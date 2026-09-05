@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -132,6 +132,17 @@ downloads of each version, see the
   and both pickers move within a poll of the command running. A model
   chosen in the CLI's own `/model` picker still waits for the next
   reply, since the CLI prints its name rather than its id.
+- **Archiving a session in a git worktree offers to delete the
+  worktree.** Once the session has stopped — right away for a session
+  with no tab, after the tab's exit for one that had a tab — a dialog
+  asks *Keep Worktree* or *Delete Worktree*. Deleting removes the
+  worktree the way the CLI reaps an untouched one (uncommitted changes
+  go with it) and its branch too when git agrees it has nothing
+  unmerged. Preferences → *When archiving a session in a git worktree*
+  makes the answer *Always Delete* or *Never Delete* instead. Nothing is
+  offered for a worktree the session left, one the CLI already reaped,
+  one still in use by another tab or a background agent, or for bulk
+  archives.
 
 ### v0.1.2 — 2026-08-30
 

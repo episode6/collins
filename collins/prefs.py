@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -116,6 +116,14 @@ _RUNNING_BEHAVIORS = [
 # "Keep Running (Hide Window)"). Shortened here because a ComboRow's value
 # label ellipsizes past ~130px.
 _QUIT_BEHAVIORS = _RUNNING_BEHAVIORS + [("hide", N_("Hide Window"))]
+
+# What archiving does with a session's git worktree once the session has
+# stopped (see MainWindow._settle_archived_worktree).
+_WORKTREE_BEHAVIORS = [
+    ("ask", N_("Ask")),
+    ("always", N_("Always Delete")),
+    ("never", N_("Never Delete")),
+]
 
 # The git page's Layout row: hunk's --mode words in prefslayout.GIT_LAYOUTS'
 # order, labelled here so the labels are the dialog's to translate.
@@ -501,6 +509,16 @@ class PreferencesDialog(Adw.Dialog):
             _("When archiving a running session"),
             _("Archiving a session that is still running also closes its tab"),
             "archive_running_session",
+        )
+        self._add_running_behavior_row(
+            sessions_group,
+            _("When archiving a session in a git worktree"),
+            _(
+                "Whether to delete the session's worktree once it has stopped; "
+                "a branch with unmerged commits is kept"
+            ),
+            "archive_worktree",
+            behaviors=_WORKTREE_BEHAVIORS,
         )
         self._quit_behavior_row = self._add_running_behavior_row(
             sessions_group,
