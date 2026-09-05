@@ -153,8 +153,8 @@ Enter opens, Esc closes.
   pass*), *Ready & Auto-Merge*, and *Mark ready, merge & archive session*. The caret beside them lists every
   PR with its title,
   `F7` opens the newest one's page, and *Open new pull requests
-  automatically* (Preferences) opens the page by itself — once per PR — the
-  moment a session picks one up. On a screen where the terminal has already
+  automatically* (Preferences, on by default) opens the page by itself —
+  once per PR — the moment a session picks one up. On a screen where the terminal has already
   hit its *maximum width* (Preferences), the page opens in a column of its
   own, twice as wide as it can be squeezed when the spare room covers that —
   paid out of the gutter the terminal wasn't using, never out of the

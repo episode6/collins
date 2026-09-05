@@ -171,6 +171,10 @@ downloads of each version, see the
   computer awake exactly while a session is working and dozes after. *Keep
   screen on* defaults to off: the computer stays up, the screen may blank.
   Both are preferences; installs that have saved theirs keep them.
+- **A new pull request opens its page by itself.** *Open new pull
+  requests automatically* now defaults to on: the moment a session picks
+  up a PR, its page opens beside the session, once per PR. As before, a
+  page closed again stays closed, and the preference turns it off.
 - **The *Composer in new sessions* preference is gone.** The new-chat
   screen writes every first prompt in its own composer, which is what the
   setting was for; a saved value is dropped on load.

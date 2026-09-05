@@ -156,7 +156,7 @@ gated to GitHub's username alphabet.
 
 - Redirecting `XDG_CONFIG_HOME` does **not** reliably hide gh's credentials
   (keyring); force `ghsetup.check` in captures of the notice.
-- The auto-opened PR page (`open_pr_panel_on_attach`) opens on a 250 ms
+- The auto-opened PR page (`open_pr_panel_on_attach`, on by default) opens on a 250 ms
   timeout with `focus=False`; from the chip cascade's idle it segfaulted.
 - `prstatus`'s listener registry is module-global; the test suite's autouse
   fixture clears it — assert `scheduled == []` too when a test stubs

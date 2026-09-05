@@ -275,15 +275,15 @@ DEFAULT_SETTINGS = {
     "pr_inline_images": True,
     # Whether a pull request joining a session opens its page beside that
     # session on its own (see PrStore's pr-attached and TerminalTab's
-    # _on_hub_pr_attached). Off by default: it spends the session's panel
-    # room without being asked. Once per PR per session — the saved list is
-    # what remembers, so a page closed again stays closed.
-    "open_pr_panel_on_attach": False,
+    # _on_hub_pr_attached). On by default: a session that just opened a PR
+    # is about to watch its checks. Once per PR per session — the saved list
+    # is what remembers, so a page closed again stays closed.
+    "open_pr_panel_on_attach": True,
     # Whether a session's gallery of images docks itself beside that session
     # the first time it shows one (see TerminalTab._consider_attachments_dock).
-    # On by default, unlike the PR switch above, because it only ever spends
-    # room the terminal wasn't using: it waits for a tab wide enough that a
-    # column comes free of the terminal's maximum width
+    # On by default, and cheaper than the PR switch above: it only ever
+    # spends room the terminal wasn't using, waiting for a tab wide enough
+    # that a column comes free of the terminal's maximum width
     # (panelsizing.room_for_a_split), and once per tab, so a panel closed
     # again stays closed.
     "dock_attachments_when_room": True,
