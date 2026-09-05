@@ -809,6 +809,7 @@ def test_cli_title_display_precedence(store):
     sid = session.session_id
     store.state.set_cli_titles({sid: "cli name"})
 
+    store.state.set_setting("cli_title_sessions", False)
     assert store.display_name(session) != "cli name"  # setting off: ignored
     store.state.set_setting("cli_title_sessions", True)
     assert store.display_name(session) == "cli name"
@@ -853,14 +854,14 @@ def test_apply_cli_titles_reprojects_only_on_a_flip(store, monkeypatch):
     store.apply_cli_titles()  # nothing moved: no work
     assert not applies
 
-    store.state.set_setting("cli_title_sessions", True)
-    store.apply_cli_titles()
+    store.state.set_setting("cli_title_sessions", False)
+    store.apply_cli_titles()  # switching off (the default is on) is a change
     assert len(applies) == 1
     store.apply_cli_titles()  # steady state: no work
     assert len(applies) == 1
 
-    store.state.set_setting("cli_title_sessions", False)
-    store.apply_cli_titles()  # switching off is a change too
+    store.state.set_setting("cli_title_sessions", True)
+    store.apply_cli_titles()  # and so is switching back on
     assert len(applies) == 2
 
 

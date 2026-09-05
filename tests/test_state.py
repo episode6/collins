@@ -116,18 +116,29 @@ def test_pr_title_sessions_setting(app_state):
 
 def test_caffeine_keep_screen_on_setting(app_state):
     state = app_state.AppState()
-    # Default matches how Caffeine Mode behaved before the setting existed:
-    # the screen stays lit along with the computer.
-    assert state.get_setting("caffeine_keep_screen_on") is True
-    state.set_setting("caffeine_keep_screen_on", False)
-    assert app_state.AppState().get_setting("caffeine_keep_screen_on") is False
+    # Off by default: an unattended agent needs the computer awake, not the
+    # screen lit.
+    assert state.get_setting("caffeine_keep_screen_on") is False
+    state.set_setting("caffeine_keep_screen_on", True)
+    assert app_state.AppState().get_setting("caffeine_keep_screen_on") is True
 
 
 def test_caffeine_on_launch_setting(app_state):
     state = app_state.AppState()
-    assert state.get_setting("caffeine_on_launch") is False  # opt-in only
-    state.set_setting("caffeine_on_launch", True)
-    assert app_state.AppState().get_setting("caffeine_on_launch") is True
+    # On by default, paired with the Until-idle timer below: a launch holds
+    # the machine only while a session works.
+    assert state.get_setting("caffeine_on_launch") is True
+    state.set_setting("caffeine_on_launch", False)
+    assert app_state.AppState().get_setting("caffeine_on_launch") is False
+
+
+def test_composer_new_sessions_setting_is_dropped_on_load(app_state):
+    # The auto-open-composer setting went with the new-chat screen; a saved
+    # copy is discarded on read rather than carried along forever.
+    state = app_state.AppState()
+    state.settings["composer_new_sessions"] = "dock"
+    state.save()
+    assert "composer_new_sessions" not in app_state.AppState().settings
 
 
 def test_caffeine_launch_timer_setting(app_state):

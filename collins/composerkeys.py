@@ -1,7 +1,6 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""What a key press means inside the composer's text box, what opens one,
-and what a new session opens it as.
+"""What a key press means inside the composer's text box, and what opens one.
 
 The composer sends on Enter by default, with a setting that swaps sending to
 Ctrl+Enter (leaving bare Enter a newline, for people who write prompts like
@@ -13,14 +12,12 @@ typelibs, which is also why the keyvals and modifier bits below are spelled
 as integers instead of Gdk constants (they are ABI, fixed by X11's keysymdef
 and GDK's ModifierType, not values that drift).
 
-The composer_new_sessions setting is here for the same reason: its three
-words are shared by the preference row that writes them and the tab that
-acts on them, and reading one back is likewise pure. So are the two rules
-for the draft stash -- what a close keeps when it can't type the text back
-into the CLI's box, and when a reopening composer is seeded with it -- and
-the rules for how a closing composer's text is typed back so that the CLI
-shows it in full rather than folding it into a "[Pasted text #1 +12 lines]"
-stand-in, and for reading such a stand-in back out when it does.
+The two rules for the draft stash are here for the same reason -- what a
+close keeps when it can't type the text back into the CLI's box, and when
+a reopening composer is seeded with it -- and so are the rules for how a
+closing composer's text is typed back so that the CLI shows it in full
+rather than folding it into a "[Pasted text #1 +12 lines]" stand-in, and
+for reading such a stand-in back out when it does.
 """
 
 from __future__ import annotations
@@ -95,25 +92,6 @@ def typing_opens_composer(char: str, state: int) -> bool:
     if state & _CHORD_MASK:
         return False
     return char not in _PROMPT_OPENERS
-
-
-# What a session Collins starts fresh opens its composer as (the
-# composer_new_sessions setting; see TerminalTab.autoshow_composer).
-OFF = "off"
-FLOAT = "float"  # raised over the agent terminal, as Ctrl+. does
-DOCK = "dock"  # its own panel page below the terminal
-AUTOSHOW_MODES = (OFF, FLOAT, DOCK)
-
-
-def autoshow_mode(setting) -> str:
-    """The composer a new session should open with, read off a saved setting.
-
-    Anything unrecognized -- a hand-edited settings file, a value some later
-    Collins wrote and this one doesn't know -- reads as ``OFF``. Showing the
-    composer is the opt-in half of this setting, so an answer we can't read
-    must never conjure one.
-    """
-    return setting if setting in AUTOSHOW_MODES else OFF
 
 
 def restore_text(text: str) -> str:

@@ -20,7 +20,6 @@ from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 from . import (  # noqa: E402
     apppicker,
     clisetup,
-    composerkeys,
     editor,
     footerapps,
     hunkctl,
@@ -89,18 +88,6 @@ _CARD_SCHEMES = [
     (notifycenter.CARD_SCHEME_APP, N_("Follow app")),
     (notifycenter.CARD_SCHEME_LIGHT, N_("Light")),
     (notifycenter.CARD_SCHEME_DARK, N_("Dark")),
-]
-
-# What a new session opens its composer as (composerkeys.AUTOSHOW_MODES, in
-# the order the drop-down offers them). The labels stay short on purpose: a
-# ComboRow's selected value gets only what its subtitle leaves — under 100px
-# here — and ellipsizes past that, so what each one means is spelled out in
-# the subtitle instead. Translations have to keep both ends short: German's
-# "Angedockt" came back cut until its subtitle lost a clause.
-_COMPOSER_AUTOSHOW = [
-    (composerkeys.OFF, N_("Never")),
-    (composerkeys.FLOAT, N_("Floating")),
-    (composerkeys.DOCK, N_("Docked")),
 ]
 
 # What closing a running session's tab does when a setting stands in for the
@@ -612,9 +599,9 @@ class PreferencesDialog(Adw.Dialog):
         self._inapp_row.connect("notify::active", self._on_inapp_changed)
         group.add(_searchable(self._inapp_row, "card", "banner", "desktop", "popup"))
 
-        # The subtitle is kept short for the same reason _COMPOSER_AUTOSHOW's
-        # labels are: the selected value gets what the subtitle leaves, and
-        # "Follow app" was coming back as "Follo…" behind a longer one.
+        # The subtitle is kept short: the selected value gets what the
+        # subtitle leaves, and "Follow app" was coming back as "Follo…"
+        # behind a longer one.
         self._card_scheme_row = Adw.ComboRow(
             title=_("Card theme"),
             subtitle=_("The in-app card's own light or dark, whatever the app is"),
@@ -720,26 +707,6 @@ class PreferencesDialog(Adw.Dialog):
 
     def _build_composer_group(self, state: AppState) -> _SearchableGroup:
         composer_group = _SearchableGroup(title=_("Composer"))
-        self._composer_autoshow_row = Adw.ComboRow(
-            title=_("Composer in new sessions"),
-            subtitle=_(
-                "Open the composer as soon as a new session starts — floating "
-                "over the agent terminal, or docked as a panel below it, where "
-                "it stays for the session's later visits"
-            ),
-        )
-        autoshow_labels = [_(label) for _v, label in _COMPOSER_AUTOSHOW]
-        self._composer_autoshow_row.set_model(Gtk.StringList.new(autoshow_labels))
-        autoshow_values = [value for value, _l in _COMPOSER_AUTOSHOW]
-        self._composer_autoshow_row.set_selected(
-            autoshow_values.index(
-                composerkeys.autoshow_mode(state.get_setting("composer_new_sessions"))
-            )
-        )
-        self._composer_autoshow_row.connect(
-            "notify::selected", self._on_composer_autoshow_changed
-        )
-        composer_group.add(_searchable(self._composer_autoshow_row, *autoshow_labels))
         self._composer_typing_row = Adw.SwitchRow(
             title=_("Typing opens the composer"),
             subtitle=_(
@@ -1680,12 +1647,6 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_composer_enter_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         self._state.set_setting("composer_enter_sends", row.get_active())
-        self._on_change()
-
-    def _on_composer_autoshow_changed(self, row: Adw.ComboRow, _pspec) -> None:
-        self._state.set_setting(
-            "composer_new_sessions", _COMPOSER_AUTOSHOW[row.get_selected()][0]
-        )
         self._on_change()
 
     def _on_tab_drag_changed(self, row: Adw.SwitchRow, _pspec) -> None:
