@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-13. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 import json
 import shutil
@@ -25,6 +25,8 @@ from collins.sessions import (
     read_mcp_config,
     recreatable_worktree,
     recreate_worktree,
+    removable_worktree,
+    remove_worktree,
     resume_cwd,
     session_from_file,
     transcript_is_stub,
@@ -759,6 +761,79 @@ def test_recreate_worktree_without_a_base(tmp_path):
     del state["originalHeadCommit"]
     assert not recreate_worktree(state)
     assert not Path(state["worktreePath"]).exists()
+
+
+def test_removable_worktree(tmp_path):
+    root, _head, state = _worktree_repo(tmp_path)
+    project = tmp_path / "-repo--claude-worktrees-oasis"
+    project.mkdir()
+    jsonl = project / "s.jsonl"
+    jsonl.write_text(_worktree_state_line(state), encoding="utf-8")
+    cwd = state["worktreePath"]
+
+    # Nothing on disk (the CLI reaped it on exit): nothing to remove.
+    assert removable_worktree(jsonl, cwd) is None
+    assert recreate_worktree(state)
+    assert removable_worktree(jsonl, cwd) == state
+    # Wherever the tab started — the worktree is what the transcript says.
+    assert removable_worktree(jsonl, str(root)) == state
+    # A plain session's transcript is never read.
+    plain = tmp_path / "-home-u-proj"
+    plain.mkdir()
+    (plain / "s.jsonl").write_text(_worktree_state_line(state), encoding="utf-8")
+    assert removable_worktree(plain / "s.jsonl", str(root)) is None
+    assert removable_worktree(None, cwd) is None
+    # A session that left its worktree, or entered somebody else's.
+    jsonl.write_text(_worktree_state_line(state) + _worktree_state_line(None), encoding="utf-8")
+    assert removable_worktree(jsonl, cwd) is None
+    jsonl.write_text(
+        _worktree_state_line({k: v for k, v in state.items() if k != "worktreeBranch"}),
+        encoding="utf-8",
+    )
+    assert removable_worktree(jsonl, cwd) is None
+
+
+def test_remove_worktree(tmp_path):
+    """A locked, dirty worktree goes — the way the CLI reaps one — and so
+    does its branch when it has nothing of its own."""
+    root, _head, state = _worktree_repo(tmp_path)
+    assert recreate_worktree(state)
+    wt = state["worktreePath"]
+    _git(root, "worktree", "lock", wt)
+    Path(wt, "scratch.txt").write_text("wip", encoding="utf-8")
+
+    assert remove_worktree(state) == ""
+    assert not Path(wt).exists()
+    branches = subprocess.run(
+        ["git", "-C", root, "branch", "--list", "worktree-oasis"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert branches.strip() == ""
+
+
+def test_remove_worktree_keeps_an_unmerged_branch(tmp_path):
+    root, _head, state = _worktree_repo(tmp_path)
+    assert recreate_worktree(state)
+    wt = state["worktreePath"]
+    Path(wt, "work.md").write_text("done", encoding="utf-8")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-qm", "work")
+
+    assert remove_worktree(state) == ""
+    assert not Path(wt).exists()
+    branches = subprocess.run(
+        ["git", "-C", root, "branch", "--list", "worktree-oasis"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "worktree-oasis" in branches
+    # Already gone: nothing left to do is not a failure. Somewhere that isn't
+    # a session worktree at all is refused outright.
+    assert remove_worktree(state) == ""
+    assert remove_worktree({"worktreePath": str(tmp_path / "elsewhere")}) != ""
 
 
 def _prompt_transcript(tmp_path, *entries):

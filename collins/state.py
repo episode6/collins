@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-02. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -125,6 +125,13 @@ DEFAULT_SETTINGS = {
     # MainWindow._hide_window.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
+    # What becomes of a session's git worktree when the session is archived —
+    # once it has stopped, if a tab was open: ask (a dialog offering to delete
+    # it) | always (delete it, no dialog) | never (leave it). Only a worktree
+    # the session still occupies (sessions.removable_worktree), and never
+    # while the session runs on as a background agent — see
+    # MainWindow._settle_archived_worktree.
+    "archive_worktree": "ask",
     # Whether the one-time first-hide notice has gone out: the desktop
     # notification saying "Collins is still running" the first time a window
     # hides instead of closing, so nobody mistakes the hide for a quit. Set

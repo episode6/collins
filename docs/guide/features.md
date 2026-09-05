@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-04. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Features
@@ -757,6 +757,15 @@ flipped the switch is refused if it calls it anyway.
   archived sessions* to see and restore them). Archiving a session with an open tab
   closes the tab too, and whole **projects** can be archived from their
   header's right-click menu.
+- **Archiving a session in a git worktree** asks whether to delete the
+  worktree once the session has stopped — *Keep Worktree* or *Delete
+  Worktree* — and Preferences → *When archiving a session in a git
+  worktree* turns the question into *Always Delete* or *Never Delete*.
+  Deleting discards uncommitted changes in the worktree; its branch is kept
+  when it has unmerged commits. A worktree the session left, one the agent
+  already reaped on exit, or one another tab or background agent is still
+  working in is never offered, and bulk archives leave worktrees alone.
+  Restoring the session later recreates the worktree on resume, as always.
 - **Archiving reaches claude.ai too** (on by default — Preferences →
   *Archive on claude.ai too*): a session you've remote-controlled from
   claude.ai, or teleported in from it, has a sibling on the web's session
