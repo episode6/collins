@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-02. Full change history: git log for this file.
+fork. Last modified: 2026-09-05. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -98,6 +98,8 @@ Keyboard Bindings dialog:
 | `Esc`, arrows, `Tab`, `Enter` / `Space` | Lightbox | Close, walk the gallery, cycle the shade's buttons, activate the focused one — nothing reaches the terminal underneath |
 | `Ctrl+Enter` | Pull request comment & review boxes | Post, as on GitHub; a bare `Enter` stays a newline |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Git page | Load the unstaged changes, the staged changes, or the branch's diff against its parent |
+| `↑` / `↓`, `Enter` | Git page (commits and files lists) | Walk the rows, load the commit or branch (or move hunk to the file) — the native sidebar's lists are ordinary GTK lists |
+| `Enter`, `Shift+Enter` | Git page commit dialog | Commit; a newline in the body |
 | `x` / `X` / `A` / `U` / `n` / `p` / `P` | Git page (hunk) | Stage or unstage the hunk or file under the cursor, stage or unstage all, walk the commits, set the parent branch |
 | `v` / `Esc`, `D`, `C` / `B`, `F` | Git page (hunk) | Anchor a line range at the cursor and clear it (`x` then stages the range), discard the hunk or range, commit the index with a summary (and a body), fix up an unpushed commit |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |

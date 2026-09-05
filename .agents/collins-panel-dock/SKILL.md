@@ -95,7 +95,14 @@ shell-less strip conjures a second terminal on the old edge.
 the shells' home strip, `page_panel_size_{bottom,right}` for the strip docked
 pages share (`state.panel_size_key(scope, mode)`). A new page kind inherits
 the "page" scope — don't invent a size setting. Per-session sizes ride the
-serialized tree's `size` field.
+serialized tree's `size` field. A page may declare `column_floor` (the dock
+spends free gutter past `terminal_max_width` on a column at least that wide,
+doubled when the gutter pays — `panelsizing.spare_floor`; the PR page's 320)
+and `column_seed` (the least its column *opens* at whether or not the gutter
+pays, paid by the terminal if need be — the git page's ~700, what its own
+size request used to force before its sidebar became collapsible). Both are
+seeds only: a size the sizer recorded from a drag wins (`PanelDock.
+_column_floor`).
 
 **Maximize** transfers the page into `_MaxPane` (a bare `Adw.TabView`, no
 bar) so it keeps its `Adw.TabPage`; the host rewires `shell-exited`/`bell`

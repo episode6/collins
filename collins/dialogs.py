@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-05. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -445,6 +445,175 @@ def info_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
 
 def error_dialog(parent: Gtk.Widget, heading: str, body: str) -> None:
     info_dialog(parent, heading, body)
+
+
+# How many lines the commit dialog's body grows to before it scrolls; and
+# the width an Adw.AlertDialog is held to for the git page's dialogs — the
+# dialog sizes itself to its heading and body text, not its extra child,
+# so a bare entry would come up as wide as "Commit" (see follow_working_dir_dialog).
+_COMMIT_BODY_MAX_LINES = 6
+_GIT_DIALOG_WIDTH = 440
+
+
+def commit_dialog(
+    parent: Gtk.Widget,
+    heading: str,
+    with_body: bool,
+    on_commit: Callable[[str, str | None], None],
+) -> None:
+    """The git page's commit dialog: a summary entry (Enter commits) and,
+    with *with_body*, a body text view under it (Enter commits there too,
+    Shift+Enter breaks a line — the composer's rule). The Commit response
+    is enabled only while the summary isn't blank, so nothing can ask git
+    for a commit with no subject. *on_commit(summary, body)* gets the
+    stripped summary and the body (None when there is no body view or it
+    is empty)."""
+    dialog = Adw.AlertDialog(heading=heading)
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    box.set_size_request(_GIT_DIALOG_WIDTH, -1)
+    summary = Gtk.Entry(placeholder_text=_("Summary"))
+    summary.set_activates_default(True)
+    box.append(summary)
+    body_view: Gtk.TextView | None = None
+    if with_body:
+        body_view = Gtk.TextView(
+            wrap_mode=Gtk.WrapMode.WORD_CHAR,
+            accepts_tab=False,
+            top_margin=8,
+            bottom_margin=8,
+            left_margin=8,
+            right_margin=8,
+        )
+        placeholder = Gtk.Label(
+            label=_("Body (optional)"),
+            xalign=0,
+            halign=Gtk.Align.START,
+            valign=Gtk.Align.START,
+            margin_top=8,
+            margin_start=8,
+            can_target=False,
+        )
+        placeholder.add_css_class("dim-label")
+        body_view.get_buffer().connect(
+            "changed", lambda buf: placeholder.set_visible(buf.get_char_count() == 0)
+        )
+        # The view sits directly in its scroller (see generate_icon_dialog:
+        # a viewport between them would measure it unwrapped).
+        scroller = Gtk.ScrolledWindow(child=body_view, has_frame=True)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.EXTERNAL)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_min_content_height(72)
+        overlay = Gtk.Overlay(child=scroller)
+        overlay.add_overlay(placeholder)
+        box.append(overlay)
+
+        def cap_height(*_a) -> None:
+            line_h = body_view.create_pango_layout("Xg").get_pixel_size()[1]
+            scroller.set_max_content_height(
+                line_h * _COMMIT_BODY_MAX_LINES + body_view.get_top_margin() + body_view.get_bottom_margin()
+            )
+
+        body_view.connect("realize", cap_height)
+
+        def on_body_key(_ctrl, keyval, _keycode, state) -> bool:
+            if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter):
+                return Gdk.EVENT_PROPAGATE
+            if state & Gdk.ModifierType.SHIFT_MASK:
+                return Gdk.EVENT_PROPAGATE  # a newline
+            if summary.get_text().strip():
+                dialog.set_close_response("commit")
+                dialog.close()
+            return Gdk.EVENT_STOP
+
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", on_body_key)
+        body_view.add_controller(keys)
+    dialog.set_extra_child(box)
+    dialog.add_response("cancel", _("Cancel"))
+    dialog.add_response("commit", _("Commit"))
+    dialog.set_response_appearance("commit", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("commit")
+    dialog.set_close_response("cancel")
+    dialog.set_response_enabled("commit", False)
+    summary.connect(
+        "changed", lambda entry: dialog.set_response_enabled("commit", bool(entry.get_text().strip()))
+    )
+    # The dialog would otherwise focus its default response (see rename_dialog).
+    dialog.set_focus(summary)
+
+    def respond(_dialog, response: str) -> None:
+        if response != "commit":
+            return
+        text = summary.get_text().strip()
+        if not text:
+            return
+        body: str | None = None
+        if body_view is not None:
+            buf = body_view.get_buffer()
+            body = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True).strip() or None
+        on_commit(text, body)
+
+    dialog.connect("response", respond)
+    _present(dialog, parent)
+
+
+def choice_dialog(
+    parent: Gtk.Widget,
+    heading: str,
+    body: str,
+    options: list[str],
+    on_pick: Callable[[int], None],
+    confirm_label: str,
+) -> None:
+    """Pick one of *options* (plain strings, shown through set_text) from a
+    single-selection list, the first row selected to begin with, in a
+    scroller capped at a handful of rows. *on_pick(index)* gets the picked
+    row's index on the confirm response (or a double-click / Enter on a
+    row); Cancel and Escape pick nothing. The git page's parent-branch
+    picker and "Fix up which commit?" list."""
+    dialog = Adw.AlertDialog(heading=heading, body=body)
+    listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
+    listbox.add_css_class("boxed-list")
+    for option in options:
+        label = Gtk.Label(xalign=0, margin_top=6, margin_bottom=6, margin_start=10, margin_end=10)
+        label.set_text(option)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        row = Gtk.ListBoxRow(child=label)
+        listbox.append(row)
+    first = listbox.get_row_at_index(0)
+    if first is not None:
+        listbox.select_row(first)
+    scroller = Gtk.ScrolledWindow(child=listbox, has_frame=False)
+    scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scroller.set_propagate_natural_height(True)
+    scroller.set_max_content_height(280)
+    scroller.set_size_request(_GIT_DIALOG_WIDTH, -1)
+    dialog.set_extra_child(scroller)
+    dialog.add_response("cancel", _("Cancel"))
+    dialog.add_response("pick", confirm_label)
+    dialog.set_response_appearance("pick", Adw.ResponseAppearance.SUGGESTED)
+    dialog.set_default_response("pick")
+    dialog.set_close_response("cancel")
+    dialog.set_response_enabled("pick", first is not None)
+
+    def picked() -> int | None:
+        row = listbox.get_selected_row()
+        return row.get_index() if row is not None else None
+
+    def respond(_dialog, response: str) -> None:
+        index = picked()
+        if response == "pick" and index is not None:
+            on_pick(index)
+
+    def on_row_activated(_list, _row) -> None:
+        dialog.set_close_response("pick")
+        dialog.close()
+
+    listbox.connect("row-activated", on_row_activated)
+    dialog.connect("response", respond)
+    if first is not None:
+        dialog.set_focus(listbox)
+    _present(dialog, parent)
 
 
 def trust_folder_dialog(

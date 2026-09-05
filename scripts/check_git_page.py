@@ -22,23 +22,38 @@ reaching an open page: a layout or theme change respawns hunk with
 --mode/--theme (the same settings again don't), the untracked switch
 reloads the current load with --exclude-untracked and rides every later
 diff load and the sidecar (never a `show`), the page size reaches the
-sidecar with neither. A pass over a narrow window checks the header's
-level buttons: shown while the VTE's column count says one pane fits,
-feeding hunk `<` / `>` (the shim's viewer records what reaches its pty),
-following the level the extension reports through the sidecar, and gone
-once the page is wide enough for both panes. A second pass with an empty
-PATH checks the install card comes up instead.
+sidecar and the native commits list with neither. A pass over the native
+sidebar (collins/gitsidebar.py) checks its commits list off the real
+repository (the branch header, the working tree row, the `main..HEAD`
+commits, the default branch's group; no parent group while the parent is
+the default, no `↑` without a remote), the header toggle and its
+persistence (page_state's "sidebar", a restore with it off), the collapse
+under the breakpoint on a 500 px window and the return on a 900 px one, a
+commit row's click reloading `show <sha>` (and the default header's doing
+nothing), a staged-side file click reloading `--staged` then navigating to
+the file, the sidecar's `selection` / `anchor` driving the highlight and
+the anchor button's label, the four cursor buttons feeding hunk their
+bytes, stage_all and commit moving the repository with exactly one reload
+each (and none on the following tick), and `git_log_page` paging the
+list. A second pass with an empty PATH checks the install card comes up
+instead.
 
 The shim is a small Python script staged on a scratch PATH: `--version`
-answers 0.20.1, `diff …` and `show …` spawn a child "viewer" (the
+answers 0.21.1, `diff …` and `show …` spawn a child "viewer" (the
 two-process shape of the real npm wrapper) and record both pids, the
-arguments, the `--extension` directory and the sidecar path in a state
-file, and the `session` subcommands answer out of that file the way hunk
-0.20 does (shapes probed on 2026-09-01; the refusal of a bad range, which
-leaves the viewer as it was, on 2026-09-02). FAKE_HUNK_REFUSE names a diff
-target the shim's `session reload` refuses; `session navigate` records its
-target in the file and refuses a file outside FAKE_HUNK_FILES (the shim is
-shared with check_show_diff.py, which drives the tool against it). A third
+arguments, the `--extension` directory, whether `--no-sidebar` was on
+the argv, and the sidecar path in a state file, and the `session`
+subcommands answer out of that file the way hunk 0.21 does (shapes probed
+on 2026-09-01; the refusal of a bad range, which leaves the viewer as it
+was, on 2026-09-02; `files[]` and the `snapshot` on 2026-09-05): the
+session records list the files FAKE_HUNK_FILES names (comma-separated;
+`a.txt` when unset) with hunk 0.21.1's counts, and a snapshot whose
+`selectedFilePath` is the last `session navigate`'s file. FAKE_HUNK_REFUSE
+names a diff target the shim's `session reload` refuses; `session
+navigate` records its target in the file and refuses a file outside
+FAKE_HUNK_FILES (the shim is shared with check_show_diff.py, which drives
+the tool against it); the viewer records every byte fed to its pty in
+`keys`. A third
 pass checks hunk also goes down — viewer included — when the page is
 unparented (a tab close), on gitpage.shutdown_all (the app's shutdown), and
 when the page closes while its spawn is still in flight, not only through
@@ -88,7 +103,7 @@ STEP_TIMEOUT_S = 8.0
 # The shim's shebang is the running interpreter, absolute: the page is
 # probed with a PATH holding nothing but the shim's directory.
 FAKE_HUNK = f"#!{sys.executable}\n" + r'''
-"""A stand-in for hunk 0.20: enough of the CLI for the git page's plumbing."""
+"""A stand-in for hunk 0.21: enough of the CLI for the git page's plumbing."""
 import json, os, signal, subprocess, sys, time
 
 STATE = os.environ["FAKE_HUNK_STATE"]
@@ -130,9 +145,43 @@ def alive(pid):
         return False
 
 
+def known_files():
+    """The files the loaded diff "has": FAKE_HUNK_FILES, comma-separated,
+    `a.txt` when unset (check_show_diff.py sets it for a refusal)."""
+    known = os.environ.get("FAKE_HUNK_FILES")
+    names = [name for name in (known.split(",") if known is not None else ["a.txt"]) if name]
+    return names
+
+
+def session_files():
+    """hunk 0.21.1's fileSummarySchema: id, path, additions, deletions,
+    hunkCount, hunks (the record lists them; the page ignores them)."""
+    return [
+        {"id": f"f{index + 1}", "path": path, "additions": 1, "deletions": 0, "hunkCount": 1, "hunks": []}
+        for index, path in enumerate(known_files())
+    ]
+
+
+def snapshot(state):
+    """hunk 0.21.1's snapshotSchema, as far as the page reads it: the
+    cursor's file is the last navigate's, else the first file."""
+    files = known_files()
+    navigate = state.get("navigate") or {}
+    selected = navigate.get("file") or (files[0] if files else None)
+    return {
+        "updatedAt": "2026-09-05T00:00:00.000Z",
+        "state": {
+            "selectedFilePath": selected,
+            "selectedHunkIndex": 0,
+            "liveComments": [],
+            "showAgentNotes": False,
+        },
+    }
+
+
 args = sys.argv[1:]
 if args == ["--version"]:
-    print("0.20.1")
+    print("0.21.1")
     sys.exit(0)
 if args and args[0] in ("diff", "show"):
     # The real hunk on PATH is an npm wrapper that spawnSyncs the viewer
@@ -170,7 +219,9 @@ if args and args[0] in ("diff", "show"):
             at = tail.index(flag)
             valued[flag] = tail[at + 1]
             del tail[at:at + 2]
-    diff_args = [a for a in tail if a not in ("--watch", "--transparent-bg")]
+    # `--no-sidebar` (hunk 0.21's "hide files pane") is a spawn flag too:
+    # tolerated here and recorded, so a check can say whether it was on.
+    diff_args = [a for a in tail if a not in ("--watch", "--transparent-bg", "--no-sidebar")]
     if args[0] == "show":
         diff_args = ["show", *diff_args]  # the same shape a `session reload -- show` records
     state = read_state()
@@ -183,6 +234,7 @@ if args and args[0] in ("diff", "show"):
         "extension": valued.get("--extension"),
         "mode": valued.get("--mode"),
         "theme": valued.get("--theme"),
+        "no_sidebar": "--no-sidebar" in tail,
         "sidecar": os.environ.get("COLLINS_GIT_STATE"),
         "reloads": state.get("reloads", 0),
     })
@@ -193,14 +245,17 @@ if args and args[0] == "session":
     state = read_state()
     pid = state.get("pid")
     live = pid is not None and alive(pid)
+    files = session_files()
     session = {
         "sessionId": "fake-session-1",
         "pid": pid,
         "cwd": REPO,
         "repoRoot": REPO,
         "title": title_for(state.get("args", [])),
-        "fileCount": 0,
-        "files": [],
+        "sourceLabel": "working tree",
+        "fileCount": len(files),
+        "files": files,
+        "snapshot": snapshot(state),
     }
     if args[1] == "list":
         print(json.dumps({"sessions": [session] if live else []}))
@@ -231,6 +286,7 @@ if args and args[0] == "session":
             print(f"hunk: No diff file matches {path}.", file=sys.stderr)
             sys.exit(1)
         state["navigate"] = {"file": path, "target": targets[0], "value": flags[targets[0]]}
+        state["navigates"] = state.get("navigates", 0) + 1
         write_state(state)
         print(json.dumps({"result": {"filePath": path, "hunkIndex": 0, "revealed": "line"}}))
         sys.exit(0)
@@ -295,10 +351,14 @@ def git(repo: str, *args: str) -> None:
 
 def make_repo(root: str) -> str:
     """main and feat at one commit, plus `base`: another branch the user can
-    pick as the parent through the sidecar."""
+    pick as the parent. The identity is set in the repository's own config:
+    the sidebar's native commit runs a plain `git commit`, which needs one
+    (CI's container has no global identity)."""
     repo = os.path.join(root, "repo")
     os.mkdir(repo)
     git(repo, "init", "-q", "-b", "main")
+    git(repo, "config", "user.email", "t@example.com")
+    git(repo, "config", "user.name", "Test")
     with open(os.path.join(repo, "a.txt"), "w") as fh:
         fh.write("one\n")
     git(repo, "add", "a.txt")
@@ -312,6 +372,30 @@ def head_sha(repo: str) -> str:
     return subprocess.run(
         [GIT, "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+def log_shas(repo: str, *range_args: str) -> list[str]:
+    """`git log --format=%H <range>`, newest first — what the commits list
+    is expected to show for a group."""
+    return subprocess.run(
+        [GIT, "log", "--format=%H", *range_args, "--"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.split()
+
+
+def git_out(repo: str, *args: str) -> str:
+    return subprocess.run([GIT, *args], cwd=repo, check=True, capture_output=True, text=True).stdout
+
+
+def patch_state(path: str, **fields) -> None:
+    """Edit the shim's state file (drop a key by passing None)."""
+    state = read_state(path)
+    for key, value in fields.items():
+        if value is None:
+            state.pop(key, None)
+        else:
+            state[key] = value
+    with open(path, "w") as fh:
+        json.dump(state, fh)
 
 
 def read_sidecar(path: str | None) -> dict:
@@ -384,8 +468,14 @@ def shim_processes(shim: str) -> list[int]:
 
 
 def settled(page: GitPage) -> bool:
-    """No reload or session get in flight."""
-    return not page._reloading and not page._syncing_session
+    """No reload, session get or navigate in flight, none queued."""
+    return (
+        not page._reloading
+        and not page._syncing_session
+        and not page._navigating
+        and page._pending_navigate is None
+        and page._pending_reload is None
+    )
 
 
 def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
@@ -561,11 +651,10 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check("the vs load works again once the target resolves", landed, read_state(state_path))
     check("the parent target is back", page._parent_target == "main")
 
-    # -- the extension sets the parent through the sidecar ----------------------------
+    # -- the sidebar's picker sets the parent ------------------------------------------
     reloads_before = read_state(state_path).get("reloads", 0)
-    write_sidecar(sidecar, parent="base", parentSource="user")
-    page.poll_tick()
-    check("a tick picks the user's parent up off the sidecar", page._parent_name == "base", page._parent_name)
+    page.sidebar.pick_parent("base")
+    check("the picker's word is the page's parent at once", page._parent_name == "base", page._parent_name)
     check(
         "page_state carries the user-set parent", page.page_state().get("parent") == "base", page.page_state()
     )
@@ -583,7 +672,7 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     )
     check("tab title names the new parent", page.page_title() == "Git · vs base", page.page_title())
     check(
-        "Collins wrote the pick back as it stands",
+        "Collins published the pick to the extension through the sidecar",
         read_sidecar(sidecar).get("parent") == "base" and read_sidecar(sidecar).get("parentSource") == "user",
         read_sidecar(sidecar),
     )
@@ -593,8 +682,7 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     page.load("unstaged")
     wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
     reloads_before = read_state(state_path).get("reloads", 0)
-    write_sidecar(sidecar, parentSource="auto")  # "Automatic": the extension leaves the name alone
-    page.poll_tick()
+    page.sidebar.pick_parent(None)  # "Automatic"
     check("back to the automatic parent", page._parent_name == "main", page._parent_name)
     check("page_state drops the parent", "parent" not in page.page_state(), page.page_state())
     check(
@@ -710,6 +798,44 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
         landed and page._foreign is None and page.loaded == "unstaged",
     )
 
+    # -- a three-dot range between two branches is the page's own load ------------------
+    subprocess.run(
+        [shim, "session", "reload", "fake-session-1", "--json", "--", "diff", "main...feat"],
+        check=True,
+        capture_output=True,
+    )
+    page.poll_tick()
+    landed = wait_for(lambda: settled(page) and page.loaded == {"range": "main...feat"})
+    check("a `main...feat` title becomes a range load", landed and page._foreign is None, page.loaded)
+    check(
+        "its breadcrumb reads the right half against the left",
+        page._breadcrumb.get_text() == "feat vs main",
+        page._breadcrumb.get_text(),
+    )
+    check("the tab title names the branch under review", page.page_title() == "Git · feat", page.page_title())
+    check(
+        "page_state persists the range",
+        page.page_state() == {"kind": "git", "loaded": {"range": "main...feat"}},
+        page.page_state(),
+    )
+    reloads_before = read_state(state_path).get("reloads", 0)
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("five\n")
+    git(repo, "commit", "-qam", "fifth")
+    page.poll_tick()
+    landed = wait_for(
+        lambda: read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page)
+    )
+    check("a freshness tick reloads the range", landed, read_state(state_path))
+    check("as `diff main...feat`", read_state(state_path).get("args") == ["main...feat"], read_state(state_path))
+    page.refresh()
+    landed = wait_for(
+        lambda: read_state(state_path).get("reloads", 0) == reloads_before + 2 and settled(page)
+    )
+    check("refresh reloads the range too", landed, read_state(state_path))
+    page.load("unstaged")
+    wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
+
     # -- close ---------------------------------------------------------------------
     pid = read_state(state_path).get("pid")
     wrapper = read_state(state_path).get("wrapper")
@@ -775,7 +901,7 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     )
     check(
         "breadcrumb reads <sha7> <subject>",
-        page._breadcrumb.get_text() == f"{sha[:7]} fourth",
+        page._breadcrumb.get_text() == f"{sha[:7]} fifth",
         page._breadcrumb.get_text(),
     )
     check("the tab title stays short", page.page_title() == f"Git · {sha[:7]}", page.page_title())
@@ -1105,6 +1231,7 @@ def check_settings(repo: str, state_path: str) -> None:
         read_sidecar(sidecar).get("logPage") == 50,
         read_sidecar(sidecar),
     )
+    check("the page size reaches the native commits list", page.sidebar.options.log_page == 50)
 
     # -- back to the defaults: a respawn into today's argv ----------------------------
     page.apply_settings(SETTINGS)
@@ -1129,95 +1256,236 @@ def check_settings(repo: str, state_path: str) -> None:
     window.destroy()
 
 
-def check_levels(repo: str, state_path: str) -> None:
-    """A narrow page's level buttons: the VTE's column count decides they
-    show, a press feeds hunk the extension's key and moves the header at
-    once, the sidecar's `level` overrides, a widened page hides them."""
-    print("-- a narrow page: the level buttons")
+def check_sidebar(repo: str, state_path: str) -> None:
+    """The native sidebar (collins/gitsidebar.py) beside hunk: its lists
+    off the real repository, the header toggle and its persistence, the
+    collapse under the breakpoint, clicks that load and navigate, the
+    sidecar's selection and anchor, the cursor buttons' bytes, the native
+    mutations, and the page size."""
+    print("-- the native sidebar")
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
         on_closed=lambda p: None,
     )
-    window = Gtk.Window(title="levels", default_width=700, default_height=600)
+    sidebar = page.sidebar
+    # A 500 px window first: under the breakpoint the sidebar hides
+    # whatever the toggle says, and the toggle goes insensitive.
+    window = Gtk.Window(title="sidebar", default_width=500, default_height=600)
     window.set_child(page)
     window.present()
-    check("levels: session id resolved", wait_for(lambda: page._session_id is not None))
-    check("the VTE reported its columns", wait_for(lambda: page.columns > 0), page.columns)
-    columns = page.columns
-    check(
-        f"a 700 px window is a narrow page where one pane fits ({columns} columns)",
-        hunkctl.pane_fit(columns) == "one",
-        columns,
-    )
-    check("the level buttons show on a narrow page", page.level_buttons_visible())
-    check("the page starts at the diff level", page.level == "diff", page.level)
-    check(
-        "back offers the files; forward has nowhere to go",
-        page._up.get_tooltip_text() == "Show the files"
-        and page._up.get_sensitive()
-        and not page._down.get_sensitive()
-        and page._down.get_tooltip_text() == "The diff is shown — the bottom level",
-        (page._up.get_tooltip_text(), page._up.get_sensitive(), page._down.get_tooltip_text()),
-    )
-    page.step_level(up=True)
-    check(
-        "the header takes the step at once",
-        page.level == "files"
-        and page._up.get_tooltip_text() == "Show the commits"
-        and page._down.get_tooltip_text() == "Back to the diff"
-        and page._down.get_sensitive(),
-        (page.level, page._up.get_tooltip_text(), page._down.get_tooltip_text()),
-    )
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "<")
-    check("the back button fed hunk `<`", landed, read_state(state_path).get("keys"))
-    page.step_level(up=True)
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "<<")
-    check("a second up fed another `<`", landed, read_state(state_path).get("keys"))
-    check(
-        "at the top the back button is insensitive and says so",
-        page.level == "commits"
-        and not page._up.get_sensitive()
-        and page._up.get_tooltip_text() == "The commits are shown — the top level"
-        and page._down.get_tooltip_text() == "Back to the files",
-        (page.level, page._up.get_tooltip_text(), page._down.get_tooltip_text()),
-    )
-    page.step_level(up=True)
-    wait_for(lambda: False, timeout=0.3)
-    keys = read_state(state_path).get("keys")
-    check("up at the top feeds nothing", keys == "<<", keys)
-    page.step_level(up=False)
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "<<>")
-    keys = read_state(state_path).get("keys")
-    check("the forward button fed hunk `>`", landed and page.level == "files", (keys, page.level))
+    check("sidebar: session id resolved", wait_for(lambda: page._session_id is not None))
+    narrow = wait_for(lambda: page._narrow)
+    check("a 500 px window is under the breakpoint", narrow)
+    check("the sidebar is hidden there", not page.sidebar_shown)
+    check("the toggle is insensitive and its box says why",
+          not page._sidebar_toggle.get_sensitive()
+          and page._sidebar_toggle_box.get_tooltip_text() == "Widen the page to show the panels",
+          (page._sidebar_toggle.get_sensitive(), page._sidebar_toggle_box.get_tooltip_text()))
+    check("the toggle still reads shown (its word persists)", page.sidebar_wanted and "sidebar" not in page.page_state())
+    page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
+    wide = wait_for(lambda: not page._narrow and page.sidebar_shown)
+    check("a 900 px page shows the sidebar again", wide, (page._narrow, page.sidebar_shown))
+    check("the toggle is sensitive again", page._sidebar_toggle.get_sensitive())
+    check("the VTE keeps its columns beside the sidebar", wait_for(lambda: page.columns >= 48), page.columns)
 
-    # -- the extension's word through the sidecar wins ---------------------------------
+    # -- the toggle and its persistence -------------------------------------------------
+    page.set_sidebar_wanted(False)
+    check("the toggle hides the sidebar", not page.sidebar_shown)
+    check("page_state says sidebar: false", page.page_state().get("sidebar") is False, page.page_state())
+    page.set_sidebar_wanted(True)
+    check("and shows it again, dropping the key", page.sidebar_shown and "sidebar" not in page.page_state())
+    restored = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+        sidebar=hunkctl.decode_sidebar({"kind": "git", "loaded": "unstaged", "sidebar": False}),
+    )
+    check(
+        "a page restored with sidebar: false keeps it hidden and says so before it is shown",
+        not restored.sidebar_wanted and restored.page_state() == {"kind": "git", "loaded": "unstaged", "sidebar": False},
+        restored.page_state(),
+    )
+
+    # -- the commits list off the real repository ---------------------------------------
+    current = log_shas(repo, "main..HEAD")
+    trunk = log_shas(repo, "main")
+    landed = wait_for(lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == current)
+    rows = sidebar.commit_rows()
+    check("the current group lists main..HEAD, newest first", landed, [r.label for r in rows])
+    check(
+        "header feat, then the working tree row",
+        len(rows) > 1 and rows[0].kind == "header" and rows[0].label == "feat" and rows[1].kind == "worktree",
+        [(r.kind, r.label) for r in rows[:2]],
+    )
+    check(
+        "the default group: header main and its commits",
+        any(r.kind == "header" and r.group == "default" and r.label == "main" for r in rows)
+        and [r.sha for r in rows if r.kind == "commit" and r.group == "default"] == trunk,
+        [(r.kind, r.group, r.label) for r in rows],
+    )
+    check("no parent group while the parent is the default", not any(r.group == "parent" for r in rows))
+    check("no ↑ without a remote", not any(r.unpushed for r in rows))
+    check("no load more… under a page of 20", not any(r.kind == "more" for r in rows))
+    check("the working tree row is the loaded one", sidebar.loaded_row_id() == "worktree", sidebar.loaded_row_id())
+    check(
+        "the loaded row wears the mark, its group's header the highlight",
+        sidebar._commit_widgets["worktree"].has_css_class("git-row-loaded")
+        and sidebar._commit_widgets["header:current"].has_css_class("git-group-loaded"),
+    )
+    check("the parent button names the parent", sidebar._parent_button.get_label() == "⎇ main", sidebar._parent_button.get_label())
+
+    # -- a commit row click loads it; the default header loads nothing --------------------
+    reloads_before = read_state(state_path).get("reloads", 0)
+    sha = current[0]
+    check("the commit row is drawn", sidebar.click_commit_row(f"commit:{sha}"))
+    landed = wait_for(lambda: read_state(state_path).get("args") == ["show", sha] and settled(page))
+    check("a commit row click reloads `show <sha>`", landed, read_state(state_path))
+    check("the ▸ row follows hunk's title", wait_for(lambda: sidebar.loaded_row_id() == f"commit:{sha}"), sidebar.loaded_row_id())
+    check("the breadcrumb names the commit", page._breadcrumb.get_text().startswith(sha[:7]), page._breadcrumb.get_text())
+    landed = wait_for(lambda: sidebar.file_rows().mode == "flat" and [f.path for f in sidebar.file_rows().flat] == ["a.txt"])
+    check("a commit load lists hunk's files flat, with counts", landed and sidebar.file_rows().flat[0].additions == 1, sidebar.file_rows())
+    reloads_before = read_state(state_path).get("reloads", 0)
+    sidebar.click_commit_row("header:default")
+    wait_for(lambda: False, timeout=0.3)
+    check("the default header loads nothing", read_state(state_path).get("reloads", 0) == reloads_before and settled(page))
+    sidebar.click_commit_row("header:current")
+    landed = wait_for(lambda: read_state(state_path).get("args") == ["main...HEAD"] and settled(page))
+    check("the current header loads the branch diff", landed, read_state(state_path))
+    check("the header row is the loaded one", wait_for(lambda: sidebar.loaded_row_id() == "header:current"))
+
+    # -- the files list on the working tree: the other side's click loads it ------------
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("staged\n")
+    git(repo, "add", "a.txt")  # the index differs from HEAD: a.txt is on the staged side
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("staged\nand more\n")  # and the tree from the index: on the unstaged side too
+    sidebar.click_commit_row("worktree")
+    landed = wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
+    check("the working tree row loads the unstaged changes", landed, read_state(state_path))
+    landed = wait_for(
+        lambda: sidebar.file_rows().mode == "split"
+        and sidebar.file_rows().live == "unstaged"
+        and [f.path for f in sidebar.file_rows().staged] == ["a.txt"]
+        and [f.path for f in sidebar.file_rows().unstaged] == ["a.txt"]
+    )
+    check("the working tree splits: hunk's files live, the other side off git status", landed, sidebar.file_rows())
+    check(
+        "the live row carries counts and the status letter, the other side its letter alone",
+        sidebar.file_rows().unstaged[0].live
+        and sidebar.file_rows().unstaged[0].code == "M"
+        and not sidebar.file_rows().staged[0].live
+        and sidebar.file_rows().staged[0].code == "M",
+        sidebar.file_rows(),
+    )
+    check("the session get snapshot puts the highlight on hunk's file", wait_for(lambda: sidebar.selected_path == "a.txt"), sidebar.selected_path)
+    check("the live row is highlighted", sidebar._file_widgets[("unstaged", "a.txt")].has_css_class("git-file-selected"))
+    patch_state(state_path, navigate=None, navigates=0)
+    reloads_before = read_state(state_path).get("reloads", 0)
+    check("the staged-side row is drawn", sidebar.click_file_row("a.txt", "staged"))
+    landed = wait_for(
+        lambda: read_state(state_path).get("args") == ["--staged"]
+        and read_state(state_path).get("navigate", {}).get("file") == "a.txt"
+        and settled(page)
+    )
+    check("a staged-side click reloads --staged, then navigates to the file", landed, read_state(state_path))
+    check("one reload, one navigate", read_state(state_path).get("reloads", 0) == reloads_before + 1 and read_state(state_path).get("navigates") == 1, read_state(state_path))
+    check("the navigate asked for the file's first hunk", read_state(state_path).get("navigate", {}).get("target") == "--hunk")
+    check("the staged side is live now", wait_for(lambda: sidebar.file_rows().live == "staged"), sidebar.file_rows())
+    reloads_before = read_state(state_path).get("reloads", 0)
+    sidebar.click_file_row("a.txt", "staged")
+    landed = wait_for(lambda: read_state(state_path).get("navigates") == 2 and settled(page))
+    check("a live-side click navigates without a reload", landed and read_state(state_path).get("reloads", 0) == reloads_before, read_state(state_path))
+    sidebar.click_section("unstaged")
+    landed = wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
+    check("the other side's heading loads that side", landed, read_state(state_path))
+    check("with no navigate", read_state(state_path).get("navigates") == 2)
+
+    # -- the session get snapshot moves the highlight within a tick ---------------------
+    os.environ["FAKE_HUNK_FILES"] = "a.txt,b.txt"
+    try:
+        patch_state(state_path, navigate={"file": "b.txt", "target": "--hunk", "value": "1"})
+        page.poll_tick()
+        check("a tick reads hunk's cursor off the session get", wait_for(lambda: sidebar.selected_path == "b.txt"), sidebar.selected_path)
+        check("the files list follows hunk's files", wait_for(lambda: [f.path for f in sidebar.file_rows().unstaged] == ["a.txt", "b.txt"]), sidebar.file_rows())
+    finally:
+        del os.environ["FAKE_HUNK_FILES"]
+    patch_state(state_path, navigate=None)
+    page.poll_tick()
+    wait_for(lambda: sidebar.selected_path == "a.txt" and [f.path for f in sidebar.file_rows().unstaged] == ["a.txt"])
+
+    # -- the sidecar's selection and anchor: the highlight and the button labels -----------
     sidecar = read_state(state_path).get("sidecar")
-    write_sidecar(sidecar, level="diff")
-    page.poll_tick()
+    check("the cursor buttons are drawn (the extension is there)", sidebar._action_children[sidebar._stage_button].get_visible())
     check(
-        "a tick reads the level off the sidecar",
-        page.level == "diff"
-        and page._up.get_tooltip_text() == "Show the files"
-        and not page._down.get_sensitive(),
-        (page.level, page._up.get_tooltip_text()),
+        "the cursor buttons are sensitive on a live working tree",
+        sidebar._stage_button.get_sensitive() and sidebar._anchor_button.get_sensitive() and sidebar._discard_button.get_sensitive(),
     )
-    write_sidecar(sidecar, level="bogus")
+    check("no anchor: Anchor line / Stage hunk", sidebar.anchor_button_label() == "Anchor line" and sidebar.stage_button_label() == "Stage hunk")
+    write_sidecar(sidecar, selection={"path": "b.txt", "hunkIndex": 2}, anchor={"path": "a.txt", "side": "new", "line": 1})
     page.poll_tick()
-    check("a level the page doesn't know is ignored", page.level == "diff", page.level)
-    write_sidecar(sidecar, level="commits")
-    page.poll_tick()
-    check("the sidecar can say commits", page.level == "commits" and not page._up.get_sensitive(), page.level)
+    check("the sidecar's selection moves the highlight at once", sidebar.selected_path == "b.txt", sidebar.selected_path)
+    check("the sidecar's anchor relabels the buttons", sidebar.anchor_button_label() == "Clear anchor" and sidebar.stage_button_label() == "Stage lines", (sidebar.anchor_button_label(), sidebar.stage_button_label()))
+    wait_for(lambda: settled(page))
+    check("the session get this tick didn't overwrite the sidecar's selection", sidebar.selected_path == "b.txt", sidebar.selected_path)
 
-    # -- widened past both panes: the buttons go ----------------------------------------
-    page.set_size_request(1150, -1)  # the toplevel grows to its child's minimum
-    wide = wait_for(lambda: page.columns >= hunkctl.TWO_PANE_COLUMNS)
-    check(f"a widened page reports both panes' columns ({page.columns})", wide, page.columns)
-    check("the level buttons hide on a wide page", not page.level_buttons_visible())
-    page.step_level(up=False)
+    # -- the four buttons feed their bytes --------------------------------------------------
+    sidebar._stage_button.emit("clicked")
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "x")
+    check("Stage lines fed hunk `x`", landed, read_state(state_path).get("keys"))
+    check("the VTE took the keyboard", window.get_focus() is page.terminal, window.get_focus())
+    sidebar._anchor_button.emit("clicked")
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1b")
+    check("Clear anchor fed escape", landed, read_state(state_path).get("keys"))
+    write_sidecar(sidecar, selection={"path": "a.txt", "hunkIndex": 0}, anchor=None)
+    page.poll_tick()
+    check("the anchor cleared: Anchor line / Stage hunk again", sidebar.anchor_button_label() == "Anchor line" and sidebar.stage_button_label() == "Stage hunk")
+    sidebar._anchor_button.emit("clicked")
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1bv")
+    check("Anchor line fed `v`", landed, read_state(state_path).get("keys"))
+    sidebar._discard_button.emit("clicked")
+    landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1bvD")
+    check("Discard fed `D`", landed, read_state(state_path).get("keys"))
+    wait_for(lambda: settled(page))
+
+    # -- native mutations: stage all, commit --------------------------------------------------
+    reloads_before = read_state(state_path).get("reloads", 0)
+    sidebar.stage_all()
+    landed = wait_for(lambda: not sidebar.busy and read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page))
+    check("stage_all reloads hunk once", landed, read_state(state_path))
+    check("and staged the tree", git_out(repo, "diff", "--name-only") == "" and git_out(repo, "diff", "--cached", "--name-only").split() == ["a.txt"])
+    page.poll_tick()
+    wait_for(lambda: settled(page))
     wait_for(lambda: False, timeout=0.3)
-    keys = read_state(state_path).get("keys")
-    check("a step on a wide page feeds nothing", keys == "<<>", keys)
+    check("the following tick reloads nothing more", read_state(state_path).get("reloads", 0) == reloads_before + 1, read_state(state_path))
+    reloads_before = read_state(state_path).get("reloads", 0)
+    sidebar.commit("native commit", None)
+    landed = wait_for(lambda: not sidebar.busy and read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page))
+    check("commit reloads hunk once", landed, read_state(state_path))
+    check("and made the commit", git_out(repo, "log", "-1", "--format=%s").strip() == "native commit", git_out(repo, "log", "-1", "--format=%s"))
+    page.poll_tick()
+    wait_for(lambda: settled(page))
+    wait_for(lambda: False, timeout=0.3)
+    check("the following tick reloads nothing more", read_state(state_path).get("reloads", 0) == reloads_before + 1, read_state(state_path))
+    landed = wait_for(lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == log_shas(repo, "main..HEAD"))
+    check("the commits list gained the commit", landed, [r.label for r in sidebar.commit_rows()])
+
+    # -- the page size pages the current group ------------------------------------------------
+    while len(log_shas(repo, "main..HEAD")) < 7:
+        with open(os.path.join(repo, "a.txt"), "a") as fh:
+            fh.write("more\n")
+        git(repo, "commit", "-qam", f"filler {len(log_shas(repo, 'main..HEAD'))}")
+    page.apply_settings({**SETTINGS, "git_log_page": 5})
+    landed = wait_for(lambda: any(r.kind == "more" and r.group == "current" for r in sidebar.commit_rows()))
+    check("git_log_page 5 over 7 commits shows load more…", landed, [(r.kind, r.label) for r in sidebar.commit_rows()])
+    check("five commits listed", len([r for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"]) == 5)
+    sidebar.load_more("current")
+    landed = wait_for(
+        lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == log_shas(repo, "main..HEAD")
+        and not any(r.kind == "more" and r.group == "current" for r in sidebar.commit_rows())
+    )
+    check("load more… lists them all and goes away", landed, [(r.kind, r.label) for r in sidebar.commit_rows()])
+    wait_for(lambda: settled(page))
     page.page_closed()
     wait_for(lambda: not page.hunk_alive, timeout=2.0)
     window.destroy()
@@ -1291,7 +1559,7 @@ def main() -> int:
             check_with_hunk(repo, state_path, shim)
             check_restore(repo, state_path, shim)
             check_settings(repo, state_path)
-            check_levels(repo, state_path)
+            check_sidebar(repo, state_path)
             check_teardown_paths(repo, state_path, shim)
         finally:
             os.environ["PATH"] = real_path

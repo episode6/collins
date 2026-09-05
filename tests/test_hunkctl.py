@@ -863,6 +863,52 @@ def test_commit_subject_resolves():
     assert kwargs["timeout"] == hunkctl.GIT_TIMEOUT_S
 
 
+def test_commit_subject_and_sha_resolves():
+    """One `git log -1 --format=%s%x00%H`: the subject for the breadcrumb
+    and the full sha the native commits list matches a `show HEAD` title
+    against."""
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout=f"Wire the mode switch\0{SHA}\n", stderr="")
+
+    assert hunkctl.commit_subject_and_sha("/repo", "HEAD", run=run) == ("Wire the mode switch", SHA)
+    argv, kwargs = calls[0]
+    assert argv == ["git", "log", "-1", "--format=%s%x00%H", "HEAD^{commit}", "--"]
+    assert kwargs["cwd"] == "/repo"
+    assert kwargs["capture_output"] and kwargs["text"]
+    assert kwargs["timeout"] == hunkctl.GIT_TIMEOUT_S
+
+
+def test_commit_subject_and_sha_three_answers():
+    """The subject follows commit_subject's answers; the sha is None
+    whenever there isn't a full one — an empty subject still carries it."""
+
+    def gone(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: bad revision")
+
+    def empty_subject(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=f"\0{SHA}\n", stderr="")
+
+    def short(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="subject\0abc123\n", stderr="")
+
+    def nothing(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="\n", stderr="")
+
+    def missing(argv, **kwargs):
+        raise FileNotFoundError("git")
+
+    assert hunkctl.commit_subject_and_sha("/repo", "deadbeef", run=gone) == (None, None)
+    assert hunkctl.commit_subject_and_sha("/repo", "HEAD", run=empty_subject) == ("", SHA)
+    assert hunkctl.commit_subject_and_sha("/repo", "HEAD", run=short) == ("subject", None)
+    assert hunkctl.commit_subject_and_sha("/repo", "HEAD", run=nothing) == ("", None)
+    assert hunkctl.commit_subject_and_sha("/repo", "HEAD", run=missing) == ("", None)
+    assert hunkctl.commit_subject_and_sha(None, "HEAD", run=short) == (None, None)
+    assert hunkctl.commit_subject_and_sha("/repo", "a..b", run=short) == (None, None)
+
+
 def test_commit_subject_three_answers():
     """A subject; None when git says the ref names no commit; "" when git
     couldn't be asked — the ref is not disproven."""
