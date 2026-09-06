@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from . import (
     desktopentry,
     dialogs,
     footerapps,
+    gitloads,
     is_debug_app_id,
     keybindings,
     keymap,
@@ -1438,6 +1439,9 @@ class MainWindow(Adw.ApplicationWindow):
             "open-folder-terminal": self._on_open_folder_terminal,
             "open-github": self._on_open_github,
             "git-pull": self._on_git_pull,
+            # The Keyboard Bindings dialog opened on one of its groups (a
+            # keybindings.GROUP_* id): what a page's `?` fires.
+            "keyboard-bindings-group": lambda _a, p: self._show_keyboard_bindings(p.get_string()),
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
@@ -1460,6 +1464,14 @@ class MainWindow(Adw.ApplicationWindow):
         )
         open_in_editor.connect("activate", self._on_open_in_editor)
         self.add_action(open_in_editor)
+
+        # (setting key, value) from the git page's keys and header menu (the
+        # native viewer's layout, line numbers, wrap): written to the
+        # settings and fanned out like a Preferences change, so every open
+        # page follows. Keys outside the page's own three are ignored.
+        git_option = Gio.SimpleAction(name="git-option", parameter_type=GLib.VariantType("(sv)"))
+        git_option.connect("activate", self._on_git_option)
+        self.add_action(git_option)
 
         # The two-part targets: (desktop-file ID, folder), and the session plus
         # the prompt a row's PR menu wants typed into it.
@@ -1573,9 +1585,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.add_controller(self._shortcut_controller)
             keymap.apply_app_accels(app, self.state.get_setting(keybindings.SETTING))
 
-    def _show_keyboard_bindings(self) -> None:
+    def _show_keyboard_bindings(self, group: str | None = None) -> None:
         KeyboardBindingsDialog(
-            self.state, self._apply_keybindings, self._suspend_shortcuts
+            self.state, self._apply_keybindings, self._suspend_shortcuts, group=group
         ).present(self)
 
     def _apply_keybindings(self) -> None:
@@ -4813,6 +4825,23 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_open_in_editor(self, _action, param: GLib.Variant) -> None:
         path, line, col = param.unpack()
         self._open_in_editor(path, [line - 1, col] if line > 0 else None)
+
+    def _on_git_option(self, _action, param: GLib.Variant) -> None:
+        """win.git-option(key, value): the git page's `0` `1` `2` `l` `w`
+        keys and its header menu writing Preferences → Git's layout, line
+        numbers or wrap. The key must be one of those three and the value
+        of its setting's type; anything else is dropped."""
+        key, value = param.unpack()
+        if key == "git_layout":
+            if value not in gitloads.LAYOUTS:
+                return
+        elif key in ("git_line_numbers", "git_wrap_lines"):
+            if not isinstance(value, bool):
+                return
+        else:
+            return
+        self.state.set_setting(key, value)
+        self.apply_preferences()
 
     def _open_in_editor(self, path: str, cursor: list | None = None) -> None:
         """win.open-in-editor(path, line, col): the current terminal tab's

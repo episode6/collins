@@ -38,8 +38,25 @@ the file, the sidecar's `selection` / `anchor` driving the highlight and
 the anchor button's label, the four cursor buttons feeding hunk their
 bytes, stage_all and commit moving the repository with exactly one reload
 each (and none on the following tick), and `git_log_page` paging the
-list. A second pass with an empty PATH checks the install card comes up
-instead.
+list — and the same pass runs again beside the **native viewer**
+(Preferences → Git → Diff viewer → Native), reading the page's own
+`loaded` / `shows` instead of the shim's state file and counting its
+reloads through `_native_load`. A native-only pass then stages every kind
+of change in the repository (two unstaged hunks with gaps around them, a
+staged edit and a staged rename, a modified binary, an image before and
+after, an untracked text file and an untracked picture, a deletion, a
+mode change) and checks each section kind renders through the view's
+probes (`file_rows`, `hunk_rows`, `gap_rows`, `badge_rows`,
+`hunk_serials`), a gap expands, a files-list click reveals, an external
+edit that keeps the line counts reloads through the file monitors within
+2 s keeping the untouched hunk's widget and the keyboard, the `git.*`
+actions are routed, the highlight follows a scroll to the end (and the
+pinned header), the files filter hides a section, Ctrl+F counts across
+hunks, the staged and commit loads land, settings and the keys reach the
+view with `page_state` untouched by a layout change, the switch flips
+live both ways, and a page restores into a commit. A pass on a PATH
+holding git alone checks the install card comes up for hunk and the diff
+for the native viewer.
 
 The shim is a small Python script staged on a scratch PATH: `--version`
 answers 0.21.1, `diff …` and `show …` spawn a child "viewer" (the
@@ -1235,25 +1252,40 @@ def check_settings(repo: str, state_path: str) -> None:
     window.destroy()
 
 
-def check_sidebar(repo: str, state_path: str) -> None:
-    """The native sidebar (collins/gitsidebar.py) beside hunk: its lists
-    off the real repository, the header toggle and its persistence, the
-    collapse under the breakpoint, clicks that load and navigate, the
-    sidecar's selection and anchor, the cursor buttons' bytes, the native
-    mutations, and the page size."""
-    print("-- the native sidebar")
+NATIVE_SETTINGS = {**SETTINGS, "git_viewer": "native", "git_layout": "stack"}
+
+
+def viewer_up(page: GitPage, native: bool) -> bool:
+    """The viewer is on screen with its first load landed: hunk's session
+    id resolved, or the native view settled."""
+    return page.settled() if native else page._session_id is not None
+
+
+def check_sidebar(repo: str, state_path: str, native: bool = False) -> None:
+    """The native sidebar (collins/gitsidebar.py) beside either viewer: its
+    lists off the real repository, the header toggle and its persistence,
+    the collapse under the breakpoint, clicks that load and navigate, the
+    native mutations, and the page size. Beside hunk (*native* False) the
+    loads are read off the shim's state file and the sidecar's selection
+    and anchor and the cursor buttons' bytes are checked too; beside the
+    native view the page's own `loaded` / `shows` say what landed and the
+    view's current file is what the highlight follows."""
+    viewer = "the native view" if native else "hunk"
+    print(f"-- the native sidebar beside {viewer}")
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
         on_closed=lambda p: None,
     )
+    if native:
+        page.apply_settings(NATIVE_SETTINGS)
     sidebar = page.sidebar
     # A 500 px window first: under the breakpoint the sidebar hides
     # whatever the toggle says, and the toggle goes insensitive.
     window = Gtk.Window(title="sidebar", default_width=500, default_height=600)
     window.set_child(page)
     window.present()
-    check("sidebar: session id resolved", wait_for(lambda: page._session_id is not None))
+    check(f"sidebar: {viewer} is up", wait_for(lambda: viewer_up(page, native)))
     narrow = wait_for(lambda: page._narrow)
     check("a 500 px window is under the breakpoint", narrow)
     check("the sidebar is hidden there", not page.sidebar_shown)
@@ -1266,11 +1298,18 @@ def check_sidebar(repo: str, state_path: str) -> None:
     wide = wait_for(lambda: not page._narrow and page.sidebar_shown)
     check("a 900 px page shows the sidebar again", wide, (page._narrow, page.sidebar_shown))
     check("the toggle is sensitive again", page._sidebar_toggle.get_sensitive())
-    check(
-        "the VTE keeps its columns beside the sidebar",
-        wait_for(lambda: page.terminal.get_column_count() >= 48),
-        page.terminal.get_column_count(),
-    )
+    if native:
+        check(
+            "the view keeps its width beside the sidebar",
+            wait_for(lambda: page.diff_view.get_width() >= 400),
+            page.diff_view.get_width(),
+        )
+    else:
+        check(
+            "the VTE keeps its columns beside the sidebar",
+            wait_for(lambda: page.terminal.get_column_count() >= 48),
+            page.terminal.get_column_count(),
+        )
 
     # -- the toggle and its persistence -------------------------------------------------
     page.set_sidebar_wanted(False)
@@ -1318,22 +1357,37 @@ def check_sidebar(repo: str, state_path: str) -> None:
     )
 
     # -- a commit row click loads it; the default header loads nothing --------------------
-    reloads_before = read_state(state_path).get("reloads", 0)
+    def shows(loaded, args: list) -> bool:
+        """The page shows *loaded*: hunk's state file records *args*, or
+        the native page says so itself."""
+        if native:
+            return page.shows(loaded) and page.settled()
+        return read_state(state_path).get("args") == args and settled(page)
+
     sha = current[0]
+    subject = git_out(repo, "log", "-1", "--format=%s", sha).strip()
     check("the commit row is drawn", sidebar.click_commit_row(f"commit:{sha}"))
-    landed = wait_for(lambda: read_state(state_path).get("args") == ["show", sha] and settled(page))
-    check("a commit row click reloads `show <sha>`", landed, read_state(state_path))
-    check("the ▸ row follows hunk's title", wait_for(lambda: sidebar.loaded_row_id() == f"commit:{sha}"), sidebar.loaded_row_id())
-    check("the breadcrumb names the commit", page._breadcrumb.get_text().startswith(sha[:7]), page._breadcrumb.get_text())
+    landed = wait_for(lambda: shows({"show": sha}, ["show", sha]))
+    check("a commit row click loads `show <sha>`", landed, page.loaded)
+    check("the ▸ row follows the load", wait_for(lambda: sidebar.loaded_row_id() == f"commit:{sha}"), sidebar.loaded_row_id())
+    check(
+        "the breadcrumb names the commit, <sha7> <subject>",
+        wait_for(lambda: page.breadcrumb_text() == f"{sha[:7]} {subject}"),
+        page.breadcrumb_text(),
+    )
     landed = wait_for(lambda: sidebar.file_rows().mode == "flat" and [f.path for f in sidebar.file_rows().flat] == ["a.txt"])
-    check("a commit load lists hunk's files flat, with counts", landed and sidebar.file_rows().flat[0].additions == 1, sidebar.file_rows())
+    check("a commit load lists its files flat, with counts", landed and sidebar.file_rows().flat[0].additions == 1, sidebar.file_rows())
     reloads_before = read_state(state_path).get("reloads", 0)
     sidebar.click_commit_row("header:default")
     wait_for(lambda: False, timeout=0.3)
-    check("the default header loads nothing", read_state(state_path).get("reloads", 0) == reloads_before and settled(page))
+    check(
+        "the default header loads nothing",
+        shows({"show": sha}, ["show", sha]) and read_state(state_path).get("reloads", 0) == reloads_before,
+        page.loaded,
+    )
     sidebar.click_commit_row("header:current")
-    landed = wait_for(lambda: read_state(state_path).get("args") == ["main...HEAD"] and settled(page))
-    check("the current header loads the branch diff", landed, read_state(state_path))
+    landed = wait_for(lambda: shows("branch", ["main...HEAD"]))
+    check("the current header loads the branch diff", landed, page.loaded)
     check("the header row is the loaded one", wait_for(lambda: sidebar.loaded_row_id() == "header:current"))
 
     # -- the files list on the working tree: the other side's click loads it ------------
@@ -1343,15 +1397,15 @@ def check_sidebar(repo: str, state_path: str) -> None:
     with open(os.path.join(repo, "a.txt"), "w") as fh:
         fh.write("staged\nand more\n")  # and the tree from the index: on the unstaged side too
     sidebar.click_commit_row("worktree")
-    landed = wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
-    check("the working tree row loads the unstaged changes", landed, read_state(state_path))
+    landed = wait_for(lambda: shows("unstaged", []))
+    check("the working tree row loads the unstaged changes", landed, page.loaded)
     landed = wait_for(
         lambda: sidebar.file_rows().mode == "split"
         and sidebar.file_rows().live == "unstaged"
         and [f.path for f in sidebar.file_rows().staged] == ["a.txt"]
         and [f.path for f in sidebar.file_rows().unstaged] == ["a.txt"]
     )
-    check("the working tree splits: hunk's files live, the other side off git status", landed, sidebar.file_rows())
+    check("the working tree splits: the viewer's files live, the other side off git status", landed, sidebar.file_rows())
     check(
         "the live row carries counts and the status letter, the other side its letter alone",
         sidebar.file_rows().unstaged[0].live
@@ -1360,95 +1414,145 @@ def check_sidebar(repo: str, state_path: str) -> None:
         and sidebar.file_rows().staged[0].code == "M",
         sidebar.file_rows(),
     )
-    check("the session get snapshot puts the highlight on hunk's file", wait_for(lambda: sidebar.selected_path == "a.txt"), sidebar.selected_path)
+    check(
+        "the viewer's cursor puts the highlight on its file",
+        wait_for(lambda: sidebar.selected_path == "a.txt"),
+        sidebar.selected_path,
+    )
     check("the live row is highlighted", sidebar._file_widgets[("unstaged", "a.txt")].has_css_class("git-file-selected"))
     patch_state(state_path, navigate=None, navigates=0)
     reloads_before = read_state(state_path).get("reloads", 0)
     check("the staged-side row is drawn", sidebar.click_file_row("a.txt", "staged"))
-    landed = wait_for(
-        lambda: read_state(state_path).get("args") == ["--staged"]
-        and read_state(state_path).get("navigate", {}).get("file") == "a.txt"
-        and settled(page)
-    )
-    check("a staged-side click reloads --staged, then navigates to the file", landed, read_state(state_path))
-    check("one reload, one navigate", read_state(state_path).get("reloads", 0) == reloads_before + 1 and read_state(state_path).get("navigates") == 1, read_state(state_path))
-    check("the navigate asked for the file's first hunk", read_state(state_path).get("navigate", {}).get("target") == "--hunk")
+    if native:
+        landed = wait_for(lambda: shows("staged", []) and page.diff_view.current()[0] == "a.txt")
+        check("a staged-side click loads --staged, then reveals the file", landed, (page.loaded, page.diff_view.current()))
+        focus = window.get_focus()
+        check("the keyboard landed in the view", focus is not None and focus.is_ancestor(page.diff_view), focus)
+    else:
+        landed = wait_for(
+            lambda: read_state(state_path).get("args") == ["--staged"]
+            and read_state(state_path).get("navigate", {}).get("file") == "a.txt"
+            and settled(page)
+        )
+        check("a staged-side click reloads --staged, then navigates to the file", landed, read_state(state_path))
+        check("one reload, one navigate", read_state(state_path).get("reloads", 0) == reloads_before + 1 and read_state(state_path).get("navigates") == 1, read_state(state_path))
+        check("the navigate asked for the file's first hunk", read_state(state_path).get("navigate", {}).get("target") == "--hunk")
     check("the staged side is live now", wait_for(lambda: sidebar.file_rows().live == "staged"), sidebar.file_rows())
     reloads_before = read_state(state_path).get("reloads", 0)
     sidebar.click_file_row("a.txt", "staged")
-    landed = wait_for(lambda: read_state(state_path).get("navigates") == 2 and settled(page))
-    check("a live-side click navigates without a reload", landed and read_state(state_path).get("reloads", 0) == reloads_before, read_state(state_path))
+    if native:
+        wait_for(lambda: False, timeout=0.3)
+        check("a live-side click reveals without a reload", shows("staged", []) and page.diff_view.current()[0] == "a.txt", page.loaded)
+    else:
+        landed = wait_for(lambda: read_state(state_path).get("navigates") == 2 and settled(page))
+        check("a live-side click navigates without a reload", landed and read_state(state_path).get("reloads", 0) == reloads_before, read_state(state_path))
     sidebar.click_section("unstaged")
-    landed = wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
-    check("the other side's heading loads that side", landed, read_state(state_path))
-    check("with no navigate", read_state(state_path).get("navigates") == 2)
+    landed = wait_for(lambda: shows("unstaged", []))
+    check("the other side's heading loads that side", landed, page.loaded)
+    if not native:
+        check("with no navigate", read_state(state_path).get("navigates") == 2)
 
-    # -- the session get snapshot moves the highlight within a tick ---------------------
-    os.environ["FAKE_HUNK_FILES"] = "a.txt,b.txt"
-    try:
-        patch_state(state_path, navigate={"file": "b.txt", "target": "--hunk", "value": "1"})
+    if native:
+        # -- no hunk: the cursor buttons (hunk's keys) are drawn but off ------------------
+        check(
+            "the cursor buttons are insensitive with no hunk to feed",
+            not sidebar._stage_button.get_sensitive()
+            and not sidebar._anchor_button.get_sensitive()
+            and not sidebar._discard_button.get_sensitive(),
+        )
+        check(
+            "stage all, unstage all and commit are live on the working tree",
+            sidebar._stage_all_button.get_sensitive() and sidebar._commit_button.get_sensitive(),
+        )
+    else:
+        # -- the session get snapshot moves the highlight within a tick ---------------------
+        os.environ["FAKE_HUNK_FILES"] = "a.txt,b.txt"
+        try:
+            patch_state(state_path, navigate={"file": "b.txt", "target": "--hunk", "value": "1"})
+            page.poll_tick()
+            check("a tick reads hunk's cursor off the session get", wait_for(lambda: sidebar.selected_path == "b.txt"), sidebar.selected_path)
+            check("the files list follows hunk's files", wait_for(lambda: [f.path for f in sidebar.file_rows().unstaged] == ["a.txt", "b.txt"]), sidebar.file_rows())
+        finally:
+            del os.environ["FAKE_HUNK_FILES"]
+        patch_state(state_path, navigate=None)
         page.poll_tick()
-        check("a tick reads hunk's cursor off the session get", wait_for(lambda: sidebar.selected_path == "b.txt"), sidebar.selected_path)
-        check("the files list follows hunk's files", wait_for(lambda: [f.path for f in sidebar.file_rows().unstaged] == ["a.txt", "b.txt"]), sidebar.file_rows())
-    finally:
-        del os.environ["FAKE_HUNK_FILES"]
-    patch_state(state_path, navigate=None)
-    page.poll_tick()
-    wait_for(lambda: sidebar.selected_path == "a.txt" and [f.path for f in sidebar.file_rows().unstaged] == ["a.txt"])
+        wait_for(lambda: sidebar.selected_path == "a.txt" and [f.path for f in sidebar.file_rows().unstaged] == ["a.txt"])
 
-    # -- the sidecar's selection and anchor: the highlight and the button labels -----------
-    sidecar = read_state(state_path).get("sidecar")
-    check("the cursor buttons are drawn (the extension is there)", sidebar._action_children[sidebar._stage_button].get_visible())
-    check(
-        "the cursor buttons are sensitive on a live working tree",
-        sidebar._stage_button.get_sensitive() and sidebar._anchor_button.get_sensitive() and sidebar._discard_button.get_sensitive(),
-    )
-    check("no anchor: Anchor line / Stage hunk", sidebar.anchor_button_label() == "Anchor line" and sidebar.stage_button_label() == "Stage hunk")
-    write_sidecar(sidecar, selection={"path": "b.txt", "hunkIndex": 2}, anchor={"path": "a.txt", "side": "new", "line": 1})
-    page.poll_tick()
-    check("the sidecar's selection moves the highlight at once", sidebar.selected_path == "b.txt", sidebar.selected_path)
-    check("the sidecar's anchor relabels the buttons", sidebar.anchor_button_label() == "Clear anchor" and sidebar.stage_button_label() == "Stage lines", (sidebar.anchor_button_label(), sidebar.stage_button_label()))
-    wait_for(lambda: settled(page))
-    check("the session get this tick didn't overwrite the sidecar's selection", sidebar.selected_path == "b.txt", sidebar.selected_path)
+        # -- the sidecar's selection and anchor: the highlight and the button labels -----------
+        sidecar = read_state(state_path).get("sidecar")
+        check("the cursor buttons are drawn (the extension is there)", sidebar._action_children[sidebar._stage_button].get_visible())
+        check(
+            "the cursor buttons are sensitive on a live working tree",
+            sidebar._stage_button.get_sensitive() and sidebar._anchor_button.get_sensitive() and sidebar._discard_button.get_sensitive(),
+        )
+        check("no anchor: Anchor line / Stage hunk", sidebar.anchor_button_label() == "Anchor line" and sidebar.stage_button_label() == "Stage hunk")
+        write_sidecar(sidecar, selection={"path": "b.txt", "hunkIndex": 2}, anchor={"path": "a.txt", "side": "new", "line": 1})
+        page.poll_tick()
+        check("the sidecar's selection moves the highlight at once", sidebar.selected_path == "b.txt", sidebar.selected_path)
+        check("the sidecar's anchor relabels the buttons", sidebar.anchor_button_label() == "Clear anchor" and sidebar.stage_button_label() == "Stage lines", (sidebar.anchor_button_label(), sidebar.stage_button_label()))
+        wait_for(lambda: settled(page))
+        check("the session get this tick didn't overwrite the sidecar's selection", sidebar.selected_path == "b.txt", sidebar.selected_path)
 
-    # -- the four buttons feed their bytes --------------------------------------------------
-    sidebar._stage_button.emit("clicked")
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "x")
-    check("Stage lines fed hunk `x`", landed, read_state(state_path).get("keys"))
-    check("the VTE took the keyboard", window.get_focus() is page.terminal, window.get_focus())
-    sidebar._anchor_button.emit("clicked")
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1b")
-    check("Clear anchor fed escape", landed, read_state(state_path).get("keys"))
-    write_sidecar(sidecar, selection={"path": "a.txt", "hunkIndex": 0}, anchor=None)
-    page.poll_tick()
-    check("the anchor cleared: Anchor line / Stage hunk again", sidebar.anchor_button_label() == "Anchor line" and sidebar.stage_button_label() == "Stage hunk")
-    sidebar._anchor_button.emit("clicked")
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1bv")
-    check("Anchor line fed `v`", landed, read_state(state_path).get("keys"))
-    sidebar._discard_button.emit("clicked")
-    landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1bvD")
-    check("Discard fed `D`", landed, read_state(state_path).get("keys"))
-    wait_for(lambda: settled(page))
+        # -- the four buttons feed their bytes --------------------------------------------------
+        sidebar._stage_button.emit("clicked")
+        landed = wait_for(lambda: read_state(state_path).get("keys") == "x")
+        check("Stage lines fed hunk `x`", landed, read_state(state_path).get("keys"))
+        check("the VTE took the keyboard", window.get_focus() is page.terminal, window.get_focus())
+        sidebar._anchor_button.emit("clicked")
+        landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1b")
+        check("Clear anchor fed escape", landed, read_state(state_path).get("keys"))
+        write_sidecar(sidecar, selection={"path": "a.txt", "hunkIndex": 0}, anchor=None)
+        page.poll_tick()
+        check("the anchor cleared: Anchor line / Stage hunk again", sidebar.anchor_button_label() == "Anchor line" and sidebar.stage_button_label() == "Stage hunk")
+        sidebar._anchor_button.emit("clicked")
+        landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1bv")
+        check("Anchor line fed `v`", landed, read_state(state_path).get("keys"))
+        sidebar._discard_button.emit("clicked")
+        landed = wait_for(lambda: read_state(state_path).get("keys") == "x\x1bvD")
+        check("Discard fed `D`", landed, read_state(state_path).get("keys"))
+        wait_for(lambda: settled(page))
 
     # -- native mutations: stage all, commit --------------------------------------------------
-    reloads_before = read_state(state_path).get("reloads", 0)
+    # Each reloads the viewer exactly once: hunk's state file counts its
+    # reloads; the native page's read is counted through its own method.
+    native_loads: list[object] = []
+    if native:
+        original_load = page._native_load
+
+        def counted_load(loaded) -> None:
+            native_loads.append(loaded)
+            original_load(loaded)
+
+        page._native_load = counted_load
+
+    def reloads() -> int:
+        return len(native_loads) if native else read_state(state_path).get("reloads", 0)
+
+    reloads_before = reloads()
     sidebar.stage_all()
-    landed = wait_for(lambda: not sidebar.busy and read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page))
-    check("stage_all reloads hunk once", landed, read_state(state_path))
+    landed = wait_for(lambda: not sidebar.busy and reloads() == reloads_before + 1 and (page.settled() if native else settled(page)))
+    check("stage_all reloads the viewer once", landed, reloads())
     check("and staged the tree", git_out(repo, "diff", "--name-only") == "" and git_out(repo, "diff", "--cached", "--name-only").split() == ["a.txt"])
+    if native:
+        check("the unstaged view emptied", wait_for(lambda: page.diff_view.file_rows() == []), page.diff_view.file_rows())
+        check(
+            "the files list moved a.txt to the staged side",
+            wait_for(lambda: [f.path for f in sidebar.file_rows().staged] == ["a.txt"] and not sidebar.file_rows().unstaged),
+            sidebar.file_rows(),
+        )
     page.poll_tick()
-    wait_for(lambda: settled(page))
+    wait_for(lambda: page.settled() if native else settled(page))
     wait_for(lambda: False, timeout=0.3)
-    check("the following tick reloads nothing more", read_state(state_path).get("reloads", 0) == reloads_before + 1, read_state(state_path))
-    reloads_before = read_state(state_path).get("reloads", 0)
+    check("the following tick reloads nothing more", reloads() == reloads_before + 1, reloads())
+    reloads_before = reloads()
     sidebar.commit("native commit", None)
-    landed = wait_for(lambda: not sidebar.busy and read_state(state_path).get("reloads", 0) == reloads_before + 1 and settled(page))
-    check("commit reloads hunk once", landed, read_state(state_path))
+    landed = wait_for(lambda: not sidebar.busy and reloads() == reloads_before + 1 and (page.settled() if native else settled(page)))
+    check("commit reloads the viewer once", landed, reloads())
     check("and made the commit", git_out(repo, "log", "-1", "--format=%s").strip() == "native commit", git_out(repo, "log", "-1", "--format=%s"))
     page.poll_tick()
-    wait_for(lambda: settled(page))
+    wait_for(lambda: page.settled() if native else settled(page))
     wait_for(lambda: False, timeout=0.3)
-    check("the following tick reloads nothing more", read_state(state_path).get("reloads", 0) == reloads_before + 1, read_state(state_path))
+    check("the following tick reloads nothing more", reloads() == reloads_before + 1, reloads())
     landed = wait_for(lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == log_shas(repo, "main..HEAD"))
     check("the commits list gained the commit", landed, [r.label for r in sidebar.commit_rows()])
 
@@ -1457,7 +1561,7 @@ def check_sidebar(repo: str, state_path: str) -> None:
         with open(os.path.join(repo, "a.txt"), "a") as fh:
             fh.write("more\n")
         git(repo, "commit", "-qam", f"filler {len(log_shas(repo, 'main..HEAD'))}")
-    page.apply_settings({**SETTINGS, "git_log_page": 5})
+    page.apply_settings({**(NATIVE_SETTINGS if native else SETTINGS), "git_log_page": 5})
     landed = wait_for(lambda: any(r.kind == "more" and r.group == "current" for r in sidebar.commit_rows()))
     check("git_log_page 5 over 7 commits shows load more…", landed, [(r.kind, r.label) for r in sidebar.commit_rows()])
     check("five commits listed", len([r for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"]) == 5)
@@ -1467,13 +1571,510 @@ def check_sidebar(repo: str, state_path: str) -> None:
         and not any(r.kind == "more" and r.group == "current" for r in sidebar.commit_rows())
     )
     check("load more… lists them all and goes away", landed, [(r.kind, r.label) for r in sidebar.commit_rows()])
-    wait_for(lambda: settled(page))
+    wait_for(lambda: page.settled() if native else settled(page))
     page.page_closed()
     wait_for(lambda: not page.hunk_alive, timeout=2.0)
     window.destroy()
 
 
+def range_settled(view, hold_s: float = 0.3):
+    """A wait_for condition: the view's scroll range has held still for
+    *hold_s* — the expanded context views have validated their heights."""
+    seen = {"upper": None, "since": 0.0}
+
+    def settled() -> bool:
+        upper = view._scroller.get_vadjustment().get_upper()
+        now = time.monotonic()
+        if upper != seen["upper"]:
+            seen["upper"], seen["since"] = upper, now
+            return False
+        return now - seen["since"] >= hold_s
+
+    return settled
+
+
+def png_bytes(rgb: tuple[int, int, int]) -> bytes:
+    """A 4×4 PNG of one colour — a picture git calls binary and the view
+    calls an image."""
+    import struct
+    import zlib
+
+    raw = b"".join(b"\x00" + bytes(rgb) * 4 for _ in range(4))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+def write_file(repo: str, name: str, data: bytes | str) -> None:
+    mode = "wb" if isinstance(data, bytes) else "w"
+    with open(os.path.join(repo, name), mode) as fh:
+        fh.write(data)
+
+
+def stage_native_fixture(repo: str) -> list[str]:
+    """Every kind of change the view draws, on a fresh commit: unstaged
+    edits (two hunks with gaps around them), a staged edit, an untracked
+    file, a staged rename, a modified binary, an image before/after and an
+    untracked image, a deleted file and a mode change. Returns text.txt's
+    lines (the check edits them again)."""
+    lines = [f"line {n}\n" for n in range(1, 61)]
+    write_file(repo, "text.txt", "".join(lines))
+    write_file(repo, "staged.txt", "".join(f"staged {n}\n" for n in range(1, 11)))
+    write_file(repo, "old.txt", "".join(f"old {n}\n" for n in range(1, 6)))
+    write_file(repo, "blob.bin", bytes(range(256)) * 4)
+    write_file(repo, "pic.png", png_bytes((200, 30, 30)))
+    write_file(repo, "gone.txt", "".join(f"gone {n}\n" for n in range(1, 4)))
+    write_file(repo, "run.sh", "#!/bin/sh\necho run\n")
+    os.chmod(os.path.join(repo, "run.sh"), 0o644)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "native fixture")
+    # unstaged: two hunks in text.txt (a 1-line gap before, 33 between, 12 after)
+    lines[4] = "line 5 changed\n"
+    lines[44] = "line 45 changed\n"
+    write_file(repo, "text.txt", "".join(lines))
+    # staged: an edit, and a rename
+    write_file(repo, "staged.txt", "".join(f"staged {n}\n" for n in range(1, 11)).replace("staged 3", "staged three"))
+    git(repo, "add", "staged.txt")
+    git(repo, "mv", "old.txt", "renamed.txt")
+    # unstaged: a binary, an image, a deletion, a mode change
+    write_file(repo, "blob.bin", bytes(range(255, -1, -1)) * 4)
+    write_file(repo, "pic.png", png_bytes((30, 200, 30)))
+    os.remove(os.path.join(repo, "gone.txt"))
+    os.chmod(os.path.join(repo, "run.sh"), 0o755)
+    # untracked: a text file and a picture
+    write_file(repo, "untracked.txt", "nothing tracked here\n")
+    write_file(repo, "new.png", png_bytes((30, 30, 200)))
+    return lines
+
+
+def clear_native_fixture(repo: str) -> None:
+    git(repo, "reset", "-q", "--hard")
+    git(repo, "clean", "-qfd")
+
+
+def check_native(repo: str, state_path: str) -> None:
+    """The native viewer behind the git_viewer switch (PR 2 of the
+    native-diff stack) over a repository holding every kind of change: the
+    view opens with no hunk spawned and draws each section kind (badges,
+    pictures, a rename on the staged side); a gap expands; the watch
+    reloads an external edit within two seconds keeping an untouched
+    hunk's widget and the keyboard; the files list follows the scroll and
+    a click reveals; the page-local keys are routed; the filter hides
+    sections; the find bar counts across hunks; loads switch (staged, a
+    commit); settings and the keys reach the view and page_state
+    round-trips a layout change; a page restores into a commit (and into
+    the default mode for a commit git no longer has); the switch flips
+    live both ways."""
+    print("-- the native viewer")
+    lines = stage_native_fixture(repo)
+    fixture_sha = head_sha(repo)
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+    )
+    page.apply_settings(NATIVE_SETTINGS)
+    check("the page reads the switch before it maps", page.native and not page.hunk_alive)
+    opened: list[tuple[str, int]] = []
+    page.diff_view.connect("open-requested", lambda _v, path, line: opened.append((path, line)))
+    window = Gtk.Window(title="native", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("the view opens and the first read lands", wait_for(page.settled))
+    check(
+        "the stack shows the native view; no hunk was spawned",
+        page._stack.get_visible_child_name() == "native" and page._child_pid is None and page.card is None,
+        (page._stack.get_visible_child_name(), page._child_pid, page.card),
+    )
+    check(
+        "the header's find and menu show, and the sidebar's filter",
+        page._find_toggle.get_visible()
+        and page._menu_button.get_visible()
+        and page.sidebar._filter_entry.get_visible(),
+    )
+    check("the breadcrumb reads the working tree", page.breadcrumb_text() == "working tree · unstaged")
+    check("nothing to reveal for a file that isn't loaded", not page.reveal("nowhere.txt"))
+
+    # -- every section kind renders -----------------------------------------------------
+    view = page.diff_view
+    kinds = {path: kind for path, kind, _shown in view.file_rows()}
+    check(
+        "the unstaged load draws a change, a binary, an image, a deletion, a mode change and the untracked files (a picture reads binary)",
+        kinds == {
+            "text.txt": "change",
+            "blob.bin": "binary",
+            "pic.png": "binary",
+            "gone.txt": "deleted",
+            "run.sh": "mode",
+            "untracked.txt": "new",
+            "new.png": "binary",
+        },
+        kinds,
+    )
+    badges = {label: (badge, picture) for label, badge, picture in view.badge_rows()}
+    check(
+        "the headers wear their badges; the images their pictures",
+        badges.get("blob.bin") == ("binary", False)
+        and badges.get("pic.png") == ("binary", True)
+        and badges.get("gone.txt") == ("deleted", False)
+        and badges.get("run.sh") == ("mode 100644 → 100755", False)
+        and badges.get("text.txt") == ("", False)
+        and badges.get("untracked.txt") == ("new", False)
+        and badges.get("new.png") == ("new · binary", True),
+        badges,
+    )
+    check("text.txt draws its two hunks", len(view.hunk_rows("text.txt")) == 2, view.hunk_rows("text.txt"))
+    check(
+        "the deleted file's one hunk holds its lines, the untracked file's its own",
+        len(view.hunk_rows("gone.txt")) == 1 and len(view.hunk_rows("untracked.txt")) == 1,
+        (view.hunk_rows("gone.txt"), view.hunk_rows("untracked.txt")),
+    )
+    check("a binary and a mode change have no hunk", view.hunk_rows("blob.bin") == [] and view.hunk_rows("run.sh") == [])
+    check(
+        "the files list lists the unstaged side from the read's own status, the staged from git status",
+        wait_for(
+            lambda: {r.path for r in page.sidebar.file_rows().unstaged} >= {"text.txt", "blob.bin", "gone.txt", "untracked.txt"}
+            and {r.path for r in page.sidebar.file_rows().staged} == {"staged.txt", "renamed.txt"}
+        ),
+        page.sidebar.file_rows(),
+    )
+    first = view.file_rows()[0][0]
+    check(
+        "the sidebar highlights the file at the top of the view",
+        wait_for(lambda: page.sidebar.selected_path == first),
+        (page.sidebar.selected_path, first),
+    )
+
+    # -- a gap expands -----------------------------------------------------------------
+    gaps = dict((address, (remaining, shown)) for address, remaining, shown in view.gap_rows("text.txt"))
+    check(
+        "the gaps before, between and after the hunks are measured",
+        gaps.get("before:0") == (1, 0) and gaps.get("before:1") == (33, 0) and "trailing:1" in gaps,
+        gaps,
+    )
+    check("▼ 20 on the gap between the hunks", view.expand_gap("text.txt", "before:1", "down", 20))
+    check(
+        "twenty lines of context are drawn, thirteen remain",
+        wait_for(lambda: dict((a, (r, s)) for a, r, s in view.gap_rows("text.txt")).get("before:1") == (13, 20)),
+        view.gap_rows("text.txt"),
+    )
+    check("`all` on the trailing gap", view.expand_gap("text.txt", "trailing:1", "all", 0))
+    check(
+        "the trailing gap is measured off the file and drawn whole",
+        wait_for(lambda: dict((a, (r, s)) for a, r, s in view.gap_rows("text.txt")).get("trailing:1") == (0, 12)),
+        view.gap_rows("text.txt"),
+    )
+
+    # -- a files-list click reveals and focuses ------------------------------------------
+    page.sidebar.click_file_row("text.txt", "unstaged")
+    check(
+        "a files-list click focuses the file's first hunk",
+        wait_for(lambda: view.current()[:2] == ("text.txt", 0)),
+        view.current(),
+    )
+    focus = window.get_focus()
+    check("the keyboard is in the view", focus is not None and focus.is_ancestor(view), focus)
+    check("the highlight followed the click", page.sidebar.selected_path == "text.txt", page.sidebar.selected_path)
+
+    # -- the watch: an external edit reloads within 2 s, an untouched hunk keeps its widget --
+    ids_before = view.hunk_serials("text.txt")
+    focus_before = window.get_focus()
+    lines[44] = "line 45 changed again\n"
+    write_file(repo, "text.txt", "".join(lines))
+    started = time.monotonic()
+    landed = wait_for(lambda: view.hunk_serials("text.txt")[1:] != ids_before[1:] and page.settled(), timeout=2.0)
+    elapsed = time.monotonic() - started
+    check(f"an edit reloads the view through the watch within 2 s ({elapsed:.1f} s)", landed)
+    ids_after = view.hunk_serials("text.txt")
+    check("the edited hunk was rebuilt, the untouched one kept its widget", len(ids_after) == 2 and ids_after[0] == ids_before[0] and ids_after[1] != ids_before[1], (ids_before, ids_after))
+    check("the keyboard stayed in the untouched hunk", window.get_focus() is focus_before and view.current()[:2] == ("text.txt", 0), (window.get_focus(), view.current()))
+    check("the file's badge is still none and its hunks two", len(view.hunk_rows("text.txt")) == 2)
+    check("the sections speak the read's hunk indexes", view.hunk_indexes("text.txt") == [0, 1], view.hunk_indexes("text.txt"))
+
+    # -- a hunk above going away: the survivor keeps its widget and takes index 0 --
+    lines[4] = "line 5\n"
+    write_file(repo, "text.txt", "".join(lines))
+    landed = wait_for(lambda: len(view.hunk_serials("text.txt")) == 1 and page.settled(), timeout=2.0)
+    check("reverting the first hunk's edit reloads to one hunk", landed, view.hunk_serials("text.txt"))
+    check(
+        "the surviving hunk kept its widget and now speaks index 0",
+        view.hunk_serials("text.txt") == ids_after[1:] and view.hunk_indexes("text.txt") == [0],
+        (ids_after, view.hunk_serials("text.txt"), view.hunk_indexes("text.txt")),
+    )
+    emitted: list[tuple[str, int]] = []
+    handler = view.connect("current-changed", lambda _v, p, h: emitted.append((p, h)))
+    check(
+        "reveal(hunk=0) lands on it and names index 0 to the sidebar",
+        page.reveal("text.txt", hunk=0)
+        and view.current()[:2] == ("text.txt", 0)
+        and all(e == ("text.txt", 0) for e in emitted),  # unchanged from before the reload: nothing to emit
+        (view.current(), emitted),
+    )
+    view.disconnect(handler)
+    check("z finds the gap above it under its new address", any(a == "before:0" and remaining > 0 for a, remaining, _s in view.gap_rows("text.txt")), view.gap_rows("text.txt"))
+    lines[4] = "line 5 changed\n"
+    write_file(repo, "text.txt", "".join(lines))
+    check("the edit put back, the two hunks return", wait_for(lambda: view.hunk_indexes("text.txt") == [0, 1] and page.settled(), timeout=2.0), view.hunk_indexes("text.txt"))
+    check("the untouched hunk kept its widget through both reloads", view.hunk_serials("text.txt")[1:] == ids_after[1:], (ids_after, view.hunk_serials("text.txt")))
+
+    # -- reveal by a line outside every hunk: the nearest hunk, not a refusal --
+    check("a line in the gap between the hunks reveals the file on its nearest hunk", page.reveal("text.txt", line=20) and view.current()[:2] == ("text.txt", 0), view.current())
+    check("and holds_line says the line itself is not in the diff", not view.holds_line("text.txt", None, 20) and view.holds_line("text.txt", None, 5))
+    check("a line inside a hunk reveals that hunk", page.reveal("text.txt", line=45) and view.current()[:2] == ("text.txt", 1), view.current())
+
+    # -- the page-local keys, through their actions ----------------------------------------
+    page.reveal("text.txt", hunk=0)
+    check("git.next-hunk is routed to the view", view.activate_action("git.next-hunk", None))
+    check("and moved the current hunk", wait_for(lambda: view.current()[:2] == ("text.txt", 1)), view.current())
+    # j / k: the cursor row within the focused hunk (wherever the last
+    # reveal left it), then across the hunk's edges.
+    hunk_view = view._focused_hunk.focused_view if view._focused_hunk is not None else None
+    check("the keyboard sits in a hunk view", hunk_view is not None)
+    row_before = hunk_view.cursor_row() if hunk_view is not None else -1
+    for _ in range(row_before):
+        view.activate_action("git.cursor-up", None)
+    check("k walks the cursor up to the hunk's first row", hunk_view is not None and hunk_view.cursor_row() == 0, hunk_view.cursor_row() if hunk_view else None)
+    check("j moves the cursor a row down", view.activate_action("git.cursor-down", None) and hunk_view.cursor_row() == 1, hunk_view.cursor_row() if hunk_view else None)
+    check("k moves it back up", view.activate_action("git.cursor-up", None) and hunk_view.cursor_row() == 0)
+    check(
+        "k past the first row enters the hunk before, on its last row",
+        view.activate_action("git.cursor-up", None)
+        and view.current()[:2] == ("text.txt", 0)
+        and view._focused_hunk.focused_view.cursor_row() == len(view._focused_hunk.focused_view.rows) - 1,
+        (view.current(), view._focused_hunk.focused_view.cursor_row() if view._focused_hunk else None),
+    )
+    check(
+        "j past its last row comes back to the hunk after, on its first row",
+        view.activate_action("git.cursor-down", None)
+        and view.current()[:2] == ("text.txt", 1)
+        and view._focused_hunk.focused_view.cursor_row() == 0,
+        view.current(),
+    )
+    view.activate_action("git.open-editor", None)
+    check(
+        "`e` asks for the file at the cursor's line",
+        bool(opened) and opened[-1][0] == "text.txt" and opened[-1][1] >= 1,
+        opened,
+    )
+    check("git.expand-gap draws the gap above the focused hunk", view.activate_action("git.expand-gap", None))
+    check(
+        "the gap between the hunks is spent",
+        wait_for(lambda: any(a == "before:1" and remaining == 0 for a, remaining, _s in view.gap_rows("text.txt"))),
+        view.gap_rows("text.txt"),
+    )
+    check("git.prev-file moves to the file before", view.activate_action("git.prev-file", None) and view.current()[0] != "text.txt", view.current())
+
+    # -- the sidebar highlight follows the scroll ----------------------------------------------
+    order = [path for path, _k, _s in view.file_rows()]
+    window.set_focus(None)  # a focused hunk still in view would hold the highlight
+    # The context views just drawn validate their heights a beat after
+    # allocation (the column's range grows then): scroll once the range
+    # has held still, or "the end" is the end of a shorter column.
+    check("the column's range settles", wait_for(range_settled(view)))
+    view.set_scroll(1.0)
+    check(
+        "scrolled to the end, the highlight moves to a later file",
+        wait_for(lambda: page.sidebar.selected_path is not None and order.index(page.sidebar.selected_path) > 0),
+        (page.sidebar.selected_path, order),
+    )
+    check(
+        "the pinned header names the file scrolled into",
+        wait_for(lambda: view.pinned_header_text() == "text.txt"),
+        view.pinned_header_text(),
+    )
+    view.set_scroll(0.0)
+    check("scrolled back, the first file again", wait_for(lambda: page.sidebar.selected_path == order[0]), page.sidebar.selected_path)
+
+    # -- the files filter ------------------------------------------------------------------
+    # (A GtkSearchEntry's search-changed is debounced: the words land a
+    # beat after the text does, so every read below waits for them.)
+    page.sidebar.set_filter_text("zzz")
+    check(
+        "the filter hides the sections and rows that don't match",
+        wait_for(
+            lambda: all(not shown for _p, _k, shown in view.file_rows())
+            and all(not w.get_visible() for w in page.sidebar._file_widgets.values())
+        ),
+        view.file_rows(),
+    )
+    page.sidebar.set_filter_text("text")
+    check(
+        "and shows what does",
+        wait_for(lambda: [p for p, _k, shown in view.file_rows() if shown] == ["text.txt"]),
+        view.file_rows(),
+    )
+    page.sidebar.set_filter_text("")
+    check("clearing shows every section", wait_for(lambda: all(shown for _p, _k, shown in view.file_rows())))
+
+    # -- the find bar -------------------------------------------------------------------------
+    page._search_bar.set_search_mode(True)
+    page._search_entry.set_text("changed")
+    check(
+        "the find bar counts the matches across both hunks",
+        wait_for(lambda: page._search_label.get_text() == "1 of 2"),
+        page._search_label.get_text(),
+    )
+    check("the first match put the current hunk on the first", view.current()[:2] == ("text.txt", 0), view.current())
+    page._search_entry.emit("next-match")
+    check("Enter steps to the next hunk's match", page._search_label.get_text() == "2 of 2", page._search_label.get_text())
+    check("the current hunk followed the match", view.current()[:2] == ("text.txt", 1), view.current())
+    page._search_entry.emit("previous-match")
+    check("Shift+Enter steps back", page._search_label.get_text() == "1 of 2", page._search_label.get_text())
+    page._search_entry.set_text("nowhere")
+    check("no match says so", wait_for(lambda: page._search_label.get_text() == "No matches"), page._search_label.get_text())
+    page._search_bar.set_search_mode(False)
+    check("closing the bar clears the label", page._search_label.get_text() == "")
+    check("Escape is not held with the bar closed", not page.holds_escape())
+
+    # -- other loads: the index (a rename), a commit -------------------------------------------
+    page.load("staged")
+    check("Ctrl+2 loads the index", wait_for(lambda: page.settled() and page.loaded == "staged"))
+    check("the breadcrumb says staged", page.breadcrumb_text() == "working tree · staged", page.breadcrumb_text())
+    check(
+        "the files list shows the staged side live",
+        wait_for(lambda: any(r.path == "staged.txt" and r.live for r in page.sidebar.file_rows().staged)),
+        page.sidebar.file_rows(),
+    )
+    kinds = {path: kind for path, kind, _shown in view.file_rows()}
+    check("the index shows the edit and the rename", kinds == {"staged.txt": "change", "renamed.txt": "rename"}, kinds)
+    badges = {label: badge for label, badge, _p in view.badge_rows()}
+    check("the rename reads `old → new` and its similarity", badges.get("old.txt → renamed.txt") == "renamed 100%", badges)
+    check("a pure rename has no hunk", view.hunk_rows("renamed.txt") == [])
+    check("no matches remain from the other side", page._search_label.get_text() == "")
+    page.load({"show": fixture_sha})
+    check("a commit load lands", wait_for(lambda: page.settled() and page.shows({"show": fixture_sha})))
+    check(
+        "the breadcrumb names the commit off the read's own git log",
+        page.breadcrumb_text() == f"{fixture_sha[:7]} native fixture" and page._resolved_sha == fixture_sha,
+        (page.breadcrumb_text(), page._resolved_sha),
+    )
+    kinds = {path: kind for path, kind, _shown in view.file_rows()}
+    check(
+        "the commit's files are drawn, its new files as new",
+        kinds.get("text.txt") == "new" and kinds.get("pic.png") == "binary" and kinds.get("old.txt") == "new",
+        kinds,
+    )
+    check("a picture added by the commit shows its one side", dict((label, p) for label, _b, p in view.badge_rows()).get("pic.png") is True)
+    check("no monitors on a commit load", page._monitors == [])
+    page.load("unstaged")
+    check("back to the working tree", wait_for(lambda: page.settled() and page.loaded == "unstaged"))
+    check("monitors are back", page._monitors != [])
+    check("page_state carries the load", page.page_state() == {"kind": "git", "loaded": "unstaged"}, page.page_state())
+
+    # -- settings and the keys that write them; page_state round-trips a layout change ----------
+    page.apply_settings({**NATIVE_SETTINGS, "git_wrap_lines": True, "git_layout": "split", "git_line_numbers": False})
+    check(
+        "wrap, layout and line numbers reach the view",
+        view.options.wrap and view.is_split() and not view.options.line_numbers,
+        view.options,
+    )
+    check("the menu's states follow", page._wrap_action.get_state().get_boolean() and page._layout_action.get_state().get_string() == "split")
+    check("a layout change leaves page_state alone (the layout is a preference)", page.page_state() == {"kind": "git", "loaded": "unstaged"}, page.page_state())
+    view.activate_action("git.layout-stack", None)
+    check("the `2` key stacks the layout (applied to the page with no window action)", not view.is_split())
+    view.activate_action("git.line-numbers", None)
+    check("`l` toggles the line numbers back on", view.options.line_numbers, view.options)
+    restored = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+        loaded=hunkctl.decode_state(page.page_state()),
+    )
+    restored.apply_settings({**NATIVE_SETTINGS, "git_layout": "split"})
+    check("a page restored from page_state reads the same state back", restored.page_state() == page.page_state(), restored.page_state())
+    check("and takes its layout from the setting before it maps", restored.diff_view.options.split)
+    page.apply_settings(NATIVE_SETTINGS)
+
+    # -- the switch flips live, both ways ----------------------------------------------------------
+    page.apply_settings({**NATIVE_SETTINGS, "git_viewer": "hunk"})
+    check("flipping to hunk spawns the viewer", wait_for(lambda: page._session_id is not None))
+    check(
+        "the stack shows hunk and the native chrome hides",
+        page._stack.get_visible_child_name() == "hunk"
+        and not page._find_toggle.get_visible()
+        and not page.sidebar._filter_entry.get_visible()
+        and not page.native,
+    )
+    # Native, then hunk again before the terminate's exit lands: the exit
+    # must respawn hunk (the last word), not show the exited card.
+    pid = read_state(state_path).get("pid")
+    page.apply_settings(NATIVE_SETTINGS)
+    page.apply_settings({**NATIVE_SETTINGS, "git_viewer": "hunk"})
+    check("a flip back before the exit leaves a respawn note", page._respawn_wanted is True and page.hunk_alive)
+    check(
+        "the exit respawns hunk rather than showing the exited card",
+        wait_for(lambda: read_state(state_path).get("pid") not in (None, pid) and page._session_id is not None),
+        (read_state(state_path).get("pid"), pid, page.card),
+    )
+    check("no card, hunk shown", page.card is None and page._stack.get_visible_child_name() == "hunk" and not page.native)
+    pid = read_state(state_path).get("pid")
+    page.apply_settings(NATIVE_SETTINGS)
+    check("flipping back takes hunk down and opens the view", wait_for(lambda: page.native and page.settled() and page._child_pid is None))
+    check("the old viewer went down", wait_for(lambda: not pid_alive(pid)), pid)
+    check("the view shows the working tree again", page._stack.get_visible_child_name() == "native" and page.loaded == "unstaged")
+
+    # -- unparented for good, the view closes; re-parented, it stays ---------------------------------
+    window.set_child(None)  # a drag to another strip: unrealized, then realized again
+    window.set_child(page)
+    wait_for(lambda: False, timeout=0.3)
+    check("a re-parented page keeps its view and monitors", page._native_opened and page._monitors != [])
+    page.page_closed()
+    window.destroy()
+    check("closing dropped the monitors", page._monitors == [])
+
+    # -- restored from a layout: a commit, and a commit git no longer has -----------------------
+    print("-- the native viewer restored from a layout")
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+        loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": fixture_sha}, "parent": "base"}),
+    )
+    page.apply_settings(NATIVE_SETTINGS)
+    check(
+        "page_state before the open: the load, and no parent",
+        page.page_state() == {"kind": "git", "loaded": {"show": fixture_sha}},
+        page.page_state(),
+    )
+    check("no subject before the open", page.breadcrumb_text() == f"commit {fixture_sha[:7]}", page.breadcrumb_text())
+    window = Gtk.Window(title="restore (native)", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("the view opens into the saved commit", wait_for(lambda: page.settled() and page.shows({"show": fixture_sha})))
+    check("no hunk was spawned for it", page._child_pid is None and page.card is None)
+    check("breadcrumb reads <sha7> <subject>", page.breadcrumb_text() == f"{fixture_sha[:7]} native fixture", page.breadcrumb_text())
+    check("the tab title stays short", page.page_title() == f"Git · {fixture_sha[:7]}", page.page_title())
+    check("the ▸ row is the commit's", wait_for(lambda: page.sidebar.loaded_row_id() == f"commit:{fixture_sha}"), page.sidebar.loaded_row_id())
+    page.page_closed()
+    window.destroy()
+    gone = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+        loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": gone}}),
+    )
+    page.apply_settings(NATIVE_SETTINGS)
+    window = Gtk.Window(title="restore (native, gone commit)", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("a commit git doesn't know opens the default mode", wait_for(lambda: page.settled() and page.loaded == "unstaged"), page.loaded)
+    check("no card", page._stack.get_visible_child_name() == "native" and page.card is None)
+    page.page_closed()
+    window.destroy()
+    clear_native_fixture(repo)
+
+
 def check_without_hunk(repo: str) -> None:
+    """With no hunk on PATH: the install card for the hunk viewer, and the
+    native viewer drawing regardless (it needs git alone)."""
     print("-- with no hunk on PATH")
     page = GitPage(
         cwd_provider=lambda: repo,
@@ -1491,29 +2092,48 @@ def check_without_hunk(repo: str) -> None:
     page.page_closed()
     window.destroy()
 
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+    )
+    page.apply_settings(NATIVE_SETTINGS)
+    window = Gtk.Window(title="check_git_page (no hunk, native)", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("the native viewer opens with no hunk anywhere", wait_for(page.settled))
+    check("no card stands in for it", page._stack.get_visible_child_name() == "native" and page.card is None, (page._stack.get_visible_child_name(), page.card))
+    check("the breadcrumb reads the working tree", page.breadcrumb_text() == "working tree · unstaged", page.breadcrumb_text())
+    page.page_closed()
+    window.destroy()
+
 
 def check_outside_a_repo(scratch: str) -> None:
     print("-- outside a repository")
     nowhere = os.path.join(scratch, "nowhere")
     os.mkdir(nowhere)
-    page = GitPage(
-        cwd_provider=lambda: nowhere,
-        parent_provider=lambda _cwd: None,
-        on_closed=lambda p: None,
-    )
-    window = Gtk.Window(title="check_git_page (no repo)", default_width=900, default_height=600)
-    window.set_child(page)
-    window.present()
-    shown = wait_for(lambda: page._stack.get_visible_child_name() == "card")
-    check(
-        "the not-a-repository card comes up",
-        shown and card_title(page) == "Not a git repository",
-        card_title(page),
-    )
-    check("no parent to name", page._parent_target is None)
-    check("no sidecar was written", not os.path.exists(page._sidecar))
-    page.page_closed()
-    window.destroy()
+    for native in (False, True):
+        page = GitPage(
+            cwd_provider=lambda: nowhere,
+            parent_provider=lambda _cwd: None,
+            on_closed=lambda p: None,
+        )
+        if native:
+            page.apply_settings(NATIVE_SETTINGS)
+        window = Gtk.Window(title="check_git_page (no repo)", default_width=900, default_height=600)
+        window.set_child(page)
+        window.present()
+        shown = wait_for(lambda p=page: p._stack.get_visible_child_name() == "card")
+        viewer = "native" if native else "hunk"
+        check(
+            f"the not-a-repository card comes up ({viewer})",
+            shown and card_title(page) == "Not a git repository",
+            card_title(page),
+        )
+        check(f"no parent to name ({viewer})", page._parent_target is None)
+        check(f"no sidecar was written ({viewer})", not os.path.exists(page._sidecar))
+        page.page_closed()
+        window.destroy()
 
 
 def main() -> int:
@@ -1542,13 +2162,17 @@ def main() -> int:
             check_restore(repo, state_path, shim)
             check_settings(repo, state_path)
             check_sidebar(repo, state_path)
+            check_sidebar(repo, state_path, native=True)
+            check_native(repo, state_path)
             check_teardown_paths(repo, state_path, shim)
         finally:
             os.environ["PATH"] = real_path
 
-        empty = os.path.join(scratch, "empty")
-        os.mkdir(empty)
-        os.environ["PATH"] = empty
+        # git alone: the hunk viewer's install card, the native viewer's diff
+        gitonly = os.path.join(scratch, "gitonly")
+        os.mkdir(gitonly)
+        os.symlink(GIT, os.path.join(gitonly, "git"))
+        os.environ["PATH"] = gitonly
         try:
             check_without_hunk(repo)
         finally:

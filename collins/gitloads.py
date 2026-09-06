@@ -69,6 +69,14 @@ MAX_PATH_CHARS = 512
 # page's loads.
 LAYOUTS: tuple[str, ...] = ("auto", "split", "stack")
 DEFAULT_LAYOUT = LAYOUTS[0]
+# Which viewer the git page draws diffs with (the git_viewer setting):
+# hunk's VTE, or the native diff view (diffview.py). Temporary — the
+# switch and hunk go together in PR 4 of the native-diff stack; until then
+# an unknown word normalises to hunk, today's default.
+VIEWER_HUNK = "hunk"
+VIEWER_NATIVE = "native"
+VIEWERS: tuple[str, ...] = (VIEWER_HUNK, VIEWER_NATIVE)
+DEFAULT_VIEWER = VIEWER_HUNK
 # The commits-per-group page the extension loads (the git_log_page setting),
 # its default and the clamp — the same numbers as sidecar.ts's, so what
 # Collins writes is what the extension reads.
@@ -128,6 +136,17 @@ class Options:
     theme: str = ""
     untracked: bool = True
     log_page: int = LOG_PAGE
+    # The native diff view's half (git_viewer and its three knobs): which
+    # viewer draws, the line-number columns, wrapping, the word emphasis.
+    viewer: str = DEFAULT_VIEWER
+    line_numbers: bool = True
+    wrap: bool = False
+    word_diff: bool = True
+
+    @property
+    def native(self) -> bool:
+        """Whether the native diff view draws the page (git_viewer)."""
+        return self.viewer == VIEWER_NATIVE
 
     @classmethod
     def from_settings(cls, settings: Mapping) -> Options:
@@ -136,10 +155,15 @@ class Options:
         git_theme stripped, kept only when it is one argument (no
         whitespace, no leading "-", at most MAX_THEME_LEN chars) else "";
         git_untracked as a bool (absent: on); git_log_page as an int
-        clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE)."""
+        clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE);
+        git_viewer not in VIEWERS → hunk; git_line_numbers, git_wrap_lines
+        and git_word_diff as bools (absent: on, off, on)."""
         layout = settings.get("git_layout")
         if layout not in LAYOUTS:
             layout = DEFAULT_LAYOUT
+        viewer = settings.get("git_viewer")
+        if viewer not in VIEWERS:
+            viewer = DEFAULT_VIEWER
         theme = settings.get("git_theme")
         theme = theme.strip() if isinstance(theme, str) else ""
         if not safe_theme(theme):
@@ -150,7 +174,16 @@ class Options:
         except (TypeError, ValueError):
             log_page = LOG_PAGE
         log_page = max(MIN_LOG_PAGE, min(MAX_LOG_PAGE, log_page))
-        return cls(layout=layout, theme=theme, untracked=bool(untracked), log_page=log_page)
+        return cls(
+            layout=layout,
+            theme=theme,
+            untracked=bool(untracked),
+            log_page=log_page,
+            viewer=viewer,
+            line_numbers=bool(settings.get("git_line_numbers", True)),
+            wrap=bool(settings.get("git_wrap_lines", False)),
+            word_diff=bool(settings.get("git_word_diff", True)),
+        )
 
 
 def safe_theme(name: object) -> bool:

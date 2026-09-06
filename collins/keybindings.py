@@ -39,6 +39,7 @@ GROUP_SESSIONS = "sessions"
 GROUP_TABS = "tabs"
 GROUP_PANELS = "panels"
 GROUP_EDITOR = "editor"
+GROUP_GIT = "git"
 GROUP_TERMINAL = "terminal"
 GROUP_APP = "app"
 
@@ -47,9 +48,18 @@ GROUP_LABELS = {
     GROUP_TABS: N_("Tabs and windows"),
     GROUP_PANELS: N_("Panels"),
     GROUP_EDITOR: N_("Editor"),
+    GROUP_GIT: N_("Git page"),
     GROUP_TERMINAL: N_("Terminal"),
     GROUP_APP: N_("Application"),
 }
+
+# Action prefixes whose controllers fire only while the keyboard is inside
+# one widget (Gtk.ShortcutScope.LOCAL on the editor pane, on the git page's
+# diff view): two such scopes never see the same press, so a chord bound in
+# both is no conflict — Ctrl+F finds in the editor and in the diff alike.
+# Everything else (the window's capture-phase controller, the app table,
+# the terminals' handlers) overlaps with everything.
+LOCAL_PREFIXES: frozenset[str] = frozenset({"editor", "git"})
 
 
 @dataclass(frozen=True)
@@ -136,6 +146,67 @@ BINDINGS: tuple[Binding, ...] = (
     ),
     Binding("editor.save", N_("Save the file"), ("<Control>s",), GROUP_EDITOR, N_("In the editor.")),
     Binding("editor.find", N_("Find in the file"), ("<Control>f",), GROUP_EDITOR, N_("In the editor.")),
+    # The native diff view's keys (hunk's own defaults where it had them):
+    # page-scoped — a Gtk.ShortcutController on the diff view, capture
+    # phase so a bare letter beats the text view under it and never reaches
+    # the agent's terminal.
+    Binding("git.next-hunk", N_("Next hunk"), ("bracketright",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.prev-hunk", N_("Previous hunk"), ("bracketleft",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.next-file", N_("Next file"), ("period",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.prev-file", N_("Previous file"), ("comma",), GROUP_GIT, N_("In the diff.")),
+    Binding(
+        "git.cursor-down",
+        N_("Cursor down a line"),
+        ("j",),
+        GROUP_GIT,
+        N_("In the diff; past the hunk's last line, into the next hunk."),
+    ),
+    Binding(
+        "git.cursor-up",
+        N_("Cursor up a line"),
+        ("k",),
+        GROUP_GIT,
+        N_("In the diff; past the hunk's first line, into the previous hunk."),
+    ),
+    Binding(
+        "git.next-note",
+        N_("Next annotated hunk"),
+        ("braceright",),
+        GROUP_GIT,
+        N_("In the diff; a hunk with a note or highlight on it."),
+    ),
+    Binding(
+        "git.prev-note",
+        N_("Previous annotated hunk"),
+        ("braceleft",),
+        GROUP_GIT,
+        N_("In the diff; a hunk with a note or highlight on it."),
+    ),
+    Binding(
+        "git.expand-gap",
+        N_("Expand the unchanged lines above the hunk"),
+        ("z",),
+        GROUP_GIT,
+        N_("In the diff."),
+    ),
+    Binding("git.layout-auto", N_("Layout: automatic"), ("0",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.layout-split", N_("Layout: split"), ("1",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.layout-stack", N_("Layout: stacked"), ("2",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.line-numbers", N_("Show/hide line numbers"), ("l",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.wrap", N_("Wrap long lines"), ("w",), GROUP_GIT, N_("In the diff.")),
+    # `a` (show/hide agent notes) arrives with the note cards themselves.
+    Binding("git.refresh", N_("Reload the diff"), ("r",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.filter", N_("Filter the files list"), ("slash",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.find", N_("Find in the diff"), ("<Control>f",), GROUP_GIT, N_("In the diff.")),
+    Binding("git.help", N_("Keyboard bindings"), ("question",), GROUP_GIT, N_("In the diff.")),
+    Binding(
+        "git.open-editor",
+        N_("Open the file in the editor"),
+        ("e",),
+        GROUP_GIT,
+        N_("In the diff; at the line under the cursor."),
+    ),
+    Binding("git.close", N_("Close the git page"), ("q",), GROUP_GIT, N_("In the diff.")),
     Binding(
         "terminal.copy",
         N_("Copy the selection"),
@@ -346,27 +417,46 @@ def with_binding(custom, action: str, accelerators: list[str]) -> dict[str, list
     return overrides
 
 
+def may_overlap(action: str, other: str) -> bool:
+    """Whether a chord bound to both *action* and *other* would ever be
+    ambiguous: no when both live in distinct LOCAL_PREFIXES scopes (the
+    editor's controller and the diff view's never see one press), yes
+    otherwise — the window's controller runs in the capture phase, so a
+    chord it claims never reaches the editor or a terminal, and the
+    reverse overlap is just as confusing."""
+    mine, theirs = action.split(".", 1)[0], other.split(".", 1)[0]
+    return not (mine in LOCAL_PREFIXES and theirs in LOCAL_PREFIXES and mine != theirs)
+
+
 def holders(custom, accelerator: str, *, except_action: str | None = None) -> list[str]:
-    """The actions *accelerator* already fires, other than *except_action*.
-    Every scope is checked against every other: the window's controller
-    runs in the capture phase, so a chord it claims never reaches the
-    editor or a terminal, and the reverse overlap is just as confusing."""
+    """The actions *accelerator* already fires, other than *except_action*
+    and the ones that can't overlap with it (may_overlap). Without
+    *except_action* every scope is checked against every other."""
     spelled = canonical(accelerator)
     return [
         action
         for action, accelerators in resolve(custom).items()
-        if action != except_action and spelled in accelerators
+        if action != except_action
+        and spelled in accelerators
+        and (except_action is None or may_overlap(except_action, action))
     ]
 
 
 def conflicts(custom) -> dict[str, list[str]]:
     """Accelerator → the actions sharing it, for every chord bound more
-    than once."""
+    than once where the sharing is ambiguous (may_overlap) — two
+    page-local scopes may bind one chord each."""
     seen: dict[str, list[str]] = {}
     for action, accelerators in resolve(custom).items():
         for accelerator in accelerators:
             seen.setdefault(canonical(accelerator), []).append(action)
-    return {accelerator: actions for accelerator, actions in seen.items() if len(actions) > 1}
+    found: dict[str, list[str]] = {}
+    for accelerator, actions in seen.items():
+        if len(actions) < 2:
+            continue
+        if any(may_overlap(a, b) for i, a in enumerate(actions) for b in actions[i + 1 :]):
+            found[accelerator] = actions
+    return found
 
 
 # -- for tooltips ----------------------------------------------------------------

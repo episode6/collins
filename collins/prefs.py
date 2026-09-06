@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -120,6 +120,14 @@ _GIT_LAYOUT_LABELS = {
     "stack": N_("Stacked"),
 }
 _GIT_LAYOUTS = [(value, _GIT_LAYOUT_LABELS.get(value, label)) for value, label in prefslayout.GIT_LAYOUTS]
+
+# The Diff viewer row (temporary, see state.DEFAULT_SETTINGS["git_viewer"]):
+# gitloads.VIEWERS' words in prefslayout.GIT_VIEWERS' order.
+_GIT_VIEWER_LABELS = {
+    "hunk": N_("hunk"),
+    "native": N_("Native"),
+}
+_GIT_VIEWERS = [(value, _GIT_VIEWER_LABELS.get(value, label)) for value, label in prefslayout.GIT_VIEWERS]
 
 # The same bound hunkctl.safe_theme applies before a name reaches hunk's
 # argv, so the row refuses exactly what the page would drop.
@@ -927,17 +935,27 @@ class PreferencesDialog(Adw.Dialog):
         first two by restarting hunk in place, the rest without."""
         git_group = _SearchableGroup(
             title=_("Git"),
-            description=_("The git page: hunk's layout and theme, and what the commits panel loads"),
+            description=_("The git page: which viewer draws the diff, how, and what the commits panel loads"),
         )
         _searchable(git_group, *prefslayout.GIT_SEARCH_TERMS)
+        # Temporary (deleted in PR 4 of the native-diff stack, with hunk):
+        # which viewer draws. hunk stays the default while the native view
+        # is tried on real diffs.
+        self._git_viewer_row = self._add_running_behavior_row(
+            git_group,
+            _("Diff viewer"),
+            _("Experimental: Native draws diffs in Collins itself; hunk runs the terminal viewer"),
+            "git_viewer",
+            _GIT_VIEWERS,
+        )
+        _searchable(self._git_viewer_row, "native", "experimental", "viewer", "hunk")
         self._git_layout_row = self._add_running_behavior_row(
             git_group,
             _("Layout"),
-            _("How hunk lays a diff out: side by side, stacked, or whichever fits the width"),
+            _("Side by side, stacked, or whichever fits the width"),
             "git_layout",
             _GIT_LAYOUTS,
         )
-
         # Free text, not a list: hunk can't be asked for its themes, the
         # built-in ones number sixty-odd, and a config file can add more —
         # and a name hunk doesn't know falls back to its default rather
@@ -962,6 +980,32 @@ class PreferencesDialog(Adw.Dialog):
             )
         )
         git_group.add(_searchable(theme_reason, *theme_terms))
+
+        # The native view's own three (diffview.set_options); hunk has its
+        # own keys for the same and ignores them.
+        self._git_line_numbers_row = Adw.SwitchRow(
+            title=_("Line numbers"),
+            subtitle=_("Native viewer: the old and new line-number columns beside each hunk"),
+        )
+        self._git_line_numbers_row.set_active(bool(state.get_setting("git_line_numbers")))
+        self._git_line_numbers_row.connect(
+            "notify::active", self._on_git_switch_changed, "git_line_numbers"
+        )
+        git_group.add(_searchable(self._git_line_numbers_row, "native", "gutter", "numbers"))
+        self._git_wrap_row = Adw.SwitchRow(
+            title=_("Wrap long lines"),
+            subtitle=_("Native viewer: wrap instead of scrolling each hunk sideways"),
+        )
+        self._git_wrap_row.set_active(bool(state.get_setting("git_wrap_lines")))
+        self._git_wrap_row.connect("notify::active", self._on_git_switch_changed, "git_wrap_lines")
+        git_group.add(_searchable(self._git_wrap_row, "native", "wrap", "truncate"))
+        self._git_word_diff_row = Adw.SwitchRow(
+            title=_("Highlight changed words"),
+            subtitle=_("Native viewer: emphasise what moved within a changed line"),
+        )
+        self._git_word_diff_row.set_active(bool(state.get_setting("git_word_diff")))
+        self._git_word_diff_row.connect("notify::active", self._on_git_switch_changed, "git_word_diff")
+        git_group.add(_searchable(self._git_word_diff_row, "native", "word", "emphasis", "inline"))
 
         self._git_untracked_row = Adw.SwitchRow(
             title=_("Show untracked files"),
@@ -1506,6 +1550,12 @@ class PreferencesDialog(Adw.Dialog):
 
     def _on_git_log_page_changed(self, row: Adw.SpinRow, _pspec) -> None:
         self._state.set_setting("git_log_page", int(row.get_value()))
+        self._on_change()
+
+    def _on_git_switch_changed(self, row: Adw.SwitchRow, _pspec, key: str) -> None:
+        """The native view's three switches (git_line_numbers, git_wrap_lines,
+        git_word_diff): saved, and fanned out to every open page."""
+        self._state.set_setting(key, bool(row.get_active()))
         self._on_change()
 
     def _on_theme_radio(self, radio: Gtk.CheckButton, name: str) -> None:

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -98,6 +98,29 @@ downloads of each version, see the
   names what loaded and the hunk session id, and points the agent at
   `hunk session …` for everything else the viewer can do. Its switch sits
   with the other tools' under Preferences → *Built-in MCP tools*.
+- **Experimental: a native diff viewer in the git page.** Preferences →
+  Git → *Diff viewer* → *Native* draws the diff in Collins itself instead
+  of running hunk: a card per file (renames, new, deleted, untracked,
+  binary, too-large and mode changes named), a syntax-highlighted view per
+  hunk in the editor's style scheme and font, split (row-aligned, wrap
+  included) or stacked, word-level emphasis, foldable gaps with *▲ 20* /
+  *▼ 20* / *all*, before/after pictures for images, a pinned file header,
+  a find bar (`Ctrl+F`, *n of m* across hunks), a files filter (`/`) that
+  narrows the list and the diff together, and hunk's navigation keys —
+  `]` `[` `.` `,` `j` `k` `}` `{` `z` `0` `1` `2` `l` `w` `r` `e` `q` `?`
+  — bound page-locally in the new *Git page* group of Keyboard Bindings
+  (which `?` opens on that group), never reaching the agent's terminal.
+  The files list follows the view and a
+  click reveals the file; edits reload through file monitors within half
+  a second — an edit that only rewrites an already-changed line included
+  — an untouched hunk keeping its widget and the keyboard, the scroll its
+  place, and the tick still covers the index, `HEAD` and the refs;
+  `show_diff` reveals the file and line in it. It runs on git alone: a
+  machine without hunk gets the diff instead of the install card.
+  Read-only for now — staging, discarding, reverting, notes and
+  highlights come next, and hunk is retired once they do. hunk stays the
+  default; three new Git rows (*Line numbers*, *Wrap long lines*,
+  *Highlight changed words*) are the native view's.
 - **Preferences → Git.** A group for the git page: hunk's layout
   (automatic / split / stacked) and theme, whether working-tree reviews
   show untracked files, how many commits each group of the commits panel

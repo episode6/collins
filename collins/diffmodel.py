@@ -864,6 +864,41 @@ def locate(files: Iterable[File], path: object, side: object, line: object) -> t
     return None
 
 
+def nearest_hunk(file: File, side: object, line: object) -> int | None:
+    """The index of *file*'s hunk whose *side* span is closest to 1-based
+    *line* (the one holding it when one does; the earlier of two equally
+    far) — where the view lands when an address names a line of the file
+    that no hunk carries (an unchanged stretch). None for a file with no
+    hunks or a bad address."""
+    if not isinstance(side, str) or side not in SIDES:
+        return None
+    if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+        return None
+    best: tuple[int, int] | None = None
+    for hunk in file.hunks:
+        start, end = hunk_range(hunk, side)
+        distance = 0 if start <= line <= end else min(abs(line - start), abs(line - end))
+        if best is None or distance < best[0]:
+            best = (distance, hunk.index)
+    return best[1] if best is not None else None
+
+
+# The characters GtkTextBuffer splits a paragraph on besides the newline (a
+# lone CR, U+2029) and the ones Pango breaks a line at (NEL, U+2028), each
+# shown as a same-width symbol so that the buffer's paragraph i is patch row
+# i and every character offset (emphasis, search) holds.
+_DISPLAY_TABLE = str.maketrans({"\r": "␍", "\x85": "␤", "\u2028": "␤", "\u2029": "¶"})
+
+
+def display_text(text: str) -> str:
+    """What a hunk view's buffer holds for a patch line's *text*: a trailing
+    CR (a CRLF file) dropped, and every other paragraph or line separator
+    inside it replaced by a visible stand-in of the same width."""
+    if text.endswith("\r"):
+        text = text[:-1]
+    return text.translate(_DISPLAY_TABLE)
+
+
 def stable_key(file: File, hunk: Hunk | None = None) -> str:
     """What a reload matches widgets by: the file's path (with its old name
     for a rename), and for a hunk its old and new spans plus a digest of its

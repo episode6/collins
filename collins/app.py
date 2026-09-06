@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1126,6 +1126,69 @@ popover.menu button.open-with-row:hover {
   padding: 2px 8px;
   min-height: 24px;
 }
+/* the native diff view (diffview.py): one .git-file card per file, its
+   header row, then .git-gap rows and .git-hunk sections. A hunk wears a
+   rail down its left edge; the focused one's rail is the accent. The
+   hunk header is the @@ line (and, next PR, the buttons). The pinned
+   header floats over the top of the scroll, so it paints its own ground. */
+.git-file {
+  padding: 4px 6px 6px 6px;
+  border-radius: 8px;
+  background-color: alpha(currentColor, 0.04);
+}
+.git-file-header {
+  min-height: 28px;
+}
+.git-file-path {
+  font-weight: bold;
+}
+.git-file-badge {
+  padding: 0px 6px;
+  border-radius: 99px;
+  background-color: alpha(currentColor, 0.1);
+}
+.git-file-body {
+  margin-top: 2px;
+}
+.git-hunk {
+  border-left: 3px solid alpha(currentColor, 0.15);
+  border-radius: 4px;
+  margin: 2px 0px;
+}
+.git-hunk-focused {
+  border-left-color: @accent_bg_color;
+}
+.git-hunk-header {
+  padding: 2px 8px;
+  min-height: 24px;
+  background-color: alpha(currentColor, 0.06);
+}
+.git-hunk-ranges,
+.git-hunk-context {
+  font-family: monospace;
+  font-size: 90%;
+}
+.git-hunk-ranges {
+  opacity: 0.8;
+}
+.git-hunk-text,
+.git-gap-text {
+  padding: 2px 0px;
+}
+.git-gap {
+  padding: 0px 8px;
+  min-height: 22px;
+}
+.git-gap-button {
+  padding: 0px 6px;
+  min-height: 20px;
+}
+.git-pinned-header {
+  padding: 4px 12px;
+  min-height: 28px;
+  background-color: @window_bg_color;
+  border-bottom: 1px solid alpha(currentColor, 0.15);
+}
 
 /* native PR view panel page: header, conversation cards, label pills */
 .pr-view-header {
@@ -1449,6 +1512,16 @@ class _ShowDiff:
                 )
             elif self._path is None:
                 self._finish(True, self._reply())
+            elif page.native:
+                # The native view reveals at once (no session to drive).
+                if page.reveal(self._path, line=self._line):
+                    self._finish(True, self._reply())
+                else:
+                    self._finish(
+                        False,
+                        f"The git page loaded {self._what()}, but {self._path} "
+                        "isn't in that diff",
+                    )
             else:
                 self._navigate()
             return GLib.SOURCE_REMOVE
@@ -1495,6 +1568,19 @@ class _ShowDiff:
 
     def _reply(self) -> str:
         page = self._page
+        if page.native:
+            # No hunk session to name (the native viewer, experimental until
+            # the cut-over PR gives the tool its own reply and companions).
+            lines = [f"Loaded {page.breadcrumb_text()} in the session's git page."]
+            if self._path:
+                where = f"{self._path}, line {self._line}" if self._line else self._path
+                lines.append(f"Revealed {where}.")
+                if self._line and not page.diff_view.holds_line(self._path, None, self._line):
+                    lines.append(
+                        f"Line {self._line} isn't in a changed region of that diff; "
+                        "the nearest hunk is shown."
+                    )
+            return "\n".join(lines)
         return hunkctl.show_diff_reply(
             page.breadcrumb_text(), page.session_id, self._path, self._line
         )

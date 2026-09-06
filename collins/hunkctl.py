@@ -74,6 +74,7 @@ from dataclasses import dataclass
 # aliases mark the re-export for the linter.
 from .gitloads import DEFAULT_LAYOUT as DEFAULT_LAYOUT
 from .gitloads import DEFAULT_MODE as DEFAULT_MODE
+from .gitloads import DEFAULT_VIEWER as DEFAULT_VIEWER
 from .gitloads import GIT_TIMEOUT_S as GIT_TIMEOUT_S
 from .gitloads import LAYOUTS as LAYOUTS
 from .gitloads import LOG_PAGE as LOG_PAGE
@@ -85,6 +86,9 @@ from .gitloads import MODES as MODES
 from .gitloads import RANGE_DOTS as RANGE_DOTS
 from .gitloads import RANGE_KEY as RANGE_KEY
 from .gitloads import SHOW_KEY as SHOW_KEY
+from .gitloads import VIEWER_HUNK as VIEWER_HUNK
+from .gitloads import VIEWER_NATIVE as VIEWER_NATIVE
+from .gitloads import VIEWERS as VIEWERS
 from .gitloads import Loaded as Loaded
 from .gitloads import Options as Options
 from .gitloads import breadcrumb as breadcrumb

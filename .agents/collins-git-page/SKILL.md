@@ -11,17 +11,28 @@ description: >-
   pid, session titles, the sidecar, show_diff), the slim collins-git hunk
   extension shipped as
   package data (TypeScript in collins/hunkext/collins-git: the five keys at
-  hunk's cursor, line ranges, the sidecar v2 contract), Preferences → Git,
+  hunk's cursor, line ranges, the sidecar v2 contract), the experimental
+  native diff view behind the temporary git_viewer switch (diffview.py over
+  diffmodel.py: the page's native load path, the sidebar following the view,
+  the files filter, the find bar, the page-local git.* chords, the file
+  monitors' watch), Preferences → Git,
   the parent-branch rule, freshness reloads, and gitinfo.py's cheap .git
   reads for the footer branch. Use when changing the git page, the sidebar,
-  the extension, the show_diff tool's page-driving half, git-branch
-  detection, or debugging "clicking a commit does nothing" / a stranded hunk
-  viewer.
+  the diff view, the extension, the show_diff tool's page-driving half,
+  git-branch detection, or debugging "clicking a commit does nothing" / a
+  stranded hunk viewer / a diff key reaching the terminal.
 ---
 
 # The git page
 
 ## Shape
+
+The page has two faces behind the temporary `git_viewer` setting: hunk in a
+VTE (this section, today's default) or the native `DiffView` (the section
+"The native viewer behind `git_viewer`" below — the same header, sidebar,
+loads, breadcrumb and persistence, a different review stream). What
+follows describes the hunk face; every hunk-only path is gated on
+`GitPage._native`.
 
 `GitPage` (`gitpage.py`) is a `PanelPage` (`page_kind="git"`; opened by F6,
 the footer's git button, a click on the footer's ⎇ branch label, or the
@@ -197,7 +208,9 @@ path)` → bytes (`side_ref` names the ref per load and side: `INDEX_REF`
 cached, reverse, three_way)` → `ApplyResult` (the `--3way` retry only when
 asked, flagged, `conflicts` when it left markers), `stage_paths` /
 `unstage_paths` / `checkout_paths` behind `safe_path`, and
-`tree_state_signature` (status + numstat hashed) for the watch. Footguns:
+`tree_state_signature` (status + numstat + the size and mtime of every
+working-tree path status lists, `MAX_STAT_PATHS`, hashed) for the watch.
+Footguns:
 every one of these runs from `gitinfo.repo_root` (`_root`) — from a
 subdirectory git reads pathspecs against the cwd and `apply` silently
 skips paths outside it; every path after `--` goes on as
@@ -235,6 +248,201 @@ get`'s `files[]` (hunk 0.21.1's `fileSummarySchema`: id, path,
 previousPath?, additions, deletions, hunkCount — a binary change lists
 0/0/0, there is no binary flag; capped at `MAX_SESSION_FILES`) and
 `snapshot.state`, the argv, the probe, the sidecar and `terminate_tree`.
+
+## The native viewer behind `git_viewer` (experimental; PR 2 of the stack)
+
+`git_viewer` (`state.DEFAULT_SETTINGS`, `"hunk"` | `"native"`, Preferences
+→ Git → *Diff viewer*, `gitloads.Options.viewer` / `.native`) is a
+**temporary** switch: PR 4 of `~/specs/collins/native-diff-panel.md`
+deletes it with every hunk path. While it lives, `GitPage` has two faces
+and every hunk-only method is gated on `self._native`; the native half is
+what survives, the gates are what goes.
+
+**The page's native branch (`gitpage.py`).** The stack has a third child,
+`_NATIVE`, holding one `diffview.DiffView`. `_ensure_spawned` / `_spawn` /
+`_respawn` dispatch to `_native_open` (a thread reads the stack and a saved
+commit's subject, like `_probed`, then `_native_opened_cb` shows the view
+and loads), `_native_close` (orphan the read, drop the monitors, empty the
+view) and `_native_load(loaded)`: one `gitops.read_diff` on a daemon
+thread behind `_gen`, plus `commit_subject_and_sha` for a commit, the
+`merge_base` a branch / range reads its old side at, and
+`tree_state_signature` for a working-tree load — landing in
+`_native_loaded` at `PRIORITY_DEFAULT`, one read at a time with a newer
+ask parked in `_native_pending`. The breadcrumb and `set_context` come
+from the `Loaded` + that sha (no title parsing); the files list from the
+read (`_session_files` builds `hunkctl.SessionFile`s so `gitmodel.
+files_sections` is unchanged; `GitSidebar.refresh_files(..., status=)`
+takes the read's own `git status` and draws at once); the context reader
+handed to the view is `gitops.side_bytes(cwd, load, side, path,
+previous_path, parent_target, merge_base)` (None for a side that names
+nothing — a branch with no parent — *except* the unstaged new side, which
+is the disk). `settled()`, `load()`, `refresh()`, `poll_tick`
+(`_native_tick`), `_on_mutated`, `_navigate` (→ `DiffView.reveal`,
+synchronous; a miss toasts), `apply_settings`, `_after_unrealize`,
+`_on_child_exited` and `holds_escape` all have the native branch.
+`_set_native` flips live: to native, a running hunk is terminated and its
+exit opens the view (`_on_child_exited`), a spawn in flight is orphaned;
+to hunk, the view closes and hunk spawns if mapped — or, when the child
+the flip to native signalled is still going down, `_respawn_wanted` is
+left for its exit (a `_spawn` on a live child no-ops, and the exit would
+otherwise show the exited card). `GitPage.native`,
+`.diff_view` and `.reveal(path, hunk, side, line)` are the public face
+(`app._ShowDiff` reveals through it and replies without a session id). A
+`line` no hunk carries (an unchanged stretch; `diffmodel.locate` misses)
+lands on the file's nearest hunk (`diffmodel.nearest_hunk`) and reveal
+still answers True — the file *is* in the diff, which is what the hunk
+path always did — and `DiffView.holds_line` lets the tool's reply say
+the line itself is not in a changed region.
+
+**The sidebar follows the view.** `DiffView`'s `current-changed(path,
+hunk)` — the file at the top of the viewport (60 ms after the scroll
+settles) or the hunk the keyboard moved into — → `GitSidebar.
+set_selection(path, hunk, "view")`. A files-list click → `reveal(path)`;
+the working tree's other side loads first with `_pending_navigate`, as
+with hunk. The **files filter** is a `Gtk.SearchEntry` above the files
+list (`set_filter_shown` — native only; hunk's own `/` filters in its
+terminal), `filter-changed(str)` → `DiffView.filter` hides sections
+(`set_visible`, not destroyed) and the rows hide too; Escape clears and
+`filter-escaped` puts the keyboard back in the view. A `GtkSearchEntry`'s
+`search-changed` is **debounced** (~150 ms): a probe that sets the text
+must `wait_for` the words to land.
+
+**Keys.** `keybindings.GROUP_GIT` (`git.*`): `]` `[` next/prev hunk, `.`
+`,` file, `j` `k` the cursor a row down/up in the focused hunk's view
+(`DiffView.step_cursor`: past the hunk's edge it enters the neighbouring
+hunk on the same side, first/last row; `_show_cursor` scrolls the
+*column* to the line — each hunk's scroller never scrolls vertically —
+from the column's own coordinates, since bounds against the scroller are
+stale until the layout after a `set_value`), `}` `{` annotated hunk (a
+view with marks — `_HunkView.marks`, the notes/highlights hook), `z`
+expand the gap above the focused hunk (all of it; one way), `0` `1` `2`
+layout, `l` line numbers, `w` wrap (`a`, agent notes shown, arrives with
+the note cards — no inert binding), `r` reload, `/` the filter, `Ctrl+F`
+find, `?` Keyboard Bindings opened **on the Git page group**
+(`win.keyboard-bindings-group (s)` → `KeyboardBindingsDialog(group=)`:
+it scrolls after the first layout past `map`, and takes the viewport's
+`scroll-to-focus` off around the first row's grab — that scroll reads
+pre-`set_value` bounds and animates the page 1 100 px past the group),
+`e` open in the editor at the cursor line (`win.open-in-editor (sii)`,
+1-based line), `q` close (`win.toggle-git`). The mechanism copies the
+editor's `editor.*` row:
+`keymap.shortcut_controller(custom, "git", …)` in `DiffView.
+apply_keybindings`, scoped `LOCAL` **on the view** (spec) and in the
+**CAPTURE** phase — a bare letter must beat the `GtkSource.View` under it
+(the editor uses BUBBLE because its chords are Ctrl chords); the
+`NamedAction`s resolve to a `Gio.SimpleActionGroup` inserted on the *page*
+under `git` (an ancestor's groups are found from the view). Nothing
+editable lives inside the view today; the note editor PR 3 adds must
+disable the letter actions while it has focus, or `e` types nothing.
+`keybindings.LOCAL_PREFIXES` / `may_overlap`: `editor.*` and `git.*` are
+page-local scopes that never see one press, so `Ctrl+F` in both is not a
+conflict (`conflicts` / `holders` skip such pairs; the dialog too). The
+stateful actions `git.layout` (`s`), `git.line-numbers` / `git.wrap` (`b`;
+a parameterless activate toggles a boolean-stateful `GSimpleAction`, so
+one action serves the key and the menu check) write their setting through
+**`win.git-option (sv)`** (window.py: an allowlist of the three keys →
+`state.set_setting` + `apply_preferences`, so every page follows); with no
+window action to reach — a page in a bare test window — `_write_option`
+applies the dict to the page alone. `_sync_action_states` mirrors
+`apply_settings` back into the menu's checks. `Ctrl+1/2/3` stay on the
+page's raw capture controller.
+
+**Find.** `Gtk.SearchBar` under the header (no `key_capture_widget`: typing
+in the page must not open it — the letters are the view's), a toggle in
+the header bound to `search-mode-enabled`. `DiffView.search(text)` /
+`search_step(forward)` / `search_position()` / `search_clear()`: matches
+are counted **in Python** over the hunk views' `rows` (`re.escape`,
+IGNORECASE; split reads the old view for deletions + context and the new
+for additions, so a context line counts once; capped at
+`MAX_SEARCH_MATCHES`), selected with `select_range` and scrolled to
+(`keyedslots.scroll_to` the hunk, `scroll_to_iter` within it), the
+sidebar following through `_set_current`. A `GtkSource.SearchContext` per
+buffer (weakly keyed by `_HunkView`) paints the highlights only — the
+editor found the sync `forward()` misses matches before the index is
+built, and async across dozens of buffers can't give "3 of 12". Matches
+are re-counted (position kept) on every `load`, `filter` and layout
+change; the page re-reads the label (`_sync_search_label`). Closing the
+bar focuses the current match's view (`focus_search_match`).
+
+**Watch mode.** After a working-tree load lands, `_install_monitors`
+puts a `Gio.FileMonitor` (`monitor_directory`) on each distinct directory
+of the loaded files (old paths of renames too) — over `MAX_DIR_MONITORS`
+(64), or with no file at all, the repository root alone; a commit / range
+load gets none. Events (not for the `.git` entry itself) debounce
+`_WATCH_DEBOUNCE_MS` (300) into `_watch_check`: `gitops.
+tree_state_signature` on a thread, compared against the state the load's
+own worker seeded (`_tree_state`); a move is a `_native_load` by key (the
+view keeps the scroll and an untouched hunk's widget and focus). One
+compare at a time, and none beside a read in flight: either marks the
+event `_watch_stale`, and the compare (`_watch_checked`) or the read
+(`_native_loaded`, after re-making the monitors, which clears the mark)
+re-runs `_watch_check` when it lands — before that, an edit written while
+`read_diff` ran was never drawn: the event was dropped and the worker
+sampled the signature *after* the read, so it already covered the edit.
+The worker now samples it **before** `read_diff` (an edit between the two
+costs one reload by key on the next compare, harmless).
+`_native_tick` re-compares every `_WATCH_SLOW_TICKS` (5) ticks regardless.
+The 2 s tick's `tree_signature` still covers index / HEAD / refs moves.
+The signature hashes `git status` **and** `numstat` **and** the size +
+mtime of every path on the working-tree side: an edit that rewrites an
+already-changed line moves neither the letter nor the counts and went
+unnoticed until the stats were added — a `touch` now costs one reload by
+key, which keeps every widget. Measured: the monitor fires at once, the
+compare lands ~20 ms after the debounce, the reload ~40 ms later (0.38 s
+edit-to-view on the e2e's fixture).
+
+**Measured (PR 2, this machine, headless).** `read_diff` + `DiffView.load`
+of PR 500's squash (`git show 449fc98`: 16 files, 76 hunks, 3118 patch
+lines): `read_diff` 23 ms; `load()` 335 ms ≈ **108 ms per 1000 patch
+lines**; first paint 1146 ms ≈ **370 ms per 1000 patch lines** (the rest
+is GTK's first allocation and GtkSourceView's highlighting); a reload
+keeps 76/76 hunk widgets, a changed hunk rebuilds only itself; split under
+wrap: 0 of 2920 rows misaligned. Re-measure with `scripts/probe_diffview.py
+--ref 449fc98` after touching `_HunkView` or the section builders — a
+second per thousand lines is the point to start deferring hunk builds
+below the fold. Keyboard selection with `cursor_visible=False`
+selects nothing on GtkSourceView 5.18 — the cursor shows while a view has
+focus. Tab width is the constant `diffview.TAB_WIDTH = 4` (the editor has
+no tab-width setting). Facts the view codes around: `GutterRendererText`
+bolds the cursor line in every view regardless of focus (a
+`weight="normal"` span outranks it); a one-line hunk's validated height
+may not reach its `propagate_natural_height` scroller until the next
+resize (the vadjustment's `changed` queues one from an idle); under wrap
+the split alignment must re-fire on height changes too.
+
+**E2E.** `scripts/check_git_page.py` runs its viewer-agnostic passes with
+**both** viewers: `check_sidebar(repo, state_path, native=)` (the 500 /
+900 px collapse, the toggle and its persistence, the commits list, a
+commit / header / working-tree row loading, the split files list and the
+other side's click, stage_all and commit reloading exactly once — hunk's
+count off the shim's state file, the native page's by wrapping
+`page._native_load` — and the page size), `check_without_hunk` (the
+install card for hunk, the diff for native, on a PATH holding git alone)
+and `check_outside_a_repo`. `check_native` stages every section kind in
+the tmp repository (`stage_native_fixture`: two unstaged hunks with gaps
+around them, a staged edit, a staged rename, a modified binary, an image
+before/after, an untracked text file and an untracked picture, a
+deletion, a mode change) and reads them back through the view's probes —
+`file_rows()` (path, kind, shown), `hunk_rows(path)`, `gap_rows(path)`,
+`badge_rows()` (path label, badge, has picture), `hunk_serials(path)`
+(`_HunkSection.serial`, minted once per widget: an `id()` can be reused
+after the dropped widget is freed), `set_scroll(fraction)`,
+`pinned_header_text()` — then a gap expanding, a files-list click
+revealing, the watch reloading an edit that keeps the line counts within
+2 s (0.4 s measured) with the untouched hunk's widget and the keyboard
+kept, the `git.*` actions, the highlight following a scroll to the end
+(and the pinned header), the filter, the find bar's counts across hunks,
+the staged (rename) and commit loads, settings and a layout change leaving
+`page_state` alone while a page restored from it takes the layout off the
+setting, the switch flipping both ways with the shim hunk going down,
+re-parent vs. unparent, and a page restored into a commit / a commit git
+no longer has. Kinds to expect: an untracked file's badge is `new` (the
+spec's word; the files list's `?` row says it is not in the index), an
+untracked *picture* reads `binary` with the badge `new · binary` (the
+`--no-index` diff says "Binary files differ"; `KIND_BINARY` wins over
+`KIND_NEW`), a pure rename has no hunk, a mode change no hunk and no
+counts. `scripts/probe_diffview.py` draws a real repository's diff to a
+PNG and prints the timings above.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 
@@ -351,6 +559,44 @@ out and is asked on demand only.
 - Two tabs on one worktree make `--repo` ambiguous; pid is the only key.
 - Hunk cancels any open dialog on reload; a shell-side commit while a `D`
   confirmation is up closes it — by design, press the key again.
+- **A kept hunk section must be re-pointed at the read's Hunk.**
+  `diffmodel.stable_key` leaves the index out on purpose (a hunk above
+  going away must not rebuild the ones below), so after `plan.commit()`
+  `_FileSection.update` re-assigns `section.hunk` from `file.hunks` in
+  order (one section per hunk, `zip(strict=True)`). Before that the
+  survivors kept the old `hunk.index`: reveal named the wrong hunk to
+  the sidebar and `z` looked up the wrong gap (`hunk_indexes` probes it).
+- **Buffer paragraphs must equal patch rows.** `GtkTextBuffer` splits a
+  paragraph on a lone `\r` and U+2029 as well as `\n`, so a row holding
+  one shifted every later tag, number, emphasis span, cursor and search
+  offset by a line. `_HunkView.set_rows` keeps `diffmodel.display_text`
+  of each row (a trailing CR dropped, the separators shown as `␍` `¶`
+  `␤`) and the search counts over those rows, so offsets agree; the
+  patch text gitpatch writes back is the model's, untouched.
+- **The native view's scroll range settles late.** A hunk or context
+  `GtkSource.View` validates its height a beat after allocation, so the
+  column's `upper` grows after the widgets are in the tree: a
+  `set_value(upper - page_size)` issued right after a load or a gap
+  expansion lands short of the real end (the e2e waits for the range to
+  hold still, `range_settled`, before `set_scroll(1.0)`), and a one-line
+  hunk can sit at 0 px until the vadjustment's `changed` queues a resize.
+- **The split padding pass is a convergence, not a one-shot.** Under wrap
+  the two views' rows are aligned with `pixels-below-lines` tags after
+  every allocation whose width *or* height changed (`_SplitPane`, 40 ms
+  settle); a pad changes a height, which re-fires the pass, which
+  converges once nothing changes. Don't assert on row alignment before it
+  has settled, and don't add a `queue_resize` inside the pass.
+- **Every hunk scrolls on its own.** With wrap off each `_HunkView` sits
+  in a `ScrolledWindow` with horizontal AUTOMATIC / vertical NEVER: a long
+  line scrolls within its hunk, never the column. Anything that measures
+  the column's height must ask the hunk scrollers
+  (`propagate_natural_height`), and a wheel over a hunk with a horizontal
+  bar is the hunk's, not the stream's.
+- **A files-list highlight that "flickers" between two files at a scroll
+  end** is the top-of-viewport rule: the first section whose bottom edge
+  is still below the viewport's top is current, so a section 8 px in
+  counts. The pinned header has its own rule (the top section's header
+  fully off) and so can name the next file down.
 
 Related: `collins-session-mcp-tools` (`show_diff`), `collins-panel-dock`,
 `collins-terminal-tab`.
