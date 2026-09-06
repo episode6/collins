@@ -2080,19 +2080,29 @@ class App(Adw.Application):
         self.refresh_status_icon()
 
     def _on_session_archived(self, _store, session_id: str) -> None:
-        """A session was put away: take down the desktop notification it left
-        standing, if it left one.
+        """A session was put away: read every notification it has in the
+        history, drop any card still up for it, and take down the desktop
+        notification it left standing, if it left one.
 
-        Mostly _on_unread_changed's work — an archive clears the flag first
-        (see the store's _put_away) and the withdrawal rides along with it.
-        This is the case the flag can't cover: `notify_user` flags whatever
-        rows the store is holding for the session, and a session it hasn't
-        discovered yet has none, so the banner goes out with no flag beside
-        it and no flip to come down on. A banner whose click would land on a
-        row that is no longer in the list is exactly the dead end the flag
-        was."""
-        if session_id:
-            self.withdraw_notification(session_id)
+        Archiving is "done with this": whatever the session was still asking
+        of the user goes out of sight with it — the store's _put_away takes
+        the sidebar flag off, and its message and bell rows are read here
+        the same way visiting the tab reads them (MainWindow._clear_unread).
+        Otherwise the bell and the badge keep counting a session with
+        nowhere left to click. The desktop notification comes down with the
+        rows through _on_notifications_changed when the session's last
+        unread row goes; the explicit withdraw covers the case the rows
+        can't: `notify_user` posts under a session id the store hasn't
+        discovered yet, so there may be a banner with no row and no flag
+        beside it. A banner whose click would land on a row that is no
+        longer in the list is exactly the dead end the flag was."""
+        if not session_id:
+            return
+        self.notification_center.mark_session_read(session_id)
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.notify_cards.dismiss_session(session_id)
+        self.withdraw_notification(session_id)
 
     def _on_tray_host_changed(self, present: bool) -> None:
         self._tray_host_present = present

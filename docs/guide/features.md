@@ -653,6 +653,9 @@ to install, and nothing in it is a terminal.
   right-click offers *Mark read* and *Remove*. *Mark all read* and *Clear*
   do what they say, except that a finished run's row is the green flag's to
   remove, not yours. Opening the sheet reads nothing on your behalf.
+  Archiving a session reads its rows, takes down its card and its desktop
+  notification, and drops it from the count — done with the session is
+  done with what it asked.
 
 ![The notification history sheet, open over a session](/img/notifications.png)
 - **Session details** (right-click → *Details…*): message and tool-call

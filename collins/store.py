@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -663,9 +663,10 @@ class SessionStore(GObject.Object):
         So the flag comes off here, while the item is still there to take it
         off — the flip announces itself through `unread-changed` like any
         other, and the badge falls with the row. The `archived` signal carries
-        the same fact out to the desktop notification the session may have
-        raised (see App), which is as stale as the badge once its session is
-        put away.
+        the same fact out to the notification center's rows, the cards and
+        the desktop notification the session may have raised (see
+        App._on_session_archived), all as stale as the badge once its
+        session is put away.
         """
         for session_id in session_ids:
             self.set_unread(session_id, False)
