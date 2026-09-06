@@ -151,7 +151,8 @@ downloads of each version, see the
   note on the hunk, *Edit* / *Delete* sit on the card, and `a` folds the
   agent's cards away. Notes live in the page for the tab's life (nothing
   is written to disk) and survive a reload on any hunk the edit left
-  alone. The agent's own doors — the tools that annotate, highlight and
+  alone (one whose line numbers shifted counts as changed). The agent's
+  own doors — the tools that annotate, highlight and
   clear — are the next release's; hunk is retired once they land.
 - **Preferences → Git.** A group for the git page: hunk's layout
   (automatic / split / stacked) and theme, whether working-tree reviews

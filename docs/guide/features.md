@@ -598,8 +598,10 @@ page needs hunk 0.21 or newer:
   - Every action **re-reads the file's patch from git** at that moment
     and refuses, with a word rather than half done, what the arithmetic
     can't describe: a binary, a file too large, a rename or a new /
-    deleted file by hunk (use the file button), a symlink or submodule,
-    and a file that changed since the view loaded it — which reloads.
+    deleted file by hunk (use the file button — a binary stages and
+    unstages whole, and is never reverted from a patch), a symlink or
+    submodule, and a file that changed since the view loaded it — which
+    reloads.
     Stage and unstage ask nothing; a discard confirms (an untracked
     file's discard moves it to the **trash**, never an unlink; a deleted
     file's *Discard file* restores it from the index); a revert applies
@@ -624,8 +626,9 @@ page needs hunk 0.21 or newer:
     the diff's letter keys type into it, nothing else. Notes live in the
     page for the tab's life — nothing is written to disk — and follow a
     reload: a note on a hunk the edit left alone keeps its card, one on
-    a hunk that changed is dropped, one on a file the current load
-    doesn't show waits for a load that does. Highlights (attention
+    a hunk that changed — or whose line numbers shifted, because lines
+    were staged or added above it — is dropped, one on a file the
+    current load doesn't show waits for a load that does. Highlights (attention
     marks on a range of a line, in hunk's tones) share the same store
     and rules; the tools that land them are the next PR's.
 

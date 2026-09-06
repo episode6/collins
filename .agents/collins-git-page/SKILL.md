@@ -459,7 +459,15 @@ whose file the load doesn't show at all (Ctrl+2 and back keeps them);
 the highlights by the file's patch hash; the hunk key is the superset
 that also honours "an untouched hunk keeps its widget, its selection
 and its notes" (Watch mode) — an edit elsewhere in the file leaves the
-note where it was.
+note where it was. **The key holds the spans, so "untouched" means the
+line numbers too**: staging a range out of hunk 0 (or an edit above
+that adds or removes lines) shifts every later hunk's old or new start,
+and each of them rebuilds — widget, selection and notes gone (the
+manual pass staged two lines of the first of eight hunks and watched
+serials 1–8 become 9–16). The e2e's survivals put the change in the
+*last* hunk on purpose. A key without the spans (the body digest plus
+an ordinal among equal bodies) would keep them; it is a PR 4 / 5 item,
+not changed here.
 
 The widgets: `DiffView` owns one `MarkStore` (`_store`), `_apply_marks`
 hands each `_HunkSection` its share (`set_marks(notes, highlights)`:
@@ -629,25 +637,62 @@ spec's word; the files list's `?` row says it is not in the index), an
 untracked *picture* reads `binary` with the badge `new · binary` (the
 `--no-index` diff says "Binary files differ"; `KIND_BINARY` wins over
 `KIND_NEW`), a pure rename has no hunk, a mode change no hunk and no
-counts. `check_native_mutations` (called from `check_native` on the
-working tree it left) stubs `dialogs.confirm_dialog` and
-`gitpage._trash_paths` and walks the staging interface: the words per
-load, `select_lines` and the one-hunk rule, Esc, stage lines / hunk with
-the index read back and the untouched hunk's serial kept, unstage hunk /
-file on the staged load, a cancelled then a confirmed discard (the
-question's words), the untracked trash and the deleted restore, a revert
-hunk from a commit, the dirty warning on the next ask, and the
-three-way retry over a committed context move. `check_native_notes`
-(before it, on the same tree) walks the notes: `c` → a draft with the
-chords off and the page holding Escape, the keyboard in the editor, an
-empty save refused, Ctrl+Enter splitting summary and rationale, `}` /
-`{`, `E` and Esc, the menu's *Add note*, `add_notes` / `add_highlights`
-(a hunk address, a bad batch landing nothing, a range past the line),
-`a`, delete, the clears, and an edit to hunk 1 reloading with hunk 0's
-note kept and hunk 1's dropped. `scripts/probe_diffview.py --notes`
-renders `-notes.png` (a user note, an agent note, a highlight per tone)
-and `-notes-draft.png` (the editor open). `scripts/probe_diffview.py`
-draws a real repository's diff to a PNG and prints the timings above.
+counts. `check_native`'s window is an **`Adw.Window`** (`set_content`),
+so the page's real `Adw.AlertDialog` is reachable through
+`window.get_visible_dialog()` — presented over a bare `Gtk.Window`, an
+Adw dialog opens in a window of its own and nothing finds it.
+`check_native_mutations` (called from `check_native` on the working
+tree it left) records the page's toasts (`page._toast` wrapped), stubs
+`gitpage._trash_paths`, and walks the staging interface: the words per
+load, `select_lines` and the one-hunk rule, Esc, stage lines / hunk
+with the index read back through **`gitops.read_status`** (what the
+files list reads: the path under `staged` and, while the other hunk is
+in the tree, under `unstaged` too) and the untouched hunk's serial
+kept, *Stage file* on the binary (whole, no patch) and its *Unstage
+file* on the staged load, unstage hunk / file, then the **real confirm
+dialog** — *Discard hunk* → `get_visible_dialog()` is the AlertDialog
+with the heading, body and `cancel` as close and default response,
+`dialog.close()` cancels (Escape's path; the pressed button spun
+meanwhile), *Discard file* on the binary → `set_close_response
+("confirm")` + `close()` runs it (the `response` signal fires once,
+through the same path as a key; never `emit("response")` and then
+`close()`, which fires a second `cancel`) — then with
+`dialogs.confirm_dialog` stubbed a cancelled and a confirmed discard
+(the question's words), the untracked trash and the deleted restore, a
+revert hunk from a commit, the dirty warning on the next ask, the
+three-way retry over a committed context move (its toast says
+"merged three-way"), a revert hunk from **`{"show": "HEAD"}`** (the
+load keeps the name; `_resolved_sha` is the sha), and a binary's
+*Revert file* refused with the toast "blob.bin is binary: use git from
+a shell", no dialog, nothing moved. `check_native_notes` (before it, on
+the same tree) walks the notes: `c` → a draft with the chords off and
+the page holding Escape, the keyboard in the editor, an empty save
+refused, Ctrl+Enter splitting summary and rationale, `}` / `{`, `E`
+and Esc, the menu's *Add note*, `add_notes` / `add_highlights` (a hunk
+address, a bad batch landing nothing, a range past the line), `a`,
+delete (an agent's note, then a user's — its card gone,
+`notes-changed` fired once), the clears, and an edit to hunk 1
+reloading with hunk 0's note kept and hunk 1's dropped.
+`scripts/probe_diffview.py --notes` renders `-notes.png` (a user note,
+an agent note, a highlight per tone) and `-notes-draft.png` (the editor
+open). `scripts/probe_diffview.py` draws a real repository's diff to a
+PNG and prints the timings above.
+
+**Manual pass (PR 3, this machine, headless).** A throwaway instance
+(fresh `COLLINS_APP_ID`, scratch XDG tree, `GitPage` in an
+`Adw.ApplicationWindow`) on this worktree's own uncommitted diff:
+*Stage lines* of two added lines in the first of eight hunks put
+exactly those two in the index (`git diff --cached` two `+` lines,
+`read_status` listing the path on both sides; the toast "Staged 2
+lines of scripts/check_git_page.py"), `{"show": "HEAD~1"}` loaded by
+name (breadcrumb `HEAD~1 <subject>`), *Revert hunk* on
+`tests/test_keybindings.py` opened the real dialog ("Revert into the
+working tree?" / Cancel · Revert) and, confirmed, put the reverse of
+the hunk in the working tree unstaged; the tree was then restored to
+the byte (`git reset -- path`, `git checkout -- path`, digests and
+`status --porcelain` equal to before). Seen and not changed: the
+pinned file header draws over the hunk header under it while a dialog
+is up (it is translucent), and the spans-in-the-key rebuild above.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 
