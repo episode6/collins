@@ -163,11 +163,19 @@ imports `gitpage`; the page feeds it and listens:
   `set_selection(path, hunk)` (the view's `current-changed`),
   `set_options` (page size → re-page; untracked → redraw),
   `set_filter_text` / `focus_filter` / `filter_text`.
-- Signals: `load-requested(Loaded)` → `load()`; `revert-requested(path)`
+- Signals: `load-requested(Loaded)` → `load()` (which clears the view's
+  solo: a load is the whole stream); `show-all-requested` (the live
+  side's or the flat list's section heading clicked) → `_show_all` →
+  `DiffView.solo(None)`; `revert-requested(path)`
   (the files list's right-click *Revert file*, offered only on a
   read-only load — `gitpatch.working_side` is None — through the
   `gitsb.revert-file (s)` action) → the view's file button;
-  `navigate-requested(path, side)` → `_navigate` (→ `DiffView.reveal`, synchronous; a miss toasts)
+  `navigate-requested(path, side)` → `_navigate` (→ `DiffView.solo(path)`
+  — the file's section shown alone, the others hidden by the same
+  `set_visible` the filter uses, `soloed` says which; a reload keeps it
+  until the file leaves the load; `]` `[` `.` `,` `}` `{` and `j` `k`
+  walk the sections the *filter* admits and re-solo the file they land
+  in — then `DiffView.reveal`, synchronous; a miss toasts)
   on the live side (or the flat list), else `_pending_navigate = (path,
   side)` + `load(side)`, run when the reload lands with that side
   (`settled()` waits for both) — and when that landing re-reads at once

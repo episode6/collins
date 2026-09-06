@@ -38,6 +38,11 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **A files-list click shows one file's diff.** Clicking a file in the
+  git page's files list scrolled the whole stream to its section; it now
+  shows that file's diff alone, and `]` / `.` walk on into the next file.
+  Clicking the section heading (**FILES**, or the live **UNSTAGED** /
+  **STAGED**) shows the whole list of diffs again.
 - **Archiving a session reads its notifications.** A session's message
   and bell rows stayed unread in the history after the session was
   archived, so the bell and the badge kept counting a session with

@@ -2265,6 +2265,9 @@ class DiffView(Gtk.Box):
         self._word_diff = True
         self.options = _Options(split=False, line_numbers=True, wrap=False, word_diff=True)
         self._filter = ""
+        # The files list's solo: one file's section shown alone (a row
+        # click), None for the whole stream (a section heading's click).
+        self._solo: str | None = None
         self._current: tuple[str, int] = ("", -1)
         self._focused_hunk: _HunkSection | None = None
         self._refocus = False
@@ -2450,7 +2453,10 @@ class DiffView(Gtk.Box):
             file = by_key.get((section.file.previous_path, section.file.path))
             if file is not None and section not in plan.built:
                 section.update(file)
-            section.set_visible(section.matches(self._filter))
+        if self._solo is not None and self._section_for(self._solo, diffmodel.NEW) is None:
+            self._solo = None  # the soloed file left the load: the whole stream again
+        for section in self._sections():
+            section.set_visible(self._shown(section))
         self._stack.set_visible_child_name("files" if self._files else "empty")
         if self._refocus:
             # The keyboard was parked off a dropped hunk: back into the view.
@@ -2916,20 +2922,54 @@ class DiffView(Gtk.Box):
         "" shows all. Sections hide, they are not destroyed. Returns how
         many are shown."""
         self._filter = (text or "").strip()
+        return self._apply_visibility()
+
+    @property
+    def soloed(self) -> str | None:
+        """The path shown alone (solo), None when the whole stream shows."""
+        return self._solo
+
+    def solo(self, path: str | None) -> bool:
+        """Show *path*'s section alone — the files list's row click — or,
+        with None, every section the filter admits again (a section
+        heading's click). Sections hide, they are not destroyed; the
+        reload rule keeps the solo until the file leaves the load. False
+        when *path* names no file of the load (nothing changes)."""
+        if path is not None and self._section_for(path, diffmodel.NEW) is None:
+            return False
+        if path == self._solo:
+            return True
+        self._solo = path
+        self._apply_visibility()
+        return True
+
+    def _shown(self, section: _FileSection) -> bool:
+        """The visibility rule: the filter's word and the solo, both."""
+        return section.matches(self._filter) and (self._solo is None or section.file.path == self._solo)
+
+    def _apply_visibility(self) -> int:
         shown = 0
         for section in self._sections():
-            visible = section.matches(self._filter)
+            visible = self._shown(section)
             section.set_visible(visible)
             shown += visible
         self._rescan_search()
         self._schedule_scroll_sync()
         return shown
 
+    def _navigable(self) -> list[_FileSection]:
+        """The sections the keyboard may walk: what shows — and, under a
+        solo, every section the filter admits, so `]` and `.` walk out of
+        the soloed file into the next one (which _focus then solos)."""
+        if self._solo is None:
+            return [s for s in self._sections() if s.get_visible()]
+        return [s for s in self._sections() if s.matches(self._filter)]
+
     def focus_hunk(self, delta: int) -> bool:
         """Move the keyboard *delta* hunks on from the current one (the
         first / last when nothing is focused), across files, skipping
         hidden sections; scrolls it into view."""
-        hunks = [h for s in self._sections() if s.get_visible() and not s.folded for h in s.hunks]
+        hunks = [h for s in self._navigable() if not s.folded for h in s.hunks]
         if not hunks:
             return False
         index = self._focused_index(hunks)
@@ -2942,7 +2982,7 @@ class DiffView(Gtk.Box):
     def focus_file(self, delta: int) -> bool:
         """Move the keyboard to the first hunk of the file *delta* files on
         from the current one (a placeholder file with no hunks is skipped)."""
-        sections = [s for s in self._sections() if s.get_visible() and s.hunks]
+        sections = [s for s in self._navigable() if s.hunks]
         if not sections:
             return False
         current_path = self._current[0]
@@ -2959,7 +2999,7 @@ class DiffView(Gtk.Box):
         """`}` / `{`: the keyboard moves to the next (previous) hunk wearing
         a note or highlight marker after (before) the focused one — the
         first (last) such hunk when nothing is focused. False with none."""
-        hunks = [h for s in self._sections() if s.get_visible() and not s.folded for h in s.hunks]
+        hunks = [h for s in self._navigable() if not s.folded for h in s.hunks]
         annotated = [h for h in hunks if h.marked]
         if not annotated:
             return False
@@ -2998,7 +3038,7 @@ class DiffView(Gtk.Box):
             view.place_cursor(target)
             self._show_cursor(view)
             return True
-        hunks = [h for s in self._sections() if s.get_visible() and not s.folded for h in s.hunks]
+        hunks = [h for s in self._navigable() if not s.folded for h in s.hunks]
         index = self._focused_index(hunks)
         if index is None:
             return False
@@ -3010,6 +3050,8 @@ class DiffView(Gtk.Box):
         old_side = len(section.views) == 2 and side == diffmodel.OLD
         entering = section.views[0] if old_side else section.views[-1]
         entering.place_cursor(0 if delta > 0 else len(entering.rows) - 1)
+        if self._solo is not None and section.file.path != self._solo:
+            self.solo(section.file.path)  # the cursor walked into another file: it shows alone now
         ok = section.grab(None, side)
         self._set_current(section.file.path, section.hunk.index)
         self._show_cursor(entering)
@@ -3554,6 +3596,8 @@ class DiffView(Gtk.Box):
         return next((i for i, h in enumerate(hunks) if h is focused), None)
 
     def _focus(self, section: _HunkSection) -> bool:
+        if self._solo is not None and section.file.path != self._solo:
+            self.solo(section.file.path)  # the keyboard walked into another file: it shows alone now
         keyedslots.scroll_to(self._scroller, section)
         ok = section.grab()
         self._set_current(section.file.path, section.hunk.index)
