@@ -690,15 +690,16 @@ class _HunkView:
             self.buffer.place_cursor(it)
 
     def cursor_row(self) -> int:
-        """The row the insert mark is on — for a line selection, the last
-        selected row when the mark sits on the selection's end (the snap
-        parks it at the start of the line after, which is no row the user
-        chose: `c` and `e` speak of the selection's last line)."""
-        row = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_line()
+        """The row the insert mark is on — for a line selection, its last
+        selected row whichever end the mark is on: the snap parks a
+        downward drag's mark at the start of the line after, which is no
+        row the user chose, and an upward drag's (Shift+Up, a drag that
+        ends above where it started) at the first row. `c` and `e` speak
+        of the selection's last line either way."""
         rows = self.selected_rows()
-        if rows is not None and row > rows[1]:
+        if rows is not None:
             return rows[1]
-        return row
+        return self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_line()
 
     # -- the selection --
 

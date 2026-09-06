@@ -2155,6 +2155,25 @@ def check_native_notes(repo: str, page: GitPage, window: Gtk.Window, lines: list
         # `-line 5` / `+line 5 changed`; row 5 is `line 6`).
         check("c with a selection anchors on its last line", view.select_lines("text.txt", 0, 3, 4) and view.add_note_at_cursor() and view.note_rows("text.txt", 0)[-1][:4] == ("", "user", "new", 5), view.note_rows("text.txt", 0))
         check("Esc drops that draft too", view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1)
+        # The same selection made upward (Shift+Up, a drag that ends above
+        # where it started) parks the insert mark on the first row: the
+        # cursor row, and the note, are still the selection's last line.
+        upward = False
+        if view.select_lines("text.txt", 0, 3, 4) and view._focused_hunk is not None:
+            hunk_view = view._focused_hunk.focused_view
+            rows = hunk_view.selected_rows()
+            if rows is not None:
+                _ok, top = hunk_view.buffer.get_iter_at_line(rows[0])
+                _ok, after = hunk_view.buffer.get_iter_at_line(rows[1] + 1)
+                hunk_view.buffer.select_range(top, after)  # the insert mark at the top
+                upward = (
+                    hunk_view.buffer.get_iter_at_mark(hunk_view.buffer.get_insert()).get_line() == rows[0]
+                    and view.selection() == ("text.txt", 0, 3, 4)
+                    and hunk_view.cursor_row() == rows[1]
+                )
+        check("an upward selection's cursor row is its last row too", upward, view.selection())
+        check("and c anchors on its last line", view.add_note_at_cursor() and view.note_rows("text.txt", 0)[-1][:4] == ("", "user", "new", 5), view.note_rows("text.txt", 0))
+        check("Esc drops this draft as well", view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1)
         view.clear_selection()
         # The context menu's *Add note*: a draft anchored to the menu's row
         # (the cursor's, with no pointer here: the hunk's first line).
@@ -2417,6 +2436,25 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("Discard hunk asks first", view.click_hunk_action("text.txt", 0, discard=True) and wait_for(lambda: len(asked) == 1, timeout=5.0), asked)
         check("the question names the hunk and the file, its button Discard", asked[-1][0] == "Discard the changes?" and asked[-1][1].startswith("Discard hunk 1 in text.txt?") and asked[-1][2] == "Discard", asked[-1])
         check("Cancel leaves the tree alone and the view free", wait_for(idle) and "line 5 changed" in git_out(repo, "diff", "--", "text.txt"))
+        # A confirm can sit open while the page moves on: the plan was read
+        # for the unstaged load, and an answer given after the sidebar
+        # loaded the staged side runs nothing.
+        held: list = []
+
+        def holding_confirm(_parent, heading, body, confirm_label, on_confirm, on_dismiss=None, **_kw) -> None:
+            held.append(on_confirm)
+
+        gitpage.dialogs.confirm_dialog = holding_confirm
+        check("Discard hunk asks, the question held open", view.click_hunk_action("text.txt", 0, discard=True) and wait_for(lambda: len(held) == 1, timeout=5.0), held)
+        page.load("staged")
+        check("the page moved to the staged load meanwhile", wait_for(lambda: page.loaded == "staged" and page.settled(), timeout=5.0), page.loaded)
+        if held:
+            held[0]()
+        check("the late answer runs nothing: the tree is untouched, the toast says so, the view is free", wait_for(idle, timeout=5.0) and "line 5 changed" in git_out(repo, "diff", "--", "text.txt") and toasts[-1:] == ["The view changed since the request: nothing was done"], toasts[-1:])
+        gitpage.dialogs.confirm_dialog = fake_confirm
+        page.load("unstaged")
+        check("back on the unstaged load", wait_for(lambda: page.loaded == "unstaged" and page.settled(), timeout=5.0), page.loaded)
+        serials = view.hunk_serials("text.txt")  # the load switch rebuilt the sections
         check("Discard lines of the second hunk, confirmed", view.select_lines("text.txt", 1, 3, 4) and view.click_hunk_action("text.txt", 1, discard=True))
         check("the lines are gone from the working tree and the view", wait_for(idle, timeout=5.0) and wait_for(lambda: len(view.hunk_rows("text.txt")) == 1, timeout=5.0) and "line 45 changed again" not in git_out(repo, "diff", "--", "text.txt"), (view.hunk_rows("text.txt"), asked[-1]))
         check("the confirm counted the lines", asked[-1][1].startswith("Discard 2 lines in text.txt?"), asked[-1])

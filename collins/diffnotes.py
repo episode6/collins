@@ -136,15 +136,29 @@ class Anchor:
 # -- text ---------------------------------------------------------------------
 
 
+# The line and paragraph separators a text widget would break a line on
+# besides "\n": folded to it, so a summary is the one line it claims to be.
+_SEPARATORS = {"\r\n": "\n", "\r": "\n", "\x85": "\n", "\u2028": "\n", "\u2029": "\n"}
+
+
 def bound_text(text: object, limit: int = NOTE_MAX_CHARS) -> str:
-    """*text* as a note shows it: a string (anything else is ""), CRLF
-    and CR folded to newlines, other control characters (tab and newline
-    kept) dropped, surrounding whitespace trimmed, cut at *limit*."""
+    """*text* as a note shows it: a string (anything else is ""), CRLF, CR,
+    NEL and the Unicode line and paragraph separators folded to newlines,
+    other control characters — C0 and C1, DEL — dropped (tab and newline
+    kept), surrounding whitespace trimmed, cut at *limit*."""
     if not isinstance(text, str):
         return ""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = "".join(ch for ch in text if ch in "\n\t" or (ch >= " " and ch != "\x7f"))
+    for separator, newline in _SEPARATORS.items():
+        text = text.replace(separator, newline)
+    text = "".join(ch for ch in text if ch in "\n\t" or (ch >= " " and not "\x7f" <= ch <= "\x9f"))
     return text.strip()[:limit].rstrip()
+
+
+def summary_text(text: object) -> str:
+    """A summary is one line: bound_text with its newlines read as
+    spaces, so the editor's split (first line, the rest) and a card's
+    heading can't disagree about where the summary ends."""
+    return " ".join(part.strip() for part in bound_text(text).split("\n") if part.strip())
 
 
 def split_note_text(text: object) -> tuple[str, str | None]:
@@ -266,7 +280,7 @@ class MarkStore:
             anchor = resolve_anchor(files, spec.path, spec.side, spec.line, spec.hunk)
             if isinstance(anchor, str):
                 return anchor
-            summary = bound_text(spec.summary)
+            summary = summary_text(spec.summary)
             if not summary:
                 return f"{spec.path}: a note needs a summary"
             rationale = bound_text(spec.rationale) or None
@@ -330,11 +344,13 @@ class MarkStore:
     # -- changing --
 
     def edit(self, note_id: object, summary: object, rationale: object = None) -> Note | None:
-        """Re-word a note; None when there is no such note or no summary."""
+        """Re-word a note: both words are replaced, so a *rationale* left
+        None clears the note's (the editor hands over the whole text,
+        split). None when there is no such note or no summary."""
         note = self.note(note_id)
         if note is None:
             return None
-        words = bound_text(summary)
+        words = summary_text(summary)
         if not words:
             return None
         updated = replace(note, summary=words, rationale=bound_text(rationale) or None)

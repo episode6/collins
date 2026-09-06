@@ -2394,12 +2394,14 @@ class GitPage(Adw.Bin):
                 else None
             )
             status = gitops.read_status(cwd) if request.revert else None
-            GLib.idle_add(self._mutation_planned, gen, request, fresh, status, priority=GLib.PRIORITY_DEFAULT)
+            GLib.idle_add(
+                self._mutation_planned, gen, cwd, request, fresh, status, priority=GLib.PRIORITY_DEFAULT
+            )
 
         threading.Thread(target=work, name="git-page-plan", daemon=True).start()
 
     def _mutation_planned(
-        self, gen: int, request: gitpatch.MutationRequest, fresh: str | None, status: object
+        self, gen: int, cwd: str, request: gitpatch.MutationRequest, fresh: str | None, status: object
     ) -> bool:
         # The view stays busy — the pressed button spinning — for the
         # request's whole life: set_busy(False) forgets which button it
@@ -2415,7 +2417,7 @@ class GitPage(Adw.Bin):
                 self._native_load(self._loaded)
             return GLib.SOURCE_REMOVE
         if plan.confirm is None:
-            self._run_plan(request, plan)
+            self._run_plan(gen, cwd, request, plan)
             return GLib.SOURCE_REMOVE
         heading, button = request.confirm_words(plan)
         # The spinner stays on the pressed button while the question is up.
@@ -2424,21 +2426,29 @@ class GitPage(Adw.Bin):
             heading,
             plan.confirm,
             button,
-            lambda: self._run_plan(request, plan),
+            lambda: self._run_plan(gen, cwd, request, plan),
             on_dismiss=lambda: self._diffview.set_busy(False),
         )
         return GLib.SOURCE_REMOVE
 
-    def _run_plan(self, request: gitpatch.MutationRequest, plan: gitpatch.Plan) -> None:
+    def _run_plan(self, gen: int, cwd: str, request: gitpatch.MutationRequest, plan: gitpatch.Plan) -> None:
         """Carry the plan out (gitops.run_plan) on a thread behind the
         sidebar's busy — the acting button spinning, every other button
         insensitive — then toast the outcome and treat the tree as moved
         (`mutated`: signatures re-seeded, the lists refreshed, the view
-        reloaded by key, so a selection survives with its hunk)."""
+        reloaded by key, so a selection survives with its hunk). The plan
+        was read against *cwd* under generation *gen* for the load the
+        request names: a confirm can sit open while the page moves on (the
+        agent `cd`s elsewhere, the sidebar loads another commit), and the
+        plan then runs against nothing — the tree it described is not the
+        one the page shows."""
         if self._closing or not self._native_opened:
             self._diffview.set_busy(False)
             return
-        cwd = self._cwd_provider()
+        if gen != self._gen or request.load != self._loaded:
+            self._diffview.set_busy(False)
+            self._toast(_("The view changed since the request: nothing was done"))
+            return
         three_way = request.three_way(plan)
         self._diffview.set_busy(True)
 

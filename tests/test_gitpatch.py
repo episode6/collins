@@ -902,6 +902,7 @@ def test_action_labels_follow_the_spec_table():
     assert gitpatch.action_labels(UNSTAGED, gitpatch.FILE) == ("Stage file", "Discard file")
     assert gitpatch.action_labels(UNSTAGED, gitpatch.HUNK) == ("Stage hunk", "Discard hunk")
     assert gitpatch.action_labels(UNSTAGED, gitpatch.HUNK, selected=True) == ("Stage lines", "Discard lines")
+    assert gitpatch.action_labels(UNSTAGED, gitpatch.LINES) == ("Stage lines", "Discard lines")
     assert gitpatch.action_labels(STAGED, gitpatch.FILE) == ("Unstage file", None)
     assert gitpatch.action_labels(STAGED, gitpatch.HUNK) == ("Unstage hunk", None)
     assert gitpatch.action_labels(STAGED, gitpatch.HUNK, selected=True) == ("Unstage lines", None)

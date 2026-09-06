@@ -42,6 +42,21 @@ index 3b18e51..a1b2c3d 100644
 """
 
 # The second hunk of app.py edited (its key moves; the first hunk's stays).
+RENAME_WITH_CHANGE = """\
+diff --git a/a.txt b/b.txt
+similarity index 66%
+rename from a.txt
+rename to b.txt
+index 3b18e51..a1b2c3d 100644
+--- a/a.txt
++++ b/b.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++deux
+ three
+"""
+
 MODIFIED_HUNK_2_CHANGED = MODIFIED.replace("+        return 2", "+        return 3")
 # The first hunk grown by a line: every later line number shifts, so the
 # second hunk's key moves too (its new_start is part of it).
@@ -68,6 +83,19 @@ def test_bound_text_folds_newlines_drops_controls_and_caps():
     assert diffnotes.bound_text(12) == ""
     long = "x" * (diffnotes.NOTE_MAX_CHARS + 50)
     assert len(diffnotes.bound_text(long)) == diffnotes.NOTE_MAX_CHARS
+
+
+def test_bound_text_treats_c1_controls_and_the_unicode_separators_like_the_c0_ones():
+    # A label breaks a line on NEL, U+2028 and U+2029 as on "\n": folded,
+    # so what a note shows is what its text says. C1 controls and DEL go.
+    assert diffnotes.bound_text("a\x85b\u2028c\u2029d") == "a\nb\nc\nd"
+    assert diffnotes.bound_text("a\x80b\x9fc\x7fd\x1bе") == "abcdе"
+
+
+def test_summary_text_is_one_line():
+    assert diffnotes.summary_text("first\n\n second \u2028third\t") == "first second third"
+    assert diffnotes.summary_text("  \n ") == ""
+    assert diffnotes.summary_text(None) == ""
 
 
 def test_split_and_join_note_text_round_trip():
@@ -213,6 +241,43 @@ def test_notes_are_capped_per_page():
     assert "at most" in store.add_notes(loaded, [spec], diffnotes.AGENT)
 
 
+def test_a_refused_batch_mints_no_ids_and_a_multi_line_summary_lands_as_one():
+    store = MarkStore()
+    loaded = files(MODIFIED)
+    specs = [NoteSpec("src/app.py", "fine", line=3), NoteSpec("src/app.py", "x", line=999)]
+    refused = store.add_notes(loaded, specs, diffnotes.AGENT)
+    assert isinstance(refused, str) and store.notes() == []
+    added = store.add_notes(loaded, [NoteSpec("src/app.py", "first\nsecond", line=3)], diffnotes.AGENT)
+    assert [(n.id, n.summary) for n in added] == [("n1", "first second")]
+
+
+def test_a_rename_is_addressed_by_its_old_name_on_the_old_side_only():
+    loaded = files(RENAME_WITH_CHANGE)
+    old = resolve_anchor(loaded, "a.txt", side="old", line=2)
+    assert not isinstance(old, str)
+    assert (old.file.path, old.side, old.line) == ("b.txt", "old", 2)
+    assert old.hunk.lines[old.line_index].text == "two"
+    assert resolve_anchor(loaded, "a.txt", line=2) == "a.txt is not in the loaded diff"
+    store = MarkStore()
+    added = store.add_notes(loaded, [NoteSpec("a.txt", "was two", side="old", line=2)], diffnotes.AGENT)
+    assert [(n.path, n.side, n.line) for n in added] == [("b.txt", "old", 2)]
+
+
+def test_highlights_are_capped_per_batch_and_per_page(monkeypatch):
+    monkeypatch.setattr(diffnotes, "MAX_HIGHLIGHTS_PER_BATCH", 3)
+    monkeypatch.setattr(diffnotes, "MAX_HIGHLIGHTS", 5)
+    store = MarkStore()
+    loaded = files(MODIFIED)
+    spec = HighlightSpec("src/app.py", 3, 0, 6)
+    assert store.add_highlights(loaded, [spec] * 4) == "at most 3 highlights at once"
+    assert not isinstance(store.add_highlights(loaded, [spec] * 3), str)
+    assert store.add_highlights(loaded, [spec] * 3) == "the page holds at most 5 highlights"
+    assert len(store.highlights()) == 3
+    assert not isinstance(store.add_highlights(loaded, [spec] * 2), str)
+    # The refused batches minted no ids.
+    assert [h.id for h in store.highlights()] == ["h1", "h2", "h3", "h4", "h5"]
+
+
 def test_edit_and_remove_a_note():
     store = MarkStore()
     loaded = files(MODIFIED)
@@ -222,6 +287,14 @@ def test_edit_and_remove_a_note():
     assert edited is not None and (edited.summary, edited.rationale) == ("second", "because")
     assert store.note(note.id) == edited
     assert edited.id == note.id and edited.hunk_key == note.hunk_key
+    # Both words are replaced: a rationale left out clears the note's.
+    cleared = store.edit(note.id, "third")
+    assert cleared is not None and (cleared.summary, cleared.rationale) == ("third", None)
+    # A summary is one line however it arrives; the editor's split reads it back.
+    folded = store.edit(note.id, "one\ntwo", "why")
+    assert folded is not None and folded.summary == "one two"
+    joined = diffnotes.join_note_text(folded.summary, folded.rationale)
+    assert diffnotes.split_note_text(joined) == ("one two", "why")
     assert store.edit(note.id, "  ") is None  # a note needs a summary
     assert store.edit("n99", "x") is None
     assert store.remove(note.id) and not store.remove(note.id) and not store.remove(None)

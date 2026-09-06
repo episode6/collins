@@ -1178,11 +1178,16 @@ def is_dirty(status: object, path: str) -> bool:
 def action_labels(load: object, grain: str, selected: bool = False) -> tuple[str, str | None]:
     """The words on a header's buttons — (the stage / unstage / revert
     button, the discard button or None when the load has none) — for a
-    *grain* (FILE or HUNK) and, for a hunk, whether lines are *selected*.
-    The spec's table: unstaged *Stage file* · *Discard file*, *Stage hunk*
-    · *Discard hunk*, *Stage lines* · *Discard lines*; staged *Unstage …*
-    alone; a commit, branch or range *Revert …* alone."""
-    what = _("file") if grain == FILE else (_("lines") if selected else _("hunk"))
+    *grain* (FILE, HUNK, or LINES, which a HUNK with lines *selected*
+    also reads as). The spec's table: unstaged *Stage file* · *Discard
+    file*, *Stage hunk* · *Discard hunk*, *Stage lines* · *Discard lines*;
+    staged *Unstage …* alone; a commit, branch or range *Revert …* alone."""
+    if grain == FILE:
+        what = _("file")
+    elif grain == LINES or selected:
+        what = _("lines")
+    else:
+        what = _("hunk")
     side = working_side(load)
     if side is None:
         return _("Revert {what}").format(what=what), None

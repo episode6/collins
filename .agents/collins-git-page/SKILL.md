@@ -453,8 +453,11 @@ of `TONES`, `hunk_key`), `NoteSpec` / `HighlightSpec` (what a caller
 asks for: a path with exactly one of `line` on a `side` or a 1-based
 `hunk`), `resolve_anchor(files, path, side, line, hunk)` → an `Anchor`
 or the reason (through `diffmodel.locate`; a hunk address takes the
-hunk's first line numbered on that side), `bound_text` (CRLF folded,
-controls dropped, cut at `NOTE_MAX_CHARS` 4000; authors at 80),
+hunk's first line numbered on that side), `bound_text` (CRLF, CR, NEL
+and the Unicode line and paragraph separators folded to newlines, C0 and
+C1 controls dropped, cut at `NOTE_MAX_CHARS` 4000; authors at 80) and
+`summary_text` (a summary is one line: its newlines read as spaces, so
+the card's heading and the editor's split can't disagree),
 `split_note_text` / `join_note_text` (the editor's first line is the
 summary, the rest the rationale), and `MarkStore`: `add_notes(files,
 specs, source)` / `add_highlights(files, specs)` land a batch **whole or
@@ -500,10 +503,11 @@ the view (`on_note_editing`), which closes any other editor unsaved (a
 draft going). `c` is `add_note_at_cursor` (the focused / current hunk,
 `_HunkSection.anchor_at_cursor`: the cursor row's new number, else its
 old, a pad taking the next numbered row — and with a line selection
-the cursor row is the selection's *last* row: the snap parks the
-insert mark at the start of the line after, which `_HunkView.
-cursor_row` folds back, so `c` and `e` speak of a line the user
-chose), `E` `edit_first_note`,
+the cursor row is the selection's *last* row whichever end the insert
+mark is on — the snap parks a downward drag's at the start of the line
+after and an upward one's (Shift+Up) on the first row — which
+`_HunkView.cursor_row` folds back, so `c` and `e` speak of a line the
+user chose), `E` `edit_first_note`,
 `on_note_saved` refuses an empty text (the editor stays open), lands a
 draft as a USER note or re-words the note, then `section.grab()` puts
 the keyboard back in the hunk; `delete_note(id)` and `clear_marks`
@@ -542,6 +546,10 @@ confirm_words(plan)`: *Move to the trash?* / *Restore the file?* /
 *Discard the changes?* / *Revert into the working tree?*; a revert's
 question opens with `revert_warning` when the file is dirty; the spinner
 stays on while it is up, `on_dismiss` clears it), then `_run_plan`:
+the request's own `gen` and `cwd` ride along, and a confirm answered
+after the page moved on (the generation bumped, `request.load` no
+longer `_loaded`) runs nothing — a toast, the buttons freed — since the
+plan described a tree the page no longer shows; else
 `gitops.run_plan(cwd, plan, three_way=request.three_way(plan), trash=
 _trash_paths)` on the sidebar's `run_mutation` thread — `add` / `reset`
 / `checkout` of the paths, the applies through `apply_patch`, OP_TRASH
