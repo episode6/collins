@@ -32,7 +32,8 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 _OAUTH_BETA = "oauth-2025-04-20"
 _HTTP_TIMEOUT_S = 15
 
-# The three /usage bars, in display order. Unknown kinds sort after these.
+# The /usage bars in display order; a response may carry any subset of these
+# (the model-scoped weekly bar comes and goes). Unknown kinds sort after.
 _KIND_ORDER = {"session": 0, "weekly_all": 1, "weekly_scoped": 2}
 
 
