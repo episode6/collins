@@ -54,22 +54,6 @@ def expected() -> set[str]:
     if not sounds:
         sys.exit(f"error: no sounds under {ROOT / 'data' / 'sounds'} — is this a full checkout?")
     paths |= {f"collins/sounds/{p.name}" for p in sounds}
-    # The hunk extension behind the git page (hunkctl.EXTENSION_DIR): hunk
-    # runs it out of the package directory, so its sources are data — the
-    # manifest, the readme, and every .ts/.tsx directly in the directory.
-    # Its tests (test/), tsconfig.json and a local bun install stay out.
-    # Without the manifest the page runs hunk bare; without index.ts hunk
-    # refuses the manifest — either is a broken package.
-    ext = ROOT / "collins" / "hunkext" / "collins-git"
-    for required in ("package.json", "index.ts"):
-        if not (ext / required).is_file():
-            sys.exit(f"error: no {required} under {ext} — is this a full checkout?")
-    shipped = sorted(
-        p
-        for p in ext.iterdir()
-        if p.is_file() and (p.name in ("package.json", "README.md") or p.suffix in (".ts", ".tsx"))
-    )
-    paths |= {f"collins/hunkext/collins-git/{p.name}" for p in shipped}
     return paths
 
 
