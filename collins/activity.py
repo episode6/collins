@@ -59,8 +59,11 @@ testable without a display.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Iterable
+
+log = logging.getLogger(__name__)
 
 # How long output has to stop before a session reads as idle. Long enough to
 # ride out the pauses inside a turn — an agent thinking between tool calls
@@ -107,8 +110,13 @@ SPINNER_STREAK_S = 4 * SPINNER_SAMPLE_S
 # the window has to be able to ride out a long turn on its own. It is a safety
 # net rather than the signal: the clear is what normally ends the pole, and
 # this only catches a CLI killed too abruptly to send one (SIGKILL emits no
-# final OSC). In practice redraw marks keep arriving alongside and refresh the
-# deadline far more often than this anyway.
+# final OSC). Redraw marks keep arriving alongside, and while the hint reads
+# busy (`ProgressWatch.busy`) the window passes them this window too, not the
+# terminal's short one: the latest mark decides the deadline, so a redraw on
+# the default window would cut the agent's word down to IDLE_S of screen
+# silence — which a stalled main loop, or a beat the CLI spends not painting,
+# then lands as a finished run with no grace at all. A turn the CLI calls
+# busy ends on its clear, or on a full minute of nothing painted at all.
 PROGRESS_IDLE_S = 60.0
 
 # How long after a termprop finish a redraw may not *start* a new pole. The
@@ -239,8 +247,11 @@ class ActivityTracker:
         if session_id not in self._deadlines:
             return
         if grace_s > 0:
+            if session_id not in self._pending_finish:
+                log.debug("activity: %s finish armed, grace %.1fs", session_id, grace_s)
             self._pending_finish.setdefault(session_id, self._clock() + grace_s)
             return
+        log.debug("activity: %s finished (no grace)", session_id)
         del self._deadlines[session_id]
         self._pending_finish.pop(session_id, None)
         self._stop_sweep_if_idle()
@@ -252,7 +263,8 @@ class ActivityTracker:
         """Disarm a finish `finish(grace_s=...)` armed for *session_id*: the
         agent said it is busy again before the grace ran out, so the clear
         was a beat inside the turn, not its end. No-op with nothing armed."""
-        self._pending_finish.pop(session_id, None)
+        if self._pending_finish.pop(session_id, None) is not None:
+            log.debug("activity: %s finish disarmed", session_id)
 
     def finish_pending(self, session_id: str) -> bool:
         """Whether a finish is armed for *session_id* and waiting out its
@@ -288,8 +300,21 @@ class ActivityTracker:
     def _on_sweep(self) -> bool:
         now = self._clock()
         armed = [sid for sid, deadline in self._pending_finish.items() if deadline <= now]
-        timed_out = [sid for sid, deadline in self._deadlines.items() if deadline <= now]
+        # An armed finish owns its session's ending: the grace is the agent's
+        # word being weighed, and a redraw mark on the short window inside it
+        # (the prompt box returning) must not land the finish early — that
+        # would undercut the grace by exactly the beat it exists to cover.
+        timed_out = [
+            sid
+            for sid, deadline in self._deadlines.items()
+            if deadline <= now and sid not in self._pending_finish
+        ]
         for session_id in dict.fromkeys(armed + timed_out):
+            log.debug(
+                "activity: %s finished (%s)",
+                session_id,
+                "grace ran out" if session_id in self._pending_finish else "idle window ran out",
+            )
             self._deadlines.pop(session_id, None)
             self._pending_finish.pop(session_id, None)
             self._on_change(session_id, False)
@@ -503,6 +528,7 @@ class ProgressWatch:
         self._clock = clock
         self._spoken = False  # a busy hint has been seen; clears mean something
         self._finished_at: float | None = None
+        self._busy = False  # the hint reads busy right now (see `busy`)
 
     def reading(self, hint: int | None) -> str | None:
         """The pole action a hint change asks for: "mark", "finish", or None.
@@ -512,11 +538,24 @@ class ProgressWatch:
         """
         if hint in _BUSY_HINTS:
             self._spoken = True
+            self._busy = True
             return "mark"
         if not self._spoken:
             return None
         self.turn_ended()
         return "finish"
+
+    @property
+    def busy(self) -> bool:
+        """Whether the agent's hint reads busy right now: a busy hint has
+        arrived and no clear (or other turn end) has followed it. While it
+        does, the turn is the agent's word and the redraw-inferred marks the
+        window feeds the tracker carry `PROGRESS_IDLE_S` rather than the
+        terminal's short window — otherwise every redraw would cut the
+        deadline back to IDLE_S, and a couple of seconds without a repaint
+        (the app's main loop stalled, the CLI between paints) would land a
+        finish, with no grace, for a turn the agent still calls busy."""
+        return self._busy
 
     def quiet(self) -> bool:
         """Whether a turn just ended here, so a redraw arriving now is its
@@ -532,9 +571,11 @@ class ProgressWatch:
 
         `_spoken` is deliberately untouched: this tab still hasn't announced
         any progress of its own, and a clear it never speaks must not start
-        finishing runs on its word.
+        finishing runs on its word. `busy` does drop: whoever called the turn
+        over, the agent is no longer held to be working.
         """
         self._finished_at = self._clock()
+        self._busy = False
 
 
 class BackgroundBusyWatch:

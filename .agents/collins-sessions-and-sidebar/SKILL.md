@@ -143,7 +143,17 @@ edge any "do this when the session is done" feature should ride. A progress
 termprop clear (and a background agent's idle reading) does not land that
 edge at once: the CLI (2.1.261) also clears the hint for a beat between tool
 calls, so `finish(grace_s=PROGRESS_FINISH_GRACE_S)` arms the finish for 3 s
-and the next busy hint `resume`s it; the pole stays up through the wait.
+and the next busy hint `resume`s it; the pole stays up through the wait, and
+the sweep leaves an armed session to its grace (a redraw mark on `IDLE_S`
+inside it can't time it out early). The latest `mark` decides the deadline,
+so while the hint reads busy (`ProgressWatch.busy`) the window's redraw marks
+carry `PROGRESS_IDLE_S` too — on the default `IDLE_S` they cut the agent's
+word down to 2 s of screen silence, and a main loop stalled that long landed
+graceless finishes (unread flag, notification) mid-turn. Probing the CLI
+(2.1.261) from a bare pty showed the hint held busy straight through tool
+loops, hooks, the auto-mode classifier, thinking and 40 s tool runs, with
+0/3 flapping only in the first seconds of a turn's stream; `COLLINS_LOG=DEBUG`
+logs each hint reading and each finish the tracker lands or disarms.
 
 **Background agents.** `bgstatus.py` polls `background_agents()` on a file
 monitor over `~/.claude/jobs/` (used only as a wake-up, never parsed) plus

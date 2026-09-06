@@ -159,6 +159,19 @@ downloads of each version, see the
   it counts, and a busy hint inside that window takes it back. The
   sidebar's pole stays up through the wait, and a real finish announces
   itself three seconds later than before.
+- **A run the CLI calls busy is not finished by two quiet seconds.** The
+  progress hint's long idle window was being cut down by every terminal
+  repaint to the two-second window inferred poles use, so a tab that
+  went two seconds without a repaint — Collins's own main loop stalled
+  that long, say — was flagged unread and announced as finished, with
+  no grace, while the CLI still reported itself working; with the flag
+  then standing, every such beat announced again. While the hint reads
+  busy, repaints keep the run on the hint's window: the CLI's own clear
+  ends it (through the three-second grace), and silence alone only
+  after a full minute, the case of a CLI killed too abruptly to clear.
+  An armed clear also can't be undercut by a repaint inside its grace.
+  `COLLINS_LOG=DEBUG` now logs every progress hint reading and every
+  finish the tracker lands or disarms, with the reason.
 - **A first prompt attaches only the pull requests it links.** Reading
   a new session's first prompt for PRs used the same grammar session
   titling does, so "open PR 0 of the port" and "PR 1 (base: main),
