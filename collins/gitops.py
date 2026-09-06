@@ -15,7 +15,7 @@ unstages everything (stage_all, unstage_all), commits the index (commit,
 commit_fixup) and asks first whether a commit may be made at all
 (in_progress_operation, staged_paths).
 
-The native diff view reads whole loads through read_diff — hunk's argv
+The native diff view reads whole loads through read_diff — the argv
 (diff_argv, show_argv, with the `a/` `b/` prefixes pinned by
 DIFF_PREFIX_ARGS so a patch fed back to `git apply` always has them), a
 `--numstat -z` pre-pass (numstat_argv) that turns files over diffmodel's
@@ -91,8 +91,8 @@ _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 # rename detection — is slower than the panels' reads; git only has to
 # come back at all. Applies and the file-grain mutations keep GIT_TIMEOUT_S.
 DIFF_TIMEOUT_S = 30.0
-# hunk's own `-c` options in front of every diff it reads (its
-# DIFF_PREFIX_NORMALIZATION_ARGS), and for the same reason: a patch the
+# The `-c` options in front of every diff the view reads, pinning the
+# prefixes whatever the user's config says: a patch the
 # view re-reads is fed back to `git apply`, and a user's `diff.noprefix` /
 # `diff.mnemonicPrefix` / custom prefixes would leave the headers without
 # the `a/` and `b/` the apply strips (with `diff.noprefix=true`, `git diff |
@@ -106,8 +106,8 @@ DIFF_PREFIX_ARGS: tuple[str, ...] = (
     "-c", "diff.srcPrefix=a/",
     "-c", "diff.dstPrefix=b/",
 )
-# What every diff read carries, hunk's `git diff` flags: no external diff
-# driver (its output is not a patch), renames paired, no ANSI.
+# What every diff read carries: no external diff driver (its output is not
+# a patch), renames paired, no ANSI.
 DIFF_ARGS: tuple[str, ...] = ("--no-ext-diff", "--find-renames", "--no-color")
 # `git apply` for every patch the view writes: `--recount` trusts the
 # lines over the `@@` counts (gitpatch's are exact; the flag costs
@@ -383,7 +383,7 @@ def _range_args(load: object, parent_target: str | None) -> list[str] | None:
 def show_argv(ref: str, pathspecs: Sequence[str] = (), excludes: Sequence[str] = ()) -> list[str]:
     """[*DIFF_PREFIX_ARGS, "show", "--format=", "--no-ext-diff",
     "--find-renames", "--no-color", ref, "--", *literal pathspecs,
-    *excludes]: one commit's diff with no message, hunk's `hunk show`."""
+    *excludes]: one commit's diff with no message."""
     return [*DIFF_PREFIX_ARGS, "show", "--format=", *DIFF_ARGS, ref, "--", *_pathspecs(pathspecs, excludes)]
 
 
@@ -394,8 +394,8 @@ def diff_argv(
     pathspecs: Sequence[str] = (),
     excludes: Sequence[str] = (),
 ) -> list[str] | None:
-    """The whole read of *load* (a gitloads.Loaded), hunk's `hunk diff` /
-    `hunk show` argv: [*DIFF_PREFIX_ARGS, "diff", "--no-ext-diff",
+    """The whole read of *load* (a gitloads.Loaded), the diff view's `git
+    diff` / `git show` argv: [*DIFF_PREFIX_ARGS, "diff", "--no-ext-diff",
     "--find-renames", "--no-color", <nothing | --staged | parent...HEAD |
     a...b>, "--", *pathspecs, *excludes], or show_argv for a commit load.
     Every pathspec goes on as `:(literal)path` (literal_pathspec) and
@@ -444,7 +444,7 @@ def file_patch_argv(
     load: object, path: str, previous_path: str | None = None, parent_target: str | None = None
 ) -> list[str] | None:
     """One file's patch of *load*, re-read at action time so its numbers
-    are exact: the extension's readFilePatch — [*DIFF_PREFIX_ARGS, "diff",
+    are exact (the old extension's readFilePatch) — [*DIFF_PREFIX_ARGS, "diff",
     ("--staged",) *DIFF_ARGS, "--", *literal paths] for a working-tree
     side (a rename names both paths so the patch carries the rename
     record), and diff_argv with the paths as pathspecs for a commit,
@@ -912,7 +912,7 @@ def read_diff(
     1. numstat_argv — the pre-pass; every path over diffmodel's
        TOO_LARGE_LINES is excluded from the diff (`:(exclude,literal)`) and
        stands in the result as a KIND_TOO_LARGE placeholder carrying its
-       counts. hunk's other cap, TOO_LARGE_BYTES, is applied after the
+       counts. The other cap, TOO_LARGE_BYTES, is applied after the
        read, by diffmodel.parse on each stanza's own text: a numstat
        says how many lines moved, not how heavy the patch is, and the
        placeholder comes out the same — only the read is not saved.

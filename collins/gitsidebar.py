@@ -3,47 +3,39 @@
 """The git page's native sidebar: the commits list over the files list, and
 the action row under them.
 
-What the collins-git hunk extension drew inside the terminal — the commits
-panel and the files panel — as GTK widgets beside hunk's VTE (gitpage
+The commits panel and the files panel beside the diff view (gitpage
 places the widget; this module never imports gitpage). The commits list is
 one group per branch of interest (gitmodel.build_rows: the current branch
 with its `working tree` row and `↑` unpushed marks, every branch of the
 stack under it down to the default branch — the page reads the stack off
 git and hands it in with set_context — and the default branch's latest
-page with `load more…`),
-the loaded row marked `▸` after hunk's own title (set_context, not the last
-click — a load made from a shell or by the agent is reflected). The files
-list is hunk's own `files[]` off `session get` (refresh_files) — the loaded
-changeset in review order, with counts and rename pairs — split into
-UNSTAGED / STAGED on the working tree, the side hunk has loaded live and
-the other read off `git status` (gitmodel.files_sections); the row hunk's
-cursor is on is highlighted (set_selection — the sidecar's `selection`
-first, the `session get` snapshot as the fallback). The action row feeds
-the extension's keys through the VTE's pty for what needs hunk's cursor
-("key-requested": stage the hunk or the anchored range, anchor a line,
-discard) and runs the rest natively on worker threads — stage all, unstage
-all, commit, commit with body, fix up — with the confirms and dialogs of
-dialogs.py, and a toast for every outcome.
+page with `load more…`), the loaded row marked `▸` after what the page
+has loaded (set_context, not the last click — a load made by the agent's
+show_diff is reflected). The files list is the loaded diff's own files
+(refresh_files, one gitmodel.FileSummary per file with counts and rename
+pairs) split into UNSTAGED / STAGED on the working tree, the side the
+page has loaded live and the other read off `git status` (gitmodel.
+files_sections — the page hands in the status its own read carried); the
+row the view is on is highlighted (set_selection, fed from the view's
+`current-changed`). A files filter sits above the list: a Gtk.SearchEntry
+whose word hides the rows here and, through "filter-changed", the
+sections in the diff; Escape clears it and "filter-escaped" hands the
+keyboard back to the view. The action row runs the whole-tree mutations
+on worker threads — stage all, unstage all, commit, commit with body, fix
+up — with the confirms and dialogs of dialogs.py, and a toast for every
+outcome; the per-hunk and per-line buttons are the diff view's own, on
+its headers.
 
 Nothing here decides what a click loads, which row is the loaded one, or
 what the confirms say: that is gitmodel's (GTK-free, unit-tested), and
 every git call is gitops'. The widget only draws, threads and emits:
-"load-requested" (a hunkctl.Loaded), "navigate-requested" (a path and the
-side it sits on), "key-requested" (bytes for the pty), "mutated" (a native
-git mutation landed — the page re-seeds its freshness signature and
-reloads hunk). Every
-thread reply lands with GLib.idle_add at default priority behind a
-generation counter, so a stale reply never overwrites a newer one; every
-subject, path and branch name goes through Gtk.Label.set_text, bounded by
-gitmodel first (foreign content).
-
-With the native diff view drawing (the git_viewer switch, PR 2 of the
-native-diff stack) the page feeds the same lists from its own read —
-refresh_files takes the `git status` it already has, set_selection follows
-the view's `current-changed` — and a files filter shows above the list
-(set_filter_shown): a Gtk.SearchEntry whose word hides the rows here and,
-through "filter-changed", the sections in the diff; Escape clears it and
-"filter-escaped" hands the keyboard back to the view.
+"load-requested" (a gitloads.Loaded), "navigate-requested" (a path and the
+side it sits on), "mutated" (a git mutation landed — the page re-seeds its
+freshness signature and reloads the view). Every thread reply lands with
+GLib.idle_add at default priority behind a generation counter, so a stale
+reply never overwrites a newer one; every subject, path and branch name
+goes through Gtk.Label.set_text, bounded by gitmodel first (foreign
+content).
 """
 
 from __future__ import annotations
@@ -59,7 +51,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import dialogs, gitinfo, gitmodel, gitops, hunkctl  # noqa: E402
+from . import dialogs, gitinfo, gitloads, gitmodel, gitops  # noqa: E402
 from .gitmodel import BranchRef, FileRow, FileSections, Row  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -180,8 +172,8 @@ class _SectionRow(Gtk.ListBoxRow):
 
 class _FileRow(Gtk.ListBoxRow):
     """One file: its status letter (coloured), the path (`old → new` for a
-    rename), and the counts hunk reported (`+a −d`, or `bin`) for a live
-    row."""
+    rename), and the counts the diff reported (`+a −d`, or `bin`) for a
+    live row."""
 
     def __init__(self, file: FileRow, side: str) -> None:
         super().__init__()
@@ -224,24 +216,23 @@ class _FileRow(Gtk.ListBoxRow):
 
 
 class GitSidebar(Gtk.Box):
-    """The native commits and files panels beside hunk, with the action
+    """The commits and files panels beside the diff view, with the action
     row. Built once per git page; fed by set_context / refresh_commits /
-    refresh_files / set_selection / set_anchor; heard through its signals
-    (see the module docstring)."""
+    refresh_files / set_selection; heard through its signals (see the
+    module docstring)."""
 
     __gsignals__ = {
         "load-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "navigate-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
-        "key-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        # The files filter's text changed (the native viewer hides the
-        # sections that don't match); Escape in the filter cleared it and
-        # wants the keyboard back in the diff.
+        # The files filter's text changed (the view hides the sections
+        # that don't match); Escape in the filter cleared it and wants the
+        # keyboard back in the diff.
         "filter-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "filter-escaped": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, cwd_provider: Callable[[], str | None], options: hunkctl.Options) -> None:
+    def __init__(self, cwd_provider: Callable[[], str | None], options: gitloads.Options) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("git-sidebar")
         self.set_size_request(WIDTH_REQUEST, -1)
@@ -255,11 +246,11 @@ class GitSidebar(Gtk.Box):
         # The branches under the parent, nearest first (gitops.stack_branches
         # as the page read it), down to the last one above the default.
         self._stack: tuple[BranchRef, ...] = ()
-        self._loaded: object = None  # a hunkctl.Loaded, or None for a foreign load
+        self._loaded: object = None  # a gitloads.Loaded, or None before the page said
         self._resolved_sha: str | None = None
-        self._live_side: str | None = None
-        self._hunk_alive = False
-        self._extension_loaded = False
+        # Whether a working-tree side is loaded: what the action row's
+        # buttons act on (stage all, commit).
+        self._live = False
 
         # -- the commits list ---------------------------------------------------
         # How many pages each group shows, by group id (absent: one).
@@ -270,7 +261,7 @@ class GitSidebar(Gtk.Box):
         self._loaded_row_id: str | None = None
 
         # -- the files list ------------------------------------------------------
-        self._session_files: tuple[hunkctl.SessionFile, ...] = ()
+        self._session_files: tuple[gitmodel.FileSummary, ...] = ()
         self._files_loaded: object = None
         self._untracked = options.untracked
         self._files_gen = 0
@@ -283,15 +274,8 @@ class GitSidebar(Gtk.Box):
         self._filter_text = ""
 
         # -- the action row --------------------------------------------------------
-        # hunk's cursor buttons (Stage hunk / Anchor line / Discard feed the
-        # extension's keys): shown with the hunk viewer alone — the native
-        # view's hunk headers carry the buttons (decision 7 of the
-        # native-diff spec); the three go with hunk in PR 4 of that stack,
-        # with `key-requested`, set_anchor and the two label probes.
-        self._cursor_buttons_shown = True
-        self._anchor: hunkctl.Anchor | None = None
-        # A native mutation (stage all, a commit) in flight: the other
-        # mutations wait, and the Commit button spins.
+        # A mutation (stage all, a commit) in flight: the other mutations
+        # wait, and the Commit button spins.
         self._busy = False
         self._mutation_gen = 0
 
@@ -318,14 +302,12 @@ class GitSidebar(Gtk.Box):
         self._file_list.connect("row-activated", self._on_file_row_activated)
         self._file_scroller = Gtk.ScrolledWindow(child=self._file_list, vexpand=True)
         self._file_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        # The files filter above the list (the native viewer's `/`; hidden
-        # while hunk draws, whose own `/` filters inside the terminal):
-        # every keystroke narrows the rows here and the sections in the
-        # diff, Escape clears and hands the keyboard back.
+        # The files filter above the list (the view's `/`): every keystroke
+        # narrows the rows here and the sections in the diff, Escape clears
+        # and hands the keyboard back.
         self._filter_entry = Gtk.SearchEntry()
         self._filter_entry.set_placeholder_text(_("Filter files"))
         self._filter_entry.add_css_class("git-files-filter")
-        self._filter_entry.set_visible(False)
         self._filter_entry.connect("search-changed", self._on_filter_changed)
         self._filter_entry.connect("stop-search", self._on_filter_stopped)
         files_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -363,14 +345,6 @@ class GitSidebar(Gtk.Box):
             self._action_children[widget] = child
 
         self._action_children: dict[Gtk.Widget, Gtk.FlowBoxChild] = {}
-        self._stage_button = self._flat_button(
-            _("Stage hunk"), lambda: self._feed(hunkctl.STAGE_KEY)
-        )
-        add(self._stage_button)
-        self._anchor_button = self._flat_button(_("Anchor line"), self._on_anchor_clicked)
-        add(self._anchor_button)
-        self._discard_button = self._flat_button(_("Discard"), lambda: self._feed(hunkctl.DISCARD_KEY))
-        add(self._discard_button)
         self._stage_all_button = self._flat_button(_("Stage all"), lambda: self._on_all_clicked(True))
         add(self._stage_all_button)
         self._unstage_all_button = self._flat_button(
@@ -419,7 +393,7 @@ class GitSidebar(Gtk.Box):
     # -- public: context and content ------------------------------------------------
 
     @property
-    def options(self) -> hunkctl.Options:
+    def options(self) -> gitloads.Options:
         """What Preferences → Git says, as last handed in (set_options)."""
         return self._options
 
@@ -431,7 +405,7 @@ class GitSidebar(Gtk.Box):
 
     @property
     def selected_path(self) -> str | None:
-        """The path of the file hunk's cursor is on, as last told."""
+        """The path of the file the view is on, as last told."""
         return self._selected_path
 
     def commit_rows(self) -> list[Row]:
@@ -446,33 +420,14 @@ class GitSidebar(Gtk.Box):
         """The id of the row marked `▸`, or None."""
         return self._loaded_row_id
 
-    def anchor_button_label(self) -> str:
-        return self._anchor_button.get_label() or ""
-
-    def stage_button_label(self) -> str:
-        return self._stage_button.get_label() or ""
-
     @property
     def filter_text(self) -> str:
         """The files filter's word, stripped ("" = every row shows)."""
         return self._filter_text
 
-    def set_filter_shown(self, shown: bool) -> None:
-        """Show the files filter (the native viewer) or hide it (hunk, whose
-        own `/` filters inside the terminal); hiding clears it."""
-        self._filter_entry.set_visible(bool(shown))
-        if not shown and self._filter_entry.get_text():
-            self._filter_entry.set_text("")
-
     def focus_filter(self) -> bool:
         """Put the keyboard in the files filter (the `/` key)."""
-        return self._filter_entry.get_visible() and self._filter_entry.grab_focus()
-
-    def set_cursor_buttons_shown(self, shown: bool) -> None:
-        """Show hunk's cursor buttons (the hunk viewer) or hide them (the
-        native view draws its own on the hunk headers)."""
-        self._cursor_buttons_shown = bool(shown)
-        self._sync_buttons()
+        return self._filter_entry.grab_focus()
 
     def set_filter_text(self, text: str) -> None:
         """Type into the filter (the e2e's way): the rows and the signal
@@ -487,24 +442,21 @@ class GitSidebar(Gtk.Box):
         default: BranchRef | None,
         loaded: object,
         resolved_sha: str | None,
-        live_side: str | None,
-        hunk_alive: bool,
-        extension_loaded: bool,
+        live: bool,
         stack: Sequence[BranchRef] = (),
     ) -> bool:
         """What the page knows: the checked-out *branch*, the *parent* and
         *default* branches the groups are built on (None when the tree
         can't name one) and the *stack* of branches between them (the
         branches under the parent, nearest first, as gitops.stack_branches
-        lists them — the page reads it off git), what hunk has *loaded* (a
-        hunkctl.Loaded, or None for a load Collins has no name for) and,
-        for a commit load, the sha it *resolved* to; which working-tree
-        side is live (None for any other load); whether hunk runs and with
-        the extension. A change of branch, parent, stack or default
-        refreshes the commits list; the loaded mark and the buttons follow
-        every call. Returns whether the groups changed (and so the list
-        was re-read here) — the page refreshes it itself otherwise after a
-        spawn."""
+        lists them — the page reads it off git), what the page has
+        *loaded* (a gitloads.Loaded) and, for a commit load, the sha it
+        *resolved* to; and whether a working-tree side is *live* (the
+        action row's buttons act on it). A change of branch, parent, stack
+        or default refreshes the commits list; the loaded mark and the
+        buttons follow every call. Returns whether the groups changed (and
+        so the list was re-read here) — the page refreshes it itself
+        otherwise after an open."""
         stack = tuple(stack)
         groups = (branch, parent, default, stack)
         groups_changed = groups != (self._branch, self._parent, self._default, self._stack)
@@ -514,9 +466,7 @@ class GitSidebar(Gtk.Box):
         self._stack = stack
         self._loaded = loaded
         self._resolved_sha = resolved_sha
-        self._live_side = live_side
-        self._hunk_alive = hunk_alive
-        self._extension_loaded = extension_loaded
+        self._live = bool(live)
         if groups_changed:
             self._pages = {}
             self.refresh_commits()
@@ -588,15 +538,15 @@ class GitSidebar(Gtk.Box):
 
     def refresh_files(
         self,
-        session_files: Sequence[hunkctl.SessionFile],
+        session_files: Sequence[gitmodel.FileSummary],
         loaded: object,
         untracked: bool,
         status: gitmodel.Status | None = None,
     ) -> None:
-        """Rebuild the files list from hunk's *files[]* for *loaded*: a
-        working-tree load reads `git status` on a thread for the other
-        side first (the `?` rows dropped when *untracked* is off) — unless
-        the caller already has the *status* (the native viewer's read
+        """Rebuild the files list from the diff's *session_files* for
+        *loaded*: a working-tree load reads `git status` on a thread for
+        the other side first (the `?` rows dropped when *untracked* is
+        off) — unless the caller already has the *status* (the page's read
         carries it), which is drawn at once; any other load is one flat
         list, drawn at once."""
         self._session_files = tuple(session_files)
@@ -629,27 +579,17 @@ class GitSidebar(Gtk.Box):
         self._rebuild_files()
         return GLib.SOURCE_REMOVE
 
-    def set_selection(self, path: str | None, hunk: int | None, source: str) -> None:
-        """Highlight the file hunk's cursor is on: *source* "sidecar" (the
-        extension's word, instant) or "session" (`session get`'s snapshot,
-        up to a tick late). The page arbitrates between the two before
-        calling (GitPage._take_session); *source* names the caller's word
-        for readers and is not kept. None clears it."""
-        del source
+    def set_selection(self, path: str | None, hunk: int | None) -> None:
+        """Highlight the file the view is on (its `current-changed`: the
+        file at the top of the viewport, or the hunk the keyboard moved
+        into). None clears it."""
         if path == self._selected_path and hunk == self._selected_hunk:
             return
         self._selected_path = path
         self._selected_hunk = hunk
         self._mark_selected_file()
 
-    def set_anchor(self, anchor: hunkctl.Anchor | None) -> None:
-        """The line `v` anchored, off the sidecar (None once cleared): the
-        anchor button reads Clear anchor while one is set, and the stage
-        button Stage lines."""
-        self._anchor = anchor
-        self._sync_buttons()
-
-    def set_options(self, options: hunkctl.Options) -> None:
+    def set_options(self, options: gitloads.Options) -> None:
         """Preferences → Git changed: a new page size re-pages the commits
         list from its first page; a flipped untracked switch redraws the
         files list."""
@@ -739,7 +679,7 @@ class GitSidebar(Gtk.Box):
         def done(read: tuple) -> None:
             result, is_root = read
             if result.ok:
-                abbrev = hunkctl.short_ref(sha)
+                abbrev = gitloads.short_ref(sha)
                 self._toast(
                     _("Committed a fixup for {sha} — fold it in with `{command}`").format(
                         sha=abbrev, command=gitmodel.autosquash_command(abbrev, is_root)
@@ -940,46 +880,16 @@ class GitSidebar(Gtk.Box):
     # -- the action row ----------------------------------------------------------------------
 
     def _working_live(self) -> bool:
-        return self._live_side is not None
+        return self._live
 
     def _sync_buttons(self) -> None:
         live = self._working_live()
-        cursor_keys = live and self._hunk_alive and self._extension_loaded
-        for button in (self._stage_button, self._anchor_button, self._discard_button):
-            child = self._action_children.get(button)
-            if child is not None:
-                child.set_visible(self._extension_loaded and self._cursor_buttons_shown)
-            button.set_sensitive(cursor_keys)
-        anchored = self._anchor is not None
-        self._stage_button.set_label(_("Stage lines") if anchored else _("Stage hunk"))
-        self._stage_button.set_tooltip_text(
-            _("Stage the lines from the anchor to hunk's cursor (x)")
-            if anchored
-            else _("Stage the hunk under hunk's cursor — unstage it in the staged view (x)")
-        )
-        self._anchor_button.set_label(_("Clear anchor") if anchored else _("Anchor line"))
-        self._anchor_button.set_tooltip_text(
-            _("Clear the line-range anchor (Esc)")
-            if anchored
-            else _("Anchor a line range at hunk's cursor line (v)")
-        )
-        self._discard_button.set_tooltip_text(
-            _("Discard the hunk under hunk's cursor, or the anchored range, after hunk's confirmation (D)")
-        )
         for button in (self._stage_all_button, self._unstage_all_button):
             button.set_sensitive(live and not self._busy)
         self._commit_button.set_sensitive(live and not self._busy)
         self._commit_stack.set_visible_child_name("spinner" if self._busy else "label")
         self._stage_all_button.set_tooltip_text(_("Stage every change (git add -A)"))
         self._unstage_all_button.set_tooltip_text(_("Unstage every change (git reset)"))
-
-    def _feed(self, key: bytes) -> None:
-        if not (self._working_live() and self._hunk_alive and self._extension_loaded):
-            return
-        self.emit("key-requested", key)
-
-    def _on_anchor_clicked(self) -> None:
-        self._feed(hunkctl.CLEAR_ANCHOR_KEY if self._anchor is not None else hunkctl.ANCHOR_KEY)
 
     def _on_all_clicked(self, stage: bool) -> None:
         if not self._working_live() or self._busy:

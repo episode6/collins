@@ -1,7 +1,7 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """Tests for diffmodel: the native diff panel's parser over every header
-form git writes, the numstat pre-pass and hunk's caps, gaps, split rows,
+form git writes, the numstat pre-pass and the size caps, gaps, split rows,
 word emphasis, the palette blend, locate and stable keys — and what garbage
 and oversized input do to each."""
 

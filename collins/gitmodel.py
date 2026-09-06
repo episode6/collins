@@ -3,16 +3,16 @@
 # parser) and joshedler/hunk-git-lite (the status parser) (MIT, © 2026
 # Sadick, © 2026 Josh Edler); see collins/THIRD_PARTY_LICENSES.md.
 
-"""The git page's native panels, as pure functions over what git and hunk
-report: the commits list's rows and the files list's sections.
+"""The git page's panels, as pure functions over what git reports: the
+commits list's rows and the files list's sections.
 
-Nothing here runs git, touches hunk or imports a widget. gitops runs git
-and hands back the Commits and Status parsed here; hunkctl parses hunk's
-`session get` reply into SessionFiles; the sidebar widget (gitsidebar, a
-later PR) asks this module which rows to draw, which of them is the loaded
-one, and what the confirms and toasts say — the same split the collins-git
-extension's model.ts had, ported so the panels can be unit-tested without
-a terminal (tests/test_gitmodel.py).
+Nothing here runs git or imports a widget. gitops runs git and hands back
+the Commits and Status parsed here; the page summarises the diff it read
+into FileSummaries (one per file of the loaded diff, with its counts and
+rename pair); the sidebar widget (gitsidebar) asks this module which rows
+to draw, which of them is the loaded one, and what the confirms and
+toasts say — so the panels can be unit-tested without a display
+(tests/test_gitmodel.py).
 
 Everything that arrives here is foreign content — a subject line, a path,
 a branch name — and is bounded before a widget sees it: subjects are cut to
@@ -27,7 +27,7 @@ import re
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 
-from . import gitloads, hunkctl
+from . import gitloads
 from .i18n import _
 
 # `git log` as parse_log reads it: NUL between the fields (sha, abbreviated
@@ -122,11 +122,27 @@ class Row:
 
 
 @dataclass(frozen=True)
+class FileSummary:
+    """One file of the loaded diff as the files list reads it (the page
+    builds one per diffmodel.File): an id, the path, *previous_path* for
+    a rename, the line counts and the hunk count — a binary change lists
+    0/0/0, which is how its row reads `bin`."""
+
+    id: str
+    path: str
+    previous_path: str | None
+    additions: int
+    deletions: int
+    hunk_count: int
+
+
+@dataclass(frozen=True)
 class FileRow:
-    """One line of the files list. *live* rows come from hunk's own files
-    (with counts, and a click navigates); the others from `git status` (a
-    click reloads to that side first). *code* is a STATUS_CODES letter, or
-    None when nothing said (a live row with no status to match it to)."""
+    """One line of the files list. *live* rows come from the loaded diff's
+    own files (with counts, and a click reveals); the others from `git
+    status` (a click reloads to that side first). *code* is a STATUS_CODES
+    letter, or None when nothing said (a live row with no status to match
+    it to)."""
 
     path: str
     code: str | None = None
@@ -138,11 +154,10 @@ class FileRow:
 
     @property
     def binary(self) -> bool:
-        """Whether the file reads as binary: hunk's session record has no
+        """Whether the file reads as binary: a FileSummary carries no
         such flag, but a binary change is the one that lists no hunk and no
-        line counts (verified against hunk 0.21.1: a changed `img.bin`
-        lists `additions: 0, deletions: 0, hunkCount: 0`) — and a text
-        file with nothing to show wouldn't be listed at all."""
+        line counts — and a text file with nothing to show wouldn't be
+        listed at all."""
         return self.live and self.additions == 0 and self.deletions == 0 and self.hunk_count == 0
 
 
@@ -150,7 +165,7 @@ class FileRow:
 class FileSections:
     """What the files list draws: one flat list (*flat*, any load but the
     working tree), or the two working-tree sides with *live* naming the one
-    hunk has loaded ("unstaged" | "staged")."""
+    the page has loaded ("unstaged" | "staged")."""
 
     mode: str
     live: str | None = None
@@ -393,7 +408,7 @@ def build_rows(
 
 
 def loaded_row_id(rows: Sequence[Row], loaded: object, resolved_sha: str | None = None) -> str | None:
-    """The id of the row that describes what hunk has loaded, or None when
+    """The id of the row that describes what the page has loaded, or None when
     no row does: the working tree row for both working-tree loads, the
     current header for "branch", a commit row for a {"show": ref} — matched
     by sha prefix, then by *resolved_sha* (what a `show HEAD` or a branch
@@ -425,10 +440,10 @@ def loaded_row_id(rows: Sequence[Row], loaded: object, resolved_sha: str | None 
 # -- the files list --------------------------------------------------------------------
 
 
-def _live_row(file: hunkctl.SessionFile, codes: dict[str, StatusRow]) -> FileRow:
-    """A row for a file hunk has loaded: its counts from hunk, its status
-    letter from the matching `git status` row when there is one, else `R`
-    for a rename hunk reports, else nothing."""
+def _live_row(file: FileSummary, codes: dict[str, StatusRow]) -> FileRow:
+    """A row for a file of the loaded diff: its counts from the diff, its
+    status letter from the matching `git status` row when there is one,
+    else `R` for a rename the diff reports, else nothing."""
     status = codes.get(file.path)
     if status is not None:
         code: str | None = status.code
@@ -453,17 +468,17 @@ def _status_row(row: StatusRow) -> FileRow:
 
 def files_sections(
     status: Status | None,
-    session_files: Sequence[hunkctl.SessionFile],
+    session_files: Sequence[FileSummary],
     loaded: object,
     untracked: bool = True,
 ) -> FileSections:
     """The files list's sections. When the working tree is loaded and the
-    status is known, the loaded side's rows come from hunk's own files
-    (counts; a click navigates) and the other side's from `git status` (a
+    status is known, the loaded side's rows come from the diff's own files
+    (counts; a click reveals) and the other side's from `git status` (a
     click reloads there first); every other load — and a working tree with
-    no status — is one flat list of hunk's files. With *untracked* off the
-    status's `?` rows are dropped: hunk's own list already respects
-    `--exclude-untracked`, and a `?` row on the other side would be a file
+    no status — is one flat list of the diff's files. With *untracked* off
+    the status's `?` rows are dropped: the diff read already leaves
+    untracked files out, and a `?` row on the other side would be a file
     a click could never load."""
     files = [file for file in session_files if _path_ok(file.path)][:MAX_ROWS]
     if loaded not in ("unstaged", "staged") or status is None:

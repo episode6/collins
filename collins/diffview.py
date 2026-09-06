@@ -2,8 +2,8 @@
 
 """The native diff view: a parsed `git diff` / `show` drawn as GTK widgets.
 
-`DiffView` is the git page's review stream, in place of hunk's terminal
-(spec: ~/specs/collins/native-diff-panel.md). It takes diffmodel's Files
+`DiffView` is the git page's review stream (spec:
+~/specs/collins/native-diff-panel.md). It takes diffmodel's Files
 and draws one `_FileSection` per file — a header (fold, icon, path, +/−
 counts, what kind of change it is), a side-by-side picture for an image,
 then `_GapRow`s and `_HunkSection`s in patch order — inside one vertical
@@ -104,7 +104,7 @@ log = logging.getLogger(__name__)
 LAYOUT_AUTO, LAYOUT_SPLIT, LAYOUT_STACK = gitloads.LAYOUTS
 SPLIT_MIN_WIDTH = 1000
 # Tab stops in the hunk text. The editor has no tab-width setting to follow
-# (state.DEFAULT_SETTINGS has none), so this is hunk's own default.
+# (state.DEFAULT_SETTINGS has none), so this is the diff's own default.
 TAB_WIDTH = 4
 # A gap's ▲ / ▼ step, and the most lines `all` will draw at once — a gap
 # of a hundred thousand unchanged lines is a file, not context.
@@ -254,7 +254,7 @@ def _selection_bounds(buffer: Gtk.TextBuffer) -> tuple[Gtk.TextIter, Gtk.TextIte
 
 def _decode_lines(data: bytes | None) -> list[str] | None:
     """A side's whole file as lines, for gap context: None for no file, a
-    binary (a NUL in the first 8000 bytes, hunk's sniff), or one over
+    binary (a NUL in the first 8000 bytes, git's own sniff), or one over
     diffmodel's char cap."""
     if data is None or b"\x00" in data[:8000] or len(data) > diffmodel.MAX_PATCH_CHARS:
         return None
@@ -1694,9 +1694,11 @@ class _HunkSection(Gtk.Box):
         lines (what `}` / `{` walk)."""
         return any(view.marks for view in self.views)
 
-    def grab(self, line_index: int | None = None, side: str = diffmodel.NEW) -> bool:
+    def grab(self, line_index: int | None = None, side: str = diffmodel.NEW, focus: bool = True) -> bool:
         """Focus the view (the *side*'s in split) with the cursor on hunk
-        line *line_index* (a Line's index in hunk.lines) when given."""
+        line *line_index* (a Line's index in hunk.lines) when given. With
+        *focus* False the cursor is placed and the keyboard stays where it
+        is (the show_diff tool's reveal: the agent asked, nobody clicked)."""
         if not self.views:
             return False
         view = self.views[0]
@@ -1704,6 +1706,8 @@ class _HunkSection(Gtk.Box):
             view = self.views[1]
         if line_index is not None and 0 <= line_index < len(self.hunk.lines):
             view.place_cursor(self._row_for(view, line_index))
+        if not focus:
+            return True
         return view.view.grab_focus()
 
     def _row_for(self, view: _HunkView, line_index: int) -> int:
@@ -1821,7 +1825,7 @@ class _GapRow(Gtk.Box):
 
     @property
     def key(self) -> str:
-        """hunk's address for this gap: `before:<i>` / `trailing:<i>`."""
+        """The model's address for this gap: `before:<i>` / `trailing:<i>`."""
         return f"{self.position}:{self.hunk_index}"
 
     @property
@@ -2474,15 +2478,21 @@ class DiffView(Gtk.Box):
         self._schedule_scroll_sync()
 
     def reveal(
-        self, path: str, hunk: int | None = None, side: str | None = None, line: int | None = None
+        self,
+        path: str,
+        hunk: int | None = None,
+        side: str | None = None,
+        line: int | None = None,
+        focus: bool = True,
     ) -> bool:
         """Scroll to *path*'s section — or its hunk *hunk* (0-based), or the
         hunk holding 1-based *line* on *side* (new by default) — and focus
-        that hunk's view with the cursor on the line. A line no hunk
-        carries (an unchanged stretch) lands on the nearest hunk: the file
-        is in the diff, which is what the caller asked about (`holds_line`
-        says whether the line itself was). False only when the file isn't
-        in the load. Synchronous."""
+        that hunk's view with the cursor on the line (with *focus* False
+        the cursor is placed and the keyboard left where it is). A line no
+        hunk carries (an unchanged stretch) lands on the nearest hunk: the
+        file is in the diff, which is what the caller asked about
+        (`holds_line` says whether the line itself was). False only when
+        the file isn't in the load. Synchronous."""
         side = side if side in diffmodel.SIDES else diffmodel.NEW
         section = self._section_for(path, side)
         if section is None:
@@ -2502,7 +2512,7 @@ class DiffView(Gtk.Box):
             target = section.hunks[0]
         keyedslots.scroll_to(self._scroller, target if hunk is not None and target is not None else section)
         if target is not None:
-            target.grab(line_index, side)
+            target.grab(line_index, side, focus=focus)
             self._set_current(section.file.path, target.hunk.index)
         else:
             self._set_current(section.file.path, -1)
@@ -2874,6 +2884,14 @@ class DiffView(Gtk.Box):
         self.on_gap_expand(gap, ALL, 0)
         return True
 
+    def hidden_by_filter(self, path: object, side: str | None = None) -> bool:
+        """Whether *path*'s section is in the load but hidden by the files
+        filter (what a reveal of it would have to clear first). False for
+        a file the load doesn't hold."""
+        side = side if side in diffmodel.SIDES else diffmodel.NEW
+        section = self._section_for(path, side)
+        return section is not None and not section.get_visible()
+
     def filter(self, text: str) -> int:
         """Show only the files whose path contains *text* (case-insensitive);
         "" shows all. Sections hide, they are not destroyed. Returns how
@@ -3015,8 +3033,9 @@ class DiffView(Gtk.Box):
 
     def expand_gap_before_focus(self) -> bool:
         """`z`: draw every unchanged line above the focused hunk (the
-        current one when none has the keyboard) — hunk's gap toggle, one
-        way: the row folds itself away once nothing is left to show."""
+        current one when none has the keyboard) — the gap's *all* button
+        from the keyboard, one way: the row folds itself away once nothing
+        is left to show."""
         hunk = self._focused_hunk
         if hunk is None or hunk.get_parent() is None:
             path, index = self._current

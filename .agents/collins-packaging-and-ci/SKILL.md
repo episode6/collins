@@ -38,8 +38,7 @@ host agent because of the pid namespace).
 everything the app reads at runtime is package data declared in
 `pyproject.toml`: locale `.mo`s, `THIRD_PARTY_LICENSES.md`, the app and
 panel SVGs, `icons/hicolor/scalable/actions/*.svg`, `sounds/*.oga`, the
-desktop file and metainfo, and the hunk extension's `.ts/package.json/
-README.md`. The in-tree paths are **symlinks into `data/`** (`collins/icons`,
+desktop file and metainfo. The in-tree paths are **symlinks into `data/`** (`collins/icons`,
 `collins/sounds`, `collins/com.episode6.Collins.desktop`, `…metainfo.xml`;
 `THIRD_PARTY_LICENSES.md` runs the other way, real file in the package). The
 Debug icon variants are listed out of the globs (a checkout-only thing).
@@ -85,8 +84,7 @@ even though the image has GTK), `e2e` (`xvfb-run … scripts/run_e2e.py
 `build_deb.sh`), `ppa-source` (noble in the noble packaging image, resolute in
 full; unsigned, checks the upload set exists), `rpm` (Fedora image: SRPM,
 rpmlint, rebuild with `%check` = desktop-file + AppStream validation, `dnf
-install`, path assertions), `verify-versions`, `hunk-ext` (`setup-bun` 1.4.0,
-`bun test`, no `bun install`).
+install`, path assertions), `verify-versions`.
 
 `.github/docker/ci.Dockerfile` is **the one canonical list of build
 dependencies** — add a build-dep there, not in a workflow. Three stages/tags

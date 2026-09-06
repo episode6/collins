@@ -1,3 +1,4 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
 """App-side plumbing for the session MCP tools, kept free of GTK.
 
 Everything the socket service and command builders need that isn't a widget:
@@ -95,20 +96,17 @@ TOOLS: list[dict] = [
     {
         "name": "show_diff",
         "description": (
-            "Open this session's Collins git page — hunk, the terminal diff "
-            "viewer, beside the terminal — on a diff, and optionally point it "
-            "at a file and line: put a change on the user's screen instead of "
-            "pasting a diff or asking them to run git. 'what' is one of "
-            "'unstaged' (the working tree), 'staged' (the index), 'branch' "
-            "(the current branch against its parent), or a commit — any ref "
-            "git resolves: a sha, HEAD~1, a branch or tag name. Reach for it "
-            "when the user should look at a change: 'show me what you did', "
-            "a review, a commit to walk through, the hunk a test failure "
-            "points at. The page is shown without taking the user's keyboard. "
-            "The reply names what loaded and the hunk session id; for "
-            "anything else in the viewer — moving between hunks, "
-            "highlighting lines, comments — drive it from your shell with "
-            "`hunk session …` (see `hunk skill path`)."
+            "Open this session's Collins git page — the diff view beside the "
+            "terminal — on a diff, and optionally point it at a file and "
+            "line: put a change on the user's screen instead of pasting a "
+            "diff or asking them to run git. 'what' is one of 'unstaged' "
+            "(the working tree), 'staged' (the index), 'branch' (the current "
+            "branch against its parent), or a commit — any ref git resolves: "
+            "a sha, HEAD~1, a branch or tag name. Reach for it when the user "
+            "should look at a change: 'show me what you did', a review, a "
+            "commit to walk through, the hunk a test failure points at. The "
+            "page is shown without taking the user's keyboard. The reply "
+            "names what loaded and, with a file, what was revealed."
         ),
         "inputSchema": {
             "type": "object",
@@ -127,7 +125,7 @@ TOOLS: list[dict] = [
                     "minLength": 1,
                     "maxLength": 4096,
                     "description": (
-                        "A file in that diff to move the viewer to, as a "
+                        "A file in that diff to move the view to, as a "
                         "path relative to the repository root (an absolute "
                         "path inside the repository works too). It must "
                         "have changes in the diff being shown."
@@ -459,40 +457,15 @@ def default_tool_settings() -> dict[str, bool]:
     return {tool_setting_key(tool["name"]): True for tool in TOOLS}
 
 
-# The tools that need something outside Collins to be of any use: show_diff
-# drives hunk (hunk.dev), and a machine without it — or with one older than
-# the session API (hunkctl.MIN_VERSION) — has nothing for the tool to open.
-# `enabled_tools` asks `is_available` about these, beside the user's switch,
-# so an agent on such a machine is never told the tool exists.
-REQUIRES_HUNK: frozenset[str] = frozenset({"show_diff"})
+def enabled_tools(is_enabled: Callable[[str], bool]) -> list[dict]:
+    """The TOOLS entries *is_enabled* says a session may see.
 
-
-def enabled_tools(
-    is_enabled: Callable[[str], bool], is_available: Callable[[str], bool] | None = None
-) -> list[dict]:
-    """The TOOLS entries *is_enabled* says a session may see — less the
-    REQUIRES_HUNK ones *is_available* says can't work here (omitted: all
-    can).
-
-    What `tools/list` answers with, so a tool switched off — or one whose
-    program isn't installed — is one the agent is never told about rather
-    than one it is told about and refused. A session already running keeps
-    the list it was handed at startup, which is why `run_tool_call` gates
-    calls on the switch too; availability is not re-checked there on
-    purpose — a call to show_diff on a machine that lost hunk since the
-    list was served opens the page on its install card, which tells the
-    user what to do, and the reply says so.
+    What `tools/list` answers with, so a tool switched off is one the agent
+    is never told about rather than one it is told about and refused. A
+    session already running keeps the list it was handed at startup, which
+    is why `run_tool_call` gates calls on the switch too.
     """
-    return [
-        tool
-        for tool in TOOLS
-        if is_enabled(tool["name"])
-        and (
-            is_available is None
-            or tool["name"] not in REQUIRES_HUNK
-            or is_available(tool["name"])
-        )
-    ]
+    return [tool for tool in TOOLS if is_enabled(tool["name"])]
 
 
 def disabled_error(name: str) -> str:

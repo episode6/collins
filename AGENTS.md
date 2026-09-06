@@ -8,7 +8,7 @@ Code sessions. It reads the CLI's own session transcripts under
 `~/.claude/projects/`, lists them in a sidebar, and opens each one in an
 embedded VTE terminal running `claude --resume <id>`. Around that terminal it
 grows a workbench: a prompt composer, a terminal panel, a code editor, a git
-page (hunk in a VTE), native pull-request pages, notifications, a status icon,
+page (a native diff view), native pull-request pages, notifications, a status icon,
 and a small MCP server every launched session can call back into.
 
 It is a GPL-3.0 fork of r4nd3l/agent-session-manager, positioned as an
@@ -178,7 +178,6 @@ python3 -m pytest tests/ -q                 # unit suite (GTK-free, ~seconds)
 ruff check collins/ tests/                  # CI pins ruff 0.16.4; rules E F W I UP B
 bash .agents/capture-screenshots/scripts/with-headless-display.sh \
     python3 scripts/run_e2e.py [--only NAME] # e2e checks behind a headless compositor
-(cd collins/hunkext/collins-git && bun test) # the hunk extension's tests
 python3 scripts/verify_versions.py          # every version copy agrees
 ./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug)
 ```
@@ -193,8 +192,8 @@ directories). Scripts run from outside the repo import the system-installed
 
 CI (`.github/workflows/ci.yml`) runs lint, the unit suite, the e2e suite under
 Xvfb, wheel + `.deb` packaging with `scripts/verify_wheel_data.py`, PPA source
-builds for noble and resolute, an RPM build + `dnf install`, version
-verification, and `bun test`. The e2e job appears late in `gh pr checks`
+builds for noble and resolute, an RPM build + `dnf install`, and version
+verification. The e2e job appears late in `gh pr checks`
 output — a run is green only when `e2e` is listed and passed. When you change a
 signal signature or a method the e2e scripts poke, grep `scripts/check_*.py`.
 
@@ -221,7 +220,7 @@ spec's `%changelog`.
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
 | Pull requests: status, hub, detail page, actions, menus, gh setup | `prstatus` `prstore` `prdetail` `practions` `prmenu` `prview` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
-| The git page: hunk in a VTE, the native commits and files sidebar, the collins-git extension, git info, the panels' model and git runners, the native diff view (experimental, behind `git_viewer`) and its GTK-free half | `gitpage` `gitsidebar` `gitloads` `hunkctl` `gitinfo` `gitmodel` `gitops` `diffview` `diffmodel` `diffnotes` `gitpatch` `keyedslots` `imagediff` `hunkext/collins-git` | `collins-git-page` |
+| The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info, the panels' model and git runners | `gitpage` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitmodel` `gitops` `keyedslots` `imagediff` | `collins-git-page` |
 | Editor panel: file tree, quick open, pop-out, narrow mode | `editor` `editorfiles` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
 | Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
 | Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `usage` `usagepanel` `tokenrefresh` `tokensettings` `welcome` `welcomegate` `clisetup` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |

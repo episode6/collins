@@ -294,22 +294,14 @@ DEFAULT_SETTINGS = {
     # merges — closing a pull request unmerged still asks, since that is the
     # one PR action that throws the work away rather than landing it.
     "confirm_merges": True,
-    # The git page (gitpage.py), Preferences → Git. The first four reach
-    # hunk: layout and theme on its command line (a change restarts hunk in
-    # place), the untracked switch on every diff it loads, the page size
-    # through the sidecar the collins-git extension reads.
-    "git_layout": "auto",  # hunk --mode: auto / split / stack
-    "git_theme": "",  # hunk --theme; "" = hunk's own default
-    "git_untracked": True,  # off: --exclude-untracked (working-tree reviews hide untracked files)
+    # The git page (gitpage.py), Preferences → Git, read through
+    # gitloads.Options.from_settings: the diff view's layout (the header
+    # menu and the `0` / `1` / `2` keys flip it too), whether working-tree
+    # reviews list untracked files, and the commits panel's page size.
+    "git_layout": "auto",  # auto / split / stack (diffview.set_options)
+    "git_untracked": True,  # off: working-tree reviews hide untracked files
     "git_log_page": 20,  # commits per group page in the commits panel ("load more…" step)
-    # Which viewer the git page draws diffs with while the native one is
-    # experimental (gitpage.py reads it through gitloads.Options.viewer):
-    # "hunk" — the terminal viewer, today's default — or "native" — the GTK
-    # diff view (diffview.py). TEMPORARY: deleted in PR 4 of the native
-    # diff stack (~/specs/collins/native-diff-panel.md), when the native
-    # view becomes the only one and every hunk path goes with the switch.
-    "git_viewer": "hunk",
-    # The native diff view's own knobs (DiffView.set_options, fed from
+    # The diff view's own knobs (DiffView.set_options, fed from
     # gitpage.apply_settings; the header menu and the `l` / `w` keys flip
     # the first two): the old and new line-number columns, wrapping long
     # lines instead of scrolling each hunk sideways, and the word-level
@@ -561,6 +553,12 @@ class AppState:
         # went with the new-chat screen, which writes every first prompt in
         # its own box; the key is dropped on the next save.
         settings.pop("composer_new_sessions", None)
+        # git_theme and git_viewer went with the terminal diff viewer the
+        # git page used to run (the diff view has no theme of its own: it
+        # follows the editor's scheme); a stale key would otherwise ride
+        # along in self.settings and be written back by every save.
+        settings.pop("git_theme", None)
+        settings.pop("git_viewer", None)
         self.settings = {**DEFAULT_SETTINGS, **settings}
 
     def save(self) -> None:

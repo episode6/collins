@@ -14,7 +14,7 @@ the Ctrl+1/2/3 chords that pick the three modes (load_for_key, integers
 rather than Gdk constants), what the footer click opens on
 (initial_mode), the panel-layout slot a page persists in (encode_state /
 decode_state / decode_sidebar), the `show_diff` session tool's reading of
-its `what` argument and the repo-relative file path it hands the viewer
+its `what` argument and the repo-relative file path it hands the view
 (show_diff_load, diff_file_path), and the three git calls behind them —
 commit_subject / commit_subject_and_sha for a commit's name and full sha,
 resolve_commit for the sha a ref means right now — each one subprocess on
@@ -22,16 +22,15 @@ a worker thread with commit_subject's three answers (a value, None for
 "git says no", "" for "git couldn't be asked").
 
 Preferences → Git arrives as the whole settings dict and normalises into
-an Options (from_settings): the layout (one of LAYOUTS), the theme name
-(safe_theme, MAX_THEME_LEN), the untracked switch and the commits-per-group
-page (LOG_PAGE, clamped to MIN_LOG_PAGE..MAX_LOG_PAGE). MAX_PATH_CHARS
-bounds every path that arrives from a viewer, a sidecar or a saved layout.
+an Options (from_settings): the layout (one of LAYOUTS), the untracked
+switch, the commits-per-group page (LOG_PAGE, clamped to
+MIN_LOG_PAGE..MAX_LOG_PAGE) and the diff view's three knobs (line
+numbers, wrap, word diff). MAX_PATH_CHARS bounds every path that arrives
+from a tool call or a saved layout. SHOW_DIFF_DEADLINE_S and
+SHOW_DIFF_POLL_MS bound the show_diff tool's wait for a page to settle.
 
-None of this is about hunk: it was split out of hunkctl (which keeps
-re-exporting every name here, so its callers read it off either module)
-so the native diff view can load the same things without the viewer's
-module. No GTK, no git beyond the three calls named above; imported by
-the unit tests (tests/test_gitloads.py).
+No GTK, no git beyond the three calls named above; imported by the unit
+tests (tests/test_gitloads.py).
 """
 
 from __future__ import annotations
@@ -48,47 +47,35 @@ MODES: tuple[str, ...] = ("unstaged", "staged", "branch")
 DEFAULT_MODE = "unstaged"
 # The fourth kind of load, a commit: {"show": "<ref>"} beside the three mode
 # strings; the fifth, a range between two refs: {"range": "<a>...<b>"} —
-# three dots exactly, both halves a safe ref (is_range) — hunk's
-# `diff a...b`, what the commits list's parent-branch header loads
-# (`<default>...<parent>`). Two-dot ranges stay foreign: hunk shows them,
-# Collins names nothing for them. `Loaded` is what the page's
-# loaded/load()/page_state carry.
+# three dots exactly, both halves a safe ref (is_range) — git's `diff
+# a...b`, what the commits list's parent-branch header loads
+# (`<default>...<parent>`). Two-dot ranges are not a load: Collins names
+# nothing for them. `Loaded` is what the page's loaded/load()/page_state
+# carry.
 SHOW_KEY = "show"
 RANGE_KEY = "range"
 RANGE_DOTS = "..."
 Loaded = str | dict
-# The longest path a session record, a sidecar selection or an anchor may
-# name: a repo-relative path from hunk's own changeset, and still foreign
-# content (a widget's label, a navigate argument). Anything longer is
-# dropped, never truncated — a cut path names nothing.
+# The longest path a tool call or a saved layout may name: a repo-relative
+# path, and still foreign content (a widget's label, a reveal target).
+# Anything longer is dropped, never truncated — a cut path names nothing.
 MAX_PATH_CHARS = 512
-# hunk's layouts, `--mode`'s words (`hunk diff --help`, 0.20.1): the
-# git_layout setting's domain. LAYOUTS[0] is hunk's own choice and sends
-# no flag; hunk exits at once on a word it doesn't know, so anything else
-# normalises to it (Options.from_settings). Not MODES — those are the
-# page's loads.
+# The diff view's layouts (the git_layout setting's domain, diffview.
+# set_options): side by side, stacked, or whichever fits the width.
+# LAYOUTS[0] is the default; anything else normalises to it
+# (Options.from_settings). Not MODES — those are the page's loads.
 LAYOUTS: tuple[str, ...] = ("auto", "split", "stack")
 DEFAULT_LAYOUT = LAYOUTS[0]
-# Which viewer the git page draws diffs with (the git_viewer setting):
-# hunk's VTE, or the native diff view (diffview.py). Temporary — the
-# switch and hunk go together in PR 4 of the native-diff stack; until then
-# an unknown word normalises to hunk, today's default.
-VIEWER_HUNK = "hunk"
-VIEWER_NATIVE = "native"
-VIEWERS: tuple[str, ...] = (VIEWER_HUNK, VIEWER_NATIVE)
-DEFAULT_VIEWER = VIEWER_HUNK
-# The commits-per-group page the extension loads (the git_log_page setting),
-# its default and the clamp — the same numbers as sidecar.ts's, so what
-# Collins writes is what the extension reads.
+# The commits-per-group page the sidebar's commits list loads (the
+# git_log_page setting), its default and the clamp.
 LOG_PAGE = 20
 MIN_LOG_PAGE = 5
 MAX_LOG_PAGE = 500
-# A theme name (git_theme) that can go on hunk's argv: hunk falls back to
-# its default theme on a name it doesn't know (verified against 0.20.1),
-# so the gate is only against something that isn't one argument. The
-# longest theme id hunk ships is 26 characters. Preferences validates
-# against the same number, imported from here.
-MAX_THEME_LEN = 64
+# The show_diff session tool's whole budget — under the CLI's own MCP
+# timeout (the shim's 15 s) — and how often it polls the page for its
+# load to land (app._ShowDiff).
+SHOW_DIFF_DEADLINE_S = 12.0
+SHOW_DIFF_POLL_MS = 250
 # A ref that is safe as an argument and as a title token: the same rule as
 # gitinfo._safe_branch_name (non-empty, no whitespace, no leading "-", no
 # "..") plus a length cap, since a title token or a persisted string is
@@ -124,50 +111,31 @@ _OTHER_CHORD_MASK = _ALT_MASK | _SUPER_MASK | _HYPER_MASK | _META_MASK
 
 @dataclass(frozen=True)
 class Options:
-    """What Preferences → Git decides about hunk, normalised (see
-    from_settings): the layout (one of LAYOUTS) and theme name ("" for
-    hunk's own default), whether working-tree reviews include untracked
-    files, and the commits-per-group page. The defaults are the shipped
-    settings' — a page that never received settings runs on them, and
-    with them every argv here is the one it was before the settings
-    existed."""
+    """What Preferences → Git decides about the git page, normalised (see
+    from_settings): the layout (one of LAYOUTS), whether working-tree
+    reviews include untracked files, the commits-per-group page, and the
+    diff view's three knobs (the line-number columns, wrapping, the word
+    emphasis). The defaults are the shipped settings' — a page that never
+    received settings runs on them."""
 
     layout: str = DEFAULT_LAYOUT
-    theme: str = ""
     untracked: bool = True
     log_page: int = LOG_PAGE
-    # The native diff view's half (git_viewer and its three knobs): which
-    # viewer draws, the line-number columns, wrapping, the word emphasis.
-    viewer: str = DEFAULT_VIEWER
     line_numbers: bool = True
     wrap: bool = False
     word_diff: bool = True
-
-    @property
-    def native(self) -> bool:
-        """Whether the native diff view draws the page (git_viewer)."""
-        return self.viewer == VIEWER_NATIVE
 
     @classmethod
     def from_settings(cls, settings: Mapping) -> Options:
         """An Options out of the whole settings dict, tolerant of every
         key being missing or wrong: git_layout not in LAYOUTS → "auto";
-        git_theme stripped, kept only when it is one argument (no
-        whitespace, no leading "-", at most MAX_THEME_LEN chars) else "";
         git_untracked as a bool (absent: on); git_log_page as an int
         clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE);
-        git_viewer not in VIEWERS → hunk; git_line_numbers, git_wrap_lines
-        and git_word_diff as bools (absent: on, off, on)."""
+        git_line_numbers, git_wrap_lines and git_word_diff as bools
+        (absent: on, off, on)."""
         layout = settings.get("git_layout")
         if layout not in LAYOUTS:
             layout = DEFAULT_LAYOUT
-        viewer = settings.get("git_viewer")
-        if viewer not in VIEWERS:
-            viewer = DEFAULT_VIEWER
-        theme = settings.get("git_theme")
-        theme = theme.strip() if isinstance(theme, str) else ""
-        if not safe_theme(theme):
-            theme = ""
         untracked = settings.get("git_untracked", True)
         try:
             log_page = int(settings.get("git_log_page", LOG_PAGE))
@@ -176,34 +144,19 @@ class Options:
         log_page = max(MIN_LOG_PAGE, min(MAX_LOG_PAGE, log_page))
         return cls(
             layout=layout,
-            theme=theme,
             untracked=bool(untracked),
             log_page=log_page,
-            viewer=viewer,
             line_numbers=bool(settings.get("git_line_numbers", True)),
             wrap=bool(settings.get("git_wrap_lines", False)),
             word_diff=bool(settings.get("git_word_diff", True)),
         )
 
 
-def safe_theme(name: object) -> bool:
-    """Whether *name* can go on hunk's argv as `--theme <name>`: a non-empty
-    str of at most MAX_THEME_LEN chars, no whitespace, no leading "-". Not
-    whether hunk knows it — it can't be listed (built-ins, `auto`, aliases
-    and the user's own `[themes.<id>]`), and an unknown one degrades to
-    hunk's default rather than failing the spawn."""
-    if not isinstance(name, str) or not name or len(name) > MAX_THEME_LEN:
-        return False
-    if any(ch.isspace() for ch in name):
-        return False
-    return not name.startswith("-")
-
-
 def safe_ref(name: object) -> bool:
-    """Whether *name* can be handed to git (and to hunk's argv) as one
-    revision: a non-empty str, no whitespace, no leading "-", no ".." (a
-    range), at most _MAX_REF_LEN chars. gitinfo._safe_branch_name's rule,
-    for what arrives from a title, a sidecar or a saved layout."""
+    """Whether *name* can be handed to git as one revision: a non-empty
+    str, no whitespace, no leading "-", no ".." (a range), at most
+    _MAX_REF_LEN chars. gitinfo._safe_branch_name's rule, for what arrives
+    from a tool call or a saved layout."""
     if not isinstance(name, str) or not name or len(name) > _MAX_REF_LEN:
         return False
     if any(ch.isspace() for ch in name):
@@ -364,15 +317,15 @@ def show_diff_load(what: object) -> Loaded | None:
 def diff_file_path(
     raw: object, repo_root: str | None, cwd: str | None = None, exists=os.path.exists
 ) -> str | None:
-    """The path hunk's `--file` takes — repo-relative, "/"-separated, as the
-    files panel shows it — out of what the agent handed the tool: an
+    """The path the diff view reveals — repo-relative, "/"-separated, as
+    the files panel shows it — out of what the agent handed the tool: an
     absolute path inside *repo_root*, or a relative one. A relative path
     is taken against the repository root (that is how a diff names files)
     unless it is only there against the agent's *cwd* (an agent that cd'd
     into a subdirectory and named a file the way its shell sees it) —
     *exists* decides, injectable for the tests. None for anything that
     can't be a file in the diff: empty, escaping the root, a leading "-"
-    (hunk's parser would read it as a flag)."""
+    (git would read it as a flag)."""
     if not isinstance(raw, str) or not raw.strip() or not repo_root:
         return None
     root = os.path.normpath(repo_root)
@@ -404,7 +357,7 @@ def breadcrumb(loaded: Loaded, branch: str | None, parent: str | None, subject: 
     None), or for a commit "<ref> <subject>" with the ref cut short
     (short_ref) — `a1b2c3d Wire the mode switch` — and _("commit {ref}")
     while the *subject* isn't known (see commit_subject). A range `a...b`
-    reads the way hunk's `left...right` does, right against left: the
+    reads right against left, as git's symmetric difference does: the
     same _("{branch} vs {parent}") with b as the branch and a as the
     parent (shas cut short)."""
     if is_show(loaded):

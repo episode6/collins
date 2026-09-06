@@ -17,8 +17,8 @@ The Notifications group's search words live here for the same reason: the
 words someone types for a notification setting ("chime", "badge") are not
 in any row's own text, and the unit suite can hold the list to the spec's
 without a dialog. The Git group's layouts and search words likewise: the
-layout values are hunk's own --mode words, which hunkctl pins on its side,
-and the two must not drift apart.
+layout values are gitloads.LAYOUTS' words, and the two must not drift
+apart.
 """
 
 from __future__ import annotations
@@ -64,39 +64,26 @@ NOTIFICATION_SEARCH_TERMS: tuple[str, ...] = (
     "unread",
 )
 
-# The Git group's Layout row, in the drop-down's order: hunk's --mode values
-# and their labels (N_-style — prefs translates them at use). The values are
-# hunk's words verbatim; hunkctl.LAYOUTS holds the same three, and a fourth
-# would have to land in both.
+# The Git group's Layout row, in the drop-down's order: the diff view's
+# layouts and their labels (N_-style — prefs translates them at use).
+# gitloads.LAYOUTS holds the same three, and a fourth would have to land in
+# both.
 GIT_LAYOUTS: tuple[tuple[str, str], ...] = (
     ("auto", "Automatic"),
     ("split", "Split"),
     ("stack", "Stacked"),
 )
 
-# The Git group's Diff viewer row, in the drop-down's order: gitloads.VIEWERS'
-# words (hunk first — today's default — then the native view, experimental
-# until PR 4 of the native-diff stack deletes the row along with hunk).
-GIT_VIEWERS: tuple[tuple[str, str], ...] = (
-    ("hunk", "hunk"),
-    ("native", "Native"),
-)
-
 # What the search bar matches the Git group on, beyond its rows' own titles
 # and subtitles: the tool's name, and the words people have for its parts.
 GIT_SEARCH_TERMS: tuple[str, ...] = (
     "git",
-    "hunk",
     "diff",
     "branch",
     "parent",
-    "theme",
     "untracked",
     "commits",
     "layout",
-    "native",
-    "viewer",
-    "experimental",
     "line numbers",
     "wrap",
     "word",

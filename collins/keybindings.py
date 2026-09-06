@@ -146,7 +146,7 @@ BINDINGS: tuple[Binding, ...] = (
     ),
     Binding("editor.save", N_("Save the file"), ("<Control>s",), GROUP_EDITOR, N_("In the editor.")),
     Binding("editor.find", N_("Find in the file"), ("<Control>f",), GROUP_EDITOR, N_("In the editor.")),
-    # The native diff view's keys (hunk's own defaults where it had them):
+    # The diff view's keys (vim-shaped, as terminal diff viewers bind them):
     # page-scoped — a Gtk.ShortcutController on the diff view, capture
     # phase so a bare letter beats the text view under it and never reaches
     # the agent's terminal.
@@ -189,8 +189,8 @@ BINDINGS: tuple[Binding, ...] = (
         GROUP_GIT,
         N_("In the diff."),
     ),
-    # The staging keys (the collins-git extension's, on hunk's cursor;
-    # here on the focused hunk and the view's own line selection).
+    # The staging keys, on the focused hunk and the view's own line
+    # selection.
     Binding(
         "git.stage",
         N_("Stage, unstage or revert the hunk or the selected lines"),
@@ -217,7 +217,7 @@ BINDINGS: tuple[Binding, ...] = (
     Binding("git.layout-stack", N_("Layout: stacked"), ("2",), GROUP_GIT, N_("In the diff.")),
     Binding("git.line-numbers", N_("Show/hide line numbers"), ("l",), GROUP_GIT, N_("In the diff.")),
     Binding("git.wrap", N_("Wrap long lines"), ("w",), GROUP_GIT, N_("In the diff.")),
-    # The notes (hunk's c / E / a): cards under the hunk, anchored to the
+    # The notes (c / E / a): cards under the hunk, anchored to the
     # cursor line. The letters are off while a note editor is open.
     Binding(
         "git.add-note",

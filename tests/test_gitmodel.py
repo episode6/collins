@@ -3,12 +3,12 @@
 """Tests for gitmodel: the git page's native panels as pure functions —
 the log and status parsers, the commits list's rows and which of them is
 the loaded one, the files list's sections, and the action row's words.
-Ports of the collins-git extension's `bun test` cases (test/model.test.ts,
-test/git.test.ts) that the native panels replace."""
+Ports of the former collins-git extension's `bun test` cases
+(test/model.test.ts, test/git.test.ts) that the native panels replaced."""
 
 import pytest
 
-from collins import gitmodel, hunkctl
+from collins import gitloads, gitmodel
 from collins.gitmodel import (
     BranchPage,
     BranchRef,
@@ -199,7 +199,7 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
     assert rows[9].load is None
     assert rows[9].id == "more:default"
     for row in rows:
-        assert row.load is None or hunkctl.loaded_ok(row.load)
+        assert row.load is None or gitloads.loaded_ok(row.load)
 
 
 def test_build_rows_a_stack_is_one_group_per_branch_each_ranging_to_the_one_below():
@@ -243,11 +243,11 @@ def test_build_rows_omits_the_stack_when_the_parent_is_the_default_branch():
 def test_build_rows_with_no_parent_at_all_the_header_loads_what_the_group_lists():
     """No parent, no default (a `git init` repository on a branch called
     something else): the header ranges over the listed commits, from the
-    oldest one's parent — a load hunk takes as `diff <sha>^...HEAD`."""
+    oldest one's parent — read as `diff <sha>^...HEAD`."""
     rows = base_rows(parent=None, default=None, stack=[], default_commits=[])
     assert [row.group for row in rows] == ["current"] * 4
     assert rows[0].load == {"range": f"{commit(2).sha}^...HEAD"}
-    assert hunkctl.loaded_ok(rows[0].load)
+    assert gitloads.loaded_ok(rows[0].load)
     # And nothing listed: nothing to load.
     rows = base_rows(parent=None, default=None, stack=[], current=[], default_commits=[])
     assert rows[0].load is None
@@ -325,7 +325,7 @@ def test_loaded_row_a_range_matches_the_header_that_loads_it_anything_else_no_ro
 
 
 def session_file(file_id, path, additions, deletions, hunk_count=1, previous=None):
-    return hunkctl.SessionFile(file_id, path, previous, additions, deletions, hunk_count)
+    return gitmodel.FileSummary(file_id, path, previous, additions, deletions, hunk_count)
 
 
 FILES = [
@@ -340,7 +340,7 @@ STATUS = Status(
 )
 
 
-def test_files_sections_splits_when_the_working_tree_is_loaded_live_side_from_hunks_files():
+def test_files_sections_splits_when_the_working_tree_is_loaded_live_side_from_the_diffs_files():
     sections = files_sections(STATUS, FILES, "unstaged")
     assert sections.mode == "split"
     assert sections.live == "unstaged"
@@ -359,16 +359,15 @@ def test_files_sections_splits_when_the_working_tree_is_loaded_live_side_from_hu
 
 
 def test_files_sections_binary_reads_off_the_counts():
-    """hunk's session record has no binary flag; a binary change is the
-    one with no hunk and no line counts (hunk 0.21.1: `additions: 0,
-    deletions: 0, hunkCount: 0`). A status-side row never claims it."""
+    """A FileSummary has no binary flag; a binary change is the one with
+    no hunk and no line counts. A status-side row never claims it."""
     sections = files_sections(STATUS, FILES, "unstaged")
     assert [row.binary for row in sections.unstaged] == [False, False, True, True]
     assert [row.binary for row in sections.staged] == [False, False]
     assert FileRow("x", live=True, additions=0, deletions=0, hunk_count=1).binary is False
 
 
-def test_files_sections_the_staged_view_puts_hunks_files_on_the_staged_side():
+def test_files_sections_the_staged_view_puts_the_diffs_files_on_the_staged_side():
     sections = files_sections(STATUS, FILES[:1], "staged")
     assert sections.live == "staged"
     assert sections.staged[0].path == "a.txt" and sections.staged[0].live
@@ -386,7 +385,7 @@ def test_files_sections_with_untracked_files_off_the_staged_views_unstaged_side_
     assert [row.path for row in sections.unstaged] == ["a.txt", "u.txt"]
     shown = files_sections(with_new, FILES[:1], "staged", untracked=True)
     assert [row.code for row in shown.unstaged] == ["M", "?", "U"]
-    # The live side is hunk's own list, already filtered by hunk itself.
+    # The live side is the diff's own list, read without untracked files already.
     live = files_sections(with_new, FILES[:2], "unstaged", untracked=False)
     assert [row.path for row in live.unstaged] == ["a.txt", "n.txt"]
 
@@ -396,7 +395,7 @@ def test_files_sections_everything_else_is_flat_and_so_is_a_working_tree_with_no
     assert shown.mode == "flat"
     assert shown.live is None
     assert len(shown.flat) == 4
-    assert shown.flat[2].code == "R"  # a rename hunk reports, with no status to ask
+    assert shown.flat[2].code == "R"  # a rename the diff reports, with no status to ask
     assert shown.flat[0].code is None
     assert files_sections(None, FILES, "unstaged").mode == "flat"
     assert files_sections(STATUS, [], {"range": "a...b"}) == gitmodel.FileSections("flat")

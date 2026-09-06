@@ -1,5 +1,5 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
-# The stream parser grew out of the collins-git hunk extension's patch.ts,
+# The stream parser grew out of the former collins-git extension's patch.ts,
 # whose single-file parser was itself adapted from muzomer/hunk-commit (MIT,
 # © 2026 hunk-jj-stage contributors); see collins/THIRD_PARTY_LICENSES.md.
 
@@ -11,12 +11,12 @@ reading every header form git writes (modes, `new file` / `deleted file`,
 `similarity index` + `rename from` / `rename to`, `copy from` / `copy to`,
 `Binary files … differ`, `GIT binary patch`, `\\ No newline at end of file`,
 c-quoted paths). `parse_numstat` reads the `--numstat -z` pre-pass and
-`too_large` applies hunk's caps (TOO_LARGE_LINES changed lines or
+`too_large` applies the size caps (TOO_LARGE_LINES changed lines or
 TOO_LARGE_BYTES of patch) so an oversized file becomes a placeholder
 instead of twenty thousand widgets. `gaps` names the unchanged stretches
-around each hunk the way hunk addressed them (`before:<i>` / `trailing:<i>`),
-`split_rows` pairs deletions with additions row by row for the split layout
-(hunk's buildSplitRows), `word_emphasis` marks the words that differ inside
+around each hunk by position (`before:<i>` / `trailing:<i>`),
+`split_rows` pairs deletions with additions row by row for the split layout,
+`word_emphasis` marks the words that differ inside
 a paired deletion/addition (difflib over word tokens, ratio ≥ 0.5),
 `palette` blends a style scheme's diff colours into its text background
 (0.18 for a row, 0.40 for the emphasis), `locate` finds the hunk and line a
@@ -41,8 +41,8 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-# hunk's largeFile.ts caps: a file whose patch changes more lines than this,
-# or weighs more than this, is a placeholder with no hunks (`too_large`).
+# The large-file caps: a file whose patch changes more lines than this, or
+# weighs more than this, is a placeholder with no hunks (`too_large`).
 TOO_LARGE_LINES = 20_000
 TOO_LARGE_BYTES = 1_048_576
 # Bounds on the stream itself. `git show` of a squash that touched every
@@ -609,7 +609,7 @@ def parse_numstat(text: object) -> dict[str, tuple[int, int]]:
 
 
 def too_large(additions: int, deletions: int, size: int) -> bool:
-    """hunk's largeFile rule: over TOO_LARGE_LINES changed lines, or a patch
+    """The large-file rule: over TOO_LARGE_LINES changed lines, or a patch
     over TOO_LARGE_BYTES, is shown as a placeholder."""
     return additions + deletions > TOO_LARGE_LINES or size > TOO_LARGE_BYTES
 
@@ -618,8 +618,8 @@ def too_large(additions: int, deletions: int, size: int) -> bool:
 
 
 def hunk_range(hunk: Hunk, side: str) -> tuple[int, int]:
-    """One hunk's inclusive line span on one side, hunk's own convention: a
-    zero-count side (a pure insertion's old side) still spans one line."""
+    """One hunk's inclusive line span on one side, by the view's convention:
+    a zero-count side (a pure insertion's old side) still spans one line."""
     start = hunk.new_start if side == NEW else hunk.old_start
     count = hunk.new_count if side == NEW else hunk.old_count
     return start, start + max(count, 1) - 1
@@ -690,7 +690,7 @@ def _change_blocks(lines: Sequence[Line]) -> Iterable[tuple[list[int], list[int]
 
 
 def split_rows(hunk: Hunk) -> list[SplitRow]:
-    """hunk's buildSplitRows: a context line is one row on both sides; inside
+    """The split layout's rows: a context line is one row on both sides; inside
     a change block the i-th deletion pairs with the i-th addition, and the
     longer side's extras sit beside padding (None)."""
     rows: list[SplitRow] = []

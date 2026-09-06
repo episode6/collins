@@ -73,40 +73,24 @@ def test_enabled_tools_serves_only_what_is_switched_on():
     ]
 
 
-def test_enabled_tools_leaves_show_diff_out_without_hunk():
-    """The tool drives hunk; a machine without it is never told the tool
-    exists (the author's ask on PR 487), whatever the switch says."""
-    served = mcptools.enabled_tools(lambda _name: True, lambda _name: False)
+def test_show_diff_is_served_on_the_switch_alone():
+    """The tool needs nothing outside Collins (the diff view is native): the
+    user's switch is the only gate, and there is no availability hook."""
+    served = mcptools.enabled_tools(lambda _name: True)
+    assert served == mcptools.TOOLS
+    served = mcptools.enabled_tools(lambda name: name != "show_diff")
     assert "show_diff" not in [tool["name"] for tool in served]
     assert len(served) == len(mcptools.TOOLS) - 1
-    served = mcptools.enabled_tools(lambda _name: True, lambda _name: True)
-    assert served == mcptools.TOOLS
+    assert not hasattr(mcptools, "REQUIRES_HUNK")
 
 
-def test_availability_is_asked_only_about_the_tools_that_need_hunk():
-    asked = []
-
-    def available(name):
-        asked.append(name)
-        return False
-
-    served = mcptools.enabled_tools(lambda _name: True, available)
-    assert asked == ["show_diff"]
-    assert mcptools.REQUIRES_HUNK == {"show_diff"}
-    assert [tool["name"] for tool in served] == [
-        tool["name"] for tool in mcptools.TOOLS if tool["name"] != "show_diff"
-    ]
-
-
-def test_switch_off_beats_availability():
-    """A switched-off tool is never asked about: the switch is the user's
-    word and comes first."""
-    asked = []
-    served = mcptools.enabled_tools(
-        lambda name: name != "show_diff", lambda name: asked.append(name) or True
-    )
-    assert asked == []
-    assert "show_diff" not in [tool["name"] for tool in served]
+def test_show_diff_description_names_no_external_viewer():
+    description = mcptools.tool_schema("show_diff")["description"]
+    # No session id to quote, no install link, no viewer to name: the page is
+    # Collins' own.
+    assert "session id" not in description and ".dev" not in description
+    assert "install" not in description
+    assert "diff view" in description
 
 
 def test_enabled_tools_can_serve_nothing_at_all():
@@ -199,7 +183,7 @@ def test_show_diff_args():
 
 def test_show_diff_line_must_be_a_positive_integer():
     """1-based on the wire, like open_in_editor's; the handler hands it to
-    hunk's `--new-line` as it is. Whether it needs a file is the handler's
+    the view's reveal as it is. Whether it needs a file is the handler's
     check (the schema has no way to say so)."""
     assert "integer" in mcptools.validate_args(
         "show_diff", {"what": "staged", "file": "x.py", "line": "12"}

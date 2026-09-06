@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -32,7 +32,7 @@ from . import (  # noqa: E402
     editor,
     editorfiles,
     footerapps,
-    hunkctl,
+    gitloads,
     keybindings,
     keymap,
     modelmenu,
@@ -2249,7 +2249,7 @@ class TerminalTab(Gtk.Box):
         self._branch_label.add_css_class("caption")
         self._branch_label.add_css_class("dim-label")
         self._branch_label.set_visible(False)
-        # A click opens the git page (hunk over this tree); the copy the
+        # A click opens the git page (the diff of this tree); the copy the
         # label used to be moves to the right button, so nothing is lost.
         enable_copy_on_click(
             self._branch_label,
@@ -5277,14 +5277,14 @@ class TerminalTab(Gtk.Box):
     # -- the git page ------------------------------------------------------
 
     def open_git_page(self, mode: str | None = None, focus: bool = True) -> bool:
-        """Open — or front — this session's git page: hunk beside the
-        terminal, over the agent's working tree.
+        """Open — or front — this session's git page: the diff view beside
+        the terminal, over the agent's working tree.
 
         One page per tab: a second ask fronts the page (revealing its strip
         if hidden) rather than opening a twin. *mode* None means a page
         already open keeps what it shows, and a new one opens on what the
         tree suggests — unstaged while anything in the tree is dirty, staged
-        when only the index is (`hunkctl.initial_mode`, fed by one `git
+        when only the index is (`gitloads.initial_mode`, fed by one `git
         status` on the click; the poll never pays for one). An explicit
         *mode* is loaded either way.
 
@@ -5299,7 +5299,7 @@ class TerminalTab(Gtk.Box):
         page = self._git_page
         if page is None:
             if mode is None:
-                mode = hunkctl.initial_mode(*change_summary(cwd))
+                mode = gitloads.initial_mode(*change_summary(cwd))
             page = GitPage(
                 cwd_provider=self.current_agent_cwd,
                 parent_provider=self._git_parent_branch,
@@ -5312,6 +5312,8 @@ class TerminalTab(Gtk.Box):
             self._dock.reveal_page(page, focus=focus)
             if mode is not None:
                 page.load(mode)
+            else:
+                page.recheck_tree()  # a page on the not-a-repo card: the tree is back (the check above)
         return True
 
     @property
@@ -5378,7 +5380,7 @@ class TerminalTab(Gtk.Box):
         restore never refuses on it; a "parent" key from before git alone
         named the stack is ignored). One page per tab: a duplicate entry (a
         hand-edited layout file) is refused, which drops it from the
-        restored strip. The page spawns hunk on its first map, so a
+        restored strip. The page reads its diff on its first map, so a
         restored page in a hidden strip costs nothing until it is shown."""
         if self._git_page is not None:
             return None
@@ -5386,8 +5388,8 @@ class TerminalTab(Gtk.Box):
             cwd_provider=self.current_agent_cwd,
             parent_provider=self._git_parent_branch,
             on_closed=self._on_git_page_closed,
-            loaded=hunkctl.decode_state(page),
-            sidebar=hunkctl.decode_sidebar(page),
+            loaded=gitloads.decode_state(page),
+            sidebar=gitloads.decode_sidebar(page),
         )
         return self._git_page
 

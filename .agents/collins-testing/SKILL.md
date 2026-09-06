@@ -4,8 +4,7 @@ description: >-
   How Collins is tested and how to test a change in it: the GTK-free pytest
   unit suite and its import blocklist, the scripts/check_*.py end-to-end
   checks driven by scripts/run_e2e.py under a headless display, the claude
-  shim pattern, headless probe scripts, ruff, the hunk extension's bun tests,
-  and what CI runs. Use whenever writing or running tests for Collins, adding
+  shim pattern, headless probe scripts, ruff, and what CI runs. Use whenever writing or running tests for Collins, adding
   an e2e check, debugging a CI-only failure (e2e flaky, idle starvation, a
   dialog on top), or deciding where a piece of logic must live so it can be
   tested.
@@ -22,7 +21,7 @@ Gsk, Graphene, Vte}`, in both import styles (`gi.require_version` and a bare
 `from gi.repository import Gtk`). So a test may import only GTK-free modules.
 This is why the codebase splits every feature into a pure module (`editorfiles`,
 `gitinfo`, `docktree`, `prstatus`, `notifycenter`, `traymodel`, `composerkeys`,
-`hunkctl`, …) and a widget module that imports it. If logic you want to test
+`gitloads`, `diffmodel`, `gitpatch`, …) and a widget module that imports it. If logic you want to test
 sits in a widget module, move it into the pure sibling first — that is the
 convention, not a workaround. Modules whose pure half needs key constants
 spell keyvals and modifier bits as integers for the same reason
@@ -55,8 +54,7 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 
 Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 `E F W I UP B`, `E402` ignored for `gi.require_version` ordering; UP035 means
-`Callable` comes from `collections.abc`), and `bun test` in
-`collins/hunkext/collins-git` for the hunk extension.
+`Callable` comes from `collections.abc`).
 
 ## Writing an e2e check
 
@@ -165,8 +163,8 @@ a tab running a real CLI, kill the foreground process group
 `.github/workflows/ci.yml`: `lint` and `verify-versions` on the bare runner;
 `test`, `e2e` (`xvfb-run … scripts/run_e2e.py --timeout 120`, 60-minute job
 cap), `packaging` and `ppa-source (resolute)` inside the resolute CI image;
-`ppa-source (noble)` in the noble packaging image; `rpm` in the Fedora image;
-`hunk-ext` on the bare runner with `setup-bun`. The e2e job `needs: image`
+`ppa-source (noble)` in the noble packaging image; `rpm` in the Fedora image.
+The e2e job `needs: image`
 and shows up **after** the first `gh pr checks --watch` may have exited green
 — keep watching until an `e2e` row is listed and finished. A check that hangs
 is one that needs more than 120 s; the whole suite passes in under two

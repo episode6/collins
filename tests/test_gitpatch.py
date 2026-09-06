@@ -1,18 +1,18 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 # Portions adapted from muzomer/hunk-commit (MIT, © 2026 hunk-jj-stage
-# contributors), by way of the collins-git hunk extension's test/patch.test.ts;
+# contributors), by way of the former collins-git extension's test/patch.test.ts;
 # see collins/THIRD_PARTY_LICENSES.md.
 
 """Tests for gitpatch: the partial-patch writers, the cross-checks and the
 planners, then the same against a real index in a temp repository. Ports
-of the collins-git extension's `bun test` cases — test/patch.test.ts,
+of the former collins-git extension's `bun test` cases — test/patch.test.ts,
 range.test.ts, staging.test.ts, anchor.test.ts, range.integration.test.ts
 and staging.integration.test.ts — onto diffmodel's File / Hunk / Line.
 
 What did not port, and why: anchor.ts's module-level anchor state (set /
 current / clear) is the view's selection now and lives in the widget;
-`anchorMarks`, the amber line highlight hunk painted, is the view's own
-text selection. The address → position lookups the extension did for the
+`anchorMarks`, the amber line highlight the old viewer painted, is the
+view's own text selection. The address → position lookups the extension did for the
 cursor (`locate`) survive as `locate_address`; the planners take line
 indexes, so the "not on a diff line" refusals become index-bounds
 refusals. The integration tests run the view's git through gitops
@@ -1049,7 +1049,7 @@ def test_plan_lines_a_view_whose_own_patch_has_a_hunk_it_could_not_read_is_refus
 
 
 def test_plan_lines_refuses_a_selection_outside_the_hunk_and_one_with_no_change_in_it():
-    # The extension's "anchor is not on a diff line": old 5 is in no hunk.
+    # The old extension's "anchor is not on a diff line": old 5 is in no hunk.
     assert gitpatch.locate_address(STAGING, OLD, 5) is None
     # `+z` is new 12; there is no old 12 in hunk 2 (old 10-11) and old 12 is outside every hunk.
     assert gitpatch.locate_address(STAGING, OLD, 12) is None

@@ -38,130 +38,97 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
-- **A git page beside the session.** `F6`, the footer's git button
-  (beside the terminal and editor toggles, greyed outside a repository), or
-  a click on the footer's ⎇ branch label, opens
-  [hunk](https://hunk.dev) in a terminal of its own
-  next to the agent's, showing the working tree, the index, a commit or
-  the branch against its parent; `Ctrl+1` / `Ctrl+2` / `Ctrl+3` jump to
-  the unstaged, staged and whole-branch diffs. A small extension Collins
-  ships binds the keys that need hunk's cursor: `x` / `X` stage or unstage
-  the hunk or file under it. **Lines, too**: `v` anchors the cursor line
-  in amber, hunk's `j` / `k` move, and `x` stages (or unstages) exactly
-  the lines in between, across hunks of one file. `D` discards a hunk or
-  range from the working tree after a confirmation (and restores a
-  deleted file). The page
+- **A git page beside the session, drawn by Collins itself.** `F6`, the
+  footer's git button (beside the terminal and editor toggles, greyed
+  outside a repository), or a click on the footer's ⎇ branch label, opens
+  a diff next to the agent's terminal showing the working tree, the
+  index, a commit or the branch against its parent; `Ctrl+1` / `Ctrl+2` /
+  `Ctrl+3` jump to the unstaged, staged and whole-branch diffs. It needs
+  `git` alone — no external diff viewer, nothing to install. The diff is
+  a card per file (renames, new, deleted, untracked, binary, too-large
+  and mode changes named), a syntax-highlighted view per hunk in the
+  editor's style scheme and font, split (row-aligned, wrap included) or
+  stacked, word-level emphasis, foldable gaps with *▲ 20* / *▼ 20* /
+  *all*, before/after pictures for images, a pinned file header, a find
+  bar (`Ctrl+F`, *n of m* across hunks), a files filter (`/`) that
+  narrows the list and the diff together, and navigation keys — `]` `[`
+  `.` `,` `j` `k` `}` `{` `z` `0` `1` `2` `l` `w` `r` `e` `q` `?` — bound
+  page-locally in the new *Git page* group of Keyboard Bindings (which
+  `?` opens on that group), never reaching the agent's terminal. Edits
+  reload through file monitors within half a second — an edit that only
+  rewrites an already-changed line included — an untouched hunk keeping
+  its widget and the keyboard, the scroll its place; the page also
   reloads by itself when the index or `HEAD` moves, and each session
-  remembers whether it was open and what it showed. A
-  machine without hunk gets an install card in the page's place; the
-  branch label's copy moved to a right-click.
-- **The git page's commits and files panels are native.** A sidebar of
-  Collins' own sits to the left of hunk: the **commits list** (the
-  current branch with its *working tree* row and `↑` unpushed marks, then
-  **every branch of the stack under it** — git's word on what stacks on
-  what: each local branch on the current one's history since the trunk,
-  nearest first, the nearest being the parent the *vs* diff is measured
-  against — then the default branch's latest page with *load more…*; a
-  click loads that commit or branch, a stack branch's header that branch
-  against the one below it, and the `▸` mark follows what hunk has
-  loaded; a branch created, deleted or moved re-reads the stack on the
-  next tick),
-  the **files list** (hunk's own files with their counts on the live side
-  of the working tree, the other side off `git status`, one flat list for
-  any other load; the row hunk's cursor is on highlighted, a click moves
-  hunk there or loads the other side first), and an **action row** —
-  *Stage hunk* / *Stage lines*, *Anchor line* / *Clear anchor* and
-  *Discard* press the extension's keys in hunk for you; *Stage all*,
-  *Unstage all*, *Commit…*, *Commit with body…* and *Fix up…* are native
-  dialogs and `git` calls, their outcomes toasts in the page, hunk
-  reloaded on the spot. The header's panel button folds the
-  sidebar (remembered with the page), and it folds by itself below about
-  680 px. A three-dot range between two branches is a load of the page's
-  own now (refreshed, remembered, restored). hunk itself runs with its
-  files pane hidden and draws the review alone; the extension keeps only
-  the cursor keys and reports hunk's cursor on every move, so the files
-  list's highlight follows without waiting for a poll. **Needs hunk 0.21
-  or newer** (its `--no-sidebar`): a 0.20 now gets the install card.
-- **The git page repairs hunk's daemon directory, and says when the
-  daemon is missing.** hunk 0.21 refuses to start its session daemon while
-  `$XDG_RUNTIME_DIR/hunk-mcp` is readable by anyone but its owner, and 0.20
-  created that directory at the umask — so an upgrade could leave every
-  commit click landing nowhere, with no word why. Before each spawn the
-  page now makes the directory owner-only when it isn't, and when the
-  viewer still never registers with the daemon, a banner over it says so,
-  names `hunk daemon serve` as the run that prints the reason, and offers
-  a Retry.
-- **`show_diff`, a session tool for the git page.** The agent can put a
-  change on your screen: `show_diff("unstaged" | "staged" | "branch" |
-  <commit ref>, file?, line?)` opens the session's git page on that diff
-  (revealed, never focused) and moves hunk to the file and line. The reply
-  names what loaded and the hunk session id, and points the agent at
-  `hunk session …` for everything else the viewer can do. Its switch sits
-  with the other tools' under Preferences → *Built-in MCP tools*.
-- **Experimental: a native diff viewer in the git page.** Preferences →
-  Git → *Diff viewer* → *Native* draws the diff in Collins itself instead
-  of running hunk: a card per file (renames, new, deleted, untracked,
-  binary, too-large and mode changes named), a syntax-highlighted view per
-  hunk in the editor's style scheme and font, split (row-aligned, wrap
-  included) or stacked, word-level emphasis, foldable gaps with *▲ 20* /
-  *▼ 20* / *all*, before/after pictures for images, a pinned file header,
-  a find bar (`Ctrl+F`, *n of m* across hunks), a files filter (`/`) that
-  narrows the list and the diff together, and hunk's navigation keys —
-  `]` `[` `.` `,` `j` `k` `}` `{` `z` `0` `1` `2` `l` `w` `r` `e` `q` `?`
-  — bound page-locally in the new *Git page* group of Keyboard Bindings
-  (which `?` opens on that group), never reaching the agent's terminal.
-  The files list follows the view and a
-  click reveals the file; edits reload through file monitors within half
-  a second — an edit that only rewrites an already-changed line included
-  — an untouched hunk keeping its widget and the keyboard, the scroll its
-  place, and the tick still covers the index, `HEAD` and the refs;
-  `show_diff` reveals the file and line in it. It runs on git alone: a
-  machine without hunk gets the diff instead of the install card.
-  hunk stays the default; three new Git rows (*Line numbers*, *Wrap long
-  lines*, *Highlight changed words*) are the native view's.
-- **The native diff viewer stages, unstages, discards and reverts.** Every
-  file header carries *Stage file* · *Discard file* (on the index
-  *Unstage file*; on a commit, the branch or a range *Revert file*), every
-  hunk header *Stage hunk* · *Discard hunk* — and a **line selection**
-  (drag in the text or on the line numbers, `Shift`+arrows; whole lines,
-  one hunk at a time, `Esc` clears) turns the hunk's buttons into *Stage
-  lines* / *Discard lines* / *Revert lines*, SourceTree's placement with
-  Sublime Merge's words. `x` / `X` / `D` press the same from the keyboard
-  (the *Git page* group of Keyboard Bindings), a right-click on a hunk
-  offers them with *Copy*, *Open in editor* and *Expand context*, and the
-  pinned file header carries the file's. Every action re-reads the
-  file's patch from git first and refuses — with a word, not half done —
-  a binary, a file too large, a rename or a new / deleted file by hunk,
-  and a file that changed since the view loaded (which reloads);
-  discards and reverts confirm first (an untracked file's discard moves
-  it to the trash, never an unlink; a deleted file's restores it; a
-  revert onto a file with unstaged changes warns that the two may
-  conflict, and retries three-way when the context has moved, saying
-  so). The outcome is a toast, the view reloads by key, and a selection
-  survives with its hunk. The sidebar's *Stage hunk* / *Anchor line* /
-  *Discard* buttons hide while the native view draws — the headers
-  carry the buttons now.
-- **Notes on the native diff.** `c` (or the hunk menu's *Add note*)
-  opens a card under the focused hunk, anchored to the cursor line: a
-  text box where `Ctrl+Enter` saves (the first line the summary, the
-  rest the rationale) and `Esc` cancels, the diff's other letters typing
-  into it meanwhile. Cards say who wrote them — *You*, or *Agent* with
-  the author — and the line they sit on, a glyph marks that line in the
+  remembers whether it was open and what it showed. The branch label's
+  copy moved to a right-click.
+- **The git page's commits and files panels.** A sidebar to the left of
+  the diff: the **commits list** (the current branch with its *working
+  tree* row and `↑` unpushed marks, then **every branch of the stack
+  under it** — git's word on what stacks on what: each local branch on
+  the current one's history since the trunk, nearest first, the nearest
+  being the parent the *vs* diff is measured against — then the default
+  branch's latest page with *load more…*; a click loads that commit or
+  branch, a stack branch's header that branch against the one below it,
+  and the `▸` mark follows what the page has loaded; a branch created,
+  deleted or moved re-reads the stack on the next tick), the **files
+  list** (the diff's files with their counts on the live side of the
+  working tree, the other side off `git status`, one flat list for any
+  other load; the row the view is on highlighted, a click reveals the
+  file or loads the other side first), and an **action row** — *Stage
+  all*, *Unstage all*, *Commit…*, *Commit with body…* and *Fix up…* are
+  native dialogs and `git` calls, their outcomes toasts in the page, the
+  diff reloaded on the spot. The header's panel button folds the sidebar
+  (remembered with the page), and it folds by itself below about 680 px.
+  A three-dot range between two branches is a load of the page's own
+  (refreshed, remembered, restored).
+- **The git page stages, unstages, discards and reverts in the diff.**
+  Every file header carries *Stage file* · *Discard file* (on the index
+  *Unstage file*; on a commit, the branch or a range *Revert file*),
+  every hunk header *Stage hunk* · *Discard hunk* — and a **line
+  selection** (drag in the text or on the line numbers, `Shift`+arrows;
+  whole lines, one hunk at a time, `Esc` clears) turns the hunk's
+  buttons into *Stage lines* / *Discard lines* / *Revert lines*,
+  SourceTree's placement with Sublime Merge's words. `x` / `X` / `D`
+  press the same from the keyboard (the *Git page* group of Keyboard
+  Bindings), a right-click on a hunk offers them with *Copy*, *Open in
+  editor* and *Expand context*, and the pinned file header carries the
+  file's. Every action re-reads the file's patch from git first and
+  refuses — with a word, not half done — a binary, a file too large, a
+  rename or a new / deleted file by hunk, and a file that changed since
+  the view loaded (which reloads); discards and reverts confirm first
+  (an untracked file's discard moves it to the trash, never an unlink; a
+  deleted file's restores it; a revert onto a file with unstaged changes
+  warns that the two may conflict, and retries three-way when the
+  context has moved, saying so). The outcome is a toast, the view
+  reloads by key, and a selection survives with its hunk.
+- **Notes on the diff.** `c` (or the hunk menu's *Add note*) opens a
+  card under the focused hunk, anchored to the cursor line: a text box
+  where `Ctrl+Enter` saves (the first line the summary, the rest the
+  rationale) and `Esc` cancels, the diff's other letters typing into it
+  meanwhile. Cards say who wrote them — *You*, or *Agent* with the
+  author — and the line they sit on, a glyph marks that line in the
   gutter, `}` / `{` walk the annotated hunks, `E` re-opens your first
   note on the hunk, *Edit* / *Delete* sit on the card, and `a` (or the
   header menu's *Agent notes* check) folds the agent's cards away. Notes
-  live in the page for the tab's life (nothing
-  is written to disk) and survive a reload on any hunk the edit left
-  alone (one whose line numbers shifted counts as changed). The agent's
-  own doors — the tools that annotate, highlight and
-  clear — are the next release's; hunk is retired once they land.
-- **Preferences → Git.** A group for the git page: hunk's layout
-  (automatic / split / stacked) and theme, whether working-tree reviews
-  show untracked files, how many commits each group of the commits panel
-  shows per *load more…*, and a default parent branch — the branch a
-  session's diffs are measured against when git shows no branch under
-  `HEAD` and no attached pull request names one. Every one of them
-  reaches a page already open.
+  live in the page for the tab's life (nothing is written to disk) and
+  survive a reload on any hunk the edit left alone (one whose line
+  numbers shifted counts as changed). The agent's own doors — the tools
+  that annotate, highlight and clear — are the next release's.
+- **`show_diff`, a session tool for the git page.** The agent can put a
+  change on your screen: `show_diff("unstaged" | "staged" | "branch" |
+  <commit ref>, file?, line?)` opens the session's git page on that diff
+  (revealed, never focused) and reveals the file and line in it; a line
+  no hunk carries lands on the nearest hunk, and the reply says so. Its
+  switch sits with the other tools' under Preferences → *Built-in MCP
+  tools*.
+- **Preferences → Git.** A group for the git page: the diff's layout
+  (automatic / split / stacked), line numbers, wrapping and changed-word
+  emphasis, whether working-tree reviews show untracked files, how many
+  commits each group of the commits panel shows per *load more…*, and a
+  default parent branch — the branch a session's diffs are measured
+  against when git shows no branch under `HEAD` and no attached pull
+  request names one. Every one of them reaches a page already open; the
+  diff's colours and font follow the editor's.
 - **The status icon's glass empties when there's nothing to do.** The drink
   now stands for something waiting: the glass holds the coral pour while
   anything is unread, pours the barber pole while any session works, and

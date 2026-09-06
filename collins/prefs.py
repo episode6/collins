@@ -22,7 +22,6 @@ from . import (  # noqa: E402
     clisetup,
     editor,
     footerapps,
-    hunkctl,
     notifycenter,
     notifysound,
     prefslayout,
@@ -112,8 +111,9 @@ _WORKTREE_BEHAVIORS = [
     ("never", N_("Never Delete")),
 ]
 
-# The git page's Layout row: hunk's --mode words in prefslayout.GIT_LAYOUTS'
-# order, labelled here so the labels are the dialog's to translate.
+# The git page's Layout row: the diff view's layouts in
+# prefslayout.GIT_LAYOUTS' order, labelled here so the labels are the
+# dialog's to translate.
 _GIT_LAYOUT_LABELS = {
     "auto": N_("Automatic"),
     "split": N_("Split"),
@@ -121,34 +121,13 @@ _GIT_LAYOUT_LABELS = {
 }
 _GIT_LAYOUTS = [(value, _GIT_LAYOUT_LABELS.get(value, label)) for value, label in prefslayout.GIT_LAYOUTS]
 
-# The Diff viewer row (temporary, see state.DEFAULT_SETTINGS["git_viewer"]):
-# gitloads.VIEWERS' words in prefslayout.GIT_VIEWERS' order.
-_GIT_VIEWER_LABELS = {
-    "hunk": N_("hunk"),
-    "native": N_("Native"),
-}
-_GIT_VIEWERS = [(value, _GIT_VIEWER_LABELS.get(value, label)) for value, label in prefslayout.GIT_VIEWERS]
-
-# The same bound hunkctl.safe_theme applies before a name reaches hunk's
-# argv, so the row refuses exactly what the page would drop.
-_GIT_THEME_MAX = hunkctl.MAX_THEME_LEN
-
-# How long the Git group's two entry rows wait after the last keystroke
-# before keeping what the box holds (see _save_git_word): a theme is saved
-# once per name typed, not once per letter — every open git page restarts
-# hunk for a theme change — and a parent branch likewise, since a prefix
-# that happens to name a branch ("main" on the way to "main-old") would
-# reload every branch diff against it. Enter, leaving the row and closing
-# the dialog save at once.
+# How long the Git group's entry row waits after the last keystroke before
+# keeping what the box holds (see _save_git_word): a parent branch is saved
+# once per name typed, not once per letter, since a prefix that happens to
+# name a branch ("main" on the way to "main-old") would reload every branch
+# diff against it. Enter, leaving the row and closing the dialog save at
+# once.
 _GIT_ENTRY_SETTLE_MS = 600
-
-
-def _git_theme_ok(text: str) -> bool:
-    """Whether *text* can stand as hunk's --theme: empty (hunk's own
-    default), or one word that can't read as a flag."""
-    return not text or (
-        len(text) <= _GIT_THEME_MAX and not text.startswith("-") and not any(c.isspace() for c in text)
-    )
 
 
 def _git_branch_ok(text: str) -> bool:
@@ -929,26 +908,16 @@ class PreferencesDialog(Adw.Dialog):
         return pr_group
 
     def _build_git_group(self, state: AppState) -> _SearchableGroup:
-        """The git page's knobs (see gitpage.py and hunkctl.Options): what
-        hunk is started with, what its commits panel loads, and the branch
-        the page measures against. All of them reach an open page — the
-        first two by restarting hunk in place, the rest without."""
+        """The git page's knobs (see gitpage.py and gitloads.Options): how
+        the diff view draws, what its commits panel loads, and the branch
+        the page measures against. All of them reach an open page as they
+        change. The diff's colours and font are the editor's (Preferences →
+        Editor), not a row here."""
         git_group = _SearchableGroup(
             title=_("Git"),
-            description=_("The git page: which viewer draws the diff, how, and what the commits panel loads"),
+            description=_("The git page: how the diff is drawn and what the commits panel loads"),
         )
         _searchable(git_group, *prefslayout.GIT_SEARCH_TERMS)
-        # Temporary (deleted in PR 4 of the native-diff stack, with hunk):
-        # which viewer draws. hunk stays the default while the native view
-        # is tried on real diffs.
-        self._git_viewer_row = self._add_running_behavior_row(
-            git_group,
-            _("Diff viewer"),
-            _("Experimental: Native draws diffs in Collins itself; hunk runs the terminal viewer"),
-            "git_viewer",
-            _GIT_VIEWERS,
-        )
-        _searchable(self._git_viewer_row, "native", "experimental", "viewer", "hunk")
         self._git_layout_row = self._add_running_behavior_row(
             git_group,
             _("Layout"),
@@ -956,56 +925,30 @@ class PreferencesDialog(Adw.Dialog):
             "git_layout",
             _GIT_LAYOUTS,
         )
-        # Free text, not a list: hunk can't be asked for its themes, the
-        # built-in ones number sixty-odd, and a config file can add more —
-        # and a name hunk doesn't know falls back to its default rather
-        # than breaking the page. The reason row under the box names a few,
-        # the way the CLI row's reason sits under its entry; the same search
-        # terms keep the two showing and hiding together.
-        theme_terms = ("hunk", "nord", "dracula", "catppuccin", "gruvbox", "solarized", "tokyo night")
-        self._git_theme_row = Adw.EntryRow(title=_("Theme"))
-        self._git_theme_row.set_text(state.get_setting("git_theme") or "")
-        self._git_theme_row.connect("changed", self._on_git_theme_changed)
-        self._git_theme_row.connect("entry-activated", self._on_git_theme_activated)
-        self._flush_git_word_on_focus_out(self._git_theme_row, "git_theme", _git_theme_ok)
-        git_group.add(_searchable(self._git_theme_row, *theme_terms))
-        theme_reason = Adw.ActionRow(activatable=False, selectable=False)
-        theme_reason.add_css_class("dim-label")
-        theme_reason.set_subtitle(
-            _(
-                "Empty: hunk's own default. Any theme hunk knows — nord, dracula, "
-                "catppuccin-mocha, github-light-default, auto (follows the terminal "
-                "background) — or one from hunk's config; a name hunk doesn't know "
-                "falls back to its default"
-            )
-        )
-        git_group.add(_searchable(theme_reason, *theme_terms))
-
-        # The native view's own three (diffview.set_options); hunk has its
-        # own keys for the same and ignores them.
+        # The view's own three (diffview.set_options).
         self._git_line_numbers_row = Adw.SwitchRow(
             title=_("Line numbers"),
-            subtitle=_("Native viewer: the old and new line-number columns beside each hunk"),
+            subtitle=_("The old and new line-number columns beside each hunk"),
         )
         self._git_line_numbers_row.set_active(bool(state.get_setting("git_line_numbers")))
         self._git_line_numbers_row.connect(
             "notify::active", self._on_git_switch_changed, "git_line_numbers"
         )
-        git_group.add(_searchable(self._git_line_numbers_row, "native", "gutter", "numbers"))
+        git_group.add(_searchable(self._git_line_numbers_row, "gutter", "numbers"))
         self._git_wrap_row = Adw.SwitchRow(
             title=_("Wrap long lines"),
-            subtitle=_("Native viewer: wrap instead of scrolling each hunk sideways"),
+            subtitle=_("Wrap instead of scrolling each hunk sideways"),
         )
         self._git_wrap_row.set_active(bool(state.get_setting("git_wrap_lines")))
         self._git_wrap_row.connect("notify::active", self._on_git_switch_changed, "git_wrap_lines")
-        git_group.add(_searchable(self._git_wrap_row, "native", "wrap", "truncate"))
+        git_group.add(_searchable(self._git_wrap_row, "wrap", "truncate"))
         self._git_word_diff_row = Adw.SwitchRow(
             title=_("Highlight changed words"),
-            subtitle=_("Native viewer: emphasise what moved within a changed line"),
+            subtitle=_("Emphasise what moved within a changed line"),
         )
         self._git_word_diff_row.set_active(bool(state.get_setting("git_word_diff")))
         self._git_word_diff_row.connect("notify::active", self._on_git_switch_changed, "git_word_diff")
-        git_group.add(_searchable(self._git_word_diff_row, "native", "word", "emphasis", "inline"))
+        git_group.add(_searchable(self._git_word_diff_row, "word", "emphasis", "inline"))
 
         self._git_untracked_row = Adw.SwitchRow(
             title=_("Show untracked files"),
@@ -1529,14 +1472,7 @@ class PreferencesDialog(Adw.Dialog):
         row.add_controller(focus)
 
     def _flush_git_words(self) -> None:
-        self._flush_git_word(self._git_theme_row, "git_theme", _git_theme_ok)
         self._flush_git_word(self._git_parent_row, "git_parent_branch", _git_branch_ok)
-
-    def _on_git_theme_changed(self, row: Adw.EntryRow) -> None:
-        self._save_git_word(row, "git_theme", _git_theme_ok)
-
-    def _on_git_theme_activated(self, row: Adw.EntryRow) -> None:
-        self._flush_git_word(row, "git_theme", _git_theme_ok)
 
     def _on_git_parent_changed(self, row: Adw.EntryRow) -> None:
         self._save_git_word(row, "git_parent_branch", _git_branch_ok)

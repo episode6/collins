@@ -90,12 +90,16 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
 - `open_in_editor` — resolves a path against the tab's live cwd and editor
   root (`_mcp_resolve_file`), opens it at a line (`window.open_in_tab_editor`,
   which honours the pop-out rule).
-- `show_diff` — offered only while hunk is installed (probed at most every
-  30 s, `App._refresh_hunk_probe`); opens the git page quietly on the working
-  tree / index / branch / a commit and navigates to a file and line via
-  `hunk session navigate` (`app._ShowDiff` polls up to 12 s for the session
-  id). Decisions in `hunkctl.show_diff_load` / `diff_file_path` /
-  `show_diff_reply`.
+- `show_diff` — opens the git page quietly on the working tree / index /
+  branch / a commit (`open_git_page(focus=False)`), waits for the read to
+  settle (`app._ShowDiff` polls `page.settled()` up to
+  `gitloads.SHOW_DIFF_DEADLINE_S`), then `GitPage.reveal(path, hunk, side,
+  line, focus=False)`; the reply names what loaded and what was revealed
+  (a line no hunk holds lands on the nearest hunk and the reply says so;
+  a file the files filter hides is revealed with the filter cleared). The
+  not-a-repo card ends the poll only while `page.opening` is False — a
+  page that stood on the card when the tree turned up shows it until its
+  open lands. Decisions in `gitloads.show_diff_load` / `diff_file_path`.
 - `show_image` — a local path or an `http(s)` URL: URLs are fetched on a
   worker thread (`remoteimages.py`, stdlib urllib, redirects to http(s) only,
   size and content-type gated, into the pruned cache dir; localhost is
@@ -139,7 +143,7 @@ shim — so it should arm and ride the busy→idle finish edge
 1. Append to `mcptools.TOOLS` with a tight schema and an agent-facing
    description that says when to call it. The setting key follows.
 2. Add `App._mcp_<name>` and register it in `_mcp_dispatch`'s handler map;
-   keep decisions in a GTK-free module (as `hunkctl` does for `show_diff`).
+   keep decisions in a GTK-free module (as `gitloads` does for `show_diff`).
 3. If it opens or changes panels: `focus=False`, and a beat's delay if it runs
    from inside another cascade.
 4. Add the tool to `prefslayout` if the switch group's order is pinned, to
