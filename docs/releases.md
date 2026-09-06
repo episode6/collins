@@ -42,7 +42,6 @@ downloads of each version, see the
   `effort` argument sets the sibling's `--effort` (`low` … `max`); left
   out, the sibling answers at the effort its caller is answering at right
   now, `/effort` switches included, the way it already inherits the model.
-
 - **The usage panel says what went wrong.** A fetch the usage endpoint
   refused showed a bare "Usage unavailable" and sat there until the next
   poll. The panel now shows the endpoint's answer — `HTTP 429: Rate

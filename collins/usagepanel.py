@@ -424,6 +424,9 @@ class UsagePanel(Gtk.Box):
             button_label=_("Dismiss"),
             timeout=_ERROR_TOAST_SECONDS,
         )
+        # A toast title is Pango markup by default; this one carries the
+        # endpoint's error body, which is nobody's markup.
+        toast.set_use_markup(False)
         # No action to run: the button only takes the toast down.
         toast.connect("button-clicked", lambda t: t.dismiss())
         toast.connect("dismissed", self._on_error_toast_dismissed)
