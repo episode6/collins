@@ -829,6 +829,29 @@ def test_inherited_model_drops_junk_to_the_default():
         assert mcptools.inherited_model(junk) == ""
 
 
+def test_start_session_effort_is_enum_constrained():
+    for level in mcptools.EFFORT_LEVELS:
+        assert (
+            mcptools.validate_args("start_session", {"prompt": "go", "effort": level})
+            is None
+        )
+    assert "effort" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "effort": "ultra"}
+    )
+    assert "effort" in mcptools.validate_args(
+        "start_session", {"prompt": "go", "effort": 3}
+    )
+
+
+def test_inherited_effort_passes_the_cli_levels_and_drops_the_rest():
+    """A stamped level carries over; an unstamped transcript or a level
+    this build doesn't name falls back to the CLI's default."""
+    for level in mcptools.EFFORT_LEVELS:
+        assert mcptools.inherited_effort(level) == level
+    for junk in (None, "", "ultra", "high; rm -rf /", "HIGH"):
+        assert mcptools.inherited_effort(junk) == ""
+
+
 def test_read_terminal_args_all_default():
     """Both arguments are optional: the bare call reads every panel tab."""
     assert mcptools.validate_args("read_terminal", {}) is None

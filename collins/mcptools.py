@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import APP_ID, DEBUG_APP_ID, diffmodel, diffnotes
+from .claudemodels import EFFORT_LEVELS
 
 # One frame on the shim↔app socket never legitimately approaches this; a line
 # that does is garbage or an attack, not a tool call. Mirrored in mcp_shim.py.
@@ -649,6 +650,19 @@ TOOLS: list[dict] = [
                         "your own session is on right now."
                     ),
                 },
+                "effort": {
+                    "type": "string",
+                    # The CLI's own --effort levels, weakest first; the same
+                    # catalogue the footer's effort menu offers.
+                    "enum": list(EFFORT_LEVELS),
+                    "description": (
+                        "Effort level for the new session — what the CLI's "
+                        "--effort takes: 'low', 'medium', 'high', 'xhigh' or "
+                        "'max'. Omit to run it at the effort your own session "
+                        "is answering at right now (the CLI's default when "
+                        "that isn't known)."
+                    ),
+                },
             },
             "required": ["prompt"],
             "additionalProperties": False,
@@ -937,6 +951,21 @@ def inherited_model(model: str | None) -> str:
     same.
     """
     return model if valid_model(model) else ""
+
+
+def inherited_effort(effort: str | None) -> str:
+    """The effort level a start_session spawn inherits when its caller
+    didn't pick one: the level the calling session's last reply was
+    answered at, as its transcript stamped it — so a mid-run ``/effort``
+    carries over too.
+
+    Passed through only when it is one of the CLI's own levels
+    (EFFORT_LEVELS): anything else — None while no reply has been stamped
+    yet, or a level this build doesn't name — drops to "" (no --effort;
+    the CLI's configured default) rather than being spliced into a
+    command line.
+    """
+    return effort if effort in EFFORT_LEVELS else ""
 
 
 # The room a read_terminal reply's text leaves inside one MAX_LINE frame for

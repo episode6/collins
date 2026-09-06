@@ -5837,6 +5837,17 @@ class TerminalTab(Gtk.Box):
             return model
         return self._options.model if self._options else ""
 
+    def current_effort(self) -> str:
+        """Best-effort effort level of the agent in this tab right now: the
+        one its transcript stamped on the last reply (``/effort`` switches
+        included), else the --effort the tab was launched with, else "" —
+        the CLI's configured default. What start_session inherits into a
+        spawned sibling."""
+        effort = self._transcript.effort()
+        if effort:
+            return effort
+        return self._options.effort if self._options else ""
+
     def _agent_is_running(self) -> bool:
         """Whether the provider's CLI is alive in this terminal right now —
         the same descendant search current_agent_cwd runs, minus its
