@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **Archiving a session reads its notifications.** A session's message
+  and bell rows stayed unread in the history after the session was
+  archived, so the bell and the badge kept counting a session with
+  nowhere left to click. Archiving now marks the session's rows read and
+  takes down its card, alongside the sidebar flag and desktop
+  notification it already cleared.
 - **Desktop notifications make a sound.** A `notify_user` message, a bell
   or an update announced while no Collins window is focused was silent:
   the sound only ever played beside an in-app card, on the theory that the

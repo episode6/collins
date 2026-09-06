@@ -771,6 +771,30 @@ def steps(app: App):
         store.set_unread(SESSION_B, False)
     yield three_stand
 
+    # -- archiving reads the session's rows -------------------------------------
+    def archive_setup():
+        win.notify_session(shared["tab_b"], "Still asking")
+        win.is_active = lambda: False
+        win.notify_session(shared["tab_b"], "Asked while away")
+        win.is_active = lambda: True
+    yield archive_setup
+
+    def archive_reads():
+        # Two message rows, plus the synthetic green row the flag raised;
+        # the card revealed itself on the turn after it was posted.
+        check("three rows and a card wait for session B before the archive",
+              center.unread_count() == 3 and any(c.get_reveal_child() for c in cards.cards()),
+              str(center.unread_count()))
+        store.set_archived(SESSION_B, True)
+        check("archiving the session reads every row it posted", center.unread_count() == 0,
+              str(center.unread_count()))
+        check("and the bell's badge is gone", bell.badge_text() == "", repr(bell.badge_text()))
+        check("and takes its card down", all(not c.get_reveal_child() for c in cards.cards()))
+        store.set_archived(SESSION_B, False)
+        center.clear()
+    yield archive_reads
+    yield wait
+
     # -- the Notifications group in Preferences -------------------------------------
     def preferences_group():
         win._show_preferences("notifications")
