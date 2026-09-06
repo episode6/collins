@@ -284,7 +284,12 @@ synchronous; a miss toasts), `apply_settings`, `_after_unrealize`,
 exit opens the view (`_on_child_exited`), a spawn in flight is orphaned;
 to hunk, the view closes and hunk spawns if mapped. `GitPage.native`,
 `.diff_view` and `.reveal(path, hunk, side, line)` are the public face
-(`app._ShowDiff` reveals through it and replies without a session id).
+(`app._ShowDiff` reveals through it and replies without a session id). A
+`line` no hunk carries (an unchanged stretch; `diffmodel.locate` misses)
+lands on the file's nearest hunk (`diffmodel.nearest_hunk`) and reveal
+still answers True — the file *is* in the diff, which is what the hunk
+path always did — and `DiffView.holds_line` lets the tool's reply say
+the line itself is not in a changed region.
 
 **The sidebar follows the view.** `DiffView`'s `current-changed(path,
 hunk)` — the file at the top of the viewport (60 ms after the scroll

@@ -1575,6 +1575,11 @@ class _ShowDiff:
             if self._path:
                 where = f"{self._path}, line {self._line}" if self._line else self._path
                 lines.append(f"Revealed {where}.")
+                if self._line and not page.diff_view.holds_line(self._path, None, self._line):
+                    lines.append(
+                        f"Line {self._line} isn't in a changed region of that diff; "
+                        "the nearest hunk is shown."
+                    )
             return "\n".join(lines)
         return hunkctl.show_diff_reply(
             page.breadcrumb_text(), page.session_id, self._path, self._line

@@ -674,6 +674,34 @@ def test_locate_answers_none_for_lines_outside_every_hunk_and_bad_addresses():
     assert locate([], "src/app.py", NEW, 3) is None
 
 
+def test_nearest_hunk_holds_the_line_or_is_the_closest_span():
+    app = only(MODIFIED)  # hunks at new 1-5 and 21-23, old 1-4 and 20-22
+    assert diffmodel.nearest_hunk(app, NEW, 3) == 0
+    assert diffmodel.nearest_hunk(app, NEW, 22) == 1
+    assert diffmodel.nearest_hunk(app, NEW, 10) == 0  # 5 from hunk 0's end, 11 from hunk 1's start
+    assert diffmodel.nearest_hunk(app, NEW, 15) == 1
+    assert diffmodel.nearest_hunk(app, NEW, 13) == 0  # 8 either way: the earlier one
+    assert diffmodel.nearest_hunk(app, NEW, 900) == 1
+    assert diffmodel.nearest_hunk(app, OLD, 12) == 0
+    assert diffmodel.nearest_hunk(only(BINARY), NEW, 1) is None
+    assert diffmodel.nearest_hunk(app, "left", 1) is None
+    assert diffmodel.nearest_hunk(app, NEW, 0) is None
+    assert diffmodel.nearest_hunk(app, NEW, True) is None
+
+
+def test_display_text_keeps_a_buffer_paragraph_per_patch_line():
+    # A trailing CR (a CRLF file) goes; a CR or separator inside the line
+    # becomes a same-width symbol, so character offsets still hold.
+    assert diffmodel.display_text("plain") == "plain"
+    assert diffmodel.display_text("dos line\r") == "dos line"
+    assert diffmodel.display_text("a\rb") == "a␍b"
+    assert diffmodel.display_text("a b c\x85d") == "a¶b␤c␤d"
+    assert diffmodel.display_text("a\rb\r") == "a␍b"
+    assert len(diffmodel.display_text("x y")) == 3
+    assert diffmodel.display_text("") == ""
+    assert diffmodel.display_text("\r") == ""
+
+
 def test_stable_key_survives_an_untouched_hunk_and_changes_with_a_moved_one():
     before = only(MODIFIED)
     after = only(

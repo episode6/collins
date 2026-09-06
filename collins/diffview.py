@@ -438,8 +438,19 @@ class _HunkView:
         self, rows: Sequence[_Row], emphasis: dict[int, tuple[tuple[int, int], ...]] | None = None
     ) -> None:
         """Fill the buffer with *rows* and tag them; *emphasis* maps a row
-        index to the character spans of its text to emphasise."""
-        self.rows = list(rows)
+        index to the character spans of its text to emphasise.
+
+        The rows kept are what the buffer shows: a patch line's text put
+        through diffmodel.display_text (a trailing CR dropped, a lone CR
+        or U+2029 — which GtkTextBuffer would split a paragraph on, so
+        paragraph i would no longer be row i — shown as a symbol), so the
+        search's offsets over `rows` and the buffer agree; a span past a
+        dropped CR is clamped to the line.
+        """
+        self.rows = [
+            row if row.kind == PAD else _Row(row.kind, diffmodel.display_text(row.text), row.old, row.new)
+            for row in rows
+        ]
         self._pads = {}
         buffer = self.buffer
         buffer.set_text("\n".join(_PAD_TEXT if row.kind == PAD else row.text for row in self.rows))
@@ -451,7 +462,11 @@ class _HunkView:
             spans = emphasis.get(index) if emphasis else None
             emphasis_tag = self._emphasis.get(row.kind)
             if spans and emphasis_tag is not None:
+                width = len(row.text)
                 for first, last in spans:
+                    last = min(last, width)
+                    if first >= last:
+                        continue
                     ok_a, start = buffer.get_iter_at_line_offset(index, first)
                     ok_b, end = buffer.get_iter_at_line_offset(index, last)
                     if ok_a and ok_b and start.get_line() == index and end.get_line() == index:
@@ -1521,8 +1536,11 @@ class DiffView(Gtk.Box):
     ) -> bool:
         """Scroll to *path*'s section — or its hunk *hunk* (0-based), or the
         hunk holding 1-based *line* on *side* (new by default) — and focus
-        that hunk's view with the cursor on the line. False when the file
-        (or the line) isn't in the load. Synchronous."""
+        that hunk's view with the cursor on the line. A line no hunk
+        carries (an unchanged stretch) lands on the nearest hunk: the file
+        is in the diff, which is what the caller asked about (`holds_line`
+        says whether the line itself was). False only when the file isn't
+        in the load. Synchronous."""
         side = side if side in diffmodel.SIDES else diffmodel.NEW
         section = self._section_for(path, side)
         if section is None:
@@ -1530,9 +1548,10 @@ class DiffView(Gtk.Box):
         line_index: int | None = None
         if hunk is None and line is not None:
             located = diffmodel.locate(self._files, section.file.path, side, line)
-            if located is None:
-                return False
-            _file, hunk, line_index = located
+            if located is not None:
+                _file, hunk, line_index = located
+            else:
+                hunk = diffmodel.nearest_hunk(section.file, side, line)
         section.set_folded(False)
         target: _HunkSection | None = None
         if hunk is not None and 0 <= hunk < len(section.hunks):
@@ -1546,6 +1565,13 @@ class DiffView(Gtk.Box):
         else:
             self._set_current(section.file.path, -1)
         return True
+
+    def holds_line(self, path: str, side: str | None, line: int) -> bool:
+        """Whether a hunk of the load carries 1-based *line* of *path* on
+        *side* (new by default) — what reveal landed on exactly, against
+        the nearest hunk it settles for otherwise."""
+        side = side if side in diffmodel.SIDES else diffmodel.NEW
+        return diffmodel.locate(self._files, path, side, line) is not None
 
     def current(self) -> tuple[str | None, int | None, None]:
         """(path, hunk index, selection) — the file the reader is in (the
