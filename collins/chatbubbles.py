@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-01. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 """Shared chat-bubble widgets: message bubbles and tool chips.
 
 Used by both the live streaming chat (`chatsessionview`) and the session replay
@@ -17,7 +17,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, Gtk, Pango  # noqa: E402
 
 from .formatting import md_to_pango  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -36,13 +36,12 @@ def make_label(role: str) -> Gtk.Label:
 
 def set_bubble_text(label: Gtk.Label, text: str, role: str) -> None:
     """Set bubble text — markdown-rendered for the assistant, plain for the user."""
+    # md_to_pango falls back to escaped plain text itself: GTK 4's
+    # set_markup never raises on bad markup, it blanks the label.
     if role == "assistant":
-        try:
-            label.set_markup(md_to_pango(text))
-            return
-        except GLib.GError:
-            pass  # malformed markup → fall through to plain
-    label.set_label(text)
+        label.set_markup(md_to_pango(text))
+    else:
+        label.set_label(text)
 
 
 def make_bubble(text: str, role: str) -> Gtk.Widget:

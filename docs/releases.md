@@ -256,6 +256,10 @@ downloads of each version, see the
   grey pull-request glyph; it now shows the same mark the footer chip and
   the page header do — the state's color, with the status badge on its
   corner — and follows the status as it moves and the theme as it flips.
+- **Fixes** — a pull request description or comment with italics closing
+  inside bold (`**strong *soft***`) rendered as nothing on the PR page;
+  it now renders, and any body the markdown pass can't nest shows as plain
+  text instead of a blank.
 
 ### v0.1.2 — 2026-08-30
 
