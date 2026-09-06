@@ -427,7 +427,7 @@ def build_rows(
             rows.append(_more_row(group))
 
     if default is not None:
-        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, default.name))
+        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, default.label))
         rows.extend(_commit_rows(default_commits, DEFAULT_GROUP, unpushed))
         if default_more:
             rows.append(_more_row(DEFAULT_GROUP))
