@@ -10,6 +10,11 @@ widget being mapped (same pattern as the terminal footer's cwd poll), so a
 hidden sidebar or a disabled or collapsed panel costs nothing. Polling also
 pauses while the window is suspended (minimized / fully hidden, GTK >= 4.12)
 or the session is locked (screensaver ``ActiveChanged`` over D-Bus).
+
+The timer is one-shot and re-armed by each landing, so any fetch — a poll or
+the refresh button — restarts the countdown to the next one. A success waits
+the full interval; a failure (the endpoint rate-limits on and off) retries
+sooner and shows the endpoint's own words meanwhile.
 """
 
 from __future__ import annotations
@@ -23,8 +28,12 @@ from . import tokenrefresh, usage
 from .i18n import _
 from .state import AppState
 
-_POLL_INTERVAL_S = 300
+_POLL_INTERVAL_S = 600
+# After a failed fetch the next try comes this soon, not a whole interval
+# later: a 429 from the endpoint clears in seconds.
+_RETRY_INTERVAL_S = 60
 # A sidebar toggle remaps the panel; don't re-fetch if the data is this fresh.
+# Only a successful fetch counts as data — a failure is never this fresh.
 _MIN_REFRESH_GAP_S = 30
 # The endpoint reports at most session + weekly + a few scoped bars; cap the
 # rows we build so a surprise response can't flood the sidebar.
@@ -34,12 +43,32 @@ _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 # Matches the archive-undo snackbar's timeout (window._UNDO_TOAST_SECONDS).
 _ERROR_TOAST_SECONDS = 4
 
+# What the panel says for a failure it can name. The error's own text (the
+# endpoint's status code and body, the socket error, the parse complaint)
+# follows on its own line for every kind but the two about the credentials
+# file, whose detail is just the file's path.
 _ERROR_MESSAGES = {
     "no-credentials": lambda: _("Not logged in to Claude"),
     "expired": lambda: _("Claude login expired — run claude to refresh"),
     "auth": lambda: _("Claude login expired — run claude to refresh"),
     "network": lambda: _("Usage unavailable (offline)"),
 }
+_DETAIL_IN_TOOLTIP_ONLY = frozenset({"no-credentials", "expired"})
+
+
+def _error_text(err: usage.UsageError | None) -> str:
+    """The status line for a failed fetch: the named message when there is
+    one, then the actual error underneath — ``HTTP 429: Rate limited.
+    Please try again later.`` rather than a bare "unavailable"."""
+    if err is None:
+        return _("Usage unavailable")
+    message = _ERROR_MESSAGES.get(err.kind)
+    detail = str(err)
+    if message is None:
+        return detail or _("Usage unavailable")
+    if err.kind in _DETAIL_IN_TOOLTIP_ONLY or not detail:
+        return message()
+    return f"{message()}\n{detail}"
 
 
 def _bar_title(bar: usage.UsageBar) -> str:
@@ -266,23 +295,31 @@ class UsagePanel(Gtk.Box):
     def _start(self) -> None:
         if self._paused():
             return
-        last = self._snapshot.fetched_at if self._snapshot else 0.0
-        if time.time() - last >= _MIN_REFRESH_GAP_S:
-            self._refresh()
-        if self._source is None:
-            self._source = GLib.timeout_add_seconds(_POLL_INTERVAL_S, self._tick)
+        age = time.time() - (self._snapshot.fetched_at if self._snapshot else 0.0)
+        if age >= _MIN_REFRESH_GAP_S:
+            self._refresh()  # its landing arms the timer
+        elif self._source is None:
+            self._schedule(_POLL_INTERVAL_S - age)
+
+    def _schedule(self, delay_s: float) -> None:
+        """Arm the one-shot timer for the next poll, replacing any pending
+        one — so a fetch of any origin, the refresh button included, restarts
+        the countdown from its landing."""
+        if self._source is not None:
+            GLib.source_remove(self._source)
+        self._source = GLib.timeout_add_seconds(max(1, round(delay_s)), self._tick)
 
     def _tick(self) -> bool:
+        self._source = None
         # Hidden sidebar/panel, collapsed panel, minimized window, or locked
         # screen → stop; map / notify::suspended / ActiveChanged restarts the
         # timer.
         if not self._stack.get_mapped() or self._paused():
-            self._source = None
             return GLib.SOURCE_REMOVE
         for row in self._bar_rows:
             row.update_countdown()
         self._refresh()
-        return GLib.SOURCE_CONTINUE
+        return GLib.SOURCE_REMOVE
 
     def _on_login_repaired(self) -> None:
         # tokenrefresh worker-thread callback: the throwaway run this panel's
@@ -328,7 +365,13 @@ class UsagePanel(Gtk.Box):
         manual, self._manual_fetch = self._manual_fetch, False
         self._fetching = False
         self._spinner.set_spinning(False)
-        if isinstance(result, usage.UsageSnapshot):
+        succeeded = isinstance(result, usage.UsageSnapshot)
+        # Every landing restarts the clock: a success waits the full
+        # interval, a failure retries sooner. A hidden or paused panel arms
+        # nothing; its map / unpause fetches afresh.
+        if self._stack.get_mapped() and not self._paused():
+            self._schedule(_POLL_INTERVAL_S if succeeded else _RETRY_INTERVAL_S)
+        if succeeded:
             self._snapshot = result
             self._show_snapshot(result)
             # A success outdates whatever failure the snackbar still reports.
@@ -348,12 +391,15 @@ class UsagePanel(Gtk.Box):
             # and the status text below names `claude` as the fix meanwhile.
             tokenrefresh.maybe_repair(self._on_login_repaired)
         if self._snapshot is not None:
-            # Keep showing stale data; just note its age in the tooltip.
+            # Keep showing stale data; the tooltip carries its age and what
+            # went wrong.
             age_min = max(1, int((time.time() - self._snapshot.fetched_at) / 60))
-            self._stack.set_tooltip_text(_("As of {n}m ago").format(n=age_min))
+            tooltip = _("As of {n}m ago").format(n=age_min)
+            if err is not None:
+                tooltip += f"\n{err}"
+            self._stack.set_tooltip_text(tooltip)
         else:
-            message = _ERROR_MESSAGES.get(err.kind if err else "", None)
-            self._status.set_text(message() if message else _("Usage unavailable"))
+            self._status.set_text(_error_text(err))
             self._status.set_tooltip_text(str(err) if err else None)
             self._stack.set_visible_child_name("status")
         if manual:
@@ -372,9 +418,9 @@ class UsagePanel(Gtk.Box):
             return
         if self._error_toast is not None:
             self._error_toast.dismiss()
-        message = _ERROR_MESSAGES.get(err.kind if err else "", None)
+        title = _error_text(err).replace("\n", " — ") if err else _("Couldn't refresh usage")
         toast = Adw.Toast(
-            title=message() if message else _("Couldn't refresh usage"),
+            title=title,
             button_label=_("Dismiss"),
             timeout=_ERROR_TOAST_SECONDS,
         )

@@ -110,11 +110,18 @@ the user's default.
 ## The usage panel (`usagepanel.py`)
 
 Session / weekly / model-scoped bars plus extra-usage credits, polled every
-5 min on a daemon thread, gated on the widget being mapped, paused while the
+10 min on a daemon thread, gated on the widget being mapped, paused while the
 window is suspended (GTK ≥ 4.12) or the screen is locked (screensaver
-`ActiveChanged` over D-Bus). Idle landings are `PRIORITY_DEFAULT`. With the
-login expired and repair off (or the welcome unanswered) it says to run
-`claude` yourself.
+`ActiveChanged` over D-Bus). Idle landings are `PRIORITY_DEFAULT`. The timer
+is one-shot and re-armed by each landing (`_schedule`): a success waits
+`_POLL_INTERVAL_S`, a failure `_RETRY_INTERVAL_S` (60 s — the endpoint
+answers 429 on and off), and the refresh button's landing restarts the clock
+like any other. A failure shows the error's own text under the named message
+(`_error_text`): `usage.describe_http_error` turns a status code and body
+into `HTTP 429: Rate limited. Please try again later.`, reading Anthropic's
+`{"error": {"message"}}` shape and flattening and bounding anything else.
+With the login expired and repair off (or the welcome unanswered) it says to
+run `claude` yourself.
 
 ## Disclosure: Token use and the welcome dialog
 

@@ -1,14 +1,18 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
+import io
 import json
 import time
+import urllib.error
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from collins import usage
 from collins.usage import (
     USAGE_URL,
     UsageError,
+    describe_http_error,
     fetch_snapshot,
     parse_snapshot,
     read_credentials,
@@ -260,6 +264,51 @@ def test_fetch_uses_fixture_env(tmp_path, monkeypatch):
 
     snap = fetch_snapshot(transport, path=tmp_path / "missing-credentials.json")
     assert len(snap.bars) == 3
+
+
+# -- HTTP errors ---------------------------------------------------------------
+
+
+def test_describe_http_error_reads_anthropic_error_body():
+    body = b'{"error": {"type": "rate_limit_error", "message": "Rate limited. Please try again later."}}'
+    assert describe_http_error(429, body) == "HTTP 429: Rate limited. Please try again later."
+
+
+def test_describe_http_error_flattens_and_bounds_foreign_bodies():
+    assert describe_http_error(502, "<html>\n  <body>Bad\n gateway</body>\n</html>") == (
+        "HTTP 502: <html> <body>Bad gateway</body> </html>"
+    )
+    assert describe_http_error(500, b"") == "HTTP 500"
+    assert describe_http_error(500, '{"error": "plain string"}') == "HTTP 500: plain string"
+    assert describe_http_error(500, '{"error": {"message": 7}}') == (
+        'HTTP 500: {"error": {"message": 7}}'
+    )
+    long = describe_http_error(503, "x" * 10_000)
+    assert len(long) < 300
+    assert describe_http_error(500, b"\xff\xfe") == "HTTP 500: ��"
+
+
+def _raise_http(monkeypatch, code: int, body: bytes):
+    def urlopen(request, timeout=None):
+        raise urllib.error.HTTPError(USAGE_URL, code, "nope", {}, io.BytesIO(body))
+
+    monkeypatch.setattr(usage.urllib.request, "urlopen", urlopen)
+
+
+def test_http_get_carries_code_and_body(monkeypatch):
+    _raise_http(monkeypatch, 429, b'{"error": {"message": "Rate limited."}}')
+    with pytest.raises(UsageError) as err:
+        usage._http_get(USAGE_URL, {})
+    assert err.value.kind == "http"
+    assert str(err.value) == "HTTP 429: Rate limited."
+
+
+def test_http_get_maps_401_to_auth(monkeypatch):
+    _raise_http(monkeypatch, 401, b'{"error": {"message": "invalid token"}}')
+    with pytest.raises(UsageError) as err:
+        usage._http_get(USAGE_URL, {})
+    assert err.value.kind == "auth"
+    assert str(err.value) == "HTTP 401: invalid token"
 
 
 # -- time_until ----------------------------------------------------------------

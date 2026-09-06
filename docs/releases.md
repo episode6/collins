@@ -42,6 +42,14 @@ downloads of each version, see the
   `effort` argument sets the sibling's `--effort` (`low` … `max`); left
   out, the sibling answers at the effort its caller is answering at right
   now, `/effort` switches included, the way it already inherits the model.
+
+- **The usage panel says what went wrong.** A fetch the usage endpoint
+  refused showed a bare "Usage unavailable" and sat there until the next
+  poll. The panel now shows the endpoint's answer — `HTTP 429: Rate
+  limited. Please try again later.` — and tries again a minute later
+  instead of waiting out a whole interval. Polls come every 10 minutes
+  rather than 5, and any fetch, the refresh button's included, restarts
+  that clock.
 - **A files-list click shows one file's diff.** Clicking a file in the
   git page's files list scrolled the whole stream to its section; it now
   shows that file's diff alone, and `]` / `.` walk on into the next file.
