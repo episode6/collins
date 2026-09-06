@@ -2002,6 +2002,18 @@ def check_native(repo: str, state_path: str) -> None:
         and not page.sidebar._filter_entry.get_visible()
         and not page.native,
     )
+    # Native, then hunk again before the terminate's exit lands: the exit
+    # must respawn hunk (the last word), not show the exited card.
+    pid = read_state(state_path).get("pid")
+    page.apply_settings(NATIVE_SETTINGS)
+    page.apply_settings({**NATIVE_SETTINGS, "git_viewer": "hunk"})
+    check("a flip back before the exit leaves a respawn note", page._respawn_wanted is True and page.hunk_alive)
+    check(
+        "the exit respawns hunk rather than showing the exited card",
+        wait_for(lambda: read_state(state_path).get("pid") not in (None, pid) and page._session_id is not None),
+        (read_state(state_path).get("pid"), pid, page.card),
+    )
+    check("no card, hunk shown", page.card is None and page._stack.get_visible_child_name() == "hunk" and not page.native)
     pid = read_state(state_path).get("pid")
     page.apply_settings(NATIVE_SETTINGS)
     check("flipping back takes hunk down and opens the view", wait_for(lambda: page.native and page.settled() and page._child_pid is None))

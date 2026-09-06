@@ -2012,8 +2012,9 @@ class GitPage(Adw.Bin):
         """The viewer switch flipped (apply_settings): to native, hunk is
         taken down (its exit opens the view, _on_child_exited) or the view
         opened at once; to hunk, the view closes and hunk spawns when the
-        page is on screen. The header's find and menu and the sidebar's
-        filter show for the native viewer only."""
+        page is on screen — or, when the child the flip to native signalled
+        is still going down, respawns on its exit. The header's find and
+        menu and the sidebar's filter show for the native viewer only."""
         self._native = native
         self._find_toggle.set_visible(native)
         self._menu_button.set_visible(native)
@@ -2038,6 +2039,13 @@ class GitPage(Adw.Bin):
         self._native_close()
         if self._card == _NOT_A_REPO:
             return  # the card's Check again spawns hunk once the tree is back
+        if self.hunk_alive:
+            # The flip to native sent its terminate and this flip back came
+            # before the exit landed: _spawn would no-op on the live child,
+            # and the exit would find neither _native nor a respawn wanted
+            # and show the exited card. Leave the note _respawn leaves.
+            self._respawn_wanted = True
+            return
         if self.get_mapped():
             self._spawn()
 

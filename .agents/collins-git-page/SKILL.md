@@ -282,7 +282,10 @@ synchronous; a miss toasts), `apply_settings`, `_after_unrealize`,
 `_on_child_exited` and `holds_escape` all have the native branch.
 `_set_native` flips live: to native, a running hunk is terminated and its
 exit opens the view (`_on_child_exited`), a spawn in flight is orphaned;
-to hunk, the view closes and hunk spawns if mapped. `GitPage.native`,
+to hunk, the view closes and hunk spawns if mapped — or, when the child
+the flip to native signalled is still going down, `_respawn_wanted` is
+left for its exit (a `_spawn` on a live child no-ops, and the exit would
+otherwise show the exited card). `GitPage.native`,
 `.diff_view` and `.reveal(path, hunk, side, line)` are the public face
 (`app._ShowDiff` reveals through it and replies without a session id). A
 `line` no hunk carries (an unchanged stretch; `diffmodel.locate` misses)

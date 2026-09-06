@@ -247,7 +247,7 @@ def pin_scroll(scroller: Gtk.ScrolledWindow, kept: list[Gtk.Widget]) -> None:
 
     clock = scroller.get_frame_clock()
     if clock is None:
-        GLib.idle_add(lambda: (place(), GLib.SOURCE_REMOVE)[1])
+        GLib.idle_add(lambda: (place(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT)
         return
     handler: list[int] = []
 

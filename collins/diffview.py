@@ -420,12 +420,21 @@ class _HunkView:
         # ancestor being allocated in the same pass is lost (measured).
         self._remeasure_source = 0
         view.get_vadjustment().connect("changed", self._on_layout_height_changed)
+        # A dropped view is unrealized: the idle it may hold is let go
+        # there rather than run over a scroller nobody shows (a re-parented
+        # one re-validates its layout on realize and re-arms it).
+        scroller.connect("unrealize", lambda _w: self._cancel_remeasure())
         self.set_wrap(wrap)
 
     def _on_layout_height_changed(self, _adjustment: Gtk.Adjustment) -> None:
         if self._remeasure_source:
             return
         self._remeasure_source = GLib.idle_add(self._remeasure, priority=GLib.PRIORITY_DEFAULT)
+
+    def _cancel_remeasure(self) -> None:
+        if self._remeasure_source:
+            GLib.source_remove(self._remeasure_source)
+            self._remeasure_source = 0
 
     def _remeasure(self) -> bool:
         self._remeasure_source = 0
@@ -1269,6 +1278,8 @@ class _FileSection(Gtk.Box):
         for section, hunk in zip(self.hunks, file.hunks, strict=True):
             section.hunk = hunk
             section.file = file
+        for gap in self.gaps:  # a kept gap likewise: its file is this read's
+            gap.file = file
 
     def _make_hunk(self, hunk: diffmodel.Hunk, language: GtkSource.Language | None) -> _HunkSection:
         owner = self._owner
