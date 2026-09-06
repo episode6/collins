@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 
 # Features
@@ -802,6 +802,18 @@ flipped the switch is refused if it calls it anyway.
   in which projects. Any dialog that would empty a project out offers to
   keep it in the sidebar as an empty header, so *New session here* still
   works.
+- **Delete archived sessions automatically** (Preferences → *Session
+  behavior* → *Delete archived sessions after*, a number and a unit: days,
+  weeks, months or years; 0, the default, keeps them forever). Once a day
+  Collins moves the transcript of every session archived at least that long
+  ago to the system trash — recoverable, like *Move transcript to trash* —
+  along with what the app kept for it. The clock runs from the moment a
+  session was archived (restoring it resets the clock; sessions archived
+  before this setting existed start theirs at the upgrade), a session that
+  is still running waits for the next day, and a project this empties out
+  is kept in the sidebar as an empty header. Sessions hidden only because
+  their whole *project* is archived are left alone. A month counts as
+  thirty days and a year as 365.
 - **Export as Markdown…** (right-click) writes a session transcript to a
   readable Markdown file. **Move transcript to trash…** (recoverable) and
   **Delete permanently…** are the only actions that touch a transcript
@@ -875,7 +887,8 @@ an expired login — off, the usage panel just says to run `claude` yourself —
 the **Model list** row, which is free — followed by a switch for each of the
 **built-in MCP tools** the agent can call, the **status icon**, **Reopen the
 last session**, what to do **when quitting with running sessions** (ask /
-exit / background / hide), **Archive on claude.ai too**, **Check for
+exit / background / hide), **Archive on claude.ai too**, **Delete archived
+sessions after** (a number and a unit; 0 never), **Check for
 updates** (the once-a-day look at GitHub's latest release, through `gh` or
 anonymously), a **Pull requests** group — the PR page's **Text size**,
 whether a first prompt that links a pull request by URL **attaches it

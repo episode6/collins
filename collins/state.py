@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -14,10 +14,11 @@ import copy
 import json
 import os
 import shutil
+import time
 from collections.abc import Iterable
 from pathlib import Path
 
-from . import mcptools, newchat, notifycenter, panelhistory, panellayout
+from . import autodelete, mcptools, newchat, notifycenter, panelhistory, panellayout
 from .claudemodels import NO_MODEL
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
@@ -148,6 +149,12 @@ DEFAULT_SETTINGS = {
     # remotearchive.py). On by default; sessions with no remote page cost one
     # transcript scan and no network.
     "archive_on_claude_ai": True,
+    # Trash archived sessions automatically once they have sat archived this
+    # long: a count and a unit (autodelete.UNITS: days | weeks | months |
+    # years). 0 is never, the default. Measured from the archive stamp in
+    # archived_at; swept at most once a day by the app (see autodelete.py).
+    "auto_delete_archived_after": 0,
+    "auto_delete_archived_unit": "months",
     # The session tab bar under the header. Hidden by default: the sidebar is
     # the intended way to move between sessions (the window title names the
     # active one), and the tabs keep working underneath; the header's own
@@ -488,6 +495,14 @@ class AppState:
         self.archived_projects = set(
             data.get("archived_projects") or data.get("hidden_projects") or []
         )
+        # When each session was archived, for the automatic delete
+        # (autodelete.py). An archive from before the stamp existed starts
+        # its clock at this read; a stamp for something no longer archived
+        # is dropped.
+        raw_archived_at = data.get("archived_at")
+        self.archived_at = autodelete.stamp_missing(
+            self.archived, raw_archived_at if isinstance(raw_archived_at, dict) else {}
+        )
         self.project_worktree = {
             k: v for k, v in (data.get("project_worktree") or {}).items() if isinstance(v, bool)
         }
@@ -557,6 +572,7 @@ class AppState:
             "emojis": self.emojis,
             "favorites": sorted(self.favorites),
             "archived": sorted(self.archived),
+            "archived_at": self.archived_at,
             "archived_projects": sorted(self.archived_projects),
             "project_worktree": self.project_worktree,
             "project_order": self.project_order,  # order is the payload — never sort
@@ -657,11 +673,22 @@ class AppState:
         return session_id in self.archived
 
     def set_archived(self, session_id: str, archived: bool) -> None:
+        """Archive or restore a session. An archive stamps the moment (kept
+        across repeated archives of the same session — the first archive is
+        the one that counts); a restore drops the stamp, so archiving again
+        later starts the clock over."""
         if archived:
             self.archived.add(session_id)
+            self.archived_at.setdefault(session_id, time.time())
         else:
             self.archived.discard(session_id)
+            self.archived_at.pop(session_id, None)
         self.save()
+
+    def archived_since(self, session_id: str) -> float | None:
+        """When the session was archived (wall-clock seconds), or None for
+        one that isn't."""
+        return self.archived_at.get(session_id)
 
     def is_project_archived(self, project_name: str) -> bool:
         return project_name in self.archived_projects

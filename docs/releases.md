@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -143,6 +143,15 @@ downloads of each version, see the
   and both pickers move within a poll of the command running. A model
   chosen in the CLI's own `/model` picker still waits for the next
   reply, since the CLI prints its name rather than its id.
+- **Archived sessions can delete themselves.** Preferences → *Session
+  behavior* → *Delete archived sessions after*: a number and a unit (days,
+  weeks, months, years; 0, the default, keeps them forever). Once a day,
+  every session archived at least that long ago has its transcript moved to
+  the system trash, the way *Delete archived sessions…* does by hand. The
+  clock runs from the archive (restoring resets it; sessions archived
+  before the setting existed start theirs at the upgrade), a running
+  session waits for tomorrow, and a project emptied out stays in the
+  sidebar as a header.
 - **Archiving a session in a git worktree offers to delete the
   worktree.** The archive starts with a dialog asking *Keep Worktree*
   or *Delete Worktree* — or *Cancel*, which archives nothing. Either

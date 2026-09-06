@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -25,6 +25,7 @@ from . import (
     APP_ID,
     DEBUG_APP_ID,
     attachrecords,
+    autodelete,
     buildinfo,
     clisetup,
     desktopentry,
@@ -3015,6 +3016,10 @@ class App(Adw.Application):
             # query a day.
             self._check_for_updates()
             GLib.timeout_add_seconds(updatecheck.POLL_S, self._check_for_updates)
+            # The archive sweep rides the same hour, and autodelete turns
+            # it into one sweep a day (none at all until the setting is on).
+            self._sweep_archived()
+            GLib.timeout_add_seconds(updatecheck.POLL_S, self._sweep_archived)
 
         return then
 
@@ -3029,6 +3034,36 @@ class App(Adw.Application):
             if isinstance(window, MainWindow):
                 window.sidebar.usage_panel.refetch()
         return GLib.SOURCE_REMOVE
+
+    # -- archived sessions past their time ------------------------------------------
+
+    def _sweep_archived(self) -> bool:
+        """Ask autodelete whether a sweep is due (the setting and the
+        once-a-day file are its to weigh) and let it trash what has expired
+        through the first window, which owns the tabs and the undo toast.
+        True, so the hourly timer that calls this keeps going."""
+        window = next((w for w in self.get_windows() if isinstance(w, MainWindow)), None)
+        if window is None:
+            return GLib.SOURCE_CONTINUE
+
+        def trash(session_ids: list[str]) -> list[str]:
+            running = {
+                sid
+                for w in self.get_windows()
+                if isinstance(w, MainWindow)
+                for sid in session_ids
+                if w.session_is_running(sid)
+            }
+            skipped = list(running)
+            return skipped + window.trash_expired_archives(
+                [sid for sid in session_ids if sid not in running]
+            )
+
+        try:
+            autodelete.maybe_sweep(self.state.settings, dict(self.state.archived_at), trash)
+        except Exception:  # pragma: no cover - never let housekeeping take the app down
+            logging.getLogger(__name__).warning("archive sweep failed", exc_info=True)
+        return GLib.SOURCE_CONTINUE
 
     # -- a newer Collins ---------------------------------------------------------
 
