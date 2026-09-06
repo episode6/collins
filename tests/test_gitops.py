@@ -1274,8 +1274,13 @@ def test_tree_state_signature_moves_with_the_working_tree(repo, tmp_path):
     # A second edit keeps the status letter and moves the numstat.
     _write(repo, "f.txt", "two\nthree\n")
     assert gitops.tree_state_signature(repo) not in (clean, edited)
+    # A third edit keeps the letter and the counts (the same number of
+    # lines changed): the file's size and mtime move the signature.
+    counted = gitops.tree_state_signature(repo)
+    _write(repo, "f.txt", "two\nfour!\n")
+    assert gitops.tree_state_signature(repo) not in (clean, edited, counted)
     _write(repo, "n.txt", "new\n")
-    assert gitops.tree_state_signature(repo) not in (clean, edited)
+    assert gitops.tree_state_signature(repo) not in (clean, edited, counted)
     outside = tmp_path / "outside"
     outside.mkdir()
     assert gitops.tree_state_signature(outside) is None

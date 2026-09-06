@@ -123,6 +123,11 @@ APPLY_ARGS: tuple[str, ...] = ("apply", "--recount", "--unidiff-zero")
 # thousands, and the load runs on every reload. The rest are listed by
 # status alone.
 MAX_UNTRACKED_DIFFS = 200
+# How many working-tree paths tree_state_signature stats (size + mtime) on
+# top of the status and numstat: the edits neither of those sees. A stat
+# is cheap, but a tree with thousands of changed paths reloads on the
+# counts alone.
+MAX_STAT_PATHS = 2_000
 # The ref file_at_argv names the index by: `:path` is git's spelling.
 INDEX_REF = ""
 # The most file_at hands back — a blob for a gap's context or an image
@@ -1102,12 +1107,15 @@ def tree_state_signature(
 ) -> str | None:
     """What the diff view's watch compares after a file monitor fires: one
     hex digest of `git status --porcelain=v2 -z` (which paths changed,
-    how, untracked included) and `git diff --numstat -z` (how much — a
+    how, untracked included), `git diff --numstat -z` (how much — a
     second edit to an already-modified file moves the counts, not the
-    letter). Unchanged means nothing to reload; the index and HEAD moves
-    are gitinfo.tree_signature's, on the tick. None when either read
-    couldn't be made — a None never equals anything, so the caller
-    reloads."""
+    letter) and, for every path the working-tree side lists (at most
+    MAX_STAT_PATHS of them), the file's size and mtime — an edit that
+    rewrites a changed line moves neither the letter nor the counts, and
+    would otherwise never reload. Unchanged means nothing to reload; the
+    index and HEAD moves are gitinfo.tree_signature's, on the tick. None
+    when either git read couldn't be made — a None never equals anything,
+    so the caller reloads."""
     root = _root(cwd)
     status = run_git_bytes(root, status_argv(), run=run, timeout=timeout)
     if not status.ok:
@@ -1119,4 +1127,13 @@ def tree_state_signature(
     digest.update(status.stdout.encode("utf-8", "replace"))
     digest.update(b"\0\0")
     digest.update(numstat.stdout.encode("utf-8", "replace"))
+    digest.update(b"\0\0")
+    for row in parse_status_v2(status.stdout).unstaged[:MAX_STAT_PATHS]:
+        try:
+            stat = os.stat(os.path.join(str(root), row.path))
+        except OSError:
+            mark = b"gone"
+        else:
+            mark = f"{stat.st_size}:{stat.st_mtime_ns}".encode()
+        digest.update(row.path.encode("utf-8", "replace") + b"\0" + mark + b"\0")
     return digest.hexdigest()
