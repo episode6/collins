@@ -5077,9 +5077,10 @@ class MainWindow(Adw.ApplicationWindow):
         posted for it. Given a row, the desktop notification is keyed by the
         row's session — the key the app withdraws it under when the row
         goes (App._on_notifications_changed). The card goes to the *active*
-        window, whichever window the tab lives in. The sound plays only
-        beside a card (the desktop sounds its own notifications), debounced
-        and single-flight in notifysound.
+        window, whichever window the tab lives in. The sound plays beside
+        the card and the desktop notification alike (GNOME never sounds a
+        Gio.Notification of ours, see notifycenter.delivery), debounced and
+        single-flight in notifysound.
         """
         if not self.state.get_setting("inapp_notifications"):
             deliveries = notifycenter.without_cards(deliveries)

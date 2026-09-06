@@ -239,9 +239,10 @@ either.)
 Where a notification goes is a function of what raised it and where you
 are. A `notify_user` message or a terminal bell reaching a window that
 isn't active becomes a **desktop** notification; the same event while a
-Collins window is active becomes an in-app **card** plus the notification
-sound instead — never both, and the sound only plays beside a card, since
-the desktop sounds its own. A message to the tab you're already looking at
+Collins window is active becomes an in-app **card** instead — never both —
+and the notification sound plays beside either (the desktop doesn't sound
+ours: GNOME only plays a sound for a notification that names one, and the
+`Gio.Notification` Collins sends can't). A message to the tab you're already looking at
 lands in the history as an already-read row and nothing more; a bell from
 the selected tab keeps the compositor's beep. A finished run is a history
 row only, unless *Announce finished runs* is on. Message, bell and update

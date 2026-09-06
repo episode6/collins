@@ -431,10 +431,10 @@ def test_listeners_connect_once_and_disconnect():
             FOCUS_ELSEWHERE,
             {DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLAG, DELIVER_FLASH},
         ),
-        (KIND_MESSAGE, FOCUS_UNFOCUSED, {DELIVER_DESKTOP, DELIVER_ROW, DELIVER_FLAG}),
+        (KIND_MESSAGE, FOCUS_UNFOCUSED, {DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLAG}),
         (KIND_BELL, FOCUS_SELECTED, {DELIVER_BEEP, DELIVER_FLASH}),
         (KIND_BELL, FOCUS_ELSEWHERE, {DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLASH}),
-        (KIND_BELL, FOCUS_UNFOCUSED, {DELIVER_DESKTOP, DELIVER_ROW, DELIVER_FLASH}),
+        (KIND_BELL, FOCUS_UNFOCUSED, {DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLASH}),
         (KIND_FINISHED, FOCUS_SELECTED, set()),
         (KIND_FINISHED, FOCUS_ELSEWHERE, {DELIVER_ROW}),
         (KIND_FINISHED, FOCUS_UNFOCUSED, {DELIVER_ROW}),
@@ -451,7 +451,7 @@ def test_delivery_table(kind, focus, expected):
     [
         (FOCUS_SELECTED, set()),  # a selected tab never goes green
         (FOCUS_ELSEWHERE, {DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLAG, DELIVER_FLASH}),
-        (FOCUS_UNFOCUSED, {DELIVER_DESKTOP, DELIVER_ROW, DELIVER_FLAG}),
+        (FOCUS_UNFOCUSED, {DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLAG}),
     ],
 )
 def test_announce_finished_runs_routes_a_finish_as_a_message(focus, expected):
@@ -464,14 +464,15 @@ def test_announce_finished_runs_changes_nothing_else():
             assert delivery(kind, focus, announce_finished_runs=True) == delivery(kind, focus)
 
 
-def test_the_sound_only_ever_plays_beside_a_card():
-    # Desktop notifications are sounded by the desktop; ours on top would
-    # ring twice.
+def test_the_sound_plays_beside_a_card_or_a_desktop_notification_and_nowhere_else():
+    # GNOME never sounds a Gio.Notification (no sound hint to carry), so
+    # the desktop notification gets our sound just as the card does.
     for kind in notifycenter.KINDS:
         for focus in notifycenter.FOCUSES:
             for announce in (False, True):
                 result = delivery(kind, focus, announce)
-                assert (DELIVER_SOUND in result) <= (DELIVER_CARD in result)
+                announced = bool(result & {DELIVER_CARD, DELIVER_DESKTOP})
+                assert (DELIVER_SOUND in result) == announced
                 assert not ({DELIVER_CARD, DELIVER_DESKTOP} <= result)
 
 
@@ -585,12 +586,12 @@ def test_focus_state(any_active, tab_window_active, tab_selected, expected):
     assert notifycenter.focus_state(any_active, tab_window_active, tab_selected) == expected
 
 
-def test_without_cards_turns_the_card_and_its_sound_into_a_desktop_notification():
+def test_without_cards_turns_the_card_into_a_desktop_notification_and_keeps_the_sound():
     elsewhere = delivery(KIND_MESSAGE, FOCUS_ELSEWHERE)
     swapped = notifycenter.without_cards(elsewhere)
-    assert DELIVER_CARD not in swapped and DELIVER_SOUND not in swapped
-    assert DELIVER_DESKTOP in swapped
-    assert swapped - {DELIVER_DESKTOP} == elsewhere - {DELIVER_CARD, DELIVER_SOUND}
+    assert DELIVER_CARD not in swapped
+    assert {DELIVER_DESKTOP, DELIVER_SOUND} <= swapped
+    assert swapped - {DELIVER_DESKTOP} == elsewhere - {DELIVER_CARD}
 
 
 def test_without_cards_leaves_a_delivery_with_no_card_alone():
@@ -767,11 +768,15 @@ def test_update_delivery_is_a_card_in_collins_and_the_desktop_away():
     in_collins = {DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW}
     assert delivery(notifycenter.KIND_UPDATE, FOCUS_SELECTED) == in_collins
     assert delivery(notifycenter.KIND_UPDATE, FOCUS_ELSEWHERE) == in_collins
-    assert delivery(notifycenter.KIND_UPDATE, FOCUS_UNFOCUSED) == {DELIVER_DESKTOP, DELIVER_ROW}
+    assert delivery(notifycenter.KIND_UPDATE, FOCUS_UNFOCUSED) == {
+        DELIVER_DESKTOP,
+        DELIVER_SOUND,
+        DELIVER_ROW,
+    }
     # Nothing to flag or flash: no session raised it.
     for focus in (FOCUS_SELECTED, FOCUS_ELSEWHERE, FOCUS_UNFOCUSED):
         assert not delivery(notifycenter.KIND_UPDATE, focus) & {DELIVER_FLAG, DELIVER_FLASH}
-    assert notifycenter.without_cards(in_collins) == {DELIVER_DESKTOP, DELIVER_ROW}
+    assert notifycenter.without_cards(in_collins) == {DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW}
 
 
 def test_update_ids_name_the_version():
