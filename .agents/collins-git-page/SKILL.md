@@ -482,7 +482,9 @@ then `_mutation_planned` calls `request.plan(fresh)`. The sidebar's
 *Revert file* (a file row's right-click on a read-only load,
 `revert-requested(path)` → `_on_revert_requested` → `DiffView.
 request_file_at(path)`) presses the view's file button for the path, so
-it is the same request from here on. A `Refusal` is a toast and, when
+it is the same request from here on — the page meets it with the same
+busy gate and toast first, since nothing greys a menu item while a
+mutation runs and `request_file` drops a press made while busy. A `Refusal` is a toast and, when
 `stale`, a `_read_diff` (the reload the words promise). A plan with
 `confirm` (a discard's; a revert never asks) asks
 through `dialogs.confirm_dialog` (heading and button from `request.

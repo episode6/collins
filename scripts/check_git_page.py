@@ -1352,6 +1352,14 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("the working tree got the reverse of the whole file, unstaged", wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0) and "staged.txt" in unstaged_paths() and "staged.txt" not in index_paths(), (unstaged_paths(), index_paths()))
         check("with no question asked, and the file's toast", len(asked) == asks and toasts[-1:] == ["Reverted staged.txt"], (asked[asks:], toasts[-1:]))
         check("the view is free again", wait_for(idle) and page.shows({"show": edit_sha}))
+        # The menu is not greyed while a mutation runs: the page's busy
+        # gate meets it with the buttons' toast, and nothing is asked.
+        view.set_busy(True)
+        before = len(toasts)
+        check("Revert file from the sidebar while the view is busy", sidebar.activate_file_menu("staged.txt", "Revert file"))
+        check("is refused with the busy toast", toasts[before:] == ["Another git operation is still running"] and len(asked) == asks, toasts[before:])
+        view.set_busy(False)
+        check("and the tree is untouched", wait_for(idle) and "staged 3\n" in open(os.path.join(repo, "staged.txt")).read())
         # A revert whose context moved retries three-way: a later commit
         # changed line 6 (inside the hunk's context), so the reverse apply
         # of the older commit's hunk misses, and the merge lands both.

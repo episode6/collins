@@ -2640,11 +2640,12 @@ class DiffView(Gtk.Box):
     def request_file_at(self, path: str) -> bool:
         """The sidebar's *Revert file* (a file row's context menu on a
         read-only load): press the file header's button for *path* as a
-        click would — the file, whole. False when the view holds no such
-        file (the list and the view read the same diff, so only a load in
-        flight gets here)."""
+        click would — the file, whole. False when nothing was asked: the
+        view is busy (request_file drops the press; the page gates and
+        toasts before calling) or holds no such file (the list and the
+        view read the same diff, so only a load in flight gets here)."""
         section = self._section_for(path, diffmodel.NEW)
-        if section is None:
+        if section is None or self._busy or self.loaded is None:
             return False
         self.request_file(section, False)
         return True

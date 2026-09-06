@@ -887,7 +887,6 @@ def test_confirm_words_name_the_question_and_its_button():
     )
 
 
-
 def test_action_labels_follow_the_spec_table():
     assert gitpatch.action_labels(UNSTAGED, gitpatch.FILE) == ("Stage file", "Discard file")
     assert gitpatch.action_labels(UNSTAGED, gitpatch.HUNK) == ("Stage hunk", "Discard hunk")

@@ -1345,7 +1345,13 @@ class GitPage(Adw.Bin):
         """A file row's *Revert file* (its context menu on a commit, the
         branch or a range): the view's file header button, pressed for it —
         the same request, the same plan, so the toast and the reload are
-        one path (_on_mutation_requested)."""
+        one path (_on_mutation_requested). The menu is not a header
+        button: nothing greys it while a mutation runs, and the view's
+        request_file drops a press made while busy, so the gate that every
+        button meets is met here first — with its toast."""
+        if self.sidebar.busy or self._diffview.busy():
+            self._toast(_("Another git operation is still running"))
+            return
         if not self._diffview.request_file_at(path):
             self._toast(_("{path} is not in the view: reloading").format(path=path))
             self._read_diff(self._loaded)
