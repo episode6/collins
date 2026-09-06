@@ -238,6 +238,9 @@ class GitPage(Adw.Bin):
         # and _resolve_parent skips an entry that stopped resolving. Every
         # read carries its generation; a bump orphans the one in flight.
         self._branch_stack: tuple[BranchRef, ...] = ()
+        # The local branches at HEAD's own commit (read_stack's second
+        # half): the current branch and its twins, the header's words.
+        self._head_twins: tuple[str, ...] = ()
         self._branch_stack_gen = 0
         self._closing = False
         # Every thread reply carries the generation it was dispatched under;
@@ -890,12 +893,14 @@ class GitPage(Adw.Bin):
         trunk = self._trunk_target(cwd)
 
         def work() -> None:
-            stack = tuple(gitops.stack_branches(cwd, trunk)) if trunk is not None else ()
-            GLib.idle_add(self._branch_stack_read, gen, stack, priority=GLib.PRIORITY_DEFAULT)
+            stack, twins = gitops.read_stack(cwd, trunk) if trunk is not None else ([], [])
+            GLib.idle_add(
+                self._branch_stack_read, gen, tuple(stack), tuple(twins), priority=GLib.PRIORITY_DEFAULT
+            )
 
         threading.Thread(target=work, name="git-page-stack", daemon=True).start()
 
-    def _branch_stack_read(self, gen: int, stack: tuple[BranchRef, ...]) -> bool:
+    def _branch_stack_read(self, gen: int, stack: tuple[BranchRef, ...], twins: tuple[str, ...] = ()) -> bool:
         """A stack read landed: the parent follows it (a parent that moved
         re-seeds the freshness signature — the base changed, not the tree
         — and reloads a branch diff, as the tick would), the sidebar gets
@@ -904,6 +909,7 @@ class GitPage(Adw.Bin):
         if gen != self._branch_stack_gen or self._closing:
             return GLib.SOURCE_REMOVE
         self._branch_stack = stack
+        self._head_twins = twins
         target_before = self._parent_target
         self._resolve_parent()
         parent_moved = self._parent_target != target_before
@@ -992,12 +998,16 @@ class GitPage(Adw.Bin):
 
         def work() -> None:
             subject = gitloads.commit_subject(cwd, show_ref) if show_ref else None
-            stack = tuple(gitops.stack_branches(cwd, trunk)) if trunk is not None else ()
-            GLib.idle_add(self._view_opened, gen, subject, stack, priority=GLib.PRIORITY_DEFAULT)
+            stack, twins = gitops.read_stack(cwd, trunk) if trunk is not None else ([], [])
+            GLib.idle_add(
+                self._view_opened, gen, subject, tuple(stack), tuple(twins), priority=GLib.PRIORITY_DEFAULT
+            )
 
         threading.Thread(target=work, name="git-page-open", daemon=True).start()
 
-    def _view_opened(self, gen: int, subject: str | None, stack: tuple[BranchRef, ...]) -> bool:
+    def _view_opened(
+        self, gen: int, subject: str | None, stack: tuple[BranchRef, ...], twins: tuple[str, ...] = ()
+    ) -> bool:
         if gen != self._gen or self._closing:
             return GLib.SOURCE_REMOVE  # _close_view reset the flags; a newer open may be out
         self._opening = False
@@ -1010,6 +1020,7 @@ class GitPage(Adw.Bin):
         self._repo_root = root
         self._branch = gitinfo.current_branch(cwd)
         self._branch_stack = stack
+        self._head_twins = twins
         parent = self._resolve_parent()
         if self._loaded == "branch" and parent is None:
             self._loaded = gitloads.DEFAULT_MODE  # a saved "vs main" in a tree with no main
@@ -1280,8 +1291,13 @@ class GitPage(Adw.Bin):
         commits for it (the groups changed)."""
         cwd = self._cwd_provider()
         parent, default = gitops.resolve_group_branches(cwd, self._parent_name, gitinfo.default_branch(cwd))
+        if parent is not None:
+            # The stack read knows the parent's twins; the .git resolve doesn't.
+            twins = next((ref.twins for ref in self._branch_stack if ref.name == parent.name), ())
+            parent = BranchRef(parent.name, parent.target, twins)
         return self.sidebar.set_context(
             branch=self._branch,
+            twins=self._head_twins,
             parent=parent,
             default=default,
             stack=self._branches_below_parent(),

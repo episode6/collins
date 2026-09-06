@@ -144,6 +144,7 @@ class _CommitRow(Gtk.ListBoxRow):
             label.set_ellipsize(Pango.EllipsizeMode.END)
             label.add_css_class("git-group-header")
             box.append(label)
+            self.set_tooltip_text(row.label)  # ellipsized: every twin's full name
         elif row.kind == "commit":
             up = Gtk.Label(width_chars=1, xalign=0.5)
             up.set_text(_UNPUSHED_MARK if row.unpushed else "")
@@ -158,6 +159,7 @@ class _CommitRow(Gtk.ListBoxRow):
             subject.set_text(row.label)
             subject.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(subject)
+            self.set_tooltip_text(row.label)  # the whole subject line
         else:
             # The working tree row and `load more…` sit in the commits'
             # column: a blank `↑` cell in front of the label.
@@ -279,6 +281,7 @@ class GitSidebar(Gtk.Box):
 
         # -- context (set_context) -------------------------------------------
         self._branch: str | None = None
+        self._twins: tuple[str, ...] = ()
         self._parent: BranchRef | None = None
         self._default: BranchRef | None = None
         # The branches under the parent, nearest first (gitops.stack_branches
@@ -501,8 +504,10 @@ class GitSidebar(Gtk.Box):
         resolved_sha: str | None,
         live: bool,
         stack: Sequence[BranchRef] = (),
+        twins: Sequence[str] = (),
     ) -> bool:
-        """What the page knows: the checked-out *branch*, the *parent* and
+        """What the page knows: the checked-out *branch* (and its *twins*,
+        the other local branches at HEAD, which share its header), the *parent* and
         *default* branches the groups are built on (None when the tree
         can't name one) and the *stack* of branches between them (the
         branches under the parent, nearest first, as gitops.stack_branches
@@ -515,9 +520,11 @@ class GitSidebar(Gtk.Box):
         so the list was re-read here) — the page refreshes it itself
         otherwise after an open."""
         stack = tuple(stack)
-        groups = (branch, parent, default, stack)
-        groups_changed = groups != (self._branch, self._parent, self._default, self._stack)
+        twins = tuple(twins)
+        groups = (branch, twins, parent, default, stack)
+        groups_changed = groups != (self._branch, self._twins, self._parent, self._default, self._stack)
         self._branch = branch
+        self._twins = twins
         self._parent = parent
         self._default = default
         self._stack = stack
@@ -589,6 +596,7 @@ class GitSidebar(Gtk.Box):
             default_commits,
             default_more,
             unpushed,
+            twins=self._twins,
         )
         self._rebuild_commits()
         return GLib.SOURCE_REMOVE

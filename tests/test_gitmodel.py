@@ -202,6 +202,23 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
         assert row.load is None or gitloads.loaded_ok(row.load)
 
 
+def test_build_rows_branches_at_one_commit_share_a_header_with_slashes():
+    """The current branch's twins (the other branches at HEAD) join its
+    header, the branch itself never repeated; a stack BranchRef's twins
+    join that branch's header; the group id and the load stay the first
+    branch's."""
+    rows = base_rows(twins=("feat/panel", "feat/panel-2", "wip"))
+    assert rows[0].label == "feat/panel / feat/panel-2 / wip"
+    assert rows[0].id == "header:current"
+    develop = gitmodel.BranchRef("develop", "origin/develop", ("develop-twin",))
+    rows = base_rows(stack=[gitmodel.BranchPage(develop, (commit(5),), False)])
+    header = next(row for row in rows if row.group == "stack:develop")
+    assert header.label == "develop / develop-twin"
+    assert header.id == "header:stack:develop"
+    assert header.load == {"range": "main...origin/develop"}
+    assert gitmodel.branch_label("a", ()) == "a"
+
+
 def test_row_folded_hides_every_row_of_a_collapsed_group_but_its_header():
     rows = base_rows()
     folded = [row.id for row in rows if gitmodel.row_folded(row, {"current", "default"})]
