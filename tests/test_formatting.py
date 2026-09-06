@@ -6,6 +6,7 @@ from collins.formatting import (
     blast_radius_body,
     body_head,
     format_relative,
+    markup_ok,
     md_to_pango,
     split_body,
 )
@@ -389,3 +390,26 @@ def test_body_head_never_splits_italics_or_strikethrough():
     # snake_case is not italics: the cut lands on the space after it.
     head, _whole = body_head("call some_long_name here", 19, 8)
     assert head == "call some_long_name"
+
+
+def test_md_bold_wrapping_italics_that_close_together():
+    # `**strong *soft***`: the first two stars of the closing run must not
+    # end the bold, or the italics close after it and Pango rejects the lot.
+    assert md_to_pango("**Preferences → *Delete after***, then") == (
+        "<b>Preferences → <i>Delete after</i></b>, then"
+    )
+
+
+def test_md_triple_star_is_bold_italics():
+    assert md_to_pango("***both***") == "<b><i>both</i></b>"
+
+
+def test_md_never_returns_markup_pango_rejects():
+    # A body the regex passes can't nest right comes back escaped and plain,
+    # never as markup: GTK 4's set_markup would render that as nothing.
+    assert markup_ok("<b>x <i>y</i></b>")
+    assert not markup_ok("<b>x <i>y</b></i>")
+    text = "**a *b** c* <d>"
+    out = md_to_pango(text)
+    assert markup_ok(out)
+    assert "<b>" not in out and "&lt;d&gt;" in out

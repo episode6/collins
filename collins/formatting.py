@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-27. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Small human-readable formatting helpers shared across the UI."""
 
@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.parsers import expat
 
 from gi.repository import GLib
 
@@ -17,7 +18,12 @@ from .i18n import _
 
 _FENCE_RE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
-_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+# The close must not be followed by a third star: in `**strong *soft***`
+# the first two stars of the `***` would otherwise end the bold and leave
+# the italics to close *after* it, mis-nested markup Pango refuses whole.
+# Refusing that close makes the bold run to the last two stars, and the
+# italic pass then nests inside it. `***both***` lands the same way.
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*(?!\*)")
 # Single-star italics run after bold, so the lookarounds only have to keep a
 # stray half of a ** pair from matching; underscore italics must not fire
 # inside snake_case, so both ends demand a non-word neighbourhood.
@@ -50,7 +56,12 @@ def md_to_pango(text: str, links: bool = False) -> str:
     `links` turns markdown links into clickable anchors — off by default so
     chat text keeps rendering URLs verbatim. With links on, images degrade to
     their alt text as a link: nothing here ever fetches a remote resource.
+
+    The result is always well-formed markup: if the passes above produce
+    mis-nested tags, the whole text comes back escaped and plain
+    rather than as a blank label (see `markup_ok`).
     """
+    original = text
     stash: list[str] = []
 
     def keep(markup: str) -> str:
@@ -83,7 +94,24 @@ def md_to_pango(text: str, links: bool = False) -> str:
     text = _renumber_lists(text)
     for i, markup in enumerate(stash):
         text = text.replace(f"{_SENT_A}{i}{_SENT_B}", markup)
-    return text
+    return text if markup_ok(text) else GLib.markup_escape_text(original)
+
+
+def markup_ok(markup: str) -> bool:
+    """Whether *markup* is well-formed — every tag closed in the order it
+    was opened. The converter's regexes are not a parser, and a body that
+    defeats them renders as nothing: GTK 4's `Gtk.Label.set_markup` warns
+    on a parse error and leaves the label empty rather than raising, so a
+    caller's try/except never fires. Nesting is the one way the converter
+    can go wrong (every tag it writes is one it knows, and the text between
+    them is escaped), and it is an XML question, so expat answers it: Pango's
+    own parser would refuse the `<a>` anchors only a GtkLabel understands."""
+    parser = expat.ParserCreate()
+    try:
+        parser.Parse(f"<m>{markup}</m>", True)
+    except expat.ExpatError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)

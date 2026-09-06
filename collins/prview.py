@@ -95,8 +95,8 @@ expander when it is a long one, so the section can lead with the artwork
 without eagerly building a buffer. The same setting gates it.
 
 Everything shown is repository content and therefore untrusted: bodies go
-through `formatting.md_to_pango`'s escaping (with the plain-text fallback on
-malformed markup), only http(s) URLs ever reach a browser or a fetch
+through `formatting.md_to_pango`'s escaping (mis-nested markup comes back as
+escaped plain text, since GTK 4 would render it as nothing), only http(s) URLs ever reach a browser or a fetch
 (prdetail and split_body both enforce that on the way in), and a
 pathological body renders capped behind a "Show more" step — with a cap on
 images too — so building labels can't wedge the main loop.
@@ -2817,9 +2817,9 @@ def _apply_font_scale(display: Gdk.Display, percent: object) -> None:
 
 
 def _set_md(label: Gtk.Label, text: str) -> None:
-    """Markdown onto a label, with chatbubbles' plain-text fallback: markup
-    this module built from untrusted text must degrade, never raise."""
-    try:
-        label.set_markup(md_to_pango(text, links=True))
-    except GLib.GError:
-        label.set_label(text)
+    """Markdown onto a label. md_to_pango answers with well-formed markup or
+    the escaped plain text — never something the label refuses. That is the
+    only fallback there can be: GTK 4's set_markup does not raise on bad
+    markup, it warns and leaves the label blank, so a try/except here
+    guarded nothing (a PR description once vanished exactly that way)."""
+    label.set_markup(md_to_pango(text, links=True))
