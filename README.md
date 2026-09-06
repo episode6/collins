@@ -195,7 +195,9 @@ collins/
 ├── gitpage.py        # the git page: hunk in a VTE, driven over its session API
 ├── gitsidebar.py     # the git page's native commits and files panels and action row
 ├── gitmodel.py       # the panels' rows and sections, as pure functions (GTK-free)
-├── gitops.py         # the git reads and mutations behind the panels (GTK-free)
+├── gitops.py         # the git reads and mutations behind the panels and the diff view (GTK-free)
+├── diffmodel.py      # a parsed diff stream: files, hunks, gaps, split rows, word emphasis (GTK-free)
+├── gitpatch.py       # the staging arithmetic: partial patches and their plans (GTK-free)
 ├── hunkctl.py        # what the git page decides without a widget (argv, titles, session ids)
 ├── hunkext/collins-git/  # the hunk extension: the cursor keys (stage, anchor, discard)
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs

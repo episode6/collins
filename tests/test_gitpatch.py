@@ -1159,17 +1159,6 @@ def test_rebind_drops_the_selection_when_the_hunk_changed_the_file_is_gone_or_an
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git isn't on PATH")
 
-# hunk's own `-c` options in front of every diff it reads, and for the same
-# reason: a patch fed back to `git apply` needs the `a/` and `b/` the apply
-# strips, whatever the user's diff.noprefix / mnemonicPrefix says.
-DIFF_PREFIX_ARGS = [
-    "-c", "core.quotePath=true",
-    "-c", "diff.noprefix=false",
-    "-c", "diff.mnemonicPrefix=false",
-    "-c", "diff.srcPrefix=a/",
-    "-c", "diff.dstPrefix=b/",
-]
-APPLY_ARGS = ["apply", "-p1", "--unidiff-zero"]
 
 
 def _run(cwd: Path, *args: str, stdin: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -1187,36 +1176,35 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _file_patch(cwd: Path, path: str = "f.txt", staged: bool = False, previous: str | None = None) -> str:
-    paths = [previous, path] if previous and previous != path else [path]
-    cached = ["--cached"] if staged else []
-    return _git(
-        cwd, *DIFF_PREFIX_ARGS, "diff", *cached, "--no-color", "--no-ext-diff", "--find-renames", "--", *paths
-    )
+    """The re-read the view makes at action time — gitops.file_patch, the
+    prefixes pinned whatever the repository's diff config says."""
+    text = gitops.file_patch(cwd, STAGED if staged else UNSTAGED, path, previous)
+    assert text is not None, f"file_patch({path}, staged={staged}) couldn't be read"
+    return text
 
 
 def _apply(cwd: Path, plan) -> bool:
+    """Carry an apply plan out the way the view does: gitops.apply_patch."""
     assert isinstance(plan, Plan) and plan.patch is not None, plan
-    argv = list(APPLY_ARGS)
-    if plan.op in (OP_APPLY_CACHED, OP_APPLY_CACHED_REVERSE):
-        argv.append("--cached")
-    if plan.op != OP_APPLY_CACHED:
-        argv.append("--reverse")
-    result = _run(cwd, *argv, "-", stdin=plan.patch, check=False)
-    assert result.returncode == 0, result.stderr.decode()
+    cached = plan.op in (OP_APPLY_CACHED, OP_APPLY_CACHED_REVERSE)
+    result = gitops.apply_patch(cwd, plan.patch, cached=cached, reverse=plan.op != OP_APPLY_CACHED)
+    assert result.ok, result.stderr
     return True
 
 
 def _run_plan(cwd: Path, plan) -> None:
-    """Carry a whole-file plan out the way gitops will."""
+    """Carry a whole-file plan out the way the view does, through gitops."""
     assert isinstance(plan, Plan), plan
     if plan.op == OP_ADD:
-        _git(cwd, "add", "-A", "--", *plan.paths)
+        result = gitops.stage_paths(cwd, plan.paths)
     elif plan.op == OP_RESET:
-        _git(cwd, "reset", "-q", "--", *plan.paths)
+        result = gitops.unstage_paths(cwd, plan.paths)
     elif plan.op == OP_CHECKOUT:
-        _git(cwd, "checkout", "-q", "--", *plan.paths)
+        result = gitops.checkout_paths(cwd, plan.paths)
     else:
         _apply(cwd, plan)
+        return
+    assert result.ok, result.stderr
 
 
 def _index(cwd: Path, path: str = "f.txt") -> str:
@@ -1581,20 +1569,22 @@ def test_from_a_subdirectory_the_paths_name_nothing_until_resolved_to_the_top_le
     _git(repo, "commit", "-qm", "sub")
     _write(repo, "sub/g.txt", "y\n")
     sub = repo / "sub"
-    # Straight from the subdirectory, the view's top-relative path names nothing.
-    assert _file_patch(sub, "sub/g.txt") == ""
+    # Straight from the subdirectory, git reads the view's top-relative
+    # path against the cwd and it names nothing.
     assert _run(sub, "add", "-A", "--", "sub/g.txt", check=False).returncode != 0
-    # Resolved to the working tree root, it works.
+    assert _git(sub, "diff", "--", "sub/g.txt") == ""
+    # gitops resolves every call to the working tree root (gitinfo.repo_root)
+    # so the same paths work from the subdirectory the agent sits in.
     top = gitinfo.repo_root(sub)
     assert top is not None and top.resolve() == repo.resolve()
-    file, text = _loaded(top, "sub/g.txt")
+    file, text = _loaded(sub, "sub/g.txt")
     assert "+y" in text
     plan = gitpatch.plan_hunk(file, 0, UNSTAGED, text)
     assert isinstance(plan, Plan)
-    _apply(top, plan)
+    _apply(sub, plan)
     assert gitops.read_status(top).staged == (StatusRow("sub/g.txt", "M"),)
-    _run_plan(top, gitpatch.plan_file(file, STAGED))
-    _run_plan(top, gitpatch.plan_file(file, UNSTAGED))
+    _run_plan(sub, gitpatch.plan_file(file, STAGED))
+    _run_plan(sub, gitpatch.plan_file(file, UNSTAGED))
     assert gitops.read_status(top).unstaged == ()
 
 
@@ -1621,11 +1611,10 @@ def test_an_untracked_file_goes_whole_and_the_file_button_stages_it_as_a_new_fil
     _write(repo, "n.txt", "new\n")
     _write(repo, "f.txt", "changed\n")
     assert _file_patch(repo, "n.txt") == ""
-    # `diff --no-index` exits 1 when the two differ, which they do.
-    synthesized = _run(
-        repo, *DIFF_PREFIX_ARGS, "diff", "--no-color", "--no-index", "--", "/dev/null", "n.txt", check=False
-    ).stdout.decode()
-    file = as_untracked(diffmodel.parse(synthesized, untracked=True)[0])
+    # The view's load synthesizes the untracked file (gitops.read_diff over
+    # `diff --no-index -- /dev/null n.txt`, which exits 1 when the two
+    # differ, as they do).
+    file = next(f for f in gitops.read_diff(repo, UNSTAGED).files if f.path == "n.txt")
     assert (file.path, file.kind, file.untracked) == ("n.txt", diffmodel.KIND_NEW, True)
     plan = gitpatch.plan_hunk(file, 0, UNSTAGED, "")
     assert plan == Plan(OP_ADD, ("n.txt",), None, None, "Staged n.txt")
@@ -1664,11 +1653,11 @@ def test_revert_a_hunk_of_a_commit_into_the_working_tree(repo):
     _write(repo, "f.txt", edited)
     _git(repo, "commit", "-qam", "two changes")
     sha = _git(repo, "rev-parse", "HEAD").strip()
-    shown = _git(
-        repo, *DIFF_PREFIX_ARGS, "show", "--format=", "--no-color", "--no-ext-diff", "--find-renames", sha
-    )
-    file = parse_one(shown)
-    fresh = _git(repo, *DIFF_PREFIX_ARGS, "show", "--format=", "--no-color", sha, "--", "f.txt")
+    shown = gitops.read_diff(repo, {"show": sha})
+    assert shown.ok and len(shown.files) == 1
+    file = shown.files[0]
+    fresh = gitops.file_patch(repo, {"show": sha}, "f.txt")
+    assert fresh == file.patch
     plan = gitpatch.plan_hunk(file, 1, {"show": sha}, fresh)
     assert isinstance(plan, Plan)
     assert (plan.op, plan.done) == (OP_APPLY_WORKTREE_REVERSE, "Reverted hunk 2 of f.txt")

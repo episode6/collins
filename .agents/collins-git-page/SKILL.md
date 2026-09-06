@@ -160,6 +160,36 @@ the limit+1 trick, `unpushed_shas` — `HEAD --not --remotes`, empty without
 a remote-tracking ref — `stack_branches`, `read_status`, `staged_paths`,
 `in_progress_operation` on `gitinfo.git_dir`, `commit`, `commit_fixup`,
 `stage_all`, `unstage_all`, `unpushed_in_group`, `resolve_group_branches`).
+
+**The native diff view's GTK-free half** (landed ahead of the view, spec
+`~/specs/collins/native-diff-panel.md`): `diffmodel.py` parses a whole
+`git diff` / `show` stream into `File`s / `Hunk`s / `Line`s (every header
+form, binary and too-large placeholders, gaps, split rows, word emphasis,
+the palette blends, `stable_key` for reload matching); `gitpatch.py` is the
+extension's staging arithmetic ported (partial-patch writers, `plan_file` /
+`plan_hunk` / `plan_lines` → a `Plan` or a `Refusal`, the confirm and toast
+words); and `gitops.py` grew the reads and runs they need — `read_diff(cwd,
+load, parent_target, untracked, pathspecs)` → `DiffRead(files, status, ok,
+error)`: hunk's own argv (`diff_argv` / `show_argv` behind
+`DIFF_PREFIX_ARGS`, the `-c` options pinning `a/` `b/` so the patch applies
+back under any `diff.noprefix`), a `numstat_argv` pre-pass whose over-cap
+paths are excluded (`:(exclude,literal)`) and stood in as `KIND_TOO_LARGE`
+placeholders, `git status` for the working-tree loads, and the untracked
+files synthesized one `untracked_diff_argv` (`diff --no-index -- /dev/null
+path`, exit 1 is the answer) at a time, at most `MAX_UNTRACKED_DIFFS`;
+`file_patch` (the re-read every mutation starts from), `file_at(cwd, ref,
+path)` → bytes (`side_ref` names the ref per load and side: `INDEX_REF`
+`""` is `:path`, `None` is the disk), `merge_base`, `apply_patch(cwd, patch,
+cached, reverse, three_way)` → `ApplyResult` (the `--3way` retry only when
+asked, flagged, `conflicts` when it left markers), `stage_paths` /
+`unstage_paths` / `checkout_paths` behind `safe_path`, and
+`tree_state_signature` (status + numstat hashed) for the watch. Footguns:
+every one of these runs from `gitinfo.repo_root` (`_root`) — from a
+subdirectory git reads pathspecs against the cwd and `apply` silently
+skips paths outside it; patch reads are binary (`run_git_bytes`) because
+`text=True` folds CRLF and the patch then matches nothing; `--3way` implies
+`--index`, so a three-way revert also stages, and a conflicting one exits 1
+having changed the tree.
 `hunkctl` carries what they lean on: the fifth `Loaded`, `{"range":
 "a...b"}` (`is_range`, `range_halves`; three dots between two safe refs —
 `loaded_from_title` names it, two-dot ranges stay foreign),
