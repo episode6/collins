@@ -74,8 +74,8 @@ downloads of each version, see the
   list** (the diff's files with their counts on the live side of the
   working tree, the other side off `git status`, one flat list for any
   other load, every row with the editor's file-type icon; the row the
-  view is on highlighted, a click reveals the
-  file or loads the other side first), and an **action row** — *Stage
+  view is on highlighted, a click reveals the file or loads the other
+  side first), and an **action row** — *Stage
   all*, *Unstage all*, *Commit…*, *Commit with body…* and *Fix up…* are
   native dialogs and `git` calls, their outcomes toasts in the page, the
   diff reloaded on the spot. The header's panel button folds the sidebar
