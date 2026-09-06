@@ -32,8 +32,10 @@ Nothing here decides what a click loads, which row is the loaded one, or
 what the confirms say: that is gitmodel's (GTK-free, unit-tested), and
 every git call is gitops'. The widget only draws, threads and emits:
 "load-requested" (a gitloads.Loaded), "navigate-requested" (a path and the
-side it sits on), "mutated" (a git mutation landed — the page re-seeds its
-freshness signature and reloads the view). Every thread reply lands with
+side it sits on), "revert-requested" (a path whose row's *Revert file*
+was picked on a commit, the branch or a range — the page hands it to the
+view's file button), "mutated" (a git mutation landed — the page re-seeds
+its freshness signature and reloads the view). Every thread reply lands with
 GLib.idle_add at default priority behind a generation counter, so a stale
 reply never overwrites a newer one; every subject, path and branch name
 goes through Gtk.Label.set_text, bounded by gitmodel first (foreign
@@ -54,7 +56,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import dialogs, filetypes, gitinfo, gitloads, gitmodel, gitops  # noqa: E402
+from . import dialogs, filetypes, gitinfo, gitloads, gitmodel, gitops, gitpatch  # noqa: E402
 from .gitmodel import BranchRef, FileRow, FileSections, Row  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -271,6 +273,7 @@ class GitSidebar(Gtk.Box):
     __gsignals__ = {
         "load-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "navigate-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
+        "revert-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # The files filter's text changed (the view hides the sections
         # that don't match); Escape in the filter cleared it and wants the
@@ -351,6 +354,9 @@ class GitSidebar(Gtk.Box):
         self._file_list.add_css_class("navigation-sidebar")
         self._file_list.add_css_class("git-files")
         self._file_list.connect("row-activated", self._on_file_row_activated)
+        files_secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        files_secondary.connect("pressed", self._on_files_secondary_click)
+        self._file_list.add_controller(files_secondary)
         self._file_scroller = Gtk.ScrolledWindow(child=self._file_list, vexpand=True)
         self._file_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         # The files filter above the list (the view's `/`): every keystroke
@@ -438,6 +444,9 @@ class GitSidebar(Gtk.Box):
         copy = Gio.SimpleAction.new("copy-sha", GLib.VariantType.new("s"))
         copy.connect("activate", lambda _a, param: self._copy_text(param.get_string()))
         group.add_action(copy)
+        revert = Gio.SimpleAction.new("revert-file", GLib.VariantType.new("s"))
+        revert.connect("activate", lambda _a, param: self.emit("revert-requested", param.get_string()))
+        group.add_action(revert)
         self._actions_group = group
         self.insert_action_group(_ACTIONS, group)
 
@@ -954,6 +963,59 @@ class GitSidebar(Gtk.Box):
             return
         if isinstance(widget, _FileRow):
             self.emit("navigate-requested", widget.file.path, widget.side)
+
+    def _file_menu_items(self, widget: _FileRow) -> list[tuple[str, str, str]]:
+        """(label, action, target) for a file row's context menu: *Revert
+        file* on a read-only load — the same reverse apply into the
+        working tree as the diff's file header button, nothing committed
+        — and nothing on the working-tree loads, whose rows' actions are
+        the headers' own."""
+        if gitpatch.working_side(self._loaded) is not None:
+            return []
+        return [(_("Revert file"), "revert-file", widget.file.path)]
+
+    def _on_files_secondary_click(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
+        row = self._file_list.get_row_at_y(int(y))
+        if not isinstance(row, _FileRow):
+            return
+        items = self._file_menu_items(row)
+        if not items:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        menu = Gio.Menu()
+        for label, action, target in items:
+            item = Gio.MenuItem.new(label, None)
+            item.set_action_and_target_value(f"{_ACTIONS}.{action}", GLib.Variant("s", target))
+            menu.append_item(item)
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(self._file_list)
+        popover.set_has_arrow(False)
+        popover.set_halign(Gtk.Align.START)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    def file_menu_labels(self, path: str, side: str = "") -> list[str] | None:
+        """The labels a right-click on the row of *path* offers (for the
+        e2e); None when there is no such row."""
+        widget = self._file_widgets.get((side, path))
+        if widget is None:
+            return None
+        return [label for label, _action, _target in self._file_menu_items(widget)]
+
+    def activate_file_menu(self, path: str, label: str, side: str = "") -> bool:
+        """Pick *label* from the row's context menu as a click would (for
+        the e2e)."""
+        widget = self._file_widgets.get((side, path))
+        if widget is None:
+            return False
+        for name, action, target in self._file_menu_items(widget):
+            if name == label:
+                self._actions_group.activate_action(action, GLib.Variant("s", target))
+                return True
+        return False
 
     # -- the action row ----------------------------------------------------------------------
 

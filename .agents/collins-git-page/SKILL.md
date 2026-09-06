@@ -163,8 +163,11 @@ imports `gitpage`; the page feeds it and listens:
   `set_selection(path, hunk)` (the view's `current-changed`),
   `set_options` (page size → re-page; untracked → redraw),
   `set_filter_text` / `focus_filter` / `filter_text`.
-- Signals: `load-requested(Loaded)` → `load()`; `navigate-requested(path,
-  side)` → `_navigate` (→ `DiffView.reveal`, synchronous; a miss toasts)
+- Signals: `load-requested(Loaded)` → `load()`; `revert-requested(path)`
+  (the files list's right-click *Revert file*, offered only on a
+  read-only load — `gitpatch.working_side` is None — through the
+  `gitsb.revert-file (s)` action) → the view's file button;
+  `navigate-requested(path, side)` → `_navigate` (→ `DiffView.reveal`, synchronous; a miss toasts)
   on the live side (or the flat list), else `_pending_navigate = (path,
   side)` + `load(side)`, run when the reload lands with that side
   (`settled()` waits for both) — and when that landing re-reads at once
@@ -224,10 +227,11 @@ can never plan another file's change under this file's confirm, and
 `_became_rename` refuses stale — the view reloads — when the fresh stanza
 is a rename the shown file was not, in `plan_hunk` as in the shared
 `_guard_partial`, since a partial patch keeps the `rename from` / `rename
-to` lines and `git apply --cached` would move the file whole; the
-planners take `dirty` — the page passes whether `DiffRead.status` lists
-the path under unstaged — and a revert's confirm then opens with
-`revert_warning`, the spec's "may conflict" sentence); and `gitops.py`
+to` lines and `git apply --cached` would move the file whole; **a revert
+plan carries no `confirm`** — its result is unstaged, in the diff, a
+discard away — so the spec's "may conflict" warning and the `dirty`
+flag the planners once took are gone, and a discard is the only plan
+that asks); and `gitops.py`
 holds the reads and runs they need — `read_diff(cwd, load, parent_target,
 untracked, pathspecs)` → `DiffRead(files, status, ok, error)`: `diff_argv`
 / `show_argv` behind `DIFF_PREFIX_ARGS` (the `-c` options pinning `a/`
@@ -473,11 +477,16 @@ hunk)`, `note_marks`, `highlight_rows`, `editing()`, `note_editor_text` /
 
 **The page runs the request (`GitPage._on_mutation_requested`).** Gated
 on the sidebar's and the view's busy and on `request.load == self.
-_loaded`; a thread reads `gitops.file_patch` when `request.needs_patch`
-and, for a revert (`request.revert`: a read-only load), `gitops.
-read_status` for `gitpatch.is_dirty`; then `_mutation_planned` calls
-`request.plan(fresh, dirty)`. A `Refusal` is a toast and, when `stale`, a
-`_read_diff` (the reload the words promise). A plan with `confirm` asks
+_loaded`; a thread reads `gitops.file_patch` when `request.needs_patch`;
+then `_mutation_planned` calls `request.plan(fresh)`. The sidebar's
+*Revert file* (a file row's right-click on a read-only load,
+`revert-requested(path)` → `_on_revert_requested` → `DiffView.
+request_file_at(path)`) presses the view's file button for the path, so
+it is the same request from here on — the page meets it with the same
+busy gate and toast first, since nothing greys a menu item while a
+mutation runs and `request_file` drops a press made while busy. A `Refusal` is a toast and, when
+`stale`, a `_read_diff` (the reload the words promise). A plan with
+`confirm` (a discard's; a revert never asks) asks
 through `dialogs.confirm_dialog` (heading and button from `request.
 confirm_words(plan)`: *Move to the trash?* / *Restore the file?* /
 *Discard the changes?* / *Revert into the working tree?*; the spinner
@@ -599,9 +608,11 @@ through **`gitops.read_status`**, *Stage file* on the binary, unstage hunk
 close()` cancels — Escape's path; `set_close_response("confirm")` +
 `close()` runs it; never `emit("response")` and then `close()`, which
 fires a second `cancel`), then with `dialogs.confirm_dialog` stubbed the
-untracked trash, the deleted restore, a revert hunk from a commit, the
-dirty warning, the three-way retry over a committed context move, a
-revert from `{"show": "HEAD"}`, and a binary's *Revert file* refused.
+untracked trash, the deleted restore, a revert hunk from a commit with
+no question asked, the sidebar's *Revert file* (`file_menu_labels`,
+`activate_file_menu`; an empty menu on the working tree), the three-way
+retry over a committed context move, a revert from `{"show": "HEAD"}`,
+and a binary's *Revert file* refused.
 `check_native_notes` walks the notes: `c` → a draft with the chords off
 and the page holding Escape, an empty save refused, Ctrl+Enter splitting
 summary and rationale, `}` / `{`, `E` and Esc, the menu's *Add note*,
