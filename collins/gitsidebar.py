@@ -283,6 +283,12 @@ class GitSidebar(Gtk.Box):
         self._filter_text = ""
 
         # -- the action row --------------------------------------------------------
+        # hunk's cursor buttons (Stage hunk / Anchor line / Discard feed the
+        # extension's keys): shown with the hunk viewer alone — the native
+        # view's hunk headers carry the buttons (decision 7 of the
+        # native-diff spec); the three go with hunk in PR 4 of that stack,
+        # with `key-requested`, set_anchor and the two label probes.
+        self._cursor_buttons_shown = True
         self._anchor: hunkctl.Anchor | None = None
         # A native mutation (stage all, a commit) in flight: the other
         # mutations wait, and the Commit button spins.
@@ -461,6 +467,12 @@ class GitSidebar(Gtk.Box):
     def focus_filter(self) -> bool:
         """Put the keyboard in the files filter (the `/` key)."""
         return self._filter_entry.get_visible() and self._filter_entry.grab_focus()
+
+    def set_cursor_buttons_shown(self, shown: bool) -> None:
+        """Show hunk's cursor buttons (the hunk viewer) or hide them (the
+        native view draws its own on the hunk headers)."""
+        self._cursor_buttons_shown = bool(shown)
+        self._sync_buttons()
 
     def set_filter_text(self, text: str) -> None:
         """Type into the filter (the e2e's way): the rows and the signal
@@ -712,7 +724,7 @@ class GitSidebar(Gtk.Box):
                 self._toast(gitops.first_line(result.stderr) or _("git commit failed"), refusal=True)
             self.emit("mutated")
 
-        self._run_mutation(work, done)
+        self.run_mutation(work, done)
 
     def fixup(self, sha: str) -> None:
         """`git commit -q -m "fixup! <sha>"` on a thread; the toast names
@@ -737,7 +749,7 @@ class GitSidebar(Gtk.Box):
                 self._toast(gitops.first_line(result.stderr) or _("git commit failed"), refusal=True)
             self.emit("mutated")
 
-        self._run_mutation(work, done)
+        self.run_mutation(work, done)
 
     def stage_all(self) -> None:
         """`git add -A` on a thread (the confirm is the button's, see
@@ -764,15 +776,17 @@ class GitSidebar(Gtk.Box):
                 self._toast(gitops.first_line(result.stderr) or _("git failed"), refusal=True)
             self.emit("mutated")
 
-        self._run_mutation(work, done)
+        self.run_mutation(work, done)
 
-    def _run_mutation(self, work: Callable[[], object], done: Callable[[object], None]) -> None:
+    def run_mutation(self, work: Callable[[], object], done: Callable[[object], None]) -> bool:
         """*work* on a daemon thread while the widget reads busy, *done*
         with its answer back on the main loop — unless the widget was
-        told to forget the ask meanwhile (a newer generation)."""
+        told to forget the ask meanwhile (a newer generation). Public:
+        the page runs the diff view's stage / discard / revert plans
+        behind the same busy. False (and a toast) when one is running."""
         if self._busy:
             self._toast(_("Another git operation is still running"), refusal=True)
-            return
+            return False
         self._busy = True
         self._mutation_gen += 1
         gen = self._mutation_gen
@@ -787,6 +801,7 @@ class GitSidebar(Gtk.Box):
             GLib.idle_add(self._mutation_done, gen, done, answer, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=run, name="git-sidebar-mutation", daemon=True).start()
+        return True
 
     def _mutation_done(self, gen: int, done: Callable[[object], None], answer: object) -> bool:
         if gen != self._mutation_gen:
@@ -933,7 +948,7 @@ class GitSidebar(Gtk.Box):
         for button in (self._stage_button, self._anchor_button, self._discard_button):
             child = self._action_children.get(button)
             if child is not None:
-                child.set_visible(self._extension_loaded)
+                child.set_visible(self._extension_loaded and self._cursor_buttons_shown)
             button.set_sensitive(cursor_keys)
         anchored = self._anchor is not None
         self._stage_button.set_label(_("Stage lines") if anchored else _("Stage hunk"))

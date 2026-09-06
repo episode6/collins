@@ -189,6 +189,29 @@ BINDINGS: tuple[Binding, ...] = (
         GROUP_GIT,
         N_("In the diff."),
     ),
+    # The staging keys (the collins-git extension's, on hunk's cursor;
+    # here on the focused hunk and the view's own line selection).
+    Binding(
+        "git.stage",
+        N_("Stage, unstage or revert the hunk or the selected lines"),
+        ("x",),
+        GROUP_GIT,
+        N_("In the diff; the selected lines when there are any, else the focused hunk."),
+    ),
+    Binding(
+        "git.stage-file",
+        N_("Stage, unstage or revert the file"),
+        ("<Shift>x",),
+        GROUP_GIT,
+        N_("In the diff; the focused hunk's file."),
+    ),
+    Binding(
+        "git.discard",
+        N_("Discard or revert the hunk or the selected lines"),
+        ("<Shift>d",),
+        GROUP_GIT,
+        N_("In the diff; after a confirmation."),
+    ),
     Binding("git.layout-auto", N_("Layout: automatic"), ("0",), GROUP_GIT, N_("In the diff.")),
     Binding("git.layout-split", N_("Layout: split"), ("1",), GROUP_GIT, N_("In the diff.")),
     Binding("git.layout-stack", N_("Layout: stacked"), ("2",), GROUP_GIT, N_("In the diff.")),

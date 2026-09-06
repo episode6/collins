@@ -34,6 +34,12 @@ def test_git_page_keys_are_page_local_and_hunks_words():
     assert git["git.next-note"] == ("braceright",)
     assert git["git.prev-note"] == ("braceleft",)
     assert git["git.expand-gap"] == ("z",)
+    # The staging keys (the extension's x / X / D); `v` is gone — the
+    # view's own selection replaced the anchor.
+    assert git["git.stage"] == ("x",)
+    assert git["git.stage-file"] == ("<Shift>x",)
+    assert git["git.discard"] == ("<Shift>d",)
+    assert "git.anchor" not in git
     layouts = (git["git.layout-auto"], git["git.layout-split"], git["git.layout-stack"])
     assert layouts == (("0",), ("1",), ("2",))
     assert git["git.line-numbers"] == ("l",)

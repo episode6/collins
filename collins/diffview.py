@@ -67,14 +67,16 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
     diffmodel,
     editorfiles,
     filetypes,
     gitloads,
+    gitpatch,
     imagediff,
+    keybindings,
     keyedslots,
     keymap,
     prblobs,
@@ -113,6 +115,9 @@ _PAD_TEXT = " "
 # lines just above the next hunk), down from the top (the lines just below
 # the previous one).
 UP, DOWN, ALL = "up", "down", "all"
+# The action group each hunk section inserts on itself for its context
+# menu (the popover finds it from its parent view, up the tree).
+_HUNK_ACTIONS = "hunk"
 
 ContextReader = Callable[[diffmodel.File, str], "bytes | None"]
 
@@ -120,12 +125,15 @@ ContextReader = Callable[[diffmodel.File, str], "bytes | None"]
 @dataclass(frozen=True)
 class _Row:
     """One paragraph of a hunk view's buffer: what kind of line it draws
-    (CONTEXT / ADD / DEL / PAD), its text, and its number on each side."""
+    (CONTEXT / ADD / DEL / PAD), its text, its number on each side, and
+    the index of the patch line it shows in `hunk.lines` (None for a
+    padding cell and for expanded context, which no selection counts)."""
 
     kind: str
     text: str
     old: int | None
     new: int | None
+    line: int | None = None
 
 
 # -- module-wide appearance ----------------------------------------------------
@@ -197,6 +205,19 @@ def _language_for(path: str, first_line: str = "") -> GtkSource.Language | None:
         if hint:
             language = manager.get_language(hint)
     return language
+
+
+def _selection_bounds(buffer: Gtk.TextBuffer) -> tuple[Gtk.TextIter, Gtk.TextIter] | None:
+    """(start, end) of the buffer's selection, or None. PyGObject hands
+    `get_selection_bounds` back as an empty tuple with no selection and
+    as the two iters (sometimes behind the flag) with one."""
+    if not buffer.get_has_selection():
+        return None
+    bounds = buffer.get_selection_bounds()
+    if not bounds or len(bounds) < 2:
+        return None
+    start, end = bounds[-2], bounds[-1]
+    return (start, end) if not start.equal(end) else None
 
 
 def _decode_lines(data: bytes | None) -> list[str] | None:
@@ -356,11 +377,26 @@ class _HunkView:
         sign: bool,
         line_numbers: bool,
         wrap: bool,
+        on_selection: Callable[[_HunkView], None] | None = None,
     ) -> None:
         self.rows: list[_Row] = []
         self.marks: dict[int, str] = {}  # row index → marker icon (set_marks)
         self._pads: dict[int, int] = {}
         self._pad_tags: dict[int, Gtk.TextTag] = {}
+        # The selection model (decision 4): the buffer's own selection,
+        # snapped to whole paragraphs on every move of its two marks —
+        # a drag in the text, Shift+arrows, a drag or click on the line
+        # numbers (the gutter gesture below) all land in one select_range.
+        # *on_selection* hears every settled move; _snapping guards the
+        # re-entry the snap's own select_range causes.
+        self._on_selection = on_selection
+        self._snapping = False
+        self._gutter_anchor: int | None = None
+        # Whether the buffer's selection is a line selection of the
+        # model's (snapped here) rather than the find bar's current match
+        # (select_match, left as the characters it found): only the first
+        # counts for the buttons and the keys.
+        self._owned = False
         buffer = GtkSource.Buffer()
         buffer.set_highlight_syntax(True)
         buffer.set_highlight_matching_brackets(False)
@@ -406,6 +442,15 @@ class _HunkView:
             position += 1
         self._marker = _MarkerRenderer()
         gutter.insert(self._marker, position)
+        if on_selection is not None:
+            buffer.connect("mark-set", self._on_mark_set)
+            # Click, shift-click or drag on the line numbers: whole lines,
+            # from the press to the pointer. The gutter is the LEFT text
+            # window's widget, so its y is that window's.
+            drag = Gtk.GestureDrag()
+            drag.connect("drag-begin", self._on_gutter_drag_begin)
+            drag.connect("drag-update", self._on_gutter_drag_update)
+            gutter.add_controller(drag)
         scroller = Gtk.ScrolledWindow(child=view, hexpand=True)
         scroller.set_propagate_natural_height(True)
         scroller.set_overlay_scrolling(True)
@@ -457,7 +502,9 @@ class _HunkView:
         dropped CR is clamped to the line.
         """
         self.rows = [
-            row if row.kind == PAD else _Row(row.kind, diffmodel.display_text(row.text), row.old, row.new)
+            row
+            if row.kind == PAD
+            else _Row(row.kind, diffmodel.display_text(row.text), row.old, row.new, row.line)
             for row in rows
         ]
         self._pads = {}
@@ -580,6 +627,165 @@ class _HunkView:
     def cursor_row(self) -> int:
         return self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_line()
 
+    # -- the selection --
+
+    def _on_mark_set(self, buffer: Gtk.TextBuffer, _iter: Gtk.TextIter, mark: Gtk.TextMark) -> None:
+        if self._snapping or mark.get_name() not in ("insert", "selection_bound"):
+            return
+        self._snapping = True
+        try:
+            self._snap()
+            self._owned = _selection_bounds(buffer) is not None
+        finally:
+            self._snapping = False
+        if self._on_selection is not None:
+            self._on_selection(self)
+
+    def select_match(self, row: int, start: int, end: int) -> bool:
+        """Select the find bar's match — characters *start*..*end* of
+        paragraph *row* — without it becoming a line selection: the snap
+        stays out, and the buttons read the hunk as unselected."""
+        ok_a, first = self.buffer.get_iter_at_line_offset(row, start)
+        ok_b, last = self.buffer.get_iter_at_line_offset(row, end)
+        if not (ok_a and ok_b):
+            return False
+        self._snapping = True
+        try:
+            self.buffer.select_range(first, last)
+            self._owned = False
+        finally:
+            self._snapping = False
+        if self._on_selection is not None:
+            self._on_selection(self)
+        return True
+
+    def _snap(self) -> None:
+        """Widen the buffer's selection to whole paragraphs — the start of
+        its first line to the start of the line after its last (the
+        newline included, so the highlight runs to the edge) — keeping
+        which end the insert mark is on, so Shift+arrows keep extending
+        from the same side. Nothing to do without a selection, or when
+        it is already snapped (the re-entry from select_range)."""
+        buffer = self.buffer
+        bounds = _selection_bounds(buffer)
+        if bounds is None:
+            return
+        start, end = bounds
+        first = start.get_line()
+        last = end.get_line()
+        if last > first and end.get_line_offset() == 0:
+            last -= 1  # the selection ends exactly on the newline of *last*
+        _ok, a = buffer.get_iter_at_line(first)
+        _ok, b = buffer.get_iter_at_line(last)
+        if not b.ends_line():
+            b.forward_to_line_end()
+        b.forward_char()  # the newline; a no-op on the last line
+        if start.equal(a) and end.equal(b):
+            return
+        insert = buffer.get_iter_at_mark(buffer.get_insert())
+        if insert.equal(end):
+            buffer.select_range(b, a)
+        else:
+            buffer.select_range(a, b)
+
+    def selected_rows(self) -> tuple[int, int] | None:
+        """The inclusive row span the buffer's (snapped) selection covers,
+        or None — for the find bar's match too."""
+        if not self._owned:
+            return None
+        bounds = _selection_bounds(self.buffer)
+        if bounds is None:
+            return None
+        start, end = bounds
+        first = start.get_line()
+        last = end.get_line()
+        if last > first and end.get_line_offset() == 0:
+            last -= 1
+        last = min(last, len(self.rows) - 1)
+        if last < first:
+            return None
+        return first, last
+
+    def select_rows(self, first: int, last: int) -> None:
+        """Select rows *first*..*last* (inclusive, either order) as a drag
+        would — the insert mark at the end, so Shift+Down extends it."""
+        if not self.rows:
+            return
+        first, last = sorted((max(0, first), min(last, len(self.rows) - 1)))
+        _ok, a = self.buffer.get_iter_at_line(first)
+        _ok, b = self.buffer.get_iter_at_line(last)
+        if not b.ends_line():
+            b.forward_to_line_end()
+        b.forward_char()
+        self.buffer.select_range(b, a)
+
+    def clear_selection(self) -> None:
+        buffer = self.buffer
+        if buffer.get_has_selection():
+            buffer.place_cursor(buffer.get_iter_at_mark(buffer.get_insert()))
+
+    def selection_text(self) -> str:
+        """The selected text, or with no selection the whole view's."""
+        bounds = _selection_bounds(self.buffer)
+        start, end = bounds if bounds is not None else self.buffer.get_bounds()
+        return self.buffer.get_text(start, end, False)
+
+    def _gutter_row(self, y: float) -> int | None:
+        """The row under gutter y (the LEFT text window's coordinates)."""
+        if not self.rows:
+            return None
+        _x, buffer_y = self.view.window_to_buffer_coords(Gtk.TextWindowType.LEFT, 0, int(y))
+        _ok, it = self.view.get_line_at_y(buffer_y)
+        return min(it.get_line(), len(self.rows) - 1)
+
+    def _on_gutter_drag_begin(self, gesture: Gtk.GestureDrag, _x: float, y: float) -> None:
+        row = self._gutter_row(y)
+        if row is None:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        shift = bool(gesture.get_current_event_state() & Gdk.ModifierType.SHIFT_MASK)
+        current = self.selected_rows()
+        if shift and current is not None:
+            # Extend from the far end of what is selected.
+            self._gutter_anchor = current[0] if row >= current[0] else current[1]
+        else:
+            self._gutter_anchor = row
+        self.view.grab_focus()
+        self.select_rows(self._gutter_anchor, row)
+
+    def _on_gutter_drag_update(self, gesture: Gtk.GestureDrag, _dx: float, dy: float) -> None:
+        if self._gutter_anchor is None:
+            return
+        _ok, _x, y = gesture.get_start_point()
+        row = self._gutter_row(y + dy)
+        if row is not None:
+            self.select_rows(self._gutter_anchor, row)
+
+
+class _ActionButton(Gtk.Button):
+    """A header's button: a label that becomes a spinner while the page
+    runs what it asked for (a Gtk.Stack, so the width holds)."""
+
+    def __init__(self, on_click: Callable[[], None]) -> None:
+        super().__init__()
+        self.add_css_class("flat")
+        self.add_css_class("git-action")
+        self._stack = Gtk.Stack()
+        self._label = Gtk.Label()
+        self._stack.add_named(self._label, "label")
+        self._stack.add_named(Gtk.Spinner(spinning=True), "spinner")
+        self.set_child(self._stack)
+        self.connect("clicked", lambda *_a: on_click())
+
+    def set_text(self, text: str) -> None:
+        self._label.set_text(text)
+
+    def text(self) -> str:
+        return self._label.get_text()
+
+    def set_spinning(self, spinning: bool) -> None:
+        self._stack.set_visible_child_name("spinner" if spinning else "label")
+
 
 # -- split layout allocation ---------------------------------------------------
 
@@ -673,9 +879,13 @@ _HUNK_SERIALS = itertools.count(1)
 
 
 class _HunkSection(Gtk.Box):
-    """One hunk: its `@@` header row (the buttons' home in the next PR) over
-    its view(s). Wears `.git-hunk`, and `.git-hunk-focused` while one of
-    its views has the keyboard — the lit rail that says "current hunk"."""
+    """One hunk: its `@@` header row — the ranges, the context, and the
+    buttons (*Stage hunk* · *Discard hunk*, whose words follow the load
+    and the selection: gitpatch.action_labels) — over its view(s). Wears
+    `.git-hunk`, and `.git-hunk-focused` while one of its views has the
+    keyboard — the lit rail that says "current hunk". A right-click on a
+    view pops the same actions plus Copy, Open in editor, Add note and
+    Expand context, through the `hunk.*` action group on the section."""
 
     def __init__(
         self,
@@ -686,6 +896,7 @@ class _HunkSection(Gtk.Box):
         palette: diffmodel.DiffPalette,
         options: _Options,
         on_focus: Callable[[_HunkSection, bool], None],
+        owner: DiffView,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("git-hunk")
@@ -700,10 +911,12 @@ class _HunkSection(Gtk.Box):
         self._palette = palette
         self._options = options
         self._on_focus = on_focus
+        self._owner: DiffView = owner
         self.views: list[_HunkView] = []
         self._body: Gtk.Widget | None = None
         self._pane: _SplitPane | None = None
         self._focused = False
+        self._menu_view: _HunkView | None = None
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("git-hunk-header")
@@ -718,13 +931,20 @@ class _HunkSection(Gtk.Box):
         context.add_css_class("dim-label")
         context.add_css_class("git-hunk-context")
         header.append(context)
-        # Where the next PR's Stage / Discard buttons go.
+        # The buttons: the stage / unstage / revert one, and discard on
+        # the unstaged load (sync_actions words them).
         self.actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.actions.add_css_class("git-hunk-actions")
+        self.primary_button = _ActionButton(lambda: self._owner_request(False))
+        self.discard_button = _ActionButton(lambda: self._owner_request(True))
+        self.actions.append(self.primary_button)
+        self.actions.append(self.discard_button)
         header.append(self.actions)
         self.header = header
         self.append(header)
+        self._install_actions()
         self._build_body()
+        self.sync_actions()
 
     # -- building --
 
@@ -737,12 +957,129 @@ class _HunkSection(Gtk.Box):
             sign=True,
             line_numbers=self._options.line_numbers,
             wrap=self._options.wrap,
+            on_selection=self._on_view_selection,
         )
         focus = Gtk.EventControllerFocus()
         focus.connect("enter", self._on_focus_enter)
         focus.connect("leave", self._on_focus_leave)
         view.view.add_controller(focus)
+        # The context menu: claimed in the capture phase, ahead of the
+        # text view's own (Cut / Paste / Select all — none of them the
+        # point here).
+        secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        secondary.connect("pressed", lambda g, n, x, y, v=view: self._on_secondary_click(g, v, x, y))
+        view.view.add_controller(secondary)
         return view
+
+    def _install_actions(self) -> None:
+        """The `hunk.*` actions the context menu fires (found from the
+        popover's parent, a view, up the tree)."""
+        group = Gio.SimpleActionGroup()
+        for name, handler in (
+            ("primary", lambda: self._owner_request(False)),
+            ("discard", lambda: self._owner_request(True)),
+            ("copy", self._copy),
+            ("open", lambda: self._owner.open_from(self)),
+            ("note", lambda: self._owner.request_note(self)),
+            ("expand", lambda: self._owner.expand_gap_before(self)),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _a, _p, run=handler: run())
+            group.add_action(action)
+        self.insert_action_group(_HUNK_ACTIONS, group)
+
+    def _on_secondary_click(self, gesture: Gtk.GestureClick, view: _HunkView, x: float, y: float) -> None:
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._menu_view = view
+        selected = self.selection() is not None
+        primary, discard = gitpatch.action_labels(self._owner.loaded, gitpatch.HUNK, selected)
+        menu = Gio.Menu()
+        acts = Gio.Menu()
+        acts.append(primary, f"{_HUNK_ACTIONS}.primary")
+        if discard is not None:
+            acts.append(discard, f"{_HUNK_ACTIONS}.discard")
+        menu.append_section(None, acts)
+        more = Gio.Menu()
+        more.append(_("Copy"), f"{_HUNK_ACTIONS}.copy")
+        more.append(_("Open in editor"), f"{_HUNK_ACTIONS}.open")
+        more.append(_("Add note"), f"{_HUNK_ACTIONS}.note")
+        more.append(_("Expand context"), f"{_HUNK_ACTIONS}.expand")
+        menu.append_section(None, more)
+        popover = Gtk.PopoverMenu.new_from_model(menu)
+        popover.set_parent(view.view)
+        popover.set_has_arrow(False)
+        popover.set_halign(Gtk.Align.START)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
+        popover.popup()
+
+    def _copy(self) -> None:
+        view = self._menu_view if self._menu_view in self.views else self.focused_view
+        if view is None and self.views:
+            view = self.views[0]
+        if view is None:
+            return
+        display = self.get_display()
+        if display is not None:
+            display.get_clipboard().set(view.selection_text())
+
+    # -- the buttons --
+
+    def _owner_request(self, discard: bool) -> None:
+        self._owner.request_hunk(self, discard)
+
+    def sync_actions(self) -> None:
+        """Word the buttons for the load and the selection (the spec's
+        table), with the keys' hints; the discard button shows on the
+        unstaged load alone."""
+        selected = self.selection() is not None
+        primary, discard = gitpatch.action_labels(self._owner.loaded, gitpatch.HUNK, selected)
+        self.primary_button.set_text(primary)
+        self.primary_button.set_tooltip_text(keybindings.with_hint(primary, "git.stage"))
+        self.discard_button.set_visible(discard is not None)
+        if discard is not None:
+            self.discard_button.set_text(discard)
+            self.discard_button.set_tooltip_text(keybindings.with_hint(discard, "git.discard"))
+        self.actions.set_visible(self._owner.loaded is not None)
+
+    def button(self, discard: bool) -> _ActionButton:
+        return self.discard_button if discard else self.primary_button
+
+    def set_busy(self, busy: bool, acting: _ActionButton | None) -> None:
+        for button in (self.primary_button, self.discard_button):
+            button.set_sensitive(not busy)
+            button.set_spinning(busy and button is acting)
+
+    # -- the selection --
+
+    def _on_view_selection(self, view: _HunkView) -> None:
+        if view not in self.views:
+            return  # a view still being built
+        self._owner.on_hunk_selection(self, view)
+
+    def selection(self) -> tuple[int, int] | None:
+        """The selected patch lines as inclusive indexes into
+        `hunk.lines` — the lowest and highest a selected row shows (a
+        span in patch order, as gitpatch.LineRange reads it) — or None
+        when no row is selected, or only padding is."""
+        for view in self.views:
+            rows = view.selected_rows()
+            if rows is None:
+                continue
+            lines = [row.line for row in view.rows[rows[0] : rows[1] + 1] if row.line is not None]
+            if lines:
+                return min(lines), max(lines)
+        return None
+
+    def selected_view(self) -> _HunkView | None:
+        return next((view for view in self.views if view.selected_rows() is not None), None)
+
+    def clear_selection(self) -> None:
+        for view in self.views:
+            view.clear_selection()
 
     def _build_body(self) -> None:
         if self._body is not None:
@@ -754,12 +1091,17 @@ class _HunkSection(Gtk.Box):
         emphasis = diffmodel.word_emphasis(hunk) if self._options.word_diff else []
         if self._options.split:
             rows = diffmodel.split_rows(hunk)
+            line_index = {id(line): i for i, line in enumerate(hunk.lines)}
             old_rows = [
-                _Row(r.old.kind, r.old.text, r.old.old, None) if r.old else _Row(PAD, "", None, None)
+                _Row(r.old.kind, r.old.text, r.old.old, None, line_index.get(id(r.old)))
+                if r.old
+                else _Row(PAD, "", None, None)
                 for r in rows
             ]
             new_rows = [
-                _Row(r.new.kind, r.new.text, None, r.new.new) if r.new else _Row(PAD, "", None, None)
+                _Row(r.new.kind, r.new.text, None, r.new.new, line_index.get(id(r.new)))
+                if r.new
+                else _Row(PAD, "", None, None)
                 for r in rows
             ]
             # Emphasis speaks in hunk line indexes; the buffers in row indexes.
@@ -783,7 +1125,9 @@ class _HunkSection(Gtk.Box):
             self._pane = pane
             self._body = pane
         else:
-            rows = [_Row(line.kind, line.text, line.old, line.new) for line in hunk.lines]
+            rows = [
+                _Row(line.kind, line.text, line.old, line.new, index) for index, line in enumerate(hunk.lines)
+            ]
             by_line = {entry.line_index: entry.spans for entry in emphasis}
             view = self._make_view((diffmodel.OLD, diffmodel.NEW))
             view.set_rows(rows, by_line)
@@ -1145,9 +1489,14 @@ class _FileSection(Gtk.Box):
         self._badge.add_css_class("dim-label")
         self._badge.add_css_class("git-file-badge")
         header.append(self._badge)
-        # Where the next PR's Stage file / Discard file go.
+        # Stage file / Discard file (Unstage file; Revert file), worded by
+        # sync_actions for the load.
         self.actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.actions.add_css_class("git-file-actions")
+        self.primary_button = _ActionButton(lambda: owner.request_file(self, False))
+        self.discard_button = _ActionButton(lambda: owner.request_file(self, True))
+        self.actions.append(self.primary_button)
+        self.actions.append(self.discard_button)
         header.append(self.actions)
         self.header = header
         self.append(header)
@@ -1280,11 +1629,36 @@ class _FileSection(Gtk.Box):
             section.file = file
         for gap in self.gaps:  # a kept gap likewise: its file is this read's
             gap.file = file
+        self.sync_actions()
+
+    def sync_actions(self) -> None:
+        """Word the file buttons for the load (gitpatch.action_labels), and
+        every hunk's after them."""
+        primary, discard = gitpatch.action_labels(self._owner.loaded, gitpatch.FILE)
+        self.primary_button.set_text(primary)
+        self.primary_button.set_tooltip_text(keybindings.with_hint(primary, "git.stage-file"))
+        self.discard_button.set_visible(discard is not None)
+        if discard is not None:
+            self.discard_button.set_text(discard)
+            self.discard_button.set_tooltip_text(discard)
+        self.actions.set_visible(self._owner.loaded is not None)
+        for section in self.hunks:
+            section.sync_actions()
+
+    def button(self, discard: bool) -> _ActionButton:
+        return self.discard_button if discard else self.primary_button
+
+    def set_busy(self, busy: bool, acting: _ActionButton | None) -> None:
+        for button in (self.primary_button, self.discard_button):
+            button.set_sensitive(not busy)
+            button.set_spinning(busy and button is acting)
+        for section in self.hunks:
+            section.set_busy(busy, acting)
 
     def _make_hunk(self, hunk: diffmodel.Hunk, language: GtkSource.Language | None) -> _HunkSection:
         owner = self._owner
         return _HunkSection(
-            self.file, hunk, language, owner.scheme, owner.palette, owner.options, owner.on_hunk_focus
+            self.file, hunk, language, owner.scheme, owner.palette, owner.options, owner.on_hunk_focus, owner
         )
 
     def _make_gap(self, gap: diffmodel.Gap | None, position: str, hunk_index: int) -> _GapRow:
@@ -1366,6 +1740,13 @@ class DiffView(Gtk.Box):
         # (`before:<i>` / `trailing:<i>`) and the line count asked for
         # (0 = all). Informational — the view reads the context itself.
         "context-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str, int)),
+        # A button or key asked for a mutation: a gitpatch.MutationRequest
+        # (the file, the load, the grain, the hunk and lines). The page
+        # reads the file's patch, plans, confirms, runs and reloads.
+        "mutation-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # *Add note* on a hunk: the path, the hunk index, the side and the
+        # 1-based line under the cursor (0: none) — the note cards' door.
+        "note-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, int, str, int)),
     }
 
     def __init__(self) -> None:
@@ -1394,6 +1775,14 @@ class DiffView(Gtk.Box):
         self._focused_hunk: _HunkSection | None = None
         self._refocus = False
         self._scroll_source = 0
+        # The one line selection (decision 4: contiguous, inside one hunk):
+        # the section holding it — its view's buffer holds the range;
+        # selecting in another hunk clears it. The button a request came
+        # from spins while the page runs it (set_busy).
+        self._selection: _HunkSection | None = None
+        self._acting: _ActionButton | None = None
+        self._busy = False
+        self._pinned_section: _FileSection | None = None
         # The find bar's half: the query, one GtkSource.SearchContext per
         # hunk buffer (the highlight of every occurrence; weakly keyed so a
         # rebuilt hunk's context goes with its view), and the matches in
@@ -1460,8 +1849,22 @@ class DiffView(Gtk.Box):
         self._pinned_badge.add_css_class("caption")
         self._pinned_badge.add_css_class("dim-label")
         pinned.append(self._pinned_badge)
+        # The pinned header carries the file's buttons too (spec): they
+        # act on the section pinned at the time of the click.
+        pinned_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        pinned_actions.add_css_class("git-file-actions")
+        self._pinned_primary = _ActionButton(lambda: self._request_pinned(False))
+        self._pinned_discard = _ActionButton(lambda: self._request_pinned(True))
+        pinned_actions.append(self._pinned_primary)
+        pinned_actions.append(self._pinned_discard)
+        pinned.append(pinned_actions)
         pinned.set_visible(False)
-        pinned.set_can_target(False)
+        # A wheel over the header scrolls the stream under it (the header
+        # is the overlay's child, not the scroller's, so the event would
+        # otherwise stop here).
+        wheel = Gtk.EventControllerScroll.new(Gtk.EventControllerScrollFlags.VERTICAL)
+        wheel.connect("scroll", self._on_pinned_scroll)
+        pinned.add_controller(wheel)
         self._pinned = pinned
         overlay.add_overlay(pinned)
         self._stack.add_named(overlay, "files")
@@ -1469,6 +1872,12 @@ class DiffView(Gtk.Box):
         self.append(bin_)
         scroller.get_vadjustment().connect("value-changed", self._on_scrolled)
         scroller.get_vadjustment().connect("changed", self._on_scrolled)
+        # Escape clears the selection — and only then: with none, the key
+        # goes on to whoever wants it (the dock's restore-from-maximized).
+        escape = Gtk.EventControllerKey()
+        escape.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        escape.connect("key-pressed", self._on_key_pressed)
+        self.add_controller(escape)
         self.connect("destroy", self._on_destroy)
 
     # -- public face -------------------------------------------------------------
@@ -1547,6 +1956,11 @@ class DiffView(Gtk.Box):
             # The keyboard was parked off a dropped hunk: back into the view.
             self._refocus = False
             self.grab_focus()
+        # A kept hunk keeps its widget, its buffer and so its selection; a
+        # rebuilt one lost it (and a section built now words its buttons
+        # for this load in its constructor).
+        if self._selection is not None and self._selection.get_parent() is None:
+            self._selection = None
         self._rescan_search()
         self._schedule_scroll_sync()
 
@@ -1592,13 +2006,155 @@ class DiffView(Gtk.Box):
         side = side if side in diffmodel.SIDES else diffmodel.NEW
         return diffmodel.locate(self._files, path, side, line) is not None
 
-    def current(self) -> tuple[str | None, int | None, None]:
+    def current(self) -> tuple[str | None, int | None, tuple[str, int, int, int] | None]:
         """(path, hunk index, selection) — the file the reader is in (the
         focused hunk's, else the one at the top of the viewport), its
-        current hunk (None when none), and the line selection (None until
-        the next PR)."""
+        current hunk (None when none), and the line selection as (path,
+        hunk index, first, last) — inclusive indexes into that hunk's
+        lines — or None."""
         path, hunk = self._current
-        return (path or None, hunk if hunk >= 0 else None, None)
+        return (path or None, hunk if hunk >= 0 else None, self.selection())
+
+    def selection(self) -> tuple[str, int, int, int] | None:
+        """The selected lines: (path, hunk index, first, last), or None."""
+        section = self._selection
+        if section is None or section.get_parent() is None:
+            return None
+        lines = section.selection()
+        if lines is None:
+            return None
+        return section.file.path, section.hunk.index, lines[0], lines[1]
+
+    def has_selection(self) -> bool:
+        return self.selection() is not None
+
+    def clear_selection(self) -> bool:
+        """`Esc`: drop the line selection. False when there was none."""
+        section = self._selection
+        self._selection = None
+        if section is None or section.get_parent() is None:
+            return False
+        had = section.selection() is not None
+        section.clear_selection()
+        section.sync_actions()
+        return had
+
+    # -- the staging keys --
+
+    def request_stage(self) -> bool:
+        """`x`: stage / unstage / revert the selected lines, or the focused
+        hunk (the current one when none has the keyboard)."""
+        section = self._target_hunk()
+        if section is None:
+            return False
+        self.request_hunk(section, False)
+        return True
+
+    def request_stage_file(self) -> bool:
+        """`X`: the focused (or current) hunk's file, whole."""
+        section = self._target_file()
+        if section is None:
+            return False
+        self.request_file(section, False)
+        return True
+
+    def request_discard(self) -> bool:
+        """`D`: discard (revert, on a read-only load) the selected lines or
+        the focused hunk, after the page's confirmation."""
+        section = self._target_hunk()
+        if section is None:
+            return False
+        self.request_hunk(section, True)
+        return True
+
+    def _target_hunk(self) -> _HunkSection | None:
+        focused = self._focused_hunk
+        if focused is not None and focused.get_parent() is not None:
+            return focused
+        selected = self._selection
+        if selected is not None and selected.get_parent() is not None:
+            return selected
+        path, index = self._current
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return None
+        return next((h for h in section.hunks if h.hunk.index == index), None)
+
+    def _target_file(self) -> _FileSection | None:
+        hunk = self._target_hunk()
+        if hunk is not None:
+            return self._section_for(hunk.file.path, diffmodel.NEW)
+        return self._section_for(self._current[0], diffmodel.NEW)
+
+    def request_hunk(self, section: _HunkSection, discard: bool) -> None:
+        """A hunk header's button (or its menu, or `x` / `D`): the selected
+        lines when the selection is in this hunk, else the whole hunk."""
+        if self._busy or self.loaded is None:
+            return
+        lines = section.selection() if self._selection is section else None
+        if lines is not None:
+            request = gitpatch.MutationRequest(
+                section.file, self.loaded, gitpatch.LINES, discard, section.hunk.index, lines[0], lines[1]
+            )
+        else:
+            request = gitpatch.MutationRequest(
+                section.file, self.loaded, gitpatch.HUNK, discard, section.hunk.index
+            )
+        self._acting = section.button(discard)
+        self.emit("mutation-requested", request)
+
+    def request_file(self, section: _FileSection, discard: bool, acting: _ActionButton | None = None) -> None:
+        """A file header's button (or `X`, or the pinned header's copy —
+        *acting* names the button that spins): the file, whole."""
+        if self._busy or self.loaded is None:
+            return
+        self._acting = acting or section.button(discard)
+        request = gitpatch.MutationRequest(section.file, self.loaded, gitpatch.FILE, discard)
+        self.emit("mutation-requested", request)
+
+    def _request_pinned(self, discard: bool) -> None:
+        section = self._pinned_section
+        if section is not None and section.get_parent() is not None:
+            self.request_file(section, discard, self._pinned_discard if discard else self._pinned_primary)
+
+    def set_busy(self, busy: bool) -> None:
+        """The page is running (or planning) a request: every header
+        button goes insensitive, the one the request came from spins."""
+        self._busy = busy
+        acting = self._acting if busy else None
+        for section in self._sections():
+            section.set_busy(busy, acting)
+        for button in (self._pinned_primary, self._pinned_discard):
+            button.set_sensitive(not busy)
+            button.set_spinning(busy and button is acting)
+        if not busy:
+            self._acting = None
+
+    def open_from(self, section: _HunkSection) -> None:
+        """The context menu's *Open in editor*: the hunk's file at the
+        cursor line (the first line of the hunk when none)."""
+        where = section.cursor_line()
+        line = where[1] if where else (section.hunk.lines[0].new or section.hunk.lines[0].old or 0)
+        self.emit("open-requested", section.file.path, line or 0)
+
+    def request_note(self, section: _HunkSection) -> None:
+        """The context menu's *Add note*: where a note would go."""
+        where = section.cursor_line()
+        side, line = where if where else (diffmodel.NEW, 0)
+        self.emit("note-requested", section.file.path, section.hunk.index, side, line)
+
+    def expand_gap_before(self, section: _HunkSection) -> bool:
+        """Draw every unchanged line above *section* (the context menu's
+        *Expand context*; `z` is expand_gap_before_focus)."""
+        file_section = self._section_for(section.file.path, diffmodel.NEW)
+        if file_section is None:
+            return False
+        key = f"{diffmodel.BEFORE}:{section.hunk.index}"
+        gap = next((g for g in file_section.gaps if g.key == key and g.remaining > 0), None)
+        if gap is None:
+            return False
+        self.on_gap_expand(gap, ALL, 0)
+        return True
 
     def filter(self, text: str) -> int:
         """Show only the files whose path contains *text* (case-insensitive);
@@ -1750,15 +2306,7 @@ class DiffView(Gtk.Box):
             hunk = next((h for h in (section.hunks if section else []) if h.hunk.index == index), None)
         if hunk is None:
             return False
-        section = self._section_for(hunk.file.path, diffmodel.NEW)
-        if section is None:
-            return False
-        key = f"{diffmodel.BEFORE}:{hunk.hunk.index}"
-        gap = next((g for g in section.gaps if g.key == key and g.remaining > 0), None)
-        if gap is None:
-            return False
-        self.on_gap_expand(gap, ALL, 0)
-        return True
+        return self.expand_gap_before(hunk)
 
     def request_open(self) -> bool:
         """Emit `open-requested` for the file and line under the cursor."""
@@ -1866,11 +2414,9 @@ class DiffView(Gtk.Box):
         hunk, view, row, start, end = self._matches[self._match_index]
         if hunk.get_parent() is None:
             return
-        ok_a, first = view.buffer.get_iter_at_line_offset(row, start)
-        ok_b, last = view.buffer.get_iter_at_line_offset(row, end)
-        if not (ok_a and ok_b):
+        if not view.select_match(row, start, end):
             return
-        view.buffer.select_range(first, last)
+        _ok, first = view.buffer.get_iter_at_line_offset(row, start)
         keyedslots.scroll_to(self._scroller, hunk)
         view.view.scroll_to_iter(first, 0.1, False, 0, 0)
         self._set_current(hunk.file.path, hunk.hunk.index)
@@ -1934,6 +2480,60 @@ class DiffView(Gtk.Box):
     def is_split(self) -> bool:
         return self.options.split
 
+    def select_lines(self, path: str, hunk: int, first: int, last: int) -> bool:
+        """Select lines *first*..*last* (indexes into the hunk's lines) of
+        hunk *hunk* of *path* as a drag on the line numbers would — in the
+        stack layout's one view, or the split's new side (the old for a
+        selection of deletions alone)."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None or not 0 <= hunk < len(section.hunks):
+            return False
+        target = section.hunks[hunk]
+        wanted = set(range(min(first, last), max(first, last) + 1))
+        for view in reversed(target.views):  # the new side first
+            rows = [i for i, row in enumerate(view.rows) if row.line in wanted]
+            if rows:
+                view.view.grab_focus()
+                view.select_rows(min(rows), max(rows))
+                return True
+        return False
+
+    def hunk_action_labels(self, path: str, hunk: int) -> tuple[str, str | None]:
+        """(the primary button's words, the discard button's or None when
+        hidden) on hunk *hunk* of *path*."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None or not 0 <= hunk < len(section.hunks):
+            return "", None
+        target = section.hunks[hunk]
+        discard = target.discard_button.text() if target.discard_button.get_visible() else None
+        return target.primary_button.text(), discard
+
+    def file_action_labels(self, path: str) -> tuple[str, str | None]:
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return "", None
+        discard = section.discard_button.text() if section.discard_button.get_visible() else None
+        return section.primary_button.text(), discard
+
+    def click_hunk_action(self, path: str, hunk: int, discard: bool = False) -> bool:
+        """Press a hunk header's button as a click would."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None or not 0 <= hunk < len(section.hunks):
+            return False
+        section.hunks[hunk].button(discard).emit("clicked")
+        return True
+
+    def click_file_action(self, path: str, discard: bool = False) -> bool:
+        """Press a file header's button as a click would."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return False
+        section.button(discard).emit("clicked")
+        return True
+
+    def busy(self) -> bool:
+        return self._busy
+
     def pinned_header_text(self) -> str | None:
         return self._pinned_path.get_text() if self._pinned.get_visible() else None
 
@@ -1957,6 +2557,40 @@ class DiffView(Gtk.Box):
             self._set_current(section.file.path, section.hunk.index)
         elif self._focused_hunk is section:
             self._focused_hunk = None
+
+    def on_hunk_selection(self, section: _HunkSection, view: _HunkView) -> None:
+        """A view's selection moved (snapped already): one selection in
+        the whole stream — a new one clears the others, in every other
+        hunk and on the hunk's other side — and the hunk's buttons follow."""
+        if view.selected_rows() is None:
+            if self._selection is section and section.selection() is None:
+                self._selection = None
+            section.sync_actions()
+            return
+        previous = self._selection
+        self._selection = section
+        if previous is not None and previous is not section and previous.get_parent() is not None:
+            previous.clear_selection()
+            previous.sync_actions()
+        for other in section.views:
+            if other is not view:
+                other.clear_selection()
+        section.sync_actions()
+
+    def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, _state) -> bool:
+        if keyval == Gdk.KEY_Escape and self.has_selection():
+            self.clear_selection()
+            return True
+        return False
+
+    def _on_pinned_scroll(self, controller: Gtk.EventControllerScroll, _dx: float, dy: float) -> bool:
+        adjustment = self._scroller.get_vadjustment()
+        step = dy
+        if controller.get_unit() == Gdk.ScrollUnit.WHEEL:
+            step = dy * (adjustment.get_page_size() ** (2.0 / 3.0))
+        upper = adjustment.get_upper() - adjustment.get_page_size()
+        adjustment.set_value(max(0.0, min(upper, adjustment.get_value() + step)))
+        return True
 
     def on_gap_expand(self, gap: _GapRow, direction: str, count: int) -> None:
         """A gap's button: read the file on the gap's side (a thread), then
@@ -2138,6 +2772,14 @@ class DiffView(Gtk.Box):
             icon_name, colour = filetypes.icon_for(PurePosixPath(top.file.path).name)
             self._pinned_icon.set_from_icon_name(icon_name)
             self._pinned_icon.set_css_classes([colour] if colour else [])
+            self._pinned_section = top
+            self._pinned_primary.set_text(top.primary_button.text())
+            self._pinned_primary.set_tooltip_text(top.primary_button.get_tooltip_text())
+            self._pinned_discard.set_visible(top.discard_button.get_visible())
+            self._pinned_discard.set_text(top.discard_button.text())
+            self._pinned_discard.set_tooltip_text(top.discard_button.get_tooltip_text())
+        else:
+            self._pinned_section = None
         self._pinned.set_visible(show)
 
     # -- context reads --
