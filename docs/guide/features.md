@@ -491,9 +491,10 @@ to install, and nothing in it is a terminal.
   alone keeps its card, one on a hunk that changed — or whose line
   numbers shifted, because lines were staged or added above it — is
   dropped, one on a file the current load doesn't show waits for a load
-  that does. Highlights (attention marks on a range of a line, in four
-  tones) share the same store and rules; the tools that land them are
-  the next release's.
+  that does. Highlights (attention marks on a range of a line, in six
+  tones) share the same store and rules; the agent lands them with
+  `highlight_diff`, its notes with `annotate_diff`, and clears both with
+  `clear_diff_marks` (your own notes stay unless it asks for them too).
 - **Find** (`Ctrl+F`, or the header's magnifier): one query over every
   hunk, every occurrence highlighted, *n of m* counted, `Enter` /
   `Shift+Enter` stepping across hunks and files.
@@ -566,11 +567,18 @@ to install, and nothing in it is a terminal.
   index is. Outside a git repository there is nothing to open: the button
   is greyed, and `F6` says so in the terminal; a directory that stops
   being a repository gets a card saying so.
-- `show_diff` — the session tool — opens the page on a diff and reveals a
-  file and line in it without taking your keyboard; a line that no hunk
-  carries (an unchanged stretch) still reveals the file, on the hunk
-  nearest that line, and the reply tells the agent so. A file your files
-  filter was hiding is shown: the filter clears first.
+- **The agent's doors.** `show_diff` — the session tool — opens the page
+  on a diff and reveals a file and a line (on either side) or a hunk in
+  it without taking your keyboard; a line that no hunk carries (an
+  unchanged stretch) still reveals the file, on the hunk nearest that
+  line, and the reply tells the agent so. A file your files filter was
+  hiding is shown: the filter clears first. Once the page is open,
+  `diff_context` reads it back (the load, the file and hunk you are on
+  and the lines you have selected, every file's hunks, the patches and
+  the notes on request), `annotate_diff` lands note cards under hunks,
+  `highlight_diff` marks ranges of lines, and `clear_diff_marks` takes
+  its marks away — see [Tools a session can
+  call](#tools-a-session-can-call).
 - Each session remembers whether its git page was open, where it sat,
   what it showed — one of the three working-tree loads, a commit or a
   range — and whether the sidebar was folded, restored on the next
@@ -709,13 +717,36 @@ is running in:
 - **`open_in_editor(path, line?)`** — put a file on your screen in the
   session's own editor pane, instead of hoping you click a path in the
   terminal.
-- **`show_diff(what, file?, line?)`** — open the session's git page on a
-  diff — `unstaged`, `staged`, `branch`, or any commit ref — and reveal a
-  file and line in it: "show me what you did" lands as the change on
-  your screen rather than a pasted diff. The page is revealed, never
-  focused; the reply tells the agent what loaded and what was revealed —
-  a line no hunk carries lands on the nearest hunk, and the reply says
-  so.
+- **`show_diff(what, file?, line?, side?, hunk?)`** — open the session's
+  git page on a diff — `unstaged`, `staged`, `branch`, or any commit ref
+  — and reveal a file in it, at a line (on the new side unless `side` is
+  `old`) or at a hunk (1-based): "show me what you did" lands as the
+  change on your screen rather than a pasted diff. The page is revealed,
+  never focused; the reply tells the agent what loaded and what was
+  revealed — the file's hunk count and the hunk it landed on; a line no
+  hunk carries lands on the nearest hunk, and the reply says so.
+- **`diff_context(files?, patch?, notes?)`** — read the git page back:
+  which diff is loaded, the file and hunk you are looking at and the
+  lines you have selected (with their text), every file in the diff with
+  its hunks and their line ranges, and on request each file's patch
+  (capped at 200 kB in all) and the notes and highlights on the page — so
+  "this hunk" and "the lines I selected" mean the same thing to you both.
+  It answers only while the page is open (the refusal names
+  `show_diff`).
+- **`annotate_diff(notes, focus?)`** — put note cards on the diff: each
+  note names a file, a line (or a hunk) and a summary, with an optional
+  rationale and author, and appears under the hunk as an *Agent* card —
+  review findings beside the code they are about. A batch lands whole or
+  not at all: a file the diff doesn't hold, or a line outside its hunks,
+  refuses the lot and the reply names the offender. `a` folds the agent's
+  cards away.
+- **`highlight_diff(marks, focus?)`** — attention marks on character
+  ranges of the diff's lines, in six tones (`match`, `current`, `info`,
+  `warning`, `error`, `dim`): the identifier a finding is about, the
+  token that changed. Validated like the notes; the reply counts them.
+- **`clear_diff_marks(file?, notes?, highlights?, user?)`** — take the
+  agent's notes and highlights off the page, everywhere or from one file;
+  your own notes stay unless `user` is true.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
   lightbox. An `http(s)` URL works too: Collins downloads it and shows the
   copy.
