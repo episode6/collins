@@ -3,10 +3,11 @@
 
 A single archive of a session that still occupies a worktree settles that
 worktree as the archive_worktree setting says: MainWindow leaves it (never),
-deletes it once the archive has landed (always), or asks first — before the
-archive begins, so Cancel keeps the session — and deletes at the end only if
-the answer was Delete (ask; see MainWindow._ask_worktree_then_archive and
-_settle_archived_worktree). None of that is reachable from pytest —
+moves it to the trash once the archive has landed (always), or asks first —
+before the archive begins, so Cancel keeps the session — and trashes at the
+end only if the answer was Trash (ask; see MainWindow._ask_worktree_then_archive
+and _settle_archived_worktree). The archive's Undo brings a trashed worktree
+back with the session (_undo_archive_now). None of that is reachable from pytest —
 tests/conftest.py blocks the GTK stack, and the ask is a real dialog on a
 real window — so it is checked here against a real App and a real git
 repository:
@@ -18,21 +19,50 @@ One session, never opened in a tab (so the archive lands on the tabless
 path, with no CLI to spawn), filed the way the CLI files a session that
 lives in a worktree, and the worktree itself cut for real under the staged
 repository. The setting is walked through never, always and ask, with the
-worktree put back between rounds; a last round makes the session a
-background agent, which must keep its worktree whatever the setting. The
-ask round is answered every way it can be: Cancel (nothing archived), Keep
-(archived, worktree stays), Delete (archived, worktree gone).
+worktree brought back by Undo (always, and the ask round's Trash answer) or
+put back between rounds; a last round makes the session a background agent,
+which must keep its worktree whatever the setting. The ask round is answered
+every way it can be: Cancel (nothing archived), Keep (archived, worktree
+stays), Trash (archived, worktree in the trash, Undo restores both).
+
+The trash is the real one Gio picks for the staged tree's filesystem (a
+.Trash-<uid> at its mount point, or the home trash under the XDG_DATA_HOME
+set here); the restore reads it back the freedesktop way.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
+import atexit
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 
-E2E = tempfile.mkdtemp(prefix="collins-archivewt-")
+
+def _staging_dir() -> str:
+    """Somewhere the worktree can be trashed from. GLib refuses to trash on
+    a "system internal" mount — a tmpfs /tmp, the usual case on a desktop —
+    unless the file shares a filesystem with the home directory, where the
+    home trash takes it. So the staged tree goes under the home directory
+    whenever the default temp directory lives on another filesystem."""
+    tmp = tempfile.gettempdir()
+    try:
+        if os.stat(tmp).st_dev == os.stat(os.path.expanduser("~")).st_dev:
+            return tempfile.mkdtemp(prefix="collins-archivewt-")
+    except OSError:
+        pass
+    home_tmp = os.path.join(
+        os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "collins-e2e"
+    )
+    os.makedirs(home_tmp, exist_ok=True)
+    path = tempfile.mkdtemp(prefix="collins-archivewt-", dir=home_tmp)
+    atexit.register(shutil.rmtree, path, True)
+    return path
+
+
+E2E = _staging_dir()
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
@@ -42,6 +72,7 @@ os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
+os.environ["XDG_DATA_HOME"] = f"{E2E}/data"
 
 REPO = f"{E2E}/repo"
 WORKTREE = f"{REPO}/.claude/worktrees/oasis"
@@ -148,6 +179,19 @@ def branch_exists() -> bool:
     return bool(git(REPO, "branch", "--list", BRANCH))
 
 
+def worktree_works() -> bool:
+    """The directory is back and git knows it as a worktree on its branch."""
+    try:
+        return git(WORKTREE, "rev-parse", "--abbrev-ref", "HEAD") == BRANCH
+    except subprocess.CalledProcessError:
+        return False
+
+
+def undo() -> None:
+    """The archive snackbar's Undo button (and Ctrl+Shift+Z)."""
+    state["win"]._undo_archive_now()
+
+
 def put_back() -> None:
     if not worktree_exists():
         assert recreate_worktree(STATE), "could not recreate the staged worktree"
@@ -211,11 +255,19 @@ def step_never() -> bool:
 def step_always() -> bool:
     win = state["win"]
     check("always: the session was archived", win.state.is_archived(SESSION))
-    check("always: the worktree is gone", not worktree_exists())
-    check("always: the untouched branch went with it", not branch_exists())
+    check("always: the worktree is in the trash", not worktree_exists())
+    check("always: the branch stays", branch_exists())
     check("always: no dialog", win.get_visible_dialog() is None)
+    undo()
+    return later(step_always_undone)
+
+
+def step_always_undone() -> bool:
+    win = state["win"]
+    check("always, undone: the session is back", not win.state.is_archived(SESSION))
+    check("always, undone: the worktree is back", worktree_works())
+    check("always, undone: no dialog", win.get_visible_dialog() is None)
     put_back()
-    restore()
     win.state.set_setting("archive_worktree", "ask")
     archive()
     return later(step_ask)
@@ -300,13 +352,21 @@ def step_ask_delete() -> bool:
 
 def step_deleted() -> bool:
     win = state["win"]
-    check("delete: the session was archived", win.state.is_archived(SESSION))
-    check("delete: the worktree is gone", not worktree_exists())
-    check("delete: the dialog is gone", win.get_visible_dialog() is None)
+    check("trash: the session was archived", win.state.is_archived(SESSION))
+    check("trash: the worktree is in the trash", not worktree_exists())
+    check("trash: the dialog is gone", win.get_visible_dialog() is None)
+    undo()
+    return later(step_trash_undone)
+
+
+def step_trash_undone() -> bool:
+    win = state["win"]
+    check("trash, undone: the session is back", not win.state.is_archived(SESSION))
+    check("trash, undone: the worktree is back", worktree_works())
+    check("trash, undone: no dialog", win.get_visible_dialog() is None)
     # A session running on as a background agent keeps its worktree whatever
     # the setting says: it is still working in there.
     put_back()
-    restore()
     win.state.set_setting("archive_worktree", "always")
     win._bg_status.background_ids.add(SESSION)
     archive()

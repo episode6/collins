@@ -189,18 +189,21 @@ downloads of each version, see the
   before the setting existed start theirs at the upgrade), a running
   session waits for tomorrow, and a project emptied out stays in the
   sidebar as a header.
-- **Archiving a session in a git worktree offers to delete the
+- **Archiving a session in a git worktree offers to trash the
   worktree.** The archive starts with a dialog asking *Keep Worktree*
-  or *Delete Worktree* — or *Cancel*, which archives nothing. Either
-  answer archives the session; the deletion waits until it has stopped
+  or *Trash Worktree* — or *Cancel*, which archives nothing. Either
+  answer archives the session; the move waits until it has stopped
   (right away for a session with no tab, after the tab's exit for one
-  that had a tab). Deleting removes the worktree the way the CLI reaps
-  an untouched one (uncommitted changes go with it) and its branch too
-  when git agrees it has nothing unmerged. Preferences → *When archiving
-  a session in a git worktree* makes the answer *Always Delete* or
-  *Never Delete* instead, with no dialog. Nothing is asked about a
-  worktree the session left, one the CLI already reaped, one still in
-  use by another tab or a background agent, or for bulk archives.
+  that had a tab). The worktree goes to the system trash whole,
+  uncommitted changes and all, and the archive's Undo brings it back
+  with the session — git's registration and the branch stay put
+  meanwhile, so the restored directory is a working worktree again the
+  moment it is back (and is registered afresh if git pruned it in
+  between). Preferences → *When archiving a session in a git worktree*
+  makes the answer *Always Trash* or *Never Trash* instead, with no
+  dialog. Nothing is asked about a worktree the session left, one the
+  CLI already reaped, one still in use by another tab or a background
+  agent, or for bulk archives.
 - **Fewer "finished" notifications for runs still going.** Recent CLI
   versions clear the terminal progress hint for a beat between tool
   calls — the model's stream has ended, the next tool isn't marked in

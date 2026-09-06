@@ -180,15 +180,23 @@ claude.ai on a background thread (`remotearchive.py`), best-effort. A single
 archive also settles the session's worktree (the `archive_worktree` setting:
 ask | always | never). With "ask", `MainWindow._set_archived` asks *before*
 anything is archived (`_ask_worktree_then_archive`: the dialog has Cancel,
-and Cancel must leave the tab and row untouched); a Delete answer is parked
+and Cancel must leave the tab and row untouched); a Trash answer is parked
 in `_worktree_deletions` and acted on by `_settle_archived_worktree` once
-the archive has landed on a stopped session — the deletion always comes
-last. "always" probes and deletes at that same landing. `sessions.
+the archive has landed on a stopped session — the move always comes last.
+"always" probes and trashes at that same landing. `sessions.
 removable_worktree` finds the worktree the transcript still records on
-disk, `sessions.remove_worktree` deletes it (`worktree remove --force
---force`, then `branch -d`), never while the session is detached or another
-tab / background agent works in it, and never for bulk archives.
-`scripts/check_archive_worktree.py` drives all of it.
+disk, `sessions.trash_worktree` moves it to the system trash (`worktree
+unlock`, then `Gio.File.trash`; git's registration and the branch stay,
+so the entry lists as prunable until gc forgets it), never while the
+session is detached or another tab / background agent works in it, and
+never for bulk archives. The archive's Undo (`_undo_archive_now`) restores
+the worktree with the session: `_trashed_worktrees` holds the records while
+the undo is armed, `sessions.restore_worktree` reads the freedesktop trash
+(home trash and the mount's `.Trash-<uid>`) back by `Path=` and re-registers
+the worktree by hand if git pruned it meanwhile. GLib refuses to trash on a
+"system internal" mount (tmpfs) unless it shares the home filesystem — an
+error dialog then, the worktree stays; `scripts/check_archive_worktree.py`
+stages under `~/.cache/collins-e2e` for that reason and drives all of it.
 
 **Automatic delete** (`autodelete.py`, GTK-free): `AppState.set_archived`
 stamps `archived_at` (first archive wins; a restore drops it; archives from

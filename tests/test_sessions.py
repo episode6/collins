@@ -1,8 +1,9 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,10 +27,11 @@ from collins.sessions import (
     recreatable_worktree,
     recreate_worktree,
     removable_worktree,
-    remove_worktree,
+    restore_worktree,
     resume_cwd,
     session_from_file,
     transcript_is_stub,
+    trash_worktree,
     worktree_project_root,
     worktree_shares_project,
 )
@@ -793,47 +795,134 @@ def test_removable_worktree(tmp_path):
     assert removable_worktree(jsonl, cwd) is None
 
 
-def test_remove_worktree(tmp_path):
-    """A locked, dirty worktree goes — the way the CLI reaps one — and so
-    does its branch when it has nothing of its own."""
+@pytest.fixture
+def fake_trash(tmp_path, monkeypatch):
+    """A freedesktop home trash under tmp_path, and a stand-in for Gio's
+    trash that files into it the way GLib does (files/<name> plus
+    info/<name>.trashinfo with a percent-encoded absolute Path=)."""
+    import urllib.parse
+
+    data_home = tmp_path / "data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
+    trash = data_home / "Trash"
+    calls: list[str] = []
+
+    def trash_path(path: str) -> str:
+        calls.append(path)
+        (trash / "files").mkdir(parents=True, exist_ok=True)
+        (trash / "info").mkdir(parents=True, exist_ok=True)
+        name = Path(path).name
+        n = 2
+        while (trash / "files" / name).exists():
+            name = f"{Path(path).name}.{n}"
+            n += 1
+        os.rename(path, trash / "files" / name)
+        (trash / "info" / f"{name}.trashinfo").write_text(
+            "[Trash Info]\nPath=" + urllib.parse.quote(path) + "\nDeletionDate=2026-09-06T10:00:00\n",
+            encoding="utf-8",
+        )
+        return ""
+
+    monkeypatch.setattr(sessions, "_trash_path", trash_path)
+    return trash, calls
+
+
+def _branches(root) -> str:
+    return subprocess.run(
+        ["git", "-C", root, "branch", "--list", "worktree-oasis"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def test_trash_worktree_round_trip(tmp_path, fake_trash):
+    """A locked, dirty worktree goes to the trash whole and comes back a
+    working worktree on the same branch, uncommitted work and all."""
+    trash, calls = fake_trash
     root, _head, state = _worktree_repo(tmp_path)
     assert recreate_worktree(state)
     wt = state["worktreePath"]
     _git(root, "worktree", "lock", wt)
     Path(wt, "scratch.txt").write_text("wip", encoding="utf-8")
 
-    assert remove_worktree(state) == ""
+    assert trash_worktree(state) == ""
+    assert calls == [wt]
     assert not Path(wt).exists()
-    branches = subprocess.run(
-        ["git", "-C", root, "branch", "--list", "worktree-oasis"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert branches.strip() == ""
-
-
-def test_remove_worktree_keeps_an_unmerged_branch(tmp_path):
-    root, _head, state = _worktree_repo(tmp_path)
-    assert recreate_worktree(state)
-    wt = state["worktreePath"]
-    Path(wt, "work.md").write_text("done", encoding="utf-8")
-    _git(wt, "add", "-A")
-    _git(wt, "commit", "-qm", "work")
-
-    assert remove_worktree(state) == ""
-    assert not Path(wt).exists()
-    branches = subprocess.run(
-        ["git", "-C", root, "branch", "--list", "worktree-oasis"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-    assert "worktree-oasis" in branches
+    assert (trash / "files" / "oasis" / "scratch.txt").read_text(encoding="utf-8") == "wip"
+    # The branch stays: git still registers the (missing) worktree on it.
+    assert "worktree-oasis" in _branches(root)
     # Already gone: nothing left to do is not a failure. Somewhere that isn't
     # a session worktree at all is refused outright.
-    assert remove_worktree(state) == ""
-    assert remove_worktree({"worktreePath": str(tmp_path / "elsewhere")}) != ""
+    assert trash_worktree(state) == ""
+    assert calls == [wt]
+    assert trash_worktree({"worktreePath": str(tmp_path / "elsewhere")}) != ""
+
+    assert restore_worktree(state) == ""
+    assert Path(wt, "scratch.txt").read_text(encoding="utf-8") == "wip"
+    assert not (trash / "info" / "oasis.trashinfo").exists()
+    head = subprocess.run(
+        ["git", "-C", wt, "rev-parse", "--abbrev-ref", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert head == "worktree-oasis"
+    # Nothing left in the trash to restore a second time.
+    assert restore_worktree(state) != ""
+
+
+def test_restore_worktree_takes_the_newest_and_refuses_to_clobber(tmp_path, fake_trash):
+    trash, _calls = fake_trash
+    root, _head, state = _worktree_repo(tmp_path)
+    wt = state["worktreePath"]
+    assert recreate_worktree(state)
+    Path(wt, "first.txt").write_text("1", encoding="utf-8")
+    assert trash_worktree(state) == ""
+    # Trashed twice (recreated in between): the later copy is the one Undo
+    # means. Its DeletionDate is what says so.
+    assert recreate_worktree(state)
+    Path(wt, "second.txt").write_text("2", encoding="utf-8")
+    assert trash_worktree(state) == ""
+    (trash / "info" / "oasis.2.trashinfo").write_text(
+        (trash / "info" / "oasis.2.trashinfo")
+        .read_text(encoding="utf-8")
+        .replace("2026-09-06T10:00:00", "2026-09-06T11:00:00"),
+        encoding="utf-8",
+    )
+    # Something already at the path (a resume recreated it) is left alone,
+    # and the trashed copies stay where they are.
+    assert recreate_worktree(state)
+    assert "already exists" in restore_worktree(state)
+    assert (trash / "files" / "oasis.2").is_dir()
+    # The fresh copy leaving through git (the CLI reaps an untouched one on
+    # exit) takes the registration with it: the restore registers the
+    # worktree again, on its branch, with the index git lost rebuilt.
+    subprocess.run(["git", "-C", root, "worktree", "remove", "--force", "--force", wt], check=True)
+    assert restore_worktree(state) == ""
+    assert Path(wt, "second.txt").exists()
+    assert not Path(wt, "first.txt").exists()
+    status = subprocess.run(
+        ["git", "-C", wt, "status", "--short", "--branch"], check=True, capture_output=True, text=True
+    ).stdout.splitlines()
+    assert status == ["## worktree-oasis", "?? second.txt"]
+
+
+def test_trashed_entry_reads_topdir_trashes(tmp_path, monkeypatch):
+    """A worktree on another filesystem lands in that filesystem's
+    .Trash-<uid>, with Path= relative to the mount point."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "nowhere"))
+    monkeypatch.setattr(sessions, "_topdir", lambda near: str(tmp_path))
+    top_trash = tmp_path / f".Trash-{os.getuid()}"
+    (top_trash / "files" / "oasis").mkdir(parents=True)
+    (top_trash / "info").mkdir()
+    (top_trash / "info" / "oasis.trashinfo").write_text(
+        "[Trash Info]\nPath=repo/.claude/worktrees/oasis\nDeletionDate=2026-09-06T10:00:00\n",
+        encoding="utf-8",
+    )
+    entry = sessions._trashed_entry(str(tmp_path / "repo" / ".claude" / "worktrees" / "oasis"))
+    assert entry == (top_trash / "files" / "oasis", top_trash / "info" / "oasis.trashinfo")
+    assert sessions._trashed_entry(str(tmp_path / "repo" / "other")) is None
 
 
 def _prompt_transcript(tmp_path, *entries):

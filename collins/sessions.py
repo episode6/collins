@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -505,44 +505,209 @@ def removable_worktree(jsonl_path: str | Path | None, cwd: str) -> dict | None:
     return state
 
 
-def remove_worktree(state: dict) -> str:
-    """Delete a session worktree — the directory and git's registration of
-    it — the way the CLI reaps one it considers untouched, and its branch
-    when git agrees the branch has nothing unmerged (`branch -d`; a branch
-    with commits of its own stays, so nothing is lost that isn't in the
-    working tree). Returns "" on success, git's words otherwise. Runs git
-    subprocesses — call off the main loop.
+def _git_words(root: str, *args: str) -> tuple[bool, str]:
+    """Run git in *root*: (ok, what it said) — its stderr, its stdout, or
+    the exit code when it said nothing. Never prompts."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", root, *args],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+    words = (result.stderr or result.stdout).strip()
+    return result.returncode == 0, words or f"git exited {result.returncode}"
 
-    --force twice: one covers a dirty working tree, and the CLI locks every
-    worktree it creates, which `worktree remove` refuses to touch with a
-    single -f (verified against git 2.43).
+
+def _trash_path(path: str) -> str:
+    """Move a file or directory to the system trash (Gio picks the trash
+    directory for its filesystem, freedesktop style). "" on success, the
+    error's words otherwise."""
+    from gi.repository import Gio, GLib  # lazy: this module is otherwise stdlib
+
+    try:
+        Gio.File.new_for_path(path).trash(None)
+    except GLib.Error as err:
+        return err.message
+    return ""
+
+
+def trash_worktree(state: dict) -> str:
+    """Move a session worktree's directory to the system trash, where
+    restore_worktree (the archive's Undo) can bring it back whole —
+    uncommitted changes, untracked files and all. Returns "" on success,
+    the error's words otherwise. Runs git and moves a tree — call off the
+    main loop.
+
+    git's registration of the worktree stays put on purpose: it is what
+    makes the restored directory a worktree again the moment it is back.
+    Meanwhile git lists the missing directory as prunable, and its own
+    `worktree prune` — which gc runs once gc.worktreePruneExpire has
+    passed — forgets it if the trash is emptied instead. It is unlocked
+    first: the CLI locks every worktree it creates, and a locked entry is
+    never pruned. The branch stays with the registration (git refuses to
+    delete a branch a registered worktree has checked out), which is also
+    what the restore needs.
     """
     path = str(state["worktreePath"])
     root = worktree_project_root(path)
     if root is None:
         return "not a session worktree"
+    if not Path(path).is_dir():
+        return ""  # already gone: nothing left to do
+    _git_words(root, "worktree", "unlock", path)  # best effort: may not be locked
+    return _trash_path(path)
 
-    def git(*args: str) -> tuple[bool, str]:
+
+def _topdir(path: str) -> str:
+    """The mount point holding *path* (or its nearest existing ancestor)."""
+    here = Path(path)
+    while not here.exists():
+        if here.parent == here:
+            return ""
+        here = here.parent
+    try:
+        dev = here.stat().st_dev
+        while here.parent != here and here.parent.stat().st_dev == dev:
+            here = here.parent
+    except OSError:
+        return ""
+    return str(here)
+
+
+def _trash_dirs(near: str) -> list[tuple[Path, str]]:
+    """The freedesktop trash directories something at *near* could have
+    been trashed into: (trash directory, the topdir its Path= entries are
+    relative to — "" for the home trash, whose entries are absolute)."""
+    data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    dirs: list[tuple[Path, str]] = [(Path(data_home) / "Trash", "")]
+    top = _topdir(near)
+    if top:
+        uid = os.getuid()
+        dirs.append((Path(top) / ".Trash" / str(uid), top))
+        dirs.append((Path(top) / f".Trash-{uid}", top))
+    return dirs
+
+
+def _trashed_entry(path: str) -> tuple[Path, Path] | None:
+    """Where the trash holds what was at *path*: (the trashed item, its
+    .trashinfo), the most recently trashed one if several, or None."""
+    import urllib.parse
+
+    want = os.path.normpath(path)
+    best: tuple[str, Path, Path] | None = None
+    for trash, top in _trash_dirs(os.path.dirname(want)):
+        info_dir = trash / "info"
         try:
-            result = subprocess.run(
-                ["git", "-C", root, *args],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
-            )
-        except (OSError, subprocess.TimeoutExpired) as e:
-            return False, str(e)
-        words = (result.stderr or result.stdout).strip()
-        return result.returncode == 0, words or f"git exited {result.returncode}"
+            names = os.listdir(info_dir)
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".trashinfo"):
+                continue
+            info = info_dir / name
+            try:
+                text = info.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            original = deleted = ""
+            for line in text.splitlines():
+                if line.startswith("Path="):
+                    original = urllib.parse.unquote(line[5:].strip())
+                elif line.startswith("DeletionDate="):
+                    deleted = line[13:].strip()
+            if not original:
+                continue
+            if not os.path.isabs(original):
+                original = os.path.join(top, original)
+            if os.path.normpath(original) != want:
+                continue
+            item = trash / "files" / name[: -len(".trashinfo")]
+            if not os.path.lexists(item):
+                continue
+            if best is None or deleted > best[0]:
+                best = (deleted, item, info)
+    return None if best is None else (best[1], best[2])
 
-    ok, words = git("worktree", "remove", "--force", "--force", path)
-    if not ok and Path(path).is_dir():
-        return words
+
+def restore_worktree(state: dict) -> str:
+    """Undo trash_worktree: move the worktree's directory back out of the
+    trash to its recorded path. Returns "" when it is back and git knows it
+    as a worktree again, the trouble's words otherwise: nothing of it in
+    the trash; something else already at its path (a resume that recreated
+    it fresh, say — the trashed copy then stays put); git having pruned its
+    registration meanwhile (the directory is back, but is no worktree).
+    Moves a tree and runs git — call off the main loop.
+    """
+    path = str(state["worktreePath"])
+    root = worktree_project_root(path)
+    if root is None:
+        return "not a session worktree"
+    if os.path.lexists(path):
+        return f"{path} already exists"
+    entry = _trashed_entry(path)
+    if entry is None:
+        return "the worktree is not in the trash"
+    item, info = entry
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.rename(item, path)
+    except OSError as e:
+        return str(e)
+    try:
+        info.unlink()
+    except OSError:
+        pass
+    # The registration should be intact (see trash_worktree); repair covers
+    # admin files that drifted meanwhile, when it can.
+    _git_words(root, "worktree", "repair", path)
+    ok, words = _git_words(path, "rev-parse", "--is-inside-work-tree")
+    if ok:
+        return ""
+    return "" if _reregister_worktree(root, path, state) else words
+
+
+def _reregister_worktree(root: str, path: str, state: dict) -> bool:
+    """git forgot the worktree at *path* while it was in the trash (pruned,
+    or reaped along with a fresh copy a resume checked out meanwhile), so
+    the directory's .git file points at an admin directory that is gone.
+    Put that directory back — the three files `worktree add` writes — on
+    the recorded branch (or detached at the recorded base when the branch
+    went too), and have git rebuild the index it lost. True when git knows
+    the worktree again."""
+    try:
+        gitfile = Path(path, ".git").read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    if not gitfile.startswith("gitdir: "):
+        return False
+    admin = Path(gitfile[len("gitdir: ") :])
+    if not admin.is_absolute():
+        admin = Path(path, admin)
+    ok, common = _git_words(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not ok or not path_within(str(Path(common, "worktrees")), str(admin)):
+        return False
     branch = state.get("worktreeBranch")
-    if isinstance(branch, str) and branch:
-        git("branch", "-d", branch)  # best effort: an unmerged branch stays
-    return ""
+    has_branch = isinstance(branch, str) and bool(branch)
+    if has_branch and _git_words(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")[0]:
+        head = f"ref: refs/heads/{branch}\n"
+    elif isinstance(state.get("originalHeadCommit"), str) and state["originalHeadCommit"]:
+        head = f"{state['originalHeadCommit']}\n"
+    else:
+        return False
+    try:
+        admin.mkdir(parents=True, exist_ok=True)
+        (admin / "gitdir").write_text(f"{Path(path, '.git')}\n", encoding="utf-8")
+        (admin / "HEAD").write_text(head, encoding="utf-8")
+        (admin / "commondir").write_text(os.path.relpath(common, admin) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    # A mixed reset rebuilds the missing index from HEAD and touches nothing
+    # in the working tree, so uncommitted work stays exactly as trashed.
+    return _git_words(path, "reset", "-q")[0]
 
 
 # The CLI's session-name records: it appends one whenever it names or renames

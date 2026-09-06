@@ -108,8 +108,8 @@ _QUIT_BEHAVIORS = _RUNNING_BEHAVIORS + [("hide", N_("Hide Window"))]
 # stopped (see MainWindow._settle_archived_worktree).
 _WORKTREE_BEHAVIORS = [
     ("ask", N_("Ask")),
-    ("always", N_("Always Delete")),
-    ("never", N_("Never Delete")),
+    ("always", N_("Always Trash")),
+    ("never", N_("Never Trash")),
 ]
 
 # The git page's Layout row: the diff view's layouts in
@@ -489,8 +489,8 @@ class PreferencesDialog(Adw.Dialog):
             sessions_group,
             _("When archiving a session in a git worktree"),
             _(
-                "Whether to delete the session's worktree once it has stopped; "
-                "a branch with unmerged commits is kept"
+                "Whether to move the session's worktree to the trash once it "
+                "has stopped; Undo brings it back with the session"
             ),
             "archive_worktree",
             behaviors=_WORKTREE_BEHAVIORS,

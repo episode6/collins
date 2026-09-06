@@ -129,9 +129,10 @@ DEFAULT_SETTINGS = {
     "archive_running_session": "ask",  # archiving a session whose tab is busy
     "quit_with_running_sessions": "ask",  # closing a window while sessions run
     # What becomes of a session's git worktree when the session is archived:
-    # ask (a dialog before the archive — Keep, Delete, or Cancel the archive)
-    # | always (delete it, no dialog) | never (leave it). The deletion itself
-    # waits until the session has stopped, if a tab was open. Only a worktree
+    # ask (a dialog before the archive — Keep, Trash, or Cancel the archive)
+    # | always (move it to the trash, no dialog) | never (leave it). The move
+    # waits until the session has stopped, if a tab was open, and the
+    # archive's Undo brings the worktree back. Only a worktree
     # the session still occupies (sessions.removable_worktree), and never
     # while the session runs on as a background agent — see
     # MainWindow._ask_worktree_then_archive and _settle_archived_worktree.
