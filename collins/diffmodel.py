@@ -27,7 +27,7 @@ Nothing here imports GTK or runs git: gitops runs git and hands the text
 here; diffview draws what comes back (tests/test_diffmodel.py). Everything
 that arrives is foreign content — a diff of a repository the agent edits —
 and is bounded before a widget sees it: the stream is cut at
-MAX_PATCH_BYTES, never more than MAX_FILES files come back, a path over
+MAX_PATCH_CHARS, never more than MAX_FILES files come back, a path over
 MAX_PATH_CHARS drops its file, and a malformed hunk is dropped rather than
 guessed at. The view then puts every string through `set_text` /
 `Gtk.TextBuffer.set_text`, never Pango markup.
@@ -47,11 +47,13 @@ TOO_LARGE_LINES = 20_000
 TOO_LARGE_BYTES = 1_048_576
 # Bounds on the stream itself. `git show` of a squash that touched every
 # file in a large repository is still one load; past these the tail is
-# dropped, not guessed at.
+# dropped, not guessed at. The stream arrives decoded, so its cap counts
+# characters (a byte at least each); a stanza's own weight is measured on
+# its UTF-8 bytes (TOO_LARGE_BYTES).
 MAX_FILES = 2000
-MAX_PATCH_BYTES = 64 * 1024 * 1024
-# A path longer than this drops its file (hunkctl.MAX_PATH_CHARS's value,
-# spelled here so this module depends on nothing of hunk's).
+MAX_PATCH_CHARS = 64 * 1024 * 1024
+# A path longer than this drops its file (gitloads.MAX_PATH_CHARS's value,
+# spelled here so this module depends on nothing of the page's).
 MAX_PATH_CHARS = 512
 # The word-emphasis pass is quadratic in the worst case; a hunk this long,
 # or a line this wide, goes without (the row colours still say what moved).
@@ -219,15 +221,15 @@ def parse(text: object, untracked: bool = False) -> list[File]:
     body ends before its declared counts are satisfied, or that carries a
     line no unified diff has, is dropped together with the rest of that
     stanza's hunks (the text so far is kept, the raw stanza always is). A
-    stream over MAX_PATCH_BYTES loses its last, possibly cut, stanza and
+    stream over MAX_PATCH_CHARS loses its last, possibly cut, stanza and
     everything after; never more than MAX_FILES come back. *untracked*
     marks every file the way gitops does for a synthesized new-file diff.
     """
     if not isinstance(text, str) or not text:
         return []
     truncated = False
-    if len(text) > MAX_PATCH_BYTES:
-        text = text[:MAX_PATCH_BYTES]
+    if len(text) > MAX_PATCH_CHARS:
+        text = text[:MAX_PATCH_CHARS]
         truncated = True
     stanzas: list[list[str]] = []
     # The stream's final newline is not an empty line (a hunk cut short

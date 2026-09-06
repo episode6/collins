@@ -419,12 +419,12 @@ def test_parse_never_returns_more_than_max_files(monkeypatch):
     assert [f.path for f in parse(text)] == ["n0.txt", "n1.txt", "n2.txt"]
 
 
-def test_parse_cuts_the_stream_at_max_patch_bytes_and_drops_the_cut_stanza(monkeypatch):
+def test_parse_cuts_the_stream_at_max_patch_chars_and_drops_the_cut_stanza(monkeypatch):
     stanzas = [NEW_FILE.replace("notes.txt", f"n{i}.txt") for i in range(4)]
     text = "".join(stanzas)
-    monkeypatch.setattr(diffmodel, "MAX_PATCH_BYTES", len(stanzas[0]) * 2 + 10)
+    monkeypatch.setattr(diffmodel, "MAX_PATCH_CHARS", len(stanzas[0]) * 2 + 10)
     assert [f.path for f in parse(text)] == ["n0.txt", "n1.txt"]
-    monkeypatch.setattr(diffmodel, "MAX_PATCH_BYTES", len(text))
+    monkeypatch.setattr(diffmodel, "MAX_PATCH_CHARS", len(text))
     assert len(parse(text)) == 4
 
 
