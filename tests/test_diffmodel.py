@@ -674,6 +674,42 @@ def test_locate_answers_none_for_lines_outside_every_hunk_and_bad_addresses():
     assert locate([], "src/app.py", NEW, 3) is None
 
 
+def test_locate_reads_each_side_of_a_new_and_a_deleted_file():
+    """The tools' addresses on a one-sided file: a new file has lines on the
+    new side only, a deleted one on the old side only (its old name); the
+    other side names nothing, whatever the number."""
+    files = parse(NEW_FILE + DELETED_FILE)
+    notes, old = files
+    assert locate(files, "notes.txt", NEW, 1) == (notes, 0, 0)
+    assert locate(files, "notes.txt", NEW, 2) == (notes, 0, 1)
+    assert locate(files, "notes.txt", NEW, 3) is None
+    assert locate(files, "notes.txt", OLD, 1) is None
+    assert locate(files, "old.txt", OLD, 2) == (old, 0, 1)
+    assert locate(files, "old.txt", NEW, 1) is None
+
+
+def test_locate_lands_on_the_hunks_edges_and_skips_placeholders():
+    """The first and last line of a span both count (the tools' 1-based
+    numbers against hunk_range's inclusive ends); a mode-only change and a
+    pure rename carry no hunk to land in, so every line of theirs misses."""
+    files = parse(MODIFIED + MODE_ONLY + PURE_RENAME)
+    app = files[0]
+    assert locate(files, "src/app.py", NEW, 1) == (app, 0, 0)  # the first context line
+    assert locate(files, "src/app.py", NEW, 5) == (app, 0, 5)  # the last line of hunk 0
+    assert locate(files, "src/app.py", NEW, 6) is None
+    assert locate(files, "src/app.py", NEW, 21) == (app, 1, 0)
+    assert locate(files, "src/app.py", NEW, 23) == (app, 1, 3)
+    assert locate(files, "src/app.py", NEW, 24) is None
+    assert locate(files, "src/app.py", OLD, 3) == (app, 0, 4)  # "" — the blank context line
+    assert locate(files, "src/app.py", OLD, 4) == (app, 0, 5)  # the last line of hunk 0's old span
+    assert locate(files, "src/app.py", OLD, 22) == (app, 1, 3)
+    for file in files[1:]:
+        assert file.hunks == ()
+        assert locate(files, file.path, NEW, 1) is None
+        if file.previous_path is not None:
+            assert locate(files, file.previous_path, OLD, 1) is None
+
+
 def test_nearest_hunk_holds_the_line_or_is_the_closest_span():
     app = only(MODIFIED)  # hunks at new 1-5 and 21-23, old 1-4 and 20-22
     assert diffmodel.nearest_hunk(app, NEW, 3) == 0
