@@ -80,6 +80,10 @@ _CODE_CLASSES: dict[str, str | None] = {
 }
 # The mark on the loaded commits row.
 _LOADED_MARK = "▸"
+# The leading column every commits row shares: a header's caret or the
+# other rows' mark cell, one width so the branch names and the `↑` column
+# line up.
+_LEAD_WIDTH = 16
 _UNPUSHED_MARK = "↑"
 _BRANCH_GLYPH = "⎇"
 # How many commits the Fix up picker lists at most.
@@ -97,13 +101,17 @@ def _restore_scroll(adjustment: Gtk.Adjustment, value: float) -> bool:
 
 
 class _CommitRow(Gtk.ListBoxRow):
-    """One line of the commits list, drawn from a gitmodel.Row: a mark
-    column (`▸` while loaded), the `↑` for an unpushed commit, the
-    abbreviated sha in monospace, and the subject (or the branch name on a
-    header, with a caret that folds the group and `⎇` in front). The
-    caret is its own button — a press on it never activates the row, so
-    folding a branch does not load its diff — and *on_fold* hears the
-    group id."""
+    """One line of the commits list, drawn from a gitmodel.Row. Two
+    columns lead every row: the first holds the caret that folds a branch
+    header's group (or the `▸` mark on a loaded working-tree or commit
+    row), the second the `↑` of an unpushed commit (blank, on the working
+    tree row, so its label lines up with the commits' shas); then the
+    abbreviated sha in monospace and the subject — or, on a header, the
+    branch name with `⎇` in front, flush against the caret. The caret is
+    its own button — a press on it never activates the row, so folding a
+    branch does not load its diff — and *on_fold* hears the group id; a
+    loaded header is tinted and bold, the caret standing where its mark
+    would."""
 
     def __init__(self, row: Row, on_fold: Callable[[str], None] | None = None) -> None:
         super().__init__()
@@ -111,20 +119,26 @@ class _CommitRow(Gtk.ListBoxRow):
         self.set_activatable(row.kind != "header" or row.load is not None)
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         box.add_css_class("git-commit-row")
-        self._mark = Gtk.Label(width_chars=1, xalign=0.5)
-        self._mark.add_css_class("git-row-mark")
-        box.append(self._mark)
+        self._mark: Gtk.Label | None = None
         self._caret: Gtk.Button | None = None
         if row.kind == "header":
             caret = Gtk.Button(icon_name="pan-down-symbolic", focusable=False)
             caret.add_css_class("flat")
             caret.add_css_class("git-group-caret")
             caret.set_valign(Gtk.Align.CENTER)
+            caret.set_size_request(_LEAD_WIDTH, -1)
             caret.set_tooltip_text(_("Fold or unfold the branch"))
             if on_fold is not None:
                 caret.connect("clicked", lambda _b: on_fold(row.group))
             box.append(caret)
             self._caret = caret
+        else:
+            mark = Gtk.Label(width_chars=1, xalign=0.5)
+            mark.add_css_class("git-row-mark")
+            mark.set_size_request(_LEAD_WIDTH, -1)
+            box.append(mark)
+            self._mark = mark
+        if row.kind == "header":
             label = Gtk.Label(xalign=0, hexpand=True)
             label.set_text(f"{_BRANCH_GLYPH} {row.label}")
             label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -145,6 +159,9 @@ class _CommitRow(Gtk.ListBoxRow):
             subject.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(subject)
         else:
+            # The working tree row and `load more…` sit in the commits'
+            # column: a blank `↑` cell in front of the label.
+            box.append(Gtk.Label(width_chars=1))
             label = Gtk.Label(xalign=0, hexpand=True)
             label.set_text(row.label)
             label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -154,7 +171,8 @@ class _CommitRow(Gtk.ListBoxRow):
         self.set_child(box)
 
     def set_loaded(self, loaded: bool) -> None:
-        self._mark.set_text(_LOADED_MARK if loaded else "")
+        if self._mark is not None:
+            self._mark.set_text(_LOADED_MARK if loaded else "")
         if loaded:
             self.add_css_class("git-row-loaded")
         else:
