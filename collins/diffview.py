@@ -34,9 +34,16 @@ are bounded upstream by diffmodel and here by MAX_EXPAND_ALL.
 Public face — what the page and the e2e drive: `set_scheme`,
 `set_options`, `load` (rebuilds by stable key so an untouched hunk keeps
 its widget and, with it, the reader's place), `reveal`, `current`,
-`filter`, `focus_hunk` / `focus_file`, the probes `file_rows` /
-`hunk_rows`, and the signals `current-changed(path, hunk)`,
-`open-requested(path, line)`, `context-requested(path, gap, count)`.
+`filter`, `focus_hunk` / `focus_file` / `focus_annotated`,
+`expand_gap_before_focus`, the find bar's `search` / `search_step` /
+`search_position` / `search_clear` (plain-text, case-insensitive matches
+over the shown hunks' rows, counted here so "3 of 12" is exact and
+synchronous — a GtkSource.SearchContext per buffer only paints the
+highlights), `apply_keybindings` (the `git.*` chords, a capture-phase
+controller scoped to the view: bare letters must beat the text views and
+never reach the agent's terminal), the probes `file_rows` / `hunk_rows`,
+and the signals `current-changed(path, hunk)`, `open-requested(path,
+line)`, `context-requested(path, gap, count)`.
 Widget code: exercised by scripts/probe_diffview.py and the git page's e2e,
 not the unit suite.
 """
@@ -45,7 +52,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import threading
+import weakref
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -66,6 +75,7 @@ from . import (  # noqa: E402
     gitloads,
     imagediff,
     keyedslots,
+    keymap,
     prblobs,
     remoteimages,
 )
@@ -87,6 +97,9 @@ TAB_WIDTH = 4
 # of a hundred thousand unchanged lines is a file, not context.
 EXPAND_STEP = 20
 MAX_EXPAND_ALL = 10_000
+# The most matches the find bar walks: a search for a single letter over a
+# huge diff stops counting here and says so through the total.
+MAX_SEARCH_MATCHES = 5_000
 # How long after the last scroll movement the current file / pinned header
 # is recomputed, and after an allocation the split rows are re-aligned.
 _SCROLL_SETTLE_MS = 60
@@ -344,6 +357,7 @@ class _HunkView:
         wrap: bool,
     ) -> None:
         self.rows: list[_Row] = []
+        self.marks: dict[int, str] = {}  # row index → marker icon (set_marks)
         self._pads: dict[int, int] = {}
         self._pad_tags: dict[int, Gtk.TextTag] = {}
         buffer = GtkSource.Buffer()
@@ -497,6 +511,7 @@ class _HunkView:
             self.clear_pads()
 
     def set_marks(self, icons: dict[int, str]) -> None:
+        self.marks = dict(icons)
         self._marker.set_marks(icons)
 
     # -- the split alignment's pads --
@@ -811,6 +826,12 @@ class _HunkSection(Gtk.Box):
     @property
     def focused(self) -> bool:
         return self._focused
+
+    @property
+    def marked(self) -> bool:
+        """Whether a note or highlight marker sits on one of the hunk's
+        lines (what `}` / `{` walk)."""
+        return any(view.marks for view in self.views)
 
     def grab(self, line_index: int | None = None, side: str = diffmodel.NEW) -> bool:
         """Focus the view (the *side*'s in split) with the cursor on hunk
@@ -1320,6 +1341,24 @@ class DiffView(Gtk.Box):
         self._focused_hunk: _HunkSection | None = None
         self._refocus = False
         self._scroll_source = 0
+        # Whether the agent-note cards (a later PR's) show; the `a` key flips
+        # it. Nothing draws them yet — the flag is kept so the key and the
+        # cards land on one switch.
+        self.notes_shown = True
+        # The find bar's half: the query, one GtkSource.SearchContext per
+        # hunk buffer (the highlight of every occurrence; weakly keyed so a
+        # rebuilt hunk's context goes with its view), and the matches in
+        # document order — (hunk section, view, row, start, end), walked by
+        # search_step.
+        self._search_text = ""
+        self._search_settings = GtkSource.SearchSettings()
+        self._search_settings.set_case_sensitive(False)
+        self._search_settings.set_wrap_around(False)
+        self._search_contexts: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+        self._matches: list[tuple[_HunkSection, _HunkView, int, int, int]] = []
+        self._match_index = -1
+        # The page-scoped chords (keybindings.GROUP_GIT), see apply_keybindings.
+        self._shortcuts: Gtk.ShortcutController | None = None
 
         # The breakpoint is what resolves `auto`: split at SPLIT_MIN_WIDTH
         # and up, stack below. The bin wants a floor on both axes or it
@@ -1385,6 +1424,20 @@ class DiffView(Gtk.Box):
 
     # -- public face -------------------------------------------------------------
 
+    def apply_keybindings(self, custom) -> None:
+        """Bind the `git.*` chords of keybindings.BINDINGS (with *custom*,
+        the "keybindings" setting, applied) on the view: a controller
+        scoped to the view — it fires only while the keyboard is inside it
+        — in the capture phase, so a bare letter (`]`, `z`, `e`) beats the
+        GtkSource.View under it, which would otherwise swallow the press as
+        text it can't insert. The actions themselves live in the page's
+        `git` action group (an ancestor's groups are found from here)."""
+        if self._shortcuts is not None:
+            self.remove_controller(self._shortcuts)
+        self._shortcuts = keymap.shortcut_controller(custom, "git", Gtk.PropagationPhase.CAPTURE)
+        self._shortcuts.set_scope(Gtk.ShortcutScope.LOCAL)
+        self.add_controller(self._shortcuts)
+
     def set_scheme(self, scheme: GtkSource.StyleScheme | None, dark: bool) -> None:
         """Restyle every buffer with the editor's *scheme* (editor.style_scheme
         already resolved "" against *dark*); the palette follows."""
@@ -1445,6 +1498,7 @@ class DiffView(Gtk.Box):
             # The keyboard was parked off a dropped hunk: back into the view.
             self._refocus = False
             self.grab_focus()
+        self._rescan_search()
         self._schedule_scroll_sync()
 
     def reveal(
@@ -1496,6 +1550,7 @@ class DiffView(Gtk.Box):
             visible = section.matches(self._filter)
             section.set_visible(visible)
             shown += visible
+        self._rescan_search()
         self._schedule_scroll_sync()
         return shown
 
@@ -1529,6 +1584,49 @@ class DiffView(Gtk.Box):
         section.set_folded(False)
         return self._focus(section.hunks[0])
 
+    def focus_annotated(self, delta: int) -> bool:
+        """`}` / `{`: the keyboard moves to the next (previous) hunk wearing
+        a note or highlight marker after (before) the focused one — the
+        first (last) such hunk when nothing is focused. False with none."""
+        hunks = [h for s in self._sections() if s.get_visible() and not s.folded for h in s.hunks]
+        annotated = [h for h in hunks if h.marked]
+        if not annotated:
+            return False
+        index = self._focused_index(hunks)
+        if index is None:
+            return self._focus(annotated[0] if delta >= 0 else annotated[-1])
+        if delta >= 0:
+            after = [h for h in hunks[index + 1 :] if h.marked]
+            return bool(after) and self._focus(after[0])
+        before = [h for h in hunks[:index] if h.marked]
+        return bool(before) and self._focus(before[-1])
+
+    def expand_gap_before_focus(self) -> bool:
+        """`z`: draw every unchanged line above the focused hunk (the
+        current one when none has the keyboard) — hunk's gap toggle, one
+        way: the row folds itself away once nothing is left to show."""
+        hunk = self._focused_hunk
+        if hunk is None or hunk.get_parent() is None:
+            path, index = self._current
+            section = self._section_for(path, diffmodel.NEW)
+            hunk = next((h for h in (section.hunks if section else []) if h.hunk.index == index), None)
+        if hunk is None:
+            return False
+        section = self._section_for(hunk.file.path, diffmodel.NEW)
+        if section is None:
+            return False
+        key = f"{diffmodel.BEFORE}:{hunk.hunk.index}"
+        gap = next((g for g in section.gaps if g.key == key and g.remaining > 0), None)
+        if gap is None:
+            return False
+        self.on_gap_expand(gap, ALL, 0)
+        return True
+
+    def set_notes_shown(self, shown: bool) -> None:
+        """`a`: whether the agent-note cards show (kept for the cards a later
+        PR draws; nothing here changes yet)."""
+        self.notes_shown = bool(shown)
+
     def request_open(self) -> bool:
         """Emit `open-requested` for the file and line under the cursor."""
         focused = self._focused_hunk
@@ -1541,6 +1639,108 @@ class DiffView(Gtk.Box):
         where = focused.cursor_line()
         self.emit("open-requested", focused.file.path, where[1] if where else 0)
         return True
+
+    # -- find --
+
+    def search(self, text: str) -> tuple[int, int]:
+        """The find bar's query: every occurrence of *text* (case-insensitive,
+        plain text) in the shown hunks' lines is highlighted, the first is
+        selected and scrolled to. Returns (1-based current, total) —
+        (0, 0) for no query or no match; the total stops at
+        MAX_SEARCH_MATCHES."""
+        self._search_text = text or ""
+        self._search_settings.set_search_text(self._search_text or None)
+        self._rescan_search()
+        if self._matches:
+            self._match_index = 0
+            self._show_match()
+        return self.search_position()
+
+    def search_step(self, forward: bool) -> tuple[int, int]:
+        """Enter / Shift+Enter: select the next (previous) match, wrapping
+        around the whole diff, across hunks and files."""
+        if not self._matches:
+            return self.search_position()
+        self._match_index = (self._match_index + (1 if forward else -1)) % len(self._matches)
+        self._show_match()
+        return self.search_position()
+
+    def search_position(self) -> tuple[int, int]:
+        """(1-based current match, total) as the find bar reports them."""
+        if not self._matches:
+            return 0, 0
+        return self._match_index + 1, len(self._matches)
+
+    def search_clear(self) -> None:
+        """The find bar closed: no query, no highlights."""
+        self._search_text = ""
+        self._search_settings.set_search_text(None)
+        self._matches = []
+        self._match_index = -1
+
+    def focus_search_match(self) -> bool:
+        """Put the keyboard in the hunk holding the current match (the find
+        bar is closing; the reader carries on from there)."""
+        if not self._matches or not 0 <= self._match_index < len(self._matches):
+            return False
+        hunk, view, _row, _start, _end = self._matches[self._match_index]
+        if hunk.get_parent() is None:
+            return False
+        return view.view.grab_focus()
+
+    def _rescan_search(self) -> None:
+        """Recompute the matches over what is shown now (a reload, a filter,
+        a layout change); the position is kept when it still exists. The
+        stack layout reads each hunk's one view; split reads the old view
+        for deletions and context and the new for additions, so a context
+        line counts once."""
+        previous = self._matches[self._match_index] if 0 <= self._match_index < len(self._matches) else None
+        self._matches = []
+        self._match_index = -1
+        text = self._search_text
+        if not text:
+            return
+        pattern = re.compile(re.escape(text), re.IGNORECASE)
+        for section in self._sections():
+            if not section.get_visible() or section.folded:
+                continue
+            for hunk in section.hunks:
+                for position, view in enumerate(hunk.views):
+                    self._search_context_for(view)
+                    skip_context = position == 1
+                    for row_index, row in enumerate(view.rows):
+                        if row.kind == PAD or (skip_context and row.kind == diffmodel.CONTEXT):
+                            continue
+                        for match in pattern.finditer(row.text):
+                            self._matches.append((hunk, view, row_index, match.start(), match.end()))
+                            if len(self._matches) >= MAX_SEARCH_MATCHES:
+                                break
+                        if len(self._matches) >= MAX_SEARCH_MATCHES:
+                            break
+        if previous is not None and previous in self._matches:
+            self._match_index = self._matches.index(previous)
+        elif self._matches:
+            self._match_index = 0
+
+    def _search_context_for(self, view: _HunkView) -> None:
+        if view in self._search_contexts:
+            return
+        context = GtkSource.SearchContext.new(view.buffer, self._search_settings)
+        context.set_highlight(True)
+        self._search_contexts[view] = context
+
+    def _show_match(self) -> None:
+        hunk, view, row, start, end = self._matches[self._match_index]
+        if hunk.get_parent() is None:
+            return
+        ok_a, first = view.buffer.get_iter_at_line_offset(row, start)
+        ok_b, last = view.buffer.get_iter_at_line_offset(row, end)
+        if not (ok_a and ok_b):
+            return
+        view.buffer.select_range(first, last)
+        keyedslots.scroll_to(self._scroller, hunk)
+        view.view.scroll_to_iter(first, 0.1, False, 0, 0)
+        self._set_current(hunk.file.path, hunk.hunk.index)
 
     # -- probes (the e2e's) --
 
@@ -1714,6 +1914,7 @@ class DiffView(Gtk.Box):
         self.options = options
         for section in self._sections():
             section.apply_options(options)
+        self._rescan_search()  # a layout change rebuilt the views the matches point into
 
     # -- scroll → current file, pinned header --
 

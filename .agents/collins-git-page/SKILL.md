@@ -11,12 +11,16 @@ description: >-
   pid, session titles, the sidecar, show_diff), the slim collins-git hunk
   extension shipped as
   package data (TypeScript in collins/hunkext/collins-git: the five keys at
-  hunk's cursor, line ranges, the sidecar v2 contract), Preferences → Git,
+  hunk's cursor, line ranges, the sidecar v2 contract), the experimental
+  native diff view behind the temporary git_viewer switch (diffview.py over
+  diffmodel.py: the page's native load path, the sidebar following the view,
+  the files filter, the find bar, the page-local git.* chords, the file
+  monitors' watch), Preferences → Git,
   the parent-branch rule, freshness reloads, and gitinfo.py's cheap .git
   reads for the footer branch. Use when changing the git page, the sidebar,
-  the extension, the show_diff tool's page-driving half, git-branch
-  detection, or debugging "clicking a commit does nothing" / a stranded hunk
-  viewer.
+  the diff view, the extension, the show_diff tool's page-driving half,
+  git-branch detection, or debugging "clicking a commit does nothing" / a
+  stranded hunk viewer / a diff key reaching the terminal.
 ---
 
 # The git page
@@ -235,6 +239,136 @@ get`'s `files[]` (hunk 0.21.1's `fileSummarySchema`: id, path,
 previousPath?, additions, deletions, hunkCount — a binary change lists
 0/0/0, there is no binary flag; capped at `MAX_SESSION_FILES`) and
 `snapshot.state`, the argv, the probe, the sidecar and `terminate_tree`.
+
+## The native viewer behind `git_viewer` (experimental; PR 2 of the stack)
+
+`git_viewer` (`state.DEFAULT_SETTINGS`, `"hunk"` | `"native"`, Preferences
+→ Git → *Diff viewer*, `gitloads.Options.viewer` / `.native`) is a
+**temporary** switch: PR 4 of `~/specs/collins/native-diff-panel.md`
+deletes it with every hunk path. While it lives, `GitPage` has two faces
+and every hunk-only method is gated on `self._native`; the native half is
+what survives, the gates are what goes.
+
+**The page's native branch (`gitpage.py`).** The stack has a third child,
+`_NATIVE`, holding one `diffview.DiffView`. `_ensure_spawned` / `_spawn` /
+`_respawn` dispatch to `_native_open` (a thread reads the stack and a saved
+commit's subject, like `_probed`, then `_native_opened_cb` shows the view
+and loads), `_native_close` (orphan the read, drop the monitors, empty the
+view) and `_native_load(loaded)`: one `gitops.read_diff` on a daemon
+thread behind `_gen`, plus `commit_subject_and_sha` for a commit, the
+`merge_base` a branch / range reads its old side at, and
+`tree_state_signature` for a working-tree load — landing in
+`_native_loaded` at `PRIORITY_DEFAULT`, one read at a time with a newer
+ask parked in `_native_pending`. The breadcrumb and `set_context` come
+from the `Loaded` + that sha (no title parsing); the files list from the
+read (`_session_files` builds `hunkctl.SessionFile`s so `gitmodel.
+files_sections` is unchanged; `GitSidebar.refresh_files(..., status=)`
+takes the read's own `git status` and draws at once); the context reader
+handed to the view is `gitops.side_bytes(cwd, load, side, path,
+previous_path, parent_target, merge_base)` (None for a side that names
+nothing — a branch with no parent — *except* the unstaged new side, which
+is the disk). `settled()`, `load()`, `refresh()`, `poll_tick`
+(`_native_tick`), `_on_mutated`, `_navigate` (→ `DiffView.reveal`,
+synchronous; a miss toasts), `apply_settings`, `_after_unrealize`,
+`_on_child_exited` and `holds_escape` all have the native branch.
+`_set_native` flips live: to native, a running hunk is terminated and its
+exit opens the view (`_on_child_exited`), a spawn in flight is orphaned;
+to hunk, the view closes and hunk spawns if mapped. `GitPage.native`,
+`.diff_view` and `.reveal(path, hunk, side, line)` are the public face
+(`app._ShowDiff` reveals through it and replies without a session id).
+
+**The sidebar follows the view.** `DiffView`'s `current-changed(path,
+hunk)` — the file at the top of the viewport (60 ms after the scroll
+settles) or the hunk the keyboard moved into — → `GitSidebar.
+set_selection(path, hunk, "view")`. A files-list click → `reveal(path)`;
+the working tree's other side loads first with `_pending_navigate`, as
+with hunk. The **files filter** is a `Gtk.SearchEntry` above the files
+list (`set_filter_shown` — native only; hunk's own `/` filters in its
+terminal), `filter-changed(str)` → `DiffView.filter` hides sections
+(`set_visible`, not destroyed) and the rows hide too; Escape clears and
+`filter-escaped` puts the keyboard back in the view. A `GtkSearchEntry`'s
+`search-changed` is **debounced** (~150 ms): a probe that sets the text
+must `wait_for` the words to land.
+
+**Keys.** `keybindings.GROUP_GIT` (`git.*`): `]` `[` next/prev hunk, `.`
+`,` file, `}` `{` annotated hunk (a view with marks — `_HunkView.marks`,
+the notes/highlights hook), `z` expand the gap above the focused hunk
+(all of it; one way), `0` `1` `2` layout, `l` line numbers, `w` wrap, `a`
+notes shown (a flag until the cards land), `r` reload, `/` the filter,
+`Ctrl+F` find, `?` Keyboard Bindings, `e` open in the editor at the cursor
+line (`win.open-in-editor (sii)`, 1-based line), `q` close (`win.
+toggle-git`). The mechanism copies the editor's `editor.*` row:
+`keymap.shortcut_controller(custom, "git", …)` in `DiffView.
+apply_keybindings`, scoped `LOCAL` **on the view** (spec) and in the
+**CAPTURE** phase — a bare letter must beat the `GtkSource.View` under it
+(the editor uses BUBBLE because its chords are Ctrl chords); the
+`NamedAction`s resolve to a `Gio.SimpleActionGroup` inserted on the *page*
+under `git` (an ancestor's groups are found from the view). Nothing
+editable lives inside the view today; the note editor PR 3 adds must
+disable the letter actions while it has focus, or `e` types nothing.
+`keybindings.LOCAL_PREFIXES` / `may_overlap`: `editor.*` and `git.*` are
+page-local scopes that never see one press, so `Ctrl+F` in both is not a
+conflict (`conflicts` / `holders` skip such pairs; the dialog too). The
+stateful actions `git.layout` (`s`), `git.line-numbers` / `git.wrap` (`b`;
+a parameterless activate toggles a boolean-stateful `GSimpleAction`, so
+one action serves the key and the menu check) write their setting through
+**`win.git-option (sv)`** (window.py: an allowlist of the three keys →
+`state.set_setting` + `apply_preferences`, so every page follows); with no
+window action to reach — a page in a bare test window — `_write_option`
+applies the dict to the page alone. `_sync_action_states` mirrors
+`apply_settings` back into the menu's checks. `Ctrl+1/2/3` stay on the
+page's raw capture controller.
+
+**Find.** `Gtk.SearchBar` under the header (no `key_capture_widget`: typing
+in the page must not open it — the letters are the view's), a toggle in
+the header bound to `search-mode-enabled`. `DiffView.search(text)` /
+`search_step(forward)` / `search_position()` / `search_clear()`: matches
+are counted **in Python** over the hunk views' `rows` (`re.escape`,
+IGNORECASE; split reads the old view for deletions + context and the new
+for additions, so a context line counts once; capped at
+`MAX_SEARCH_MATCHES`), selected with `select_range` and scrolled to
+(`keyedslots.scroll_to` the hunk, `scroll_to_iter` within it), the
+sidebar following through `_set_current`. A `GtkSource.SearchContext` per
+buffer (weakly keyed by `_HunkView`) paints the highlights only — the
+editor found the sync `forward()` misses matches before the index is
+built, and async across dozens of buffers can't give "3 of 12". Matches
+are re-counted (position kept) on every `load`, `filter` and layout
+change; the page re-reads the label (`_sync_search_label`). Closing the
+bar focuses the current match's view (`focus_search_match`).
+
+**Watch mode.** After a working-tree load lands, `_install_monitors`
+puts a `Gio.FileMonitor` (`monitor_directory`) on each distinct directory
+of the loaded files (old paths of renames too) — over `MAX_DIR_MONITORS`
+(64), or with no file at all, the repository root alone; a commit / range
+load gets none. Events (not for the `.git` entry itself) debounce
+`_WATCH_DEBOUNCE_MS` (300) into `_watch_check`: `gitops.
+tree_state_signature` on a thread, compared against the state the load's
+own worker seeded (`_tree_state`); a move is a `_native_load` by key (the
+view keeps the scroll and an untouched hunk's widget and focus). One
+compare at a time (`_watch_stale` re-runs); none while a read is out.
+`_native_tick` re-compares every `_WATCH_SLOW_TICKS` (5) ticks regardless.
+The 2 s tick's `tree_signature` still covers index / HEAD / refs moves.
+
+**Measured (PR 2).** `read_diff` + `DiffView.load` of PR 500's squash (16
+files, 76 hunks, 3118 lines): `load()` 317 ms ≈ 102 ms per 1000 patch
+lines, first paint ~1.1 s; a reload keeps 76/76 hunk widgets, a changed
+hunk rebuilds only itself. Keyboard selection with `cursor_visible=False`
+selects nothing on GtkSourceView 5.18 — the cursor shows while a view has
+focus. Tab width is the constant `diffview.TAB_WIDTH = 4` (the editor has
+no tab-width setting). Facts the view codes around: `GutterRendererText`
+bolds the cursor line in every view regardless of focus (a
+`weight="normal"` span outranks it); a one-line hunk's validated height
+may not reach its `propagate_natural_height` scroller until the next
+resize (the vadjustment's `changed` queues one from an idle); under wrap
+the split alignment must re-fire on height changes too.
+
+**E2E.** `scripts/check_git_page.py`'s `check_native` pass: the switch
+before map, no hunk spawned, the watch reloading an edit, the files list
+and highlight following, a click revealing, the `git.*` actions routed
+(`next-hunk`, `open-editor`, `expand-gap`, `layout-stack`, `line-numbers`),
+the filter, the find bar's counts, the staged and commit loads, the
+settings, the switch flipping both ways with the shim hunk going down.
+`scripts/probe_diffview.py` draws a real repository's diff to a PNG.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 

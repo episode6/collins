@@ -36,6 +36,14 @@ thread reply lands with GLib.idle_add at default priority behind a
 generation counter, so a stale reply never overwrites a newer one; every
 subject, path and branch name goes through Gtk.Label.set_text, bounded by
 gitmodel first (foreign content).
+
+With the native diff view drawing (the git_viewer switch, PR 2 of the
+native-diff stack) the page feeds the same lists from its own read —
+refresh_files takes the `git status` it already has, set_selection follows
+the view's `current-changed` — and a files filter shows above the list
+(set_filter_shown): a Gtk.SearchEntry whose word hides the rows here and,
+through "filter-changed", the sections in the diff; Escape clears it and
+"filter-escaped" hands the keyboard back to the view.
 """
 
 from __future__ import annotations
@@ -226,6 +234,11 @@ class GitSidebar(Gtk.Box):
         "navigate-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
         "key-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # The files filter's text changed (the native viewer hides the
+        # sections that don't match); Escape in the filter cleared it and
+        # wants the keyboard back in the diff.
+        "filter-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "filter-escaped": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
     def __init__(self, cwd_provider: Callable[[], str | None], options: hunkctl.Options) -> None:
@@ -265,6 +278,9 @@ class GitSidebar(Gtk.Box):
         self._file_widgets: dict[tuple[str, str], _FileRow] = {}
         self._selected_path: str | None = None
         self._selected_hunk: int | None = None
+        # The filter entry's word (native viewer): a case-insensitive
+        # substring of the path; rows that don't match hide.
+        self._filter_text = ""
 
         # -- the action row --------------------------------------------------------
         self._anchor: hunkctl.Anchor | None = None
@@ -296,10 +312,23 @@ class GitSidebar(Gtk.Box):
         self._file_list.connect("row-activated", self._on_file_row_activated)
         self._file_scroller = Gtk.ScrolledWindow(child=self._file_list, vexpand=True)
         self._file_scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        # The files filter above the list (the native viewer's `/`; hidden
+        # while hunk draws, whose own `/` filters inside the terminal):
+        # every keystroke narrows the rows here and the sections in the
+        # diff, Escape clears and hands the keyboard back.
+        self._filter_entry = Gtk.SearchEntry()
+        self._filter_entry.set_placeholder_text(_("Filter files"))
+        self._filter_entry.add_css_class("git-files-filter")
+        self._filter_entry.set_visible(False)
+        self._filter_entry.connect("search-changed", self._on_filter_changed)
+        self._filter_entry.connect("stop-search", self._on_filter_stopped)
+        files_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        files_box.append(self._filter_entry)
+        files_box.append(self._file_scroller)
 
         self._paned = Gtk.Paned(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
         self._paned.set_start_child(self._commit_scroller)
-        self._paned.set_end_child(self._file_scroller)
+        self._paned.set_end_child(files_box)
         self._paned.set_resize_start_child(True)
         self._paned.set_resize_end_child(True)
         self._paned.set_shrink_start_child(False)
@@ -417,6 +446,27 @@ class GitSidebar(Gtk.Box):
     def stage_button_label(self) -> str:
         return self._stage_button.get_label() or ""
 
+    @property
+    def filter_text(self) -> str:
+        """The files filter's word, stripped ("" = every row shows)."""
+        return self._filter_text
+
+    def set_filter_shown(self, shown: bool) -> None:
+        """Show the files filter (the native viewer) or hide it (hunk, whose
+        own `/` filters inside the terminal); hiding clears it."""
+        self._filter_entry.set_visible(bool(shown))
+        if not shown and self._filter_entry.get_text():
+            self._filter_entry.set_text("")
+
+    def focus_filter(self) -> bool:
+        """Put the keyboard in the files filter (the `/` key)."""
+        return self._filter_entry.get_visible() and self._filter_entry.grab_focus()
+
+    def set_filter_text(self, text: str) -> None:
+        """Type into the filter (the e2e's way): the rows and the signal
+        follow as they would for a keystroke."""
+        self._filter_entry.set_text(text)
+
     def set_context(
         self,
         *,
@@ -525,12 +575,18 @@ class GitSidebar(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     def refresh_files(
-        self, session_files: Sequence[hunkctl.SessionFile], loaded: object, untracked: bool
+        self,
+        session_files: Sequence[hunkctl.SessionFile],
+        loaded: object,
+        untracked: bool,
+        status: gitmodel.Status | None = None,
     ) -> None:
         """Rebuild the files list from hunk's *files[]* for *loaded*: a
         working-tree load reads `git status` on a thread for the other
-        side first (the `?` rows dropped when *untracked* is off); any
-        other load is one flat list, drawn at once."""
+        side first (the `?` rows dropped when *untracked* is off) — unless
+        the caller already has the *status* (the native viewer's read
+        carries it), which is drawn at once; any other load is one flat
+        list, drawn at once."""
         self._session_files = tuple(session_files)
         self._files_loaded = loaded
         self._untracked = untracked
@@ -538,6 +594,10 @@ class GitSidebar(Gtk.Box):
         gen = self._files_gen
         if loaded not in ("unstaged", "staged"):
             self._sections = gitmodel.files_sections(None, self._session_files, loaded, untracked)
+            self._rebuild_files()
+            return
+        if status is not None:
+            self._sections = gitmodel.files_sections(status, self._session_files, loaded, untracked)
             self._rebuild_files()
             return
         cwd = self._cwd_provider()
@@ -821,8 +881,33 @@ class GitSidebar(Gtk.Box):
                 self._file_list.append(widget)
                 self._file_widgets[("", file.path)] = widget
         self._mark_selected_file()
+        self._apply_filter()
         if value > 0:
             GLib.idle_add(_restore_scroll, adjustment, value)
+
+    def _apply_filter(self) -> None:
+        needle = self._filter_text.casefold()
+        for widget in self._file_widgets.values():
+            file = widget.file
+            shown = not needle or needle in file.path.casefold() or (
+                file.previous_path is not None and needle in file.previous_path.casefold()
+            )
+            widget.set_visible(shown)
+
+    def _on_filter_changed(self, entry: Gtk.SearchEntry) -> None:
+        text = (entry.get_text() or "").strip()
+        if text == self._filter_text:
+            return
+        self._filter_text = text
+        self._apply_filter()
+        self.emit("filter-changed", text)
+
+    def _on_filter_stopped(self, entry: Gtk.SearchEntry) -> None:
+        """Escape in the filter: clear it (the rows and the diff come back)
+        and ask the page for the keyboard to return to the diff."""
+        if entry.get_text():
+            entry.set_text("")
+        self.emit("filter-escaped")
 
     def _mark_selected_file(self) -> None:
         live = self._sections.live if self._sections.mode == "split" else ""

@@ -113,6 +113,41 @@ where the unit tests can reach them. This module never imports terminal.py
 (which imports it) and declares no "shell-exited": the strip closes any page
 that emits it, and a hunk that exits should show a Reopen card, not take
 the page with it.
+
+**The native viewer (experimental, behind Preferences → Git → Diff viewer;
+gitloads.Options.viewer).** With `git_viewer = "native"` the stack shows a
+DiffView (diffview.py) in hunk's place and nothing is spawned: every load
+is `gitops.read_diff` on a daemon thread behind `_gen`, landing at
+PRIORITY_DEFAULT in `_native_loaded` — the breadcrumb and the sidebar's
+context come from the `Loaded` itself plus the sha and subject the same
+worker read (no title to parse), the files list from the read's files and
+the `git status` it carried (GitSidebar.refresh_files takes it), the view
+patched by stable key so the reader's place and focused hunk survive. The
+sidebar's highlight follows the view's `current-changed` (the file at the
+top of the viewport, debounced in the view, or the hunk the keyboard
+moved into), a files-list click reveals the section (`_navigate` →
+DiffView.reveal, synchronous; the other working-tree side loads first as
+with hunk), and the header gains a find bar (Ctrl+F: one query over every
+hunk, Enter / Shift+Enter across hunks) and a menu (layout, line numbers,
+wrap, reload, keyboard shortcuts). The chords of keybindings.GROUP_GIT
+(`]` `[` `.` `,` `}` `{` `z` `0` `1` `2` `l` `w` `a` `r` `/` `?` `e` `q`,
+Ctrl+F) are `git.*` actions in a group on the page, fired by a controller
+scoped to the view (DiffView.apply_keybindings) — bare letters never reach
+the agent's terminal. Freshness: the 2 s tick's tree_signature covers the
+index and HEAD as before; edits to the working tree are caught by
+Gio.FileMonitors on the loaded files' directories (at most
+MAX_DIR_MONITORS, else the repository root alone), debounced 300 ms into a
+`gitops.tree_state_signature` compare on a thread and a reload by key when
+it moved, plus a slow tick every _WATCH_SLOW_TICKS ticks that compares
+regardless (an untracked file in a directory nobody watches). Commit and
+range loads have no monitors. `e` opens the file in the session's editor
+at the cursor line through `win.open-in-editor`; the `0` `1` `2` `l` `w`
+keys and the menu write their setting through `win.git-option` so every
+page follows (a page in a bare window — the e2e — applies it to itself).
+Every hunk-only path is gated on `self._native`; the switch flips live in
+apply_settings (`_set_native`: hunk is terminated or spawned, the view
+opened or closed). The whole native half is what PR 4 of the stack keeps
+when hunk goes; the switch and the gates are what it deletes.
 """
 
 from __future__ import annotations
@@ -122,7 +157,7 @@ import logging
 import os
 import threading
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import gi
@@ -133,7 +168,21 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
-from . import gitinfo, gitops, hunkctl, keybindings, keymap, proctree, themes  # noqa: E402
+from . import (  # noqa: E402
+    diffmodel,
+    diffview,
+    gitinfo,
+    gitloads,
+    gitops,
+    hunkctl,
+    keybindings,
+    keymap,
+    prefslayout,
+    proctree,
+    themes,
+)
+from .diffview import DiffView  # noqa: E402
+from .editor import style_scheme  # noqa: E402
 from .gitmodel import BranchRef  # noqa: E402
 from .gitsidebar import GitSidebar  # noqa: E402
 from .i18n import _  # noqa: E402
@@ -189,7 +238,22 @@ _BRANCH_MAX_CHARS = 24
 
 # Stack page names.
 _HUNK = "hunk"
+_NATIVE = "native"
 _CARD = "card"
+
+# The native viewer's watch (see the module docstring): how many directory
+# monitors a working-tree load may hold before the repository root alone is
+# watched, how long after the last event the tree state is compared, and
+# every how many 2 s ticks it is compared regardless (10 s).
+MAX_DIR_MONITORS = 64
+_WATCH_DEBOUNCE_MS = 300
+_WATCH_SLOW_TICKS = 5
+
+# The action group the native viewer's keys and header menu act on,
+# inserted on the page under this prefix (keybindings' `git.*`).
+_ACTIONS = "git"
+# The settings the keys and the menu may write through win.git-option.
+_KEY_SETTINGS = ("git_layout", "git_line_numbers", "git_wrap_lines")
 
 # Which card the stack shows, when it shows one (see _show_card).
 _INSTALL = "install"
@@ -343,6 +407,31 @@ class GitPage(Adw.Bin):
         # word); without it the sidebar hides the buttons that feed its keys.
         self._extension_loaded = hunkctl.extension_dir() is not None
 
+        # -- the native viewer (see the module docstring) -----------------------
+        # Which viewer draws: Options.viewer's word, flipped live by
+        # apply_settings (_set_native). Opened = the DiffView is up over a
+        # repository (the not-a-repo card is the only other face); opening
+        # = the first read (the stack, a saved commit's subject) is out.
+        self._native = False
+        self._native_opened = False
+        self._native_opening = False
+        # A read_diff in flight, the load asked while it was, and the tree
+        # state (gitops.tree_state_signature) the watch compares against —
+        # seeded by every working-tree load's own worker.
+        self._native_loading = False
+        self._native_pending: hunkctl.Loaded | None = None
+        self._tree_state: str | None = None
+        self._monitors: list[Gio.FileMonitor] = []
+        self._watch_source = 0
+        self._watch_checking = False
+        self._watch_stale = False
+        self._watch_ticks = 0
+        # The last whole settings dict apply_settings saw: what a key that
+        # writes an option applies locally when no window action is there
+        # to persist it (a page in a bare test window).
+        self._settings: dict = {}
+        self._scheme_setting = ""
+
         # -- what Preferences → Git says (see apply_settings) ------------------
         # The shipped defaults until the host's first apply_settings — a
         # page built by the strip gets the dock's settings before it maps.
@@ -415,8 +504,59 @@ class GitPage(Adw.Bin):
         self._sidebar_toggle.connect("toggled", self._on_sidebar_toggled)
         self._sidebar_toggle_box = Gtk.Box()
         self._sidebar_toggle_box.append(self._sidebar_toggle)
+        # The native viewer's find toggle and menu (hidden while hunk draws).
+        self._find_toggle = Gtk.ToggleButton(icon_name="edit-find-symbolic")
+        self._find_toggle.add_css_class("flat")
+        self._find_toggle.set_tooltip_text(keybindings.with_hint(_("Find in the diff"), "git.find"))
+        self._find_toggle.set_visible(False)
+        self._menu_button = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=self._build_menu())
+        self._menu_button.add_css_class("flat")
+        self._menu_button.set_tooltip_text(_("Diff view options"))
+        self._menu_button.set_visible(False)
+        header.append(self._find_toggle)
         header.append(self._sidebar_toggle_box)
+        header.append(self._menu_button)
         header.append(refresh)
+        self._refresh_button = refresh
+
+        # -- the native viewer's find bar (Ctrl+F; hidden while hunk draws) ----
+        self._search_bar = Gtk.SearchBar()
+        self._search_bar.set_show_close_button(True)
+        search_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._search_entry = Gtk.SearchEntry(hexpand=True)
+        self._search_entry.set_placeholder_text(_("Find in the diff"))
+        self._search_entry.connect("search-changed", self._on_search_changed)
+        self._search_entry.connect("activate", lambda *_a: self._search_step(True))
+        self._search_entry.connect("next-match", lambda *_a: self._search_step(True))
+        self._search_entry.connect("previous-match", lambda *_a: self._search_step(False))
+        self._search_entry.connect("stop-search", lambda *_a: self._search_bar.set_search_mode(False))
+        search_box.append(self._search_entry)
+        previous = Gtk.Button(icon_name="go-up-symbolic")
+        previous.add_css_class("flat")
+        previous.set_tooltip_text(_("Previous match (Shift+Enter)"))
+        previous.connect("clicked", lambda *_a: self._search_step(False))
+        search_box.append(previous)
+        following = Gtk.Button(icon_name="go-down-symbolic")
+        following.add_css_class("flat")
+        following.set_tooltip_text(_("Next match (Enter)"))
+        following.connect("clicked", lambda *_a: self._search_step(True))
+        search_box.append(following)
+        self._search_label = Gtk.Label()
+        self._search_label.add_css_class("dim-label")
+        self._search_label.add_css_class("caption")
+        search_box.append(self._search_label)
+        self._search_bar.set_child(search_box)
+        self._search_bar.connect_entry(self._search_entry)
+        # No key-capture widget: typing anywhere in the page must not open
+        # the bar — bare letters are the view's keys.
+        self._search_bar.connect("notify::search-mode-enabled", self._on_search_mode_changed)
+        self._find_toggle.bind_property(
+            "active",
+            self._search_bar,
+            "search-mode-enabled",
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+        )
+        self._search_bar.set_visible(False)
 
         # -- hunk's terminal, and the cards that stand in for it ----------------
         self.terminal = Vte.Terminal()
@@ -439,6 +579,19 @@ class GitPage(Adw.Bin):
         self._stack.add_named(scrolled, _HUNK)
         self._stack.add_named(self._card_slot, _CARD)
 
+        # -- the native diff view, hunk's stand-in behind the switch ------------
+        self._diffview = DiffView()
+        self._diffview.connect("current-changed", self._on_current_changed)
+        self._diffview.connect("open-requested", self._on_open_requested)
+        self._diffview.apply_keybindings(keybindings.current())
+        self._stack.add_named(self._diffview, _NATIVE)
+        self._install_actions()
+        # The view follows the editor's scheme, and the app's light/dark
+        # when that says "follow" (the same pair editor.py listens to).
+        style_manager = Adw.StyleManager.get_default()
+        self._dark_id = style_manager.connect("notify::dark", lambda *_a: self._apply_scheme())
+        self._apply_scheme()
+
         # Shown when the viewer never registered with hunk's session daemon
         # (_resolved gave up): the page still draws, but every load the
         # extension sends — a commit clicked, `n`, a header — finds no
@@ -459,6 +612,8 @@ class GitPage(Adw.Bin):
         self.sidebar.connect("navigate-requested", self._on_navigate_requested)
         self.sidebar.connect("key-requested", self._on_key_requested)
         self.sidebar.connect("mutated", self._on_mutated)
+        self.sidebar.connect("filter-changed", lambda _s, text: self._on_filter_changed(text))
+        self.sidebar.connect("filter-escaped", lambda _s: self._diffview.grab_focus())
         self._paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._paned.set_start_child(self.sidebar)
         self._paned.set_resize_start_child(False)
@@ -481,6 +636,7 @@ class GitPage(Adw.Bin):
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         box.append(header)
+        box.append(self._search_bar)
         box.append(self._banner)
         box.append(self._bin)
         # Page-local toasts: commit results, git's refusals, a navigate hunk
@@ -518,6 +674,26 @@ class GitPage(Adw.Bin):
     def hunk_alive(self) -> bool:
         """Whether a hunk child is running in the VTE right now."""
         return self._child_pid is not None
+
+    @property
+    def native(self) -> bool:
+        """Whether the native diff view draws the page (Preferences → Git →
+        Diff viewer); hunk otherwise."""
+        return self._native
+
+    @property
+    def diff_view(self) -> DiffView:
+        """The native view (the e2e's probes and the show_diff tool's
+        reveal); shown only while `native`."""
+        return self._diffview
+
+    def reveal(
+        self, path: str, hunk: int | None = None, side: str | None = None, line: int | None = None
+    ) -> bool:
+        """Scroll the native view to *path* (its hunk *hunk*, or the hunk
+        holding *line* on *side*) and focus it — DiffView.reveal; False
+        when the native viewer isn't drawing or the file isn't loaded."""
+        return self._native and self._native_opened and self._diffview.reveal(path, hunk, side, line)
 
     @property
     def session_id(self) -> str | None:
@@ -568,7 +744,15 @@ class GitPage(Adw.Bin):
         queued behind one. What a caller driving the page from outside
         (the show_diff tool) waits for before trusting `loaded` and before
         sending the session its own commands — nor a `session navigate` of
-        the sidebar's own out or queued behind a load."""
+        the sidebar's own out or queued behind a load. With the native
+        viewer: the view is up and no read is out or queued."""
+        if self._native:
+            return (
+                self._native_opened
+                and not self._native_loading
+                and self._native_pending is None
+                and self._pending_navigate is None
+            )
         return (
             self.hunk_alive
             and self._session_id is not None
@@ -612,6 +796,10 @@ class GitPage(Adw.Bin):
         self._sync_header()
         self.emit("title-changed")
         self._sync_context()
+        if self._native:
+            if self._native_opened:
+                self._native_load(self._loaded)
+            return  # else the open on map reads _loaded
         if not self._spawned:
             if self._card == _EXITED and self.get_mapped():
                 self._spawn()  # Ctrl+1/2/3 on a dead viewer: reopen into that load
@@ -628,7 +816,13 @@ class GitPage(Adw.Bin):
         the same target — a mode's, a commit's or a range's — or a respawn
         without a session id, and the commits list re-read. No-op on a
         card, and while hunk shows a load Collins can't name (hunk's own
-        `r` key and `--watch` cover that one)."""
+        `r` key and `--watch` cover that one). The native viewer re-reads
+        its load."""
+        if self._native:
+            if self._native_opened:
+                self._refresh_branch_stack()
+                self._native_load(self._loaded)
+            return
         if not self.hunk_alive:
             return
         if self._resolving:
@@ -660,6 +854,8 @@ class GitPage(Adw.Bin):
             # The tree went away under a running hunk (a worktree removed):
             # take the child down — its exit shows the card — and say why
             # once it is gone. A card already saying so is left alone.
+            if self._native and (self._native_opened or self._native_opening):
+                self._native_close()
             if self.hunk_alive:
                 self._respawn_wanted = False
                 self._terminate_child()
@@ -680,10 +876,12 @@ class GitPage(Adw.Bin):
             self._branch_stack = ()  # another branch: another stack, read below
             self._sync_header()
             self._sync_context()  # another branch: other groups
-        self._read_sidecar()
+        if not self._native:
+            self._read_sidecar()
         target_before = self._parent_target
         self._resolve_parent()
-        self._write_sidecar()
+        if not self._native:
+            self._write_sidecar()
         parent_moved = self._parent_target != target_before
         if parent_moved:
             self._sync_header()
@@ -713,6 +911,9 @@ class GitPage(Adw.Bin):
             self._sync_context()
         if changed:
             self._files_stale = True
+        if self._native:
+            self._native_tick(moved, parent_moved and target_before is not None)
+            return
         if not self.hunk_alive or self._resolving:
             return
         if parent_moved and target_before is not None and self._loaded == "branch" and not self._foreign:
@@ -746,6 +947,9 @@ class GitPage(Adw.Bin):
     def grab_page_focus(self) -> None:
         if self._stack.get_visible_child_name() == _CARD and self._card_button is not None:
             self._card_button.grab_focus()
+        elif self._native:
+            if not self._diffview.grab_focus():
+                self._refresh_button.grab_focus()  # nothing loaded yet: somewhere in the page
         else:
             self.terminal.grab_focus()
 
@@ -759,8 +963,9 @@ class GitPage(Adw.Bin):
 
     def holds_escape(self) -> bool:
         """hunk reads Escape itself while it runs; the dock's restore-from-
-        maximized yields to it (see paneldock)."""
-        return self.hunk_alive
+        maximized yields to it (see paneldock). The native find bar holds
+        it too while open (Escape closes the bar)."""
+        return self.hunk_alive or (self._native and self._search_bar.get_search_mode())
 
     def apply_settings(self, settings: dict) -> None:
         """Font ("font"), terminal theme ("terminal_theme"), the KeyMatcher
@@ -779,13 +984,35 @@ class GitPage(Adw.Bin):
         the sidecar is rewritten now, not on the next tick, so the page
         size and the switch reach the extension while the page is hidden
         too. Nothing happens for a call that changed none of them — every
-        preference the dialog touches lands here."""
+        preference the dialog touches lands here.
+
+        The native viewer's share: the viewer switch itself (_set_native),
+        its layout / line numbers / wrap / word-diff (DiffView.set_options),
+        the editor's font and style scheme (decision 3 of the spec), the
+        `git.*` chords, and the untracked switch as a re-read of a
+        working-tree load."""
+        self._settings = dict(settings)
         font = settings.get("font") or ""
         self.terminal.set_font(Pango.FontDescription.from_string(font) if font else None)
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
         self._keys = keymap.KeyMatcher.from_settings(settings)
         old, self._options = self._options, hunkctl.Options.from_settings(settings)
         new = self._options
+        # -- the native viewer's half --
+        self._diffview.apply_keybindings(settings.get(keybindings.SETTING))
+        diffview.apply_font(settings.get("editor_font") or "")
+        self._scheme_setting = settings.get("editor_style_scheme") or ""
+        self._apply_scheme()
+        self._diffview.set_options(new.layout, new.line_numbers, new.wrap, new.word_diff)
+        self._sync_action_states()
+        self.sidebar.set_options(new)
+        if new.native != self._native:
+            self._set_native(new.native)
+        if self._native:
+            working = self._loaded in ("unstaged", "staged")
+            if new.untracked != old.untracked and self._native_opened and working:
+                self._native_load(self._loaded)
+            return
         spawned = self._spawned_options
         if (
             spawned is not None
@@ -810,7 +1037,6 @@ class GitPage(Adw.Bin):
             self._reload(self._loaded)
         if self._sidecar_written is not None:
             self._write_sidecar()
-        self.sidebar.set_options(new)
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
@@ -840,6 +1066,11 @@ class GitPage(Adw.Bin):
         self._gen += 1
         self._terminate_child()
         _LIVE_PAGES.discard(self)
+        self._drop_monitors()
+        dark_id = getattr(self, "_dark_id", 0)
+        if dark_id:
+            Adw.StyleManager.get_default().disconnect(dark_id)
+            self._dark_id = 0
         if self._sidecar_monitor is not None:
             self._sidecar_monitor.cancel()
             self._sidecar_monitor = None
@@ -864,6 +1095,13 @@ class GitPage(Adw.Bin):
 
     def _after_unrealize(self) -> bool:
         if self.get_realized() or self._closing:
+            return GLib.SOURCE_REMOVE
+        if self._native:
+            # The view's read (if one is out) is orphaned and the monitors
+            # dropped; the next map opens it again over the tree then.
+            if self._native_opened or self._native_opening:
+                log.debug("gitpage: page went unrealized; closing the native view")
+                self._native_close()
             return GLib.SOURCE_REMOVE
         if self.hunk_alive:
             log.debug("gitpage: page went unrealized; stopping hunk")
@@ -1034,15 +1272,12 @@ class GitPage(Adw.Bin):
             self.emit("title-changed")
         if not self._sync_context():
             self.sidebar.refresh_commits()
-        if (
-            parent_moved
-            and target_before is not None
-            and self.hunk_alive
-            and not self._resolving
-            and self._loaded == "branch"
-            and self._foreign is None
-        ):
-            self._reload("branch")
+        if parent_moved and target_before is not None and self._loaded == "branch" and self._foreign is None:
+            if self._native:
+                if self._native_opened:
+                    self._native_load("branch")
+            elif self.hunk_alive and not self._resolving:
+                self._reload("branch")
         return GLib.SOURCE_REMOVE
 
     # -- the sidecar -----------------------------------------------------------------
@@ -1144,6 +1379,14 @@ class GitPage(Adw.Bin):
         self._card = None
         self._sync_sidebar()
 
+    def _show_native(self) -> None:
+        self._stack.set_visible_child_name(_NATIVE)
+        self._card_slot.set_child(None)
+        self._card_button = None
+        self._card = None
+        self._banner.set_revealed(False)
+        self._sync_sidebar()
+
     def _show_install_card(self, probe: hunkctl.Probe) -> None:
         if probe.status == "missing":
             title = _("hunk isn't installed")
@@ -1188,7 +1431,13 @@ class GitPage(Adw.Bin):
     # -- spawning ---------------------------------------------------------------------
 
     def _ensure_spawned(self) -> None:
-        if not self._spawned and not self._closing:
+        if self._closing:
+            return
+        if self._native:
+            if not self._native_opened and not self._native_opening and not self.hunk_alive:
+                self._native_open()
+            return
+        if not self._spawned:
             self._spawn()
 
     def _spawn(self) -> None:
@@ -1197,8 +1446,12 @@ class GitPage(Adw.Bin):
         commit still exists (hunkctl.commit_subject: `hunk show` of a sha
         that was rebased away exits at once, and the page would sit on the
         exited card, Reopen after Reopen) — then the VTE spawn on the main
-        loop."""
+        loop. With the native viewer, open the view instead (_native_open:
+        the cards' Check again buttons land here too)."""
         if self._closing or self.hunk_alive:
+            return
+        if self._native:
+            self._native_open()
             return
         self._spawned = True
         self._resolving = True
@@ -1404,8 +1657,13 @@ class GitPage(Adw.Bin):
         """Start over in the current mode: signal the running child and let
         its exit spawn the next one; leave a note for a spawn still in flight
         (the probe, or VTE's fork) to act on when it lands; or spawn straight
-        away when there is nothing."""
+        away when there is nothing. The native viewer closes and opens
+        again over the (new) tree."""
         if self._closing:
+            return
+        if self._native and not self.hunk_alive:
+            self._native_close()
+            self._native_open()
             return
         if self.hunk_alive:
             self._respawn_wanted = True
@@ -1450,6 +1708,14 @@ class GitPage(Adw.Bin):
         self.terminal.reset(True, True)
         self._sync_context()  # the sidebar's cursor keys go insensitive
         if self._closing:
+            return
+        if self._native:
+            # The viewer switched to native while hunk ran, and this exit is
+            # the terminate _set_native sent: the view opens now — or on the
+            # next map, for a page nobody is looking at.
+            self._respawn_wanted = False
+            if self.get_mapped():
+                self._spawn()
             return
         if self._respawn_wanted:
             self._respawn_wanted = False
@@ -1673,8 +1939,15 @@ class GitPage(Adw.Bin):
 
     def _navigate(self, path: str) -> None:
         """`hunk session navigate --file <path>` on a thread (the show_diff
-        tool's shape, hunkctl.navigate_argv); a refusal is a toast."""
-        if self._closing or self._session_id is None or self._hunk_path is None:
+        tool's shape, hunkctl.navigate_argv); a refusal is a toast. The
+        native view reveals the section at once."""
+        if self._closing:
+            return
+        if self._native:
+            if self._native_opened and not self._diffview.reveal(path):
+                self._toast(_("{path} isn't in this diff").format(path=path))
+            return
+        if self._session_id is None or self._hunk_path is None:
             return
         argv = hunkctl.navigate_argv(self._hunk_path, self._session_id, path)
         self._navigating = True
@@ -1720,6 +1993,10 @@ class GitPage(Adw.Bin):
         self._refs_signature = gitinfo.refs_signature(cwd)
         self._files_stale = True
         self._refresh_branch_stack()
+        if self._native:
+            if self._native_opened:
+                self._native_load(self._loaded)
+            return
         if not self.hunk_alive or self._resolving or self._foreign is not None:
             return
         self._reload(self._loaded)  # a respawn without a session id
@@ -1728,6 +2005,496 @@ class GitPage(Adw.Bin):
         toast = Adw.Toast(title=text, timeout=4)
         toast.set_use_markup(False)
         self._toast_overlay.add_toast(toast)
+
+    # -- the native viewer ---------------------------------------------------------------
+
+    def _set_native(self, native: bool) -> None:
+        """The viewer switch flipped (apply_settings): to native, hunk is
+        taken down (its exit opens the view, _on_child_exited) or the view
+        opened at once; to hunk, the view closes and hunk spawns when the
+        page is on screen. The header's find and menu and the sidebar's
+        filter show for the native viewer only."""
+        self._native = native
+        self._find_toggle.set_visible(native)
+        self._menu_button.set_visible(native)
+        self._search_bar.set_visible(native)
+        if not native:
+            self._search_bar.set_search_mode(False)
+        self.sidebar.set_filter_shown(native)
+        if native:
+            self._banner.set_revealed(False)
+            if self.hunk_alive:
+                self._respawn_wanted = False
+                self._terminate_child()  # the exit lands in _on_child_exited → _spawn → _native_open
+                return
+            if self._spawned:
+                # A probe or VTE fork in flight for a viewer nobody wants:
+                # orphan it (see _on_spawned) and open the view instead.
+                self._gen += 1
+                self._spawn_failed()
+            if self.get_mapped():
+                self._native_open()
+            return
+        self._native_close()
+        if self._card == _NOT_A_REPO:
+            return  # the card's Check again spawns hunk once the tree is back
+        if self.get_mapped():
+            self._spawn()
+
+    def _native_open(self) -> None:
+        """Bring the view up over the tree: the stack git shows under HEAD
+        and, for a commit load, whether the commit still exists, on a
+        thread (as _spawn's probe does), then the first read."""
+        if self._closing or self._native_opened or self._native_opening:
+            return
+        cwd = self._cwd_provider()
+        root = gitinfo.repo_root(cwd)
+        if root is None or not cwd:
+            self._show_not_a_repo()
+            return
+        self._native_opening = True
+        self._gen += 1
+        gen = self._gen
+        self._repo_root = root
+        show_ref = gitloads.show_ref(self._loaded)
+        trunk = self._trunk_target(cwd)
+        self._branch_stack_gen += 1  # this read supersedes any in flight
+
+        def work() -> None:
+            subject = gitloads.commit_subject(cwd, show_ref) if show_ref else None
+            stack = tuple(gitops.stack_branches(cwd, trunk)) if trunk is not None else ()
+            GLib.idle_add(self._native_opened_cb, gen, subject, stack, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="git-page-open", daemon=True).start()
+
+    def _native_opened_cb(self, gen: int, subject: str | None, stack: tuple[BranchRef, ...]) -> bool:
+        if gen != self._gen or self._closing or not self._native:
+            return GLib.SOURCE_REMOVE  # _native_close reset the flags; a newer open may be out
+        self._native_opening = False
+        cwd = self._cwd_provider()
+        root = gitinfo.repo_root(cwd)
+        if root is None:
+            self._show_not_a_repo()
+            return GLib.SOURCE_REMOVE
+        self._native_opened = True
+        self._repo_root = root
+        self._branch = gitinfo.current_branch(cwd)
+        self._branch_stack = stack
+        parent = self._resolve_parent()
+        if self._loaded == "branch" and parent is None:
+            self._loaded = hunkctl.DEFAULT_MODE  # a saved "vs main" in a tree with no main
+        if gitloads.is_show(self._loaded) and subject is None:
+            log.debug("gitpage: commit %s doesn't resolve; opening %s", self._loaded, hunkctl.DEFAULT_MODE)
+            self._loaded = hunkctl.DEFAULT_MODE
+        self._subject = (subject or None) if gitloads.is_show(self._loaded) else None
+        self._resolved_sha = None
+        self._shown_target = None
+        self._foreign = None
+        self._signature = gitinfo.tree_signature(cwd, self._parent_name)
+        self._refs_signature = gitinfo.refs_signature(cwd)
+        self._sync_header()
+        self.emit("title-changed")
+        self._show_native()
+        if not self._sync_context():
+            self.sidebar.refresh_commits()
+        self._native_load(self._loaded)
+        return GLib.SOURCE_REMOVE
+
+    def _native_close(self) -> None:
+        """Take the view down (the viewer switched, the page unrealized,
+        the tree went away): every read in flight orphaned, the monitors
+        dropped, the view emptied."""
+        self._native_opened = False
+        self._native_opening = False
+        self._native_loading = False
+        self._native_pending = None
+        self._pending_navigate = None
+        self._tree_state = None
+        self._gen += 1
+        self._drop_monitors()
+        self._diffview.load((), None, None)
+        self._sync_search_label()
+
+    def _native_load(self, loaded: hunkctl.Loaded) -> None:
+        """Read *loaded* (gitops.read_diff — the numstat pre-pass, the patch
+        stream, `git status` and the untracked files for a working-tree
+        side) on a thread, with the commit's subject and sha, the merge
+        base a branch or range reads its old side at, and the tree state
+        the watch compares against; one read at a time, a newer ask
+        waiting in _native_pending."""
+        if self._closing or not self._native_opened:
+            return
+        if self._native_loading:
+            self._native_pending = loaded
+            return
+        if loaded == "branch" and self._resolve_parent() is None:
+            return
+        self._native_loading = True
+        gen = self._gen
+        cwd = self._cwd_provider()
+        parent_target = self._parent_target
+        untracked = self._options.untracked
+        show_ref = gitloads.show_ref(loaded)
+        halves = gitloads.range_halves(gitloads.range_of(loaded))
+        working = loaded in ("unstaged", "staged")
+
+        def work() -> None:
+            read = gitops.read_diff(cwd, loaded, parent_target, untracked)
+            subject, sha = gitloads.commit_subject_and_sha(cwd, show_ref) if show_ref else (None, None)
+            base: str | None = None
+            if loaded == "branch" and parent_target:
+                base = gitops.merge_base(cwd, parent_target, "HEAD")
+            elif halves is not None:
+                base = gitops.merge_base(cwd, halves[0], halves[1])
+            state = gitops.tree_state_signature(cwd) if working else None
+            GLib.idle_add(
+                self._native_loaded,
+                gen,
+                loaded,
+                read,
+                (subject, sha),
+                base,
+                state,
+                priority=GLib.PRIORITY_DEFAULT,
+            )
+
+        threading.Thread(target=work, name="git-page-read", daemon=True).start()
+
+    def _native_loaded(
+        self,
+        gen: int,
+        loaded: hunkctl.Loaded,
+        read: gitops.DiffRead,
+        named: tuple[str | None, str | None],
+        base: str | None,
+        state: str | None,
+    ) -> bool:
+        if gen != self._gen or self._closing or not self._native_opened:
+            return GLib.SOURCE_REMOVE
+        self._native_loading = False
+        pending, self._native_pending = self._native_pending, None
+        if pending is not None and pending != loaded:
+            self._native_load(pending)  # the header already says so (load); this read is old news
+            return GLib.SOURCE_REMOVE
+        if loaded != self._loaded:
+            return GLib.SOURCE_REMOVE  # load() moved on without a read of its own yet
+        subject, sha = named
+        self._subject = (subject or None) if gitloads.is_show(loaded) else None
+        self._resolved_sha = sha
+        self._sync_header()
+        self.emit("title-changed")
+        if not read.ok:
+            log.debug("gitpage: read_diff(%r) failed: %s", loaded, read.error)
+            self._toast(_("Couldn't read the diff: {error}").format(error=read.error or "git"))
+        cwd = self._cwd_provider()
+        parent_target = self._parent_target
+
+        def reader(file: diffmodel.File, side: str) -> bytes | None:
+            return gitops.side_bytes(cwd, loaded, side, file.path, file.previous_path, parent_target, base)
+
+        self._diffview.load(read.files, loaded, reader, repo=str(self._repo_root or ""))
+        self.sidebar.refresh_files(_session_files(read.files), loaded, self._options.untracked, read.status)
+        self._files_stale = False
+        working = loaded in ("unstaged", "staged")
+        self._tree_state = state
+        self._install_monitors(read.files if working else None)
+        self._sync_context()
+        self._sync_search_label()
+        self._run_pending_navigate()
+        return GLib.SOURCE_REMOVE
+
+    def _native_tick(self, moved: bool, parent_moved: bool) -> None:
+        """The 2 s tick's native half (after the branch, parent and
+        signatures were re-read): a moved base reloads a branch diff, a
+        moved index / HEAD re-reads the load, and every _WATCH_SLOW_TICKS
+        ticks a working-tree load's tree state is compared regardless of
+        the monitors (an untracked file in a directory none watches)."""
+        if not self._native_opened:
+            return
+        if parent_moved and self._loaded == "branch":
+            self._native_load("branch")
+            return
+        if moved:
+            self._native_load(self._loaded)
+            return
+        self._watch_ticks += 1
+        if self._watch_ticks >= _WATCH_SLOW_TICKS:
+            self._watch_ticks = 0
+            self._watch_check()
+
+    # -- the watch --
+
+    def _install_monitors(self, files: Sequence[diffmodel.File] | None) -> None:
+        """Watch the directories the loaded working-tree *files* sit in (the
+        old path of a rename too) — the repository root alone with more
+        than MAX_DIR_MONITORS of them, or with no file at all (an untracked
+        file may appear anywhere). None (a commit or range load) watches
+        nothing: the tick covers HEAD and the refs."""
+        self._drop_monitors()
+        root = self._repo_root
+        if files is None or root is None:
+            return
+        dirs: set[str] = set()
+        for file in files:
+            for path in (file.path, file.previous_path):
+                if path:
+                    dirs.add(os.path.dirname(os.path.join(str(root), path)))
+        if not dirs or len(dirs) > MAX_DIR_MONITORS:
+            dirs = {str(root)}
+        for directory in sorted(dirs):
+            try:
+                monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.NONE, None)
+            except GLib.Error as exc:
+                log.debug("gitpage: no monitor on %s: %s", directory, exc.message)
+                continue
+            monitor.connect("changed", self._on_tree_event)
+            self._monitors.append(monitor)
+
+    def _drop_monitors(self) -> None:
+        for monitor in self._monitors:
+            monitor.cancel()
+        self._monitors = []
+        if self._watch_source:
+            GLib.source_remove(self._watch_source)
+            self._watch_source = 0
+        self._watch_stale = False
+
+    def _on_tree_event(self, _monitor, file: Gio.File, _other, _event: Gio.FileMonitorEvent) -> None:
+        """A watched directory changed: not for `.git` itself (its own
+        churn is the tick's business), debounced into one compare."""
+        if self._closing or not self._native_opened:
+            return
+        if file is not None and file.get_basename() == ".git":
+            return
+        if self._watch_source:
+            GLib.source_remove(self._watch_source)
+        self._watch_source = GLib.timeout_add(_WATCH_DEBOUNCE_MS, self._watch_fire)
+
+    def _watch_fire(self) -> bool:
+        self._watch_source = 0
+        self._watch_check()
+        return GLib.SOURCE_REMOVE
+
+    def _watch_check(self) -> None:
+        """Compare the tree state on a thread and reload by key when it
+        moved. One compare at a time (an event meanwhile re-runs it); a
+        read already in flight brings its own state, so none is needed."""
+        if self._closing or not self._native_opened or self._loaded not in ("unstaged", "staged"):
+            return
+        if self._native_loading:
+            return
+        if self._watch_checking:
+            self._watch_stale = True
+            return
+        self._watch_checking = True
+        gen = self._gen
+        cwd = self._cwd_provider()
+
+        def work() -> None:
+            state = gitops.tree_state_signature(cwd)
+            GLib.idle_add(self._watch_checked, gen, state, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="git-page-watch", daemon=True).start()
+
+    def _watch_checked(self, gen: int, state: str | None) -> bool:
+        self._watch_checking = False
+        if gen != self._gen or self._closing or not self._native_opened:
+            return GLib.SOURCE_REMOVE
+        stale, self._watch_stale = self._watch_stale, False
+        if state != self._tree_state:
+            self._tree_state = state
+            log.debug("gitpage: the working tree moved under the watch; reloading")
+            self._native_load(self._loaded)
+        elif stale:
+            self._watch_check()
+        return GLib.SOURCE_REMOVE
+
+    # -- what the view says --
+
+    def _on_current_changed(self, _view: DiffView, path: str, hunk: int) -> None:
+        """The view's current file / hunk moved (a scroll, a key): the
+        files list's highlight follows."""
+        self.sidebar.set_selection(path or None, hunk if hunk >= 0 else None, "view")
+
+    def _on_open_requested(self, _view: DiffView, path: str, line: int) -> None:
+        """`e`: the file under the cursor in the session's editor, at the
+        cursor's line (1-based; 0 = no cursor), through the window's
+        open-in-editor action — the same door the terminal's file links
+        use. The path is the diff's, relative to the repository root."""
+        root = self._repo_root
+        if root is None or not gitops.safe_path(path):
+            return
+        full = os.path.join(str(root), path)
+        self.activate_action("win.open-in-editor", GLib.Variant("(sii)", (full, max(0, int(line)), 0)))
+
+    def _on_filter_changed(self, text: str) -> None:
+        self._diffview.filter(text)
+        self._sync_search_label()
+
+    def _apply_scheme(self) -> None:
+        dark = Adw.StyleManager.get_default().get_dark()
+        self._diffview.set_scheme(style_scheme(self._scheme_setting, dark), dark)
+
+    # -- the find bar --
+
+    def _toggle_find(self) -> None:
+        if self._search_bar.get_search_mode():
+            self._search_bar.set_search_mode(False)
+        else:
+            self._search_bar.set_search_mode(True)
+            self._search_entry.grab_focus()
+
+    def _on_search_mode_changed(self, bar: Gtk.SearchBar, _pspec) -> None:
+        if bar.get_search_mode():
+            return
+        # Closing: the highlights go, the keyboard lands on the hunk that
+        # held the current match (else wherever the view puts it).
+        if not self._diffview.focus_search_match():
+            self._diffview.grab_focus()
+        self._diffview.search_clear()
+        self._search_label.set_text("")
+
+    def _on_search_changed(self, entry: Gtk.SearchEntry) -> None:
+        self._show_search_position(self._diffview.search(entry.get_text()))
+
+    def _search_step(self, forward: bool) -> None:
+        self._show_search_position(self._diffview.search_step(forward))
+
+    def _sync_search_label(self) -> None:
+        """After a reload, a filter or a layout change re-counted the
+        matches: the label follows (the view keeps its place)."""
+        if self._search_bar.get_search_mode():
+            self._show_search_position(self._diffview.search_position())
+
+    def _show_search_position(self, position: tuple[int, int]) -> None:
+        current, total = position
+        if not self._search_entry.get_text():
+            self._search_label.set_text("")
+        elif total == 0:
+            self._search_label.set_text(_("No matches"))
+        else:
+            self._search_label.set_text(_("{n} of {m}").format(n=current, m=total))
+
+    # -- the keys and the menu --
+
+    def _build_menu(self) -> Gio.Menu:
+        menu = Gio.Menu()
+        layout = Gio.Menu()
+        for value, label in prefslayout.GIT_LAYOUTS:
+            item = Gio.MenuItem.new(_(label), None)
+            item.set_action_and_target_value(f"{_ACTIONS}.layout", GLib.Variant("s", value))
+            layout.append_item(item)
+        menu.append_section(_("Layout"), layout)
+        view = Gio.Menu()
+        view.append(_("Line numbers"), f"{_ACTIONS}.line-numbers")
+        view.append(_("Wrap long lines"), f"{_ACTIONS}.wrap")
+        menu.append_section(None, view)
+        more = Gio.Menu()
+        more.append(_("Reload the diff"), f"{_ACTIONS}.refresh")
+        more.append(_("Keyboard shortcuts"), f"{_ACTIONS}.help")
+        menu.append_section(None, more)
+        return menu
+
+    def _install_actions(self) -> None:
+        """The `git.*` actions the view's chords (keybindings.GROUP_GIT) and
+        the header menu fire. The three stateful ones mirror the settings
+        (layout, line numbers, wrap) and write them back through
+        win.git-option; the notes switch is the page's own."""
+        group = Gio.SimpleActionGroup()
+        plain: dict[str, Callable[[], object]] = {
+            "next-hunk": lambda: self._diffview.focus_hunk(1),
+            "prev-hunk": lambda: self._diffview.focus_hunk(-1),
+            "next-file": lambda: self._diffview.focus_file(1),
+            "prev-file": lambda: self._diffview.focus_file(-1),
+            "next-note": lambda: self._diffview.focus_annotated(1),
+            "prev-note": lambda: self._diffview.focus_annotated(-1),
+            "expand-gap": self._diffview.expand_gap_before_focus,
+            "layout-auto": lambda: self._write_option("git_layout", "auto"),
+            "layout-split": lambda: self._write_option("git_layout", "split"),
+            "layout-stack": lambda: self._write_option("git_layout", "stack"),
+            "refresh": self.refresh,
+            "filter": self._focus_filter,
+            "find": self._toggle_find,
+            "help": lambda: self.activate_action("win.keyboard-bindings", None),
+            "open-editor": self._diffview.request_open,
+            "close": lambda: self.activate_action("win.toggle-git", None),
+        }
+        for name, handler in plain.items():
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _a, _p, run=handler: run())
+            group.add_action(action)
+        self._layout_action = Gio.SimpleAction.new_stateful(
+            "layout", GLib.VariantType.new("s"), GLib.Variant("s", self._options.layout)
+        )
+        self._layout_action.connect(
+            "change-state", lambda _a, value: self._write_option("git_layout", value.get_string())
+        )
+        group.add_action(self._layout_action)
+        self._numbers_action = Gio.SimpleAction.new_stateful(
+            "line-numbers", None, GLib.Variant("b", self._options.line_numbers)
+        )
+        self._numbers_action.connect(
+            "change-state", lambda _a, value: self._write_option("git_line_numbers", value.get_boolean())
+        )
+        group.add_action(self._numbers_action)
+        self._wrap_action = Gio.SimpleAction.new_stateful("wrap", None, GLib.Variant("b", self._options.wrap))
+        self._wrap_action.connect(
+            "change-state", lambda _a, value: self._write_option("git_wrap_lines", value.get_boolean())
+        )
+        group.add_action(self._wrap_action)
+        notes = Gio.SimpleAction.new_stateful("toggle-notes", None, GLib.Variant("b", True))
+        notes.connect("change-state", self._on_notes_toggled)
+        group.add_action(notes)
+        self.insert_action_group(_ACTIONS, group)
+
+    def _on_notes_toggled(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self._diffview.set_notes_shown(value.get_boolean())
+
+    def _sync_action_states(self) -> None:
+        """The stateful actions follow the settings (apply_settings), so
+        the menu's checks and radios say what the view does."""
+        options = self._options
+        if self._layout_action.get_state().get_string() != options.layout:
+            self._layout_action.set_state(GLib.Variant("s", options.layout))
+        if self._numbers_action.get_state().get_boolean() != options.line_numbers:
+            self._numbers_action.set_state(GLib.Variant("b", options.line_numbers))
+        if self._wrap_action.get_state().get_boolean() != options.wrap:
+            self._wrap_action.set_state(GLib.Variant("b", options.wrap))
+
+    def _write_option(self, key: str, value: object) -> None:
+        """A key or menu item changed a setting: persist it through the
+        window (win.git-option → AppState + apply_preferences, so every
+        page follows); with no window action to reach — a page in a bare
+        test window — apply it to this page alone."""
+        if key not in _KEY_SETTINGS:
+            return
+        variant = GLib.Variant("s", value) if isinstance(value, str) else GLib.Variant("b", bool(value))
+        if self.activate_action("win.git-option", GLib.Variant("(sv)", (key, variant))):
+            return
+        self.apply_settings({**self._settings, "git_viewer": self._options.viewer, key: value})
+
+    def _focus_filter(self) -> None:
+        """`/`: the files filter, when the sidebar is on screen."""
+        if self.sidebar.get_visible():
+            self.sidebar.focus_filter()
+
+
+def _session_files(files: Sequence[diffmodel.File]) -> tuple[hunkctl.SessionFile, ...]:
+    """The files list's rows from a native read: the shape the sidebar
+    reads off hunk's session records (gitmodel.files_sections) — a binary
+    file lists 0/0/0, which is how the row reads `bin`."""
+    return tuple(
+        hunkctl.SessionFile(
+            str(index),
+            file.path,
+            file.previous_path if file.previous_path and file.previous_path != file.path else None,
+            file.additions,
+            file.deletions,
+            len(file.hunks),
+        )
+        for index, file in enumerate(files)
+    )
 
 
 def _title_subject_and_sha(cwd: str | None, title: str | None) -> tuple[str | None, str | None]:

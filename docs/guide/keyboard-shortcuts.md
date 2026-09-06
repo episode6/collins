@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -36,6 +36,7 @@ These are the defaults. Every one of them can be changed — see
 | `Ctrl+Shift+O` | Quick open — fuzzy-find a file in the project, opened in the editor |
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in the current file |
+| `Ctrl+F` (in the git page's native diff) | Find in the diff — one query over every hunk; `Enter` / `Shift+Enter` walk the matches across hunks and files |
 | `F9` | Toggle the sidebar |
 | `Ctrl+Shift+B` | Show/hide the notification history — the sheet the header bell opens; `Esc` closes it too |
 | `Ctrl+,` | Preferences |
@@ -101,5 +102,10 @@ Keyboard Bindings dialog:
 | `↑` / `↓`, `Enter` | Git page (commits and files lists) | Walk the rows, load the commit or branch (or move hunk to the file) — the native sidebar's lists are ordinary GTK lists |
 | `Enter`, `Shift+Enter` | Git page commit dialog | Commit; a newline in the body |
 | `x` / `X`, `v` / `Esc`, `D` | Git page (hunk) | Stage or unstage the hunk or file under hunk's cursor; anchor a line range at the cursor and clear it (`x` then stages the range); discard the hunk or range after hunk's confirmation — the sidebar's *Stage hunk*, *Anchor line* and *Discard* buttons press the same |
+| `]` / `[`, `.` / `,` | Git page (native diff, experimental) | Focus the next / previous hunk, the next / previous file — scrolled into view, the files list following |
+| `}` / `{` | Git page (native diff) | The next / previous hunk carrying a note or highlight |
+| `z` | Git page (native diff) | Draw every unchanged line above the focused hunk |
+| `0` / `1` / `2`, `l`, `w` | Git page (native diff) | Layout automatic / split / stacked, line numbers on or off, wrap long lines — each writes the Preferences → Git setting, so every page follows |
+| `r`, `/`, `?`, `e`, `q` | Git page (native diff) | Reload the diff; focus the files filter (`Esc` there clears it and comes back); open the Keyboard Bindings dialog; open the file under the cursor in the editor, at that line; close the page |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
 | `Esc` | Notification sheet, attachments overlay, Open with picker | Close |

@@ -1512,6 +1512,16 @@ class _ShowDiff:
                 )
             elif self._path is None:
                 self._finish(True, self._reply())
+            elif page.native:
+                # The native view reveals at once (no session to drive).
+                if page.reveal(self._path, line=self._line):
+                    self._finish(True, self._reply())
+                else:
+                    self._finish(
+                        False,
+                        f"The git page loaded {self._what()}, but {self._path} "
+                        "isn't in that diff",
+                    )
             else:
                 self._navigate()
             return GLib.SOURCE_REMOVE
@@ -1558,6 +1568,14 @@ class _ShowDiff:
 
     def _reply(self) -> str:
         page = self._page
+        if page.native:
+            # No hunk session to name (the native viewer, experimental until
+            # the cut-over PR gives the tool its own reply and companions).
+            lines = [f"Loaded {page.breadcrumb_text()} in the session's git page."]
+            if self._path:
+                where = f"{self._path}, line {self._line}" if self._line else self._path
+                lines.append(f"Revealed {where}.")
+            return "\n".join(lines)
         return hunkctl.show_diff_reply(
             page.breadcrumb_text(), page.session_id, self._path, self._line
         )

@@ -1473,6 +1473,204 @@ def check_sidebar(repo: str, state_path: str) -> None:
     window.destroy()
 
 
+def check_native(repo: str, state_path: str) -> None:
+    """The native viewer behind the git_viewer switch (PR 2 of the
+    native-diff stack): the view opens with no hunk spawned, the watch
+    reloads an edit, the files list follows the view and a click reveals,
+    the page-local keys are routed, the filter hides sections, the find
+    bar counts across hunks, loads switch (staged, a commit), settings and
+    the keys reach the view, and the switch flips live both ways."""
+    print("-- the native viewer")
+    lines = [f"line {n}\n" for n in range(1, 31)]
+    with open(os.path.join(repo, "native.txt"), "w") as fh:
+        fh.writelines(lines)
+    git(repo, "add", "native.txt")
+    git(repo, "commit", "-qm", "native fixture")
+    settings = {**SETTINGS, "git_viewer": "native", "git_layout": "stack"}
+    page = GitPage(
+        cwd_provider=lambda: repo,
+        parent_provider=lambda _cwd: "main",
+        on_closed=lambda p: None,
+    )
+    page.apply_settings(settings)
+    check("the page reads the switch before it maps", page.native and not page.hunk_alive)
+    opened: list[tuple[str, int]] = []
+    page.diff_view.connect("open-requested", lambda _v, path, line: opened.append((path, line)))
+    window = Gtk.Window(title="native", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    check("the view opens and the first read lands", wait_for(page.settled))
+    check(
+        "the stack shows the native view; no hunk was spawned",
+        page._stack.get_visible_child_name() == "native" and page._child_pid is None and page.card is None,
+        (page._stack.get_visible_child_name(), page._child_pid, page.card),
+    )
+    check(
+        "the header's find and menu show, and the sidebar's filter",
+        page._find_toggle.get_visible()
+        and page._menu_button.get_visible()
+        and page.sidebar._filter_entry.get_visible(),
+    )
+    check("the breadcrumb reads the working tree", page.breadcrumb_text() == "working tree · unstaged")
+    check("nothing to reveal for a file that isn't loaded", not page.reveal("nowhere.txt"))
+
+    # -- the watch: an edit reloads within the debounce + one read ---------------------
+    lines[4] = "line 5 changed\n"
+    lines[24] = "line 25 changed\n"
+    with open(os.path.join(repo, "native.txt"), "w") as fh:
+        fh.writelines(lines)
+    landed = wait_for(
+        lambda: any(p == "native.txt" for p, _k, _s in page.diff_view.file_rows()) and page.settled()
+    )
+    check("an edit to the working tree reloads the view through the watch", landed, page.diff_view.file_rows())
+    hunks = page.diff_view.hunk_rows("native.txt")
+    check("the file draws its two hunks", len(hunks) == 2, hunks)
+    check(
+        "the files list lists it on the unstaged side, at once (the read's own status)",
+        wait_for(lambda: any(r.path == "native.txt" for r in page.sidebar.file_rows().unstaged)),
+        page.sidebar.file_rows(),
+    )
+    first = page.diff_view.file_rows()[0][0]
+    check(
+        "the sidebar highlights the file at the top of the view",
+        wait_for(lambda: page.sidebar.selected_path == first),
+        (page.sidebar.selected_path, first),
+    )
+
+    # -- a files-list click reveals and focuses ------------------------------------------
+    page.sidebar.click_file_row("native.txt", "unstaged")
+    check(
+        "a files-list click focuses the file's first hunk",
+        wait_for(lambda: page.diff_view.current()[:2] == ("native.txt", 0)),
+        page.diff_view.current(),
+    )
+    focus = window.get_focus()
+    check("the keyboard is in the view", focus is not None and focus.is_ancestor(page.diff_view), focus)
+    check("the highlight followed the click", page.sidebar.selected_path == "native.txt", page.sidebar.selected_path)
+
+    # -- the page-local keys, through their actions ----------------------------------------
+    check("git.next-hunk is routed to the view", page.diff_view.activate_action("git.next-hunk", None))
+    check(
+        "and moved the current hunk",
+        wait_for(lambda: page.diff_view.current()[:2] == ("native.txt", 1)),
+        page.diff_view.current(),
+    )
+    page.diff_view.activate_action("git.open-editor", None)
+    check(
+        "`e` asks for the file at the cursor's line",
+        bool(opened) and opened[-1][0] == "native.txt" and opened[-1][1] >= 1,
+        opened,
+    )
+    check("git.expand-gap draws the gap above the focused hunk", page.diff_view.activate_action("git.expand-gap", None))
+    check(
+        "the gap between the hunks is spent",
+        wait_for(lambda: any(a == "before:1" and remaining == 0 for a, remaining, _s in page.diff_view.gap_rows("native.txt"))),
+        page.diff_view.gap_rows("native.txt"),
+    )
+
+    # -- the files filter ------------------------------------------------------------------
+    # (A GtkSearchEntry's search-changed is debounced: the words land a
+    # beat after the text does, so every read below waits for them.)
+    page.sidebar.set_filter_text("zzz")
+    check(
+        "the filter hides the sections and rows that don't match",
+        wait_for(
+            lambda: all(not shown for _p, _k, shown in page.diff_view.file_rows())
+            and all(not w.get_visible() for w in page.sidebar._file_widgets.values())
+        ),
+        page.diff_view.file_rows(),
+    )
+    page.sidebar.set_filter_text("native")
+    check(
+        "and shows what does",
+        wait_for(lambda: [p for p, _k, shown in page.diff_view.file_rows() if shown] == ["native.txt"]),
+        page.diff_view.file_rows(),
+    )
+    page.sidebar.set_filter_text("")
+    check("clearing shows every section", wait_for(lambda: all(shown for _p, _k, shown in page.diff_view.file_rows())))
+
+    # -- the find bar -------------------------------------------------------------------------
+    page._search_bar.set_search_mode(True)
+    page._search_entry.set_text("changed")
+    check(
+        "the find bar counts the matches across both hunks",
+        wait_for(lambda: page._search_label.get_text() == "1 of 2"),
+        page._search_label.get_text(),
+    )
+    check("the first match put the current hunk on the first", page.diff_view.current()[:2] == ("native.txt", 0), page.diff_view.current())
+    page._search_entry.emit("next-match")
+    check("Enter steps to the next hunk's match", page._search_label.get_text() == "2 of 2", page._search_label.get_text())
+    check("the current hunk followed the match", page.diff_view.current()[:2] == ("native.txt", 1), page.diff_view.current())
+    page._search_entry.emit("previous-match")
+    check("Shift+Enter steps back", page._search_label.get_text() == "1 of 2", page._search_label.get_text())
+    page._search_entry.set_text("nowhere")
+    check("no match says so", wait_for(lambda: page._search_label.get_text() == "No matches"), page._search_label.get_text())
+    page._search_bar.set_search_mode(False)
+    check("closing the bar clears the label", page._search_label.get_text() == "")
+    check("Escape is not held with the bar closed", not page.holds_escape())
+
+    # -- other loads: the index, a commit -------------------------------------------------------
+    git(repo, "add", "native.txt")
+    page.load("staged")
+    check("Ctrl+2 loads the index", wait_for(lambda: page.settled() and page.loaded == "staged"))
+    check("the breadcrumb says staged", page.breadcrumb_text() == "working tree · staged", page.breadcrumb_text())
+    check(
+        "the files list shows the staged side live",
+        wait_for(lambda: any(r.path == "native.txt" for r in page.sidebar.file_rows().staged)),
+        page.sidebar.file_rows(),
+    )
+    check("the view shows the staged file", [p for p, _k, _s in page.diff_view.file_rows()] == ["native.txt"], page.diff_view.file_rows())
+    git(repo, "reset", "-q", "native.txt")
+    sha = head_sha(repo)
+    page.load({"show": sha})
+    check("a commit load lands", wait_for(lambda: page.settled() and page.shows({"show": sha})))
+    check(
+        "the breadcrumb names the commit off the read's own git log",
+        page.breadcrumb_text() == f"{sha[:7]} native fixture" and page._resolved_sha == sha,
+        (page.breadcrumb_text(), page._resolved_sha),
+    )
+    check("the commit's file is drawn", [p for p, _k, _s in page.diff_view.file_rows()] == ["native.txt"], page.diff_view.file_rows())
+    check("no monitors on a commit load", page._monitors == [])
+    page.load("unstaged")
+    check("back to the working tree", wait_for(lambda: page.settled() and page.loaded == "unstaged"))
+    check("monitors are back", page._monitors != [])
+    check("page_state carries the load", page.page_state() == {"kind": "git", "loaded": "unstaged"}, page.page_state())
+
+    # -- settings and the keys that write them ---------------------------------------------------
+    page.apply_settings({**settings, "git_wrap_lines": True, "git_layout": "split", "git_line_numbers": False})
+    check(
+        "wrap, layout and line numbers reach the view",
+        page.diff_view.options.wrap and page.diff_view.is_split() and not page.diff_view.options.line_numbers,
+        page.diff_view.options,
+    )
+    check("the menu's states follow", page._wrap_action.get_state().get_boolean() and page._layout_action.get_state().get_string() == "split")
+    page.diff_view.activate_action("git.layout-stack", None)
+    check("the `2` key stacks the layout (applied to the page with no window action)", not page.diff_view.is_split())
+    page.diff_view.activate_action("git.line-numbers", None)
+    check("`l` toggles the line numbers back on", page.diff_view.options.line_numbers, page.diff_view.options)
+    page.apply_settings(settings)
+
+    # -- the switch flips live, both ways ----------------------------------------------------------
+    page.apply_settings({**settings, "git_viewer": "hunk"})
+    check("flipping to hunk spawns the viewer", wait_for(lambda: page._session_id is not None))
+    check(
+        "the stack shows hunk and the native chrome hides",
+        page._stack.get_visible_child_name() == "hunk"
+        and not page._find_toggle.get_visible()
+        and not page.sidebar._filter_entry.get_visible()
+        and not page.native,
+    )
+    pid = read_state(state_path).get("pid")
+    page.apply_settings(settings)
+    check("flipping back takes hunk down and opens the view", wait_for(lambda: page.native and page.settled() and page._child_pid is None))
+    check("the old viewer went down", wait_for(lambda: not pid_alive(pid)), pid)
+    check("the view shows the working tree again", page._stack.get_visible_child_name() == "native" and page.loaded == "unstaged")
+    page.page_closed()
+    window.destroy()
+    check("closing dropped the monitors", page._monitors == [])
+    git(repo, "checkout", "-q", "--", "native.txt")
+
+
 def check_without_hunk(repo: str) -> None:
     print("-- with no hunk on PATH")
     page = GitPage(
@@ -1542,6 +1740,7 @@ def main() -> int:
             check_restore(repo, state_path, shim)
             check_settings(repo, state_path)
             check_sidebar(repo, state_path)
+            check_native(repo, state_path)
             check_teardown_paths(repo, state_path, shim)
         finally:
             os.environ["PATH"] = real_path

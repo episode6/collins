@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 
 # Features
@@ -471,12 +471,15 @@ page needs hunk 0.21 or newer:
   branch; either way the local branch when there is one, else the
   remote's. There is nothing to set: create or delete a branch and the
   page follows on its next tick.
-- **Preferences → Git** sets how hunk is started — its **Layout**
+- **Preferences → Git** sets which **Diff viewer** draws (hunk, or the
+  experimental native view below), how hunk is started — its **Layout**
   (automatic, split or stacked) and **Theme** (any name hunk knows; empty
-  is hunk's own default) — whether working-tree reviews **show untracked
-  files**, and the commits panel's **Commits per page**. All of them reach
-  a page already open: a layout or theme change restarts hunk in place,
-  the other two don't.
+  is hunk's own default) — the native view's **Line numbers**, **Wrap long
+  lines** and **Highlight changed words**, whether working-tree reviews
+  **show untracked files**, and the commits panel's **Commits per page**.
+  All of them reach a page already open: a layout or theme change
+  restarts hunk in place, the viewer switch swaps the viewer live, the
+  rest change nothing but the view.
 - `Ctrl+1` / `Ctrl+2` / `Ctrl+3` still load the **unstaged** changes, the
   **staged** changes and the whole **branch against its parent**
   (`main...HEAD`) from anywhere in the page — the three most common rows,
@@ -520,6 +523,48 @@ page needs hunk 0.21 or newer:
   what it showed — one of the three working-tree loads, a commit or a
   range — and whether the sidebar was folded, restored on the next launch,
   hunk starting the moment the page is first shown.
+- **Experimental: the native diff viewer.** Preferences → Git → **Diff
+  viewer** → *Native* replaces hunk's terminal with a diff drawn by
+  Collins itself; hunk stays the default while it is tried on real diffs,
+  and once staging lands in it hunk is retired. What it does today,
+  read-only:
+  - Every file of the load is a card — its path (`old → new` for a
+    rename), `+` / `−` counts, and what kind of change it is (new,
+    deleted, untracked, binary, too large, renamed, a mode change) — and
+    every hunk under it its own syntax-highlighted view, in the **editor's
+    style scheme and font**, with old and new line numbers and a `+` / `−`
+    sign column. **Split** puts old and new side by side, row-aligned even
+    under wrap; **stacked** is one column; *automatic* splits when the
+    page is wide enough. Changed words within a changed line are
+    emphasised. Images show before and after, side by side.
+  - Unchanged stretches between hunks fold into *⋯ n unchanged lines*
+    rows with *▲ 20* / *▼ 20* / *all* buttons (`z` draws everything above
+    the focused hunk); the header of the file you are scrolled into stays
+    pinned at the top.
+  - The **files list** follows the view — the file at the top of the
+    viewport, or the hunk the keyboard moved into — and a click in it
+    scrolls to the file and focuses its first hunk. A **filter** box above
+    the list (`/`) narrows both the list and the diff to the paths that
+    contain what you type; `Esc` clears it.
+  - **Find** (`Ctrl+F`, or the header's magnifier): one query over every
+    hunk, every occurrence highlighted, *n of m* counted, `Enter` /
+    `Shift+Enter` stepping across hunks and files.
+  - **Keys**, page-local (they never reach the agent's terminal): `]` /
+    `[` and `.` / `,` move between hunks and files, `}` / `{` between
+    annotated hunks, `0` / `1` / `2` pick the layout, `l` and `w` flip
+    line numbers and wrap (writing the setting, so every page follows),
+    `r` reloads, `e` opens the file in the editor at the cursor's line,
+    `?` opens Keyboard Bindings, `q` closes the page. The header's menu
+    has the same layout, line-number and wrap switches.
+  - It **keeps itself fresh** without hunk's `--watch`: the loaded files'
+    directories are watched, an edit re-reads the diff a third of a second
+    later — an untouched hunk keeps its widget and the keyboard, the
+    scroll stays put — and the two-second tick still catches the index,
+    `HEAD` and the refs.
+  - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`, the commits list, the breadcrumb, the
+    tab title, `show_diff` and the layout persistence all work as with
+    hunk. Not yet: staging, discarding, reverting, notes and highlights,
+    line selection — the next release's.
 
 ## Knowing what's happening
 
