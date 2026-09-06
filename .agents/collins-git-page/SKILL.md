@@ -74,25 +74,38 @@ daemon serve` is in its own group and rightly survives.
 **Freshness.** hunk's `--watch` covers file edits; commits and staging done
 from a shell or by the agent are caught by the tab footer's 2 s tick
 forwarding `poll_tick` while the page is mapped: `gitinfo.tree_signature`
-(index mtime, HEAD sha, parent ref) changed → reload what is shown, and a
-`remote_refs_signature` move refreshes the `↑` marks. A move the extension
-made itself (`x`, `X`, `D`, reloaded through hunk's own `hunk.app.refresh`)
-is recorded in the sidecar (`refreshed`: index mtime + HEAD) and skipped, or
-the reload would land on the dialog the user opened next (hunk cancels
-dialogs on any reload). A native mutation from the sidebar (`mutated`)
-re-seeds the signatures and reloads at once.
+(index mtime, HEAD sha, parent ref) changed → reload what is shown, and
+either that or a `refs_signature` move (`refs/heads` and `refs/remotes`
+directory mtimes, `packed-refs`: a branch made, deleted or committed to in
+another worktree, a push) → `_refresh_branch_stack` (below), which re-reads the
+commits list when it lands. A move the extension made itself (`x`, `X`,
+`D`, reloaded through hunk's own `hunk.app.refresh`) is recorded in the
+sidecar (`refreshed`: index mtime + HEAD) and skipped, or the reload would
+land on the dialog the user opened next (hunk cancels dialogs on any
+reload). A native mutation from the sidebar (`mutated`) re-seeds the
+signatures, re-reads the stack and reloads at once.
 
-**Parent branch.** `TerminalTab._git_parent_branch`: an attached open PR's
-base, else the `git_parent_branch` setting (`origin/x` read as `x`), else the
+**Parent branch and the stack.** Git is the source of truth: `gitops.
+stack_branches(cwd, trunk)` — `for-each-ref refs/heads` tips intersected
+with `rev-list --topo-order <trunk>..HEAD` (capped at `MAX_STACK_WALK`),
+HEAD's own commit dropped — lists the local branches on the current
+branch's history since the default branch, nearest first. The page reads
+it on the spawn's probe thread and on a thread after every move
+(`_refresh_branch_stack` → `_branch_stack_read`, generation-guarded; `_branch_stack` is cleared
+on a branch change), keeps it in `_branch_stack`, and `_resolve_parent` takes the
+first entry that still resolves as the parent; `_branches_below_parent` is
+what the sidebar groups. Only with no stack does the host's rung name the
+parent — `TerminalTab._git_parent_branch`: an attached open PR's base, else
+the `git_parent_branch` setting (`origin/x` read as `x`), else the
 repository's default branch (`gitinfo.default_branch`: `refs/remotes/*/HEAD`,
 then local `main`/`master`, loose or packed — no subprocess; a `git init`
-repo has no remote HEAD). The user overrides with the sidebar's ⎇ button
-(`parent-picked` → `GitPage._on_parent_picked`, which re-seeds the tree
-signature so the tick reads no move in the new base); "Automatic" hands the
-choice back. The pick persists in the page's layout slot
-(`hunkctl.encode_state` / `decode_parent`), beside `"sidebar": false` when
-the sidebar is folded (`decode_sidebar`). The extension never sees the
-parent.
+repo has no remote HEAD, and without a default there is no trunk to walk
+from, so no stack). A stack read that moves the parent re-seeds the tree
+signature (the base changed, not the tree) and reloads a branch diff. There
+is no picker and no persisted parent: the layout slot is `hunkctl.
+encode_state(loaded, sidebar)` (`"sidebar": false` when folded,
+`decode_sidebar`); a `"parent"` key from older layouts is ignored. The
+extension never sees the parent.
 
 ## The native sidebar (`gitsidebar.py`)
 
@@ -101,12 +114,15 @@ parent.
 non-selectable `caption-heading` rows) and a wrapping `Gtk.FlowBox` action
 row. It never imports `gitpage`; the page feeds it and listens:
 
-- Feed: `set_context(branch, parent, default, loaded, resolved_sha,
-  live_side, hunk_alive, extension_loaded, auto_parent)` after every
-  `_apply_title` / probe / exit (a changed branch, parent or default
+- Feed: `set_context(branch, parent, default, stack, loaded, resolved_sha,
+  live_side, hunk_alive, extension_loaded)` after every `_apply_title` /
+  probe / exit / stack read (a changed branch, parent, stack or default
   re-reads the commits; returns whether it did), `refresh_commits()`
-  (threads: `gitops.read_page` per group + `unpushed_shas`, landed behind
-  a generation), `refresh_files(files, loaded, untracked)` (the page calls
+  (threads: `gitops.read_page` per group — the current `<parent>..HEAD`,
+  then the parent and each stack branch as `<below>..<branch>`
+  (`gitmodel.stack_ranges`), the default — plus `unpushed_shas`, landed
+  behind a generation; group ids are `current`, `stack:<name>`, `default`,
+  and `_pages` is keyed by them), `refresh_files(files, loaded, untracked)` (the page calls
   it only when `(files, loaded, untracked)` changed or the tree moved —
   `_files_shown` / `_files_stale` — since a working-tree load costs a `git
   status`), `set_selection(path, hunk, source)` (the sidecar's word beats
@@ -117,8 +133,8 @@ row. It never imports `gitpage`; the page feeds it and listens:
   `_pending_navigate = (path, side)` + `load(side)`, run when the reload
   lands with that side (`settled()` waits for both); `key-requested(bytes)`
   → `feed_child` + `terminal.grab_focus()` (hunk's `D` confirm answers to
-  Enter); `mutated` → re-seed the signatures, refresh, `_reload` now;
-  `parent-picked(name | None)`.
+  Enter); `mutated` → re-seed the signatures, re-read the stack, `_reload`
+  now.
 - Native mutations (`commit`, `fixup`, `stage_all`, `unstage_all` — public
   so the e2e drives them without dialogs) run on a thread behind `busy`
   (the Commit button spins, the other mutations go insensitive) and toast
@@ -141,7 +157,7 @@ The GTK-free halves: `gitmodel.py` (ports of the old extension's
 every subject, path and list bounded) and `gitops.py` (argv builders and
 runners that take `run=subprocess.run` and never raise: `read_page` with
 the limit+1 trick, `unpushed_shas` — `HEAD --not --remotes`, empty without
-a remote-tracking ref — `read_status`, `local_branches`, `staged_paths`,
+a remote-tracking ref — `stack_branches`, `read_status`, `staged_paths`,
 `in_progress_operation` on `gitinfo.git_dir`, `commit`, `commit_fixup`,
 `stage_all`, `unstage_all`, `unpushed_in_group`, `resolve_group_branches`).
 `hunkctl` carries what they lean on: the fifth `Loaded`, `{"range":
@@ -237,8 +253,9 @@ touching it. `bun.lock` is gitignored.
 Cheap reads straight from `.git` for the footer's 2 s poll and every
 right-click: `current_branch`, `default_branch`, `github_url`, `repo_root`,
 `index_mtime`, `head_sha`, `resolve_branch`, `base_ref`, `tree_signature`,
-`remote_refs_signature` (mtimes of `packed-refs` and every directory under
-`refs/remotes`, so a push moves it), `git_dir`, `parent_branch`. Anything
+`refs_signature` (mtimes of `packed-refs` and every directory under
+`refs/heads` and `refs/remotes`, so a branch written anywhere or a push
+moves it), `git_dir`, `parent_branch`. Anything
 that needs `git` (`has_changes`, `change_summary`, `ignored_names`) shells
 out and is asked on demand only.
 

@@ -1024,10 +1024,9 @@ def test_initial_mode(staged, unstaged, expected):
 
 def test_encode_state():
     assert hunkctl.encode_state("staged") == {"kind": "git", "loaded": "staged"}
-    assert hunkctl.encode_state("staged", None) == {"kind": "git", "loaded": "staged"}
-    assert hunkctl.encode_state("branch", "base") == {"kind": "git", "loaded": "branch", "parent": "base"}
-    state = hunkctl.encode_state({"show": SHA}, "base")
-    assert state == {"kind": "git", "loaded": {"show": SHA}, "parent": "base"}
+    assert hunkctl.encode_state("branch") == {"kind": "git", "loaded": "branch"}
+    state = hunkctl.encode_state({"show": SHA})
+    assert state == {"kind": "git", "loaded": {"show": SHA}}
     assert json.loads(json.dumps(state)) == state  # what panellayout writes
 
 
@@ -1059,39 +1058,21 @@ def test_decode_state(page, expected):
     assert hunkctl.decode_state(page) == expected
 
 
-@pytest.mark.parametrize(
-    ("page", "expected"),
-    [
-        ({"kind": "git", "loaded": "branch", "parent": "base"}, "base"),
-        ({"kind": "git", "loaded": "branch", "parent": "release/v1"}, "release/v1"),
-        ({"kind": "git", "loaded": "branch"}, None),
-        ({"kind": "git", "parent": ""}, None),
-        ({"kind": "git", "parent": "-x"}, None),
-        ({"kind": "git", "parent": "a..b"}, None),
-        ({"kind": "git", "parent": 3}, None),
-        ("git", None),
-        (None, None),
-    ],
-)
-def test_decode_parent(page, expected):
-    assert hunkctl.decode_parent(page) == expected
-
-
 def test_state_round_trips():
     for mode in hunkctl.MODES:
         assert hunkctl.decode_state(hunkctl.encode_state(mode)) == mode
-    state = hunkctl.encode_state({"show": SHA}, "base")
+    state = hunkctl.encode_state({"show": SHA})
     assert hunkctl.decode_state(state) == {"show": SHA}
-    assert hunkctl.decode_parent(state) == "base"
-    assert hunkctl.decode_parent(hunkctl.encode_state("branch")) is None
+    # A layout from before git alone named the stack carries the branch the
+    # user had set; it is ignored, not refused.
+    assert hunkctl.decode_state({"kind": "git", "loaded": "branch", "parent": "base"}) == "branch"
 
 
 def test_range_state_round_trips():
-    state = hunkctl.encode_state({"range": "main...feat"}, "base")
-    assert state == {"kind": "git", "loaded": {"range": "main...feat"}, "parent": "base"}
+    state = hunkctl.encode_state({"range": "main...feat"})
+    assert state == {"kind": "git", "loaded": {"range": "main...feat"}}
     assert json.loads(json.dumps(state)) == state
     assert hunkctl.decode_state(state) == {"range": "main...feat"}
-    assert hunkctl.decode_parent(state) == "base"
     # A malformed saved range reads as the default, like a malformed show.
     assert hunkctl.decode_state({"kind": "git", "loaded": {"range": "main..feat"}}) == "unstaged"
     assert hunkctl.decode_state({"kind": "git", "loaded": {"range": "-x...y"}}) == "unstaged"
@@ -1105,11 +1086,11 @@ def test_sidebar_state_round_trips():
     """"sidebar" is written only when hidden; absent reads as shown."""
     assert hunkctl.encode_state("staged") == {"kind": "git", "loaded": "staged"}
     assert hunkctl.encode_state("staged", sidebar=True) == {"kind": "git", "loaded": "staged"}
-    hidden = hunkctl.encode_state("staged", "base", sidebar=False)
-    assert hidden == {"kind": "git", "loaded": "staged", "parent": "base", "sidebar": False}
+    hidden = hunkctl.encode_state("staged", sidebar=False)
+    assert hidden == {"kind": "git", "loaded": "staged", "sidebar": False}
     assert hunkctl.decode_sidebar(hidden) is False
     assert hunkctl.decode_sidebar(hunkctl.encode_state("staged")) is True
-    assert hunkctl.decode_state(hidden) == "staged" and hunkctl.decode_parent(hidden) == "base"
+    assert hunkctl.decode_state(hidden) == "staged"
 
 
 @pytest.mark.parametrize(

@@ -1087,15 +1087,13 @@ def initial_mode(staged: bool, unstaged: bool) -> str:
     return "staged" if staged and not unstaged else "unstaged"
 
 
-def encode_state(loaded: Loaded, parent: str | None = None, sidebar: bool = True) -> dict:
-    """{"kind": "git", "loaded": loaded, "parent": parent, "sidebar":
-    False} — the page's panel_layout slot; "parent" (the branch the user
-    set) only when there is one, "sidebar" only when the native sidebar is
-    hidden (absent reads as shown, see decode_sidebar). A commit or range
-    load is its dict, copied."""
+def encode_state(loaded: Loaded, sidebar: bool = True) -> dict:
+    """{"kind": "git", "loaded": loaded, "sidebar": False} — the page's
+    panel_layout slot; "sidebar" only when the native sidebar is hidden
+    (absent reads as shown, see decode_sidebar). A commit or range load is
+    its dict, copied. A "parent" key older layouts carry (the branch a
+    user set before git alone named the stack) is ignored on decode."""
     state = {"kind": "git", "loaded": dict(loaded) if isinstance(loaded, dict) else loaded}
-    if parent:
-        state["parent"] = parent
     if not sidebar:
         state["sidebar"] = False
     return state
@@ -1124,15 +1122,6 @@ def decode_sidebar(page: object) -> bool:
         return True
     sidebar = page.get("sidebar")
     return sidebar if isinstance(sidebar, bool) else True
-
-
-def decode_parent(page: object) -> str | None:
-    """The parent branch name a saved page dict carries, when it is a safe
-    one; None otherwise (no parent set, or a string git couldn't take)."""
-    if not isinstance(page, dict):
-        return None
-    parent = page.get("parent")
-    return parent if safe_ref(parent) else None
 
 
 # -- the sidecar ------------------------------------------------------------------

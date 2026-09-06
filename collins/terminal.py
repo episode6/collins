@@ -5337,13 +5337,13 @@ class TerminalTab(Gtk.Box):
 
     def _git_parent_branch(self, cwd: str | None) -> str | None:
         """The branch the current one is measured against — what the page's
-        "vs" load diffs HEAD from: the automatic rung, three deep. The
-        attached PR's base first (a stacked PR is measured against the
-        branch it stacks on, not trunk), then the default parent branch
-        from Preferences → Git when the repository has it, then the
-        repository's default branch (gitinfo.parent_branch). The branch
-        the user set through the extension's "Set parent branch…" beats
-        all three, inside the page itself (GitPage._resolve_parent).
+        "vs" load diffs HEAD from — when git itself shows no stack under
+        HEAD (the page reads that first, gitops.stack_branches; see
+        GitPage._resolve_parent): the host's rung, three deep. The
+        attached PR's base first (a stacked PR whose base isn't a local
+        branch is still measured against it, not trunk), then the default
+        parent branch from Preferences → Git when the repository has it,
+        then the repository's default branch (gitinfo.parent_branch).
 
         The tab's own PR records (prstatus.PullRequest) carry no base ref —
         only a fetched PR page does (prdetail's `baseRefName`) — so the base
@@ -5372,11 +5372,11 @@ class TerminalTab(Gtk.Box):
 
     def _restore_git_page(self, page: dict) -> GitPage | None:
         """A saved layout's git page, rebuilt on what it was saved showing —
-        a mode, a commit or a range — with the parent branch the user had
-        set, if any, and with its native sidebar shown or hidden as it was
-        (anything the saved dict can't name reads as unstaged, no parent,
-        or the sidebar shown — the layout is a preference, so restore
-        never refuses on it). One page per tab: a duplicate entry (a
+        a mode, a commit or a range — with its native sidebar shown or
+        hidden as it was (anything the saved dict can't name reads as
+        unstaged or the sidebar shown — the layout is a preference, so
+        restore never refuses on it; a "parent" key from before git alone
+        named the stack is ignored). One page per tab: a duplicate entry (a
         hand-edited layout file) is refused, which drops it from the
         restored strip. The page spawns hunk on its first map, so a
         restored page in a hidden strip costs nothing until it is shown."""
@@ -5387,7 +5387,6 @@ class TerminalTab(Gtk.Box):
             parent_provider=self._git_parent_branch,
             on_closed=self._on_git_page_closed,
             loaded=hunkctl.decode_state(page),
-            parent=hunkctl.decode_parent(page),
             sidebar=hunkctl.decode_sidebar(page),
         )
         return self._git_page

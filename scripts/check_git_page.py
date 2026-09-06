@@ -9,14 +9,16 @@ sidecar's path in its environment, resolving the session id by pid off the
 shim's `session list --json`, switching modes through `session reload`,
 reloading on a freshness tick after a commit (and not for a move the
 extension recorded as already shown), keeping the viewer through a
-reload hunk refuses, the sidebar's parent pick reloading the branch diff
-against the new base (the sidecar untouched: it carries no parent since
+reload hunk refuses, git naming the stack (a local branch created under
+HEAD becomes the parent on the next tick, the branch diff reloads against
+it and the commits list grows its group; deleted, the parent falls back to
+the host's rung — the sidecar untouched: it carries no parent since
 contract version 2), following a reload
 made behind Collins' back (the poll's `session get`) — a commit becoming
 the page's own load (its breadcrumb naming it, `<ref> <subject>`, off a
 real git), a range between two branches staying hunk's — taking the child
-down on close, restoring into `hunk show <sha>` with the user's parent
-(carried in page_state before the page is ever shown), opening the default
+down on close, restoring into `hunk show <sha>` (a layout's stale
+"parent" key ignored), opening the default
 mode for a saved commit git no longer has, and reopening a dead viewer
 from Ctrl+1/2/3. A pass through apply_settings checks Preferences → Git
 reaching an open page: a layout or theme change respawns hunk with
@@ -26,7 +28,7 @@ diff load and the sidecar (never a `show`), the page size reaches the
 native commits list with neither. A pass over the native
 sidebar (collins/gitsidebar.py) checks its commits list off the real
 repository (the branch header, the working tree row, the `main..HEAD`
-commits, the default branch's group; no parent group while the parent is
+commits, the default branch's group; no stack group while the parent is
 the default, no `↑` without a remote), the header toggle and its
 persistence (page_state's "sidebar", a restore with it off), the collapse
 under the breakpoint on a 500 px window and the return on a 900 px one, a
@@ -351,8 +353,9 @@ def git(repo: str, *args: str) -> None:
 
 
 def make_repo(root: str) -> str:
-    """main and feat at one commit, plus `base`: another branch the user can
-    pick as the parent. The identity is set in the repository's own config:
+    """main and feat at one commit, plus `base`: a second branch at that
+    commit (on the trunk, so never in feat's stack). The identity is set
+    in the repository's own config:
     the sidebar's native commit runs a plain `git commit`, which needs one
     (CI's container has no global identity)."""
     repo = os.path.join(root, "repo")
@@ -645,28 +648,45 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     check("the vs load works again once the target resolves", landed, read_state(state_path))
     check("the parent target is back", page._parent_target == "main")
 
-    # -- the sidebar's picker sets the parent ------------------------------------------
+    # -- git names the stack: a local branch under HEAD becomes the parent ----------------
     reloads_before = read_state(state_path).get("reloads", 0)
-    page.sidebar.pick_parent("base")
-    check("the picker's word is the page's parent at once", page._parent_name == "base", page._parent_name)
-    check(
-        "page_state carries the user-set parent", page.page_state().get("parent") == "base", page.page_state()
-    )
-    landed = wait_for(lambda: read_state(state_path).get("args") == ["base...HEAD"] and settled(page))
-    check("the branch diff reloads against the new parent", landed, read_state(state_path))
+    git(repo, "branch", "step", "HEAD~1")  # on feat's own history: feat stacks on it now
+    page.poll_tick()  # the refs signature moved: the stack is re-read
+    landed = wait_for(lambda: page._parent_name == "step" and settled(page))
+    check("a local branch under HEAD is the parent git names", landed, page._parent_name)
+    check("page_state carries no parent (git names it, nothing is set)", "parent" not in page.page_state())
+    landed = wait_for(lambda: read_state(state_path).get("args") == ["step...HEAD"] and settled(page))
+    check("the branch diff reloads against the branch it stacks on", landed, read_state(state_path))
     check(
         "one reload for the parent change, not a freshness one on top",
         read_state(state_path).get("reloads", 0) == reloads_before + 1,
         read_state(state_path),
     )
     check(
-        "breadcrumb reads feat vs base",
-        page._breadcrumb.get_text() == "feat vs base",
+        "breadcrumb reads feat vs step",
+        page._breadcrumb.get_text() == "feat vs step",
         page._breadcrumb.get_text(),
     )
-    check("tab title names the new parent", page.page_title() == "Git · vs base", page.page_title())
+    check("tab title names the new parent", page.page_title() == "Git · vs step", page.page_title())
+    landed = wait_for(
+        lambda: [r.sha for r in page.sidebar.commit_rows() if r.kind == "commit" and r.group == "stack:step"]
+        == log_shas(repo, "main..step")
+        and [r.sha for r in page.sidebar.commit_rows() if r.kind == "commit" and r.group == "current"]
+        == log_shas(repo, "step..HEAD")
+    )
     check(
-        "the pick never reaches the sidecar (contract version 2 carries no parent)",
+        "the commits list groups by the stack: feat's commits since step, step's since main",
+        landed,
+        [(r.group, r.label) for r in page.sidebar.commit_rows()],
+    )
+    step_header = next((r for r in page.sidebar.commit_rows() if r.id == "header:stack:step"), None)
+    check(
+        "the stack branch's header loads it against the branch below (main...step)",
+        step_header is not None and step_header.load == {"range": "main...step"},
+        step_header,
+    )
+    check(
+        "the stack never reaches the sidecar (contract version 2 carries no parent)",
         read_sidecar(sidecar).get("parent") is None and "parentSource" not in read_sidecar(sidecar),
         read_sidecar(sidecar),
     )
@@ -676,9 +696,12 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
     page.load("unstaged")
     wait_for(lambda: read_state(state_path).get("args") == [] and settled(page))
     reloads_before = read_state(state_path).get("reloads", 0)
-    page.sidebar.pick_parent(None)  # "Automatic"
-    check("back to the automatic parent", page._parent_name == "main", page._parent_name)
-    check("page_state drops the parent", "parent" not in page.page_state(), page.page_state())
+    git(repo, "branch", "-D", "step")  # the stack is gone: the host's rung names the parent again
+    page.poll_tick()
+    landed = wait_for(lambda: page._parent_name == "main" and settled(page))
+    check("back to the host's parent once the stack is gone", landed, page._parent_name)
+    landed = wait_for(lambda: not any(r.group == "stack:step" for r in page.sidebar.commit_rows()))
+    check("and the stack group is gone from the commits list", landed)
     check(
         "the sidecar still holds Collins' two keys and the extension's record",
         read_sidecar(sidecar) == {
@@ -847,10 +870,11 @@ def check_with_hunk(repo: str, state_path: str, shim: str) -> None:
 
 
 def check_restore(repo: str, state_path: str, shim: str) -> None:
-    """A page rebuilt from a saved layout — a commit, and the user's parent —
-    spawns `hunk show <sha>` and reports the parent it was given; a saved
-    commit that no longer exists opens the default mode instead of a dead
-    viewer; a dead viewer's card reopens on Ctrl+1/2/3 (load())."""
+    """A page rebuilt from a saved layout — a commit — spawns `hunk show
+    <sha>` (a "parent" key from an older layout is ignored: git names the
+    stack); a saved commit that no longer exists opens the default mode
+    instead of a dead viewer; a dead viewer's card reopens on Ctrl+1/2/3
+    (load())."""
     print("-- restored from a layout")
     sha = head_sha(repo)
     page = GitPage(
@@ -858,11 +882,10 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
         parent_provider=lambda _cwd: "main",
         on_closed=lambda p: None,
         loaded=hunkctl.decode_state({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
-        parent=hunkctl.decode_parent({"kind": "git", "loaded": {"show": sha}, "parent": "base"}),
     )
     check(
-        "page_state before the spawn keeps the restored parent (a hidden page saves it again)",
-        page.page_state() == {"kind": "git", "loaded": {"show": sha}, "parent": "base"},
+        "page_state before the spawn: the load, and no parent (an older layout's is dropped)",
+        page.page_state() == {"kind": "git", "loaded": {"show": sha}},
         page.page_state(),
     )
     check("breadcrumb reads the short sha", page.page_title() == f"Git · {sha[:7]}", page.page_title())
@@ -877,10 +900,10 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
     check("session id resolved", wait_for(lambda: page._session_id is not None))
     state = read_state(state_path)
     check("hunk spawned as `show <sha>`", state.get("args") == ["show", sha], state)
-    check("the user's parent is in force", page._parent_name == "base" and page._parent_target == "base")
+    check("the parent is the host's (no stack under HEAD)", page._parent_name == "main" and page._parent_target == "main")
     check(
-        "page_state carries it",
-        page.page_state() == {"kind": "git", "loaded": {"show": sha}, "parent": "base"},
+        "page_state carries the load alone",
+        page.page_state() == {"kind": "git", "loaded": {"show": sha}},
         page.page_state(),
     )
     check(
@@ -923,25 +946,6 @@ def check_restore(repo: str, state_path: str, shim: str) -> None:
         (read_state(state_path).get("args"), page.loaded),
     )
     check("no card", page._stack.get_visible_child_name() == "hunk")
-    page.page_closed()
-    wait_for(lambda: not page.hunk_alive, timeout=2.0)
-    window.destroy()
-
-    # A saved parent that no longer exists falls back to the automatic rung.
-    page = GitPage(
-        cwd_provider=lambda: repo,
-        parent_provider=lambda _cwd: "main",
-        on_closed=lambda p: None,
-        loaded="branch",
-        parent="nosuch",
-    )
-    window = Gtk.Window(title="restore (stale parent)", default_width=900, default_height=600)
-    window.set_child(page)
-    window.present()
-    check("session id resolved (stale parent)", wait_for(lambda: page._session_id is not None))
-    check("a parent that doesn't resolve yields to the automatic one", page._parent_name == "main")
-    check("and isn't persisted once found missing", "parent" not in page.page_state(), page.page_state())
-    check("the branch diff is against main", read_state(state_path).get("args") == ["main...HEAD"])
     page.page_closed()
     wait_for(lambda: not page.hunk_alive, timeout=2.0)
     window.destroy()
@@ -1303,7 +1307,7 @@ def check_sidebar(repo: str, state_path: str) -> None:
         and [r.sha for r in rows if r.kind == "commit" and r.group == "default"] == trunk,
         [(r.kind, r.group, r.label) for r in rows],
     )
-    check("no parent group while the parent is the default", not any(r.group == "parent" for r in rows))
+    check("no stack group while the parent is the default", not any(r.group.startswith("stack:") for r in rows))
     check("no ↑ without a remote", not any(r.unpushed for r in rows))
     check("no load more… under a page of 20", not any(r.kind == "more" for r in rows))
     check("the working tree row is the loaded one", sidebar.loaded_row_id() == "worktree", sidebar.loaded_row_id())
@@ -1312,7 +1316,6 @@ def check_sidebar(repo: str, state_path: str) -> None:
         sidebar._commit_widgets["worktree"].has_css_class("git-row-loaded")
         and sidebar._commit_widgets["header:current"].has_css_class("git-group-loaded"),
     )
-    check("the parent button names the parent", sidebar._parent_button.get_label() == "⎇ main", sidebar._parent_button.get_label())
 
     # -- a commit row click loads it; the default header loads nothing --------------------
     reloads_before = read_state(state_path).get("reloads", 0)

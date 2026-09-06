@@ -1201,8 +1201,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Hány commitot mutat a commit-panel egy-egy csoportja a további betöltése… sora előtt',
         'Default parent branch':
             'Alapértelmezett szülőág',
-        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
-            'Üresen: automatikus. Az oldal az ágat először a csatolt pull request alapágához méri, aztán ehhez az ághoz, ha megvan a tárolóban (develop, vagy origin/develop, ha csak a távoli tárolóban van meg), aztán az alapértelmezett ághoz; az oldal Szülőág beállítása… menüpontja továbbra is felülírja',
+        "Empty: automatic. The page measures the branch against the local branch it stacks on when git shows one, else the attached pull request's base, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch":
+            'Üresen: automatikus. Az oldal az ágat ahhoz a helyi ághoz méri, amelyre a git szerint épül, ha van ilyen, különben a csatolt pull request alapágához, aztán ehhez az ághoz, ha megvan a tárolóban (develop, vagy origin/develop, ha csak a távoli tárolóban van meg), aztán az alapértelmezett ághoz',
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':
@@ -2744,8 +2744,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Wie viele Commits jede Gruppe des Commit-Panels vor ihrer Zeile „mehr laden…“ zeigt',
         'Default parent branch':
             'Standard-Elternbranch',
-        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
-            'Leer: automatisch. Die Seite misst den Branch zuerst an der Basis des angehängten Pull-Requests, dann an diesem Branch, wenn das Repository ihn hat (develop, oder origin/develop für einen, den nur das Remote hat), dann am Standardbranch; „Elternbranch festlegen…“ auf der Seite hat weiterhin Vorrang',
+        "Empty: automatic. The page measures the branch against the local branch it stacks on when git shows one, else the attached pull request's base, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch":
+            'Leer: automatisch. Die Seite misst den Branch an dem lokalen Branch, auf dem er laut git aufsetzt, wenn es einen gibt, sonst an der Basis des angehängten Pull-Requests, dann an diesem Branch, wenn das Repository ihn hat (develop, oder origin/develop für einen, den nur das Remote hat), dann am Standardbranch',
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':
@@ -4284,8 +4284,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Cuántos commits muestra cada grupo del panel de commits antes de su fila cargar más…',
         'Default parent branch':
             'Rama padre predeterminada',
-        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
-            'Vacío: automático. La página mide la rama primero contra la base del pull request adjunto, luego contra esta rama cuando el repositorio la tiene (develop, u origin/develop para una que solo tiene el remoto), luego contra la rama predeterminada; Establecer rama padre… en la página sigue teniendo prioridad',
+        "Empty: automatic. The page measures the branch against the local branch it stacks on when git shows one, else the attached pull request's base, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch":
+            'Vacío: automático. La página mide la rama contra la rama local sobre la que se apila según git, si la hay; si no, contra la base del pull request adjunto, luego contra esta rama cuando el repositorio la tiene (develop, u origin/develop para una que solo tiene el remoto), luego contra la rama predeterminada',
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':
@@ -5825,8 +5825,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Combien de commits chaque groupe du panneau des commits affiche avant sa ligne charger plus…',
         'Default parent branch':
             'Branche parente par défaut',
-        "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it":
-            "Vide : automatique. La page mesure la branche d'abord contre la base du pull request attaché, puis contre cette branche quand le dépôt l'a (develop, ou origin/develop pour une que seul le dépôt distant a), puis contre la branche par défaut ; Définir la branche parente… dans la page reste prioritaire",
+        "Empty: automatic. The page measures the branch against the local branch it stacks on when git shows one, else the attached pull request's base, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch":
+            "Vide : automatique. La page mesure la branche contre la branche locale sur laquelle elle s'empile selon git, s'il y en a une ; sinon contre la base du pull request attaché, puis contre cette branche quand le dépôt l'a (develop, ou origin/develop pour une que seul le dépôt distant a), puis contre la branche par défaut",
         'Caffeine Mode':
             'Caffeine Mode',
         'Keep screen on':

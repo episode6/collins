@@ -113,9 +113,13 @@ def test_the_other_read_builders():
     assert gitops.status_argv() == [
         "--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all",
     ]
-    assert gitops.local_branches_argv() == [
-        "for-each-ref", "--format=%(refname:short)", "--sort=refname", "refs/heads",
+    assert gitops.branch_tips_argv() == [
+        "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads",
     ]
+    assert gitops.stack_walk_argv("main", "HEAD", 50) == [
+        "rev-list", "--topo-order", "-n", "50", "main..HEAD", "--",
+    ]
+    assert gitops.stack_walk_argv(None, "HEAD", 0) == ["rev-list", "--topo-order", "-n", "1", "HEAD", "--"]
     assert gitops.staged_paths_argv() == ["diff", "--cached", "--name-only", "-z"]
     assert gitops.rev_parse_argv("HEAD^") == ["rev-parse", "--verify", "--quiet", "HEAD^"]
 
@@ -185,11 +189,39 @@ def test_read_status_parses_the_porcelain_and_is_none_when_git_fails():
     assert gitops.read_status("/repo", run=fake_runner({"status": ok("")})) == Status()
 
 
-def test_local_branches_one_name_per_line_gated():
-    run = fake_runner({"for-each-ref": ok("base\nmain\n\nfeat/x\n-odd\na b\n")})
-    assert gitops.local_branches("/repo", run=run) == ["base", "main", "feat/x"]
-    assert run.calls[0][0][1:] == gitops.local_branches_argv()
-    assert gitops.local_branches("/repo", run=fake_runner({"for-each-ref": failed("x")})) == []
+SHA_C = "c" * 40
+SHA_D = "d" * 40
+
+
+def test_stack_branches_orders_the_tips_by_the_walk_and_drops_the_head_tip():
+    """HEAD at SHA_A over SHA_B over SHA_C (the walk, children first) with
+    branches at each: the tip at HEAD is the current branch (or a twin of
+    it) and is left out; the rest come nearest first, twins at one commit
+    by name; a tip outside the walk (SHA_D: on the trunk) is not in the
+    stack; unsafe names are dropped."""
+    tips = (
+        f"{SHA_A} feat\n{SHA_B} step2\n{SHA_C} step1\n{SHA_C} alt\n{SHA_D} main\n{SHA_B} -odd\n{SHA_B} a b\n"
+    )
+    run = fake_runner({"for-each-ref": ok(tips), "rev-list": ok(f"{SHA_A}\n{SHA_B}\n{SHA_C}\n")})
+    assert gitops.stack_branches("/repo", "main", run=run) == [
+        BranchRef("step2", "step2"), BranchRef("alt", "alt"), BranchRef("step1", "step1"),
+    ]
+    assert run.calls[0][0][1:] == gitops.branch_tips_argv()
+    assert run.calls[1][0][1:] == gitops.stack_walk_argv("main", "HEAD", gitops.MAX_STACK_WALK)
+
+
+def test_stack_branches_is_empty_when_git_cant_answer_or_the_targets_are_unsafe():
+    assert gitops.stack_branches("/repo", "main", run=fake_runner({"for-each-ref": failed("x")})) == []
+    run = fake_runner({"for-each-ref": ok(f"{SHA_B} step\n"), "rev-list": failed("bad revision")})
+    assert gitops.stack_branches("/repo", "main", run=run) == []
+    # No tips at all: the walk is not even asked for.
+    run = fake_runner({"for-each-ref": ok("")})
+    assert gitops.stack_branches("/repo", "main", run=run) == [] and len(run.calls) == 1
+    # An empty walk (HEAD is on the trunk): nothing.
+    run = fake_runner({"for-each-ref": ok(f"{SHA_B} step\n"), "rev-list": ok("")})
+    assert gitops.stack_branches("/repo", "main", run=run) == []
+    assert gitops.stack_branches("/repo", "-x", run=fake_runner({})) == []
+    assert gitops.stack_branches("/repo", "main", "a..b", run=fake_runner({})) == []
 
 
 def test_staged_paths_splits_on_nul_and_is_empty_when_git_fails():
@@ -302,7 +334,7 @@ def _mark_pushed(repo: Path) -> None:
 @pytest.fixture
 def repo(tmp_path):
     """main at one commit (`first`, f.txt), like scripts/check_git_page.py's
-    make_repo — plus `base`, another branch the parent picker can name."""
+    make_repo — plus `base`, a second branch at the same commit."""
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q", "-b", "main")
@@ -473,10 +505,29 @@ def gitmodel_autosquash(abbrev: str) -> str:
 
 
 @needs_git
-def test_local_branches_and_resolve_group_branches(repo):
-    assert gitops.local_branches(repo) == ["base", "main"]
+def test_stack_branches_reads_the_stack_off_a_repository(repo):
+    """main ← step1 ← step2 ← feat, one commit each: feat's stack is step2
+    then step1; step2's is step1; a branch at main's own commit (`base`)
+    is on the trunk and never in a stack; a twin of HEAD is left out."""
+    assert gitops.stack_branches(repo, "main") == []  # on main itself
+    for name in ("step1", "step2", "feat"):
+        _git(repo, "checkout", "-qb", name)
+        (repo / f"{name}.txt").write_text(f"{name}\n")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", name)
+    _git(repo, "branch", "twin")
+    assert gitops.stack_branches(repo, "main") == [BranchRef("step2", "step2"), BranchRef("step1", "step1")]
+    assert gitops.stack_branches(repo, "main", "step2") == [BranchRef("step1", "step1")]
+    assert gitops.stack_branches(repo, "step1") == [BranchRef("step2", "step2")]
+    assert gitops.stack_branches(repo, None)[:2] == [BranchRef("step2", "step2"), BranchRef("step1", "step1")]
+    assert BranchRef("base", "base") in gitops.stack_branches(repo, None)  # no floor: the trunk's tips too
+    _git(repo, "checkout", "-q", "step2")
+    assert gitops.stack_branches(repo, "main") == [BranchRef("step1", "step1")]
+
+
+@needs_git
+def test_resolve_group_branches(repo):
     _git(repo, "checkout", "-qb", "feat/x")
-    assert gitops.local_branches(repo) == ["base", "feat/x", "main"]
     assert gitops.resolve_group_branches(repo, "base", "main") == (
         BranchRef("base", "base"), BranchRef("main", "main"),
     )

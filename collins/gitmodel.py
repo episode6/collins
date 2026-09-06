@@ -44,8 +44,12 @@ MAX_ROWS = 2000
 # unmerged path) plus `?` for untracked. Anything else — a code a future git
 # adds — drops the row rather than colouring it wrong.
 STATUS_CODES = frozenset("MADRTCU?")
-# The groups of the commits list, top to bottom, and the row kinds in them.
-GROUPS: tuple[str, ...] = ("current", "parent", "default")
+# The groups of the commits list, top to bottom: the current branch, one
+# group per branch of the stack under it (stack_group(name), the nearest
+# first), the default branch. The row kinds in them.
+CURRENT_GROUP = "current"
+DEFAULT_GROUP = "default"
+STACK_GROUP_PREFIX = "stack:"
 ROW_KINDS: tuple[str, ...] = ("header", "worktree", "commit", "more")
 # The row ids the widget and the e2e check address rows by.
 WORKTREE_ROW_ID = "worktree"
@@ -88,6 +92,17 @@ class BranchRef:
 
     name: str
     target: str
+
+
+@dataclass(frozen=True)
+class BranchPage:
+    """One branch of the stack as the commits list shows it: the branch,
+    the page of commits read for it (`<the branch below>..<branch>`), and
+    whether a `load more…` row is due."""
+
+    branch: BranchRef
+    commits: tuple[Commit, ...] = ()
+    more: bool = False
 
 
 @dataclass(frozen=True)
@@ -262,6 +277,22 @@ def without_untracked(status: Status | None) -> Status | None:
 # -- the commits list ------------------------------------------------------------------
 
 
+def stack_group(name: str) -> str:
+    """The group id of a stack branch's rows (`stack:<branch name>`)."""
+    return f"{STACK_GROUP_PREFIX}{name}"
+
+
+def stack_ranges(stack: Sequence[BranchRef], default: BranchRef | None) -> list[tuple[BranchRef, str | None]]:
+    """(branch, the target below it) for every branch of *stack*, nearest
+    HEAD first: the next branch's target, the default's for the last one,
+    None when there is no default — the lower end of each group's `git
+    log` range (`<below>..<branch>`) and of its header's three-dot load."""
+    if not stack:
+        return []
+    below = [ref.target for ref in stack[1:]] + [default.target if default is not None else None]
+    return list(zip(stack, below, strict=True))
+
+
 def header_row_id(group: str) -> str:
     return f"header:{group}"
 
@@ -302,26 +333,30 @@ def build_rows(
     default: BranchRef | None,
     current: Sequence[Commit],
     current_more: bool,
-    parent_commits: Sequence[Commit],
-    parent_more: bool,
+    stack: Sequence[BranchPage],
     default_commits: Sequence[Commit],
     default_more: bool,
     unpushed: Collection[str],
 ) -> list[Row]:
     """The rows of the commits list, top to bottom: the current branch (its
     header, `working tree`, its commits `<parent>..HEAD`, `load more…`),
-    the parent branch when it isn't the default (its header, its commits
-    `<default>..<parent>`), then the default branch (its header, its latest
-    page).
+    then one group per branch of *stack* — the branch the current one
+    stacks on first, then the one under it, down to the last one above
+    the default branch (each its header, its commits `<below>..<branch>`,
+    `load more…`) — then the default branch (its header, its latest page).
+    The caller hands the stack as gitops.stack_branches lists it, nearest
+    HEAD first, with a page read for each (BranchPage); a parent that is
+    the default branch has no stack.
 
     Header loads follow the spec's table: the current branch's header loads
     "branch" (`<parent>...HEAD`) — or, with no parent at all, the range
     from the oldest listed commit's parent (`{"range": "<sha>^...HEAD"}`),
-    nothing when nothing is listed — and the parent's header the range
-    `<default>...<parent>`. The default branch's header loads nothing: a
-    whole trunk is more than a viewer should be handed. Branch names are
-    shown as written. *unpushed* is the set of shas the `↑` mark goes on.
-    The whole list is capped at MAX_ROWS.
+    nothing when nothing is listed — and a stack branch's header the
+    range `<below>...<branch>` (stack_ranges), none when nothing lies
+    below. The default branch's header loads nothing: a whole trunk is
+    more than a viewer should be handed. Branch names are shown as
+    written. *unpushed* is the set of shas the `↑` mark goes on. The
+    whole list is capped at MAX_ROWS.
     """
     rows: list[Row] = []
     oldest = current[-1] if current else None
@@ -331,28 +366,29 @@ def build_rows(
         current_load = {hunkctl.RANGE_KEY: f"{oldest.sha}^...HEAD"}
     else:
         current_load = None
-    rows.append(Row(header_row_id("current"), "header", "current", branch, current_load))
-    rows.append(Row(WORKTREE_ROW_ID, "worktree", "current", _("working tree"), "unstaged"))
-    rows.extend(_commit_rows(current, "current", unpushed))
+    rows.append(Row(header_row_id(CURRENT_GROUP), "header", CURRENT_GROUP, branch, current_load))
+    rows.append(Row(WORKTREE_ROW_ID, "worktree", CURRENT_GROUP, _("working tree"), "unstaged"))
+    rows.extend(_commit_rows(current, CURRENT_GROUP, unpushed))
     if current_more:
-        rows.append(_more_row("current"))
+        rows.append(_more_row(CURRENT_GROUP))
 
-    parent_is_default = parent is None or (default is not None and parent.name == default.name)
-    if parent is not None and not parent_is_default:
-        parent_load: hunkctl.Loaded | None = None
-        if default is not None:
-            candidate = {hunkctl.RANGE_KEY: f"{default.target}...{parent.target}"}
-            parent_load = candidate if hunkctl.is_range(candidate) else None
-        rows.append(Row(header_row_id("parent"), "header", "parent", parent.name, parent_load))
-        rows.extend(_commit_rows(parent_commits, "parent", unpushed))
-        if parent_more:
-            rows.append(_more_row("parent"))
+    ranges = stack_ranges([page.branch for page in stack], default)
+    for page, (ref, below) in zip(stack, ranges, strict=True):
+        group = stack_group(ref.name)
+        load: hunkctl.Loaded | None = None
+        if below is not None:
+            candidate = {hunkctl.RANGE_KEY: f"{below}...{ref.target}"}
+            load = candidate if hunkctl.is_range(candidate) else None
+        rows.append(Row(header_row_id(group), "header", group, ref.name, load))
+        rows.extend(_commit_rows(page.commits, group, unpushed))
+        if page.more:
+            rows.append(_more_row(group))
 
     if default is not None:
-        rows.append(Row(header_row_id("default"), "header", "default", default.name))
-        rows.extend(_commit_rows(default_commits, "default", unpushed))
+        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, default.name))
+        rows.extend(_commit_rows(default_commits, DEFAULT_GROUP, unpushed))
         if default_more:
-            rows.append(_more_row("default"))
+            rows.append(_more_row(DEFAULT_GROUP))
     return rows[:MAX_ROWS]
 
 

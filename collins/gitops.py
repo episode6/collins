@@ -8,8 +8,9 @@ every read and mutation, and the runners that turn them into gitmodel's
 values.
 
 The commits list reads pages of `git log` (read_page), the `↑` marks
-(unpushed_shas), the working tree's status (read_status) and the local
-branches for the parent picker (local_branches); the action row stages and
+(unpushed_shas), the stack of local branches between the default branch
+and HEAD (stack_branches) and the working tree's status (read_status); the
+action row stages and
 unstages everything (stage_all, unstage_all), commits the index (commit,
 commit_fixup) and asks first whether a commit may be made at all
 (in_progress_operation, staged_paths). Every runner takes *run*
@@ -52,6 +53,11 @@ COMMIT_TIMEOUT_S = 600.0
 # branch pushed without `-u` has no upstream at all, and a branch pushed
 # to a second remote is on that remote.
 NOT_ON_ANY_REMOTE: tuple[str, ...] = ("--not", "--remotes")
+# How far down from HEAD stack_branches looks for branch tips: a stack is
+# a few branches of a few commits each, and the walk runs on every move of
+# the tree; a branch that far off its trunk lists its commits all the same,
+# under the current group.
+MAX_STACK_WALK = 10_000
 
 # The markers git leaves in its directory while an operation waits on the
 # user, in the order they are checked (a rebase beats a merge beats a
@@ -139,10 +145,19 @@ def status_argv() -> list[str]:
     return ["--no-optional-locks", "status", "--porcelain=v2", "-z", "--untracked-files=all"]
 
 
-def local_branches_argv() -> list[str]:
-    """["for-each-ref", "--format=%(refname:short)", "--sort=refname",
-    "refs/heads"]: every local branch, by name."""
-    return ["for-each-ref", "--format=%(refname:short)", "--sort=refname", "refs/heads"]
+def branch_tips_argv() -> list[str]:
+    """["for-each-ref", "--format=%(objectname) %(refname:short)",
+    "refs/heads"]: every local branch with the commit it points at."""
+    return ["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"]
+
+
+def stack_walk_argv(lower: str | None, upper: str, limit: int) -> list[str]:
+    """["rev-list", "--topo-order", "-n", limit, "<lower>..<upper>", "--"]:
+    the commits *upper* has that *lower* hasn't, children before parents —
+    so *upper*'s own commit comes first, and a branch tip nearer *upper*
+    comes before one further down. All of *upper* without a *lower*."""
+    rev = f"{lower}..{upper}" if lower else upper
+    return ["rev-list", "--topo-order", "-n", str(max(1, int(limit))), rev, "--"]
 
 
 def staged_paths_argv() -> list[str]:
@@ -229,15 +244,44 @@ def read_status(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT
     return parse_status_v2(result.stdout) if result.ok else None
 
 
-def local_branches(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT_TIMEOUT_S) -> list[str]:
-    """Every local branch, sorted by name — the parent picker's rows. Only
-    names hunkctl.safe_ref accepts (a branch is one, but the list ends up
-    in an argv); [] when git couldn't answer."""
-    result = run_git(cwd, local_branches_argv(), run=run, timeout=timeout)
-    if not result.ok:
+def stack_branches(
+    cwd: str | Path | None,
+    lower: str | None,
+    upper: str = "HEAD",
+    run=subprocess.run,
+    timeout: float = GIT_TIMEOUT_S,
+) -> list[BranchRef]:
+    """The stack under *upper*: every local branch whose tip is a commit
+    *upper* has and *lower* (the default branch's target) hasn't, nearest
+    *upper* first — what the commits list groups by, and what names the
+    branch the current one stacks on (the first of them). A tip at
+    *upper*'s own commit is left out (that is the current branch, or a
+    twin of it with no commits of its own), and so is any name
+    hunkctl.safe_ref refuses (it ends up in an argv). Two git runs: the
+    branch tips (branch_tips_argv) and the walk (stack_walk_argv, capped at
+    MAX_STACK_WALK commits — a tip further down than that is not seen);
+    [] when either couldn't be asked, or the targets aren't safe."""
+    if (lower is not None and not hunkctl.safe_ref(lower)) or not hunkctl.safe_ref(upper):
         return []
-    names = [line.strip() for line in result.stdout.splitlines()]
-    return [name for name in names if hunkctl.safe_ref(name)]
+    tips = run_git(cwd, branch_tips_argv(), run=run, timeout=timeout)
+    if not tips.ok:
+        return []
+    by_sha: dict[str, list[str]] = {}
+    for line in tips.stdout.splitlines():
+        sha, _sep, name = line.strip().partition(" ")
+        if _FULL_SHA.match(sha) and hunkctl.safe_ref(name):
+            by_sha.setdefault(sha, []).append(name)
+    if not by_sha:
+        return []
+    walk = run_git(cwd, stack_walk_argv(lower, upper, MAX_STACK_WALK), run=run, timeout=timeout)
+    if not walk.ok:
+        return []
+    shas = [line.strip() for line in walk.stdout.splitlines() if _FULL_SHA.match(line.strip())]
+    stack: list[BranchRef] = []
+    for sha in shas[1:]:  # the first is upper's own commit
+        for name in sorted(by_sha.get(sha, ())):
+            stack.append(BranchRef(name, name))
+    return stack
 
 
 def staged_paths(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT_TIMEOUT_S) -> list[str]:

@@ -52,24 +52,29 @@ downloads of each version, see the
   range from the working tree after a confirmation (and restores a
   deleted file). The page
   reloads by itself when the index or `HEAD` moves, and each session
-  remembers whether it was open, what it showed and the parent you set. A
+  remembers whether it was open and what it showed. A
   machine without hunk gets an install card in the page's place; the
   branch label's copy moved to a right-click.
 - **The git page's commits and files panels are native.** A sidebar of
   Collins' own sits to the left of hunk: the **commits list** (the
-  current branch with its *working tree* row and `↑` unpushed marks, the
-  parent branch, the default branch's latest page with *load more…*; a
-  click loads that commit or branch, the parent's header the parent
-  against the default, and the `▸` mark follows what hunk has loaded),
+  current branch with its *working tree* row and `↑` unpushed marks, then
+  **every branch of the stack under it** — git's word on what stacks on
+  what: each local branch on the current one's history since the trunk,
+  nearest first, the nearest being the parent the *vs* diff is measured
+  against — then the default branch's latest page with *load more…*; a
+  click loads that commit or branch, a stack branch's header that branch
+  against the one below it, and the `▸` mark follows what hunk has
+  loaded; a branch created, deleted or moved re-reads the stack on the
+  next tick),
   the **files list** (hunk's own files with their counts on the live side
   of the working tree, the other side off `git status`, one flat list for
   any other load; the row hunk's cursor is on highlighted, a click moves
   hunk there or loads the other side first), and an **action row** —
   *Stage hunk* / *Stage lines*, *Anchor line* / *Clear anchor* and
   *Discard* press the extension's keys in hunk for you; *Stage all*,
-  *Unstage all*, *Commit…*, *Commit with body…*, *Fix up…* and the parent
-  picker are native dialogs and `git` calls, their outcomes toasts in the
-  page, hunk reloaded on the spot. The header's panel button folds the
+  *Unstage all*, *Commit…*, *Commit with body…* and *Fix up…* are native
+  dialogs and `git` calls, their outcomes toasts in the page, hunk
+  reloaded on the spot. The header's panel button folds the
   sidebar (remembered with the page), and it folds by itself below about
   680 px. A three-dot range between two branches is a load of the page's
   own now (refreshed, remembered, restored). hunk itself runs with its
@@ -97,9 +102,9 @@ downloads of each version, see the
   (automatic / split / stacked) and theme, whether working-tree reviews
   show untracked files, how many commits each group of the commits panel
   shows per *load more…*, and a default parent branch — the branch a
-  session's diffs are measured against when no attached pull request names
-  one; *Set parent branch…* in the page still overrides it. Every one of
-  them reaches a page already open.
+  session's diffs are measured against when git shows no branch under
+  `HEAD` and no attached pull request names one. Every one of them
+  reaches a page already open.
 - **The status icon's glass empties when there's nothing to do.** The drink
   now stands for something waiting: the glass holds the coral pour while
   anything is unread, pours the barber pole while any session works, and
