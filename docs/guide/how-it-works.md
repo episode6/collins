@@ -352,7 +352,7 @@ collins/
 ├── gitloads.py       # what the git page can load: modes, commits, ranges, their names, the layout slot
 ├── diffmodel.py      # a parsed diff stream: files, hunks, gaps, split rows, word emphasis
 ├── gitpatch.py       # the staging arithmetic: partial patches and their plans
-├── diffnotes.py      # notes and highlights on a diff, kept by hunk across reloads
+├── diffnotes.py      # notes and highlights on a diff, kept by hunk key across reloads
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free
