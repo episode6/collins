@@ -14,7 +14,7 @@ the Ctrl+1/2/3 chords that pick the three modes (load_for_key, integers
 rather than Gdk constants), what the footer click opens on
 (initial_mode), the panel-layout slot a page persists in (encode_state /
 decode_state / decode_sidebar), the `show_diff` session tool's reading of
-its `what` argument and the repo-relative file path it hands the viewer
+its `what` argument and the repo-relative file path it hands the view
 (show_diff_load, diff_file_path), and the three git calls behind them —
 commit_subject / commit_subject_and_sha for a commit's name and full sha,
 resolve_commit for the sha a ref means right now — each one subprocess on

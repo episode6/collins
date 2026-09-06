@@ -30,13 +30,13 @@ These are the defaults. Every one of them can be changed — see
 | `Esc` | Bring a panel tab that's overlaying the whole session back to its place in the panel (a shell with a program running in it keeps the key) |
 | `Ctrl+.` | Show/hide the composer — raised, the cursor lands in it; pressed again while composing it closes and puts the draft back in the agent's own input box |
 | `Ctrl+'` | Show/hide the attachments gallery — the images this session has been shown, the same panel the handle on the terminal's right edge raises; docked as a panel tab it comes to the front (revealing a hidden strip) instead of closing |
-| `F6` | Show/hide the git page — hunk beside the session showing the working tree, the index, or the branch against its parent; pressed while the cursor is in it, it closes |
+| `F6` | Show/hide the git page — the diff beside the session showing the working tree, the index, or the branch against its parent; pressed while the cursor is in it, it closes |
 | `F7` | Open the pull request page for the newest PR this session is linked to — already open, it comes to the front and re-reads itself |
 | `F8` | Show/hide the editor panel (brings a popped-out editor back first) |
 | `Ctrl+Shift+O` | Quick open — fuzzy-find a file in the project, opened in the editor |
 | `Ctrl+S` (in the editor) | Save the current file |
 | `Ctrl+F` (in the editor) | Find in the current file |
-| `Ctrl+F` (in the git page's native diff) | Find in the diff — one query over every hunk; `Enter` / `Shift+Enter` walk the matches across hunks and files |
+| `Ctrl+F` (in the git page) | Find in the diff — one query over every hunk; `Enter` / `Shift+Enter` walk the matches across hunks and files |
 | `F9` | Toggle the sidebar |
 | `Ctrl+Shift+B` | Show/hide the notification history — the sheet the header bell opens; `Esc` closes it too |
 | `Ctrl+,` | Preferences |
@@ -99,16 +99,15 @@ Keyboard Bindings dialog:
 | `Esc`, arrows, `Tab`, `Enter` / `Space` | Lightbox | Close, walk the gallery, cycle the shade's buttons, activate the focused one — nothing reaches the terminal underneath |
 | `Ctrl+Enter` | Pull request comment & review boxes | Post, as on GitHub; a bare `Enter` stays a newline |
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Git page | Load the unstaged changes, the staged changes, or the branch's diff against its parent |
-| `↑` / `↓`, `Enter` | Git page (commits and files lists) | Walk the rows, load the commit or branch (or move hunk to the file) — the native sidebar's lists are ordinary GTK lists |
+| `↑` / `↓`, `Enter` | Git page (commits and files lists) | Walk the rows, load the commit or branch (or reveal the file in the diff) — the sidebar's lists are ordinary GTK lists |
 | `Enter`, `Shift+Enter` | Git page commit dialog | Commit; a newline in the body |
-| `x` / `X`, `v` / `Esc`, `D` | Git page (hunk) | Stage or unstage the hunk or file under hunk's cursor; anchor a line range at the cursor and clear it (`x` then stages the range); discard the hunk or range after hunk's confirmation — the sidebar's *Stage hunk*, *Anchor line* and *Discard* buttons press the same |
-| `]` / `[`, `.` / `,` | Git page (native diff, experimental) | Focus the next / previous hunk, the next / previous file — scrolled into view, the files list following. This row and the four below are the **Git page** group of the Keyboard Bindings dialog: bare letters bound to the diff alone, rebindable there like any other |
-| `j` / `k` | Git page (native diff) | Move the cursor line down / up in the focused hunk, the page scrolling to keep it on screen; past the hunk's last (first) line the keyboard walks on into the next (previous) hunk |
-| `}` / `{` | Git page (native diff) | The next / previous hunk carrying a note or highlight |
-| `c`, `E`, `a` | Git page (native diff) | Add a note under the focused hunk, anchored to the cursor line (`Ctrl+Enter` saves, `Esc` cancels; while the editor is open the other letters type into it); edit the hunk's first note of yours; show or fold the agent's notes |
-| `z` | Git page (native diff) | Draw every unchanged line above the focused hunk |
-| `x` / `X`, `D`, `Esc` | Git page (native diff) | Stage, unstage or revert — by the load — the selected lines or, with none, the focused hunk; the same for the whole file; discard (revert, on a commit or branch) the selection or hunk after a confirmation whose default is *Cancel* — `Esc` or `Enter` there leaves the tree alone; clear the line selection (made by dragging in the text or on the line numbers, or with `Shift`+arrows). The hunk and file headers' buttons press the same; a binary has no hunk and goes whole from its file header, never reverted |
-| `0` / `1` / `2`, `l`, `w` | Git page (native diff) | Layout automatic / split / stacked, line numbers on or off, wrap long lines — each writes the Preferences → Git setting, so every page follows |
-| `r`, `/`, `?`, `e`, `q` | Git page (native diff) | Reload the diff; focus the files filter (`Esc` there clears it and comes back); open the Keyboard Bindings dialog on its Git page group; open the file under the cursor in the editor, at that line; close the page |
+| `]` / `[`, `.` / `,` | Git page (diff) | Focus the next / previous hunk, the next / previous file — scrolled into view, the files list following. This row and the ones below are the **Git page** group of the Keyboard Bindings dialog: bare letters bound to the diff alone (they never reach the agent's terminal), rebindable there like any other |
+| `j` / `k` | Git page (diff) | Move the cursor line down / up in the focused hunk, the page scrolling to keep it on screen; past the hunk's last (first) line the keyboard walks on into the next (previous) hunk |
+| `}` / `{` | Git page (diff) | The next / previous hunk carrying a note or highlight |
+| `c`, `E`, `a` | Git page (diff) | Add a note under the focused hunk, anchored to the cursor line (`Ctrl+Enter` saves, `Esc` cancels; while the editor is open the other letters type into it); edit the hunk's first note of yours; show or fold the agent's notes |
+| `z` | Git page (diff) | Draw every unchanged line above the focused hunk |
+| `x` / `X`, `D`, `Esc` | Git page (diff) | Stage, unstage or revert — by the load — the selected lines or, with none, the focused hunk; the same for the whole file; discard (revert, on a commit or branch) the selection or hunk after a confirmation whose default is *Cancel* — `Esc` or `Enter` there leaves the tree alone; clear the line selection (made by dragging in the text or on the line numbers, or with `Shift`+arrows). The hunk and file headers' buttons press the same; a binary has no hunk and goes whole from its file header, never reverted |
+| `0` / `1` / `2`, `l`, `w` | Git page (diff) | Layout automatic / split / stacked, line numbers on or off, wrap long lines — each writes the Preferences → Git setting, so every page follows |
+| `r`, `/`, `?`, `e`, `q` | Git page (diff) | Reload the diff; focus the files filter (`Esc` there clears it and comes back); open the Keyboard Bindings dialog on its Git page group; open the file under the cursor in the editor, at that line; close the page |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
 | `Esc` | Notification sheet, attachments overlay, Open with picker | Close |

@@ -3,8 +3,8 @@
 """Tests for gitmodel: the git page's native panels as pure functions —
 the log and status parsers, the commits list's rows and which of them is
 the loaded one, the files list's sections, and the action row's words.
-Ports of the collins-git extension's `bun test` cases (test/model.test.ts,
-test/git.test.ts) that the native panels replace."""
+Ports of the former collins-git extension's `bun test` cases
+(test/model.test.ts, test/git.test.ts) that the native panels replaced."""
 
 import pytest
 

@@ -6,7 +6,7 @@ script, no data_files that land anywhere pipx or a venv would look. So every
 file the app needs at runtime ships inside the package: the action icons
 app.py puts on the icon search path, the app icon, the launcher template
 and metainfo `collins --install-desktop` writes out, the translations, the
-notification sounds, and the hunk extension the git page hands to hunk.
+notification sounds.
 
 They get there through `[tool.setuptools.package-data]` globs over paths that
 are *symlinks* into data/, and setuptools has not always followed those — the

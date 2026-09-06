@@ -86,7 +86,10 @@ def test_show_diff_is_served_on_the_switch_alone():
 
 def test_show_diff_description_names_no_external_viewer():
     description = mcptools.tool_schema("show_diff")["description"]
-    assert "hunk session" not in description and "hunk.dev" not in description
+    # No session id to quote, no install link, no viewer to name: the page is
+    # Collins' own.
+    assert "session id" not in description and ".dev" not in description
+    assert "install" not in description
     assert "diff view" in description
 
 

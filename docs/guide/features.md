@@ -384,20 +384,25 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 ## Git page
 
 What the agent has changed, beside the terminal it is changing it in. The
-page is [hunk](https://hunk.dev) — the terminal diff viewer — running in a
-terminal of its own under a one-row header, one page per session, with
-Collins' own **commits** and **files** panels in a native sidebar to its
-left, and a small hunk extension Collins ships (`collins-git`) inside the
-terminal for the keys that need hunk's cursor. hunk runs with its own
-files pane hidden — the review stream is all it draws — which is why the
-page needs hunk 0.21 or newer:
+page is a diff drawn by Collins itself — one page per session, under a
+one-row header — with Collins' own **commits** and **files** panels in a
+sidebar to its left. It needs `git` alone: there is no external diff viewer
+to install, and nothing in it is a terminal.
 
-- **Three panels.** The native **commits** list over the **files** list on
-  the left, an action row under them, and hunk's own review stream — every
-  file of what is loaded, in one scrollable column — on the right. Clicking
-  a file moves hunk to it; hunk's `.` / `,` and `]` / `[` walk files and
-  hunks as ever, and the files list follows hunk's cursor as it moves (the
-  extension reports every move; without it, within a couple of seconds).
+- **The diff.** Every file of the load is a card — its path (`old → new`
+  for a rename), `+` / `−` counts, and what kind of change it is (new —
+  untracked files included; the files list's `?` says which — deleted,
+  binary, too large, renamed, a mode change) — and every hunk under it
+  its own syntax-highlighted view, in the **editor's style scheme and
+  font**, with old and new line numbers and a `+` / `−` sign column.
+  **Split** puts old and new side by side, row-aligned even under wrap;
+  **stacked** is one column; *automatic* splits when the page is wide
+  enough. Changed words within a changed line are emphasised. Images
+  show before and after, side by side; a binary or a file too large to
+  draw is a placeholder with its counts. Unchanged stretches between
+  hunks fold into *⋯ n unchanged lines* rows with *▲ 20* / *▼ 20* /
+  *all* buttons (`z` draws everything above the focused hunk); the
+  header of the file you are scrolled into stays pinned at the top.
 - **The commits list is the switch.** One group per branch of the stack:
   the **current branch** — a *working tree* row, then its own commits
   since it forked from the branch it stacks on, unpushed ones marked `↑`
@@ -405,58 +410,111 @@ page needs hunk 0.21 or newer:
   added over the one below (a branch straight off the trunk has no such
   groups), and the **default branch**'s latest *Commits per page* (twenty
   by default) with a *load more…* row. A click loads it into the same
-  window: the *working tree* row the unstaged changes, a commit that one
+  page: the *working tree* row the unstaged changes, a commit that one
   commit, a branch header everything the branch did since it forked (a
   stack branch's header, that branch against the one below it) — except
   the default branch's, which stays put: a whole trunk is more than a
-  diff viewer should be handed. The loaded row wears `▸`, and its group's
-  header is bold; the mark follows what hunk has loaded, not the last
-  click. A right-click offers *Copy sha* and *Reload*.
+  diff should be handed. The loaded row wears `▸`, and its group's
+  header is bold; the mark follows what the page has loaded, not the
+  last click. A right-click offers *Copy sha* and *Reload*.
 - **The files list splits on the working tree.** With *working tree*
-  loaded it shows **UNSTAGED · n** and **STAGED · n** sections; hunk holds
-  one of the two at a time, so that side is live — hunk's own files with
-  their `+` / `−` counts (`bin` for a binary) — and the other is
-  navigation off `git status`: clicking a file there (or the section's
-  heading) loads that side and selects the file. Any other load (a
+  loaded it shows **UNSTAGED · n** and **STAGED · n** sections; the page
+  holds one of the two at a time, so that side is live — the diff's own
+  files with their `+` / `−` counts (`bin` for a binary) — and the other
+  is navigation off `git status`: clicking a file there (or the section's
+  heading) loads that side and reveals the file. Any other load (a
   commit, a branch, a range) is one flat **FILES · n** list. The status
   letter colours each row (added green, deleted red, renamed blue,
-  untracked dim), and the file hunk's cursor is on is highlighted.
-- **The action row.** *Stage hunk* (or *Stage lines* while a range is
-  anchored), *Anchor line* / *Clear anchor* and *Discard* act on hunk's
-  cursor — they press the extension's `x`, `v` / `Esc` and `D` for you and
-  put the keyboard back in hunk, so its own confirmation for a discard
-  answers to Enter. *Stage all* and *Unstage all* confirm with the count,
-  then run `git add -A` / `git reset`; the **Commit** menu has *Commit…*,
-  *Commit with body…* (a summary, and a body — Enter commits, Shift+Enter
-  breaks a line) and *Fix up…* (pick an unpushed commit, and the confirm
-  names the `git rebase -i --autosquash` that folds it in — named, never
-  run). Commits refuse
-  before asking anything while a rebase, merge, cherry-pick or revert is
-  half-finished, or nothing is staged. Every outcome is a toast in the
-  page (*Committed a1b2c3d "…" — undo with `git reset --soft HEAD~1`*,
-  or git's first error line), and hunk reloads on the spot.
+  untracked dim). The list **follows the view** — the file at the top of
+  the viewport, or the hunk the keyboard moved into, is highlighted — and
+  a click scrolls to the file and focuses its first hunk. A **filter**
+  box above the list (`/`) narrows both the list and the diff to the
+  paths that contain what you type; `Esc` clears it.
+- **The action row.** *Stage all* and *Unstage all* confirm with the
+  count, then run `git add -A` / `git reset`; the **Commit** menu has
+  *Commit…*, *Commit with body…* (a summary, and a body — Enter commits,
+  Shift+Enter breaks a line) and *Fix up…* (pick an unpushed commit, and
+  the confirm names the `git rebase -i --autosquash` that folds it in —
+  named, never run). Commits refuse before asking anything while a
+  rebase, merge, cherry-pick or revert is half-finished, or nothing is
+  staged. Every outcome is a toast in the page (*Committed a1b2c3d "…" —
+  undo with `git reset --soft HEAD~1`*, or git's first error line), and
+  the diff reloads on the spot.
+- **Staging, in the diff itself.** The buttons sit on the headers
+  (SourceTree's placement, Sublime Merge's words), always there and
+  lifted while the pointer is over the file or hunk:
+
+  | Load | File header | Hunk header, nothing selected | Hunk header, lines selected |
+  | --- | --- | --- | --- |
+  | unstaged | *Stage file* · *Discard file* | *Stage hunk* · *Discard hunk* | *Stage lines* · *Discard lines* |
+  | staged | *Unstage file* | *Unstage hunk* | *Unstage lines* |
+  | a commit, the branch, a range | *Revert file* | *Revert hunk* | *Revert lines* |
+
+  **Select lines** by dragging in the text, dragging or clicking (and
+  shift-clicking) on the line numbers, or with `Shift`+arrows: the
+  selection snaps to whole lines, lives in one hunk at a time (selecting
+  in another clears it), and `Esc` clears it; padding cells and expanded
+  context never count. `x` stages, unstages or reverts the selection or,
+  with none, the focused hunk; `X` the file; `D` discards (reverts, on a
+  commit or branch) after a confirmation. A right-click on a hunk offers
+  the same, plus *Copy*, *Open in editor*, *Add note* and *Expand
+  context*; the pinned file header carries the file's buttons too.
+- Every action **re-reads the file's patch from git** at that moment and
+  refuses, with a word rather than half done, what the arithmetic can't
+  describe: a binary, a file too large, a rename or a new / deleted file
+  by hunk (use the file button — a binary stages and unstages whole, and
+  is never reverted from a patch), a symlink or submodule, and a file
+  that changed since the view loaded it — which reloads. Stage and
+  unstage ask nothing; a discard confirms (an untracked file's discard
+  moves it to the **trash**, never an unlink; a deleted file's *Discard
+  file* restores it from the index); a revert applies the commit's patch
+  in reverse to the working tree after a confirm that warns when the
+  file has unstaged changes, and when the context has moved retries
+  three-way and says so (the result is staged, and may carry conflict
+  markers). Each runs behind the page's busy — the pressed button spins
+  — toasts its outcome (or git's first error line), and reloads the view
+  by key, so a selection survives with its hunk.
+- **Notes on the diff.** `c` (or the right-click menu's *Add note*) opens
+  a card under the focused hunk, anchored to the cursor line — a text
+  box where `Ctrl+Enter` saves and `Esc` cancels; the first line is the
+  note's summary, the rest its rationale. The card names its source
+  (*You*, or *Agent* with the author when a session lands one through
+  the annotate tool) and the line it sits on, the marker column shows a
+  glyph beside that line, and `}` / `{` walk the annotated hunks. `E`
+  re-opens the hunk's first note of yours, *Edit* and *Delete* sit on
+  the card (the agent's cards delete too, and `a` — or the header menu's
+  *Agent notes* check — folds them all away, their markers staying).
+  With lines selected, `c` anchors the note on the selection's last
+  line. While an editor is open the diff's letter keys type into it,
+  nothing else. Notes live in the page for the tab's life — nothing is
+  written to disk — and follow a reload: a note on a hunk the edit left
+  alone keeps its card, one on a hunk that changed — or whose line
+  numbers shifted, because lines were staged or added above it — is
+  dropped, one on a file the current load doesn't show waits for a load
+  that does. Highlights (attention marks on a range of a line, in four
+  tones) share the same store and rules; the tools that land them are
+  the next release's.
+- **Find** (`Ctrl+F`, or the header's magnifier): one query over every
+  hunk, every occurrence highlighted, *n of m* counted, `Enter` /
+  `Shift+Enter` stepping across hunks and files.
+- **Keys**, page-local (they never reach the agent's terminal, and the
+  *Git page* group of Keyboard Bindings rebinds them): `]` / `[` and `.`
+  / `,` move between hunks and files, `j` / `k` move the cursor line
+  within the focused hunk and on into the next one past its edge, the
+  page scrolling along, `}` / `{` between annotated hunks, `0` / `1` /
+  `2` pick the layout, `l` and `w` flip line numbers and wrap (writing
+  the setting, so every page follows), `r` reloads, `e` opens the file
+  in the editor at the cursor's line, `?` opens Keyboard Bindings on the
+  Git page group, `q` closes the page. The header's menu has the same
+  layout, line-number and wrap switches. `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
+  load the **unstaged** changes, the **staged** changes and the whole
+  **branch against its parent** (`main...HEAD`) from anywhere in the page
+  — the three most common rows, as chords.
 - **The sidebar folds.** The header's panel button hides and shows it,
   remembered with the page; below about 680 px the page hides it
   regardless (the button greys with *Widen the page to show the panels*)
-  so hunk keeps its columns — a fresh page opens wide enough for both,
-  and the divider can be dragged down to hunk alone.
-- **Staging, from the keyboard** — live while the working tree is loaded;
-  in a commit or branch view the keys say *read-only view* and do nothing:
-
-  | Key | Does |
-  | --- | --- |
-  | `x` | stage the current hunk — unstage it, in the Staged view — or, after `v`, the lines from the anchor to the cursor |
-  | `X` | stage / unstage the current file (a rename as both paths at once) |
-  | `v` / `Esc` | anchor a line range at the cursor line (painted amber), and clear it again; move with hunk's own `j` / `k`, then `x` or `D` |
-  | `D` | discard the current hunk, or the anchored range, from the working tree — after a confirmation; on a deleted file, restore it from the index |
-
-  Every key reloads the review and says what it did. Stage and unstage
-  ask nothing; discard confirms first, because the change exists nowhere
-  else. A binary file, a range across two files, or a file that changed
-  since the review loaded, is refused with a word rather than half-done.
-  Everything else — stage all, commit, fix up — is the sidebar's, native.
-  (hunk's own `s` still pops its files pane inside the terminal; it is
-  hunk's, and stays until you press it again.)
+  so the diff keeps its columns — a fresh page opens wide enough for
+  both, and the divider can be dragged down to the diff alone.
 - **The parent branch is git's word.** The page reads the stack off the
   repository: every local branch whose tip lies on the current branch's
   history since the default branch, nearest first. The nearest one is
@@ -471,39 +529,34 @@ page needs hunk 0.21 or newer:
   branch; either way the local branch when there is one, else the
   remote's. There is nothing to set: create or delete a branch and the
   page follows on its next tick.
-- **Preferences → Git** sets which **Diff viewer** draws (hunk, or the
-  experimental native view below), how hunk is started — its **Layout**
-  (automatic, split or stacked) and **Theme** (any name hunk knows; empty
-  is hunk's own default) — the native view's **Line numbers**, **Wrap long
-  lines** and **Highlight changed words**, whether working-tree reviews
-  **show untracked files**, and the commits panel's **Commits per page**.
-  All of them reach a page already open: a layout or theme change
-  restarts hunk in place, the viewer switch swaps the viewer live, the
-  rest change nothing but the view.
-- `Ctrl+1` / `Ctrl+2` / `Ctrl+3` still load the **unstaged** changes, the
-  **staged** changes and the whole **branch against its parent**
-  (`main...HEAD`) from anywhere in the page — the three most common rows,
-  as chords.
+- **Preferences → Git** sets the diff's **Layout** (automatic, split or
+  stacked), **Line numbers**, **Wrap long lines** and **Highlight changed
+  words**, whether working-tree reviews **show untracked files**, and the
+  commits panel's **Commits per page**. All of them reach a page already
+  open, and the diff follows the editor's style scheme and font from
+  Preferences → Editor.
 - **The header says what you're looking at**: the branch, then a
   breadcrumb — *working tree · unstaged*, *working tree · staged*,
   *feature vs main*, *a1b2c3d Wire the mode switch* — that the page's tab
-  title follows (*Git · staged*, *Git · a1b2c3d*). It reports what hunk has loaded, not
-  what was last clicked: a load made in the commits list, by a `hunk
-  session reload` run from a shell, or by the agent shows up in it within
-  a couple of seconds. A commit, and a three-dot range between two
-  branches (a stack branch's header: *develop vs main*), are the page's own
-  loads — kept fresh, remembered, restored — while anything else hunk
-  can show (`a..b`, a pathspec) is named as hunk names it and left alone
-  until the next load takes the page back. A refresh button reloads the
-  same diff and the lists; the tab's X closes the page.
-- **It keeps itself fresh.** Every two seconds the page compares the
-  index, `HEAD` and the parent branch against what it last loaded, and
-  reloads when any of them moved — an agent staging, committing or
-  rebasing shows up without a keypress, and a session that finishes a
-  turn is checked on the spot; a branch created, deleted or moved (a
-  commit on another branch of the stack, in another worktree) re-reads
-  the stack and the commits list, and a push refreshes the `↑` marks. A
-  session that steps into a worktree takes the page with it.
+  title follows (*Git · staged*, *Git · a1b2c3d*). It reports what the
+  page has loaded, not what was last clicked: a load made in the commits
+  list or by the agent shows up in it at once. A commit, and a three-dot
+  range between two branches (a stack branch's header: *develop vs
+  main*), are loads of the page's own — kept fresh, remembered, restored.
+  A refresh button reloads the same diff and the lists; the tab's X
+  closes the page.
+- **It keeps itself fresh.** The loaded files' directories are watched:
+  an edit re-reads the diff a third of a second later — any edit, one
+  that only rewrites an already-changed line included — an untouched
+  hunk keeps its widget, its selection and the keyboard, and the scroll
+  stays put. Every two seconds the page also compares the index, `HEAD`
+  and the parent branch against what it last loaded, and reloads when
+  any of them moved — an agent staging, committing or rebasing shows up
+  without a keypress, and a session that finishes a turn is checked on
+  the spot; a branch created, deleted or moved (a commit on another
+  branch of the stack, in another worktree) re-reads the stack and the
+  commits list, and a push refreshes the `↑` marks. A session that steps
+  into a worktree takes the page with it.
 - **Three ways in**: `F6` (pressed while the cursor is in the page, it
   closes; from anywhere else it opens or fronts it), the footer's **git
   button** beside the terminal and editor toggles (the same toggle, the
@@ -511,128 +564,16 @@ page needs hunk 0.21 or newer:
   branch** label. A fresh page opens on the unstaged changes while
   anything in the tree is dirty, and on the staged ones when only the
   index is. Outside a git repository there is nothing to open: the button
-  is greyed, and `F6` says so in the terminal.
-- **Hunk's own keys still work** — it is the real program, in a real
-  terminal, so its navigation, search and `r` reload are all there. The
-  page holds `Esc` for it, and the terminal zoom chords apply.
-- **No hunk, no error.** A machine without hunk (or with one older than
-  0.21) gets a card in the page's place: a link to hunk's install
-  instructions and a *Check again* button. Hunk exiting gets a *Reopen*
-  card; a directory that stops being a repository, a card saying so.
+  is greyed, and `F6` says so in the terminal; a directory that stops
+  being a repository gets a card saying so.
+- `show_diff` — the session tool — opens the page on a diff and reveals a
+  file and line in it without taking your keyboard; a line that no hunk
+  carries (an unchanged stretch) still reveals the file, on the hunk
+  nearest that line, and the reply tells the agent so.
 - Each session remembers whether its git page was open, where it sat,
   what it showed — one of the three working-tree loads, a commit or a
-  range — and whether the sidebar was folded, restored on the next launch,
-  hunk starting the moment the page is first shown.
-- **Experimental: the native diff viewer.** Preferences → Git → **Diff
-  viewer** → *Native* replaces hunk's terminal with a diff drawn by
-  Collins itself; hunk stays the default while it is tried on real diffs,
-  and once staging lands in it hunk is retired. What it does today,
-  read-only:
-  - Every file of the load is a card — its path (`old → new` for a
-    rename), `+` / `−` counts, and what kind of change it is (new —
-    untracked files included; the files list's `?` says which — deleted,
-    binary, too large, renamed, a mode change) — and
-    every hunk under it its own syntax-highlighted view, in the **editor's
-    style scheme and font**, with old and new line numbers and a `+` / `−`
-    sign column. **Split** puts old and new side by side, row-aligned even
-    under wrap; **stacked** is one column; *automatic* splits when the
-    page is wide enough. Changed words within a changed line are
-    emphasised. Images show before and after, side by side.
-  - Unchanged stretches between hunks fold into *⋯ n unchanged lines*
-    rows with *▲ 20* / *▼ 20* / *all* buttons (`z` draws everything above
-    the focused hunk); the header of the file you are scrolled into stays
-    pinned at the top.
-  - The **files list** follows the view — the file at the top of the
-    viewport, or the hunk the keyboard moved into — and a click in it
-    scrolls to the file and focuses its first hunk. A **filter** box above
-    the list (`/`) narrows both the list and the diff to the paths that
-    contain what you type; `Esc` clears it.
-  - **Find** (`Ctrl+F`, or the header's magnifier): one query over every
-    hunk, every occurrence highlighted, *n of m* counted, `Enter` /
-    `Shift+Enter` stepping across hunks and files.
-  - **Keys**, page-local (they never reach the agent's terminal): `]` /
-    `[` and `.` / `,` move between hunks and files, `j` / `k` move the
-    cursor line within the focused hunk and on into the next one past its
-    edge, the page scrolling along, `}` / `{` between annotated hunks,
-    `0` / `1` / `2` pick the layout, `l` and `w` flip line numbers and
-    wrap (writing the setting, so every page follows), `r` reloads, `e`
-    opens the file in the editor at the cursor's line, `?` opens Keyboard
-    Bindings on the Git page group, `q` closes the page. The header's
-    menu has the same layout, line-number and wrap switches.
-  - `show_diff` with a line that no hunk carries (an unchanged stretch)
-    still reveals the file, on the hunk nearest that line, and tells the
-    agent so.
-  - It **keeps itself fresh** without hunk's `--watch`: the loaded files'
-    directories are watched, an edit re-reads the diff a third of a second
-    later — any edit, one that only rewrites an already-changed line
-    included — an untouched hunk keeps its widget and the keyboard, the
-    scroll stays put, and the two-second tick still catches the index,
-    `HEAD` and the refs.
-  - It needs **git alone**: a machine without hunk gets the diff instead
-    of the install card, and every kind of change draws — an edit, a new
-    or deleted file, an untracked one, a rename (as `old → new` with its
-    similarity), a binary, an image, a mode change.
-  - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`, the commits list, the breadcrumb, the
-    tab title, `show_diff` and the layout persistence all work as with
-    hunk.
-  - **Staging, in the diff itself.** The buttons sit on the headers
-    (SourceTree's placement, Sublime Merge's words), always there and
-    lifted while the pointer is over the file or hunk:
-
-    | Load | File header | Hunk header, nothing selected | Hunk header, lines selected |
-    | --- | --- | --- | --- |
-    | unstaged | *Stage file* · *Discard file* | *Stage hunk* · *Discard hunk* | *Stage lines* · *Discard lines* |
-    | staged | *Unstage file* | *Unstage hunk* | *Unstage lines* |
-    | a commit, the branch, a range | *Revert file* | *Revert hunk* | *Revert lines* |
-
-    **Select lines** by dragging in the text, dragging or clicking (and
-    shift-clicking) on the line numbers, or with `Shift`+arrows: the
-    selection snaps to whole lines, lives in one hunk at a time
-    (selecting in another clears it), and `Esc` clears it; padding cells
-    and expanded context never count. `x` stages, unstages or reverts
-    the selection or, with none, the focused hunk; `X` the file; `D`
-    discards (reverts, on a commit or branch) after a confirmation. A
-    right-click on a hunk offers the same, plus *Copy*, *Open in editor*,
-    *Add note* and *Expand context*; the pinned file header carries the
-    file's buttons too.
-  - Every action **re-reads the file's patch from git** at that moment
-    and refuses, with a word rather than half done, what the arithmetic
-    can't describe: a binary, a file too large, a rename or a new /
-    deleted file by hunk (use the file button — a binary stages and
-    unstages whole, and is never reverted from a patch), a symlink or
-    submodule, and a file that changed since the view loaded it — which
-    reloads.
-    Stage and unstage ask nothing; a discard confirms (an untracked
-    file's discard moves it to the **trash**, never an unlink; a deleted
-    file's *Discard file* restores it from the index); a revert applies
-    the commit's patch in reverse to the working tree after a confirm
-    that warns when the file has unstaged changes, and when the context
-    has moved retries three-way and says so (the result is staged, and
-    may carry conflict markers). Each runs behind the sidebar's busy —
-    the pressed button spins — toasts its outcome (or git's first error
-    line), and reloads the view by key, so a selection survives with its
-    hunk. The sidebar's *Stage hunk* / *Anchor line* / *Discard* buttons
-    hide while the native view draws: the headers carry the buttons now.
-  - **Notes on the diff.** `c` (or the right-click menu's *Add note*)
-    opens a card under the focused hunk, anchored to the cursor line —
-    a text box where `Ctrl+Enter` saves and `Esc` cancels; the first
-    line is the note's summary, the rest its rationale. The card names
-    its source (*You*, or *Agent* with the author when a session lands
-    one through the annotate tool) and the line it sits on, the marker
-    column shows a glyph beside that line, and `}` / `{` walk the
-    annotated hunks. `E` re-opens the hunk's first note of yours, *Edit*
-    and *Delete* sit on the card (the agent's cards delete too, and `a`
-    — or the header menu's *Agent notes* check — folds them all away,
-    their markers staying). With lines selected, `c` anchors the note
-    on the selection's last line. While an editor is open
-    the diff's letter keys type into it, nothing else. Notes live in the
-    page for the tab's life — nothing is written to disk — and follow a
-    reload: a note on a hunk the edit left alone keeps its card, one on
-    a hunk that changed — or whose line numbers shifted, because lines
-    were staged or added above it — is dropped, one on a file the
-    current load doesn't show waits for a load that does. Highlights (attention
-    marks on a range of a line, in hunk's tones) share the same store
-    and rules; the tools that land them are the next PR's.
+  range — and whether the sidebar was folded, restored on the next
+  launch, the diff read the moment the page is first shown.
 
 ## Knowing what's happening
 
@@ -768,14 +709,12 @@ is running in:
   session's own editor pane, instead of hoping you click a path in the
   terminal.
 - **`show_diff(what, file?, line?)`** — open the session's git page on a
-  diff — `unstaged`, `staged`, `branch`, or any commit ref — and move hunk
-  to a file and line in it: "show me what you did" lands as the change on
+  diff — `unstaged`, `staged`, `branch`, or any commit ref — and reveal a
+  file and line in it: "show me what you did" lands as the change on
   your screen rather than a pasted diff. The page is revealed, never
-  focused; the reply tells the agent what loaded and the hunk session id,
-  and that everything else in the viewer (moving between hunks,
-  highlighting lines, comments) is `hunk session …` from its own shell.
-  Sessions are offered the tool only while hunk is on the `PATH` (checked
-  at most every 30 s), so an agent on a machine without it never sees it.
+  focused; the reply tells the agent what loaded and what was revealed —
+  a line no hunk carries lands on the nearest hunk, and the reply says
+  so.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
   lightbox. An `http(s)` URL works too: Collins downloads it and shows the
   copy.
@@ -994,8 +933,9 @@ anonymously), a **Pull requests** group — the PR page's **Text size**,
 whether a first prompt that links a pull request by URL **attaches it
 to the session** (on; a bare "PR 183" is not enough), whether sessions are **renamed after their pull
 requests** (off), and whether the marks are **refreshed at launch**
-(on) — a **Git** group for the git page — hunk's **Layout** (automatic /
-split / stacked) and **Theme**, **Show untracked files**, **Commits per
+(on) — a **Git** group for the git page — the diff's **Layout** (automatic /
+split / stacked), **Line numbers**, **Wrap long lines** and **Highlight
+changed words**, **Show untracked files**, **Commits per
 page**, and a **Default parent branch** to measure branches against when
 git shows no stack and no pull request names one — and the **Footer
 apps** list — reachable from

@@ -103,37 +103,25 @@ runs whatever `claude` it finds on your `PATH`, under Anthropic's own terms
 Anthropic are trademarks of Anthropic PBC. Collins is an unofficial community tool, not
 affiliated with or endorsed by Anthropic.
 
-## hunk
+## collins-git
 
-The git page shows diffs through **hunk** — © Ben Vinegar — MIT License —
-[modem-dev/hunk](https://github.com/modem-dev/hunk), [hunk.dev](https://hunk.dev). Collins
-neither bundles nor redistributes it: it runs whatever `hunk` it finds on your `PATH`
-(0.21 or newer), and shows how to install one when there is none.
+The git page's diff, its staging arithmetic and its commits and files panels are
+Collins' own GTK widgets and Python modules, licensed **GPL-3.0-or-later** like the
+rest, with code adapted from three community projects, each under the **MIT License**:
 
-## collins-git (the bundled hunk extension)
-
-The git page's keys at hunk's cursor — stage the hunk, the file or a line range, anchor
-a range, discard — are a hunk extension Collins ships as package data under
-`collins/hunkext/collins-git/` and loads with `--extension`; the page's commits and
-files panels are Collins' own GTK widgets, fed by Python ports of two of the parsers
-below. The extension is part of Collins and licensed **GPL-3.0-or-later** like the rest,
-with code adapted from three community extensions, each under the **MIT License**:
-
+- **hunk-commit** — © 2026 hunk-jj-stage contributors —
+  [muzomer/hunk-commit](https://github.com/muzomer/hunk-commit): the staging arithmetic
+  in `collins/gitpatch.py` — the single-file patch parser, the partial-patch writers and
+  their guards — and the stream parser it grew into (`collins/diffmodel.py`), with the
+  patch tests ported alongside (`tests/test_gitpatch.py`).
 - **hunk-git-lite** — © 2026 Josh Edler —
   [joshedler/hunk-git-lite](https://github.com/joshedler/hunk-git-lite): the git runner
-  shape (`git.ts`) and the status parser the integration tests read the index back with
-  (`test/support/status.ts`); the same status parser and runner shape ported to Python
-  for the native panels (`collins/gitmodel.py`, `collins/gitops.py`).
-- **hunk-commit** — © 2026 hunk-jj-stage contributors —
-  [muzomer/hunk-commit](https://github.com/muzomer/hunk-commit): the single-file patch
-  parser, writer and guards (`patch.ts`, `staging.ts`, `test/patch.test.ts`), the
-  staging commands in the composition root (`index.ts`) and the temp-repository test
-  fixture (`test/support/gitRepo.ts`).
+  shape and the status parser, ported to Python for the native panels
+  (`collins/gitmodel.py`, `collins/gitops.py`).
 - **hunk-commit-log** — © 2026 Sadick —
   [sadick254/hunk-commit-log](https://github.com/sadick254/hunk-commit-log): the log
   format, its parser and the log reader, ported to Python for the native commits list
-  (`collins/gitmodel.py`, `collins/gitops.py`); nothing of it remains in the extension
-  itself.
+  (`collins/gitmodel.py`, `collins/gitops.py`).
 
 Each borrowing file names its source in its header. The MIT License text, which applies
 to those portions:

@@ -254,7 +254,7 @@ def _selection_bounds(buffer: Gtk.TextBuffer) -> tuple[Gtk.TextIter, Gtk.TextIte
 
 def _decode_lines(data: bytes | None) -> list[str] | None:
     """A side's whole file as lines, for gap context: None for no file, a
-    binary (a NUL in the first 8000 bytes, hunk's sniff), or one over
+    binary (a NUL in the first 8000 bytes, git's own sniff), or one over
     diffmodel's char cap."""
     if data is None or b"\x00" in data[:8000] or len(data) > diffmodel.MAX_PATCH_CHARS:
         return None
@@ -1825,7 +1825,7 @@ class _GapRow(Gtk.Box):
 
     @property
     def key(self) -> str:
-        """hunk's address for this gap: `before:<i>` / `trailing:<i>`."""
+        """The model's address for this gap: `before:<i>` / `trailing:<i>`."""
         return f"{self.position}:{self.hunk_index}"
 
     @property
@@ -3025,8 +3025,9 @@ class DiffView(Gtk.Box):
 
     def expand_gap_before_focus(self) -> bool:
         """`z`: draw every unchanged line above the focused hunk (the
-        current one when none has the keyboard) — hunk's gap toggle, one
-        way: the row folds itself away once nothing is left to show."""
+        current one when none has the keyboard) — the gap's *all* button
+        from the keyboard, one way: the row folds itself away once nothing
+        is left to show."""
         hunk = self._focused_hunk
         if hunk is None or hunk.get_parent() is None:
             path, index = self._current

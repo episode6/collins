@@ -34,7 +34,7 @@ def test_git_page_keys_are_page_local_vim_letters():
     assert git["git.next-note"] == ("braceright",)
     assert git["git.prev-note"] == ("braceleft",)
     assert git["git.expand-gap"] == ("z",)
-    # The staging keys (the extension's x / X / D); `v` is gone — the
+    # The staging keys (x / X / D); the old anchor key `v` is gone — the
     # view's own selection replaced the anchor.
     assert git["git.stage"] == ("x",)
     assert git["git.stage-file"] == ("<Shift>x",)

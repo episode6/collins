@@ -126,7 +126,7 @@ Changing an existing msgid means changing that key in all four dicts.
 strings falling back to English is expected and accepted. The desktop entry's
 `GenericName[xx]` / `Comment[xx]` / `Keywords[xx]` and the metainfo's
 `<summary xml:lang>` are translated by hand and invisible to xgettext. Agent-
-facing strings (MCP tool descriptions and errors, `hunkctl` reply text) are
+facing strings (MCP tool descriptions and errors, `show_diff` reply text) are
 deliberately untranslated English. `ruff` covers `collins/` and `tests/`
 only; `generate.py`'s long lines are expected.
 

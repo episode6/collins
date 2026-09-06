@@ -521,7 +521,7 @@ def test_repo_root_at_root_and_below(tmp_path):
 
 def test_repo_root_of_a_worktree_is_the_worktree(tmp_path):
     """The directory holding the pointer file, not the main checkout the
-    pointer names: hunk is spawned there and diffs that tree."""
+    pointer names: the diff view reads there and diffs that tree."""
     main = make_repo(tmp_path / "main")
     wt_git_dir = main / ".git" / "worktrees" / "wt"
     wt_git_dir.mkdir(parents=True)

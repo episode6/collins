@@ -134,7 +134,7 @@ def default_branch(cwd: str | Path | None) -> str | None:
 
 def parent_branch(cwd: str | Path | None, candidates: Iterable[str | None]) -> str | None:
     """The branch the current one is measured against — the git page's "vs"
-    load, the extension's commit groups: the first of *candidates* (in
+    load, the sidebar's commit groups: the first of *candidates* (in
     order; None and "" are skipped) that `resolve_branch` finds in the
     repository enclosing *cwd*, as a local or remote-tracking ref, else
     `default_branch(cwd)`.

@@ -1,6 +1,6 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 # Portions adapted from muzomer/hunk-commit (MIT, © 2026 hunk-jj-stage
-# contributors), by way of the collins-git hunk extension's patch.ts and
+# contributors), by way of the former collins-git extension's patch.ts and
 # staging.ts; see collins/THIRD_PARTY_LICENSES.md.
 
 """The native diff panel's staging arithmetic: the partial patches a hunk
@@ -27,7 +27,7 @@ patch re-read from git at action time, and the load (`"unstaged"`,
 `"staged"`, or a read-only load — a commit, `branch`, a range — where the
 one action is a revert), and return a `Plan` the page's worker thread runs
 through gitops, or a `Refusal` with the words the user sees. The refusals
-are the extension's: binary and oversized files, renames and new or deleted
+are the old extension's: binary and oversized files, renames and new or deleted
 files at hunk grain (whole file only), a symlink or submodule, a path
 outside the repository, and a file whose patch moved since the view loaded
 it — `find_disagreement` (the hunk spans) and `same_hunks` (every line) are

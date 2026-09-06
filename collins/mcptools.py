@@ -124,7 +124,7 @@ TOOLS: list[dict] = [
                     "minLength": 1,
                     "maxLength": 4096,
                     "description": (
-                        "A file in that diff to move the viewer to, as a "
+                        "A file in that diff to move the view to, as a "
                         "path relative to the repository root (an absolute "
                         "path inside the repository works too). It must "
                         "have changes in the diff being shown."

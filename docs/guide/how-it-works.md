@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -184,9 +184,7 @@ that dialog has been answered.
   tools — `set_session_title`, `open_in_editor`, `show_diff`,
   `show_image`, `notify_user`, `attach_pr`, `start_session`,
   `read_terminal`, `run_in_terminal` — and a session sees exactly the ones
-  you left on (`show_diff` only while hunk is installed, too: Collins
-  probes for it at most every 30 s and leaves the tool off the list
-  otherwise).
+  you left on.
 
 The **Model list** row beside the pickers is the odd one out: a Models API
 query that spends no tokens, which its subtitle says.
@@ -226,20 +224,13 @@ widget behind GNOME Terminal and Ptyxis. The app spawns your `$SHELL` and types
 the agent's resume command (e.g. `claude --resume <id>`) into it, so your
 aliases and environment apply and you drop back to a prompt when the agent
 exits. The secondary panel terminal is another VTE running a plain shell —
-the same widget, minus the agent. The git page is a third VTE, running
-[hunk](https://hunk.dev) instead of a shell — Collins drives it over hunk's
-session API (`hunk session reload`) to swap what it shows in place, and
-starts it with `--extension` pointing at the `collins-git` extension the
-package ships (`collins/hunkext/collins-git`), which draws the commits and
-files panels inside hunk and does the staging. The two sides trade the
-parent branch, the commits page size and the untracked-files switch through
-a small JSON file under `$XDG_RUNTIME_DIR` whose path hunk's process gets in
-`COLLINS_GIT_STATE`: Collins writes the branch it resolved and the two
-settings from Preferences → Git, the extension writes the branch the user
-picks and adds `--exclude-untracked` to its own loads while the switch is
-off. (The new-chat
-screen, the pull request page and a session replay are tabs with no
-terminal in them.)
+the same widget, minus the agent. The git page has no terminal in it: its
+diff is drawn by Collins from one `git diff` / `git show` read per load
+(`gitops.read_diff`, parsed by `diffmodel`), one GtkSourceView per hunk in
+the editor's style scheme, and its staging arithmetic (`gitpatch`) writes
+partial patches back through `git apply`. (The new-chat screen, the pull
+request page and a session replay are tabs with no terminal in them
+either.)
 
 ## Notifications
 
@@ -356,12 +347,12 @@ collins/
 ├── mcptools.py       # the tools it offers (notify, spawn, show_image, …)
 ├── prstore.py        # single source of truth for pull request state (gh)
 ├── prview.py         # the in-app pull request page
-├── gitpage.py        # the git page: hunk in a VTE, driven over its session API
+├── gitpage.py        # the git page: the diff view under its header, the sidebar, loads and freshness
+├── diffview.py       # the diff view: a view per hunk, split or stacked, gaps, find, selection, buttons, notes
 ├── gitloads.py       # what the git page can load: modes, commits, ranges, their names, the layout slot
 ├── diffmodel.py      # a parsed diff stream: files, hunks, gaps, split rows, word emphasis
 ├── gitpatch.py       # the staging arithmetic: partial patches and their plans
-├── hunkctl.py        # what the git page decides about hunk without a widget: argv, session ids, sidecar
-├── hunkext/collins-git/  # the hunk extension: commits + files panels, staging
+├── diffnotes.py      # notes and highlights on a diff, kept by hunk across reloads
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus
 ├── traymodel.py      # what the icon shows (badge, menu) — toolkit-free

@@ -3,10 +3,11 @@
 """Tests for gitops: the argv the git page's native panels hand git (pinned
 without git), the runners against a fake `run` and, when git is on PATH,
 against a temp repository — commit, fixup, stage all, the `↑` marks, the
-commit gate's in-progress check. Ports of the collins-git extension's
-`bun test` cases (test/git.test.ts, test/commit.integration.test.ts).
+commit gate's in-progress check. Ports of the former collins-git
+extension's `bun test` cases (test/git.test.ts,
+test/commit.integration.test.ts).
 
-The diff view's half: hunk's diff / show / numstat argv, the apply and
+The diff view's half: the diff / show / numstat argv, the apply and
 file-grain argv, read_diff against a repository with an untracked file, a
 rename, a binary and a too-large file, file_patch, file_at, merge_base,
 apply_patch cached / reverse / worktree and its `--3way` retry, the paths
