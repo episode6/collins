@@ -2920,8 +2920,14 @@ class DiffView(Gtk.Box):
     def filter(self, text: str) -> int:
         """Show only the files whose path contains *text* (case-insensitive);
         "" shows all. Sections hide, they are not destroyed. Returns how
-        many are shown."""
+        many are shown. A word that leaves out the soloed file drops the
+        solo: the filter is the newer ask, and the two together would
+        show nothing at all."""
         self._filter = (text or "").strip()
+        if self._solo is not None:
+            section = self._section_for(self._solo, diffmodel.NEW)
+            if section is not None and not section.matches(self._filter):
+                self._solo = None
         return self._apply_visibility()
 
     @property

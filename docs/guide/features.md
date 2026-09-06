@@ -444,7 +444,8 @@ to install, and nothing in it is a terminal.
   or the live side's **UNSTAGED** / **STAGED**) to see the whole list of
   diffs again; loading anything else does too. A **filter**
   box above the list (`/`) narrows both the list and the diff to the
-  paths that contain what you type; `Esc` clears it.
+  paths that contain what you type (a word that leaves out the file
+  shown alone shows the matching files instead); `Esc` clears it.
 - **The action row.** *Stage all* and *Unstage all* confirm with the
   count, then run `git add -A` / `git reset`; the **Commit** menu has
   *Commit…*, *Commit with body…* (a summary, and a body — Enter commits,

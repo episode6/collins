@@ -173,7 +173,9 @@ imports `gitpage`; the page feeds it and listens:
   `navigate-requested(path, side)` → `_navigate` (→ `DiffView.solo(path)`
   — the file's section shown alone, the others hidden by the same
   `set_visible` the filter uses, `soloed` says which; a reload keeps it
-  until the file leaves the load; `]` `[` `.` `,` `}` `{` and `j` `k`
+  until the file leaves the load, and a filter word that leaves the
+  soloed file out drops it, else the two would show nothing; `]` `[`
+  `.` `,` `}` `{` and `j` `k`
   walk the sections the *filter* admits and re-solo the file they land
   in — then `DiffView.reveal`, synchronous; a miss toasts)
   on the live side (or the flat list), else `_pending_navigate = (path,

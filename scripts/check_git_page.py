@@ -693,6 +693,15 @@ def check_native(repo: str) -> None:
         view.soloed is None and all(shown for _p, _k, shown in view.file_rows()),
         (view.soloed, view.file_rows()),
     )
+    check("solo text.txt again", view.solo("text.txt") and view.soloed == "text.txt")
+    check("a filter word the soloed file matches keeps the solo", view.filter("text") == 1 and view.soloed == "text.txt")
+    check(
+        "a word that leaves the soloed file out drops the solo: the filter's files show",
+        view.filter("") >= 1 and view.solo("text.txt") and view.soloed == "text.txt"
+        and view.filter("png") >= 1 and view.soloed is None,
+        (view.soloed, view.file_rows()),
+    )
+    view.filter("")
 
     # -- the watch: an external edit reloads within 2 s, an untouched hunk keeps its widget --
     # A line selection in the untouched hunk must ride the reload too (the
