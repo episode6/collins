@@ -182,6 +182,61 @@ _SHEBANG_INTERPRETERS = {
 }
 
 
+# Fence info word -> GtkSource language id, for the words PR bodies put after
+# ``` (the corpus: python, json, css, c, bash, suggestion). GtkSource's ids
+# are not the common names — python3, js and sh, never python/javascript/
+# bash — and a `suggestion` fence is GitHub's suggested-change block, plain
+# text here. Anything else is None: the widget layer asks GtkSource itself
+# for the word, and falls back to plain.
+_FENCE_LANGUAGES = {
+    "python": "python3",
+    "py": "python3",
+    "python3": "python3",
+    "js": "js",
+    "javascript": "js",
+    "ts": "js",
+    "typescript": "js",
+    "jsx": "js",
+    "tsx": "js",
+    "bash": "sh",
+    "sh": "sh",
+    "zsh": "sh",
+    "shell": "sh",
+    "console": "sh",
+    "yml": "yaml",
+    "yaml": "yaml",
+    "json": "json",
+    "css": "css",
+    "html": "html",
+    "c": "c",
+    "cpp": "cpp",
+    "c++": "cpp",
+    "rust": "rust",
+    "rs": "rust",
+    "go": "go",
+    "diff": "diff",
+    "patch": "diff",
+    "xml": "xml",
+    "toml": "toml",
+    "ini": "ini",
+    "md": "markdown",
+    "markdown": "markdown",
+    "suggestion": None,
+}
+
+
+def fence_language_id(info: str) -> str | None:
+    """The GtkSource language id for a fenced code block's *info* string
+    (the text after the opening ```): its first word, lower-cased, through
+    the alias map above. None for an empty info, a `suggestion` fence, or a
+    word the map doesn't know — the caller may still try that word as a
+    GtkSource id (a `kotlin` fence highlights that way) before going plain."""
+    words = info.strip().split()
+    if not words:
+        return None
+    return _FENCE_LANGUAGES.get(words[0].lower())
+
+
 def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
     """A fast hint at the GtkSource language id for *path*, from its suffix
     or (failing that) a `#!` shebang line. None when nothing matches — the

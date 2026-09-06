@@ -189,8 +189,23 @@ to the header and trims to `TABLE_MAX_ROWS` (50) × `TABLE_MAX_COLUMNS`
 one leaf, as a list item does) is a dim
 "N more rows on GitHub" link to the body's own `page_url` (the comment's
 anchor or the PR; threaded from `_body_label` through
-`_segments`'s partial into `build_one`). Code blocks and `<details>`
-render as their escaped source until their own PRs land. Images render
+`_segments`'s partial into `build_one`). A `CodeBlock` is a read-only
+`GtkSource.View` (`mdwidgets.code_view`) built like the Files view's patch
+view — no cursor, monospace, 6/4 px margins, no line numbers, its own
+`AUTOMATIC/NEVER` scroller with natural height (`.pr-md-code` on the view,
+`.pr-md-code-scroller` on the frame), the buffer text capped at
+`mdwidgets.CODE_CAP` (the render cap, per block); its language is the
+fence's info word through `editorfiles.fence_language_id` (the alias map:
+`python`/`py` → `python3`, `js`/`ts`/`jsx`/`tsx` → `js`, `bash`/`zsh`/
+`shell`/`console` → `sh`, `suggestion` → plain), else the word itself when
+`LanguageManager.get_language` knows it, else plain. The style scheme is
+the page's — `PrViewPage._body_scheme()` = `editor.style_scheme(setting,
+dark)`, threaded beside `page_url` through `_body_label` / `_folded_body` /
+`_segments` / `_fill_blocks` / `_ThreadCard` into `build_one` — and
+`_apply_scheme` restyles every live code view with
+`mdwidgets.restyle_code(page, scheme)` (a tree walk for `.pr-md-code`
+views) when the setting or the app's light/dark changes. `<details>`
+renders as its escaped source until its own PR lands. Images render
 via `bodyimages` / `pictures` (`BoundedPicture`
 measures height-for-width in a `Gtk.Box` slot); changed images render
 before/after from `prblobs` (`gh api …/contents/{path}?ref=<sha>` with the

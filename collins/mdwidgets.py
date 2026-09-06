@@ -5,9 +5,12 @@ labels the page always used (a heading's markup wrapped in a size span),
 a list is a column of glyph-plus-content rows that nests structurally, a
 quote a bordered column, a rule a separator, a table a grid of cell labels
 that scrolls sideways on its own (the page body never does), an image row
-whatever the page's own image slot builder makes of it. Blocks with no
-widget of their own yet — code blocks, `<details>` — render as a label of
-their escaped source, monospace for code: visibly plain, never dropped.
+whatever the page's own image slot builder makes of it, a code block a
+read-only GtkSource view built like the Files view's patch view (the
+fence's language highlighted, the editor's style scheme threaded in from
+the page, its own sideways scroller). Blocks with no widget of their own
+yet — `<details>` — render as a label of their escaped source: visibly
+plain, never dropped.
 
 A widget budget bounds what one body can build (`Budget`): past it, the
 rest of the blocks become one plain label of their source. The cap is on
@@ -26,11 +29,18 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 from . import mdblocks  # noqa: E402
+from .editor import GtkSource  # noqa: E402 — require_version + friendly exit live there
+from .editorfiles import fence_language_id  # noqa: E402
 from .formatting import markup_ok  # noqa: E402
 from .i18n import N_, _  # noqa: E402
 
 # Leaf widgets one body may build before the rest render as plain text.
 WIDGET_BUDGET = 400
+# Characters one code block's buffer holds — the page's render cap
+# (prview._RENDER_CAP), applied per block: a fence is one block whatever
+# its size, and a GtkSource buffer past this is layout the main loop pays
+# for on every scroll.
+CODE_CAP = 20_000
 # Heading sizes as Pango percentages: h1–h3 step down, h4–h6 are bold at
 # the reading size. They compose with the page's font-scale provider
 # (prview._apply_font_scale), which multiplies through CSS inheritance.
@@ -65,12 +75,15 @@ def build(
     image_row: Callable[[tuple], Gtk.Widget],
     depth: int = 0,
     page_url: str = "",
+    scheme: GtkSource.StyleScheme | None = None,
 ) -> list[Gtk.Widget]:
     """Widgets for *blocks*, in order, spending *budget*; *image_row* is
     what turns an `ImageRow`'s images into a widget (the page's own slot
     builder); *page_url* is where the body lives on GitHub — what a capped
-    table's "more" link opens. Once the budget runs dry the remaining
-    blocks come back as a single plain label of their source."""
+    table's "more" link opens; *scheme* is the GtkSource style scheme a
+    code block's view wears (the page's, from `editor.style_scheme`). Once
+    the budget runs dry the remaining blocks come back as a single plain
+    label of their source."""
     widgets: list[Gtk.Widget] = []
     for index, block in enumerate(blocks):
         if budget.left <= 0:
@@ -78,7 +91,7 @@ def build(
             if rest:
                 widgets.append(plain_label(rest))
             break
-        widgets.append(build_one(block, budget, image_row, depth, page_url))
+        widgets.append(build_one(block, budget, image_row, depth, page_url, scheme))
     return widgets
 
 
@@ -94,6 +107,7 @@ def build_one(
     image_row: Callable[[tuple], Gtk.Widget],
     depth: int = 0,
     page_url: str = "",
+    scheme: GtkSource.StyleScheme | None = None,
 ) -> Gtk.Widget:
     """The widget for one block. Containers recurse through `build`."""
     if isinstance(block, mdblocks.Text):
@@ -111,16 +125,14 @@ def build_one(
         rule.add_css_class("pr-md-rule")
         return rule
     if isinstance(block, mdblocks.ListBlock):
-        return _list(block, budget, image_row, depth, page_url)
+        return _list(block, budget, image_row, depth, page_url, scheme)
     if isinstance(block, mdblocks.Quote):
-        return _quote(block, budget, image_row, depth, page_url)
+        return _quote(block, budget, image_row, depth, page_url, scheme)
     if isinstance(block, mdblocks.Table):
         return _table(block, budget, page_url)
     if isinstance(block, mdblocks.CodeBlock):
         budget.take()
-        label = text_label(f"<tt>{GLib.markup_escape_text(block.text.rstrip())}</tt>", block.text)
-        label.add_css_class("pr-md-code")
-        return label
+        return code_view(block, scheme)
     # <details> waits for its own widget: its source, escaped.
     budget.take()
     return plain_label(block.source)
@@ -154,8 +166,70 @@ def heading_label(block: mdblocks.Heading) -> Gtk.Label:
     return label
 
 
+def code_view(block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -> Gtk.Widget:
+    """A fence or indented block as a read-only GtkSource view, built like
+    the Files view's patch view: no cursor, monospace, 6/4 px margins, no
+    line numbers (these are snippets), in its own scroller that scrolls
+    sideways only with its natural height propagated — a long line pans
+    within the block instead of widening the page. The language is the
+    fence's info word through `editorfiles.fence_language_id`, or the word
+    itself when GtkSource knows it by that name, or none; *scheme* is the
+    editor's style scheme as the page computes it (`style_scheme`), and
+    `restyle_code` follows a later change. The text is capped at `CODE_CAP`."""
+    buffer = GtkSource.Buffer()
+    manager = GtkSource.LanguageManager.get_default()
+    language_id = fence_language_id(block.lang or "")
+    language = manager.get_language(language_id) if language_id else None
+    if language is None and block.lang and block.lang != "suggestion":
+        # A word the alias map doesn't know but GtkSource does (kotlin,
+        # ruby, sql…). The id alphabet is [a-z0-9-]; anything else is no id.
+        word = block.lang if all(c.isalnum() or c in "-_." for c in block.lang) else ""
+        language = manager.get_language(word) if word else None
+    if language is not None:
+        buffer.set_language(language)
+    buffer.set_highlight_matching_brackets(False)
+    if scheme is not None:
+        buffer.set_style_scheme(scheme)
+    text = block.text[:CODE_CAP].rstrip("\n")
+    buffer.set_text(text)
+    view = GtkSource.View(buffer=buffer)
+    view.set_editable(False)
+    view.set_cursor_visible(False)
+    view.set_monospace(True)
+    view.set_left_margin(6)
+    view.set_right_margin(6)
+    view.set_top_margin(4)
+    view.set_bottom_margin(4)
+    view.add_css_class("pr-md-code")
+    scroller = Gtk.ScrolledWindow(child=view, hexpand=True)
+    scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+    scroller.set_propagate_natural_height(True)
+    scroller.add_css_class("pr-md-code-scroller")
+    return scroller
+
+
+def restyle_code(root: Gtk.Widget, scheme: GtkSource.StyleScheme | None) -> None:
+    """Put *scheme* on every code view under *root* — what the page does
+    when the editor's scheme setting or the app's light/dark changes, the
+    way its Files view restyles its patch buffers."""
+    if scheme is None:
+        return
+    child = root.get_first_child()
+    while child is not None:
+        if isinstance(child, GtkSource.View) and "pr-md-code" in child.get_css_classes():
+            child.get_buffer().set_style_scheme(scheme)
+        else:
+            restyle_code(child, scheme)
+        child = child.get_next_sibling()
+
+
 def _list(
-    block: mdblocks.ListBlock, budget: Budget, image_row, depth: int, page_url: str = ""
+    block: mdblocks.ListBlock,
+    budget: Budget,
+    image_row,
+    depth: int,
+    page_url: str = "",
+    scheme: GtkSource.StyleScheme | None = None,
 ) -> Gtk.Widget:
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
     column.add_css_class("pr-md-list")
@@ -191,7 +265,7 @@ def _list(
         budget.take()
         row.append(mark)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
-        for widget in build(list(item.children), budget, image_row, depth + 1, page_url):
+        for widget in build(list(item.children), budget, image_row, depth + 1, page_url, scheme):
             content.append(widget)
         row.append(content)
         column.append(row)
@@ -199,7 +273,12 @@ def _list(
 
 
 def _quote(
-    block: mdblocks.Quote, budget: Budget, image_row, depth: int, page_url: str = ""
+    block: mdblocks.Quote,
+    budget: Budget,
+    image_row,
+    depth: int,
+    page_url: str = "",
+    scheme: GtkSource.StyleScheme | None = None,
 ) -> Gtk.Widget:
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
     column.add_css_class("pr-md-quote")
@@ -210,7 +289,7 @@ def _quote(
         title.add_css_class("pr-md-alert-title")
         budget.take()
         column.append(title)
-    for widget in build(list(block.children), budget, image_row, depth + 1, page_url):
+    for widget in build(list(block.children), budget, image_row, depth + 1, page_url, scheme):
         column.append(widget)
     return column
 

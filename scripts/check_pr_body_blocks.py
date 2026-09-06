@@ -4,8 +4,10 @@
 The PR page renders bodies through mdblocks (markdown-it-py) and mdwidgets:
 headings as sized labels, lists as glyph-plus-content rows with task-list
 glyphs, quotes behind a bar, rules as separators, tables as grids of cell
-labels in a sideways-only scroller (capped, with a link to the rest), and
-every block the widget layer has no widget for yet as its escaped source.
+labels in a sideways-only scroller (capped, with a link to the rest), code
+blocks as read-only GtkSource views highlighted for the fence's language
+and wearing the page's style scheme, and every block the widget layer has
+no widget for yet as its escaped source.
 The fold's preview cut, the "Show more" step and the regex fallback ride
 the same walk. None of that is reachable from pytest (tests/conftest.py
 blocks the GTK stack), so it is checked here against the real page in a
@@ -16,8 +18,8 @@ real window:
 
 `prdetail.fetch` is stubbed with a canned detail — a description made of
 the block fixture, one comment — so nothing leaves the machine. Grown per
-PR of the markdown stack: a GtkSource.View for code and a Gtk.Expander for
-<details> join the assertions as they land.
+PR of the markdown stack: a Gtk.Expander for <details> joins the
+assertions when it lands.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
@@ -49,6 +51,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from collins import i18n, mdblocks, mdwidgets, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
+from collins.editor import GtkSource  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
 PR_URL = "https://github.com/episode6/collins/pull/55"
@@ -307,10 +310,44 @@ def step_expanded() -> bool:
               grid.get_height())
         check("…with no more-link under a table that fits",
               not findall(full, lambda w: has_class(w, "pr-md-table-more")))
-    check(
-        "the fence renders as monospace text for now",
-        any(t == 'print("hi")' and has_class(w, "pr-md-code") for w, t in zip(labels(full), all_texts, strict=True)),
-    )
+    check("the fence's source is gone from the labels", not any('print("hi")' in t for t in all_texts))
+    views = findall(full, lambda w: isinstance(w, GtkSource.View))
+    check("the fence renders as a GtkSource view", len(views) == 1, len(views))
+    if views:
+        view = views[0]
+        buffer = view.get_buffer()
+        language = buffer.get_language()
+        check("…with the python3 language", language is not None and language.get_id() == "python3",
+              language.get_id() if language else None)
+        check("…holding the fence's text",
+              buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True) == 'print("hi")')
+        check("…read-only, no cursor, monospace",
+              not view.get_editable() and not view.get_cursor_visible() and view.get_monospace())
+        check("…no line numbers", not view.get_show_line_numbers())
+        check("…wearing .pr-md-code", has_class(view, "pr-md-code"))
+        scheme = buffer.get_style_scheme()
+        check("…wearing the page's style scheme, not GtkSource's classic default",
+              scheme is not None and scheme.get_id() in ("Adwaita", "Adwaita-dark"),
+              scheme.get_id() if scheme else None)
+        state["scheme_before"] = scheme.get_id() if scheme else None
+        scroller = view.get_parent()
+        check(
+            "…inside a scroller that scrolls sideways only, at its natural height",
+            isinstance(scroller, Gtk.ScrolledWindow)
+            and scroller.get_policy() == (Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+            and scroller.get_propagate_natural_height()
+            and has_class(scroller, "pr-md-code-scroller"),
+            type(scroller).__name__,
+        )
+        check("…as tall as its one line, not the page", 10 < view.get_height() < 80, view.get_height())
+        # A scheme change restyles the live view, as it does the diff buffers.
+        page._scheme_setting = "classic"
+        page._apply_scheme()
+        after = buffer.get_style_scheme()
+        check("…and follows the editor's scheme setting", after is not None and after.get_id() == "classic",
+              after.get_id() if after else None)
+        page._scheme_setting = ""
+        page._apply_scheme()
     check(
         "the <details> renders as its source for now",
         any(t.startswith("<details>") and "hidden text" in t for t in all_texts),
@@ -363,6 +400,25 @@ def step_back() -> bool:
         any(has_class(w, "pr-md-h1") and w.get_text() == "Back" for w in labels(card))
         and any(has_class(w, "pr-md-glyph") and w.get_text() == "☑" for w in labels(card)),
         texts(card),
+    )
+    # Fence languages the alias map doesn't name: one GtkSource knows by
+    # that word, a `suggestion` fence, a word nobody knows.
+    fences = "```kotlin\nval a = 1\n```\n\n```suggestion\nx\n```\n\n```nosuchlang-2\ny\n```"
+    return land(replace(STAGED["detail"], body=fences), step_code_languages)
+
+
+def step_code_languages() -> bool:
+    page = state["page"]
+    card = description_card(page)
+    views = findall(card, lambda w: isinstance(w, GtkSource.View))
+    ids = [
+        (lang.get_id() if (lang := v.get_buffer().get_language()) is not None else None) for v in views
+    ]
+    check("three fences, three views", len(views) == 3, len(views))
+    check(
+        "a word GtkSource knows highlights, suggestion and unknown words stay plain",
+        ids == ["kotlin", None, None],
+        ids,
     )
     # A table past the caps: 50 rows of 8 columns drawn, the rest a link.
     width = mdblocks.TABLE_MAX_COLUMNS + 2
