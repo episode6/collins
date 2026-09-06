@@ -1796,10 +1796,67 @@ def check_native(repo: str, state_path: str) -> None:
     check("the edited hunk was rebuilt, the untouched one kept its widget", len(ids_after) == 2 and ids_after[0] == ids_before[0] and ids_after[1] != ids_before[1], (ids_before, ids_after))
     check("the keyboard stayed in the untouched hunk", window.get_focus() is focus_before and view.current()[:2] == ("text.txt", 0), (window.get_focus(), view.current()))
     check("the file's badge is still none and its hunks two", len(view.hunk_rows("text.txt")) == 2)
+    check("the sections speak the read's hunk indexes", view.hunk_indexes("text.txt") == [0, 1], view.hunk_indexes("text.txt"))
+
+    # -- a hunk above going away: the survivor keeps its widget and takes index 0 --
+    lines[4] = "line 5\n"
+    write_file(repo, "text.txt", "".join(lines))
+    landed = wait_for(lambda: len(view.hunk_serials("text.txt")) == 1 and page.settled(), timeout=2.0)
+    check("reverting the first hunk's edit reloads to one hunk", landed, view.hunk_serials("text.txt"))
+    check(
+        "the surviving hunk kept its widget and now speaks index 0",
+        view.hunk_serials("text.txt") == ids_after[1:] and view.hunk_indexes("text.txt") == [0],
+        (ids_after, view.hunk_serials("text.txt"), view.hunk_indexes("text.txt")),
+    )
+    emitted: list[tuple[str, int]] = []
+    handler = view.connect("current-changed", lambda _v, p, h: emitted.append((p, h)))
+    check(
+        "reveal(hunk=0) lands on it and names index 0 to the sidebar",
+        page.reveal("text.txt", hunk=0)
+        and view.current()[:2] == ("text.txt", 0)
+        and all(e == ("text.txt", 0) for e in emitted),  # unchanged from before the reload: nothing to emit
+        (view.current(), emitted),
+    )
+    view.disconnect(handler)
+    check("z finds the gap above it under its new address", any(a == "before:0" and remaining > 0 for a, remaining, _s in view.gap_rows("text.txt")), view.gap_rows("text.txt"))
+    lines[4] = "line 5 changed\n"
+    write_file(repo, "text.txt", "".join(lines))
+    check("the edit put back, the two hunks return", wait_for(lambda: view.hunk_indexes("text.txt") == [0, 1] and page.settled(), timeout=2.0), view.hunk_indexes("text.txt"))
+    check("the untouched hunk kept its widget through both reloads", view.hunk_serials("text.txt")[1:] == ids_after[1:], (ids_after, view.hunk_serials("text.txt")))
+
+    # -- reveal by a line outside every hunk: the nearest hunk, not a refusal --
+    check("a line in the gap between the hunks reveals the file on its nearest hunk", page.reveal("text.txt", line=20) and view.current()[:2] == ("text.txt", 0), view.current())
+    check("and holds_line says the line itself is not in the diff", not view.holds_line("text.txt", None, 20) and view.holds_line("text.txt", None, 5))
+    check("a line inside a hunk reveals that hunk", page.reveal("text.txt", line=45) and view.current()[:2] == ("text.txt", 1), view.current())
 
     # -- the page-local keys, through their actions ----------------------------------------
+    page.reveal("text.txt", hunk=0)
     check("git.next-hunk is routed to the view", view.activate_action("git.next-hunk", None))
     check("and moved the current hunk", wait_for(lambda: view.current()[:2] == ("text.txt", 1)), view.current())
+    # j / k: the cursor row within the focused hunk (wherever the last
+    # reveal left it), then across the hunk's edges.
+    hunk_view = view._focused_hunk.focused_view if view._focused_hunk is not None else None
+    check("the keyboard sits in a hunk view", hunk_view is not None)
+    row_before = hunk_view.cursor_row() if hunk_view is not None else -1
+    for _ in range(row_before):
+        view.activate_action("git.cursor-up", None)
+    check("k walks the cursor up to the hunk's first row", hunk_view is not None and hunk_view.cursor_row() == 0, hunk_view.cursor_row() if hunk_view else None)
+    check("j moves the cursor a row down", view.activate_action("git.cursor-down", None) and hunk_view.cursor_row() == 1, hunk_view.cursor_row() if hunk_view else None)
+    check("k moves it back up", view.activate_action("git.cursor-up", None) and hunk_view.cursor_row() == 0)
+    check(
+        "k past the first row enters the hunk before, on its last row",
+        view.activate_action("git.cursor-up", None)
+        and view.current()[:2] == ("text.txt", 0)
+        and view._focused_hunk.focused_view.cursor_row() == len(view._focused_hunk.focused_view.rows) - 1,
+        (view.current(), view._focused_hunk.focused_view.cursor_row() if view._focused_hunk else None),
+    )
+    check(
+        "j past its last row comes back to the hunk after, on its first row",
+        view.activate_action("git.cursor-down", None)
+        and view.current()[:2] == ("text.txt", 1)
+        and view._focused_hunk.focused_view.cursor_row() == 0,
+        view.current(),
+    )
     view.activate_action("git.open-editor", None)
     check(
         "`e` asks for the file at the cursor's line",

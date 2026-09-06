@@ -556,6 +556,20 @@ out and is asked on demand only.
 - Two tabs on one worktree make `--repo` ambiguous; pid is the only key.
 - Hunk cancels any open dialog on reload; a shell-side commit while a `D`
   confirmation is up closes it — by design, press the key again.
+- **A kept hunk section must be re-pointed at the read's Hunk.**
+  `diffmodel.stable_key` leaves the index out on purpose (a hunk above
+  going away must not rebuild the ones below), so after `plan.commit()`
+  `_FileSection.update` re-assigns `section.hunk` from `file.hunks` in
+  order (one section per hunk, `zip(strict=True)`). Before that the
+  survivors kept the old `hunk.index`: reveal named the wrong hunk to
+  the sidebar and `z` looked up the wrong gap (`hunk_indexes` probes it).
+- **Buffer paragraphs must equal patch rows.** `GtkTextBuffer` splits a
+  paragraph on a lone `\r` and U+2029 as well as `\n`, so a row holding
+  one shifted every later tag, number, emphasis span, cursor and search
+  offset by a line. `_HunkView.set_rows` keeps `diffmodel.display_text`
+  of each row (a trailing CR dropped, the separators shown as `␍` `¶`
+  `␤`) and the search counts over those rows, so offsets agree; the
+  patch text gitpatch writes back is the model's, untouched.
 - **The native view's scroll range settles late.** A hunk or context
   `GtkSource.View` validates its height a beat after allocation, so the
   column's `upper` grows after the widgets are in the tree: a
