@@ -92,17 +92,17 @@ All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults (the 
 
 ## Requirements
 
-Python ≥ 3.10, GTK ≥ 4.10, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject — from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box. GStreamer (the core typelib plus the base plugins) is optional too: with it Collins plays the notification sound, without it the desktop's beep stands in. The `.deb` and the `.rpm` only *recommend* those two.
+Python ≥ 3.10, GTK ≥ 4.10, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject, and markdown-it-py with linkify-it-py (the PR page's markdown parser) — all from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box. GStreamer (the core typelib plus the base plugins) is optional too: with it Collins plays the notification sound, without it the desktop's beep stands in. The `.deb` and the `.rpm` only *recommend* those two.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
 
 # Fedora
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling gstreamer1 gstreamer1-plugins-base
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base
 
 # Arch
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling gstreamer gst-plugins-base-libs
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs
 ```
 
 Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.

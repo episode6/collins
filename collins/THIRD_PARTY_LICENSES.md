@@ -39,6 +39,21 @@ you are free to replace them with your own builds:
 - **Python** and its standard library — © the Python Software Foundation — PSF License
   Agreement — [python.org](https://www.python.org)
 
+## Python libraries
+
+Loaded at runtime from your system packages, like the platform libraries above — nothing
+is bundled. They parse pull request bodies as GitHub-flavored markdown; without them the
+PR page falls back to a plainer built-in renderer.
+
+- **markdown-it-py** — © ExecutableBooks and the markdown-it-py contributors — MIT License —
+  [executablebooks/markdown-it-py](https://github.com/executablebooks/markdown-it-py)
+- **mdurl** (markdown-it-py's URL helper) — © the mdurl authors — MIT License —
+  [executablebooks/mdurl](https://github.com/executablebooks/mdurl)
+- **linkify-it-py** (bare-URL detection) — © the linkify-it-py contributors — MIT License —
+  [tsutsu3/linkify-it-py](https://github.com/tsutsu3/linkify-it-py)
+- **uc-micro-py** (linkify-it-py's Unicode tables) — © the uc-micro-py contributors — MIT
+  License — [tsutsu3/uc.micro-py](https://github.com/tsutsu3/uc.micro-py)
+
 ## Icons
 
 Most icons are named icons resolved at runtime from the system icon theme, typically the

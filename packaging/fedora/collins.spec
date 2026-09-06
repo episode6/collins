@@ -47,12 +47,15 @@ BuildRequires:  appstream
 # GstAudio/GstPbutils/GstVideo-1.0.typelib and libgstplayback.so in
 # gstreamer1-plugins-base — so, again, nothing else to name. The claude CLI is a curl-installed
 # binary with no package, so it cannot be a dependency at all; the app's own
-# first-run check handles its absence.
+# first-run check handles its absence. markdown-it-py and linkify-it-py
+# (pure Python) render pull request bodies as real markdown blocks.
 Requires:       python3-gobject
 Requires:       gtk4 >= 4.10
 Requires:       libadwaita >= 1.5
 Requires:       vte291-gtk4
 Requires:       gtksourceview5
+Requires:       python3-markdown-it-py
+Requires:       python3-linkify-it-py
 Recommends:     libspelling
 Recommends:     gstreamer1
 Recommends:     gstreamer1-plugins-base
