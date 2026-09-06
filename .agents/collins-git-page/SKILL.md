@@ -433,11 +433,13 @@ the staged (rename) and commit loads, settings and a layout change leaving
 `page_state` alone while a page restored from it takes the layout off the
 setting, the switch flipping both ways with the shim hunk going down,
 re-parent vs. unparent, and a page restored into a commit / a commit git
-no longer has. Kinds to expect: an untracked *picture* reads `binary`
-with the badge `untracked · binary` (the `--no-index` diff says "Binary
-files differ"; `KIND_BINARY` wins over `KIND_NEW`), a pure rename has no
-hunk, a mode change no hunk and no counts. `scripts/probe_diffview.py`
-draws a real repository's diff to a PNG and prints the timings above.
+no longer has. Kinds to expect: an untracked file's badge is `new` (the
+spec's word; the files list's `?` row says it is not in the index), an
+untracked *picture* reads `binary` with the badge `new · binary` (the
+`--no-index` diff says "Binary files differ"; `KIND_BINARY` wins over
+`KIND_NEW`), a pure rename has no hunk, a mode change no hunk and no
+counts. `scripts/probe_diffview.py` draws a real repository's diff to a
+PNG and prints the timings above.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 

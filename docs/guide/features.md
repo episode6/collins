@@ -529,8 +529,9 @@ page needs hunk 0.21 or newer:
   and once staging lands in it hunk is retired. What it does today,
   read-only:
   - Every file of the load is a card — its path (`old → new` for a
-    rename), `+` / `−` counts, and what kind of change it is (new,
-    deleted, untracked, binary, too large, renamed, a mode change) — and
+    rename), `+` / `−` counts, and what kind of change it is (new —
+    untracked files included; the files list's `?` says which — deleted,
+    binary, too large, renamed, a mode change) — and
     every hunk under it its own syntax-highlighted view, in the **editor's
     style scheme and font**, with old and new line numbers and a `+` / `−`
     sign column. **Split** puts old and new side by side, row-aligned even

@@ -1184,9 +1184,9 @@ class _FileSection(Gtk.Box):
     @staticmethod
     def _badge_text(file: diffmodel.File) -> str:
         words: list[str] = []
-        if file.untracked:
-            words.append(_("untracked"))
-        elif file.kind == diffmodel.KIND_NEW:
+        if file.untracked or file.kind == diffmodel.KIND_NEW:
+            # An untracked file reads `new` too (the files list's `?` row
+            # already says it is not in the index).
             words.append(_("new"))
         if file.kind == diffmodel.KIND_DELETED:
             words.append(_("deleted"))

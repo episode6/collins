@@ -1726,8 +1726,8 @@ def check_native(repo: str, state_path: str) -> None:
         and badges.get("gone.txt") == ("deleted", False)
         and badges.get("run.sh") == ("mode 100644 → 100755", False)
         and badges.get("text.txt") == ("", False)
-        and badges.get("untracked.txt") == ("untracked", False)
-        and badges.get("new.png") == ("untracked · binary", True),
+        and badges.get("untracked.txt") == ("new", False)
+        and badges.get("new.png") == ("new · binary", True),
         badges,
     )
     check("text.txt draws its two hunks", len(view.hunk_rows("text.txt")) == 2, view.hunk_rows("text.txt"))
