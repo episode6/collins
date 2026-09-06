@@ -728,11 +728,14 @@ is running in:
 - **`diff_context(files?, patch?, notes?)`** — read the git page back:
   which diff is loaded, the file and hunk you are looking at and the
   lines you have selected (with their text), every file in the diff with
-  its hunks and their line ranges, and on request each file's patch
+  its hunks and their line ranges (a side a hunk has no lines on, like a
+  new file's old side, reads `null`), and on request each file's patch
   (capped at 200 kB in all) and the notes and highlights on the page — so
   "this hunk" and "the lines I selected" mean the same thing to you both.
   It answers only while the page is open (the refusal names
-  `show_diff`).
+  `show_diff`), and always as one JSON object: a reply too large to send
+  is trimmed — the patches first, then the hunk lists, the notes, the
+  file list, the selection's text — and says so under `truncated`.
 - **`annotate_diff(notes, focus?)`** — put note cards on the diff: each
   note names a file, a line (or a hunk) and a summary, with an optional
   rationale and author, and appears under the hunk as an *Agent* card —
@@ -746,7 +749,9 @@ is running in:
   token that changed. Validated like the notes; the reply counts them.
 - **`clear_diff_marks(file?, notes?, highlights?, user?)`** — take the
   agent's notes and highlights off the page, everywhere or from one file;
-  your own notes stay unless `user` is true.
+  your own notes stay unless `user` is true. Neither flag clears both,
+  one alone names the kind (`notes: false` is "the highlights only"), and
+  both false is refused.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
   lightbox. An `http(s)` URL works too: Collins downloads it and shows the
   copy.

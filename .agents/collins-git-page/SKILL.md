@@ -605,7 +605,8 @@ refused, the old side, a switched-off tool refused and gone from the
 list, `diff_context`'s JSON (load, current, files / hunks, patch and
 notes only when asked), a note batch with one bad address landing
 nothing, a good one's cards under the hunk, a highlight painted
-(`highlight_rows`) and a bad range refused, the clears' counts — and the
+(`highlight_rows`) and a bad range refused, the clears' counts (a lone
+`notes: false` clearing the highlights, both false refused) — and the
 keyboard never taken, `focus: true` included.
 `scripts/check_git_prefs.py`: the seven Git rows, the settle-timer rules
 on the parent-branch entry. `scripts/probe_diffview.py` draws a real

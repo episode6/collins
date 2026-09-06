@@ -551,9 +551,14 @@ def script():
     got = yield "clear_diff_marks", {"file": "a.txt", "notes": True}
     check("clearing the notes of a file counts them", got == (True, "Cleared 2 notes from a.txt."), got)
     check("…the highlight stays", len(page.highlights()) == 1 and page.notes() == [], page.highlights())
-    got = yield "clear_diff_marks", {}
-    check("clearing everything counts both", got == (True, "Cleared 0 notes and 1 highlight."), got)
+    got = yield "clear_diff_marks", {"notes": False, "highlights": False}
+    check("both flags false is refused, not 'Cleared .'", got == (False, mcptools.CLEAR_NOTHING), got)
+    check("…and clears nothing", len(page.highlights()) == 1, page.highlights())
+    got = yield "clear_diff_marks", {"notes": False}
+    check("'notes': false alone clears the highlights", got == (True, "Cleared 1 highlight."), got)
     check("…the page is bare", page.highlights() == [] and page.diff_view.highlight_rows("a.txt", 0) == [])
+    got = yield "clear_diff_marks", {}
+    check("clearing everything counts both", got == (True, "Cleared 0 notes and 0 highlights."), got)
     check("the page still hasn't the keyboard", not page.has_page_focus())
 
 

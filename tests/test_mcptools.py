@@ -501,26 +501,98 @@ def test_diff_context_reply_carries_patches_up_to_the_cap():
     assert mcptools.DIFF_CONTEXT_PATCH_BYTES == 200_000
 
 
-def test_diff_context_reply_always_fits_one_wire_frame():
-    """A reply over MAX_LINE closes the shim's connection, so an oversize one
-    shrinks — the patches first, then the files, then the notes — and says
-    so."""
-    huge = "x" * 300_000
+def _framed(text: str) -> bytes:
+    """The reply as mcpserver._send puts it on the wire."""
+    return mcptools.encode_message({"id": 1, "ok": True, "message": text})
+
+
+def _big_file(name: str = "big.txt", hunks: int = 1, width: int = 300_000) -> diffmodel.File:
+    huge = "x" * width
     lines = tuple(diffmodel.Line(diffmodel.ADD, huge, None, i + 1) for i in range(4))
     hunk = diffmodel.Hunk(0, "@@ -0,0 +1,4 @@", 0, 0, 1, 4, "", lines)
-    file = diffmodel.File("big.txt", None, "new", None, None, None, False, (hunk,), 4, 0, "+" + huge, "h")
+    return diffmodel.File(name, None, "new", None, None, None, False, (hunk,) * hunks, 4, 0, "+" + huge, "h")
+
+
+def test_diff_context_reply_always_fits_one_wire_frame():
+    """A reply over MAX_LINE closes the shim's connection, so an oversize one
+    shrinks — the patches first, then the hunk lists, then the notes, then
+    the files, then the selection's text — and says so. The measure is
+    the framed reply, not the raw text: encode_message escapes every
+    quote and newline of the indented JSON once more."""
+    file = _big_file()
     notes = tuple(
         diffnotes.Note(f"n{i}", "agent", "big.txt", "new", 1, "s" * 4000, "r" * 4000, None, "k")
         for i in range(200)
     )
     context = mcptools.DiffContext("unstaged", "x", (file,) * 3, notes=notes)
     text = mcptools.diff_context_reply(context, patch=True, notes=True, patch_budget=10_000_000)
-    assert len(text.encode("utf-8")) <= mcptools.MAX_LINE
+    assert len(_framed(text)) <= mcptools.MAX_LINE
     reply = json.loads(text)
     assert "truncated" in reply
     assert "files" in reply and "patch" not in reply["files"][0]
     small = mcptools.diff_context_reply(mcptools.DiffContext("unstaged", "x", (file,)), patch=True)
     assert "truncated" not in json.loads(small)
+    assert len(_framed(small)) <= mcptools.MAX_LINE
+
+
+def test_diff_context_reply_measures_the_framed_reply():
+    """The two replies that fit the raw measure but not the frame: notes
+    full of quotes, tabs and newlines (their escapes double in the frame),
+    and a plain files-only list of thousands of hunks (the indentation's
+    newlines do the same)."""
+    noisy = ('"\t\n' * 1000)[:4000]
+    notes = tuple(
+        diffnotes.Note(f"n{i}", "agent", "a.txt", "new", 1, noisy, noisy, None, "k") for i in range(116)
+    )
+    files = _files()
+    context = mcptools.DiffContext("unstaged", "x", tuple(files), notes=notes)
+    text = mcptools.diff_context_reply(context, files=True, notes=True)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply and "notes" not in reply
+
+    many = _big_file("many.txt", hunks=9000, width=1)
+    context = mcptools.DiffContext("unstaged", "x", (many,))
+    text = mcptools.diff_context_reply(context)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply
+    entry = reply["files"][0]
+    assert "hunks" not in entry and entry["hunks_omitted"] is True and entry["hunk_count"] == 9000
+    assert entry["path"] == "many.txt"
+
+
+def test_diff_context_reply_drops_the_selection_text_last():
+    """A selection across a hunk of huge lines is the one unbounded thing
+    the bare object carries: its text goes when nothing else is left."""
+    file = _big_file(width=400_000)
+    context = mcptools.DiffContext("unstaged", "x", (file,), selection=("big.txt", 0, 0, 3))
+    text = mcptools.diff_context_reply(context, files=False)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply
+    assert reply["selection"]["text_omitted"] is True and "text" not in reply["selection"]
+    assert reply["selection"]["lines"] == 4 and reply["selection"]["new"] == [1, 4]
+
+
+def test_diff_context_hunk_ranges_are_null_on_an_empty_side():
+    """A new file's hunk (`@@ -0,0 +1,4 @@`) has no old line for a note to
+    land on: the view pads that side to a row, the tool says null."""
+    file = _big_file(width=3)
+    reply = json.loads(mcptools.diff_context_reply(mcptools.DiffContext("unstaged", "x", (file,))))
+    assert reply["files"][0]["hunks"][0]["old"] is None
+    assert reply["files"][0]["hunks"][0]["new"] == [1, 4]
+    app = _files()[0]
+    reply = json.loads(mcptools.diff_context_reply(mcptools.DiffContext("unstaged", "x", (app,))))
+    assert reply["files"][0]["hunks"][0]["old"] == [1, 4]
+
+
+def test_note_schema_caps_match_diffnotes():
+    schema = mcptools.tool_schema("annotate_diff")
+    note = schema["inputSchema"]["properties"]["notes"]["items"]["properties"]
+    assert note["summary"]["maxLength"] == diffnotes.NOTE_MAX_CHARS
+    assert note["rationale"]["maxLength"] == diffnotes.NOTE_MAX_CHARS
+    assert mcptools.NOTE_MAX_CHARS == diffnotes.NOTE_MAX_CHARS
 
 
 def test_reveal_reply_names_the_load_the_spot_and_the_hunk():
@@ -567,6 +639,22 @@ def test_clear_reply_words():
     assert mcptools.clear_reply(1, None, "a.py") == "Cleared 1 note from a.py."
     assert mcptools.clear_reply(None, 1, None) == "Cleared 1 highlight."
     assert mcptools.clear_reply(0, 0, None) == "Cleared 0 notes and 0 highlights."
+    assert mcptools.clear_reply(None, None, None) == "Nothing cleared."
+    assert mcptools.clear_reply(None, None, "a.txt") == "Nothing cleared from a.txt."
+
+
+def test_clear_targets_reads_one_flag_as_the_other_kind():
+    """Neither flag clears both; one alone names what to clear, an explicit
+    false the other kind; both false is refused, never 'Cleared .'."""
+    assert mcptools.clear_targets({}) == (True, True)
+    assert mcptools.clear_targets({"file": "a.txt"}) == (True, True)
+    assert mcptools.clear_targets({"notes": True}) == (True, False)
+    assert mcptools.clear_targets({"highlights": True}) == (False, True)
+    assert mcptools.clear_targets({"notes": False}) == (False, True)
+    assert mcptools.clear_targets({"highlights": False}) == (True, False)
+    assert mcptools.clear_targets({"notes": True, "highlights": True}) == (True, True)
+    assert mcptools.clear_targets({"notes": True, "highlights": False}) == (True, False)
+    assert mcptools.clear_targets({"notes": False, "highlights": False}) == mcptools.CLEAR_NOTHING
 
 
 def test_show_image_args():

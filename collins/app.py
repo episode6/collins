@@ -2595,9 +2595,10 @@ class App(Adw.Application):
                 path = resolve(args["file"]) if resolve is not None else None
                 if path is None:
                     return False, f"'file' must be a path inside the repository: {args['file']!r}"
-            notes, highlights = args.get("notes"), args.get("highlights")
-            if notes is None and highlights is None:
-                notes = highlights = True
+            targets = mcptools.clear_targets(args)
+            if isinstance(targets, str):
+                return False, targets
+            notes, highlights = targets
             gone_notes = gone_highlights = None
             if notes:
                 gone_notes = page.clear_marks(path, notes=True, include_user=bool(args.get("user")))

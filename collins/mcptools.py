@@ -39,6 +39,10 @@ TERMINAL_MAX_LINES = 2000
 # past it the remaining files' patches are left out and the reply says so.
 DIFF_CONTEXT_PATCH_BYTES = 200_000
 
+# The most a note's summary or rationale may hold: diffnotes' cap, which
+# annotate_diff's schema below states so the two can't drift apart.
+NOTE_MAX_CHARS = diffnotes.NOTE_MAX_CHARS
+
 # The tools Collins serves to sessions, in MCP's own tool shape (the app
 # hands these to the shim verbatim for `tools/list`). A tool earns its place
 # only if it needs the app — anything the agent can do from its shell stays
@@ -182,11 +186,14 @@ TOOLS: list[dict] = [
             "same hunk: which diff is loaded, the file and hunk the user is "
             "on and any lines they have selected, every file in the diff "
             "with its hunks (1-based, with each hunk's old and new line "
-            "ranges), and optionally the patch text and the notes on the "
-            "page (the user's and yours). Reach for it when the user says "
-            "'this hunk', 'the selected lines', 'what I'm looking at', or "
-            "before annotating. The page must be open: show_diff opens it. "
-            "The reply is one JSON object."
+            "ranges — null on a side the hunk has no lines on, like a new "
+            "file's old side), and optionally the patch text and the notes "
+            "on the page (the user's and yours). Reach for it when the user "
+            "says 'this hunk', 'the selected lines', 'what I'm looking at', "
+            "or before annotating. The page must be open: show_diff opens "
+            "it. The reply is one JSON object; one too large to send is "
+            "shrunk (patches, hunk lists, notes, files, the selection's "
+            "text, in that order) and carries a 'truncated' key."
         ),
         "inputSchema": {
             "type": "object",
@@ -285,7 +292,7 @@ TOOLS: list[dict] = [
                             "summary": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 4000,
+                                "maxLength": NOTE_MAX_CHARS,
                                 "description": (
                                     "The note's headline — one line, what the "
                                     "user should know about that spot."
@@ -294,7 +301,7 @@ TOOLS: list[dict] = [
                             "rationale": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 4000,
+                                "maxLength": NOTE_MAX_CHARS,
                                 "description": (
                                     "The longer explanation shown under the "
                                     "summary; plain text, may span lines."
@@ -424,8 +431,9 @@ TOOLS: list[dict] = [
             "page: the ones annotate_diff and highlight_diff put there, on "
             "every file or one file. Notes the user typed themselves are "
             "kept unless 'user' is true. With neither 'notes' nor "
-            "'highlights' given, both are cleared. The reply counts what "
-            "went."
+            "'highlights' given, both are cleared; one given alone names "
+            "what to clear ('notes': true — the notes only; 'notes': false "
+            "— the highlights only). The reply counts what went."
         ),
         "inputSchema": {
             "type": "object",
@@ -992,10 +1000,6 @@ def terminal_reply(sections: list[tuple[int, bool, str]], lines: int) -> str:
 # diffnotes.MarkStore's (resolve_anchor over diffmodel.locate); note_specs /
 # highlight_specs only shape the arguments and refuse what can't be a path.
 
-# The most a summary or rationale may hold — diffnotes' cap, which the
-# schemas above mirror.
-NOTE_MAX_CHARS = diffnotes.NOTE_MAX_CHARS
-
 # The room a diff_context reply leaves inside one MAX_LINE frame for the
 # envelope: the same margin as read_terminal's.
 _DIFF_REPLY_MARGIN = _TERMINAL_REPLY_MARGIN
@@ -1025,11 +1029,14 @@ class DiffContext:
 
 
 def _hunk_entry(hunk: diffmodel.Hunk) -> dict:
+    # A side the hunk has no lines on (a new file's old side, `-0,0`) is
+    # null: the view pads such a side to one row (diffmodel.hunk_range),
+    # but no address a note or highlight can give lands there.
     return {
         "hunk": hunk.index + 1,
         "header": hunk.header,
-        "old": list(diffmodel.hunk_range(hunk, diffmodel.OLD)),
-        "new": list(diffmodel.hunk_range(hunk, diffmodel.NEW)),
+        "old": list(diffmodel.hunk_range(hunk, diffmodel.OLD)) if hunk.old_count else None,
+        "new": list(diffmodel.hunk_range(hunk, diffmodel.NEW)) if hunk.new_count else None,
     }
 
 
@@ -1049,7 +1056,7 @@ def _current_entry(context: DiffContext) -> dict | None:
     return entry
 
 
-def _selection_entry(context: DiffContext) -> dict | None:
+def _selection_entry(context: DiffContext, text: bool = True) -> dict | None:
     if context.selection is None:
         return None
     path, index, first, last = context.selection
@@ -1060,27 +1067,35 @@ def _selection_entry(context: DiffContext) -> dict | None:
     if not (0 <= first <= last < len(lines)):
         return None
     chosen = lines[first : last + 1]
-    return {
+    entry = {
         "file": path,
         "hunk": index + 1,
         "lines": len(chosen),
         "old": _side_span(chosen, diffmodel.OLD),
         "new": _side_span(chosen, diffmodel.NEW),
-        "text": "".join(f"{_SIGNS.get(line.kind, ' ')}{line.text}\n" for line in chosen),
     }
+    if text:
+        entry["text"] = "".join(f"{_SIGNS.get(line.kind, ' ')}{line.text}\n" for line in chosen)
+    else:
+        entry["text_omitted"] = True
+    return entry
 
 
 _SIGNS = {diffmodel.ADD: "+", diffmodel.DEL: "-", diffmodel.CONTEXT: " "}
 
 
-def _file_entry(file: diffmodel.File) -> dict:
+def _file_entry(file: diffmodel.File, hunks: bool = True) -> dict:
     entry: dict = {
         "path": file.path,
         "kind": file.kind,
         "additions": file.additions,
         "deletions": file.deletions,
-        "hunks": [_hunk_entry(hunk) for hunk in file.hunks],
     }
+    if hunks:
+        entry["hunks"] = [_hunk_entry(hunk) for hunk in file.hunks]
+    else:
+        entry["hunk_count"] = len(file.hunks)
+        entry["hunks_omitted"] = True
     if file.previous_path is not None:
         entry["previous_path"] = file.previous_path
     if file.untracked:
@@ -1116,15 +1131,23 @@ def _highlight_entry(mark: diffnotes.Highlight) -> dict:
     }
 
 
-def _context_object(context: DiffContext, files: bool, patch: bool, notes: bool, patch_budget: int) -> dict:
+def _context_object(
+    context: DiffContext,
+    files: bool,
+    patch: bool,
+    notes: bool,
+    patch_budget: int,
+    hunks: bool = True,
+    selection_text: bool = True,
+) -> dict:
     reply: dict = {
         "loaded": context.loaded,
         "breadcrumb": context.breadcrumb,
         "current": _current_entry(context),
-        "selection": _selection_entry(context),
+        "selection": _selection_entry(context, text=selection_text),
     }
     if files:
-        entries = [_file_entry(file) for file in context.files]
+        entries = [_file_entry(file, hunks=hunks) for file in context.files]
         if patch:
             spent = 0
             truncated = False
@@ -1159,18 +1182,49 @@ def diff_context_reply(
     the tools' `hunk` arguments count them). The patches stop at
     *patch_budget* bytes with a note; and whatever the options, the reply
     fits one wire frame — an oversize one is shrunk step by step (the
-    patches go first, then the hunk lists, then the notes) rather than
-    closing the connection (see mcpserver._send)."""
+    patches go first, then the hunk lists, then the notes, then the file
+    list, then the selection's text), each step saying so under
+    `truncated`, rather than closing the connection (see mcpserver._send).
+
+    The measure is the reply as the frame carries it — the string
+    JSON-escaped once more inside `{"id", "ok", "message"}` (encode_message
+    dumps with ensure_ascii, so every quote, newline and non-ASCII
+    character grows on the wire) — with _DIFF_REPLY_MARGIN left for the
+    envelope, as terminal_reply measures its own."""
     budget = MAX_LINE - _DIFF_REPLY_MARGIN
-    steps = [(files, patch, notes), (files, False, notes), (files, False, False), (False, False, False)]
-    for step_files, step_patch, step_notes in steps:
-        reply = _context_object(context, step_files, step_patch, step_notes, patch_budget)
-        if (step_files, step_patch, step_notes) != (files, patch, notes):
+    asked = (files, True, patch, notes, True)
+    steps = [
+        asked,
+        (files, True, False, notes, True),
+        (files, False, False, notes, True),
+        (files, False, False, False, True),
+        (False, False, False, False, True),
+        (False, False, False, False, False),
+    ]
+    for step in steps:
+        step_files, step_hunks, step_patch, step_notes, step_text = step
+        reply = _context_object(
+            context,
+            step_files,
+            step_patch,
+            step_notes,
+            patch_budget,
+            hunks=step_hunks,
+            selection_text=step_text,
+        )
+        if step != asked:
             reply["truncated"] = "the reply was too large; some of what was asked for was left out"
-        text = json.dumps(reply, ensure_ascii=False, indent=1)
-        if len(text.encode("utf-8")) <= budget:
-            return text
-    return text[: budget // 4]
+        if _fits_frame(reply, budget):
+            return json.dumps(reply, ensure_ascii=False, indent=1)
+    # Every step but the bare object is bounded by the parser's caps (a
+    # path, a breadcrumb, a hunk header): this is a placeholder, not a path
+    # the tests can reach, but it still answers with a JSON object.
+    return json.dumps({"loaded": context.loaded, "truncated": "the reply was too large to send"})
+
+
+def _fits_frame(reply: dict, budget: int) -> bool:
+    text = json.dumps(reply, ensure_ascii=False, indent=1)
+    return len(json.dumps(text).encode("utf-8")) <= budget
 
 
 def _index_word(prefix: str, index: int, entry: dict) -> str:
@@ -1242,6 +1296,27 @@ def highlight_reply(count: int) -> str:
     return f"Added {count} highlight{'' if count == 1 else 's'}."
 
 
+CLEAR_NOTHING = "Nothing to clear: 'notes' and 'highlights' are both false"
+
+
+def clear_targets(args: dict) -> tuple[bool, bool] | str:
+    """clear_diff_marks' (notes, highlights) from its arguments, or the
+    refusal: neither given clears both; one given alone means that kind —
+    `notes: true` the notes only, `notes: false` everything but the
+    notes; both false is nothing to do, refused rather than answered
+    with an empty "Cleared"."""
+    notes, highlights = args.get("notes"), args.get("highlights")
+    if notes is None and highlights is None:
+        return True, True
+    if notes is None:
+        notes = not highlights
+    elif highlights is None:
+        highlights = not notes
+    if not notes and not highlights:
+        return CLEAR_NOTHING
+    return bool(notes), bool(highlights)
+
+
 def clear_reply(notes: int | None, highlights: int | None, path: str | None) -> str:
     parts = []
     if notes is not None:
@@ -1249,6 +1324,8 @@ def clear_reply(notes: int | None, highlights: int | None, path: str | None) -> 
     if highlights is not None:
         parts.append(f"{highlights} highlight{'' if highlights == 1 else 's'}")
     where = f" from {path}" if path else ""
+    if not parts:
+        return f"Nothing cleared{where}."
     return f"Cleared {' and '.join(parts)}{where}."
 
 

@@ -116,12 +116,21 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   the watch or the footer's tick may have a reload out), so an agent
   calling right after an edit isn't flaky. `diff_context` is
   `mcptools.diff_context_reply(page.context(), files, patch, notes)`:
-  **one JSON object** (hunks 1-based with header / old / new ranges, the
-  current file + hunk, the selection's spans and text, the files, the
-  patches under `DIFF_CONTEXT_PATCH_BYTES` (200 kB, a file that doesn't
-  fit is `patch_omitted` and so are the later ones), the notes and
-  highlights), shrunk stepwise — patches, then hunks, then notes — with a
-  `truncated` key so it always fits one frame. `annotate_diff` /
+  **one JSON object** (hunks 1-based with header / old / new ranges — a
+  side the hunk has no lines on, a new file's old side, is `null`, not
+  the view's padded `[0, 0]` — the current file + hunk, the selection's
+  spans and text, the files, the patches under
+  `DIFF_CONTEXT_PATCH_BYTES` (200 kB, a file that doesn't fit is
+  `patch_omitted` and so are the later ones), the notes and highlights),
+  shrunk stepwise — patches, then the hunk lists (`hunks_omitted` +
+  `hunk_count` per file), then notes, then the file list, then the
+  selection's text (`text_omitted`) — with a `truncated` key so it always
+  fits one frame. **The measure is the framed reply**, `json.dumps(text)`
+  as `encode_message` will escape it (indent-1 JSON doubles every newline
+  and quote on the wire; a raw-bytes measure passed replies that closed
+  the connection) with the same 16 KiB margin as `terminal_reply`.
+  `mcptools.NOTE_MAX_CHARS` (diffnotes') is the schema's `maxLength` for
+  a summary and a rationale. `annotate_diff` /
   `highlight_diff` shape their batches with `mcptools.note_specs` /
   `highlight_specs` (each refuses a non-repo path by index, `notes[1]
   (x.py)`, and a note with both or neither of `line` / `hunk`) and hand
@@ -131,9 +140,13 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   (`line 99 (new) of a.txt is not in a hunk of the loaded diff`); the
   replies are prefixed `No notes added: ` / `No highlights added: `.
   Highlight offsets are code points (diffnotes' rule; the schema says
-  so). `clear_diff_marks` with neither `notes` nor `highlights` clears
-  both; `user` only widens the notes; two `clear_marks` calls so the
-  reply (`mcptools.clear_reply`) counts each. The switch labels are in
+  so). `clear_diff_marks`' flags are read by `mcptools.clear_targets`:
+  neither given clears both, one alone names the kind (`notes: true` the
+  notes only, `notes: false` the highlights only), both false is refused
+  (`CLEAR_NOTHING`) — an explicit false beside an omitted key once
+  cleared nothing and answered `Cleared .`; `user` only widens the notes;
+  two `clear_marks` calls so the reply (`mcptools.clear_reply`) counts
+  each. The switch labels are in
   `tokensettings._MCP_TOOL_LABELS`.
 - `show_image` — a local path or an `http(s)` URL: URLs are fetched on a
   worker thread (`remoteimages.py`, stdlib urllib, redirects to http(s) only,
