@@ -149,12 +149,32 @@ under a banner. Font scale is a display-level provider keyed on
 (`_landed`); a forced fetch colliding with one in flight is re-issued. Before
 `_rebuild` clears a box, focus inside it is parked on the scroller
 (`_park_focus`), and `gtk-label-select-on-focus` is off app-wide, or the
-description selects itself. Bodies render via `formatting.md_to_pango`
-(escape everything; `set_lines` caps per *paragraph*, so `_folded_body`
-truncates text). The converter checks its own output is well-formed and
-falls back to escaped plain text: GTK 4's `set_markup` blanks a label on bad
-markup instead of raising, so a `try/except GLib.GError` around it guards
-nothing. Images render via `bodyimages` / `pictures` (`BoundedPicture`
+description selects itself.
+
+**Bodies are markdown blocks.** `mdblocks.parse_blocks` (GTK-free; GLib
+only) runs markdown-it-py's `gfm-like` preset — the one preset, pinned by a
+unit test: `gfm-like2` exists only on 4.1+ and Ubuntu ships 3.0.0 — and
+folds the token stream into frozen dataclasses (`Text(markup, source)`,
+`Heading`, `CodeBlock`, `Table`, `Quote(kind)`, `ListBlock`/`ListItem(check)`,
+`Details`, `ImageRow`, `Rule`), each carrying its `source`. Inline runs are
+rendered to Pango markup by a walker with an open-tag stack (well-formed by
+construction), hrefs escaped and gated to http(s), a linkify link kept only
+when its visible text starts with `http://`, `https://` or `www.` (GitHub's
+autolink rule; markdown-it's fuzzy linkify would link `example.com`),
+`<img>`/`<br>`/`<sub>`/`<sup>`/`<kbd>` honoured and every other tag escaped
+literal, nesting capped at `MAX_DEPTH` (6). `mdwidgets.build` turns blocks
+into widgets under a `Budget` of ~400 leaves (past it the rest is one plain
+label); `prview._fill_blocks` walks them with per-block line costs
+(`mdblocks.line_cost`), cutting the overrunning *paragraph* on its source
+with `body_head` and re-rendering the front through `mdblocks.render_inline`
+(`set_lines` + ellipsize on that label alone) — any other block that doesn't
+fit whole waits for "Show more". Fallback ladder: `mdblocks.available()`
+False (import latch) → `split_body` + `md_to_pango` for every body; a body
+`parse_blocks` raises on → that body alone; bad markup on a label → escaped
+source (GTK 4's `set_markup` blanks a label on bad markup instead of
+raising, so a `try/except GLib.GError` around it guards nothing). Tables,
+code blocks and `<details>` render as their escaped source until their own
+PRs land. Images render via `bodyimages` / `pictures` (`BoundedPicture`
 measures height-for-width in a `Gtk.Box` slot); changed images render
 before/after from `prblobs` (`gh api …/contents/{path}?ref=<sha>` with the
 raw media type; a binary file *does* get a "Binary files differ" patch, so
@@ -175,6 +195,20 @@ gated to GitHub's username alphabet.
   the normal close flow — can be declined), never the toggling row action.
 - The e2e env has no gh: stage `session_prs` records in `state.json` to render
   marks and badges.
+- `scripts/check_pr_page_focus.py` finds the description as a `Gtk.Label`
+  whose text starts with "First" and `check_pr_page_patch.py` counts column
+  children: paragraphs must stay individually selectable labels, and no
+  block widget may add a `Gtk.Button` with a `Gtk.Box` child (how the focus
+  check finds the fold's toggle). `check_pr_body_blocks.py` asserts on the
+  `pr-md-*` CSS classes — keep them when restyling.
+- An `<img>` alone on its line is a CommonMark HTML *block* (type 7), not an
+  `html_inline`: `mdblocks._html_lines` turns such lines into image rows. A
+  `Text.source` is the inline token's content (indents and `>` stripped),
+  not the mapped lines — `parseInline` on the cut front would otherwise
+  render the markers literally; container sources *are* the mapped lines.
+- Task lists and alerts are text-token detectors (`[ ] `/`[x] ` as the first
+  text of an item's first paragraph; `[!NOTE]` + softbreak as a quote's), and
+  the detector mutates the token it strips — parse each body once.
 
 Related: `collins-sessions-and-sidebar`, `collins-terminal-tab`,
 `collins-panel-dock`, `collins-gtk-sharp-edges`.

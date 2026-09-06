@@ -43,6 +43,20 @@ downloads of each version, see the
   shows that file's diff alone, and `]` / `.` walk on into the next file.
   Clicking the section heading (**FILES**, or the live **UNSTAGED** /
   **STAGED**) shows the whole list of diffs again.
+- **PR bodies render as real markdown blocks.** The PR page's description,
+  comments and reviews are parsed by markdown-it-py (the `gfm-like`
+  preset; `python3-markdown-it` / `python3-linkify-it` on Ubuntu,
+  `python3-markdown-it-py` / `python3-linkify-it-py` on Fedora,
+  `python-markdown-it-py` / `python-linkify-it-py` on Arch — new
+  dependencies, from the distro like everything else) into blocks Collins
+  draws itself: headings in three sizes, nested lists laid out
+  structurally, ☐ / ☑ task lists, ordered lists counting from their first
+  number, quotes and alerts behind a bar, horizontal rules, reference-style
+  links, bare URLs linked the way GitHub links them, `<kbd>` / `<sub>` /
+  `<sup>` / `<br>`. Tables, code blocks and `<details>` show as their
+  source for now (their own widgets follow); any other HTML shows escaped.
+  The folded preview still opens with the first paragraph, and without
+  the parser the page falls back to the previous renderer.
 - **Archiving a session reads its notifications.** A session's message
   and bell rows stayed unread in the history after the session was
   archived, so the bell and the badge kept counting a session with

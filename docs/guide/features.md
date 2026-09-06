@@ -160,6 +160,17 @@ Enter opens, Esc closes.
   own, twice as wide as it can be squeezed when the spare room covers that —
   paid out of the gutter the terminal wasn't using, never out of the
   terminal itself.
+- **Bodies render as GitHub-flavored markdown.** The description, comments,
+  reviews and review threads on the PR page are parsed with markdown-it-py
+  (the `gfm-like` preset): headings in three sizes, nested lists laid out
+  structurally, task lists with ☐ / ☑ glyphs, ordered lists counting from
+  their first number, block quotes and GitHub alerts behind a bar,
+  horizontal rules, reference-style links, bare `https://` and `www.`
+  URLs linked, `<kbd>`, `<sub>`, `<sup>` and `<br>`, and images in place
+  as before. Tables, code blocks and `<details>` show as their source for
+  now — never dropped. Every other HTML tag shows escaped, as text. Without
+  the parser installed the page falls back to its plainer built-in
+  renderer.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
   file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —
   renders as the picture itself, on a transparency checkerboard: **before
