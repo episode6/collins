@@ -15,9 +15,10 @@ current / clear) is the view's selection now and lives in the widget;
 text selection. The address → position lookups the extension did for the
 cursor (`locate`) survive as `locate_address`; the planners take line
 indexes, so the "not on a diff line" refusals become index-bounds
-refusals. The git argv the integration tests run (the prefix-normalised
-`diff`, the applies) is spelled here; gitops grows the builders later in
-this PR."""
+refusals. The integration tests run the view's git through gitops
+(file_patch, apply_patch, read_diff, stage_paths / unstage_paths /
+checkout_paths); only the repository setup and the read-backs shell out on
+their own (_run, _git)."""
 
 from __future__ import annotations
 
@@ -887,7 +888,14 @@ def test_plan_lines_refuses_in_order_binary_too_large_untracked_rename_empty_unr
         "diff --git a/f.txt b/f.txt\nindex 1111111..2222222 100644\nBinary files a/f.txt and b/f.txt differ\n"
     )
     assert refusal(fresh=binary) == "f.txt is binary: use Stage file"
-    assert "outside" in refusal(fresh=STAGING_TEXT.replace("f.txt", "../f.txt"))
+    # A fresh stanza for another path is not the file's, whatever else the
+    # stream holds; an outside path is refused once the stanza is found.
+    assert refusal(fresh=STAGING_TEXT.replace("f.txt", "../f.txt")) == (
+        "cannot read the patch for f.txt: no stanza for it"
+    )
+    assert "outside" in refusal(
+        file=replace(STAGING, path="../f.txt"), fresh=STAGING_TEXT.replace("f.txt", "../f.txt")
+    )
     assert refusal(fresh=STAGING_TEXT.replace("100644", "120000")) == (
         "cannot stage f.txt by hunk: it is a symbolic link, which hunks cannot describe"
     )
@@ -1115,6 +1123,63 @@ def test_revert_a_hunk_or_lines_from_a_commit_is_a_reverse_apply_in_the_working_
         "f.txt is a new or deleted file: use Revert file"
     )
     assert reason(gitpatch.plan_hunk(STAGING, 0, "branch", "")) == "nothing to revert in f.txt: reloading"
+
+
+def test_a_fresh_stanza_for_another_path_is_never_taken_as_the_files():
+    """parse_file_patch answers only the stanza whose path is the one asked
+    for — a lone stanza for another file used to be accepted, and the
+    planners then wrote a patch for that file under a confirm naming this
+    one. Every planner path refuses without a plan."""
+    other = STAGING_TEXT.replace("f.txt", "g.txt")
+    assert gitpatch.parse_file_patch(other, "f.txt") is None
+    assert gitpatch.parse_file_patch(other, "g.txt").path == "g.txt"
+    assert gitpatch.parse_file_patch(other + STAGING_TEXT, "f.txt").path == "f.txt"
+    # A rename re-read names the new path; the old one alone is not it.
+    renamed = STAGING_TEXT.replace(
+        "index 1111111..2222222 100644",
+        "similarity index 90%\nrename from e.txt\nrename to f.txt\nindex 1111111..2222222 100644",
+    )
+    assert gitpatch.parse_file_patch(renamed, "f.txt", "e.txt").previous_path == "e.txt"
+    assert gitpatch.parse_file_patch(renamed, "e.txt", "e.txt") is None
+    none = "cannot read the patch for f.txt: no stanza for it"
+    assert reason(gitpatch.plan_hunk(STAGING, 1, UNSTAGED, other)) == none
+    assert reason(gitpatch.plan_hunk(STAGING, None, UNSTAGED, other)) == none
+    assert reason(gitpatch.plan_lines(STAGING, 1, 0, 2, STAGED, other)) == none
+    assert reason(gitpatch.plan_hunk(STAGING, 1, UNSTAGED, other, discard=True)) == none
+    assert reason(gitpatch.plan_lines(STAGING, 1, 0, 2, UNSTAGED, other, discard=True)) == none
+    assert reason(gitpatch.plan_hunk(STAGING, 1, {"show": "abc123"}, other)) == none
+    assert reason(gitpatch.plan_lines(STAGING, 1, 0, 2, "branch", other)) == none
+    # The last check before a patch is written: a File whose path is not
+    # the shown one is refused as a change, whichever way it got there.
+    shown = replace(STAGING, path="g.txt")
+    refused = gitpatch._same_file(shown, STAGING, gitpatch._Wording("stage"))
+    assert refused == Refusal(
+        "g.txt changed since it was loaded, reloading (the patch names f.txt)", stale=True
+    )
+    assert gitpatch._same_file(STAGING, STAGING, gitpatch._Wording("stage")) is None
+
+
+def test_a_revert_of_a_dirty_file_opens_its_confirmation_with_the_conflict_warning():
+    load = {"show": "abc123"}
+    warning = "f.txt has unstaged changes in the working tree; reverting may conflict."
+    assert gitpatch.revert_warning("f.txt") == warning
+    clean = gitpatch.plan_file(STAGING, load)
+    dirty = gitpatch.plan_file(STAGING, load, dirty=True)
+    assert dirty == replace(clean, confirm=f"{warning} {clean.confirm}")
+    hunk = gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT, dirty=True)
+    assert hunk.confirm == f"{warning} Revert hunk 2 of f.txt in the working tree? This cannot be undone."
+    clean_hunk = gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT)
+    assert replace(hunk, confirm=None) == replace(clean_hunk, confirm=None)
+    lines = gitpatch.plan_lines(STAGING, 1, 1, 2, load, STAGING_TEXT, dirty=True)
+    assert lines.confirm == f"{warning} Revert 2 lines of f.txt in the working tree? This cannot be undone."
+    # The flag means nothing to the working-tree loads: a stage asks
+    # nothing, a discard's question is its own.
+    assert gitpatch.plan_hunk(STAGING, 1, UNSTAGED, STAGING_TEXT, dirty=True).confirm is None
+    assert gitpatch.plan_file(STAGING, UNSTAGED, discard=True, dirty=True).confirm == (
+        "Discard the changes to f.txt? This cannot be undone."
+    )
+    discard = gitpatch.plan_lines(STAGING, 1, 1, 2, UNSTAGED, STAGING_TEXT, discard=True, dirty=True)
+    assert discard.confirm == "Discard 2 lines in f.txt? This cannot be undone."
 
 
 # -- anchor.test.ts: the selection across a reload ----------------------------
@@ -1669,3 +1734,35 @@ def test_revert_a_hunk_of_a_commit_into_the_working_tree(repo):
     _git(repo, "checkout", "-q", "--", "f.txt")
     _apply(repo, whole)
     assert _read(repo, "f.txt") == THIRTY
+
+
+@needs_git
+def test_a_view_of_one_file_never_plans_a_change_to_its_glob_twin(repo):
+    """The view loaded `foo[1].txt`; by action time that file is clean again
+    and foo1.txt carries the same-shaped change. A glob reading of the
+    pathspec once returned foo1.txt's stanza for the re-read and the lone
+    stanza was taken as the file's: a discard confirmed for `foo[1].txt`
+    emptied foo1.txt's change. Now the re-read is literal and empty, the
+    plan is a stale refusal, and nothing moves."""
+    for name in ("foo1.txt", "foo[1].txt"):
+        _write(repo, name, "one\ntwo\nthree\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "twins")
+    _write(repo, "foo[1].txt", "one\ntwo\nthree\nchanged\n")
+    shown = gitops.read_diff(repo, UNSTAGED)
+    assert [f.path for f in shown.files] == ["foo[1].txt"]
+    file = shown.files[0]
+    _git(repo, "checkout", "-q", "--", ":(literal)foo[1].txt")
+    _write(repo, "foo1.txt", "one\ntwo\nthree\nchanged\n")
+    fresh = gitops.file_patch(repo, UNSTAGED, "foo[1].txt")
+    assert fresh == ""
+    plan = gitpatch.plan_hunk(file, 0, UNSTAGED, fresh, discard=True)
+    assert plan == Refusal("nothing to discard in foo[1].txt: reloading", stale=True)
+    assert isinstance(gitpatch.plan_hunk(file, 0, UNSTAGED, fresh), Refusal)
+    # Even handed foo1.txt's stanza outright, the planner has no file for it.
+    twin = gitops.file_patch(repo, UNSTAGED, "foo1.txt")
+    assert twin.startswith("diff --git a/foo1.txt b/foo1.txt\n")
+    assert gitpatch.plan_hunk(file, 0, UNSTAGED, twin, discard=True) == Refusal(
+        "cannot read the patch for foo[1].txt: no stanza for it"
+    )
+    assert gitops.read_status(repo) == Status(unstaged=(StatusRow("foo1.txt", "M"),), staged=())

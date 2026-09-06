@@ -172,7 +172,13 @@ form, binary and too-large placeholders, gaps, split rows, word emphasis,
 the palette blends, `stable_key` for reload matching); `gitpatch.py` is the
 extension's staging arithmetic ported (partial-patch writers, `plan_file` /
 `plan_hunk` / `plan_lines` → a `Plan` or a `Refusal`, the confirm and toast
-words); and `gitops.py` grew the reads and runs they need — `read_diff(cwd,
+words; `parse_file_patch` answers only the stanza whose path was asked
+for and `_same_file` re-checks it before a patch is written, so a re-read
+can never plan another file's change under this file's confirm; the
+planners take `dirty` — the page must pass whether `DiffRead.status`
+lists the path under unstaged — and a revert's confirm then opens with
+`revert_warning`, the spec's "may conflict" sentence); and `gitops.py`
+grew the reads and runs they need — `read_diff(cwd,
 load, parent_target, untracked, pathspecs)` → `DiffRead(files, status, ok,
 error)`: hunk's own argv (`diff_argv` / `show_argv` behind
 `DIFF_PREFIX_ARGS`, the `-c` options pinning `a/` `b/` so the patch applies
@@ -190,7 +196,12 @@ asked, flagged, `conflicts` when it left markers), `stage_paths` /
 `tree_state_signature` (status + numstat hashed) for the watch. Footguns:
 every one of these runs from `gitinfo.repo_root` (`_root`) — from a
 subdirectory git reads pathspecs against the cwd and `apply` silently
-skips paths outside it; patch reads are binary (`run_git_bytes`) because
+skips paths outside it; every path after `--` goes on as
+`:(literal)path` (`literal_pathspec`) because git reads a bare pathspec
+as a glob — `foo[1].txt` names foo1.txt too, and a confirmed
+`checkout -- foo[1].txt` discarded the twin's changes (the `--no-index`
+untracked read takes filesystem paths and stays bare); patch reads are
+binary (`run_git_bytes`) because
 `text=True` folds CRLF and the patch then matches nothing; `--3way` implies
 `--index`, so a three-way revert also stages, and a conflicting one exits 1
 having changed the tree.
