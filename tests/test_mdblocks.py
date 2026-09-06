@@ -263,6 +263,25 @@ def test_nested_details_close_matches_its_own_open():
     assert outer.children[1] == Text("outer", "outer")
 
 
+def test_details_closed_inside_its_own_block_is_literal():
+    blocks = parse_blocks("<details><summary>a</summary></details>\n\ntext\n\n</details>")
+    assert [type(b) for b in blocks] == [Text, Text, Text]
+    assert blocks[0].source == "<details><summary>a</summary></details>"
+    assert blocks[2] == Text("&lt;/details&gt;", "</details>")
+
+
+def test_details_pairing_is_one_pass():
+    # 9 000 unmatched openers is what prdetail's 100 000-char cap lets
+    # through; a scan per opener took ~24 s on the main loop.
+    import time
+
+    body = "<details>\n\n" * 9000
+    started = time.perf_counter()
+    blocks = parse_blocks(body)
+    assert time.perf_counter() - started < 3.0
+    assert len(blocks) == 9000 and all(isinstance(b, Text) for b in blocks)
+
+
 def test_inline_html_whitelist():
     text = parse_blocks(FIXTURE)[11]
     assert text.markup == (

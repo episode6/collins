@@ -243,6 +243,7 @@ def line_cost(block: Block, image_lines: int = 4) -> int:
 _IMG_TAG_RE = re.compile(r"<img\b[^<>]{0,1000}>", re.I)
 _DETAILS_OPEN_RE = re.compile(r"^\s*<details\b([^>]*)>", re.I)
 _DETAILS_CLOSE_RE = re.compile(r"^\s*</details\s*>", re.I)
+_DETAILS_TAG_RE = re.compile(r"<(/?)details\b", re.I)
 _SUMMARY_RE = re.compile(r"<summary\b[^>]*>(.*?)</summary\s*>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^<>]{0,1000}>")
 _OPEN_ATTR_RE = re.compile(r"(?:^|\s)open(?:\s|=|$)", re.I)
@@ -267,9 +268,10 @@ class _Folder:
 
     def fold(self, tokens: list, depth: int) -> list[Block]:
         blocks: list[Block] = []
+        closes = _details_closes(tokens)
         i = 0
         while i < len(tokens):
-            block, i = self._one(tokens, i, depth, blocks)
+            block, i = self._one(tokens, i, depth, blocks, closes)
             if block is not None:
                 blocks.append(block)
             if self._pending:
@@ -277,7 +279,9 @@ class _Folder:
                 self._pending.clear()
         return blocks
 
-    def _one(self, tokens: list, i: int, depth: int, blocks: list[Block]) -> tuple[Block | None, int]:
+    def _one(
+        self, tokens: list, i: int, depth: int, blocks: list[Block], closes: dict[int, int]
+    ) -> tuple[Block | None, int]:
         token = tokens[i]
         kind = token.type
         if kind == "paragraph_open":
@@ -321,7 +325,7 @@ class _Folder:
             items = self._items(tokens[i + 1 : close], depth + 1)
             return ListBlock(ordered, start, tuple(items), source), close + 1
         if kind == "html_block":
-            return self._html_block(tokens, i, depth)
+            return self._html_block(tokens, i, depth, closes.get(i))
         if kind.endswith("_open"):
             # A container this module has no vocabulary for: its whole
             # source, escaped, and the stream skipped past its close.
@@ -414,13 +418,14 @@ class _Folder:
             aligns = [None] * len(header)
         return Table(tuple(aligns), tuple(header), tuple(rows), source)
 
-    def _html_block(self, tokens: list, i: int, depth: int) -> tuple[Block | None, int]:
+    def _html_block(
+        self, tokens: list, i: int, depth: int, close: int | None
+    ) -> tuple[Block | None, int]:
         token = tokens[i]
         content = token.content or ""
         opener = _DETAILS_OPEN_RE.match(content)
         if opener is None:
             return self._html_lines(content, token), i + 1
-        close = _details_close(tokens, i)
         if close is None or depth + 1 > MAX_DEPTH:
             return _literal(content.rstrip("\n")), i + 1
         is_open = bool(_OPEN_ATTR_RE.search(opener.group(1)))
@@ -518,23 +523,33 @@ def _matching(tokens: list, i: int, close_type: str) -> int:
     return len(tokens)
 
 
-def _details_close(tokens: list, i: int) -> int | None:
-    """The html_block closing the ``<details>`` opened at *i*, nesting
-    counted, or None: an unmatched open renders literal rather than as an
-    expander that eats the rest of the body."""
-    depth = 0
-    for j in range(i + 1, len(tokens)):
-        token = tokens[j]
+def _details_closes(tokens: list) -> dict[int, int]:
+    """Index of the html_block closing each ``<details>`` opener in *tokens*
+    (an html_block whose content starts with the tag), paired in one pass
+    with a stack — every ``<details`` and ``</details`` tag inside every
+    html_block's content counts, in order, so nesting matches its own
+    open. An opener absent from the map is unmatched (or closed inside
+    its own block) and renders literal rather than as an expander that
+    eats the rest of the body. One linear pass: a body of thousands of
+    unmatched openers must not cost a scan per opener."""
+    closes: dict[int, int] = {}
+    stack: list[int | None] = []
+    for j, token in enumerate(tokens):
         if token.type != "html_block":
             continue
         content = token.content or ""
-        depth += len(re.findall(r"<details\b", content, re.I))
-        closes = len(re.findall(r"</details\s*>", content, re.I))
-        if closes:
-            if depth < closes:
-                return j
-            depth -= closes
-    return None
+        # Only the leading tag of an opener block is a Details; further
+        # opens in the same content are anonymous and just nest.
+        real = _DETAILS_OPEN_RE.match(content) is not None
+        for tag in _DETAILS_TAG_RE.finditer(content):
+            if not tag.group(1):
+                stack.append(j if real else None)
+                real = False
+            elif stack:
+                opened = stack.pop()
+                if opened is not None and opened != j:
+                    closes[opened] = j
+    return closes
 
 
 def _start(token) -> int:

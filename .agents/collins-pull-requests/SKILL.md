@@ -210,6 +210,11 @@ gated to GitHub's username alphabet.
   `Text.source` is the inline token's content (indents and `>` stripped),
   not the mapped lines — `parseInline` on the cut front would otherwise
   render the markers literally; container sources *are* the mapped lines.
+- `<details>` openers are paired with their `</details>` html_blocks in
+  one stack pass per `fold` call (`mdblocks._details_closes`), never by a
+  forward scan per opener: prdetail's 100 000-char cap admits nine thousand
+  unmatched openers, and a scan each was 24 s on the main loop. An opener
+  with no close, or closed inside its own block, renders literal.
 - Task lists and alerts are text-token detectors (`[ ] `/`[x] ` as the first
   text of an item's first paragraph; `[!NOTE]` + softbreak as a quote's), and
   the detector mutates the token it strips — parse each body once.
