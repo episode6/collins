@@ -1233,7 +1233,14 @@ class _FileSection(Gtk.Box):
         plan.commit()
         self.hunks = [w for w in plan.widgets if isinstance(w, _HunkSection)]
         self.gaps = [w for w in plan.widgets if isinstance(w, _GapRow)]
-        for section in self.hunks:
+        # A kept section still holds the Hunk of the load it was built for:
+        # the key leaves the index out on purpose (a hunk above going away
+        # must not rebuild the ones below), so re-point every section at
+        # this read's Hunk — the items list yields one section per
+        # file.hunks entry, in order — or `]`, `z`, reveal and the sidebar
+        # would keep speaking the old indexes.
+        for section, hunk in zip(self.hunks, file.hunks, strict=True):
+            section.hunk = hunk
             section.file = file
 
     def _make_hunk(self, hunk: diffmodel.Hunk, language: GtkSource.Language | None) -> _HunkSection:
@@ -1767,6 +1774,12 @@ class DiffView(Gtk.Box):
         hunks kept theirs (and hold no reference to a widget for it)."""
         section = self._section_for(path, diffmodel.NEW)
         return [h.serial for h in section.hunks] if section is not None else []
+
+    def hunk_indexes(self, path: str) -> list[int]:
+        """The `hunk.index` each hunk section of *path* speaks for, in
+        order — `list(range(n))` after any reload, kept widgets included."""
+        section = self._section_for(path, diffmodel.NEW)
+        return [h.hunk.index for h in section.hunks] if section is not None else []
 
     def badge_rows(self) -> list[tuple[str, str, bool]]:
         """(path label, badge, has picture) per section, in order — the
