@@ -198,7 +198,8 @@ collins/
 ├── gitops.py         # the git reads and mutations behind the panels and the diff view (GTK-free)
 ├── diffmodel.py      # a parsed diff stream: files, hunks, gaps, split rows, word emphasis (GTK-free)
 ├── gitpatch.py       # the staging arithmetic: partial patches and their plans (GTK-free)
-├── hunkctl.py        # what the git page decides without a widget (argv, titles, session ids)
+├── gitloads.py       # what the git page can load: modes, commits, ranges, their names and layout slot (GTK-free)
+├── hunkctl.py        # what the git page decides about hunk without a widget (argv, session ids, sidecar)
 ├── hunkext/collins-git/  # the hunk extension: the cursor keys (stage, anchor, discard)
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog

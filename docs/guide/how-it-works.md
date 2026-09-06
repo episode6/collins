@@ -357,7 +357,8 @@ collins/
 ├── prstore.py        # single source of truth for pull request state (gh)
 ├── prview.py         # the in-app pull request page
 ├── gitpage.py        # the git page: hunk in a VTE, driven over its session API
-├── hunkctl.py        # what the git page decides without a widget: argv, titles, session ids
+├── gitloads.py       # what the git page can load: modes, commits, ranges, their names, the layout slot
+├── hunkctl.py        # what the git page decides about hunk without a widget: argv, session ids, sidecar
 ├── hunkext/collins-git/  # the hunk extension: commits + files panels, staging
 ├── practions.py      # what a PR offers (merge, review, …) and the gh calls
 ├── statusicon.py     # the status icon: a StatusNotifierItem over D-Bus

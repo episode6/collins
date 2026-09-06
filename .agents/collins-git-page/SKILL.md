@@ -5,8 +5,11 @@ description: >-
   running in a VTE beside the session and driven over its session API
   (gitpage.py), the native commits and files sidebar with its action row
   (gitsidebar.py over the GTK-free gitmodel.py and gitops.py), the GTK-free
-  decisions in hunkctl.py (argv, version gate, session lookup by pid, titles,
-  the sidecar, show_diff), the slim collins-git hunk extension shipped as
+  Loaded vocabulary in gitloads.py (modes, commit and range loads, safe
+  refs, breadcrumb and tab titles, the chords, the layout slot) and the
+  hunk-side decisions in hunkctl.py (argv, version gate, session lookup by
+  pid, session titles, the sidecar, show_diff), the slim collins-git hunk
+  extension shipped as
   package data (TypeScript in collins/hunkext/collins-git: the five keys at
   hunk's cursor, line ranges, the sidecar v2 contract), Preferences → Git,
   the parent-branch rule, freshness reloads, and gitinfo.py's cheap .git
@@ -58,8 +61,9 @@ and an `Adw.Banner` over the viewer says the viewer never registered with
 the daemon, names `hunkctl.DAEMON_DIAGNOSTIC` (`hunk daemon serve`) as the
 run that prints why, and offers **Retry** (`_respawn`); the banner hides on a
 successful resolve, a card, or the child exiting. The three modes plus
-`{"show": ref}` and `{"range": "a...b"}` are the `Loaded` value;
-`hunkctl.breadcrumb` / `tab_title` / `loaded_from_title` map between them
+`{"show": ref}` and `{"range": "a...b"}` are the `Loaded` value
+(`gitloads.py`, see below); `gitloads.breadcrumb` / `tab_title` and
+`hunkctl.loaded_from_title` map between them
 and hunk's own session titles (a two-dot range or a pathspec stays
 foreign: shown by title, never reloaded). `_apply_title` also hands the
 sidebar its context and, for a `show`, the full sha the worker read
@@ -102,7 +106,7 @@ then local `main`/`master`, loose or packed — no subprocess; a `git init`
 repo has no remote HEAD, and without a default there is no trunk to walk
 from, so no stack). A stack read that moves the parent re-seeds the tree
 signature (the base changed, not the tree) and reloads a branch diff. There
-is no picker and no persisted parent: the layout slot is `hunkctl.
+is no picker and no persisted parent: the layout slot is `gitloads.
 encode_state(loaded, sidebar)` (`"sidebar": false` when folded,
 `decode_sidebar`); a `"parent"` key from older layouts is ignored. The
 extension never sees the parent.
@@ -190,15 +194,30 @@ skips paths outside it; patch reads are binary (`run_git_bytes`) because
 `text=True` folds CRLF and the patch then matches nothing; `--3way` implies
 `--index`, so a three-way revert also stages, and a conflicting one exits 1
 having changed the tree.
-`hunkctl` carries what they lean on: the fifth `Loaded`, `{"range":
-"a...b"}` (`is_range`, `range_halves`; three dots between two safe refs —
-`loaded_from_title` names it, two-dot ranges stay foreign),
+**`gitloads.py` is the `Loaded` vocabulary**, split out of `hunkctl` so
+the native view can load the same things without the viewer's module:
+`MODES` / `DEFAULT_MODE`, `SHOW_KEY` / `RANGE_KEY`, `safe_ref` (the one
+rule for a ref that goes on an argv or into a title), `is_show` /
+`show_ref`, the fifth `Loaded` `{"range": "a...b"}` (`is_range`,
+`range_halves`, `range_of`; three dots between two safe refs, two-dot
+ranges stay foreign), `loaded_ok`, `short_ref`, `breadcrumb` /
+`tab_title`, `load_for_key` (Ctrl+1/2/3 as integers), `initial_mode`,
+`encode_state` / `decode_state` / `decode_sidebar`, the `show_diff` tool's
+`show_diff_load` and `diff_file_path`, the git calls behind a commit's
+name (`commit_subject`, `commit_subject_and_sha` — one `git log -1
+--format=%s%x00%H` — and `resolve_commit`, `GIT_TIMEOUT_S`), `Options.
+from_settings` with `LAYOUTS`, the `LOG_PAGE` bounds, `safe_theme` /
+`MAX_THEME_LEN` (the theme goes with decision 3 of the native-diff spec,
+not before), and `MAX_PATH_CHARS`. **`hunkctl` re-exports every one of
+those names** (redundant `X as X` aliases, so ruff reads them as
+re-exports; `tests/test_hunkctl.py` pins the identity), so no caller moved
+— new code imports `gitloads` directly. `hunkctl` itself keeps what is
+hunk's: `loaded_from_title` / `title_tail` / `foreign_tab_title`,
 `Session.files` / `selected_path` / `selected_hunk` parsed off `session
 get`'s `files[]` (hunk 0.21.1's `fileSummarySchema`: id, path,
 previousPath?, additions, deletions, hunkCount — a binary change lists
 0/0/0, there is no binary flag; capped at `MAX_SESSION_FILES`) and
-`snapshot.state`, and `commit_subject_and_sha` (one `git log -1
---format=%s%x00%H`).
+`snapshot.state`, the argv, the probe, the sidecar and `terminate_tree`.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 
@@ -241,8 +260,8 @@ spawn argv (a change restarts hunk in place — nothing in the session API
 changes them); untracked goes on every diff tail and into the sidecar; page
 size pages the native commits list (`GitSidebar.set_options`). `prefslayout`
 pins hunk's own `--mode` words so the two sides can't drift.
-`hunkctl.Options.from_settings` normalises the settings dict; `safe_theme`
-gates the theme string.
+`gitloads.Options.from_settings` normalises the settings dict; `safe_theme`
+gates the theme string (both re-exported from `hunkctl`).
 
 ## The extension (`collins/hunkext/collins-git`)
 
