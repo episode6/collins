@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -302,6 +302,21 @@ DEFAULT_SETTINGS = {
     "git_theme": "",  # hunk --theme; "" = hunk's own default
     "git_untracked": True,  # off: --exclude-untracked (working-tree reviews hide untracked files)
     "git_log_page": 20,  # commits per group page in the commits panel ("load more…" step)
+    # Which viewer the git page draws diffs with while the native one is
+    # experimental (gitpage.py reads it through gitloads.Options.viewer):
+    # "hunk" — the terminal viewer, today's default — or "native" — the GTK
+    # diff view (diffview.py). TEMPORARY: deleted in PR 4 of the native
+    # diff stack (~/specs/collins/native-diff-panel.md), when the native
+    # view becomes the only one and every hunk path goes with the switch.
+    "git_viewer": "hunk",
+    # The native diff view's own knobs (DiffView.set_options, fed from
+    # gitpage.apply_settings; the header menu and the `l` / `w` keys flip
+    # the first two): the old and new line-number columns, wrapping long
+    # lines instead of scrolling each hunk sideways, and the word-level
+    # emphasis pass within a changed line.
+    "git_line_numbers": True,
+    "git_wrap_lines": False,
+    "git_word_diff": True,
     # The branch a session's git page measures its branch against when git
     # shows no local branch under HEAD (the stack, gitops.stack_branches,
     # names the parent first) and no attached pull request names one (see

@@ -17,8 +17,51 @@ def test_every_default_is_canonical_and_unique():
 def test_catalogue_actions_are_prefixed_and_unique():
     actions = [b.action for b in kb.BINDINGS]
     assert len(actions) == len(set(actions))
-    assert all(a.split(".", 1)[0] in {"win", "app", "editor", "terminal"} for a in actions)
+    assert all(a.split(".", 1)[0] in {"win", "app", "editor", "git", "terminal"} for a in actions)
     assert all(b.group in kb.GROUP_LABELS for b in kb.BINDINGS)
+
+
+def test_git_page_keys_are_page_local_and_hunks_words():
+    # The diff view's chords: hunk's own defaults where it had them, bare
+    # letters included — page-local, so they never reach the terminal.
+    git = {b.action: b.defaults for b in kb.BINDINGS if b.group == kb.GROUP_GIT}
+    assert git["git.next-hunk"] == ("bracketright",)
+    assert git["git.prev-hunk"] == ("bracketleft",)
+    assert git["git.next-file"] == ("period",)
+    assert git["git.prev-file"] == ("comma",)
+    assert git["git.next-note"] == ("braceright",)
+    assert git["git.prev-note"] == ("braceleft",)
+    assert git["git.expand-gap"] == ("z",)
+    layouts = (git["git.layout-auto"], git["git.layout-split"], git["git.layout-stack"])
+    assert layouts == (("0",), ("1",), ("2",))
+    assert git["git.line-numbers"] == ("l",)
+    assert git["git.wrap"] == ("w",)
+    assert git["git.toggle-notes"] == ("a",)
+    assert git["git.refresh"] == ("r",)
+    assert git["git.filter"] == ("slash",)
+    assert git["git.find"] == ("<Control>f",)
+    assert git["git.help"] == ("question",)
+    assert git["git.open-editor"] == ("e",)
+    assert git["git.close"] == ("q",)
+    assert all(a.startswith("git.") for a in git)
+    assert kb.GROUP_LABELS[kb.GROUP_GIT] == "Git page"
+
+
+def test_two_local_scopes_may_share_a_chord():
+    # Ctrl+F finds in the editor and in the diff: the two controllers fire
+    # only with the keyboard inside their own widget, so neither eats the
+    # other's press — no conflict, and no holder to warn about.
+    assert kb.may_overlap("editor.find", "git.find") is False
+    assert kb.may_overlap("editor.find", "win.quick-switch") is True
+    assert kb.may_overlap("git.close", "terminal.copy") is True
+    assert kb.holders({}, "<Control>f", except_action="git.find") == []
+    assert kb.holders({}, "<Control>f", except_action="editor.find") == []
+    # Without a reference action every holder is listed.
+    assert sorted(kb.holders({}, "<Control>f")) == ["editor.find", "git.find"]
+    # A window chord rebound onto a diff key is still a conflict.
+    custom = {"win.quick-switch": ["q"]}
+    assert kb.conflicts(custom) == {"q": ["win.quick-switch", "git.close"]}
+    assert kb.holders(custom, "q", except_action="git.close") == ["win.quick-switch"]
 
 
 @pytest.mark.parametrize(

@@ -1066,6 +1066,40 @@ def test_read_diff_reads_a_staged_rename_a_commit_a_branch_and_a_range(tree):
 
 
 @needs_git
+def test_side_bytes_reads_each_side_of_a_load_the_way_the_view_asks(repo):
+    OLD, NEW = diffmodel.OLD, diffmodel.NEW
+    # The working tree: index on the old side, the disk on the new.
+    _write(repo, "f.txt", "two\n")
+    assert gitops.side_bytes(repo, "unstaged", OLD, "f.txt") == b"one\n"
+    assert gitops.side_bytes(repo, "unstaged", NEW, "f.txt") == b"two\n"
+    _git(repo, "add", "f.txt")
+    _write(repo, "f.txt", "three\n")
+    assert gitops.side_bytes(repo, "staged", OLD, "f.txt") == b"one\n"
+    assert gitops.side_bytes(repo, "staged", NEW, "f.txt") == b"two\n"
+    # A rename's old side is read under the previous path; a commit's old
+    # side at its parent; a branch with no parent names nothing (not the
+    # disk); a range's old side at the merge base the caller resolved.
+    _git(repo, "checkout", "-q", "--", "f.txt")
+    _git(repo, "checkout", "-qb", "feature")
+    _git(repo, "mv", "f.txt", "g.txt")
+    _write(repo, "g.txt", "two\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "rename")
+    sha = _git(repo, "rev-parse", "HEAD").strip()
+    show = {"show": sha}
+    assert gitops.side_bytes(repo, show, OLD, "g.txt", previous_path="f.txt") == b"one\n"
+    assert gitops.side_bytes(repo, show, NEW, "g.txt", previous_path="f.txt") == b"two\n"
+    assert gitops.side_bytes(repo, show, OLD, "g.txt") is None  # no g.txt in the parent
+    assert gitops.side_bytes(repo, "branch", OLD, "g.txt", previous_path="f.txt") is None
+    base = gitops.merge_base(repo, "main", "HEAD")
+    assert gitops.side_bytes(repo, "branch", OLD, "g.txt", "f.txt", "main", base) == b"one\n"
+    assert gitops.side_bytes(repo, "branch", NEW, "g.txt", "f.txt", "main", base) == b"two\n"
+    assert gitops.side_bytes(repo, {"range": "main...feature"}, OLD, "g.txt", "f.txt") == b"one\n"
+    assert gitops.side_bytes(repo, {"range": "a..b"}, NEW, "g.txt") is None
+    assert gitops.side_bytes(repo, "unstaged", NEW, "-x") is None
+
+
+@needs_git
 def test_read_diff_keeps_crlf_and_the_patch_applies_back(repo):
     _write(repo, "crlf.txt", "a\r\nb\r\n")
     _git(repo, "add", "-A")

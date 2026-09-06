@@ -3,7 +3,7 @@
 """The preferences page's shape (collins.prefslayout): the settings that
 spend the user's Claude quota sit together, directly under General."""
 
-from collins import prefslayout, tokenrefresh
+from collins import gitloads, prefslayout, tokenrefresh
 from collins.state import DEFAULT_SETTINGS
 
 
@@ -87,6 +87,21 @@ def test_every_git_setting_has_its_default():
     assert DEFAULT_SETTINGS["git_untracked"] is True
     assert DEFAULT_SETTINGS["git_log_page"] == 20
     assert DEFAULT_SETTINGS["git_parent_branch"] == ""
+    # The native view's temporary switch (hunk stays the default until the
+    # cut-over PR deletes both) and its three knobs.
+    assert DEFAULT_SETTINGS["git_viewer"] == "hunk"
+    assert DEFAULT_SETTINGS["git_line_numbers"] is True
+    assert DEFAULT_SETTINGS["git_wrap_lines"] is False
+    assert DEFAULT_SETTINGS["git_word_diff"] is True
+
+
+def test_git_viewers_are_gitloads_words():
+    # The Diff viewer row's values are what Options.from_settings accepts,
+    # hunk first so an unknown stored value falls back to it.
+    assert [value for value, _label in prefslayout.GIT_VIEWERS] == list(gitloads.VIEWERS)
+    assert DEFAULT_SETTINGS["git_viewer"] == prefslayout.GIT_VIEWERS[0][0] == gitloads.DEFAULT_VIEWER
+    for word in ("native", "viewer", "experimental", "wrap", "line numbers", "word"):
+        assert word in prefslayout.GIT_SEARCH_TERMS
 
 
 def test_git_layouts_are_hunks_mode_words():

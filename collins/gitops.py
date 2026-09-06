@@ -488,6 +488,32 @@ def side_ref(
     return (merge_base or halves[0]) if old else halves[1]
 
 
+def side_bytes(
+    cwd: str | Path | None,
+    load: object,
+    side: str,
+    path: str,
+    previous_path: str | None = None,
+    parent_target: str | None = None,
+    merge_base: str | None = None,
+    run=subprocess.run,
+    timeout: float = DIFF_TIMEOUT_S,
+) -> bytes | None:
+    """The whole file on one *side* of *load* — the diff view's context
+    reader (DiffView.load's `context_reader(file, side)`), for a gap's
+    lines and an image's before/after: side_ref names where the side reads
+    from, file_at reads it. The old side of a rename is read under
+    *previous_path*. None where side_ref names nothing (a branch load with
+    no *parent_target*, a foreign range) — except the unstaged load's new
+    side, which is the working tree itself — and for whatever file_at
+    can't read (no such file on that side, too big, unsafe)."""
+    ref = side_ref(load, side, parent_target, merge_base)
+    if ref is None and not (load == "unstaged" and side == diffmodel.NEW):
+        return None
+    where = previous_path if side == diffmodel.OLD and previous_path else path
+    return file_at(cwd, ref, where, run=run, timeout=timeout)
+
+
 def apply_argv(cached: bool, reverse: bool, three_way: bool = False) -> list[str]:
     """["apply", "--recount", "--unidiff-zero", ("--cached",) ("--reverse",)
     ("--3way",) "-"]: the patch on stdin, to the index only with *cached*

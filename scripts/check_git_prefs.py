@@ -90,7 +90,17 @@ from collins.state import AppState  # noqa: E402
 PASSED = 0
 FAILED = 0
 
-ROW_TITLES = ["Layout", "Theme", "Show untracked files", "Commits per page", "Default parent branch"]
+ROW_TITLES = [
+    "Diff viewer",  # temporary: the native view's switch (PR 2 of the native-diff stack)
+    "Layout",
+    "Theme",
+    "Line numbers",
+    "Wrap long lines",
+    "Highlight changed words",
+    "Show untracked files",
+    "Commits per page",
+    "Default parent branch",
+]
 
 
 def focus_chain(widget) -> list:
@@ -224,13 +234,26 @@ def step_layout() -> bool:
     )
     # The two entries each carry a title-less reason row beneath them, the
     # way the CLI path row does.
-    check("the group holds its five rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
-    check("each entry has a reason row under it", titles(git)[2] == "" and titles(git)[-1] == "", titles(git))
-    layout, theme, _r1, untracked, log_page, parent, _r2 = git.rows
+    check("the group holds its nine rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
+    check("each entry has a reason row under it", titles(git)[3] == "" and titles(git)[-1] == "", titles(git))
+    viewer, layout, theme, _r1, numbers, wrap, words, untracked, log_page, parent, _r2 = git.rows
+    model = viewer.get_model()
+    labels = [model.get_string(i) for i in range(model.get_n_items())]
+    check("the Diff viewer row lists hunk and Native", labels == ["hunk", "Native"], labels)
+    check("and opens on hunk (the default while the native view is experimental)", viewer.get_selected() == 0)
+    check("the viewer row says it is experimental", "Experimental" in (viewer.get_subtitle() or ""), viewer.get_subtitle())
     model = layout.get_model()
     labels = [model.get_string(i) for i in range(model.get_n_items())]
     check("the Layout row lists hunk's three modes", labels == ["Automatic", "Split", "Stacked"], labels)
     check("and opens on Automatic (the default)", layout.get_selected() == 0, layout.get_selected())
+    check(
+        "the native view's switches open on their defaults (numbers on, wrap off, words on)",
+        all(isinstance(r, Adw.SwitchRow) for r in (numbers, wrap, words))
+        and numbers.get_active()
+        and not wrap.get_active()
+        and words.get_active(),
+    )
+    state.update(viewer=viewer, wrap=wrap)
     check(
         "the Theme box opens empty",
         isinstance(theme, Adw.EntryRow) and theme.get_text() == "",
@@ -255,6 +278,14 @@ def step_writes() -> bool:
     layout.set_selected(1)
     check("picking Split writes hunk's mode word", setting("git_layout") == "split", setting("git_layout"))
     check("and calls on_change", changes() == 1, changes())
+    state["viewer"].set_selected(1)
+    check("picking Native writes git_viewer", setting("git_viewer") == "native", setting("git_viewer"))
+    state["wrap"].set_active(True)
+    check("the wrap switch writes git_wrap_lines", setting("git_wrap_lines") is True, setting("git_wrap_lines"))
+    check("both called on_change", changes() == 3, changes())
+    state["viewer"].set_selected(0)
+    state["wrap"].set_active(False)
+    del state["changes"][1:]  # the counts below predate these rows: back to the one Layout change
 
     # Typing alone saves nothing until it settles: "dr", "dra"… on the way
     # to a theme name must not each restart hunk.

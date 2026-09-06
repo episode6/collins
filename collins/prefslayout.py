@@ -74,6 +74,14 @@ GIT_LAYOUTS: tuple[tuple[str, str], ...] = (
     ("stack", "Stacked"),
 )
 
+# The Git group's Diff viewer row, in the drop-down's order: gitloads.VIEWERS'
+# words (hunk first — today's default — then the native view, experimental
+# until PR 4 of the native-diff stack deletes the row along with hunk).
+GIT_VIEWERS: tuple[tuple[str, str], ...] = (
+    ("hunk", "hunk"),
+    ("native", "Native"),
+)
+
 # What the search bar matches the Git group on, beyond its rows' own titles
 # and subtitles: the tool's name, and the words people have for its parts.
 GIT_SEARCH_TERMS: tuple[str, ...] = (
@@ -86,4 +94,10 @@ GIT_SEARCH_TERMS: tuple[str, ...] = (
     "untracked",
     "commits",
     "layout",
+    "native",
+    "viewer",
+    "experimental",
+    "line numbers",
+    "wrap",
+    "word",
 )

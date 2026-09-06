@@ -45,10 +45,23 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
         ({"git_log_page": 1000}, gitloads.Options(log_page=500)),
         ({"git_log_page": "abc"}, gitloads.Options(log_page=20)),
         ({"git_log_page": None}, gitloads.Options(log_page=20)),
+        ({"git_viewer": "native"}, gitloads.Options(viewer="native")),
+        ({"git_viewer": "hunk"}, gitloads.Options()),
+        ({"git_viewer": "bogus"}, gitloads.Options()),
+        ({"git_viewer": None}, gitloads.Options()),
+        ({"git_line_numbers": 0}, gitloads.Options(line_numbers=False)),
+        ({"git_wrap_lines": 1}, gitloads.Options(wrap=True)),
+        ({"git_word_diff": False}, gitloads.Options(word_diff=False)),
     ],
 )
 def test_options_from_settings_normalises_each_key(settings, expected):
     assert gitloads.Options.from_settings(settings) == expected
+
+
+def test_options_native_says_which_viewer_draws():
+    assert gitloads.Options().native is False
+    assert gitloads.Options(viewer=gitloads.VIEWER_NATIVE).native is True
+    assert gitloads.VIEWERS == ("hunk", "native") and gitloads.DEFAULT_VIEWER == "hunk"
 
 
 def test_options_from_settings_reads_the_whole_dict():

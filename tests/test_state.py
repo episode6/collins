@@ -1185,6 +1185,11 @@ def test_git_settings_have_their_defaults(app_state):
     assert app_state.DEFAULT_SETTINGS["git_untracked"] is True
     assert app_state.DEFAULT_SETTINGS["git_log_page"] == 20
     assert app_state.DEFAULT_SETTINGS["git_parent_branch"] == ""
+    # The native diff view behind its temporary switch (hunk until PR 4).
+    assert app_state.DEFAULT_SETTINGS["git_viewer"] == "hunk"
+    assert app_state.DEFAULT_SETTINGS["git_line_numbers"] is True
+    assert app_state.DEFAULT_SETTINGS["git_wrap_lines"] is False
+    assert app_state.DEFAULT_SETTINGS["git_word_diff"] is True
 
 
 def test_git_settings_round_trip(app_state):
