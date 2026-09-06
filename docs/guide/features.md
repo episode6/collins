@@ -425,7 +425,8 @@ to install, and nothing in it is a terminal.
   heading) loads that side and reveals the file. Any other load (a
   commit, a branch, a range) is one flat **FILES · n** list. The status
   letter colours each row (added green, deleted red, renamed blue,
-  untracked dim). The list **follows the view** — the file at the top of
+  untracked dim), and each row carries the file-type icon the editor's
+  tree shows for the name. The list **follows the view** — the file at the top of
   the viewport, or the hunk the keyboard moved into, is highlighted — and
   a click scrolls to the file and focuses its first hunk. A **filter**
   box above the list (`/`) narrows both the list and the diff to the

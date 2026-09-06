@@ -43,6 +43,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Sequence
+from pathlib import PurePosixPath
 
 import gi
 
@@ -51,7 +52,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import dialogs, gitinfo, gitloads, gitmodel, gitops  # noqa: E402
+from . import dialogs, filetypes, gitinfo, gitloads, gitmodel, gitops  # noqa: E402
 from .gitmodel import BranchRef, FileRow, FileSections, Row  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -171,9 +172,10 @@ class _SectionRow(Gtk.ListBoxRow):
 
 
 class _FileRow(Gtk.ListBoxRow):
-    """One file: its status letter (coloured), the path (`old → new` for a
-    rename), and the counts the diff reported (`+a −d`, or `bin`) for a
-    live row."""
+    """One file: its status letter (coloured), the file-type icon the
+    editor's tree shows for the name (filetypes.icon_for, with its colour
+    class), the path (`old → new` for a rename), and the counts the diff
+    reported (`+a −d`, or `bin`) for a live row."""
 
     def __init__(self, file: FileRow, side: str) -> None:
         super().__init__()
@@ -188,6 +190,11 @@ class _FileRow(Gtk.ListBoxRow):
         if css:
             code.add_css_class(css)
         box.append(code)
+        icon_name, colour = filetypes.icon_for(PurePosixPath(file.path).name)
+        icon = Gtk.Image.new_from_icon_name(icon_name)
+        if colour:
+            icon.add_css_class(colour)
+        box.append(icon)
         path = Gtk.Label(xalign=0, hexpand=True)
         if file.previous_path and file.previous_path != file.path:
             path.set_text(f"{file.previous_path} → {file.path}")
