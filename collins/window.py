@@ -5064,8 +5064,9 @@ class MainWindow(Adw.ApplicationWindow):
     ) -> frozenset[str]:
         """Do what the delivery table asked for a notification of *kind*
         from *page*'s tab, and return what was done — the set itself, after
-        the *In-app notifications* switch has had its say (off, a card and
-        its sound become a desktop notification: notifycenter.without_cards).
+        the *In-app notifications* switch has had its say (off, a card
+        becomes a desktop notification, the sound staying:
+        notifycenter.without_cards).
 
         One act per name. The flash and the beep need no page (a bell from
         a tab this window doesn't hold flashes the header and nothing else).

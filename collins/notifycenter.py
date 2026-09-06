@@ -84,7 +84,7 @@ FOCUSES = frozenset({FOCUS_SELECTED, FOCUS_ELSEWHERE, FOCUS_UNFOCUSED})
 # The things delivery() can ask for. Each is one widget-side act; the window
 # does the ones it is handed and nothing else.
 DELIVER_CARD = "card"  # the in-app card, in the active window
-DELIVER_SOUND = "sound"  # the notification sound (only ever beside a card)
+DELIVER_SOUND = "sound"  # the notification sound, beside a card or a desktop notification
 DELIVER_ROW = "row"  # a history row, unread (for `finished`: the synthetic row set_green owns)
 DELIVER_ROW_READ = "row-read"  # a history row that is already read
 DELIVER_FLAG = "flag"  # flag the session's sidebar row unread (MainWindow._flag_unread)
