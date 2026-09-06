@@ -191,7 +191,11 @@ def unstaged_landed(ok: bool, text: str) -> None:
         lines[0] == "Loaded working tree · unstaged in the session's git page.",
         lines[0],
     )
-    check("the reply names the spot", len(lines) > 1 and lines[1] == "Revealed a.txt, line 3.", lines)
+    check(
+        "the reply names the spot, the side and the hunk landed on",
+        len(lines) > 1 and lines[1] == "Revealed a.txt, line 3 (new side): hunk 1 of 1.",
+        lines,
+    )
     check("line 3 is a changed line: no nearest-hunk note", len(lines) == 2, lines)
     check("the page shows the unstaged working tree", page is not None and page.shows("unstaged"), page and page.loaded)
     check(
@@ -227,10 +231,14 @@ def staged_landed(ok: bool, text: str) -> None:
     page = state["caller"].git_page
     check("a file in the index reveals", ok, text)
     lines = text.split("\n")
-    check("the reply names the file and line", len(lines) > 1 and lines[1] == "Revealed b.txt, line 40.", lines)
+    check(
+        "the reply names the file and line",
+        len(lines) > 1 and lines[1] == "Revealed b.txt, line 40 (new side): hunk 1 of 1.",
+        lines,
+    )
     check(
         "a line no hunk holds lands on the nearest hunk, and the reply says so",
-        len(lines) == 3 and lines[2].startswith("Line 40 isn't in a changed region"),
+        len(lines) == 3 and lines[2].startswith("Line 40 (new side) isn't in a changed region"),
         lines,
     )
     check("the view is on b.txt", page.diff_view.current()[0] == "b.txt", page.diff_view.current())
@@ -286,9 +294,146 @@ def branch_landed(ok: bool, text: str) -> None:
     check("the page shows the branch diff", page.shows("branch"), page.loaded)
     check(
         "an absolute path inside the repository reveals by its repo-relative name",
-        "Revealed a.txt." in text and page.diff_view.current()[0] == "a.txt",
+        "Revealed a.txt: hunk 1 of 1." in text and page.diff_view.current()[0] == "a.txt",
         (text, page.diff_view.current()),
     )
+    check("the page still hasn't the keyboard", not page.has_page_focus())
+    call({"what": "branch", "file": "a.txt", "hunk": 2}, hunk_refused)
+
+
+def hunk_refused(ok: bool, text: str) -> None:
+    check(
+        "a hunk the file doesn't have is refused by count",
+        (ok, text) == (False, "The git page loaded the branch diff, but a.txt has 1 hunk in that diff, not 2"),
+        (ok, text),
+    )
+    got = app._mcp_show_diff(found(), {"what": "branch", "file": "a.txt", "hunk": 1, "line": 2})
+    check("line and hunk together are refused", got == (False, "'line' and 'hunk' are exclusive: give one"), got)
+    got = app._mcp_show_diff(found(), {"what": "branch", "side": "old"})
+    check("a side without a file is refused", got == (False, "'side' needs 'file'"), got)
+    call({"what": "branch", "file": "a.txt", "hunk": 1}, hunk_landed)
+
+
+def hunk_landed(ok: bool, text: str) -> None:
+    page = state["caller"].git_page
+    check("a hunk address reveals", ok and text.endswith("Revealed a.txt, hunk 1 of 1."), text)
+    check("the view is on a.txt's hunk 1", page.diff_view.current()[:2] == ("a.txt", 0), page.diff_view.current())
+    call({"what": "branch", "file": "a.txt", "side": "old", "line": 1}, old_side_landed)
+
+
+def old_side_landed(ok: bool, text: str) -> None:
+    check(
+        "an old-side line reveals and the reply says which side",
+        ok and text.endswith("Revealed a.txt, line 1 (old side): hunk 1 of 1."),
+        text,
+    )
+    tools()
+
+
+def tools() -> None:
+    """The other four tools on the open page (the branch diff: a.txt with
+    one hunk, `+two` at new line 2): annotate, read back, highlight, clear
+    — a bad batch landing nothing — and every one of them refused, naming
+    show_diff, when no page is open."""
+    import json
+    from types import SimpleNamespace
+
+    page = state["caller"].git_page
+    nowhere = (None, SimpleNamespace(git_page=None))
+    for name in ("diff_context", "annotate_diff", "highlight_diff", "clear_diff_marks"):
+        args = {
+            "annotate_diff": {"notes": [{"file": "a.txt", "line": 2, "summary": "x"}]},
+            "highlight_diff": {"marks": [{"file": "a.txt", "line": 2, "start": 0, "end": 1}]},
+        }.get(name, {})
+        got = getattr(app, f"_mcp_{name}")(nowhere, args)
+        check(f"{name} without a page names show_diff", got == (False, mcptools.PAGE_NOT_OPEN), got)
+
+    got = app._mcp_diff_context(found(), {})
+    check("diff_context answers at once on a settled page", isinstance(got, tuple) and got[0], got)
+    context = json.loads(got[1])
+    check("…naming the load", context["loaded"] == "branch" and context["breadcrumb"].startswith("feat vs main"), context)
+    check("…the current file and hunk", context["current"]["file"] == "a.txt" and context["current"]["hunk"] == 1, context)
+    check(
+        "…and the files with their hunks",
+        [(f["path"], [h["hunk"] for h in f["hunks"]], f["hunks"][0]["new"]) for f in context["files"]]
+        == [("a.txt", [1], [1, 2])],
+        context["files"],
+    )
+    check("no patch or notes unless asked", "patch" not in context["files"][0] and "notes" not in context)
+
+    got = app._mcp_annotate_diff(
+        found(),
+        {
+            "notes": [
+                {"file": "a.txt", "line": 2, "summary": "fine"},
+                {"file": "a.txt", "line": 99, "summary": "not in a hunk"},
+            ]
+        },
+    )
+    check(
+        "a batch with one bad address lands nothing and names it",
+        got == (False, "No notes added: line 99 (new) of a.txt is not in a hunk of the loaded diff"),
+        got,
+    )
+    check("…nothing landed", page.notes() == [] and page.diff_view.note_rows("a.txt", 0) == [], page.notes())
+    got = app._mcp_annotate_diff(
+        found(),
+        {
+            "notes": [
+                {"file": "a.txt", "line": 2, "summary": "Note one", "rationale": "because"},
+                {"file": "a.txt", "hunk": 1, "side": "old", "summary": "Note two", "author": "reviewer"},
+            ],
+            "focus": True,
+        },
+    )
+    check("a good batch lands and the reply lists the ids", got == (True, "Added 2 notes: n1, n2."), got)
+    rows = page.diff_view.note_rows("a.txt", 0)
+    check(
+        "the cards are under the hunk, as the agent's",
+        [(r[0], r[1], r[2], r[3], r[4]) for r in rows]
+        == [("n1", "agent", "new", 2, "Note one"), ("n2", "agent", "old", 1, "Note two")],
+        rows,
+    )
+    check("focus never took the keyboard", not page.has_page_focus())
+
+    got = app._mcp_diff_context(found(), {"notes": True, "patch": True, "files": True})
+    context = json.loads(got[1])
+    check(
+        "diff_context lists the notes",
+        [(n["id"], n["source"], n["line"], n.get("rationale"), n.get("author")) for n in context["notes"]]
+        == [("n1", "agent", 2, "because", None), ("n2", "agent", 1, None, "reviewer")],
+        context.get("notes"),
+    )
+    check("…and the patch when asked", "+two\n" in context["files"][0].get("patch", ""), context["files"][0])
+
+    got = app._mcp_highlight_diff(
+        found(), {"marks": [{"file": "a.txt", "line": 2, "start": 0, "end": 3, "tone": "warning"}]}
+    )
+    check("a highlight lands", got == (True, "Added 1 highlight."), got)
+    check(
+        "…painted on the hunk's view",
+        page.diff_view.highlight_rows("a.txt", 0) == [(1, 0, 3, "warning")],
+        page.diff_view.highlight_rows("a.txt", 0),
+    )
+    got = app._mcp_highlight_diff(found(), {"marks": [{"file": "a.txt", "line": 2, "start": 0, "end": 30}]})
+    check("a range past the line is refused", got[0] is False and "range [0, 30)" in got[1], got)
+    check("…and lands nothing", len(page.highlights()) == 1, page.highlights())
+    got = app._mcp_diff_context(found(), {"notes": True, "files": False})
+    context = json.loads(got[1])
+    check(
+        "diff_context lists the highlight",
+        [(h["id"], h["line"], h["start"], h["end"], h["tone"]) for h in context["highlights"]]
+        == [("h3", 2, 0, 3, "warning")],  # the store's serial is shared: n1, n2, h3
+        context.get("highlights"),
+    )
+    check("…without the files when told not to", "files" not in context, list(context))
+
+    got = app._mcp_clear_diff_marks(found(), {"file": "a.txt", "notes": True})
+    check("clearing the notes of a file counts them", got == (True, "Cleared 2 notes from a.txt."), got)
+    check("…the highlight stays", len(page.highlights()) == 1 and page.notes() == [], page.highlights())
+    got = app._mcp_clear_diff_marks(found(), {})
+    check("clearing everything counts both", got == (True, "Cleared 0 notes and 1 highlight."), got)
+    check("…the page is bare", page.highlights() == [] and page.diff_view.highlight_rows("a.txt", 0) == [])
     check("the page still hasn't the keyboard", not page.has_page_focus())
     finish()
 

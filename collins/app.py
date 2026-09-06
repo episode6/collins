@@ -28,6 +28,8 @@ from . import (
     buildinfo,
     clisetup,
     desktopentry,
+    diffmodel,
+    diffnotes,
     editorfiles,
     ghwelcome,
     gitinfo,
@@ -1432,30 +1434,64 @@ _FILETYPE_COLORS = {
 }
 
 
+def _await_page_settled(tab, page, then, what: str | None = None) -> None:
+    """Poll *page* (GitPage) until it has settled — no read or reveal in
+    flight — then call *then(error)*: None when it did, else the reason it
+    never will (the page or its tab closed, the not-a-repo card, the
+    deadline). What every diff tool waits on: the page reads its diff on a
+    thread, so its public face (card, opening, settled) is read on a
+    timeout rather than hooked into. One deadline bounds the wait
+    (gitloads.SHOW_DIFF_DEADLINE_S, under the CLI's own MCP timeout);
+    whatever happens the page stays open, showing what it shows. *what*
+    names the load in the deadline's words when the caller asked for one.
+    """
+    deadline = time.monotonic() + gitloads.SHOW_DIFF_DEADLINE_S
+
+    def poll() -> bool:
+        if tab.get_root() is None or tab.git_page is not page:
+            then("The git page closed before the diff loaded")
+            return GLib.SOURCE_REMOVE
+        if page.card == "not-a-repo" and not page.opening:
+            # The card is final only once no open is out: a page that stood
+            # on it when the tree turned up (open_git_page's load re-opens
+            # the view) shows it until the open's thread lands.
+            then("The session's working directory isn't inside a git repository")
+            return GLib.SOURCE_REMOVE
+        if page.settled():
+            then(None)
+            return GLib.SOURCE_REMOVE
+        if time.monotonic() >= deadline:
+            loading = f"finish loading {what}" if what else "settle"
+            then(
+                f"The git page didn't {loading} in time; it is open in Collins and shows "
+                + (page.breadcrumb_text() or "nothing yet")
+            )
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    GLib.timeout_add(gitloads.SHOW_DIFF_POLL_MS, poll)
+
+
 class _ShowDiff:
     """One show_diff tool call in flight: a commit ref resolved to its sha
     on a thread, the git page opened (or fronted, never focused) on the
-    load, the page polled until the load has landed, then — with a file
+    load, the page awaited until the load has landed, then — with a file
     named — the view's reveal (synchronous); the deferred reply resolves
-    with what the page ended up showing, or the first reason it couldn't.
-
-    The page reads its diff on a thread, so the poll reads its public face
-    (GitPage.card, settled, shows) rather than hooking into its steps. One
-    deadline bounds the whole call (gitloads.SHOW_DIFF_DEADLINE_S, under
-    the CLI's own MCP timeout); whatever the outcome the page stays open,
-    showing what it shows — a failed call is reported, not undone.
+    with what the page ended up showing (mcptools.reveal_reply: the load,
+    the file's hunk count and the hunk the view landed on), or the first
+    reason it couldn't. A failed call is reported, not undone.
     """
 
-    def __init__(self, tab, root: str, loaded, path, line, deferred) -> None:
+    def __init__(self, tab, root: str, loaded, path, side, line, hunk, deferred) -> None:
         self._tab = tab
         self._root = root
         self._loaded = loaded
         self._path = path
+        self._side = side or diffmodel.NEW
         self._line = line
+        self._hunk = hunk
         self._deferred = deferred
         self._page = None
-        self._deadline = time.monotonic() + gitloads.SHOW_DIFF_DEADLINE_S
-        self._finished = False
 
     def begin(self) -> None:
         ref = gitloads.show_ref(self._loaded)
@@ -1471,8 +1507,6 @@ class _ShowDiff:
         threading.Thread(target=work, name="show-diff-rev-parse", daemon=True).start()
 
     def _resolved(self, ref: str, sha: str | None) -> bool:
-        if self._finished:
-            return GLib.SOURCE_REMOVE
         if sha is None:
             self._finish(False, f"No commit named {ref} in {self._root}")
         elif not sha:
@@ -1502,71 +1536,61 @@ class _ShowDiff:
             self._finish(False, "Collins couldn't open the git page")
             return
         self._page = page
-        GLib.timeout_add(gitloads.SHOW_DIFF_POLL_MS, self._poll)
+        _await_page_settled(tab, page, self._settled, what=self._what())
 
-    def _poll(self) -> bool:
-        if self._finished:
-            return GLib.SOURCE_REMOVE
+    def _settled(self, error: str | None) -> None:
+        if error is not None:
+            self._finish(False, error)
+            return
         page = self._page
-        if self._tab.get_root() is None or self._tab.git_page is not page:
-            self._finish(False, "The git page closed before the diff loaded")
-            return GLib.SOURCE_REMOVE
-        if page.card == "not-a-repo" and not page.opening:
-            # The card is final only once no open is out: a page that stood
-            # on it when the tree turned up (open_git_page's load re-opens
-            # the view) shows it until the open's thread lands.
-            self._finish(False, "The session's working directory isn't inside a git repository")
-            return GLib.SOURCE_REMOVE
-        if page.settled():
-            if not page.shows(self._loaded):
-                hint = ""
-                if self._loaded == "branch":
-                    hint = (
-                        " — no parent branch resolves for this branch; the user can "
-                        "set one in Preferences → Git"
-                    )
-                self._finish(
-                    False,
-                    f"The git page couldn't load {self._what()}{hint}; it shows "
-                    + page.breadcrumb_text(),
+        if not page.shows(self._loaded):
+            hint = ""
+            if self._loaded == "branch":
+                hint = (
+                    " — no parent branch resolves for this branch; the user can "
+                    "set one in Preferences → Git"
                 )
-            elif self._path is None:
-                self._finish(True, self._reply())
-            elif page.reveal(self._path, line=self._line, focus=False):
-                self._finish(True, self._reply())
-            else:
-                self._finish(
-                    False,
-                    f"The git page loaded {self._what()}, but {self._path} "
-                    "isn't in that diff",
-                )
-            return GLib.SOURCE_REMOVE
-        if time.monotonic() >= self._deadline:
             self._finish(
                 False,
-                f"The git page didn't finish loading {self._what()} in time; it is "
-                "open in Collins and shows " + (page.breadcrumb_text() or "nothing yet"),
+                f"The git page couldn't load {self._what()}{hint}; it shows " + page.breadcrumb_text(),
             )
-            return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
+            return
+        try:
+            self._reveal()
+        except Exception:  # never leave the shim waiting on a widget's surprise
+            logging.getLogger(__name__).exception("show_diff: reveal failed")
+            self._finish(False, "Collins couldn't reveal that in the git page")
 
-    def _reply(self) -> str:
+    def _reveal(self) -> None:
         page = self._page
-        lines = [f"Loaded {page.breadcrumb_text()} in the session's git page."]
-        if self._path:
-            where = f"{self._path}, line {self._line}" if self._line else self._path
-            lines.append(f"Revealed {where}.")
-            if self._line and not page.diff_view.holds_line(self._path, None, self._line):
-                lines.append(
-                    f"Line {self._line} isn't in a changed region of that diff; "
-                    "the nearest hunk is shown."
-                )
-        return "\n".join(lines)
+        breadcrumb = page.breadcrumb_text()
+        path, side = self._path, self._side
+        if path is None:
+            self._finish(True, mcptools.reveal_reply(breadcrumb))
+            return
+        file = diffmodel.find_file(page.context().files, path, side)
+        refusal = None
+        if file is None:
+            refusal = f"{path} isn't in that diff"
+        elif self._hunk is not None:
+            refusal = mcptools.hunk_refusal(path, self._hunk, file)
+        if refusal is None and not page.reveal(
+            path, hunk=None if self._hunk is None else self._hunk - 1, side=side, line=self._line, focus=False
+        ):
+            refusal = f"{path} isn't in that diff"
+        if refusal is not None:
+            self._finish(False, f"The git page loaded {self._what()}, but {refusal}")
+            return
+        view = page.diff_view
+        holds = self._line is None or view.holds_line(path, side, self._line)
+        self._finish(
+            True,
+            mcptools.reveal_reply(
+                breadcrumb, path, side, self._line, self._hunk, file, view.current()[1], holds
+            ),
+        )
 
     def _finish(self, ok: bool, text: str) -> None:
-        if self._finished:
-            return
-        self._finished = True
         self._deferred.resolve(ok, text)
 
 
@@ -2380,6 +2404,10 @@ class App(Adw.Application):
                 "set_session_title": self._mcp_set_session_title,
                 "open_in_editor": self._mcp_open_in_editor,
                 "show_diff": self._mcp_show_diff,
+                "diff_context": self._mcp_diff_context,
+                "annotate_diff": self._mcp_annotate_diff,
+                "highlight_diff": self._mcp_highlight_diff,
+                "clear_diff_marks": self._mcp_clear_diff_marks,
                 "show_image": self._mcp_show_image,
                 "notify_user": self._mcp_notify_user,
                 "attach_pr": self._mcp_attach_pr,
@@ -2457,11 +2485,127 @@ class App(Adw.Application):
             path = gitloads.diff_file_path(args["file"], str(root), cwd)
             if path is None:
                 return False, f"'file' must be a path inside the repository: {args['file']!r}"
-        elif "line" in args:
-            return False, "'line' needs 'file'"
+        else:
+            for key in ("line", "hunk", "side"):
+                if key in args:
+                    return False, f"'{key}' needs 'file'"
+        if "line" in args and "hunk" in args:
+            return False, "'line' and 'hunk' are exclusive: give one"
         deferred = mcptools.DeferredResult()
-        _ShowDiff(tab, str(root), loaded, path, args.get("line"), deferred).begin()
+        _ShowDiff(
+            tab, str(root), loaded, path, args.get("side"), args.get("line"), args.get("hunk"), deferred
+        ).begin()
         return deferred
+
+    # -- the other diff tools: the page must be open; a load in flight is waited for --
+
+    @staticmethod
+    def _mcp_on_diff_page(tab, act) -> mcptools.ToolResult:
+        """Run *act(page)* → (ok, text) on the tab's git page once it has
+        settled. The page must be open (show_diff opens it — the refusal
+        says so); a load in flight (the watch or the footer's tick may
+        have just started one, and a reveal may be waiting on it) is
+        waited for behind a DeferredResult, which always resolves."""
+        page = tab.git_page
+        if page is None or not (page.opened or page.opening):
+            return False, mcptools.PAGE_NOT_OPEN
+        if page.settled():
+            return act(page)
+        deferred = mcptools.DeferredResult()
+
+        def then(error: str | None) -> None:
+            if error is not None:
+                deferred.resolve(False, error)
+                return
+            try:
+                deferred.resolve(*act(page))
+            except Exception:
+                logging.getLogger(__name__).exception("diff tool failed on the git page")
+                deferred.resolve(False, "Collins couldn't act on the git page")
+
+        _await_page_settled(tab, page, then)
+        return deferred
+
+    @staticmethod
+    def _mcp_diff_path_resolver(tab):
+        """The tool's file → repo-relative path (gitloads.diff_file_path),
+        or None for a caller outside a repository."""
+        cwd = tab.current_agent_cwd()
+        root = gitinfo.repo_root(cwd)
+        if root is None:
+            return None
+        return lambda raw: gitloads.diff_file_path(raw, str(root), cwd)
+
+    def _mcp_diff_context(self, found, args: dict) -> mcptools.ToolResult:
+        _window, tab = found
+
+        def act(page) -> tuple[bool, str]:
+            return True, mcptools.diff_context_reply(
+                page.context(),
+                files=args.get("files", True),
+                patch=args.get("patch", False),
+                notes=args.get("notes", False),
+            )
+
+        return self._mcp_on_diff_page(tab, act)
+
+    def _mcp_annotate_diff(self, found, args: dict) -> mcptools.ToolResult:
+        _window, tab = found
+
+        def act(page) -> tuple[bool, str]:
+            resolve = self._mcp_diff_path_resolver(tab)
+            if resolve is None:
+                return False, "The session's working directory isn't inside a git repository"
+            specs = mcptools.note_specs(args["notes"], resolve)
+            if isinstance(specs, str):
+                return False, f"No notes added: {specs}"
+            # The batch lands whole or not at all (diffnotes.MarkStore): the
+            # reason names the first address the loaded diff doesn't carry.
+            added = page.add_notes(specs, focus=bool(args.get("focus")), source=diffnotes.AGENT)
+            if isinstance(added, str):
+                return False, f"No notes added: {added}"
+            return True, mcptools.annotate_reply(added)
+
+        return self._mcp_on_diff_page(tab, act)
+
+    def _mcp_highlight_diff(self, found, args: dict) -> mcptools.ToolResult:
+        _window, tab = found
+
+        def act(page) -> tuple[bool, str]:
+            resolve = self._mcp_diff_path_resolver(tab)
+            if resolve is None:
+                return False, "The session's working directory isn't inside a git repository"
+            specs = mcptools.highlight_specs(args["marks"], resolve)
+            if isinstance(specs, str):
+                return False, f"No highlights added: {specs}"
+            added = page.add_highlights(specs, focus=bool(args.get("focus")))
+            if isinstance(added, str):
+                return False, f"No highlights added: {added}"
+            return True, mcptools.highlight_reply(added)
+
+        return self._mcp_on_diff_page(tab, act)
+
+    def _mcp_clear_diff_marks(self, found, args: dict) -> mcptools.ToolResult:
+        _window, tab = found
+
+        def act(page) -> tuple[bool, str]:
+            path = None
+            if "file" in args:
+                resolve = self._mcp_diff_path_resolver(tab)
+                path = resolve(args["file"]) if resolve is not None else None
+                if path is None:
+                    return False, f"'file' must be a path inside the repository: {args['file']!r}"
+            notes, highlights = args.get("notes"), args.get("highlights")
+            if notes is None and highlights is None:
+                notes = highlights = True
+            gone_notes = gone_highlights = None
+            if notes:
+                gone_notes = page.clear_marks(path, notes=True, include_user=bool(args.get("user")))
+            if highlights:
+                gone_highlights = page.clear_marks(path, highlights=True)
+            return True, mcptools.clear_reply(gone_notes, gone_highlights, path)
+
+        return self._mcp_on_diff_page(tab, act)
 
     def _mcp_show_image(self, found, args: dict) -> mcptools.ToolResult:
         window, tab = found

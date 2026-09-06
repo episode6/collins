@@ -120,6 +120,7 @@ from . import (  # noqa: E402
     gitops,
     gitpatch,
     keybindings,
+    mcptools,
     prefslayout,
 )
 from .diffview import DiffView  # noqa: E402
@@ -538,6 +539,24 @@ class GitPage(Adw.Bin):
     ) -> int:
         """DiffView.clear_marks: how many were dropped."""
         return self._diffview.clear_marks(path, notes=notes, highlights=highlights, include_user=include_user)
+
+    def context(self) -> mcptools.DiffContext:
+        """What the page shows, in one read for the diff tools
+        (mcptools.DiffContext): the load and its breadcrumb, the view's
+        files, the file and hunk the reader is on, the line selection, and
+        every mark. Empty of files while the view isn't up."""
+        view = self._diffview
+        path, hunk, selection = view.current() if self._opened else (None, None, None)
+        return mcptools.DiffContext(
+            loaded=dict(self._loaded) if isinstance(self._loaded, dict) else self._loaded,
+            breadcrumb=self.breadcrumb_text(),
+            files=view.files if self._opened else (),
+            path=path,
+            hunk=hunk,
+            selection=selection,
+            notes=tuple(view.notes()),
+            highlights=tuple(view.highlights()),
+        )
 
     @property
     def card(self) -> str | None:

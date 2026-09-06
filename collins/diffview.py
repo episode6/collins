@@ -2518,6 +2518,12 @@ class DiffView(Gtk.Box):
             self._set_current(section.file.path, -1)
         return True
 
+    @property
+    def files(self) -> tuple[diffmodel.File, ...]:
+        """The files of the load, in the diff's order (what the tools read
+        hunk counts and addresses against)."""
+        return tuple(self._files)
+
     def holds_line(self, path: str, side: str | None, line: int) -> bool:
         """Whether a hunk of the load carries 1-based *line* of *path* on
         *side* (new by default) — what reveal landed on exactly, against
