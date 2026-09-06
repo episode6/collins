@@ -150,10 +150,11 @@ under a banner. Font scale is a display-level provider keyed on
 `_rebuild` clears a box, focus inside it is parked on the scroller
 (`_park_focus`), and `gtk-label-select-on-focus` is off app-wide, or the
 description selects itself. Bodies render via `formatting.md_to_pango`
-(escape everything; its output is checked well-formed and falls back to
-escaped plain text, because GTK 4's `set_markup` blanks a label on bad markup
-instead of raising — a `try/except GLib.GError` around it guards nothing; `set_lines` caps per *paragraph*, so `_folded_body`
-truncates text); images via `bodyimages` / `pictures` (`BoundedPicture`
+(escape everything; `set_lines` caps per *paragraph*, so `_folded_body`
+truncates text). The converter checks its own output is well-formed and
+falls back to escaped plain text: GTK 4's `set_markup` blanks a label on bad
+markup instead of raising, so a `try/except GLib.GError` around it guards
+nothing. Images render via `bodyimages` / `pictures` (`BoundedPicture`
 measures height-for-width in a `Gtk.Box` slot); changed images render
 before/after from `prblobs` (`gh api …/contents/{path}?ref=<sha>` with the
 raw media type; a binary file *does* get a "Binary files differ" patch, so
