@@ -2884,6 +2884,14 @@ class DiffView(Gtk.Box):
         self.on_gap_expand(gap, ALL, 0)
         return True
 
+    def hidden_by_filter(self, path: object, side: str | None = None) -> bool:
+        """Whether *path*'s section is in the load but hidden by the files
+        filter (what a reveal of it would have to clear first). False for
+        a file the load doesn't hold."""
+        side = side if side in diffmodel.SIDES else diffmodel.NEW
+        section = self._section_for(path, side)
+        return section is not None and not section.get_visible()
+
     def filter(self, text: str) -> int:
         """Show only the files whose path contains *text* (case-insensitive);
         "" shows all. Sections hide, they are not destroyed. Returns how

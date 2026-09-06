@@ -112,6 +112,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 from . import (  # noqa: E402
     dialogs,
     diffmodel,
+    diffnotes,
     diffview,
     gitinfo,
     gitloads,
@@ -469,6 +470,12 @@ class GitPage(Adw.Bin):
         been asked for; `settled()` says whether it landed)."""
         return self._opened
 
+    @property
+    def opening(self) -> bool:
+        """Whether the view is on its way up (the open's thread is out):
+        a card still showing meanwhile is not the page's last word."""
+        return self._opening
+
     def reveal(
         self,
         path: str,
@@ -480,8 +487,57 @@ class GitPage(Adw.Bin):
         """Scroll the view to *path* (its hunk *hunk*, or the hunk holding
         *line* on *side*) and focus it — DiffView.reveal (*focus* False
         leaves the keyboard where it is: the show_diff tool's way); False
-        when the view isn't open or the file isn't loaded."""
-        return self._opened and self._diffview.reveal(path, hunk, side, line, focus=focus)
+        when the view isn't open or the file isn't loaded. A file the
+        files filter hides is shown first: the filter is cleared (the
+        sidebar's entry too), as a reveal of something hidden would
+        otherwise answer True over a section nobody can see."""
+        if not self._opened:
+            return False
+        if self._diffview.hidden_by_filter(path, side):
+            self.sidebar.set_filter_text("")  # its rows follow (debounced), and the signal
+            self._diffview.filter("")  # the sections, now: the reveal scrolls to one
+            self._sync_search_label()
+        return self._diffview.reveal(path, hunk, side, line, focus=focus)
+
+    # The marks' doors, for a caller outside the view (the agent's tools):
+    # DiffView's own, on the page's face. Each answers the store's word;
+    # a page whose view isn't up has no diff to anchor anything to.
+
+    def notes(self, path: str | None = None) -> list[diffnotes.Note]:
+        """Every note on the page (of *path*), parked ones included —
+        DiffView.notes."""
+        return self._diffview.notes(path)
+
+    def highlights(self, path: str | None = None) -> list[diffnotes.Highlight]:
+        """Every highlight on the page (of *path*) — DiffView.highlights."""
+        return self._diffview.highlights(path)
+
+    def add_notes(
+        self, specs: Sequence[diffnotes.NoteSpec], focus: bool = False, source: str = diffnotes.AGENT
+    ) -> list[str] | str:
+        """DiffView.add_notes: the batch lands whole or not at all — the
+        ids, or the reason. Refused (untranslated, an agent's reply) while
+        the view isn't up."""
+        if not self._opened:
+            return "The git page isn't showing a diff"
+        return self._diffview.add_notes(specs, focus=focus, source=source)
+
+    def add_highlights(self, specs: Sequence[diffnotes.HighlightSpec], focus: bool = False) -> int | str:
+        """DiffView.add_highlights: the count, or the reason; refused while
+        the view isn't up."""
+        if not self._opened:
+            return "The git page isn't showing a diff"
+        return self._diffview.add_highlights(specs, focus=focus)
+
+    def clear_marks(
+        self,
+        path: str | None = None,
+        notes: bool = False,
+        highlights: bool = False,
+        include_user: bool = False,
+    ) -> int:
+        """DiffView.clear_marks: how many were dropped."""
+        return self._diffview.clear_marks(path, notes=notes, highlights=highlights, include_user=include_user)
 
     @property
     def card(self) -> str | None:
@@ -548,6 +604,12 @@ class GitPage(Adw.Bin):
         self._sync_context()
         if self._opened:
             self._read_diff(self._loaded)
+        elif self._card == _NOT_A_REPO and self.get_mapped():
+            # A load asked of a page standing on the card (the host's
+            # open_git_page, whose own repo check just passed: the tree
+            # turned up since): the tick's path, now rather than 2 s on.
+            # With no tree still, _open_view re-shows the card.
+            self._open_view()
         # else the open on map reads _loaded
 
     def refresh(self) -> None:
@@ -1025,6 +1087,12 @@ class GitPage(Adw.Bin):
             return GLib.SOURCE_REMOVE
         if loaded != self._loaded:
             return GLib.SOURCE_REMOVE  # load() moved on without a read of its own yet
+        # An ask for the same load that arrived while this read was out
+        # (the tick's moved index, a mutation landing, the untracked switch)
+        # is a move this read can't have seen — the tick already advanced
+        # its signature past it, so nothing else would reload. This read is
+        # drawn (something shows at once) and the ask re-reads after it.
+        reread = pending is not None
         subject, sha = named
         self._subject = (subject or None) if gitloads.is_show(loaded) else None
         self._resolved_sha = sha
@@ -1051,7 +1119,9 @@ class GitPage(Adw.Bin):
         self._sync_context()
         self._sync_search_label()
         self._run_pending_navigate()
-        if stale and working:
+        if reread:
+            self._read_diff(loaded)  # its worker samples the tree state anew: no compare needed
+        elif stale and working:
             self._watch_check()
         return GLib.SOURCE_REMOVE
 

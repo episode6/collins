@@ -253,12 +253,30 @@ def commit_landed(ok: bool, text: str) -> None:
     )
     check("no reveal line without a file", "\n" not in text, text)
     check("the page still hasn't the keyboard", not page.has_page_focus())
+    # The files filter hides a.txt before the next call names it: a reveal
+    # of a hidden file must clear the filter, not answer True over a
+    # section nobody can see. (The entry's search-changed is debounced:
+    # the call waits a beat for the words to land.)
+    page.sidebar.set_filter_text("zzz")
+    GLib.timeout_add(400, filtered_then_branch)
+
+
+def filtered_then_branch() -> bool:
+    page = state["caller"].git_page
+    check("the filter hid a.txt", page.diff_view.hidden_by_filter("a.txt"), page.diff_view.file_rows())
     call({"what": "branch", "file": "/" + os.path.relpath(REPO, "/") + "/a.txt"}, branch_landed)
+    return GLib.SOURCE_REMOVE
 
 
 def branch_landed(ok: bool, text: str) -> None:
     page = state["caller"].git_page
     check("the branch diff loads", ok, text)
+    check(
+        "revealing a file the filter hid cleared the filter",
+        page.sidebar.filter_text == "" and not page.diff_view.hidden_by_filter("a.txt")
+        and any(p == "a.txt" and shown for p, _k, shown in page.diff_view.file_rows()),
+        (page.sidebar.filter_text, page.diff_view.file_rows()),
+    )
     first = text.split("\n")[0]
     check(
         "the reply names the branch against its parent",

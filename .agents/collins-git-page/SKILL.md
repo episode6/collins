@@ -56,7 +56,12 @@ untracked)` on a daemon thread behind `_gen`, plus `commit_subject_and_sha`
 for a commit, the `merge_base` a branch / range reads its old side at, and
 `tree_state_signature` for a working-tree load (sampled **before** the
 read, see Watch mode) — landing in `_diff_read` at `PRIORITY_DEFAULT`, one
-read at a time with a newer ask parked in `_pending_load`. The breadcrumb
+read at a time with a newer ask parked in `_pending_load` — **an ask for
+the same load that arrives while a read is out re-reads after the landed
+read is drawn** (the tick's moved index, a mutation landing, the untracked
+switch: the tick already advanced its signature past the move, so nothing
+else would reload, and the stale read stood in for it until PR 4's review
+— the e2e gates `gitops.read_diff`'s landing to prove it). The breadcrumb
 and `set_context` come from the `Loaded` + that sha (`_resolved_sha`); the
 files list from the read (`_file_summaries` builds `gitmodel.FileSummary`s
 so `gitmodel.files_sections` is fed the same shape; `GitSidebar.
@@ -70,12 +75,23 @@ a thread reads the stack git shows under HEAD and, for a saved commit,
 whether it still exists — else the default mode — then `_view_opened`
 shows the view and loads); `_close_view` orphans the read, drops the
 monitors and empties the view; `_reopen` is the moved-repo-root path.
-`GitPage.opened`, `.loaded`, `.diff_view`, `.settled()` (no read or
-navigate in flight), `.shows(loaded)`, `.card`, `.breadcrumb_text` and
-`.reveal(path, hunk, side, line, focus=True)` are the public face —
-`app._ShowDiff` opens the page with `focus=False`, polls `settled()` up to
-`gitloads.SHOW_DIFF_DEADLINE_S` (12 s, `SHOW_DIFF_POLL_MS` 250) and
-reveals with `focus=False`, so the tool never takes the keyboard. A
+`GitPage.opened`, `.opening` (the open's thread is out: a card still up
+is not the page's last word), `.loaded`, `.diff_view`, `.settled()` (no
+read or navigate in flight), `.shows(loaded)`, `.card`, `.breadcrumb_text`,
+`.reveal(path, hunk, side, line, focus=True)` and the marks' doors
+(`notes()`, `highlights()`, `add_notes()`, `add_highlights()`,
+`clear_marks()` — `DiffView`'s, refused with a reason while the view isn't
+up) are the public face — `app._ShowDiff` opens the page with
+`focus=False`, polls `settled()` up to `gitloads.SHOW_DIFF_DEADLINE_S`
+(12 s, `SHOW_DIFF_POLL_MS` 250; the not-a-repo card ends the poll only
+while `opening` is False) and reveals with `focus=False`, so the tool
+never takes the keyboard. `load()` on a mapped page standing on the card
+opens the view (the host's `open_git_page(mode)` whose own repo check just
+passed: the tree turned up) rather than waiting for the tick. A reveal of
+a file the files filter hides clears the filter first (the sidebar's entry
+and `DiffView.filter("")` at once; `DiffView.hidden_by_filter` says so) —
+only the tool reaches a hidden section, and True over one nobody can see
+was wrong. A
 `line` no hunk carries (an unchanged stretch; `diffmodel.locate` misses)
 lands on the file's nearest hunk (`diffmodel.nearest_hunk`) and reveal
 still answers True — the file *is* in the diff — and `DiffView.holds_line`

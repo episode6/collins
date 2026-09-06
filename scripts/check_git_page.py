@@ -49,6 +49,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -355,6 +356,46 @@ def check_sidebar(repo: str) -> None:
     check("the following tick reloads nothing more", len(reads) == reads_before + 1, len(reads) - reads_before)
     landed = wait_for(lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == log_shas(repo, "main..HEAD"))
     check("the commits list gained the commit", landed, [r.label for r in sidebar.commit_rows()])
+
+    # -- an ask that lands while a read is out re-reads --------------------------------------
+    # The read runs at once but lands late (gated), so it carries the tree
+    # before the `git add`; the tick meanwhile sees the index move and asks
+    # for the same load. The landed read must not stand in for that ask:
+    # the tick's signature already moved past the add, so nothing else
+    # would ever reload, and the view would show a.txt as unstaged for good.
+    gate = threading.Event()
+    real_read_diff = gitops.read_diff
+    git_reads: list[object] = []  # the reads git actually ran (a parked ask is a _read_diff call, not a read)
+
+    def late_read_diff(*args, **kwargs):
+        read = real_read_diff(*args, **kwargs)
+        git_reads.append(args[1] if len(args) > 1 else kwargs.get("load"))
+        gate.wait(STEP_TIMEOUT_S)
+        return read
+
+    with open(os.path.join(repo, "a.txt"), "a") as fh:
+        fh.write("pending\n")
+    gitops.read_diff = late_read_diff
+    try:
+        page.load("unstaged")
+        wait_for(lambda: len(git_reads) == 1)  # the worker is past its read, held before landing
+        git(repo, "add", "a.txt")
+        page.poll_tick()
+        check("the tick parked its ask behind the read in flight", page._pending_load == "unstaged" and not page.settled(), (page._pending_load, page.settled()))
+        gate.set()
+        landed = wait_for(lambda: len(git_reads) == 2 and page.settled())
+    finally:
+        gitops.read_diff = real_read_diff
+    check("the parked ask re-reads after the stale read lands", landed, git_reads)
+    check("the re-read shows the index move: the unstaged view is empty", wait_for(lambda: page.diff_view.file_rows() == []), page.diff_view.file_rows())
+    check(
+        "and the files list has a.txt on the staged side alone",
+        wait_for(lambda: [f.path for f in sidebar.file_rows().staged] == ["a.txt"] and not sidebar.file_rows().unstaged),
+        sidebar.file_rows(),
+    )
+    git(repo, "commit", "-qm", "pending committed")
+    page.poll_tick()
+    wait_for(page.settled)
 
     # -- the page size pages the current group ------------------------------------------------
     while len(log_shas(repo, "main..HEAD")) < 7:
@@ -1330,6 +1371,21 @@ def check_outside_a_repo(scratch: str) -> None:
     check("no parent to name", page._parent_target is None)
     check("Escape is not held by a card", not page.holds_escape())
     check("the view is not open", not page.opened and not page.settled())
+    # A load asked of the page on the card leaves the card up while there
+    # is still no tree...
+    page.load("staged")
+    wait_for(lambda: False, timeout=0.3)
+    check("a load with no tree keeps the card", page.card == "not-a-repo" and not page.opened and not page.opening, (page.card, page.opened))
+    # ...and opens the view at once when the tree turned up (the host's
+    # open_git_page(mode) on a page that stood on the card): the card is
+    # not the page's last word while the open is out.
+    git(nowhere, "init", "-q", "-b", "main")
+    git(nowhere, "config", "user.email", "t@example.com")
+    git(nowhere, "config", "user.name", "Test")
+    git(nowhere, "commit", "-q", "--allow-empty", "-m", "first")
+    page.load("staged")
+    check("a load once the tree exists opens the view (card still up, opening)", page.opening and page.card == "not-a-repo", (page.opening, page.card))
+    check("the view opens into the load asked for", wait_for(lambda: page.settled() and page.loaded == "staged" and page.card is None), (page.card, page.loaded, page.opened))
     page.page_closed()
     window.destroy()
 

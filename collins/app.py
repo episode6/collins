@@ -1511,7 +1511,10 @@ class _ShowDiff:
         if self._tab.get_root() is None or self._tab.git_page is not page:
             self._finish(False, "The git page closed before the diff loaded")
             return GLib.SOURCE_REMOVE
-        if page.card == "not-a-repo":
+        if page.card == "not-a-repo" and not page.opening:
+            # The card is final only once no open is out: a page that stood
+            # on it when the tree turned up (open_git_page's load re-opens
+            # the view) shows it until the open's thread lands.
             self._finish(False, "The session's working directory isn't inside a git repository")
             return GLib.SOURCE_REMOVE
         if page.settled():

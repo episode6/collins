@@ -569,7 +569,8 @@ to install, and nothing in it is a terminal.
 - `show_diff` — the session tool — opens the page on a diff and reveals a
   file and line in it without taking your keyboard; a line that no hunk
   carries (an unchanged stretch) still reveals the file, on the hunk
-  nearest that line, and the reply tells the agent so.
+  nearest that line, and the reply tells the agent so. A file your files
+  filter was hiding is shown: the filter clears first.
 - Each session remembers whether its git page was open, where it sat,
   what it showed — one of the three working-tree loads, a commit or a
   range — and whether the sidebar was folded, restored on the next

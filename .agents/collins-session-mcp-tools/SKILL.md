@@ -95,8 +95,11 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   settle (`app._ShowDiff` polls `page.settled()` up to
   `gitloads.SHOW_DIFF_DEADLINE_S`), then `GitPage.reveal(path, hunk, side,
   line, focus=False)`; the reply names what loaded and what was revealed
-  (a line no hunk holds lands on the nearest hunk and the reply says so).
-  Decisions in `gitloads.show_diff_load` / `diff_file_path`.
+  (a line no hunk holds lands on the nearest hunk and the reply says so;
+  a file the files filter hides is revealed with the filter cleared). The
+  not-a-repo card ends the poll only while `page.opening` is False — a
+  page that stood on the card when the tree turned up shows it until its
+  open lands. Decisions in `gitloads.show_diff_load` / `diff_file_path`.
 - `show_image` — a local path or an `http(s)` URL: URLs are fetched on a
   worker thread (`remoteimages.py`, stdlib urllib, redirects to http(s) only,
   size and content-type gated, into the pruned cache dir; localhost is
