@@ -354,7 +354,14 @@ load gets none. Events (not for the `.git` entry itself) debounce
 tree_state_signature` on a thread, compared against the state the load's
 own worker seeded (`_tree_state`); a move is a `_native_load` by key (the
 view keeps the scroll and an untouched hunk's widget and focus). One
-compare at a time (`_watch_stale` re-runs); none while a read is out.
+compare at a time, and none beside a read in flight: either marks the
+event `_watch_stale`, and the compare (`_watch_checked`) or the read
+(`_native_loaded`, after re-making the monitors, which clears the mark)
+re-runs `_watch_check` when it lands — before that, an edit written while
+`read_diff` ran was never drawn: the event was dropped and the worker
+sampled the signature *after* the read, so it already covered the edit.
+The worker now samples it **before** `read_diff` (an edit between the two
+costs one reload by key on the next compare, harmless).
 `_native_tick` re-compares every `_WATCH_SLOW_TICKS` (5) ticks regardless.
 The 2 s tick's `tree_signature` still covers index / HEAD / refs moves.
 The signature hashes `git status` **and** `numstat` **and** the size +

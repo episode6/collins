@@ -2139,6 +2139,10 @@ class GitPage(Adw.Bin):
         working = loaded in ("unstaged", "staged")
 
         def work() -> None:
+            # The state before the read, not after: an edit landing while
+            # the diff is read is then a move on the next compare (one
+            # reload by key, harmless) instead of one the watch never sees.
+            state = gitops.tree_state_signature(cwd) if working else None
             read = gitops.read_diff(cwd, loaded, parent_target, untracked)
             subject, sha = gitloads.commit_subject_and_sha(cwd, show_ref) if show_ref else (None, None)
             base: str | None = None
@@ -2146,7 +2150,6 @@ class GitPage(Adw.Bin):
                 base = gitops.merge_base(cwd, parent_target, "HEAD")
             elif halves is not None:
                 base = gitops.merge_base(cwd, halves[0], halves[1])
-            state = gitops.tree_state_signature(cwd) if working else None
             GLib.idle_add(
                 self._native_loaded,
                 gen,
@@ -2197,10 +2200,16 @@ class GitPage(Adw.Bin):
         self._files_stale = False
         working = loaded in ("unstaged", "staged")
         self._tree_state = state
+        # An event that arrived while this read was out (marked stale by
+        # _watch_check, which runs no compare beside a read) is compared
+        # now; the monitors are re-made first, which clears the mark.
+        stale = self._watch_stale
         self._install_monitors(read.files if working else None)
         self._sync_context()
         self._sync_search_label()
         self._run_pending_navigate()
+        if stale and working:
+            self._watch_check()
         return GLib.SOURCE_REMOVE
 
     def _native_tick(self, moved: bool, parent_moved: bool) -> None:
@@ -2277,13 +2286,13 @@ class GitPage(Adw.Bin):
 
     def _watch_check(self) -> None:
         """Compare the tree state on a thread and reload by key when it
-        moved. One compare at a time (an event meanwhile re-runs it); a
-        read already in flight brings its own state, so none is needed."""
+        moved. One compare at a time, and none beside a read in flight —
+        either marks the event stale, and the compare (_watch_checked) or
+        the read (_native_loaded) re-runs this when it lands, so an edit
+        during a read is drawn rather than dropped."""
         if self._closing or not self._native_opened or self._loaded not in ("unstaged", "staged"):
             return
-        if self._native_loading:
-            return
-        if self._watch_checking:
+        if self._native_loading or self._watch_checking:
             self._watch_stale = True
             return
         self._watch_checking = True
