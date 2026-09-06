@@ -152,7 +152,8 @@ Enter opens, Esc closes.
   *Ready* offers the stops past it: *Mark ready & merge* (or *…when checks
   pass*), *Ready & Auto-Merge*, and *Mark ready, merge & archive session*. The caret beside them lists every
   PR with its title,
-  `F7` opens the newest one's page, and *Open new pull requests
+  `F7` opens the newest one's page (its tab wears the PR's own mark, so a
+  red build shows on the tab too), and *Open new pull requests
   automatically* (Preferences, on by default) opens the page by itself —
   once per PR — the moment a session picks one up. On a screen where the terminal has already
   hit its *maximum width* (Preferences), the page opens in a column of its

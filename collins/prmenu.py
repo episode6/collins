@@ -39,7 +39,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+gi.require_version("Gsk", "4.0")
+gi.require_version("Graphene", "1.0")
+from gi.repository import Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import dialogs, practions  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
@@ -80,8 +82,49 @@ ROW_ICON_PX = 16
 ROW_BADGE_PX = 10
 MAX_CHARS = 48
 MAX_HEIGHT_PX = 400
+# The shades every mark is colored in, GitHub's own pairs for light and dark
+# (keyed by "is dark"), so a merged PR or a red build reads here exactly as it
+# does on the PR page in either theme. The widget marks get them through CSS —
+# app.py's scheme provider paints these keys onto the classes below — and the
+# rasterized tab mark (see mark_icon) reads them directly, since a texture has
+# no class for CSS to color.
+MARK_COLORS = {
+    False: {  # light
+        "merged_purple": "#8250df",
+        "passed_green": "#1a7f37",
+        "failed_red": "#cf222e",
+        "pending_yellow": "#bf8700",
+        "draft_grey": "#59636e",
+    },
+    True: {  # dark
+        "merged_purple": "#a371f7",
+        "passed_green": "#3fb950",
+        "failed_red": "#f85149",
+        "pending_yellow": "#d29922",
+        "draft_grey": "#9198a1",
+    },
+}
+# Which shade each mark class wears: GitHub's open-PR green is its checks-
+# passed green, so the open base icon shares the shade; a draft (and a PR
+# nothing is known about) takes GitHub's muted grey; a closed PR and the
+# conflict badge both share the failed red — on GitHub a closed PR is that
+# same danger red, and either of the other two blocks the merge; the
+# unresolved-comments badge borrows the pending yellow — attention-colored,
+# but nothing is broken, someone just has the last word. app.py's _SCHEME_CSS
+# spells the same table out as CSS.
+MARK_CLASS_COLORS = {
+    "pr-merged": "merged_purple",
+    "pr-open": "passed_green",
+    "pr-draft": "draft_grey",
+    "pr-closed": "failed_red",
+    "pr-conflict": "failed_red",
+    "pr-unresolved": "pending_yellow",
+    "pr-checks-passed": "passed_green",
+    "pr-checks-failed": "failed_red",
+    "pr-checks-pending": "pending_yellow",
+}
 # Every PR mark is GitHub's own iconography, colored as on the PR page (the
-# shades follow the light/dark scheme and live in app.py). The base icon says
+# shades follow the light/dark scheme: MARK_COLORS above). The base icon says
 # what the PR *is*: grey while it's a draft — or while nothing has been
 # fetched, where grey reads as "nothing known" rather than a wrongly green
 # all-clear — green once it's ready for review, purple when it lands, red when
@@ -281,11 +324,99 @@ def status_icon(pr: PullRequest) -> Gtk.Widget:
     return _mark(pr.state, pr.badge, MERGED_ICON_PX, BADGE_PX)
 
 
-def state_icon_name(state: str | None) -> str:
-    """The bare icon name for a PR state — for slots that take a themed icon
-    rather than a widget, like a panel page's tab. Color is the widget marks'
-    affordance; a tab icon carries the shape alone."""
-    return _BASE_ICONS.get(state or "", _BASE_FALLBACK)[0]
+# The tab mark is drawn into a box the size of a tab's icon slot, the way the
+# widget marks lay out (see _mark): badge overhanging the base's bottom-left,
+# an unbadged base filling the box. A tab icon is a GIcon, not a widget, so
+# the mark is rasterized into a Gdk.Texture (itself a GIcon) instead of built
+# from images — hence the colors read from MARK_COLORS rather than CSS, and
+# the texture baked per scheme.
+TAB_ICON_PX = 16
+TAB_BADGE_PX = 8
+_tab_icons: dict[tuple[str, str, bool, int], Gdk.Texture] = {}
+
+
+def mark_icon(pr: PullRequest, dark: bool, scale: int = 1) -> Gio.Icon:
+    """`status_icon` as a GIcon, for a slot that takes an icon rather than a
+    widget — a panel page's tab. *dark* picks the scheme's shades; *scale*
+    is the widget's scale factor, so the raster stays crisp on a HiDPI
+    display (a texture icon is fitted to the slot, so the box is drawn in
+    logical pixels and multiplied). Textures are cached per look: a tab is
+    re-synced on every status move and every scheme flip, and there are
+    only so many marks to draw.
+    """
+    key = (pr.state or "", pr.badge or "", dark, scale)
+    texture = _tab_icons.get(key)
+    if texture is None:
+        texture = _render_mark(pr.state, pr.badge, dark, scale)
+        _tab_icons[key] = texture
+    return texture
+
+
+def _render_mark(state: str | None, badge_name: str | None, dark: bool, scale: int) -> Gdk.Texture:
+    display = Gdk.Display.get_default()
+    theme = Gtk.IconTheme.get_for_display(display)
+    colors = MARK_COLORS[dark]
+    box = TAB_ICON_PX
+    badge = _BADGE_ICONS.get(badge_name or "")
+    overhang = max(1, round(TAB_BADGE_PX * BADGE_OVERHANG_PX / BADGE_PX)) if badge else 0
+    base_px = box - overhang
+    snapshot = Gtk.Snapshot()
+    snapshot.scale(scale, scale)
+    name, css_class = _BASE_ICONS.get(state or "", _BASE_FALLBACK)
+    # Badged, the base sits against the top-right corner and the badge hangs
+    # into the bottom-left; alone, the base fills the box.
+    _snapshot_symbolic(
+        snapshot, theme, name, base_px, scale, overhang, 0, colors[MARK_CLASS_COLORS[css_class]]
+    )
+    if badge is not None:
+        name, css_class = badge
+        _snapshot_symbolic(
+            snapshot,
+            theme,
+            name,
+            TAB_BADGE_PX,
+            scale,
+            0,
+            box - TAB_BADGE_PX,
+            colors[MARK_CLASS_COLORS[css_class]],
+        )
+    node = snapshot.to_node()
+    renderer = Gsk.CairoRenderer.new()
+    renderer.realize_for_display(display)
+    try:
+        return renderer.render_texture(node, Graphene.Rect().init(0, 0, box * scale, box * scale))
+    finally:
+        renderer.unrealize()
+
+
+def _snapshot_symbolic(
+    snapshot: Gtk.Snapshot,
+    theme: Gtk.IconTheme,
+    name: str,
+    px: int,
+    scale: int,
+    x: int,
+    y: int,
+    color: str,
+) -> None:
+    """Draw one symbolic icon at *px* into the snapshot, at (x, y), in *color*.
+
+    *scale* goes to the lookup as well as being the snapshot's transform.
+    Measured, it makes no difference to these SVG icons — an SVG paintable
+    is drawn from the vector at whatever the final transform is, and a
+    16 px icon under a 2x transform came out pixel-identical to a direct
+    32 px render — but it is what the lookup asks for, and a bitmap theme
+    icon would pick its 2x file by it.
+    """
+    paintable = theme.lookup_icon(
+        name, None, px, scale, Gtk.TextDirection.NONE, Gtk.IconLookupFlags.FORCE_SYMBOLIC
+    )
+    rgba = Gdk.RGBA()
+    rgba.parse(color)
+    snapshot.save()
+    snapshot.translate(Graphene.Point().init(x, y))
+    paintable.snapshot_symbolic(snapshot, px, px, [rgba])
+    snapshot.restore()
 
 
 def check_image(state: str, px: int = ROW_ICON_PX) -> Gtk.Widget:
