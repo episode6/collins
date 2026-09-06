@@ -320,6 +320,13 @@ def commit_row_id(sha: str) -> str:
     return f"commit:{sha}"
 
 
+def row_folded(row: Row, collapsed: Collection[str]) -> bool:
+    """Whether *row* hides under a collapsed group: every row of a group in
+    *collapsed* but its header, which stays as the handle that unfolds it
+    (the sidebar's caret)."""
+    return row.kind != "header" and row.group in collapsed
+
+
 def _commit_rows(commits: Iterable[Commit], group: str, unpushed: Collection[str]) -> list[Row]:
     rows = []
     for commit in commits:

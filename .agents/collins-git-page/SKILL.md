@@ -177,7 +177,12 @@ imports `gitpage`; the page feeds it and listens:
   toast, while one runs): the page runs the diff view's plans behind the
   same `busy`. The e2e reaches rows with `click_commit_row(id)`,
   `click_file_row(path, side)`, `click_section(side)` and reads
-  `commit_rows()`, `file_rows()`, `loaded_row_id()`, `selected_path`.
+  `commit_rows()`, `file_rows()`, `loaded_row_id()`, `selected_path`,
+  and folds groups with `collapse_group(group, collapsed=None)` /
+  `collapsed_groups()` — the caret on a header row (`_CommitRow`, a
+  focusable=False flat button, so its press never activates the row);
+  `gitmodel.row_folded` says which rows hide, the header never, and the
+  fold set lives on the widget for the page's life (not in `page_state`).
 - The per-hunk and per-line buttons are the diff view's own, on its
   headers (decision 7 of the spec): the sidebar has no cursor buttons.
 

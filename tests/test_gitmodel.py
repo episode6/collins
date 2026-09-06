@@ -202,6 +202,20 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
         assert row.load is None or gitloads.loaded_ok(row.load)
 
 
+def test_row_folded_hides_every_row_of_a_collapsed_group_but_its_header():
+    rows = base_rows()
+    folded = [row.id for row in rows if gitmodel.row_folded(row, {"current", "default"})]
+    assert folded == [
+        gitmodel.WORKTREE_ROW_ID,
+        f"commit:{commit(3).sha}",
+        f"commit:{commit(2).sha}",
+        f"commit:{commit(9).sha}",
+        f"commit:{commit(8).sha}",
+        "more:default",
+    ]
+    assert not any(gitmodel.row_folded(row, set()) for row in rows)
+
+
 def test_build_rows_a_stack_is_one_group_per_branch_each_ranging_to_the_one_below():
     """feat/panel over step2 over step1 over main: the parent's group
     ranges to the branch under it, the last one to the default."""
