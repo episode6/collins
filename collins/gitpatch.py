@@ -730,18 +730,18 @@ def _select(fresh: File, hunk_index: int, first: int, last: int, path: str) -> L
     return selected
 
 
-def plan_file(file: File, load: object, discard: bool = False, dirty: bool = False) -> Plan | Refusal:
+def plan_file(file: File, load: object, discard: bool = False) -> Plan | Refusal:
     """What the file button does: on the unstaged load *Stage file* (`add`,
     both paths of a rename) or, with *discard*, *Discard file* — a tracked
     file's changes checked out of the index, a deleted file restored from
     it, an untracked file moved to the trash (never unlinked), each after a
     confirmation; on the staged load *Unstage file* (`reset`); on a
     read-only load *Revert file*, that diff's whole patch applied in
-    reverse to the working tree after a confirmation (a binary cannot be
-    reverted from a patch without its data). *dirty* says the working
-    tree holds unstaged changes to the file (the page reads it off the
-    status): a revert then opens its confirmation with the warning that
-    the two may conflict (revert_warning)."""
+    reverse to the working tree — with no confirmation: nothing is
+    committed, the revert lands as unstaged changes the diff shows at once
+    and a discard takes back (a binary cannot be reverted from a patch
+    without its data; a file with unstaged changes of its own may not take
+    the patch, and gitops.apply_patch's three-way retry then merges)."""
     unsafe = unsafe_path_reason(file.path)
     if unsafe is None and file.previous_path is not None:
         unsafe = unsafe_path_reason(file.previous_path)
@@ -756,12 +756,11 @@ def plan_file(file: File, load: object, discard: bool = False, dirty: bool = Fal
             return Refusal(_("{path} is too large to revert: use git from a shell").format(path=file.path))
         if not file.patch.strip():
             return wording.nothing(file.path)
-        confirm = _("Revert {path} in the working tree? This cannot be undone.").format(path=file.path)
         return Plan(
             OP_APPLY_WORKTREE_REVERSE,
             _paths(file),
             file.patch,
-            _with_revert_warning(confirm, file.path, dirty),
+            None,
             _("Reverted {path}").format(path=file.path),
             lines=file.additions + file.deletions,
         )
@@ -799,7 +798,6 @@ def plan_hunk(
     load: object,
     fresh_patch: object,
     discard: bool = False,
-    dirty: bool = False,
 ) -> Plan | Refusal:
     """What the hunk button does for hunk *hunk_index* of *file* (the File
     the view loaded), given the file's patch re-read from git now.
@@ -812,13 +810,12 @@ def plan_hunk(
     oversized file has no hunk to select, and the hunk button on one must
     say "use Stage file" rather than quietly become it. With *discard*, the
     hunk is taken back out of the working tree (a deleted file is restored
-    whole); on a read-only load it is reverted into the working tree. Both
-    ask first; *dirty* (plan_file) puts the conflict warning on the
-    revert's question.
+    whole); on a read-only load it is reverted into the working tree. A
+    discard asks first; a revert does not (plan_file).
     """
     side = working_side(load)
     if side is None:
-        return _plan_revert(file, hunk_index, None, fresh_patch, dirty)
+        return _plan_revert(file, hunk_index, None, fresh_patch)
     if discard:
         return _plan_discard(file, hunk_index, None, load, fresh_patch)
     stage = side == UNSTAGED
@@ -883,13 +880,12 @@ def plan_lines(
     load: object,
     fresh_patch: object,
     discard: bool = False,
-    dirty: bool = False,
 ) -> Plan | Refusal:
     """What the lines button does for lines *first*..*last* (inclusive
     indexes into the hunk's lines, either order) of hunk *hunk_index*: a
     partial patch for `git apply --cached` (reversed on the staged load),
     with *discard* one taken back out of the working tree, on a read-only
-    load one reverted into it (*dirty* as plan_file's) — or a refusal.
+    load one reverted into it — or a refusal.
     There is no whole-file fall-through here: a selection names lines, and
     a file that can only go whole is told so. A selection meets more
     guards than a hunk: its indexes came out of the view, so besides the
@@ -897,7 +893,7 @@ def plan_lines(
     the fresh ones (`same_hunks`) before either number is trusted."""
     side = working_side(load)
     if side is None:
-        return _plan_revert(file, hunk_index, (first, last), fresh_patch, dirty)
+        return _plan_revert(file, hunk_index, (first, last), fresh_patch)
     if discard:
         return _plan_discard(file, hunk_index, (first, last), load, fresh_patch)
     stage = side == UNSTAGED
@@ -1002,29 +998,16 @@ def _plan_discard(
     )
 
 
-def revert_warning(path: str) -> str:
-    """The sentence a revert's confirmation opens with when *path* has
-    unstaged changes in the working tree: the patch is applied over them
-    and may not fit (apply_patch's `--3way` retry then merges, and can
-    leave markers)."""
-    return _("{path} has unstaged changes in the working tree; reverting may conflict.").format(path=path)
-
-
-def _with_revert_warning(confirm: str, path: str, dirty: bool) -> str:
-    return f"{revert_warning(path)} {confirm}" if dirty else confirm
-
-
 def _plan_revert(
     file: File,
     hunk_index: int | None,
     lines: tuple[int, int] | None,
     fresh_patch: object,
-    dirty: bool = False,
 ) -> Plan | Refusal:
     """Revert, from a commit, `branch` or a range: the hunk or the selected
-    lines of that diff applied in reverse to the working tree, after a
-    confirmation — opened with revert_warning when the file is *dirty*.
-    The "fresh" patch is that diff's file re-read (`git show <ref> --
+    lines of that diff applied in reverse to the working tree, with no
+    confirmation (plan_file says why: the result is unstaged, visible and
+    discardable). The "fresh" patch is that diff's file re-read (`git show <ref> --
     <path>`); it only moves when the ref does. A new or deleted file, a
     rename and a binary revert whole or not at all."""
     wording = _Wording(_REVERT)
@@ -1054,18 +1037,11 @@ def _plan_revert(
         return written
     patch, count = written
     if lines is None:
-        confirm = _("Revert hunk {n} of {path} in the working tree? This cannot be undone.").format(
-            n=hunk_index + 1, path=file.path
-        )
         done = _("Reverted hunk {n} of {path}").format(n=hunk_index + 1, path=file.path)
     else:
-        confirm = _("Revert {lines} of {path} in the working tree? This cannot be undone.").format(
-            lines=_lines_words(count), path=file.path
-        )
         done = _("Reverted {lines} of {path}").format(lines=_lines_words(count), path=file.path)
-    confirm = _with_revert_warning(confirm, file.path, dirty)
     return Plan(
-        OP_APPLY_WORKTREE_REVERSE, (guard.path,), patch, confirm, done,
+        OP_APPLY_WORKTREE_REVERSE, (guard.path,), patch, None, done,
         lines=count, hunk_index=hunk_index if lines is None else None,
     )
 
@@ -1113,8 +1089,7 @@ class MutationRequest:
     @property
     def revert(self) -> bool:
         """Whether the load is read-only, where every action is a revert
-        into the working tree (and the working tree's own state matters:
-        `dirty`, and apply_patch's three-way retry)."""
+        into the working tree (and apply_patch's three-way retry applies)."""
         return working_side(self.load) is None
 
     @property
@@ -1124,22 +1099,21 @@ class MutationRequest:
         compare the view against the disk before trusting a line."""
         return self.grain != FILE
 
-    def plan(self, fresh_patch: object, dirty: bool = False) -> Plan | Refusal:
+    def plan(self, fresh_patch: object) -> Plan | Refusal:
         """The Plan (or Refusal) for this request, given the patch re-read
-        now (None when `needs_patch` is False) and whether the path has
-        unstaged changes in the working tree (`is_dirty`)."""
+        now (None when `needs_patch` is False)."""
         if self.grain == FILE:
-            return plan_file(self.file, self.load, discard=self.discard, dirty=dirty)
+            return plan_file(self.file, self.load, discard=self.discard)
         if self.grain == LINES:
             if self.hunk_index is None or self.first is None or self.last is None:
                 return Refusal(_("nothing selected"))
             return plan_lines(
                 self.file, self.hunk_index, self.first, self.last, self.load, fresh_patch,
-                discard=self.discard, dirty=dirty,
+                discard=self.discard,
             )
         if self.grain == HUNK:
             return plan_hunk(
-                self.file, self.hunk_index, self.load, fresh_patch, discard=self.discard, dirty=dirty
+                self.file, self.hunk_index, self.load, fresh_patch, discard=self.discard
             )
         return Refusal(_("nothing selected"))
 
@@ -1162,17 +1136,6 @@ class MutationRequest:
         if self.revert:
             return _("Revert into the working tree?"), _("Revert")
         return _("Discard the changes?"), _("Discard")
-
-
-def is_dirty(status: object, path: str) -> bool:
-    """Whether the working tree holds unstaged changes to *path*: a row for
-    it under the status' `unstaged` (gitmodel.Status; None reads as clean).
-    What `plan_file` / `plan_hunk` / `plan_lines` take as *dirty* for a
-    revert's warning."""
-    rows = getattr(status, "unstaged", None)
-    if not rows:
-        return False
-    return any(getattr(row, "path", None) == path for row in rows)
 
 
 def action_labels(load: object, grain: str, selected: bool = False) -> tuple[str, str | None]:

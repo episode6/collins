@@ -808,12 +808,11 @@ def test_plan_file_discard_checks_out_trashes_or_restores_after_a_confirmation()
     assert "renamed" in reason(gitpatch.plan_file(as_renamed(STAGING, "e.txt"), UNSTAGED, discard=True))
 
 
-def test_plan_file_on_a_read_only_load_reverts_the_whole_patch_after_a_confirmation():
+def test_plan_file_on_a_read_only_load_reverts_the_whole_patch_without_a_confirmation():
     for load in ("branch", {"show": "abc123"}, {"range": "a...b"}):
         plan = gitpatch.plan_file(STAGING, load)
         assert plan == Plan(
-            OP_APPLY_WORKTREE_REVERSE, ("f.txt",), STAGING_TEXT,
-            "Revert f.txt in the working tree? This cannot be undone.", "Reverted f.txt", lines=6,
+            OP_APPLY_WORKTREE_REVERSE, ("f.txt",), STAGING_TEXT, None, "Reverted f.txt", lines=6,
         )
         assert gitpatch.plan_file(STAGING, load, discard=True) == plan
     assert reason(gitpatch.plan_file(as_binary(STAGING), "branch")) == "f.txt is binary: use git from a shell"
@@ -855,12 +854,12 @@ def test_mutation_request_dispatches_to_the_planner_of_its_grain():
     assert isinstance(gitpatch.MutationRequest(STAGING, UNSTAGED, "nonsense").plan(STAGING_TEXT), Refusal)
 
 
-def test_mutation_request_on_a_read_only_load_reverts_and_passes_dirty_through():
+def test_mutation_request_on_a_read_only_load_reverts_without_a_confirmation():
     request = gitpatch.MutationRequest(STAGING, {"show": "abc123"}, gitpatch.HUNK, hunk_index=0)
     assert request.revert
-    plan = request.plan(STAGING_TEXT, dirty=True)
+    plan = request.plan(STAGING_TEXT)
     assert isinstance(plan, Plan) and plan.op == OP_APPLY_WORKTREE_REVERSE
-    assert plan.confirm.startswith(gitpatch.revert_warning("f.txt"))
+    assert plan.confirm is None
     assert request.three_way(plan)
     # The same op from a discard on the unstaged load never retries three-way.
     discard = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.HUNK, discard=True, hunk_index=0)
@@ -887,15 +886,6 @@ def test_confirm_words_name_the_question_and_its_button():
         "Revert into the working tree?", "Revert"
     )
 
-
-def test_is_dirty_reads_the_unstaged_rows_of_a_status():
-    from collins.gitmodel import Status, StatusRow
-
-    status = Status(unstaged=(StatusRow("f.txt", "M"),), staged=(StatusRow("g.txt", "M"),))
-    assert gitpatch.is_dirty(status, "f.txt")
-    assert not gitpatch.is_dirty(status, "g.txt")
-    assert not gitpatch.is_dirty(None, "f.txt")
-    assert not gitpatch.is_dirty(object(), "f.txt")
 
 
 def test_action_labels_follow_the_spec_table():
@@ -1177,19 +1167,19 @@ def test_discard_refuses_anything_but_a_plain_modification_and_a_hunk_that_is_no
 # -- revert from a read-only load (native only; no extension counterpart) -----
 
 
-def test_revert_a_hunk_or_lines_from_a_commit_is_a_reverse_apply_in_the_working_tree_after_a_confirmation():
+def test_revert_a_hunk_or_lines_from_a_commit_is_a_reverse_apply_in_the_working_tree_without_a_confirmation():
     load = {"show": "abc123"}
     plan = gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT)
     assert isinstance(plan, Plan)
     assert (plan.op, plan.done, plan.lines, plan.hunk_index) == (
         OP_APPLY_WORKTREE_REVERSE, "Reverted hunk 2 of f.txt", 3, 1
     )
-    assert plan.confirm == "Revert hunk 2 of f.txt in the working tree? This cannot be undone."
+    assert plan.confirm is None
     assert "@@ -12,2 +12 @@\n-x\n-y\n+z\n" in plan.patch
     lines = gitpatch.plan_lines(STAGING, 1, 1, 2, load, STAGING_TEXT)
     assert isinstance(lines, Plan)
     assert (lines.op, lines.done, lines.lines) == (OP_APPLY_WORKTREE_REVERSE, "Reverted 2 lines of f.txt", 2)
-    assert lines.confirm == "Revert 2 lines of f.txt in the working tree? This cannot be undone."
+    assert lines.confirm is None
     assert "@@ -12 +12 @@\n-y\n+z\n" in lines.patch
     assert gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT, discard=True) == plan
     assert reason(gitpatch.plan_hunk(as_binary(STAGING), 1, load, "")) == (
@@ -1251,26 +1241,19 @@ def test_a_fresh_stanza_for_another_path_is_never_taken_as_the_files():
     assert gitpatch._same_file(STAGING, STAGING, gitpatch._Wording("stage")) is None
 
 
-def test_a_revert_of_a_dirty_file_opens_its_confirmation_with_the_conflict_warning():
+def test_reverts_never_ask_while_discards_keep_their_question():
+    """A revert lands as unstaged changes the diff shows and a discard
+    takes back, so no revert plan carries a confirm; a discard is the
+    working tree's own loss and still asks."""
     load = {"show": "abc123"}
-    warning = "f.txt has unstaged changes in the working tree; reverting may conflict."
-    assert gitpatch.revert_warning("f.txt") == warning
-    clean = gitpatch.plan_file(STAGING, load)
-    dirty = gitpatch.plan_file(STAGING, load, dirty=True)
-    assert dirty == replace(clean, confirm=f"{warning} {clean.confirm}")
-    hunk = gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT, dirty=True)
-    assert hunk.confirm == f"{warning} Revert hunk 2 of f.txt in the working tree? This cannot be undone."
-    clean_hunk = gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT)
-    assert replace(hunk, confirm=None) == replace(clean_hunk, confirm=None)
-    lines = gitpatch.plan_lines(STAGING, 1, 1, 2, load, STAGING_TEXT, dirty=True)
-    assert lines.confirm == f"{warning} Revert 2 lines of f.txt in the working tree? This cannot be undone."
-    # The flag means nothing to the working-tree loads: a stage asks
-    # nothing, a discard's question is its own.
-    assert gitpatch.plan_hunk(STAGING, 1, UNSTAGED, STAGING_TEXT, dirty=True).confirm is None
-    assert gitpatch.plan_file(STAGING, UNSTAGED, discard=True, dirty=True).confirm == (
+    assert gitpatch.plan_file(STAGING, load).confirm is None
+    assert gitpatch.plan_hunk(STAGING, 1, load, STAGING_TEXT).confirm is None
+    assert gitpatch.plan_lines(STAGING, 1, 1, 2, load, STAGING_TEXT).confirm is None
+    assert gitpatch.plan_hunk(STAGING, 1, UNSTAGED, STAGING_TEXT).confirm is None
+    assert gitpatch.plan_file(STAGING, UNSTAGED, discard=True).confirm == (
         "Discard the changes to f.txt? This cannot be undone."
     )
-    discard = gitpatch.plan_lines(STAGING, 1, 1, 2, UNSTAGED, STAGING_TEXT, discard=True, dirty=True)
+    discard = gitpatch.plan_lines(STAGING, 1, 1, 2, UNSTAGED, STAGING_TEXT, discard=True)
     assert discard.confirm == "Discard 2 lines in f.txt? This cannot be undone."
 
 

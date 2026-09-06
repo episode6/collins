@@ -407,6 +407,7 @@ class GitPage(Adw.Bin):
         self.sidebar = GitSidebar(cwd_provider, self._options)
         self.sidebar.connect("load-requested", lambda _s, loaded: self.load(loaded))
         self.sidebar.connect("navigate-requested", self._on_navigate_requested)
+        self.sidebar.connect("revert-requested", self._on_revert_requested)
         self.sidebar.connect("mutated", self._on_mutated)
         self.sidebar.connect("filter-changed", lambda _s, text: self._on_filter_changed(text))
         self.sidebar.connect("filter-escaped", lambda _s: self._diffview.grab_focus())
@@ -1340,6 +1341,15 @@ class GitPage(Adw.Bin):
         self.load(side)
         self._pending_navigate = (path, side)
 
+    def _on_revert_requested(self, _sidebar: GitSidebar, path: str) -> None:
+        """A file row's *Revert file* (its context menu on a commit, the
+        branch or a range): the view's file header button, pressed for it —
+        the same request, the same plan, so the toast and the reload are
+        one path (_on_mutation_requested)."""
+        if not self._diffview.request_file_at(path):
+            self._toast(_("{path} is not in the view: reloading").format(path=path))
+            self._read_diff(self._loaded)
+
     def _run_pending_navigate(self) -> None:
         pending, self._pending_navigate = self._pending_navigate, None
         if pending is None:
@@ -1398,12 +1408,12 @@ class GitPage(Adw.Bin):
     # -- the view's mutations (stage, unstage, discard, revert) --
 
     def _on_mutation_requested(self, _view: DiffView, request: gitpatch.MutationRequest) -> None:
-        """A header button, its menu, or `x` / `X` / `D`: re-read the
-        file's patch from git now (gitops.file_patch — the planners
-        compare the view against the disk before trusting a line), and
-        for a revert the working tree's status (the "may conflict"
-        warning), on a thread; then plan (_mutation_planned). The view's
-        buttons wait meanwhile, the pressed one spinning."""
+        """A header button, its menu, `x` / `X` / `D`, or the sidebar's
+        *Revert file* (relayed through DiffView.request_file_at): re-read
+        the file's patch from git now (gitops.file_patch — the planners
+        compare the view against the disk before trusting a line) on a
+        thread; then plan (_mutation_planned). The view's buttons wait
+        meanwhile, the pressed one spinning."""
         if self._closing or not self._opened:
             return
         if self.sidebar.busy or self._diffview.busy():
@@ -1425,15 +1435,12 @@ class GitPage(Adw.Bin):
                 if request.needs_patch
                 else None
             )
-            status = gitops.read_status(cwd) if request.revert else None
-            GLib.idle_add(
-                self._mutation_planned, gen, cwd, request, fresh, status, priority=GLib.PRIORITY_DEFAULT
-            )
+            GLib.idle_add(self._mutation_planned, gen, cwd, request, fresh, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, name="git-page-plan", daemon=True).start()
 
     def _mutation_planned(
-        self, gen: int, cwd: str, request: gitpatch.MutationRequest, fresh: str | None, status: object
+        self, gen: int, cwd: str, request: gitpatch.MutationRequest, fresh: str | None
     ) -> bool:
         # The view stays busy — the pressed button spinning — for the
         # request's whole life: set_busy(False) forgets which button it
@@ -1441,7 +1448,7 @@ class GitPage(Adw.Bin):
         if gen != self._gen or self._closing or not self._opened:
             self._diffview.set_busy(False)
             return GLib.SOURCE_REMOVE
-        plan = request.plan(fresh, gitpatch.is_dirty(status, request.path))
+        plan = request.plan(fresh)
         if isinstance(plan, gitpatch.Refusal):
             self._diffview.set_busy(False)
             self._toast(plan.reason)

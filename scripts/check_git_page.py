@@ -1115,10 +1115,11 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
     hunk and a file from the staged load, the real confirm dialog
     cancelled and confirmed on a discard, then a discard and an untracked
     file's trash with dialogs.confirm_dialog stubbed, a revert of a hunk
-    from a commit and from `show HEAD`, the dirty warning on the next, the
-    three-way retry over a committed context move, a binary's revert
-    refused with a toast, and every mutation reloading the view by key
-    with the untouched hunk's widget kept."""
+    from a commit and from `show HEAD` (no question asked), the sidebar's
+    *Revert file* on a file row, the three-way retry over a committed
+    context move, a binary's revert refused with a toast, and every
+    mutation reloading the view by key with the untouched hunk's widget
+    kept."""
     print("-- the native viewer's staging interface")
     view = page.diff_view
     sidebar = page.sidebar
@@ -1329,7 +1330,8 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("Discard file on a deleted file restores it", view.click_file_action("gone.txt", discard=True) and wait_for(idle, timeout=5.0) and wait_for(lambda: os.path.exists(os.path.join(repo, "gone.txt")), timeout=5.0), asked[-1])
         check("its question said restore", asked[-1][0] == "Restore the file?" and asked[-1][2] == "Restore", asked[-1])
 
-        # -- revert from a commit, and the dirty warning ---------------------------------------------------
+        # -- revert from a commit: no question, and the sidebar's Revert file -------------------------------
+        check("a file row on the working tree has no context menu", sidebar.file_menu_labels("staged.txt", "staged") == [], sidebar.file_menu_labels("staged.txt", "staged"))
         git(repo, "commit", "-qm", "staged edit")
         edit_sha = head_sha(repo)
         page.poll_tick()
@@ -1338,13 +1340,18 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("the words read Revert, with no discard", view.file_action_labels("staged.txt") == ("Revert file", None) and view.hunk_action_labels("staged.txt", 0) == ("Revert hunk", None), (view.file_action_labels("staged.txt"), view.hunk_action_labels("staged.txt", 0)))
         check("a selection reads Revert lines", view.select_lines("staged.txt", 0, 0, 1) and view.hunk_action_labels("staged.txt", 0) == ("Revert lines", None))
         view.clear_selection()
-        check("Revert hunk, confirmed", view.click_hunk_action("staged.txt", 0))
-        check("the working tree got the reverse of the hunk", wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0), asked[-1])
-        check("its question said revert, without a warning (the file was clean)", asked[-1][0] == "Revert into the working tree?" and asked[-1][1].startswith("Revert hunk 1 of staged.txt") and asked[-1][2] == "Revert", asked[-1])
+        asks = len(asked)
+        check("Revert hunk", view.click_hunk_action("staged.txt", 0))
+        check("the working tree got the reverse of the hunk", wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0), asked[asks:])
+        check("with no question asked", len(asked) == asks, asked[asks:])
+        check("the toast", toasts[-1:] == ["Reverted hunk 1 of staged.txt"], toasts[-1:])
         check("the commit's view is unchanged by a revert into the tree", view.hunk_rows("staged.txt") != [] and page.shows({"show": edit_sha}))
-        answers.append(False)
-        check("Revert file on the now-dirty file asks with the warning", view.click_file_action("staged.txt") and wait_for(lambda: asked[-1][1].startswith("staged.txt has unstaged changes"), timeout=5.0), asked[-1])
-        check("cancelled: the view is free again", wait_for(idle))
+        git(repo, "checkout", "-q", "--", "staged.txt")
+        check("the file row's context menu on a commit offers Revert file", sidebar.file_menu_labels("staged.txt") == ["Revert file"], sidebar.file_menu_labels("staged.txt"))
+        check("Revert file from the sidebar", sidebar.activate_file_menu("staged.txt", "Revert file"))
+        check("the working tree got the reverse of the whole file, unstaged", wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0) and "staged.txt" in unstaged_paths() and "staged.txt" not in index_paths(), (unstaged_paths(), index_paths()))
+        check("with no question asked, and the file's toast", len(asked) == asks and toasts[-1:] == ["Reverted staged.txt"], (asked[asks:], toasts[-1:]))
+        check("the view is free again", wait_for(idle) and page.shows({"show": edit_sha}))
         # A revert whose context moved retries three-way: a later commit
         # changed line 6 (inside the hunk's context), so the reverse apply
         # of the older commit's hunk misses, and the merge lands both.
@@ -1370,8 +1377,8 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("show HEAD loads (the `six` commit)", wait_for(lambda: page.settled() and page.shows({"show": "HEAD"}), timeout=5.0) and page._resolved_sha == head_sha(repo), (page.loaded, page._resolved_sha))
         check("its hunk offers Revert hunk", view.hunk_action_labels("staged.txt", 0) == ("Revert hunk", None), view.hunk_action_labels("staged.txt", 0))
         asks = len(asked)
-        check("Revert hunk, confirmed", view.click_hunk_action("staged.txt", 0) and wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 6\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0), asked[-1:])
-        check("the question asked once, without the warning (the file was clean)", len(asked) == asks + 1 and asked[-1][0] == "Revert into the working tree?" and "unstaged changes" not in asked[-1][1], asked[-1:])
+        check("Revert hunk", view.click_hunk_action("staged.txt", 0) and wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 6\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0), asked[asks:])
+        check("no question asked", len(asked) == asks, asked[asks:])
         check("the reverse of HEAD's hunk is in the working tree, unstaged", "staged SIX" not in open(os.path.join(repo, "staged.txt")).read() and "staged.txt" in unstaged_paths() and "staged.txt" not in index_paths(), (unstaged_paths(), index_paths()))
         check("the toast", toasts[-1:] == ["Reverted hunk 1 of staged.txt"], toasts[-1:])
         check("the commit's view stays", page.shows({"show": "HEAD"}) and view.hunk_rows("staged.txt") != [])

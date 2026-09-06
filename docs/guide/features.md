@@ -430,7 +430,10 @@ to install, and nothing in it is a terminal.
   files with their `+` / `−` counts (`bin` for a binary) — and the other
   is navigation off `git status`: clicking a file there (or the section's
   heading) loads that side and reveals the file. Any other load (a
-  commit, a branch, a range) is one flat **FILES · n** list. The status
+  commit, a branch, a range) is one flat **FILES · n** list, and a
+  right-click on one of its rows offers *Revert file* — the diff's own
+  file button: that commit's changes to the file applied in reverse to
+  the working tree, unstaged, nothing committed. The status
   letter colours each row (added green, deleted red, renamed blue,
   untracked dim), and each row carries the file-type icon the editor's
   tree shows for the name. The list **follows the view** — the file at
@@ -465,7 +468,7 @@ to install, and nothing in it is a terminal.
   in another clears it), and `Esc` clears it; padding cells and expanded
   context never count. `x` stages, unstages or reverts the selection or,
   with none, the focused hunk; `X` the file; `D` discards (reverts, on a
-  commit or branch) after a confirmation. A right-click on a hunk offers
+  commit or branch). A right-click on a hunk offers
   the same, plus *Copy*, *Open in editor*, *Add note* and *Expand
   context*; the pinned file header carries the file's buttons too.
 - Every action **re-reads the file's patch from git** at that moment and
@@ -476,11 +479,12 @@ to install, and nothing in it is a terminal.
   that changed since the view loaded it — which reloads. Stage and
   unstage ask nothing; a discard confirms (an untracked file's discard
   moves it to the **trash**, never an unlink; a deleted file's *Discard
-  file* restores it from the index); a revert applies the commit's patch
-  in reverse to the working tree after a confirm that warns when the
-  file has unstaged changes, and when the context has moved retries
-  three-way and says so (the result is staged, and may carry conflict
-  markers). Each runs behind the page's busy — the pressed button spins
+  file* restores it from the index); a revert asks nothing either — it
+  applies the commit's patch in reverse to the working tree, where the
+  result sits unstaged for the diff to show and a discard to take back —
+  and when the context has moved retries three-way and says so (the
+  result is staged, and may carry conflict markers). Each runs behind
+  the page's busy — the pressed button spins
   — toasts its outcome (or git's first error line), and reloads the view
   by key, so a selection survives with its hunk.
 - **Notes on the diff.** `c` (or the right-click menu's *Add note*) opens

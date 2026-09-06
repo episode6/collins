@@ -2637,6 +2637,18 @@ class DiffView(Gtk.Box):
         request = gitpatch.MutationRequest(section.file, self.loaded, gitpatch.FILE, discard)
         self.emit("mutation-requested", request)
 
+    def request_file_at(self, path: str) -> bool:
+        """The sidebar's *Revert file* (a file row's context menu on a
+        read-only load): press the file header's button for *path* as a
+        click would — the file, whole. False when the view holds no such
+        file (the list and the view read the same diff, so only a load in
+        flight gets here)."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return False
+        self.request_file(section, False)
+        return True
+
     def _request_pinned(self, discard: bool) -> None:
         section = self._pinned_section
         if section is not None and section.get_parent() is not None:

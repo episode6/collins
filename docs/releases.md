@@ -105,12 +105,14 @@ downloads of each version, see the
   file's. Every action re-reads the file's patch from git first and
   refuses — with a word, not half done — a binary, a file too large, a
   rename or a new / deleted file by hunk, and a file that changed since
-  the view loaded (which reloads); discards and reverts confirm first
-  (an untracked file's discard moves it to the trash, never an unlink; a
-  deleted file's restores it; a revert onto a file with unstaged changes
-  warns that the two may conflict, and retries three-way when the
-  context has moved, saying so). The outcome is a toast, the view
-  reloads by key, and a selection survives with its hunk.
+  the view loaded (which reloads); a discard confirms first (an
+  untracked file's moves it to the trash, never an unlink; a deleted
+  file's restores it), a revert does not — its result is unstaged, in
+  the diff, a discard away — and retries three-way when the context has
+  moved, saying so. The outcome is a toast, the view reloads by key, and
+  a selection survives with its hunk. A right-click on a row of the
+  files list on a commit, the branch or a range offers *Revert file*,
+  the same reverse apply.
 - **Notes on the diff.** `c` (or the hunk menu's *Add note*) opens a
   card under the focused hunk, anchored to the cursor line: a text box
   where `Ctrl+Enter` saves (the first line the summary, the rest the
