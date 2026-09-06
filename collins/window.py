@@ -4499,6 +4499,13 @@ class MainWindow(Adw.ApplicationWindow):
             return
         ok, hint = terminal.get_termprop_int(name)
         action = watch.reading(hint if ok else None)
+        log.debug(
+            "progress: %s hint=%s -> %s%s",
+            self._session_id_of(page) or self._placeholder_pages.get(page),
+            hint if ok else None,
+            action,
+            " (startup hold)" if self._startup_held(page) else "",
+        )
         if self._startup_held(page):
             # A spawning CLI blips its progress hint with no turn in sight,
             # so whatever action the blip asks for is dropped — its clear
@@ -4564,10 +4571,19 @@ class MainWindow(Adw.ApplicationWindow):
         progress = self._progress_watches.get(page)
         if progress is not None and progress.quiet():
             agent_output = False
+        # While the agent's own hint reads busy, a redraw mark carries the
+        # termprop's window, not the terminal's short one. The latest mark
+        # decides the deadline, so redraws on IDLE_S would cut the agent's
+        # word down to two seconds of screen silence — and a main loop stalled
+        # that long (a sweep dispatched before the pending output) landed a
+        # finish, with no grace, unread flag and notification included, for a
+        # turn still going. The CLI's clear ends this turn (through the
+        # grace); silence only does after PROGRESS_IDLE_S, a killed CLI's case.
+        idle_s = PROGRESS_IDLE_S if progress is not None and progress.busy else None
         session_id = self._session_id_of(page)
         for tracked in (session_id, self._placeholder_pages.get(page)):
             if tracked and (agent_output or self._activity.is_busy(tracked)):
-                self._activity.mark(tracked)
+                self._activity.mark(tracked, idle_s=idle_s)
         if self.tab_view.get_selected_page() is page:
             return
         if not page.get_needs_attention():

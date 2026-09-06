@@ -653,3 +653,48 @@ def test_a_grace_finish_on_an_idle_session_is_a_no_op():
     tracker.finish("a", grace_s=3.0)
     assert not tracker.finish_pending("a")
     assert changes == []
+
+
+def test_a_short_mark_inside_the_grace_does_not_land_the_finish_early():
+    # A redraw mark on the terminal's short window (the prompt box returning)
+    # arriving inside a grace must not time the session out before the grace
+    # does: the armed finish owns the ending, and lands on its own deadline —
+    # or not at all, if a busy hint takes the clear back first.
+    tracker, clock, timers, changes, finished = make_finish_tracker(idle_s=2.0)
+    tracker.mark("a", idle_s=60.0)
+    tracker.finish("a", grace_s=3.0)
+    tracker.mark("a")  # deadline now sits at +2.0, inside the +3.0 grace
+    clock.advance(2.5)
+    timers.tick()
+    assert tracker.is_busy("a")
+    assert finished == []
+    tracker.resume("a")  # the busy hint arrives at 2.5s: a beat, not an end
+    tracker.mark("a", idle_s=60.0)
+    clock.advance(1.0)
+    timers.tick()
+    assert tracker.is_busy("a")
+    assert finished == []
+    assert changes == [("a", True)]
+
+
+def test_busy_reads_the_hint_between_a_busy_hint_and_its_clear():
+    watch, _clock = make_progress_watch()
+    assert not watch.busy
+    watch.reading(3)
+    assert watch.busy
+    watch.reading(None)
+    assert not watch.busy
+    watch.reading(1)
+    assert watch.busy
+    # Another source calling the turn over (the agent list's idle reading)
+    # drops it too: the agent is no longer held to be working.
+    watch.turn_ended()
+    assert not watch.busy
+
+
+def test_busy_stays_off_for_a_tab_that_never_spoke():
+    # A stray clear on a tab whose CLI speaks no progress means nothing, and
+    # it leaves busy where it was: off, so its redraws stay on IDLE_S.
+    watch, _clock = make_progress_watch()
+    watch.reading(None)
+    assert not watch.busy
