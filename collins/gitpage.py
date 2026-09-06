@@ -612,6 +612,15 @@ class GitPage(Adw.Bin):
             self._open_view()
         # else the open on map reads _loaded
 
+    def recheck_tree(self) -> None:
+        """A page fronted with no load asked (the footer's button, F6):
+        standing on the not-a-repo card, open the view now if the tree
+        turned up — `load()`'s path, without a load — rather than on the
+        tick 2 s on. With no tree still, _open_view re-shows the card. A
+        no-op off the card."""
+        if self._card == _NOT_A_REPO and self.get_mapped():
+            self._open_view()
+
     def refresh(self) -> None:
         """Reload what is loaded (the header's ⟳, the `r` key): the diff
         re-read and the commits list re-read. No-op on a card."""
@@ -1118,10 +1127,13 @@ class GitPage(Adw.Bin):
         self._install_monitors(read.files if working else None)
         self._sync_context()
         self._sync_search_label()
-        self._run_pending_navigate()
         if reread:
+            # A navigate waiting for this side stays queued: revealed now
+            # it would scroll a view the re-read is about to redraw.
             self._read_diff(loaded)  # its worker samples the tree state anew: no compare needed
-        elif stale and working:
+            return GLib.SOURCE_REMOVE
+        self._run_pending_navigate()
+        if stale and working:
             self._watch_check()
         return GLib.SOURCE_REMOVE
 

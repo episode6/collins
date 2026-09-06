@@ -87,7 +87,9 @@ up) are the public face — `app._ShowDiff` opens the page with
 while `opening` is False) and reveals with `focus=False`, so the tool
 never takes the keyboard. `load()` on a mapped page standing on the card
 opens the view (the host's `open_git_page(mode)` whose own repo check just
-passed: the tree turned up) rather than waiting for the tick. A reveal of
+passed: the tree turned up) rather than waiting for the tick, and so does
+`recheck_tree()`, which `open_git_page` with no mode (the footer's button,
+F6) calls on a page it fronts. A reveal of
 a file the files filter hides clears the filter first (the sidebar's entry
 and `DiffView.filter("")` at once; `DiffView.hidden_by_filter` says so) —
 only the tool reaches a hidden section, and True over one nobody can see
@@ -155,7 +157,10 @@ imports `gitpage`; the page feeds it and listens:
   side)` → `_navigate` (→ `DiffView.reveal`, synchronous; a miss toasts)
   on the live side (or the flat list), else `_pending_navigate = (path,
   side)` + `load(side)`, run when the reload lands with that side
-  (`settled()` waits for both); `filter-changed(str)` → `DiffView.filter`
+  (`settled()` waits for both) — and when that landing re-reads at once
+  (an equal ask parked behind it, `_diff_read`'s `reread`), the navigate
+  stays queued for the re-read rather than scrolling a view about to be
+  redrawn; `filter-changed(str)` → `DiffView.filter`
   hides sections (`set_visible`, not destroyed) and the rows hide too;
   `filter-escaped` puts the keyboard back in the view (Escape in the entry
   clears it first); `mutated` → re-seed the signatures, re-read the

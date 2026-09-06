@@ -1,3 +1,4 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
 """App-side plumbing for the session MCP tools, kept free of GTK.
 
 Everything the socket service and command builders need that isn't a widget:

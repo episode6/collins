@@ -5312,6 +5312,8 @@ class TerminalTab(Gtk.Box):
             self._dock.reveal_page(page, focus=focus)
             if mode is not None:
                 page.load(mode)
+            else:
+                page.recheck_tree()  # a page on the not-a-repo card: the tree is back (the check above)
         return True
 
     @property

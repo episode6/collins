@@ -393,6 +393,35 @@ def check_sidebar(repo: str) -> None:
         wait_for(lambda: [f.path for f in sidebar.file_rows().staged] == ["a.txt"] and not sidebar.file_rows().unstaged),
         sidebar.file_rows(),
     )
+    # The same race with a navigate queued: a staged-side click on a.txt
+    # asks for the unstaged side (a.txt is dirty again) and waits for that
+    # read; the file is staged while the read is out. The reveal must ride
+    # the re-read — where a.txt is gone, so it toasts — not the stale
+    # view, where it would have scrolled to a section about to be redrawn.
+    page.load("staged")
+    wait_for(lambda: page.settled() and page.loaded == "staged")
+    with open(os.path.join(repo, "a.txt"), "a") as fh:
+        fh.write("more\n")
+    toasts: list[str] = []
+    real_toast = page._toast
+    page._toast = lambda text: (toasts.append(text), real_toast(text))
+    gate.clear()
+    git_reads.clear()
+    gitops.read_diff = late_read_diff
+    try:
+        sidebar.emit("navigate-requested", "a.txt", "unstaged")
+        wait_for(lambda: len(git_reads) == 1)
+        check("the click queued its reveal behind the load", page._pending_navigate == ("a.txt", "unstaged") and page.loaded == "unstaged", page._pending_navigate)
+        git(repo, "add", "a.txt")
+        page.poll_tick()
+        check("the tick parked a re-read again", page._pending_load == "unstaged", page._pending_load)
+        gate.set()
+        landed = wait_for(lambda: len(git_reads) == 2 and page.settled())
+    finally:
+        gitops.read_diff = real_read_diff
+        page._toast = real_toast
+    check("the re-read landed and the queued reveal ran on it: a.txt is gone, so it toasted", landed and page._pending_navigate is None and toasts == ["a.txt isn't in this diff"], (toasts, page._pending_navigate))
+    check("the unstaged view is empty again", wait_for(lambda: page.diff_view.file_rows() == []), page.diff_view.file_rows())
     git(repo, "commit", "-qm", "pending committed")
     page.poll_tick()
     wait_for(page.settled)
@@ -1376,16 +1405,22 @@ def check_outside_a_repo(scratch: str) -> None:
     page.load("staged")
     wait_for(lambda: False, timeout=0.3)
     check("a load with no tree keeps the card", page.card == "not-a-repo" and not page.opened and not page.opening, (page.card, page.opened))
+    page.recheck_tree()
+    wait_for(lambda: False, timeout=0.3)
+    check("a re-check with no tree keeps the card too", page.card == "not-a-repo" and not page.opened and not page.opening, (page.card, page.opened))
     # ...and opens the view at once when the tree turned up (the host's
-    # open_git_page(mode) on a page that stood on the card): the card is
-    # not the page's last word while the open is out.
+    # open_git_page on a page that stood on the card — recheck_tree with
+    # no mode, the footer's button; load(mode) takes the same path): the
+    # card is not the page's last word while the open is out.
     git(nowhere, "init", "-q", "-b", "main")
     git(nowhere, "config", "user.email", "t@example.com")
     git(nowhere, "config", "user.name", "Test")
     git(nowhere, "commit", "-q", "--allow-empty", "-m", "first")
-    page.load("staged")
-    check("a load once the tree exists opens the view (card still up, opening)", page.opening and page.card == "not-a-repo", (page.opening, page.card))
-    check("the view opens into the load asked for", wait_for(lambda: page.settled() and page.loaded == "staged" and page.card is None), (page.card, page.loaded, page.opened))
+    page.recheck_tree()
+    check("a re-check once the tree exists opens the view (card still up, opening)", page.opening and page.card == "not-a-repo", (page.opening, page.card))
+    check("the view opens into the load it held", wait_for(lambda: page.settled() and page.loaded == "staged" and page.card is None), (page.card, page.loaded, page.opened))
+    page.load("unstaged")
+    check("a load then reads as usual", wait_for(lambda: page.settled() and page.loaded == "unstaged" and page.card is None), (page.card, page.loaded))
     page.page_closed()
     window.destroy()
 
