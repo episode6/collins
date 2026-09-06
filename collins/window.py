@@ -4738,7 +4738,7 @@ class MainWindow(Adw.ApplicationWindow):
             tab.toggle_attachments()
 
     def _toggle_git(self) -> None:
-        """F6: raise this tab's git page — hunk over the session's working
+        """F6: raise this tab's git page — the diff of the session's working
         tree, index or branch — or, pressed while the cursor is in it, lower
         it. As with the composer, the toggle turns on focus: a page behind
         another panel tab or in a hidden strip is one the press was asking

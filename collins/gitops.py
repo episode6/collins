@@ -15,7 +15,7 @@ unstages everything (stage_all, unstage_all), commits the index (commit,
 commit_fixup) and asks first whether a commit may be made at all
 (in_progress_operation, staged_paths).
 
-The native diff view reads whole loads through read_diff — hunk's argv
+The native diff view reads whole loads through read_diff — the argv
 (diff_argv, show_argv, with the `a/` `b/` prefixes pinned by
 DIFF_PREFIX_ARGS so a patch fed back to `git apply` always has them), a
 `--numstat -z` pre-pass (numstat_argv) that turns files over diffmodel's

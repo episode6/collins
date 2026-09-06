@@ -81,7 +81,7 @@ _MCP_TOOL_LABELS = {
         N_("Show diffs in the git page"),
         N_(
             "show_diff — open the git page on a working-tree, branch or commit diff, at a file "
-            "and line; offered to sessions only while hunk is installed"
+            "and line"
         ),
     ),
     "show_image": (

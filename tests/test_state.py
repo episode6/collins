@@ -141,6 +141,21 @@ def test_composer_new_sessions_setting_is_dropped_on_load(app_state):
     assert "composer_new_sessions" not in app_state.AppState().settings
 
 
+def test_terminal_diff_viewer_settings_are_dropped_on_load(app_state):
+    # git_theme and git_viewer went with the terminal diff viewer; a saved
+    # copy is discarded on read (AppState round-trips unknown keys
+    # otherwise, and every save would write them back).
+    state = app_state.AppState()
+    state.settings["git_theme"] = "nord"
+    state.settings["git_viewer"] = "native"
+    state.save()
+    reloaded = app_state.AppState()
+    assert "git_theme" not in reloaded.settings
+    assert "git_viewer" not in reloaded.settings
+    reloaded.save()
+    assert "git_theme" not in app_state.AppState().settings
+
+
 def test_caffeine_launch_timer_setting(app_state):
     from collins.caffeine import DURATION_KEYS, duration_seconds, follows_activity
 
@@ -1177,16 +1192,15 @@ def test_notification_settings_have_their_defaults(app_state):
 
 
 def test_git_settings_have_their_defaults(app_state):
-    # The five rows of the Git group (see prefslayout): hunk's own layout
-    # and theme, untracked files shown, twenty commits a page, and the
-    # parent branch worked out by the page.
+    # The rows of the Git group (see prefslayout): the diff view's layout
+    # and three knobs, untracked files shown, twenty commits a page, and
+    # the parent branch worked out by the page.
     assert app_state.DEFAULT_SETTINGS["git_layout"] == "auto"
-    assert app_state.DEFAULT_SETTINGS["git_theme"] == ""
     assert app_state.DEFAULT_SETTINGS["git_untracked"] is True
     assert app_state.DEFAULT_SETTINGS["git_log_page"] == 20
     assert app_state.DEFAULT_SETTINGS["git_parent_branch"] == ""
-    # The native diff view behind its temporary switch (hunk until PR 4).
-    assert app_state.DEFAULT_SETTINGS["git_viewer"] == "hunk"
+    assert "git_theme" not in app_state.DEFAULT_SETTINGS
+    assert "git_viewer" not in app_state.DEFAULT_SETTINGS
     assert app_state.DEFAULT_SETTINGS["git_line_numbers"] is True
     assert app_state.DEFAULT_SETTINGS["git_wrap_lines"] is False
     assert app_state.DEFAULT_SETTINGS["git_word_diff"] is True

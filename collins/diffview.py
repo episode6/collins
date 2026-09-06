@@ -2,8 +2,8 @@
 
 """The native diff view: a parsed `git diff` / `show` drawn as GTK widgets.
 
-`DiffView` is the git page's review stream, in place of hunk's terminal
-(spec: ~/specs/collins/native-diff-panel.md). It takes diffmodel's Files
+`DiffView` is the git page's review stream (spec:
+~/specs/collins/native-diff-panel.md). It takes diffmodel's Files
 and draws one `_FileSection` per file — a header (fold, icon, path, +/−
 counts, what kind of change it is), a side-by-side picture for an image,
 then `_GapRow`s and `_HunkSection`s in patch order — inside one vertical
@@ -104,7 +104,7 @@ log = logging.getLogger(__name__)
 LAYOUT_AUTO, LAYOUT_SPLIT, LAYOUT_STACK = gitloads.LAYOUTS
 SPLIT_MIN_WIDTH = 1000
 # Tab stops in the hunk text. The editor has no tab-width setting to follow
-# (state.DEFAULT_SETTINGS has none), so this is hunk's own default.
+# (state.DEFAULT_SETTINGS has none), so this is the diff's own default.
 TAB_WIDTH = 4
 # A gap's ▲ / ▼ step, and the most lines `all` will draw at once — a gap
 # of a hundred thousand unchanged lines is a file, not context.
@@ -1694,9 +1694,11 @@ class _HunkSection(Gtk.Box):
         lines (what `}` / `{` walk)."""
         return any(view.marks for view in self.views)
 
-    def grab(self, line_index: int | None = None, side: str = diffmodel.NEW) -> bool:
+    def grab(self, line_index: int | None = None, side: str = diffmodel.NEW, focus: bool = True) -> bool:
         """Focus the view (the *side*'s in split) with the cursor on hunk
-        line *line_index* (a Line's index in hunk.lines) when given."""
+        line *line_index* (a Line's index in hunk.lines) when given. With
+        *focus* False the cursor is placed and the keyboard stays where it
+        is (the show_diff tool's reveal: the agent asked, nobody clicked)."""
         if not self.views:
             return False
         view = self.views[0]
@@ -1704,6 +1706,8 @@ class _HunkSection(Gtk.Box):
             view = self.views[1]
         if line_index is not None and 0 <= line_index < len(self.hunk.lines):
             view.place_cursor(self._row_for(view, line_index))
+        if not focus:
+            return True
         return view.view.grab_focus()
 
     def _row_for(self, view: _HunkView, line_index: int) -> int:
@@ -2474,15 +2478,21 @@ class DiffView(Gtk.Box):
         self._schedule_scroll_sync()
 
     def reveal(
-        self, path: str, hunk: int | None = None, side: str | None = None, line: int | None = None
+        self,
+        path: str,
+        hunk: int | None = None,
+        side: str | None = None,
+        line: int | None = None,
+        focus: bool = True,
     ) -> bool:
         """Scroll to *path*'s section — or its hunk *hunk* (0-based), or the
         hunk holding 1-based *line* on *side* (new by default) — and focus
-        that hunk's view with the cursor on the line. A line no hunk
-        carries (an unchanged stretch) lands on the nearest hunk: the file
-        is in the diff, which is what the caller asked about (`holds_line`
-        says whether the line itself was). False only when the file isn't
-        in the load. Synchronous."""
+        that hunk's view with the cursor on the line (with *focus* False
+        the cursor is placed and the keyboard left where it is). A line no
+        hunk carries (an unchanged stretch) lands on the nearest hunk: the
+        file is in the diff, which is what the caller asked about
+        (`holds_line` says whether the line itself was). False only when
+        the file isn't in the load. Synchronous."""
         side = side if side in diffmodel.SIDES else diffmodel.NEW
         section = self._section_for(path, side)
         if section is None:
@@ -2502,7 +2512,7 @@ class DiffView(Gtk.Box):
             target = section.hunks[0]
         keyedslots.scroll_to(self._scroller, target if hunk is not None and target is not None else section)
         if target is not None:
-            target.grab(line_index, side)
+            target.grab(line_index, side, focus=focus)
             self._set_current(section.file.path, target.hunk.index)
         else:
             self._set_current(section.file.path, -1)

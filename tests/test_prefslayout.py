@@ -3,7 +3,7 @@
 """The preferences page's shape (collins.prefslayout): the settings that
 spend the user's Claude quota sit together, directly under General."""
 
-from collins import gitloads, prefslayout, tokenrefresh
+from collins import prefslayout, tokenrefresh
 from collins.state import DEFAULT_SETTINGS
 
 
@@ -80,32 +80,28 @@ def test_git_follows_pull_requests():
 
 
 def test_every_git_setting_has_its_default():
-    # hunk's own defaults for what reaches hunk, twenty commits a page, and
-    # the parent branch left to the page to work out.
+    # The diff view's layout and three knobs, untracked files shown, twenty
+    # commits a page, and the parent branch left to the page to work out.
     assert DEFAULT_SETTINGS["git_layout"] == "auto"
-    assert DEFAULT_SETTINGS["git_theme"] == ""
     assert DEFAULT_SETTINGS["git_untracked"] is True
     assert DEFAULT_SETTINGS["git_log_page"] == 20
     assert DEFAULT_SETTINGS["git_parent_branch"] == ""
-    # The native view's temporary switch (hunk stays the default until the
-    # cut-over PR deletes both) and its three knobs.
-    assert DEFAULT_SETTINGS["git_viewer"] == "hunk"
     assert DEFAULT_SETTINGS["git_line_numbers"] is True
     assert DEFAULT_SETTINGS["git_wrap_lines"] is False
     assert DEFAULT_SETTINGS["git_word_diff"] is True
-
-
-def test_git_viewers_are_gitloads_words():
-    # The Diff viewer row's values are what Options.from_settings accepts,
-    # hunk first so an unknown stored value falls back to it.
-    assert [value for value, _label in prefslayout.GIT_VIEWERS] == list(gitloads.VIEWERS)
-    assert DEFAULT_SETTINGS["git_viewer"] == prefslayout.GIT_VIEWERS[0][0] == gitloads.DEFAULT_VIEWER
-    for word in ("native", "viewer", "experimental", "wrap", "line numbers", "word"):
+    # The terminal viewer's theme and the viewer switch went with it
+    # (decisions 1 and 3 of the native-diff spec).
+    assert "git_theme" not in DEFAULT_SETTINGS
+    assert "git_viewer" not in DEFAULT_SETTINGS
+    assert not hasattr(prefslayout, "GIT_VIEWERS")
+    for word in ("wrap", "line numbers", "word", "layout"):
         assert word in prefslayout.GIT_SEARCH_TERMS
+    for word in ("hunk", "theme", "viewer", "experimental"):
+        assert word not in prefslayout.GIT_SEARCH_TERMS
 
 
-def test_git_layouts_are_hunks_mode_words():
-    # The values go to hunk's --mode verbatim, and the default is first so
+def test_git_layouts_are_gitloads_words():
+    # The values are gitloads.LAYOUTS verbatim, and the default is first so
     # an unknown stored value falls back to it.
     assert [value for value, _label in prefslayout.GIT_LAYOUTS] == ["auto", "split", "stack"]
     assert DEFAULT_SETTINGS["git_layout"] == prefslayout.GIT_LAYOUTS[0][0]

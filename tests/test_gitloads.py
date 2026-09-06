@@ -6,7 +6,7 @@ Preferences → Git normalises into, the breadcrumb and tab title each load
 wears, a commit's subject and sha and the sha a ref resolves to (against a
 fake `run`), the Ctrl+1/2/3 chords, the initial mode, the layout slot, and
 the show_diff tool's reading of its `what` and `file` arguments. Split out
-of tests/test_hunkctl.py with the module; hunkctl re-exports every name."""
+of the old viewer module's tests with the module."""
 
 import ast
 import json
@@ -29,13 +29,6 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
         ({"git_layout": "stack"}, gitloads.Options(layout="stack")),
         ({"git_layout": "bogus"}, gitloads.Options()),
         ({"git_layout": None}, gitloads.Options()),
-        ({"git_theme": "nord"}, gitloads.Options(theme="nord")),
-        ({"git_theme": "  nord "}, gitloads.Options(theme="nord")),
-        ({"git_theme": "-x"}, gitloads.Options()),
-        ({"git_theme": "a b"}, gitloads.Options()),
-        ({"git_theme": "x" * 65}, gitloads.Options()),
-        ({"git_theme": "x" * 64}, gitloads.Options(theme="x" * 64)),
-        ({"git_theme": 3}, gitloads.Options()),
         ({"git_untracked": 0}, gitloads.Options(untracked=False)),
         ({"git_untracked": False}, gitloads.Options(untracked=False)),
         ({"git_untracked": "yes"}, gitloads.Options(untracked=True)),
@@ -45,10 +38,6 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
         ({"git_log_page": 1000}, gitloads.Options(log_page=500)),
         ({"git_log_page": "abc"}, gitloads.Options(log_page=20)),
         ({"git_log_page": None}, gitloads.Options(log_page=20)),
-        ({"git_viewer": "native"}, gitloads.Options(viewer="native")),
-        ({"git_viewer": "hunk"}, gitloads.Options()),
-        ({"git_viewer": "bogus"}, gitloads.Options()),
-        ({"git_viewer": None}, gitloads.Options()),
         ({"git_line_numbers": 0}, gitloads.Options(line_numbers=False)),
         ({"git_wrap_lines": 1}, gitloads.Options(wrap=True)),
         ({"git_word_diff": False}, gitloads.Options(word_diff=False)),
@@ -58,33 +47,24 @@ def test_options_from_settings_normalises_each_key(settings, expected):
     assert gitloads.Options.from_settings(settings) == expected
 
 
-def test_options_native_says_which_viewer_draws():
-    assert gitloads.Options().native is False
-    assert gitloads.Options(viewer=gitloads.VIEWER_NATIVE).native is True
-    assert gitloads.VIEWERS == ("hunk", "native") and gitloads.DEFAULT_VIEWER == "hunk"
-
-
 def test_options_from_settings_reads_the_whole_dict():
     settings = {
         "font": "Monospace 11",
         "git_layout": "stack",
-        "git_theme": "catppuccin-mocha",
+        "git_theme": "catppuccin-mocha",  # a stale key from the terminal viewer's days: ignored
         "git_untracked": False,
         "git_log_page": 40,
     }
-    expected = gitloads.Options("stack", "catppuccin-mocha", False, 40)
+    expected = gitloads.Options("stack", False, 40)
     assert gitloads.Options.from_settings(settings) == expected
 
 
-def test_safe_theme():
-    assert gitloads.safe_theme("nord")
-    assert gitloads.safe_theme("github-light-default")
-    assert gitloads.safe_theme("auto")
-    assert not gitloads.safe_theme("")
-    assert not gitloads.safe_theme("-nord")
-    assert not gitloads.safe_theme("no rd")
-    assert not gitloads.safe_theme("nord\n")
-    assert not gitloads.safe_theme(None)
+def test_options_have_no_theme_and_no_viewer():
+    """Decision 3 of the native-diff spec: the diff follows the editor's
+    scheme, and the viewer switch went with the terminal viewer."""
+    assert not hasattr(gitloads.Options(), "theme")
+    assert not hasattr(gitloads.Options(), "viewer")
+    assert not hasattr(gitloads, "safe_theme")
 
 
 # -- loads -------------------------------------------------------------------
@@ -175,7 +155,7 @@ def test_range_helpers():
 
 
 def test_range_breadcrumb_and_tab_title():
-    """hunk's `left...right` reads as right against left: b vs a."""
+    """`left...right` reads as right against left: b vs a."""
     assert gitloads.breadcrumb({"range": "main...feat"}, "x", "y") == "feat vs main"
     assert gitloads.breadcrumb({"range": SHA + "...HEAD"}, None, None) == "HEAD vs 0123456"
     assert gitloads.tab_title({"range": "main...feat"}, "main") == "Git · feat"
@@ -555,7 +535,7 @@ def test_options_defaults_reproduce_the_shipped_settings():
     """A page that never received settings, and an empty dict, both run on
     the defaults."""
     options = gitloads.Options()
-    assert options == gitloads.Options(layout="auto", theme="", untracked=True, log_page=20)
+    assert options == gitloads.Options(layout="auto", untracked=True, log_page=20)
     assert gitloads.Options.from_settings({}) == options
     assert gitloads.LAYOUTS == ("auto", "split", "stack")
     assert gitloads.DEFAULT_LAYOUT == "auto"
@@ -568,11 +548,12 @@ def test_vocabulary_constants():
     assert (gitloads.SHOW_KEY, gitloads.RANGE_KEY, gitloads.RANGE_DOTS) == ("show", "range", "...")
     assert gitloads.MAX_PATH_CHARS == 512
     assert gitloads.GIT_TIMEOUT_S == 5.0
+    assert gitloads.SHOW_DIFF_DEADLINE_S == 12.0 and gitloads.SHOW_DIFF_POLL_MS == 250
 
 
-def test_gitloads_stands_without_the_viewer():
-    """The module is the Loaded vocabulary alone: it imports nothing of
-    hunk's (hunkctl imports it, never the reverse) and nothing of GTK's."""
+def test_gitloads_stands_alone():
+    """The module is the Loaded vocabulary alone: nothing of a widget's,
+    nothing of GTK's."""
     with open(gitloads.__file__, encoding="utf-8") as fh:
         tree = ast.parse(fh.read())
     imported = set()
@@ -581,5 +562,5 @@ def test_gitloads_stands_without_the_viewer():
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             imported.add(node.module or "")
-    assert not {name for name in imported if "hunkctl" in name or name.startswith("gi")}
+    assert not {name for name in imported if name.startswith("gi")}
     assert imported == {"__future__", "os", "re", "subprocess", "collections.abc", "dataclasses", "i18n"}

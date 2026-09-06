@@ -55,6 +55,6 @@ def test_git_search_terms_name_the_page_and_its_parts():
     # The words someone has for the git page's settings that no row's own
     # text carries: the tool's name, "untracked", the parent branch.
     text = " ".join(prefslayout.GIT_SEARCH_TERMS)
-    for word in ("git", "hunk", "diff", "untracked", "parent branch", "theme", "layout"):
+    for word in ("git", "diff", "untracked", "parent branch", "layout", "wrap"):
         assert matches(word, text), word
     assert not matches("scrollback", text)

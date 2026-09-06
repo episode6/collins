@@ -666,7 +666,7 @@ def test_resolve_branch_none(tmp_path):
 
 @pytest.mark.parametrize("name", ["", " ", "-main", "--staged", "a..b", "a...b", "ma in", "main\n"])
 def test_resolve_branch_rejects_names_that_read_as_arguments(tmp_path, name):
-    """The name ends up in hunk's argv; anything git could read as an option
+    """The name ends up on git's argv; anything git could read as an option
     or a range never gets there."""
     repo = make_repo(tmp_path / "repo")
     with_local_branch(repo, "main")

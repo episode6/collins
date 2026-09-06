@@ -1837,7 +1837,7 @@ class PanelDock(Adw.Bin):
         A page may also declare a `column_seed`: the least its column opens
         at whether or not the gutter can pay — paid by the terminal if need
         be, as the page's own size request would have been (the git page's
-        680 px: room for its native sidebar beside hunk's diff, while its
+        680 px: room for its sidebar beside a readable diff, while its
         real minimum, what a drag may shrink it to, is far less). Like the
         gutter floor it is only a seed: a size the sizer recorded from the
         user's own drag wins over it.

@@ -244,7 +244,7 @@ def change_summary(cwd: str | Path | None) -> tuple[bool, bool]:
     *staged* is any entry with a status in the index column (the first of
     the two porcelain columns), *unstaged* any entry with one in the
     worktree column or an untracked (`??`) entry — the split the git page's
-    footer entry point opens on (see hunkctl.initial_mode: the working tree
+    footer entry point opens on (see gitloads.initial_mode: the working tree
     while anything in it is dirty, the index when only that is). The same
     `--no-optional-locks status --porcelain` as `has_changes`, with the same
     2 s budget, and like it asked on demand only — never from the poll.
@@ -383,7 +383,7 @@ def resolve_branch(cwd: str | Path | None, name: str | None) -> tuple[str, str] 
 
     The remote fallback is what lets a clone that never checked `main` out
     locally still diff against it: `origin/main` is a ref git knows just as
-    well. The name is what ends up in hunk's argv, hence the gate on it.
+    well. The name is what ends up on git's argv, hence the gate on it.
     """
     if not _safe_branch_name(name):
         return None

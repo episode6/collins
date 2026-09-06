@@ -7,7 +7,7 @@ A *note* is a card under a hunk anchored to one line of one side (decision
 rationale and author, and a source — USER for the ones typed into the
 view's own editor, AGENT for the ones the `annotate_diff` tool lands. A
 *highlight* is an attention mark on a character range of a line, in one of
-hunk's tones. Both live in a `MarkStore` for the tab's life (decision 8:
+TONES. Both live in a `MarkStore` for the tab's life (decision 8:
 nothing is written to state.json), keyed to survive a reload: every mark
 remembers the stable key of the hunk it sits in (diffmodel.stable_key —
 the hunk's ranges and content), so a reload that leaves that hunk alone
@@ -34,8 +34,8 @@ USER = "user"
 AGENT = "agent"
 SOURCES: tuple[str, ...] = (USER, AGENT)
 
-# hunk's highlight tones (`highlight add --tone`): what the view paints a
-# marked range with. MATCH is the default.
+# The highlight tones: what the view paints a marked range with. MATCH is
+# the default.
 TONE_MATCH = "match"
 TONE_CURRENT = "current"
 TONE_INFO = "info"

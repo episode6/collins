@@ -21,9 +21,9 @@ def test_catalogue_actions_are_prefixed_and_unique():
     assert all(b.group in kb.GROUP_LABELS for b in kb.BINDINGS)
 
 
-def test_git_page_keys_are_page_local_and_hunks_words():
-    # The diff view's chords: hunk's own defaults where it had them, bare
-    # letters included — page-local, so they never reach the terminal.
+def test_git_page_keys_are_page_local_vim_letters():
+    # The diff view's chords: vim-shaped bare letters included — page-local,
+    # so they never reach the terminal.
     git = {b.action: b.defaults for b in kb.BINDINGS if b.group == kb.GROUP_GIT}
     assert git["git.next-hunk"] == ("bracketright",)
     assert git["git.prev-hunk"] == ("bracketleft",)
