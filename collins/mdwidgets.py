@@ -71,12 +71,18 @@ def build(
     widgets: list[Gtk.Widget] = []
     for index, block in enumerate(blocks):
         if budget.left <= 0:
-            rest = "\n\n".join(b.source for b in blocks[index:] if b.source)
+            rest = rest_source(blocks[index:])
             if rest:
                 widgets.append(plain_label(rest))
             break
         widgets.append(build_one(block, budget, image_row, depth))
     return widgets
+
+
+def rest_source(blocks: list) -> str:
+    """The source of *blocks* as one text — what the tail past the widget
+    budget renders as, in `build` and in the page's own block walk."""
+    return "\n\n".join(block.source for block in blocks if block.source)
 
 
 def build_one(
@@ -149,6 +155,14 @@ def _list(block: mdblocks.ListBlock, budget: Budget, image_row, depth: int) -> G
         last = block.start + len(block.items) - 1
         width = len(str(max(last, block.start))) + 1
     for position, item in enumerate(block.items):
+        if budget.left <= 0:
+            # The budget bounds items too, not only what is inside them: a
+            # ten-thousand-item list is ten thousand rows and glyphs. The
+            # items left become one plain label of their paragraphs.
+            rest = rest_source([child for rest in block.items[position:] for child in rest.children])
+            if rest:
+                column.append(plain_label(rest))
+            break
         if item.check is not None:
             glyph = _TASK_GLYPHS[item.check]
         elif block.ordered:

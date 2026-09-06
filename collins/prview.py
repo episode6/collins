@@ -2769,12 +2769,28 @@ def _fill_blocks(
     re-rendered through the same inline walker, and that label alone gets
     the `set_lines` + ellipsize backstop and a trailing …. Only paragraphs
     are cut: any other block that doesn't fit whole waits for "Show more".
+
+    The widget budget (`mdwidgets.Budget`) is the third bound, on layout:
+    once it runs dry the blocks left become one plain label of their
+    source — as many of them as the character and line budgets still
+    allow, the rest waiting for "Show more" like any other block. Nothing
+    is ever dropped: pressing it fills again with fresh budgets, and the
+    tail past the widget budget is that same one label.
     """
     spent = False
     shown_image = False
     complete = True
     budget = mdwidgets.Budget()
-    for block in blocks:
+    for index, block in enumerate(blocks):
+        if budget.left <= 0:
+            if not spent:
+                rest, chars, lines, whole = _rest_head(blocks[index:], chars, lines)
+                if rest:
+                    box.append(mdwidgets.plain_label(rest))
+                complete = complete and whole
+            else:
+                complete = False
+            break
         if isinstance(block, mdblocks.ImageRow):
             if spent and not (keep_first_image and not shown_image):
                 complete = False
@@ -2786,7 +2802,7 @@ def _fill_blocks(
                 lines -= _IMAGE_FOLD_LINES
                 spent = spent or lines <= 0
             continue
-        if spent or budget.left <= 0:
+        if spent:
             complete = False
             continue
         if isinstance(block, mdblocks.Text):
@@ -2832,6 +2848,30 @@ def _fill_blocks(
             lines -= cost
             spent = spent or lines <= 0
     return complete
+
+
+def _rest_head(
+    blocks: list, chars: int | None, lines: int | None
+) -> tuple[str, int | None, int | None, bool]:
+    """The front of *blocks* that fits *chars*/*lines* as one source text,
+    the budgets left after it, and whether every block fit — the shape
+    the tail past the widget budget takes (whole blocks only: a plain
+    label of half a table is no better than none)."""
+    taken: list = []
+    whole = True
+    for block in blocks:
+        cost = mdblocks.line_cost(block, _IMAGE_FOLD_LINES)
+        if (chars is not None and len(block.source) > chars) or (
+            lines is not None and cost > lines
+        ):
+            whole = False
+            break
+        taken.append(block)
+        if chars is not None:
+            chars -= len(block.source)
+        if lines is not None:
+            lines -= cost
+    return mdwidgets.rest_source(taken), chars, lines, whole
 
 
 def _cut_markup(head: str) -> str:

@@ -45,7 +45,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from collins import i18n, mdblocks, prdetail, prview  # noqa: E402
+from collins import i18n, mdblocks, mdwidgets, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
@@ -332,6 +332,43 @@ def step_back() -> bool:
         and any(has_class(w, "pr-md-glyph") and w.get_text() == "☑" for w in labels(card)),
         texts(card),
     )
+    # The widget budget: a body past it renders its tail as one plain
+    # label — never dropped, never a widget per item (the body itself
+    # sits under the render cap, so this is the widget budget alone).
+    items = "\n".join(f"- item {n}" for n in range(1500))
+    return land(replace(STAGED["detail"], body=items + "\n\nafter the list"), step_budget)
+
+
+def step_budget() -> bool:
+    page = state["page"]
+    full = fold(page)._full
+    widgets = list(walk(full))
+    check("a 1500-item list builds a bounded widget tree", len(widgets) < 1500, len(widgets))
+    all_texts = texts(full)
+    check(
+        "…its tail kept as plain text inside the list",
+        any(t.endswith("item 1499") and "item 1000" in t for t in all_texts),
+        [t[-60:] for t in all_texts][-2:],
+    )
+    check("…and the paragraph after it too", "after the list" in all_texts, all_texts[-1][-60:])
+    check(
+        "…with no Show more button past the render cap",
+        not findall(full, lambda w: isinstance(w, Gtk.Button)),
+    )
+    paragraphs = "\n\n".join(f"p{n}" for n in range(500))
+    return land(replace(STAGED["detail"], body=paragraphs), step_budget_paragraphs)
+
+
+def step_budget_paragraphs() -> bool:
+    page = state["page"]
+    full = fold(page)._full
+    body_labels = [w for w in labels(full) if has_class(w, "pr-md-text")]
+    check(
+        "500 paragraphs: the widget budget's worth of labels, then one of the rest",
+        len(body_labels) == mdwidgets.WIDGET_BUDGET + 1,
+        len(body_labels),
+    )
+    check("…ending with the last paragraph", body_labels and body_labels[-1].get_text().endswith("p499"))
     return done()
 
 

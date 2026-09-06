@@ -163,12 +163,16 @@ when its visible text starts with `http://`, `https://` or `www.` (GitHub's
 autolink rule; markdown-it's fuzzy linkify would link `example.com`),
 `<img>`/`<br>`/`<sub>`/`<sup>`/`<kbd>` honoured and every other tag escaped
 literal, nesting capped at `MAX_DEPTH` (6). `mdwidgets.build` turns blocks
-into widgets under a `Budget` of ~400 leaves (past it the rest is one plain
-label); `prview._fill_blocks` walks them with per-block line costs
-(`mdblocks.line_cost`), cutting the overrunning *paragraph* on its source
-with `body_head` and re-rendering the front through `mdblocks.render_inline`
-(`set_lines` + ellipsize on that label alone) — any other block that doesn't
-fit whole waits for "Show more". Fallback ladder: `mdblocks.available()`
+into widgets under a `Budget` of ~400 leaves — a list's items count too, so
+a ten-thousand-item list is a few hundred rows and one label of the rest —
+and past it the remaining blocks are one plain label of their source
+(`mdwidgets.rest_source`), never dropped; `prview._fill_blocks` walks them
+with per-block line costs (`mdblocks.line_cost`), cutting the overrunning
+*paragraph* on its source with `body_head` and re-rendering the front
+through `mdblocks.render_inline` (`set_lines` + ellipsize on that label
+alone) — any other block that doesn't fit whole waits for "Show more", and
+what its own widget budget leaves over takes the same one-label shape
+(`_rest_head`). Fallback ladder: `mdblocks.available()`
 False (import latch) → `split_body` + `md_to_pango` for every body; a body
 `parse_blocks` raises on → that body alone; bad markup on a label → escaped
 source (GTK 4's `set_markup` blanks a label on bad markup instead of
