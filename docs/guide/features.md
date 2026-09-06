@@ -398,20 +398,20 @@ page needs hunk 0.21 or newer:
   a file moves hunk to it; hunk's `.` / `,` and `]` / `[` walk files and
   hunks as ever, and the files list follows hunk's cursor as it moves (the
   extension reports every move; without it, within a couple of seconds).
-- **The commits list is the switch.** One group per branch of interest:
+- **The commits list is the switch.** One group per branch of the stack:
   the **current branch** — a *working tree* row, then its own commits
-  since it forked from the parent, unpushed ones marked `↑` — the **parent
-  branch**'s commits not on the default branch (left out when the parent
-  *is* the default), and the **default branch**'s latest *Commits per
-  page* (twenty by default) with a *load more…* row. A click loads it
-  into the same window: the *working tree* row the unstaged changes, a
-  commit that one commit, a branch header everything the branch did since
-  it forked (the parent's header, the parent against the default) —
-  except the default branch's, which stays put: a whole trunk is more
-  than a diff viewer should be handed. The loaded row wears `▸`, and its
-  group's header is bold; the mark follows what hunk has loaded, not the
-  last click. A right-click offers *Copy sha*, *Set parent branch…* and
-  *Reload*.
+  since it forked from the branch it stacks on, unpushed ones marked `↑`
+  — then **each branch under it**, nearest first, with the commits it
+  added over the one below (a branch straight off the trunk has no such
+  groups), and the **default branch**'s latest *Commits per page* (twenty
+  by default) with a *load more…* row. A click loads it into the same
+  window: the *working tree* row the unstaged changes, a commit that one
+  commit, a branch header everything the branch did since it forked (a
+  stack branch's header, that branch against the one below it) — except
+  the default branch's, which stays put: a whole trunk is more than a
+  diff viewer should be handed. The loaded row wears `▸`, and its group's
+  header is bold; the mark follows what hunk has loaded, not the last
+  click. A right-click offers *Copy sha* and *Reload*.
 - **The files list splits on the working tree.** With *working tree*
   loaded it shows **UNSTAGED · n** and **STAGED · n** sections; hunk holds
   one of the two at a time, so that side is live — hunk's own files with
@@ -430,7 +430,7 @@ page needs hunk 0.21 or newer:
   *Commit with body…* (a summary, and a body — Enter commits, Shift+Enter
   breaks a line) and *Fix up…* (pick an unpushed commit, and the confirm
   names the `git rebase -i --autosquash` that folds it in — named, never
-  run); the **⎇ branch** button is the parent picker. Commits refuse
+  run). Commits refuse
   before asking anything while a rebase, merge, cherry-pick or revert is
   half-finished, or nothing is staged. Every outcome is a toast in the
   page (*Committed a1b2c3d "…" — undo with `git reset --soft HEAD~1`*,
@@ -454,19 +454,23 @@ page needs hunk 0.21 or newer:
   ask nothing; discard confirms first, because the change exists nowhere
   else. A binary file, a range across two files, or a file that changed
   since the review loaded, is refused with a word rather than half-done.
-  Everything else — stage all, commit, fix up, the parent branch — is the
-  sidebar's, native. (hunk's own `s` still pops its files pane inside the
-  terminal; it is hunk's, and stays until you press it again.)
-- **The parent branch** is the base branch of the session's newest pull
-  request once its PR page has been opened — a stacked PR is measured
-  against the branch it stacks on — then the **Default parent branch**
-  from Preferences → Git when the repository has a branch by that name
-  (`develop`, or `origin/develop` for one only the remote has), and
-  otherwise the repository's default branch; either way the local branch
-  when there is one, else the remote's. *Set parent branch…* (the
-  sidebar's ⎇ button or right-click) overrides all of
-  that for the session until *Automatic* is picked again, and the choice
-  is remembered with the page.
+  Everything else — stage all, commit, fix up — is the sidebar's, native.
+  (hunk's own `s` still pops its files pane inside the terminal; it is
+  hunk's, and stays until you press it again.)
+- **The parent branch is git's word.** The page reads the stack off the
+  repository: every local branch whose tip lies on the current branch's
+  history since the default branch, nearest first. The nearest one is
+  the parent — what the *vs* diff and the current group's commits are
+  measured against — and the rest are the groups under it, so a stack of
+  branches shows as a stack of groups. Only when git shows no branch
+  under `HEAD` does anything else name the parent: the base branch of the
+  session's newest pull request once its PR page has been opened, then
+  the **Default parent branch** from Preferences → Git when the
+  repository has a branch by that name (`develop`, or `origin/develop`
+  for one only the remote has), and otherwise the repository's default
+  branch; either way the local branch when there is one, else the
+  remote's. There is nothing to set: create or delete a branch and the
+  page follows on its next tick.
 - **Preferences → Git** sets how hunk is started — its **Layout**
   (automatic, split or stacked) and **Theme** (any name hunk knows; empty
   is hunk's own default) — whether working-tree reviews **show untracked
@@ -484,7 +488,7 @@ page needs hunk 0.21 or newer:
   what was last clicked: a load made in the commits list, by a `hunk
   session reload` run from a shell, or by the agent shows up in it within
   a couple of seconds. A commit, and a three-dot range between two
-  branches (the parent's header: *develop vs main*), are the page's own
+  branches (a stack branch's header: *develop vs main*), are the page's own
   loads — kept fresh, remembered, restored — while anything else hunk
   can show (`a..b`, a pathspec) is named as hunk names it and left alone
   until the next load takes the page back. A refresh button reloads the
@@ -493,8 +497,10 @@ page needs hunk 0.21 or newer:
   index, `HEAD` and the parent branch against what it last loaded, and
   reloads when any of them moved — an agent staging, committing or
   rebasing shows up without a keypress, and a session that finishes a
-  turn is checked on the spot; a push refreshes the `↑` marks. A session
-  that steps into a worktree takes the page with it.
+  turn is checked on the spot; a branch created, deleted or moved (a
+  commit on another branch of the stack, in another worktree) re-reads
+  the stack and the commits list, and a push refreshes the `↑` marks. A
+  session that steps into a worktree takes the page with it.
 - **Three ways in**: `F6` (pressed while the cursor is in the page, it
   closes; from anywhere else it opens or fronts it), the footer's **git
   button** beside the terminal and editor toggles (the same toggle, the
@@ -512,9 +518,8 @@ page needs hunk 0.21 or newer:
   card; a directory that stops being a repository, a card saying so.
 - Each session remembers whether its git page was open, where it sat,
   what it showed — one of the three working-tree loads, a commit or a
-  range — whether the sidebar was folded, and the parent branch you set,
-  restored on the next launch, hunk starting the moment the page is first
-  shown.
+  range — and whether the sidebar was folded, restored on the next launch,
+  hunk starting the moment the page is first shown.
 
 ## Knowing what's happening
 
@@ -879,7 +884,8 @@ requests** (off), and whether the marks are **refreshed at launch**
 (on) — a **Git** group for the git page — hunk's **Layout** (automatic /
 split / stacked) and **Theme**, **Show untracked files**, **Commits per
 page**, and a **Default parent branch** to measure branches against when
-no pull request names one — and the **Footer apps** list — reachable from
+git shows no stack and no pull request names one — and the **Footer
+apps** list — reachable from
 the sidebar menu or `Ctrl+,`.
 
 A **search bar across the top** filters the whole screen as you type, and it

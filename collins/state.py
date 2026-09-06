@@ -302,11 +302,13 @@ DEFAULT_SETTINGS = {
     "git_theme": "",  # hunk --theme; "" = hunk's own default
     "git_untracked": True,  # off: --exclude-untracked (working-tree reviews hide untracked files)
     "git_log_page": 20,  # commits per group page in the commits panel ("load more…" step)
-    # The branch a session's git page measures its branch against when no
-    # attached pull request names one (see TerminalTab._git_parent_branch):
-    # "" = automatic (the PR's base, else the repository's default branch).
-    # A branch name; "origin/x" is taken as x when origin has it
-    # (gitinfo.parent_branch); skipped in a repository that lacks it.
+    # The branch a session's git page measures its branch against when git
+    # shows no local branch under HEAD (the stack, gitops.stack_branches,
+    # names the parent first) and no attached pull request names one (see
+    # TerminalTab._git_parent_branch): "" = automatic (the PR's base, else
+    # the repository's default branch). A branch name; "origin/x" is taken
+    # as x when origin has it (gitinfo.parent_branch); skipped in a
+    # repository that lacks it.
     "git_parent_branch": "",
     "editor_window_width": 1000,  # last popped-out editor window size (floating, unmaximized)
     "editor_window_height": 700,

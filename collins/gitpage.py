@@ -77,24 +77,24 @@ a button that needs hunk's cursor feeds the extension's key through the pty
 confirm answers to Enter; the buttons are hidden when hunk runs without
 the extension), a native mutation ("mutated": stage all, a commit)
 re-seeds the signature and reloads hunk at once rather than waiting for
-the tick, and a parent pick ("parent-picked") sets the user's parent. The
-sidebar hides below the Adw.BreakpointBin's breakpoint
+the tick. The sidebar hides below the Adw.BreakpointBin's breakpoint
 (_NARROW_MAX_WIDTH) whatever the header's toggle says, and the toggle's
 state — persisted in page_state's "sidebar" — rules above it; the install
 and not-a-repo cards hide it too (nothing to list), the exited card keeps
 it (the commits list still works). Page-local toasts (commit results, git
 errors, a navigate hunk refused) float in an Adw.ToastOverlay over the page.
 
-The parent branch is the name the page resolved — the user's pick (the
-sidebar's ⎇ picker) while it resolves, else the host's automatic rung (the
-newest PR's base, then the default parent from Preferences → Git, then the
-default branch) — and the sidebar groups its commits the same way the
-breadcrumb reads; a pick re-resolves at once and reloads a branch diff
-that now has another base.
-The user's pick persists with the page (page_state's "parent") from the
-moment it is set or restored — a restored page that was never shown still
-carries it into the next layout save — and is dropped only once a
-resolution found the branch missing.
+The parent branch — the branch the current one stacks on, what the "vs"
+load diffs against and the current group's commits stop at — is git's
+word first: the stack of local branches between the default branch and
+HEAD (gitops.stack_branches, read on a thread whenever the tree or a ref
+moved, _refresh_branch_stack), its nearest branch being the parent and the rest
+the sidebar's stack groups. Only when git shows no stack does the host's
+rung name it (parent_provider: the newest PR's base, then the default
+parent from Preferences → Git, then the default branch). The sidebar
+groups its commits the same way the breadcrumb reads; a stack read that
+moves the parent reloads a branch diff that now has another base. There
+is no picker: git is the source of truth for what stacks on what.
 
 The rest of Preferences → Git reaches the page as the whole settings dict
 (apply_settings, on every change the dialog makes), read into an
@@ -134,6 +134,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import gitinfo, gitops, hunkctl, keybindings, keymap, proctree, themes  # noqa: E402
+from .gitmodel import BranchRef  # noqa: E402
 from .gitsidebar import GitSidebar  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -230,39 +231,33 @@ class GitPage(Adw.Bin):
         parent_provider: Callable[[str | None], str | None],
         on_closed: Callable[[GitPage], None],
         loaded: hunkctl.Loaded = hunkctl.DEFAULT_MODE,
-        parent: str | None = None,
         sidebar: bool = True,
     ) -> None:
         """*cwd_provider*: the agent's live cwd (TerminalTab.current_agent_cwd)
         — read at every spawn and poll. *parent_provider(cwd)*: the parent
-        branch NAME ("main") the host computes (the newest PR's base, else
-        the default branch), or None; the page resolves it to a diff target
-        itself (gitinfo.resolve_branch). *on_closed(page)*: fired from
-        page_closed() — the tab's X, through the strip's close funnel — after hunk
-        is signalled, so the host drops its reference. *loaded*: what to
-        spawn into (a restored layout's, or the footer's choice): a mode, a
-        commit as {"show": ref}, or a range as {"range": "a...b"}.
-        *parent*: the branch the user set through "Set parent branch…"
-        (the sidebar's picker, or the extension's), restored from the
-        layout; it beats *parent_provider* while it resolves. *sidebar*:
-        whether the native panels show (the header's toggle, restored from
-        the layout: hunkctl.decode_sidebar)."""
+        branch NAME ("main") the host computes for a tree git shows no
+        stack in (the newest PR's base, else the default branch), or None;
+        the page resolves it to a diff target itself (gitinfo.resolve_branch).
+        *on_closed(page)*: fired from page_closed() — the tab's X, through
+        the strip's close funnel — after hunk is signalled, so the host
+        drops its reference. *loaded*: what to spawn into (a restored
+        layout's, or the footer's choice): a mode, a commit as {"show":
+        ref}, or a range as {"range": "a...b"}. *sidebar*: whether the
+        native panels show (the header's toggle, restored from the layout:
+        hunkctl.decode_sidebar)."""
         super().__init__()
         self.add_css_class("git-page")
         self._cwd_provider = cwd_provider
         self._parent_provider = parent_provider
         self._on_closed = on_closed
         self._loaded: hunkctl.Loaded = loaded if hunkctl.loaded_ok(loaded) else hunkctl.DEFAULT_MODE
-        # The user-set parent branch NAME, or None for the automatic rung
-        # (see _resolve_parent). Comes in from the layout, changes through
-        # the sidecar, goes out in page_state.
-        self._user_parent: str | None = parent if hunkctl.safe_ref(parent) else None
-        # Set by _resolve_parent when the user's branch was looked for and
-        # not found; cleared when it resolves again or another pick lands.
-        # Only this puts the pick out of force (see _parent_source): a page
-        # that hasn't resolved anything yet — restored into a hidden strip,
-        # or shown over a directory that isn't a repository — keeps it.
-        self._user_parent_missing = False
+        # The stack git shows under HEAD (gitops.stack_branches: the local
+        # branches between the default branch and HEAD, nearest first), as
+        # last read by _refresh_branch_stack; cleared on a branch change,
+        # and _resolve_parent skips an entry that stopped resolving. Every
+        # read carries its generation; a bump orphans the one in flight.
+        self._branch_stack: tuple[BranchRef, ...] = ()
+        self._branch_stack_gen = 0
 
         # -- hunk process state ----------------------------------------------
         self._hunk_path: str | None = None
@@ -320,9 +315,11 @@ class GitPage(Adw.Bin):
         # the sidebar matches a `show HEAD` title to a row with.
         self._resolved_sha: str | None = None
         self._signature: tuple | None = None
-        # What moves on a push or fetch (gitinfo.remote_refs_signature):
-        # a move refreshes the commits list's `↑` marks, nothing else.
-        self._remote_signature: tuple | None = None
+        # What moves when any ref is written (gitinfo.refs_signature): a
+        # commit on another branch of the stack, a branch made or deleted,
+        # a push or fetch. A move re-reads the stack and the commits list
+        # (the groups, the `↑` marks), never the diff.
+        self._refs_signature: tuple | None = None
 
         # -- the native sidebar's feed (see gitsidebar) -------------------------
         # The header toggle's word; the sidebar shows only while it is True,
@@ -462,7 +459,6 @@ class GitPage(Adw.Bin):
         self.sidebar.connect("navigate-requested", self._on_navigate_requested)
         self.sidebar.connect("key-requested", self._on_key_requested)
         self.sidebar.connect("mutated", self._on_mutated)
-        self.sidebar.connect("parent-picked", self._on_parent_picked)
         self._paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._paned.set_start_child(self.sidebar)
         self._paned.set_resize_start_child(False)
@@ -639,7 +635,7 @@ class GitPage(Adw.Bin):
             return  # the first load is still landing
         if self._foreign is not None:
             return
-        self.sidebar.refresh_commits()
+        self._refresh_branch_stack()
         self._files_stale = True
         self._reload(self._loaded)
 
@@ -681,6 +677,7 @@ class GitPage(Adw.Bin):
         branch = gitinfo.current_branch(cwd)
         if branch != self._branch:
             self._branch = branch
+            self._branch_stack = ()  # another branch: another stack, read below
             self._sync_header()
             self._sync_context()  # another branch: other groups
         self._read_sidecar()
@@ -692,7 +689,7 @@ class GitPage(Adw.Bin):
             self._sync_header()
             self.emit("title-changed")
         signature = gitinfo.tree_signature(cwd, self._parent_name)
-        remote = gitinfo.remote_refs_signature(cwd)
+        refs = gitinfo.refs_signature(cwd)
         # A parent that changed changes the signature's base too; that is
         # not the tree moving, and only a branch diff has to follow it. A
         # move the extension made (an `x`, a commit) and reloaded hunk for
@@ -703,17 +700,19 @@ class GitPage(Adw.Bin):
         if moved and hunkctl.shown_by_extension(self._ext_refreshed, signature, self._signature):
             log.debug("gitpage: the extension already reloaded for this move")
             moved = False
-        remote_moved = self._remote_signature is not None and remote != self._remote_signature
+        refs_moved = self._refs_signature is not None and refs != self._refs_signature
         self._signature = signature
-        self._remote_signature = remote
+        self._refs_signature = refs
         # The native lists follow every move — the extension's own included,
-        # and a push (the `↑` marks) — whether or not hunk is reloaded.
-        if changed or remote_moved or parent_moved:
-            self.sidebar.refresh_commits()
+        # a commit on another branch of the stack, a push (the `↑` marks) —
+        # whether or not hunk is reloaded: the stack is re-read, and the
+        # commits list with it (_branch_stack_read).
+        if changed or refs_moved:
+            self._refresh_branch_stack()
+        elif parent_moved:
+            self._sync_context()
         if changed:
             self._files_stale = True
-        if parent_moved:
-            self._sync_context()
         if not self.hunk_alive or self._resolving:
             return
         if parent_moved and target_before is not None and self._loaded == "branch" and not self._foreign:
@@ -815,10 +814,8 @@ class GitPage(Adw.Bin):
 
     def page_state(self) -> dict:
         """This page's slot in a serialized dock layout (see panellayout):
-        what is loaded, the user-set parent while it is in force, and
-        whether the sidebar is hidden."""
-        parent = self._user_parent if self._parent_source() == "user" else None
-        return hunkctl.encode_state(self._loaded, parent, sidebar=self._sidebar_wanted)
+        what is loaded, and whether the sidebar is hidden."""
+        return hunkctl.encode_state(self._loaded, sidebar=self._sidebar_wanted)
 
     def page_closed(self) -> None:
         """The tab is really closing: SIGTERM the hunk child if alive, then
@@ -968,35 +965,85 @@ class GitPage(Adw.Bin):
     def _resolve_parent(self) -> str | None:
         """The diff target for the parent branch (`main`, `origin/main`),
         re-read from the tree each time: a fetch or a checkout can create the
-        ref between two asks. The user's pick (_user_parent) while it
-        resolves, else the host's automatic rung (parent_provider: the
-        newest PR's base, else the default branch). None when there is no
-        parent to name."""
+        ref between two asks. The nearest branch of the stack git showed
+        (_branch_stack, the first that still resolves — one deleted since the read
+        is skipped until the next read drops it), else the host's rung
+        (parent_provider: the newest PR's base, then the default parent
+        setting, then the default branch). None when there is no parent to
+        name."""
         cwd = self._cwd_provider()
-        name = None
-        if self._user_parent and gitinfo.resolve_branch(cwd, self._user_parent):
-            name = self._user_parent
-            self._user_parent_missing = False
-        else:
-            self._user_parent_missing = self._user_parent is not None
+        name = next((ref.name for ref in self._branch_stack if gitinfo.resolve_branch(cwd, ref.name)), None)
+        if name is None:
             name = self._parent_provider(cwd)
         resolved = gitinfo.resolve_branch(cwd, name)
-        # The name goes out in the sidecar (and into the header) whether or
-        # not it resolves yet, so it passes the same gate the read side
-        # applies to what comes back: a PR base or a provider answer that
-        # does not look like a ref is not a parent at all.
+        # The name goes into the header whether or not it resolves yet, so
+        # it passes the same gate the read side applies to what comes back:
+        # a PR base or a provider answer that does not look like a ref is
+        # not a parent at all.
         self._parent_name = name if hunkctl.safe_ref(name) else None
         self._parent_target = resolved[0] if resolved else None
         return self._parent_target
 
-    def _parent_source(self) -> str:
-        """"user" while the user-set parent is in force — set, and not found
-        missing by the last _resolve_parent (a page that never resolved,
-        being unshown or over no repository, keeps the pick) — else "auto":
-        whether page_state carries the name."""
-        if self._user_parent and not self._user_parent_missing:
-            return "user"
-        return "auto"
+    def _branches_below_parent(self) -> tuple[BranchRef, ...]:
+        """The stack's branches under the parent, for the sidebar's groups:
+        what follows the parent in _branch_stack; nothing when the parent isn't
+        one of them (the host's rung named it, or nothing did)."""
+        for index, ref in enumerate(self._branch_stack):
+            if ref.name == self._parent_name:
+                return self._branch_stack[index + 1 :]
+        return ()
+
+    def _trunk_target(self, cwd: str | None) -> str | None:
+        """The default branch's diff target (`main`, `origin/main`) — the
+        lower end of the stack walk — or None when the tree can't name one
+        (then there is no stack to read: the walk needs a floor)."""
+        resolved = gitinfo.resolve_branch(cwd, gitinfo.default_branch(cwd))
+        return resolved[0] if resolved else None
+
+    def _refresh_branch_stack(self) -> None:
+        """Re-read the stack off git on a thread (gitops.stack_branches, two
+        git runs), then re-resolve the parent on it and re-read the commits
+        list (_branch_stack_read). The one way the commits list is refreshed after
+        a move: the tick's, the refresh button's, a native mutation's."""
+        self._branch_stack_gen += 1
+        gen = self._branch_stack_gen
+        cwd = self._cwd_provider()
+        trunk = self._trunk_target(cwd)
+
+        def work() -> None:
+            stack = tuple(gitops.stack_branches(cwd, trunk)) if trunk is not None else ()
+            GLib.idle_add(self._branch_stack_read, gen, stack, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="git-page-stack", daemon=True).start()
+
+    def _branch_stack_read(self, gen: int, stack: tuple[BranchRef, ...]) -> bool:
+        """A stack read landed: the parent follows it (a parent that moved
+        re-seeds the freshness signature — the base changed, not the tree
+        — and reloads a branch diff, as the tick would), the sidebar gets
+        the groups, and the commits list is re-read either way (the
+        move that asked for the read may lie inside a group)."""
+        if gen != self._branch_stack_gen or self._closing:
+            return GLib.SOURCE_REMOVE
+        self._branch_stack = stack
+        target_before = self._parent_target
+        self._resolve_parent()
+        parent_moved = self._parent_target != target_before
+        if parent_moved:
+            self._signature = gitinfo.tree_signature(self._cwd_provider(), self._parent_name)
+            self._sync_header()
+            self.emit("title-changed")
+        if not self._sync_context():
+            self.sidebar.refresh_commits()
+        if (
+            parent_moved
+            and target_before is not None
+            and self.hunk_alive
+            and not self._resolving
+            and self._loaded == "branch"
+            and self._foreign is None
+        ):
+            self._reload("branch")
+        return GLib.SOURCE_REMOVE
 
     # -- the sidecar -----------------------------------------------------------------
 
@@ -1162,6 +1209,8 @@ class GitPage(Adw.Bin):
         cwd = self._cwd_provider()
         show_ref = hunkctl.show_ref(self._loaded)
         runtime_dir = GLib.get_user_runtime_dir()
+        trunk = self._trunk_target(cwd)
+        self._branch_stack_gen += 1  # the probe's read supersedes any in flight
 
         def work() -> None:
             probe = hunkctl.probe()
@@ -1173,11 +1222,20 @@ class GitPage(Adw.Bin):
                 else:
                     log.warning("gitpage: %s isn't owner-only and can't be made so", daemon_dir)
             subject = hunkctl.commit_subject(cwd, show_ref) if show_ref else None
-            GLib.idle_add(self._probed, gen, probe, subject)
+            # The stack comes up with the viewer, so the first spawn already
+            # diffs against the branch this one stacks on (see _refresh_branch_stack).
+            stack = tuple(gitops.stack_branches(cwd, trunk)) if trunk is not None else ()
+            GLib.idle_add(self._probed, gen, probe, subject, stack)
 
         threading.Thread(target=work, name="git-page-probe", daemon=True).start()
 
-    def _probed(self, gen: int, probe: hunkctl.Probe, subject: str | None = None) -> bool:
+    def _probed(
+        self,
+        gen: int,
+        probe: hunkctl.Probe,
+        subject: str | None = None,
+        stack: tuple[BranchRef, ...] = (),
+    ) -> bool:
         if gen != self._gen or self._closing:
             return GLib.SOURCE_REMOVE
         if probe.status != "ok":
@@ -1193,6 +1251,7 @@ class GitPage(Adw.Bin):
             return GLib.SOURCE_REMOVE
         self._repo_root = root
         self._branch = gitinfo.current_branch(cwd)
+        self._branch_stack = stack
         parent = self._resolve_parent()
         if self._loaded == "branch" and parent is None:
             self._loaded = hunkctl.DEFAULT_MODE  # a saved "vs main" in a tree with no main
@@ -1207,7 +1266,7 @@ class GitPage(Adw.Bin):
         self._shown_target = None
         self._foreign = None
         self._signature = gitinfo.tree_signature(cwd, self._parent_name)
-        self._remote_signature = gitinfo.remote_refs_signature(cwd)
+        self._refs_signature = gitinfo.refs_signature(cwd)
         self._sync_header()
         self.emit("title-changed")
         self._spawned_mode = self._loaded
@@ -1550,10 +1609,10 @@ class GitPage(Adw.Bin):
     def _sync_context(self) -> bool:
         """Hand the sidebar what the page knows (GitSidebar.set_context):
         the branch, the parent and default branches as BranchRefs
-        (gitops.resolve_group_branches — .git reads, no process), the load
-        and its resolved sha, the live working-tree side, whether hunk runs
-        with the extension, and the automatic parent's name. True when the
-        sidebar re-read its commits for it (the groups changed)."""
+        (gitops.resolve_group_branches — .git reads, no process), the stack
+        under the parent, the load and its resolved sha, the live
+        working-tree side, and whether hunk runs with the extension. True
+        when the sidebar re-read its commits for it (the groups changed)."""
         cwd = self._cwd_provider()
         parent, default = gitops.resolve_group_branches(cwd, self._parent_name, gitinfo.default_branch(cwd))
         loaded = None if self._foreign is not None else self._loaded
@@ -1562,12 +1621,12 @@ class GitPage(Adw.Bin):
             branch=self._branch,
             parent=parent,
             default=default,
+            stack=self._branches_below_parent(),
             loaded=loaded,
             resolved_sha=self._resolved_sha,
             live_side=live,
             hunk_alive=self.hunk_alive,
             extension_loaded=self._extension_loaded,
-            auto_parent=self._parent_provider(cwd),
         )
 
     def _sync_sidebar(self) -> None:
@@ -1653,41 +1712,17 @@ class GitPage(Adw.Bin):
 
     def _on_mutated(self, _sidebar: GitSidebar) -> None:
         """A native mutation landed (stage all, a commit): re-seed the
-        freshness signature so the tick doesn't reload a second time,
-        refresh the lists, and reload hunk now."""
+        freshness signatures so the tick doesn't reload a second time,
+        refresh the lists (the stack first: a commit moved HEAD), and
+        reload hunk now."""
         cwd = self._cwd_provider()
         self._signature = gitinfo.tree_signature(cwd, self._parent_name)
-        self._remote_signature = gitinfo.remote_refs_signature(cwd)
+        self._refs_signature = gitinfo.refs_signature(cwd)
         self._files_stale = True
-        self.sidebar.refresh_commits()
+        self._refresh_branch_stack()
         if not self.hunk_alive or self._resolving or self._foreign is not None:
             return
         self._reload(self._loaded)  # a respawn without a session id
-
-    def _on_parent_picked(self, _sidebar: GitSidebar, name: str | None) -> None:
-        """The sidebar's parent pick — a branch name, or None for Automatic
-        — lands where the sidecar's used to: the user's pick, re-resolved,
-        published to the extension, persisted (page_state), and a branch
-        diff reloaded against the new base. The signature is re-seeded
-        with the new base so the tick reads no move in it."""
-        self._user_parent = name if hunkctl.safe_ref(name) else None
-        self._user_parent_missing = False
-        target_before = self._parent_target
-        self._resolve_parent()
-        cwd = self._cwd_provider()
-        self._signature = gitinfo.tree_signature(cwd, self._parent_name)
-        self._write_sidecar()
-        self._sync_header()
-        self.emit("title-changed")
-        self._sync_context()
-        if (
-            self.hunk_alive
-            and not self._resolving
-            and self._parent_target != target_before
-            and self._loaded == "branch"
-            and self._foreign is None
-        ):
-            self._reload("branch")
 
     def _toast(self, text: str) -> None:
         toast = Adw.Toast(title=text, timeout=4)

@@ -998,10 +998,11 @@ class PreferencesDialog(Adw.Dialog):
         parent_reason.add_css_class("dim-label")
         parent_reason.set_subtitle(
             _(
-                "Empty: automatic. The page measures the branch against the attached "
-                "pull request's base first, then this branch when the repository has "
-                "it (develop, or origin/develop for one only the remote has), then the "
-                "default branch; Set parent branch… in the page still overrides it"
+                "Empty: automatic. The page measures the branch against the local "
+                "branch it stacks on when git shows one, else the attached pull "
+                "request's base, then this branch when the repository has it "
+                "(develop, or origin/develop for one only the remote has), then the "
+                "default branch"
             )
         )
         git_group.add(_searchable(parent_reason, *parent_terms))

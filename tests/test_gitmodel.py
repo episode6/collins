@@ -10,6 +10,7 @@ import pytest
 
 from collins import gitmodel, hunkctl
 from collins.gitmodel import (
+    BranchPage,
     BranchRef,
     Commit,
     FileRow,
@@ -150,15 +151,17 @@ def test_without_untracked():
 # -- build_rows ---------------------------------------------------------------
 
 
+DEVELOP = BranchRef("develop", "origin/develop")
+
+
 def base_rows(**overrides):
     args = dict(
         branch="feat/panel",
-        parent=BranchRef("develop", "origin/develop"),
+        parent=DEVELOP,
         default=BranchRef("main", "main"),
         current=[commit(3), commit(2)],
         current_more=False,
-        parent_commits=[commit(5)],
-        parent_more=False,
+        stack=[BranchPage(DEVELOP, (commit(5),), False)],
         default_commits=[commit(9), commit(8)],
         default_more=True,
         unpushed={commit(3).sha},
@@ -174,8 +177,8 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
         "current/worktree:working tree",
         "current/commit:commit 3",
         "current/commit:commit 2",
-        "parent/header:develop",
-        "parent/commit:commit 5",
+        "stack:develop/header:develop",
+        "stack:develop/commit:commit 5",
         "default/header:main",
         "default/commit:commit 9",
         "default/commit:commit 8",
@@ -190,7 +193,7 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
     assert (rows[2].sha, rows[2].abbrev, rows[2].unpushed) == (commit(3).sha, commit(3).abbrev, True)
     assert rows[3].unpushed is False
     assert rows[4].load == {"range": "main...origin/develop"}
-    assert rows[4].id == "header:parent"
+    assert rows[4].id == "header:stack:develop"
     assert rows[6].load is None
     assert rows[6].id == "header:default"
     assert rows[9].load is None
@@ -199,9 +202,41 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
         assert row.load is None or hunkctl.loaded_ok(row.load)
 
 
-def test_build_rows_omits_the_parent_group_when_the_parent_is_the_default_branch():
-    rows = base_rows(parent=BranchRef("main", "main"))
-    assert not any(row.group == "parent" for row in rows)
+def test_build_rows_a_stack_is_one_group_per_branch_each_ranging_to_the_one_below():
+    """feat/panel over step2 over step1 over main: the parent's group
+    ranges to the branch under it, the last one to the default."""
+    step2, step1 = BranchRef("step2", "step2"), BranchRef("step1", "step1")
+    rows = base_rows(
+        parent=step2,
+        stack=[BranchPage(step2, (commit(5),), True), BranchPage(step1, (commit(4),), False)],
+    )
+    assert [f"{row.group}/{row.kind}:{row.label}" for row in rows] == [
+        "current/header:feat/panel",
+        "current/worktree:working tree",
+        "current/commit:commit 3",
+        "current/commit:commit 2",
+        "stack:step2/header:step2",
+        "stack:step2/commit:commit 5",
+        "stack:step2/more:load more…",
+        "stack:step1/header:step1",
+        "stack:step1/commit:commit 4",
+        "default/header:main",
+        "default/commit:commit 9",
+        "default/commit:commit 8",
+        "default/more:load more…",
+    ]
+    assert rows[4].load == {"range": "step1...step2"} and rows[4].id == "header:stack:step2"
+    assert rows[6].id == "more:stack:step2"
+    assert rows[7].load == {"range": "main...step1"} and rows[7].id == "header:stack:step1"
+    main = BranchRef("main", "main")
+    assert gitmodel.stack_ranges([step2, step1], main) == [(step2, "step1"), (step1, "main")]
+    assert gitmodel.stack_ranges([step2, step1], None) == [(step2, "step1"), (step1, None)]
+    assert gitmodel.stack_ranges([], BranchRef("main", "main")) == []
+
+
+def test_build_rows_omits_the_stack_when_the_parent_is_the_default_branch():
+    rows = base_rows(parent=BranchRef("main", "main"), stack=[])
+    assert not any(row.group.startswith(gitmodel.STACK_GROUP_PREFIX) for row in rows)
     assert rows[0].load == "branch"
 
 
@@ -209,12 +244,12 @@ def test_build_rows_with_no_parent_at_all_the_header_loads_what_the_group_lists(
     """No parent, no default (a `git init` repository on a branch called
     something else): the header ranges over the listed commits, from the
     oldest one's parent — a load hunk takes as `diff <sha>^...HEAD`."""
-    rows = base_rows(parent=None, default=None, default_commits=[])
+    rows = base_rows(parent=None, default=None, stack=[], default_commits=[])
     assert [row.group for row in rows] == ["current"] * 4
     assert rows[0].load == {"range": f"{commit(2).sha}^...HEAD"}
     assert hunkctl.loaded_ok(rows[0].load)
     # And nothing listed: nothing to load.
-    rows = base_rows(parent=None, default=None, current=[], default_commits=[])
+    rows = base_rows(parent=None, default=None, stack=[], current=[], default_commits=[])
     assert rows[0].load is None
     assert [row.kind for row in rows] == ["header", "worktree"]
 
@@ -227,14 +262,16 @@ def test_build_rows_the_default_branchs_header_loads_nothing():
 
 
 def test_build_rows_load_more_rows_appear_per_group_when_a_page_was_full():
-    rows = base_rows(current_more=True, parent_more=True)
-    assert [row.group for row in rows if row.kind == "more"] == ["current", "parent", "default"]
-    assert [row.id for row in rows if row.kind == "more"] == ["more:current", "more:parent", "more:default"]
+    rows = base_rows(current_more=True, stack=[BranchPage(DEVELOP, (commit(5),), True)])
+    assert [row.group for row in rows if row.kind == "more"] == ["current", "stack:develop", "default"]
+    assert [row.id for row in rows if row.kind == "more"] == [
+        "more:current", "more:stack:develop", "more:default",
+    ]
 
 
 def test_build_rows_parent_without_a_default_has_no_range_to_load():
     rows = base_rows(default=None, default_commits=[])
-    header = next(row for row in rows if row.group == "parent" and row.kind == "header")
+    header = next(row for row in rows if row.group == "stack:develop" and row.kind == "header")
     assert header.load is None
     assert not any(row.group == "default" for row in rows)
 
@@ -245,8 +282,9 @@ def test_build_rows_bounds_what_it_shows():
     long = commit(1, "x" * (gitmodel.SUBJECT_MAX_CHARS + 9))
     rows = base_rows(current=[long])
     assert rows[2].label == "x" * gitmodel.SUBJECT_MAX_CHARS
-    rows = base_rows(parent=BranchRef("dev", "a b"))
-    assert next(row for row in rows if row.id == "header:parent").load is None
+    odd = BranchRef("dev", "a b")
+    rows = base_rows(parent=odd, stack=[BranchPage(odd)])
+    assert next(row for row in rows if row.id == "header:stack:dev").load is None
     many = [commit(i) for i in range(1, 1200)]
     rows = base_rows(current=many, default_commits=many)
     assert len(rows) == gitmodel.MAX_ROWS
@@ -275,7 +313,7 @@ def test_loaded_row_a_show_matches_by_sha_prefix_then_by_the_resolved_sha():
 
 def test_loaded_row_a_range_matches_the_header_that_loads_it_anything_else_no_row():
     rows = base_rows()
-    assert loaded_row_id(rows, {"range": "main...origin/develop"}) == "header:parent"
+    assert loaded_row_id(rows, {"range": "main...origin/develop"}) == "header:stack:develop"
     assert loaded_row_id(rows, {"range": "x...y"}) is None
     assert loaded_row_id(rows, {"range": "x..y"}) is None
     assert loaded_row_id(rows, None) is None

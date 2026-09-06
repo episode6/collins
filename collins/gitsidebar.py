@@ -7,8 +7,10 @@ What the collins-git hunk extension drew inside the terminal — the commits
 panel and the files panel — as GTK widgets beside hunk's VTE (gitpage
 places the widget; this module never imports gitpage). The commits list is
 one group per branch of interest (gitmodel.build_rows: the current branch
-with its `working tree` row and `↑` unpushed marks, the parent branch when
-it isn't the default, the default branch's latest page with `load more…`),
+with its `working tree` row and `↑` unpushed marks, every branch of the
+stack under it down to the default branch — the page reads the stack off
+git and hands it in with set_context — and the default branch's latest
+page with `load more…`),
 the loaded row marked `▸` after hunk's own title (set_context, not the last
 click — a load made from a shell or by the agent is reflected). The files
 list is hunk's own `files[]` off `session get` (refresh_files) — the loaded
@@ -20,8 +22,8 @@ first, the `session get` snapshot as the fallback). The action row feeds
 the extension's keys through the VTE's pty for what needs hunk's cursor
 ("key-requested": stage the hunk or the anchored range, anchor a line,
 discard) and runs the rest natively on worker threads — stage all, unstage
-all, commit, commit with body, fix up, the parent picker — with the
-confirms and dialogs of dialogs.py, and a toast for every outcome.
+all, commit, commit with body, fix up — with the confirms and dialogs of
+dialogs.py, and a toast for every outcome.
 
 Nothing here decides what a click loads, which row is the loaded one, or
 what the confirms say: that is gitmodel's (GTK-free, unit-tested), and
@@ -29,7 +31,7 @@ every git call is gitops'. The widget only draws, threads and emits:
 "load-requested" (a hunkctl.Loaded), "navigate-requested" (a path and the
 side it sits on), "key-requested" (bytes for the pty), "mutated" (a native
 git mutation landed — the page re-seeds its freshness signature and
-reloads hunk), "parent-picked" (a branch name, or None for Automatic). Every
+reloads hunk). Every
 thread reply lands with GLib.idle_add at default priority behind a
 generation counter, so a stale reply never overwrites a newer one; every
 subject, path and branch name goes through Gtk.Label.set_text, bounded by
@@ -224,7 +226,6 @@ class GitSidebar(Gtk.Box):
         "navigate-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
         "key-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "parent-picked": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
     }
 
     def __init__(self, cwd_provider: Callable[[], str | None], options: hunkctl.Options) -> None:
@@ -238,15 +239,18 @@ class GitSidebar(Gtk.Box):
         self._branch: str | None = None
         self._parent: BranchRef | None = None
         self._default: BranchRef | None = None
+        # The branches under the parent, nearest first (gitops.stack_branches
+        # as the page read it), down to the last one above the default.
+        self._stack: tuple[BranchRef, ...] = ()
         self._loaded: object = None  # a hunkctl.Loaded, or None for a foreign load
         self._resolved_sha: str | None = None
         self._live_side: str | None = None
         self._hunk_alive = False
         self._extension_loaded = False
-        self._auto_parent: str | None = None
 
         # -- the commits list ---------------------------------------------------
-        self._pages: dict[str, int] = dict.fromkeys(gitmodel.GROUPS, 1)
+        # How many pages each group shows, by group id (absent: one).
+        self._pages: dict[str, int] = {}
         self._commits_gen = 0
         self._rows: list[Row] = []
         self._commit_widgets: dict[str, _CommitRow] = {}
@@ -351,10 +355,6 @@ class GitSidebar(Gtk.Box):
         self._commit_stack.add_named(Gtk.Spinner(spinning=True), "spinner")
         self._commit_button.set_child(self._commit_stack)
         add(self._commit_button)
-
-        self._parent_button = self._flat_button(f"{_BRANCH_GLYPH} ?", self._on_parent_clicked)
-        self._parent_button.set_tooltip_text(_("Set parent branch…"))
-        add(self._parent_button)
         self.append(actions)
 
     @staticmethod
@@ -370,7 +370,6 @@ class GitSidebar(Gtk.Box):
             ("commit", lambda: self._on_commit_clicked(False)),
             ("commit-body", lambda: self._on_commit_clicked(True)),
             ("fixup", self._on_fixup_clicked),
-            ("set-parent", self._on_parent_clicked),
             ("reload", self.refresh_commits),
         ):
             action = Gio.SimpleAction.new(name, None)
@@ -429,33 +428,35 @@ class GitSidebar(Gtk.Box):
         live_side: str | None,
         hunk_alive: bool,
         extension_loaded: bool,
-        auto_parent: str | None,
+        stack: Sequence[BranchRef] = (),
     ) -> bool:
         """What the page knows: the checked-out *branch*, the *parent* and
         *default* branches the groups are built on (None when the tree
-        can't name one), what hunk has *loaded* (a hunkctl.Loaded, or None
-        for a load Collins has no name for) and, for a commit load, the
-        sha it *resolved* to; which working-tree side is live (None for
-        any other load); whether hunk runs and with the extension; and
-        the automatic parent's name, for the picker's first row. A change
-        of branch, parent or default refreshes the commits list; the
-        loaded mark and the buttons follow every call. Returns whether the
-        groups changed (and so the list was re-read here) — the page
-        refreshes it itself otherwise after a spawn."""
-        groups_changed = (branch, parent, default) != (self._branch, self._parent, self._default)
+        can't name one) and the *stack* of branches between them (the
+        branches under the parent, nearest first, as gitops.stack_branches
+        lists them — the page reads it off git), what hunk has *loaded* (a
+        hunkctl.Loaded, or None for a load Collins has no name for) and,
+        for a commit load, the sha it *resolved* to; which working-tree
+        side is live (None for any other load); whether hunk runs and with
+        the extension. A change of branch, parent, stack or default
+        refreshes the commits list; the loaded mark and the buttons follow
+        every call. Returns whether the groups changed (and so the list
+        was re-read here) — the page refreshes it itself otherwise after a
+        spawn."""
+        stack = tuple(stack)
+        groups = (branch, parent, default, stack)
+        groups_changed = groups != (self._branch, self._parent, self._default, self._stack)
         self._branch = branch
         self._parent = parent
         self._default = default
+        self._stack = stack
         self._loaded = loaded
         self._resolved_sha = resolved_sha
         self._live_side = live_side
         self._hunk_alive = hunk_alive
         self._extension_loaded = extension_loaded
-        self._auto_parent = auto_parent
-        name = parent.name if parent is not None else (auto_parent or "?")
-        self._parent_button.set_label(f"{_BRANCH_GLYPH} {name}")
         if groups_changed:
-            self._pages = dict.fromkeys(gitmodel.GROUPS, 1)
+            self._pages = {}
             self.refresh_commits()
         else:
             self._mark_loaded_row()
@@ -464,34 +465,42 @@ class GitSidebar(Gtk.Box):
 
     def refresh_commits(self) -> None:
         """Re-read the groups' pages and the `↑` marks on a thread and
-        rebuild the commits list; a reply to an earlier ask is dropped."""
+        rebuild the commits list; a reply to an earlier ask is dropped.
+        The stack's groups are the parent (when it isn't the default) and
+        the branches under it, each read as `<below>..<branch>`
+        (gitmodel.stack_ranges)."""
         self._commits_gen += 1
         gen = self._commits_gen
         cwd = self._cwd_provider()
         parent, default = self._parent, self._default
+        stack: tuple[BranchRef, ...] = ()
+        if parent is not None and (default is None or parent.name != default.name):
+            stack = (parent, *self._stack)
         pages = dict(self._pages)
         page_size = self._options.log_page
 
         def work() -> None:
             current_range = [f"{parent.target}..HEAD"] if parent is not None else ["HEAD"]
-            current, current_more = gitops.read_page(cwd, current_range, page_size, pages["current"])
-            parent_commits: list[gitmodel.Commit] = []
-            parent_more = False
-            if parent is not None and default is not None and parent.name != default.name:
-                parent_commits, parent_more = gitops.read_page(
-                    cwd, [f"{default.target}..{parent.target}"], page_size, pages["parent"]
-                )
+            current, current_more = gitops.read_page(
+                cwd, current_range, page_size, pages.get(gitmodel.CURRENT_GROUP, 1)
+            )
+            stack_pages: list[gitmodel.BranchPage] = []
+            for ref, below in gitmodel.stack_ranges(stack, default):
+                group = gitmodel.stack_group(ref.name)
+                span = [f"{below}..{ref.target}"] if below is not None else [ref.target]
+                commits, more = gitops.read_page(cwd, span, page_size, pages.get(group, 1))
+                stack_pages.append(gitmodel.BranchPage(ref, tuple(commits), more))
             default_commits: list[gitmodel.Commit] = []
             default_more = False
             if default is not None:
                 default_commits, default_more = gitops.read_page(
-                    cwd, [default.target], page_size, pages["default"]
+                    cwd, [default.target], page_size, pages.get(gitmodel.DEFAULT_GROUP, 1)
                 )
             unpushed = gitops.unpushed_shas(cwd)
             GLib.idle_add(
                 self._commits_read,
                 gen,
-                (current, current_more, parent_commits, parent_more, default_commits, default_more, unpushed),
+                (current, current_more, stack_pages, default_commits, default_more, unpushed),
                 priority=GLib.PRIORITY_DEFAULT,
             )
 
@@ -500,15 +509,14 @@ class GitSidebar(Gtk.Box):
     def _commits_read(self, gen: int, read: tuple) -> bool:
         if gen != self._commits_gen:
             return GLib.SOURCE_REMOVE
-        current, current_more, parent_commits, parent_more, default_commits, default_more, unpushed = read
+        current, current_more, stack_pages, default_commits, default_more, unpushed = read
         self._rows = gitmodel.build_rows(
             self._branch or "HEAD",
             self._parent,
             self._default,
             current,
             current_more,
-            parent_commits,
-            parent_more,
+            stack_pages,
             default_commits,
             default_more,
             unpushed,
@@ -575,16 +583,17 @@ class GitSidebar(Gtk.Box):
         files list."""
         old, self._options = self._options, options
         if options.log_page != old.log_page:
-            self._pages = dict.fromkeys(gitmodel.GROUPS, 1)
+            self._pages = {}
             self.refresh_commits()
         if options.untracked != old.untracked:
             self.refresh_files(self._session_files, self._files_loaded, options.untracked)
 
     def load_more(self, group: str) -> None:
-        """One more page for *group* (one of gitmodel.GROUPS)."""
-        if group not in self._pages:
+        """One more page for *group* (a row's group id: the current or
+        default group, or a stack branch's)."""
+        if not any(row.group == group for row in self._rows):
             return
-        self._pages[group] += 1
+        self._pages[group] = self._pages.get(group, 1) + 1
         self.refresh_commits()
 
     # -- public: the e2e's way of clicking ----------------------------------------------
@@ -697,13 +706,6 @@ class GitSidebar(Gtk.Box):
 
         self._run_mutation(work, done)
 
-    def pick_parent(self, name: str | None) -> None:
-        """The user's parent branch pick: *name*, or None for Automatic.
-        Emits "parent-picked"; the page persists and re-resolves."""
-        if name is not None and not hunkctl.safe_ref(name):
-            return
-        self.emit("parent-picked", name)
-
     def _run_mutation(self, work: Callable[[], object], done: Callable[[object], None]) -> None:
         """*work* on a daemon thread while the widget reads busy, *done*
         with its answer back on the main loop — unless the widget was
@@ -777,7 +779,6 @@ class GitSidebar(Gtk.Box):
             item = Gio.MenuItem.new(_("Copy sha"), None)
             item.set_action_and_target_value(f"{_ACTIONS}.copy-sha", GLib.Variant("s", row.row.sha))
             menu.append_item(item)
-        menu.append(_("Set parent branch…"), f"{_ACTIONS}.set-parent")
         menu.append(_("Reload"), f"{_ACTIONS}.reload")
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         popover = Gtk.PopoverMenu.new_from_model(menu)
@@ -1006,32 +1007,6 @@ class GitSidebar(Gtk.Box):
             gitmodel.fixup_options(commits),
             picked,
             _("Choose"),
-        )
-        return GLib.SOURCE_REMOVE
-
-    def _on_parent_clicked(self) -> None:
-        cwd = self._cwd_provider()
-
-        def work() -> None:
-            branches = gitops.local_branches(cwd)
-            GLib.idle_add(self._branches_listed, branches, priority=GLib.PRIORITY_DEFAULT)
-
-        threading.Thread(target=work, name="git-sidebar-branches", daemon=True).start()
-
-    def _branches_listed(self, branches: list[str]) -> bool:
-        auto = self._auto_parent or "?"
-        options = [_("Automatic ({name})").format(name=auto), *branches]
-
-        def picked(index: int) -> None:
-            self.pick_parent(None if index == 0 else branches[index - 1])
-
-        dialogs.choice_dialog(
-            self,
-            _("Set parent branch"),
-            _("The branch this one is measured against: its diff, and the commits listed as its own."),
-            options,
-            picked,
-            _("Set"),
         )
         return GLib.SOURCE_REMOVE
 
