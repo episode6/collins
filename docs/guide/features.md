@@ -170,8 +170,12 @@ Enter opens, Esc closes.
   as before. Tables are grids — the header row bold, columns aligned as
   the delimiter row asks, cells selectable — that scroll sideways within
   their own band rather than widening the page; a table past 50 rows or
-  8 columns shows that much and a link to the rest on GitHub. Code blocks
-  and `<details>` show as their source for now — never dropped. Every
+  8 columns shows that much and a link to the rest on GitHub. Fenced and
+  indented code is a read-only source view — highlighted for the fence's
+  language (`python`, `bash`, `json`, `diff`, `rust`… and any other name
+  GtkSourceView knows), wearing the editor's style scheme like the Files
+  view's diffs, a long line scrolling sideways within the block. A
+  `<details>` block shows as its source for now — never dropped. Every
   other HTML tag shows escaped, as text. Without the parser installed the
   page falls back to its plainer built-in renderer.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
