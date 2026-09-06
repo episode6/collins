@@ -44,7 +44,11 @@ def test_git_page_keys_are_page_local_and_hunks_words():
     assert layouts == (("0",), ("1",), ("2",))
     assert git["git.line-numbers"] == ("l",)
     assert git["git.wrap"] == ("w",)
-    assert "git.toggle-notes" not in git  # `a` lands with the note cards
+    # The notes: `c` adds, `E` edits (Shift, spelled for GTK's matcher), `a`
+    # folds the agent's cards.
+    assert git["git.add-note"] == ("c",)
+    assert git["git.edit-note"] == ("<Shift>e",)
+    assert git["git.agent-notes"] == ("a",)
     assert git["git.refresh"] == ("r",)
     assert git["git.filter"] == ("slash",)
     assert git["git.find"] == ("<Control>f",)

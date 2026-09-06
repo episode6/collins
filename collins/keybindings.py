@@ -217,7 +217,23 @@ BINDINGS: tuple[Binding, ...] = (
     Binding("git.layout-stack", N_("Layout: stacked"), ("2",), GROUP_GIT, N_("In the diff.")),
     Binding("git.line-numbers", N_("Show/hide line numbers"), ("l",), GROUP_GIT, N_("In the diff.")),
     Binding("git.wrap", N_("Wrap long lines"), ("w",), GROUP_GIT, N_("In the diff.")),
-    # `a` (show/hide agent notes) arrives with the note cards themselves.
+    # The notes (hunk's c / E / a): cards under the hunk, anchored to the
+    # cursor line. The letters are off while a note editor is open.
+    Binding(
+        "git.add-note",
+        N_("Add a note"),
+        ("c",),
+        GROUP_GIT,
+        N_("In the diff; a card under the focused hunk, anchored to the cursor line."),
+    ),
+    Binding(
+        "git.edit-note",
+        N_("Edit the hunk's first note"),
+        ("<Shift>e",),
+        GROUP_GIT,
+        N_("In the diff; the first note you wrote on the focused hunk."),
+    ),
+    Binding("git.agent-notes", N_("Show/hide agent notes"), ("a",), GROUP_GIT, N_("In the diff.")),
     Binding("git.refresh", N_("Reload the diff"), ("r",), GROUP_GIT, N_("In the diff.")),
     Binding("git.filter", N_("Filter the files list"), ("slash",), GROUP_GIT, N_("In the diff.")),
     Binding("git.find", N_("Find in the diff"), ("<Control>f",), GROUP_GIT, N_("In the diff.")),

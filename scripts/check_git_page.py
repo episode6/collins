@@ -111,6 +111,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 Adw.init()
 
 from collins import gitinfo, gitops, gitpage, hunkctl  # noqa: E402
+from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
 
 PASSED = 0
@@ -1968,6 +1969,7 @@ def check_native(repo: str, state_path: str) -> None:
     check("monitors are back", page._monitors != [])
     check("page_state carries the load", page.page_state() == {"kind": "git", "loaded": "unstaged"}, page.page_state())
 
+    check_native_notes(repo, page, window, lines)
     check_native_mutations(repo, page, window, lines)
 
     # -- settings and the keys that write them; page_state round-trips a layout change ----------
@@ -2072,6 +2074,136 @@ def check_native(repo: str, state_path: str) -> None:
     page.page_closed()
     window.destroy()
     clear_native_fixture(repo)
+
+
+def check_native_notes(repo: str, page: GitPage, window: Gtk.Window, lines: list[str]) -> None:
+    """The notes and highlights (PR 3 of the native-diff stack), on the
+    working-tree view the native check left: `c` opens a draft card under
+    the focused hunk with its editor (the page-local chords off, the page
+    holding Escape), Ctrl+Enter saves the first line as the summary and
+    the rest as the rationale, `E` re-opens it, Esc drops an edit or a
+    draft, `}` / `{` walk the annotated hunks, the agent tools' doors
+    (add_notes / add_highlights / clear_marks) land a batch whole or not
+    at all, `a` folds the agent's cards, Delete drops one, and a reload
+    keeps the notes of an untouched hunk and drops the changed hunk's."""
+    print("-- the native viewer's notes and highlights")
+    view = page.diff_view
+    group = page._git_actions
+    changed: list[int] = []
+    editing_events: list[bool] = []
+    handlers = [
+        view.connect("notes-changed", lambda _v: changed.append(1)),
+        view.connect("editing-changed", lambda _v, e: editing_events.append(e)),
+    ]
+
+    def enabled(name: str) -> bool:
+        action = group.lookup_action(name)
+        return action is not None and action.get_enabled()
+
+    try:
+        check("no notes to begin with", view.notes() == [] and view.highlights() == [] and not view.editing())
+        check("reveal hunk 0 of text.txt", page.reveal("text.txt", hunk=0) and view.current()[:2] == ("text.txt", 0), view.current())
+
+        # -- c: a draft card, its editor, the chords off meanwhile --------------------------------
+        check("c opens a draft card with its editor", view.add_note_at_cursor() and view.editing() and page.holds_escape())
+        rows = view.note_rows("text.txt", 0)
+        check("the draft is anchored to the cursor line (new line 2, the hunk's first)", rows and rows[-1][:4] == ("", "user", "new", 2), rows)
+        check("the page-local chords are off while the editor is open", not enabled("stage") and not enabled("close") and not enabled("add-note") and editing_events == [True], (editing_events, enabled("stage")))
+        focus = window.get_focus()
+        check("the keyboard is in the editor", isinstance(focus, Gtk.TextView) and focus.has_css_class("git-note-editor"), focus)
+        check("the editor opens empty", view.note_editor_text() == "", view.note_editor_text())
+        check("Ctrl+Enter on an empty text keeps the editor open", not view.commit_note() and view.editing())
+        view.set_note_editor_text("Keep line 5\nit is load-bearing\r\n")
+        check("Ctrl+Enter saves the note and closes the editor", view.commit_note() and not view.editing() and editing_events == [True, False], editing_events)
+        notes = view.notes()
+        check(
+            "the note is a user note on new line 2 of text.txt, summary and rationale split",
+            len(notes) == 1
+            and (notes[0].source, notes[0].path, notes[0].side, notes[0].line, notes[0].summary, notes[0].rationale, notes[0].author)
+            == ("user", "text.txt", "new", 2, "Keep line 5", "it is load-bearing", None),
+            notes,
+        )
+        check("notes-changed fired once", changed == [1], changed)
+        check("the card shows under hunk 0", view.note_rows("text.txt", 0) == [(notes[0].id, "user", "new", 2, "Keep line 5", True)], view.note_rows("text.txt", 0))
+        check("the marker sits on the hunk's first line", view.note_marks("text.txt", 0) == [0], view.note_marks("text.txt", 0))
+        check("the chords are back on and the page lets Escape go", enabled("stage") and enabled("close") and not page.holds_escape())
+        check("the keyboard is back in the hunk", view._focused_hunk is not None and view.current()[:2] == ("text.txt", 0), (window.get_focus(), view.current()))
+
+        # -- } / {: the annotated hunks --------------------------------------------------------------
+        check("] moves to hunk 1", view.focus_hunk(1) and view.current()[:2] == ("text.txt", 1), view.current())
+        check("{ walks back to the annotated hunk", view.focus_annotated(-1) and view.current()[:2] == ("text.txt", 0), view.current())
+        check("} finds no annotated hunk after it", not view.focus_annotated(1) and view.current()[:2] == ("text.txt", 0))
+
+        # -- E: edit; Esc: drop an edit, drop a draft -------------------------------------------------
+        check("E opens the note's editor on its text", view.edit_first_note() and view.editing() and view.note_editor_text() == "Keep line 5\nit is load-bearing", view.note_editor_text())
+        view.set_note_editor_text("Keep line five")
+        edited = view.commit_note() and view.notes()
+        check("saving re-words the note under the same id", edited and (view.notes()[0].id, view.notes()[0].summary, view.notes()[0].rationale) == (notes[0].id, "Keep line five", None), view.notes())
+        check("E again, Esc drops the edit", view.edit_first_note() and view.set_note_editor_text("scratch") and view.cancel_note() and not view.editing() and view.notes()[0].summary == "Keep line five", view.notes())
+        check("c then Esc leaves no draft behind", view.add_note_at_cursor() and view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1, view.note_rows("text.txt", 0))
+        check("the chords are on again", enabled("stage") and not page.holds_escape())
+        # The context menu's *Add note*: a draft anchored to the menu's row
+        # (the cursor's, with no pointer here: the hunk's first line).
+        section_1 = view._section_for("text.txt", "new").hunks[1]
+        view.request_note(section_1)
+        rows = view.note_rows("text.txt", 1)
+        check("the menu's Add note opens a draft under that hunk", view.editing() and rows and rows[-1][:4] == ("", "user", "new", 42), rows)
+        check("Esc drops it", view.cancel_note() and view.note_rows("text.txt", 1) == [])
+
+        # -- the agent's doors: add_notes, a batch whole or not at all ------------------------------------
+        ids = view.add_notes([NoteSpec("text.txt", "Agent says", rationale="why", author="claude", line=45)])
+        check("add_notes lands an agent note on hunk 1", isinstance(ids, list) and len(ids) == 1 and view.note_rows("text.txt", 1) == [(ids[0], "agent", "new", 45, "Agent says", True)], (ids, view.note_rows("text.txt", 1)))
+        check("the note is marked on its line (the addition, index 4)", view.note_marks("text.txt", 1) == [4], view.note_marks("text.txt", 1))
+        check("[ back to hunk 0 (the cancelled draft's hunk kept the keyboard)", view.focus_hunk(-1) and view.current()[:2] == ("text.txt", 0), view.current())
+        check("} walks to it", view.focus_annotated(1) and view.current()[:2] == ("text.txt", 1), view.current())
+        bad = view.add_notes([NoteSpec("text.txt", "fine", line=45), NoteSpec("nope.txt", "x", line=1)])
+        check("a batch with a bad address lands nothing and names the offender", isinstance(bad, str) and "nope.txt" in bad and len(view.notes()) == 2, (bad, len(view.notes())))
+        by_hunk = view.add_notes([NoteSpec("text.txt", "by hunk", hunk=2, side="old")])
+        check("a hunk address anchors on its first line of that side", isinstance(by_hunk, list) and (view.notes()[-1].side, view.notes()[-1].line) == ("old", 42), view.notes()[-1:])
+        check("the hunk's cards follow the store's order", [r[4] for r in view.note_rows("text.txt", 1)] == ["Agent says", "by hunk"], view.note_rows("text.txt", 1))
+        view.set_agent_notes_shown(False)
+        check("a folds the agent's cards, the marks stay", all(not r[5] for r in view.note_rows("text.txt", 1)) and view.note_marks("text.txt", 1) == [0, 4], (view.note_rows("text.txt", 1), view.note_marks("text.txt", 1)))
+        check("the user's card stays shown", view.note_rows("text.txt", 0)[0][5])
+        view.set_agent_notes_shown(True)
+        check("a again shows them", all(r[5] for r in view.note_rows("text.txt", 1)))
+
+        # -- highlights ------------------------------------------------------------------------------------
+        count = view.add_highlights([HighlightSpec("text.txt", 45, 0, 4), HighlightSpec("text.txt", 45, 5, 7, side="old", tone="error")])
+        check("add_highlights paints two ranges", count == 2 and view.highlight_rows("text.txt", 1) == [(3, 5, 7, "error"), (4, 0, 4, "match")], (count, view.highlight_rows("text.txt", 1)))
+        painted = [span for v in section_1.views for span in v.highlights]
+        check("the views hold the tags", sorted(painted) == [(3, 5, 7, "error"), (4, 0, 4, "match")], painted)
+        bad = view.add_highlights([HighlightSpec("text.txt", 45, 0, 99)])
+        check("a range past the line is refused", isinstance(bad, str) and "not within" in bad and len(view.highlights()) == 2, bad)
+
+        # -- delete and clear --------------------------------------------------------------------------------
+        check("Delete drops the agent's note", view.delete_note(ids[0]) and ids[0] not in [n.id for n in view.notes()] and [r[4] for r in view.note_rows("text.txt", 1)] == ["by hunk"], view.note_rows("text.txt", 1))
+        check("an unknown id is refused", not view.delete_note("n999"))
+        check("clear_marks(notes) spares the user's", view.clear_marks(notes=True) == 1 and [n.source for n in view.notes()] == ["user"], view.notes())
+        check("clear_marks(highlights) clears them", view.clear_marks(highlights=True) == 2 and view.highlights() == [] and view.highlight_rows("text.txt", 1) == [] and not any(v.highlights for v in section_1.views))
+
+        # -- a reload keeps the untouched hunk's notes, drops the changed hunk's -----------------------------
+        check("a note on hunk 1 again", isinstance(view.add_notes([NoteSpec("text.txt", "on hunk 1", line=45)]), list) and len(view.notes()) == 2)
+        serials = view.hunk_serials("text.txt")
+        lines[44] = "line 45 changed thrice\n"
+        write_file(repo, "text.txt", "".join(lines))
+        check("an edit to hunk 1 reloads the view", wait_for(lambda: view.hunk_serials("text.txt")[1:] != serials[1:] and page.settled(), timeout=2.0), view.hunk_serials("text.txt"))
+        check(
+            "the untouched hunk kept its note and card, the changed hunk lost its",
+            [n.summary for n in view.notes()] == ["Keep line five"]
+            and view.note_rows("text.txt", 0) == [(notes[0].id, "user", "new", 2, "Keep line five", True)]
+            and view.note_rows("text.txt", 1) == []
+            and view.hunk_serials("text.txt")[0] == serials[0],
+            (view.notes(), view.note_rows("text.txt", 0), view.note_rows("text.txt", 1)),
+        )
+        serials = view.hunk_serials("text.txt")
+        lines[44] = "line 45 changed again\n"
+        write_file(repo, "text.txt", "".join(lines))
+        check("the edit put back reloads again", wait_for(lambda: view.hunk_serials("text.txt")[1:] != serials[1:] and page.settled(), timeout=2.0))
+        check("clear with include_user empties the store", view.clear_marks(notes=True, include_user=True) == 1 and view.notes() == [] and view.note_rows("text.txt", 0) == [])
+        check("no editor is left open", not view.editing() and enabled("stage"))
+    finally:
+        for handler in handlers:
+            view.disconnect(handler)
 
 
 def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: list[str]) -> None:

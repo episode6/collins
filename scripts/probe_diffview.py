@@ -34,7 +34,8 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, GLib, Graphene, Gtk  # noqa: E402
 
-from collins import diffmodel, diffview, gitops  # noqa: E402
+from collins import diffmodel, diffnotes, diffview, gitops  # noqa: E402
+from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
 from collins.editor import style_scheme  # noqa: E402
 
 FAILURES: list[str] = []
@@ -72,6 +73,11 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=1400)
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--dark", action="store_true")
+    parser.add_argument(
+        "--notes",
+        action="store_true",
+        help="land a user note, an agent note and highlights on the first text file, render -notes.png and stop",
+    )
     parser.add_argument("--out", default=os.path.join(os.getcwd(), "diffview-probe.png"))
     args = parser.parse_args()
 
@@ -142,7 +148,89 @@ def main() -> int:
         def step_paint() -> bool:
             print(f"first paint after {(time.monotonic() - t0) * 1000:.0f} ms")
             render(win, args.out)
-            GLib.timeout_add(50, step_keys)
+            GLib.timeout_add(50, step_notes if args.notes else step_keys)
+            return GLib.SOURCE_REMOVE
+
+        def step_notes() -> bool:
+            # The note cards: a user note typed through the editor, an
+            # agent note with a rationale and author, a highlight per tone
+            # on the first hunk's lines, and a draft left open.
+            if first_text is None:
+                print("no text file to put notes on")
+                return finish()
+            path = first_text.path
+            hunk = first_text.hunks[0]
+            numbered = [line for line in hunk.lines if line.new is not None]
+            ok("reveal(first file)", view.reveal(path))
+            mode = os.environ.get("PROBE_NOTES_MODE", "")
+            if mode == "cancel":
+                ok("c opens a draft", view.add_note_at_cursor() and view.editing())
+                ok("Esc cancels", view.cancel_note())
+                GLib.timeout_add(600, finish)
+                return GLib.SOURCE_REMOVE
+            if mode == "wait-cancel":
+                ok("c opens a draft", view.add_note_at_cursor() and view.editing())
+                ok("focus moves to a hunk", view.focus_hunk(1))
+
+                def later() -> bool:
+                    ok("Esc cancels after a wait", view.cancel_note())
+                    GLib.timeout_add(600, finish)
+                    return GLib.SOURCE_REMOVE
+
+                GLib.timeout_add(500, later)
+                return GLib.SOURCE_REMOVE
+            if mode == "no-editor":
+                pass
+            else:
+                ok("c opens a draft", view.add_note_at_cursor() and view.editing())
+                view.set_note_editor_text("Keep this\nIt is load-bearing: the tick reads it every two seconds.")
+                ok("Ctrl+Enter saves", view.commit_note() and len(view.notes()) == 1)
+            agent = view.add_notes(
+                [
+                    NoteSpec(
+                        path,
+                        "Consider a named constant",
+                        rationale="The same literal appears three times in this file.",
+                        author="claude",
+                        line=numbered[min(2, len(numbered) - 1)].new,
+                    )
+                ]
+            )
+            ok("add_notes lands an agent note", isinstance(agent, list), str(agent))
+            marks = []
+            for tone, line in zip(diffnotes.TONES, numbered, strict=False):
+                width = len(line.text)
+                if width >= 2:
+                    marks.append(HighlightSpec(path, line.new, 0, min(width, 12), tone=tone))
+            painted = view.add_highlights(marks) if marks else 0
+            ok("add_highlights paints a range per tone", painted == len(marks), str(painted))
+            def paint_draft() -> bool:
+                # A draft being typed on the last hunk, the editor open.
+                view.reveal(path, hunk=len(first_text.hunks) - 1)
+                ok("a draft on the last hunk", view.add_note_at_cursor() and view.editing())
+                view.set_note_editor_text("A draft being typed")
+
+                def paint_end() -> bool:
+                    # The editor sits under the hunk: scroll the card into view.
+                    card = view._editing
+                    found, bounds = card.compute_bounds(view._column) if card is not None else (False, None)
+                    if found:
+                        adjustment = view._scroller.get_vadjustment()
+                        adjustment.set_value(max(0.0, bounds.get_y() - adjustment.get_page_size() * 0.6))
+                    GLib.timeout_add(
+                        200, lambda: (render(win, args.out.replace(".png", "-notes-draft.png")), finish())[1]
+                    )
+                    return GLib.SOURCE_REMOVE
+
+                GLib.timeout_add(300, paint_end)
+                return GLib.SOURCE_REMOVE
+
+            def paint() -> bool:
+                render(win, args.out.replace(".png", "-notes.png"))
+                GLib.timeout_add(50, paint_draft)
+                return GLib.SOURCE_REMOVE
+
+            GLib.timeout_add(400, paint)
             return GLib.SOURCE_REMOVE
 
         def step_keys() -> bool:

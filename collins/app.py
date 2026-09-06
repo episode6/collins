@@ -1195,6 +1195,32 @@ popover.menu button.open-with-row:hover {
 .git-gap-text {
   padding: 2px 0px;
 }
+/* the note cards under a hunk: a soft card per note, the agent's with
+   the accent rail, the editor a framed text box. */
+.git-hunk-notes {
+  padding: 4px 8px 6px 8px;
+}
+.git-note {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border-left: 3px solid alpha(currentColor, 0.25);
+  background-color: alpha(currentColor, 0.05);
+}
+.git-note-agent {
+  border-left-color: @accent_bg_color;
+}
+.git-note-header button.caption {
+  padding: 0px 6px;
+  min-height: 20px;
+}
+.git-note-editor-frame {
+  border: 1px solid alpha(currentColor, 0.2);
+  border-radius: 6px;
+}
+.git-note-editor {
+  background-color: @view_bg_color;
+  color: @view_fg_color;
+}
 .git-gap {
   padding: 0px 8px;
   min-height: 22px;

@@ -18,7 +18,8 @@ pass evens the two sides' row heights with `pixels-below-lines` tags.
 The buffers hold the patch text without its signs; the signs and the two
 line-number columns are `GtkSource.GutterRendererText` subclasses reading
 per-line arrays (`_NumberRenderer`, `_SignRenderer`), plus a
-`_MarkerRenderer` column for the notes and highlights later PRs land. Row
+`_MarkerRenderer` column for the notes and highlights (the glyph beside a
+line carrying one). Row
 backgrounds are `paragraph-background` tags, word emphasis a `background`
 tag, both coloured by diffmodel.palette from the editor's style scheme
 (decision 3: the diff follows `editor_style_scheme` and `editor_font`).
@@ -41,9 +42,17 @@ over the shown hunks' rows, counted here so "3 of 12" is exact and
 synchronous — a GtkSource.SearchContext per buffer only paints the
 highlights), `apply_keybindings` (the `git.*` chords, a capture-phase
 controller scoped to the view: bare letters must beat the text views and
-never reach the agent's terminal), the probes `file_rows` / `hunk_rows`,
-and the signals `current-changed(path, hunk)`, `open-requested(path,
-line)`, `context-requested(path, gap, count)`.
+never reach the agent's terminal), the notes and highlights — `notes` /
+`highlights`, `add_notes` / `add_highlights` / `clear_marks` (the agent
+tools' doors: a batch lands whole or not at all), `add_note_at_cursor`
+(`c`), `edit_first_note` (`E`), `edit_note` / `delete_note` (the cards'
+buttons), `set_agent_notes_shown` (`a`), `editing` — held in a
+diffnotes.MarkStore for the tab's life and drawn as `_NoteCard`s under
+their hunk with a glyph in the marker column (decision 5), the probes
+`file_rows` / `hunk_rows` / `note_rows`, and the signals
+`current-changed(path, hunk)`, `open-requested(path, line)`,
+`context-requested(path, gap, count)`, `mutation-requested(request)`,
+`notes-changed()`, `editing-changed(bool)`.
 Widget code: exercised by scripts/probe_diffview.py and the git page's e2e,
 not the unit suite.
 """
@@ -71,6 +80,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pang
 
 from . import (  # noqa: E402
     diffmodel,
+    diffnotes,
     editorfiles,
     filetypes,
     gitloads,
@@ -118,6 +128,28 @@ UP, DOWN, ALL = "up", "down", "all"
 # The action group each hunk section inserts on itself for its context
 # menu (the popover finds it from its parent view, up the tree).
 _HUNK_ACTIONS = "hunk"
+# The marker column's glyphs (bundled icons: the theme's may be absent
+# under CI), and what a highlight of each tone paints its range with —
+# Gtk.TextTag properties; `current` is the reverse-video stand-in.
+_NOTE_ICON = "chat-bubble-symbolic"
+_HIGHLIGHT_ICON = "circle-fill-symbolic"
+_TONE_STYLES: dict[str, dict[str, str]] = {
+    diffnotes.TONE_MATCH: {"background": "rgba(255,196,0,0.38)"},
+    diffnotes.TONE_CURRENT: {"background": "#3584e4", "foreground": "#ffffff"},
+    diffnotes.TONE_INFO: {"background": "rgba(53,132,228,0.30)"},
+    diffnotes.TONE_WARNING: {"background": "rgba(255,120,0,0.35)"},
+    diffnotes.TONE_ERROR: {"background": "rgba(224,27,36,0.35)"},
+    diffnotes.TONE_DIM: {"foreground": "#8c8c8c"},
+}
+# The most pixels a note's editor grows to before it scrolls.
+_NOTE_EDITOR_MAX_HEIGHT = 220
+# How long a dropped note card stays in the tree, hidden, before it is
+# unparented. A Gtk.TextView unrealized within a few milliseconds of its
+# keyboard focus leaving segfaults GTK's Wayland input method (measured
+# in scripts/probe_diffview.py --notes, split layout: the compositor's
+# text-input reply lands after the widget is gone and the handler asks
+# it for its display); with half a second in between it never has.
+_CARD_REAP_MS = 500
 
 ContextReader = Callable[[diffmodel.File, str], "bytes | None"]
 
@@ -326,7 +358,7 @@ class _SignRenderer(_TextRenderer):
 
 class _MarkerRenderer(GtkSource.GutterRendererPixbuf):
     """The marker column: an icon beside a line carrying a note or a
-    highlight (later PRs). Empty until `set_marks` names one; sized to the
+    highlight. Empty until `set_marks` names one; sized to the
     icon only while it has any."""
 
     def __init__(self) -> None:
@@ -381,6 +413,10 @@ class _HunkView:
     ) -> None:
         self.rows: list[_Row] = []
         self.marks: dict[int, str] = {}  # row index → marker icon (set_marks)
+        # The highlights on this view's rows: (row, start, end, tone), and
+        # one tag per tone, made as a tone first shows (set_highlights).
+        self.highlights: list[tuple[int, int, int, str]] = []
+        self._highlight_tags: dict[str, Gtk.TextTag] = {}
         self._pads: dict[int, int] = {}
         self._pad_tags: dict[int, Gtk.TextTag] = {}
         # The selection model (decision 4): the buffer's own selection,
@@ -585,6 +621,35 @@ class _HunkView:
     def set_marks(self, icons: dict[int, str]) -> None:
         self.marks = dict(icons)
         self._marker.set_marks(icons)
+
+    def set_highlights(self, entries: Sequence[tuple[int, int, int, str]]) -> None:
+        """Paint *entries* — (row, start, end, tone): code points [start,
+        end) of paragraph *row* in the tone's tag (_TONE_STYLES) — in
+        place of whatever was painted before. A span past the row's
+        text (a dropped trailing CR) is clamped to it."""
+        buffer = self.buffer
+        if self._highlight_tags:
+            start, end = buffer.get_bounds()
+            for tag in self._highlight_tags.values():
+                buffer.remove_tag(tag, start, end)
+        self.highlights = []
+        for row, first, last, tone in entries:
+            style = _TONE_STYLES.get(tone)
+            if style is None or not 0 <= row < len(self.rows):
+                continue
+            tag = self._highlight_tags.get(tone)
+            if tag is None:
+                tag = buffer.create_tag(f"git-hl-{tone}", **style)
+                self._highlight_tags[tone] = tag
+            width = len(self.rows[row].text)
+            last = min(last, width)
+            if first >= last:
+                continue
+            ok_a, a = buffer.get_iter_at_line_offset(row, first)
+            ok_b, b = buffer.get_iter_at_line_offset(row, last)
+            if ok_a and ok_b and a.get_line() == row and b.get_line() == row:
+                buffer.apply_tag(tag, a, b)
+                self.highlights.append((row, first, last, tone))
 
     # -- the split alignment's pads --
 
@@ -878,6 +943,202 @@ class _Options:
 _HUNK_SERIALS = itertools.count(1)
 
 
+class _NoteCard(Gtk.Box):
+    """One note under its hunk (decision 5: a card, not an inline row):
+    who wrote it and where it sits, the summary and the rationale — or,
+    while it is being written, a text editor with *Save* / *Cancel*
+    (`Ctrl+Enter` saves, `Esc` cancels). A draft (*note* None) is a card
+    for a note not yet in the store; cancelling one removes it. Every
+    word shows through `set_text`; the editor's text is bounded by
+    diffnotes when it is saved."""
+
+    def __init__(
+        self,
+        section: _HunkSection,
+        owner: DiffView,
+        note: diffnotes.Note | None,
+        side: str,
+        line: int,
+    ) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.add_css_class("git-note")
+        self.section = section
+        self._owner = owner
+        self.note = note
+        self.side = side
+        self.line = line
+        self.editing = False
+        self._commit_button: Gtk.Button | None = None
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header.add_css_class("git-note-header")
+        self._source = Gtk.Label(xalign=0.0)
+        self._source.add_css_class("caption-heading")
+        header.append(self._source)
+        self._where = Gtk.Label(xalign=0.0, hexpand=True)
+        self._where.add_css_class("caption")
+        self._where.add_css_class("dim-label")
+        header.append(self._where)
+        self._edit = Gtk.Button(label=_("Edit"))
+        self._edit.add_css_class("flat")
+        self._edit.add_css_class("caption")
+        self._edit.connect("clicked", lambda _b: self.start_edit())
+        header.append(self._edit)
+        self._delete = Gtk.Button(label=_("Delete"))
+        self._delete.add_css_class("flat")
+        self._delete.add_css_class("caption")
+        self._delete.connect("clicked", lambda _b: self._owner.delete_note(self.note.id if self.note else ""))
+        header.append(self._delete)
+        self.append(header)
+
+        self._stack = Gtk.Stack()
+        self._stack.set_hhomogeneous(False)
+        self._stack.set_vhomogeneous(False)
+        shown = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._summary = Gtk.Label(xalign=0.0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self._summary.add_css_class("git-note-summary")
+        shown.append(self._summary)
+        self._rationale = Gtk.Label(xalign=0.0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self._rationale.add_css_class("dim-label")
+        self._rationale.add_css_class("git-note-rationale")
+        shown.append(self._rationale)
+        self._stack.add_named(shown, "show")
+        editor = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._text = Gtk.TextView()
+        self._text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._text.set_accepts_tab(False)
+        self._text.set_left_margin(6)
+        self._text.set_right_margin(6)
+        self._text.set_top_margin(4)
+        self._text.set_bottom_margin(4)
+        self._text.add_css_class("git-note-editor")
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self._on_editor_key)
+        self._text.add_controller(keys)
+        scroller = Gtk.ScrolledWindow(child=self._text)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_max_content_height(_NOTE_EDITOR_MAX_HEIGHT)
+        scroller.set_min_content_height(48)
+        scroller.add_css_class("git-note-editor-frame")
+        editor.append(scroller)
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        hint = Gtk.Label(xalign=0.0, hexpand=True)
+        hint.set_text(_("Ctrl+Enter saves · Esc cancels"))
+        hint.add_css_class("caption")
+        hint.add_css_class("dim-label")
+        buttons.append(hint)
+        cancel = Gtk.Button(label=_("Cancel"))
+        cancel.connect("clicked", lambda _b: self.cancel())
+        buttons.append(cancel)
+        save = Gtk.Button(label=_("Save"))
+        save.add_css_class("suggested-action")
+        save.connect("clicked", lambda _b: self.commit())
+        buttons.append(save)
+        editor.append(buttons)
+        self._stack.add_named(editor, "edit")
+        self.append(self._stack)
+        self.set_note(note)
+
+    # -- words --
+
+    def set_note(self, note: diffnotes.Note | None) -> None:
+        self.note = note
+        if note is not None:
+            self.side, self.line = note.side, note.line
+        source = note.source if note is not None else diffnotes.USER
+        for css in ("git-note-user", "git-note-agent"):
+            self.remove_css_class(css)
+        self.add_css_class(f"git-note-{source}")
+        who = _("You") if source == diffnotes.USER else _("Agent")
+        if note is not None and note.author:
+            who = f"{who} · {note.author}"
+        self._source.set_text(who)
+        where = _("new line {n}") if self.side == diffmodel.NEW else _("old line {n}")
+        self._where.set_text(where.format(n=self.line))
+        self._summary.set_text(note.summary if note is not None else "")
+        self._rationale.set_text(note.rationale or "" if note is not None else "")
+        self._rationale.set_visible(bool(note is not None and note.rationale))
+        self._edit.set_visible(note is not None and source == diffnotes.USER and not self.editing)
+        self._delete.set_visible(note is not None and not self.editing)
+
+    @property
+    def draft(self) -> bool:
+        return self.note is None
+
+    # -- the editor --
+
+    def start_edit(self) -> None:
+        """Open the editor on the note's text (empty for a draft) and put
+        the keyboard in it."""
+        if self.editing:
+            self._text.grab_focus()
+            return
+        self.editing = True
+        text = diffnotes.join_note_text(self.note.summary, self.note.rationale) if self.note else ""
+        buffer = self._text.get_buffer()
+        buffer.set_text(text)
+        buffer.place_cursor(buffer.get_end_iter())
+        self._stack.set_visible_child_name("edit")
+        self._edit.set_visible(False)
+        self._delete.set_visible(False)
+        # The keyboard first, then the view (which may drop another draft:
+        # its editor must not be the focus widget when it goes).
+        self._text.grab_focus()
+        self._owner.on_note_editing(self, True)
+        GLib.idle_add(self._refocus, priority=GLib.PRIORITY_DEFAULT)
+
+    def _refocus(self) -> bool:
+        if self.editing and self._text.get_root() is not None:
+            self._text.grab_focus()
+        return GLib.SOURCE_REMOVE
+
+    def text(self) -> str:
+        buffer = self._text.get_buffer()
+        start, end = buffer.get_bounds()
+        return buffer.get_text(start, end, False)
+
+    def set_text(self, text: str) -> None:
+        self._text.get_buffer().set_text(text)
+
+    def commit(self) -> bool:
+        """`Ctrl+Enter` / *Save*: hand the text to the view; an empty text
+        keeps the editor open (a note needs a summary)."""
+        if not self.editing:
+            return False
+        return self._owner.on_note_saved(self, self.text())
+
+    def cancel(self) -> None:
+        """`Esc` / *Cancel*: close the editor, keeping the note as it was;
+        a draft goes away."""
+        if not self.editing:
+            return
+        self._owner.on_note_cancelled(self)
+
+    def finish(self) -> None:
+        """Back to the card (the view calls it after a save or cancel)."""
+        self.close_quietly()
+        self._owner.on_note_editing(self, False)
+
+    def close_quietly(self) -> None:
+        """Back to the card without telling the view (it already knows)."""
+        self.editing = False
+        self._stack.set_visible_child_name("show")
+        self.set_note(self.note)
+
+    def _on_editor_key(self, _ctrl, keyval: int, _keycode: int, state) -> bool:
+        if keyval == Gdk.KEY_Escape:
+            self.cancel()
+            return True
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter) and (
+            state & Gdk.ModifierType.CONTROL_MASK
+        ):
+            self.commit()
+            return True
+        return False
+
+
 class _HunkSection(Gtk.Box):
     """One hunk: its `@@` header row — the ranges, the context, and the
     buttons (*Stage hunk* · *Discard hunk*, whose words follow the load
@@ -885,7 +1146,10 @@ class _HunkSection(Gtk.Box):
     `.git-hunk`, and `.git-hunk-focused` while one of its views has the
     keyboard — the lit rail that says "current hunk". A right-click on a
     view pops the same actions plus Copy, Open in editor, Add note and
-    Expand context, through the `hunk.*` action group on the section."""
+    Expand context, through the `hunk.*` action group on the section.
+    Under the views sit the hunk's note cards (`set_marks`: the notes and
+    highlights the store placed in this hunk, drawn as cards and as the
+    marker column's glyphs, the highlights as tags on their rows)."""
 
     def __init__(
         self,
@@ -917,6 +1181,14 @@ class _HunkSection(Gtk.Box):
         self._pane: _SplitPane | None = None
         self._focused = False
         self._menu_view: _HunkView | None = None
+        # The marks placed in this hunk — (mark, line index into
+        # hunk.lines) — and the cards by note id; drafts are cards with no
+        # note yet, kept at the end of the notes box.
+        self._placed_notes: list[tuple[diffnotes.Note, int]] = []
+        self._placed_highlights: list[tuple[diffnotes.Highlight, int]] = []
+        self._cards: dict[str, _NoteCard] = {}
+        self._drafts: list[_NoteCard] = []
+        self._agent_notes_shown = True
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("git-hunk-header")
@@ -942,6 +1214,10 @@ class _HunkSection(Gtk.Box):
         header.append(self.actions)
         self.header = header
         self.append(header)
+        self._notes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._notes_box.add_css_class("git-hunk-notes")
+        self._notes_box.set_visible(False)
+        self.append(self._notes_box)
         self._install_actions()
         self._build_body()
         self.sync_actions()
@@ -993,6 +1269,13 @@ class _HunkSection(Gtk.Box):
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         self._menu_view = view
         selected = self.selection() is not None
+        if not selected:
+            # The menu's *Add note* and *Open in editor* speak of the
+            # cursor line: put it under the pointer (a selection stays —
+            # placing the cursor would clear it).
+            _bx, by = view.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(x), int(y))
+            _ok, it = view.view.get_line_at_y(by)
+            view.place_cursor(min(it.get_line(), max(0, len(view.rows) - 1)))
         primary, discard = gitpatch.action_labels(self._owner.loaded, gitpatch.HUNK, selected)
         menu = Gio.Menu()
         acts = Gio.Menu()
@@ -1133,7 +1416,150 @@ class _HunkSection(Gtk.Box):
             view.set_rows(rows, by_line)
             self.views = [view]
             self._body = view.scroller
-        self.append(self._body)
+        # Between the header and the note cards (a rebuilt body must not
+        # land under the notes).
+        self.insert_child_after(self._body, self.header)
+        self._apply_view_marks()
+
+    # -- notes and highlights --
+
+    def set_marks(
+        self,
+        notes: Sequence[tuple[diffnotes.Note, int]],
+        highlights: Sequence[tuple[diffnotes.Highlight, int]],
+    ) -> None:
+        """Show *notes* and *highlights* — each with the index into
+        hunk.lines the store placed it at — as this hunk's: the cards
+        (kept by note id, so one being edited keeps its editor), the
+        marker glyphs and the highlight tags on the views."""
+        self._placed_notes = list(notes)
+        self._placed_highlights = list(highlights)
+        wanted = {note.id: note for note, _index in notes}
+        for note_id in list(self._cards):
+            if note_id not in wanted:
+                self._remove_card(self._cards.pop(note_id))
+        for note, _index in notes:
+            card = self._cards.get(note.id)
+            if card is None:
+                card = _NoteCard(self, self._owner, note, note.side, note.line)
+                self._cards[note.id] = card
+            else:
+                card.set_note(note)
+        # Re-order: the store's order, drafts last.
+        for child in list(self._cards.values()) + list(self._drafts):
+            if child.get_parent() is self._notes_box:
+                self._notes_box.remove(child)
+        for note, _index in notes:
+            self._notes_box.append(self._cards[note.id])
+        for draft in self._drafts:
+            self._notes_box.append(draft)
+        self._sync_cards_shown()
+        self._apply_view_marks()
+
+    def set_agent_notes_shown(self, shown: bool) -> None:
+        """`a`: the agent's cards fold away (their markers stay)."""
+        self._agent_notes_shown = shown
+        self._sync_cards_shown()
+
+    def _sync_cards_shown(self) -> None:
+        any_shown = False
+        for card in self._cards.values():
+            agent = card.note is not None and card.note.source == diffnotes.AGENT
+            visible = self._agent_notes_shown or not agent
+            card.set_visible(visible)
+            any_shown = any_shown or visible
+        self._notes_box.set_visible(any_shown or bool(self._drafts))
+
+    def _apply_view_marks(self) -> None:
+        """The marker column's glyphs and the highlight tags per view: a
+        row carrying a note shows the note's glyph (over a highlight's),
+        the side's view in split, the one view in stack."""
+        for view in self.views:
+            side = self.side_of(view)
+            both = len(self.views) == 1
+            icons: dict[int, str] = {}
+            spans: list[tuple[int, int, int, str]] = []
+            for mark, index in self._placed_highlights:
+                if both or mark.side == side:
+                    row = self._row_for(view, index)
+                    icons[row] = _HIGHLIGHT_ICON
+                    spans.append((row, mark.start, mark.end, mark.tone))
+            for note, index in self._placed_notes:
+                if both or note.side == side:
+                    icons[self._row_for(view, index)] = _NOTE_ICON
+            view.set_marks(icons)
+            view.set_highlights(spans)
+
+    def anchor_at_cursor(self, view: _HunkView | None = None) -> tuple[str, int]:
+        """(side, 1-based line) a note asked for here would sit at: the
+        cursor row of *view* (the focused view, else the last), its new
+        number when it has one, else its old; a padding row takes the
+        next numbered row; failing all, the hunk's first numbered line."""
+        view = view if view in self.views else (self.focused_view or (self.views[-1] if self.views else None))
+        if view is not None and view.rows:
+            start = min(view.cursor_row(), len(view.rows) - 1)
+            for row in view.rows[start:]:
+                if row.new is not None:
+                    return diffmodel.NEW, row.new
+                if row.old is not None:
+                    return diffmodel.OLD, row.old
+        for line in self.hunk.lines:
+            if line.new is not None:
+                return diffmodel.NEW, line.new
+            if line.old is not None:
+                return diffmodel.OLD, line.old
+        return diffmodel.NEW, 0
+
+    def add_draft(self, side: str, line: int) -> _NoteCard:
+        """A card for a note not yet written, at the end of the notes."""
+        card = _NoteCard(self, self._owner, None, side, line)
+        self._drafts.append(card)
+        self._notes_box.append(card)
+        self._notes_box.set_visible(True)
+        return card
+
+    def drop_draft(self, card: _NoteCard) -> None:
+        if card in self._drafts:
+            self._drafts.remove(card)
+            self._remove_card(card)
+            self._sync_cards_shown()
+
+    def _remove_card(self, card: _NoteCard) -> None:
+        """Take *card* out of the tree: the keyboard moves off it first
+        (the hunk's view takes it), it hides now, and it is unparented
+        _CARD_REAP_MS later — never in the turn its editor's focus left
+        (see the constant)."""
+        root = self.get_root()
+        focus = root.get_focus() if root is not None else None
+        if focus is not None and (focus is card or focus.is_ancestor(card)):
+            if not self.grab():
+                root.set_focus(None)
+        card.set_visible(False)
+
+        def unparent() -> bool:
+            if card.get_parent() is self._notes_box:
+                self._notes_box.remove(card)
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(_CARD_REAP_MS, unparent)
+
+    def cards(self) -> list[_NoteCard]:
+        """Every card in the box's order, drafts included."""
+        return [c for c in self._cards.values()] + list(self._drafts)
+
+    def first_user_card(self) -> _NoteCard | None:
+        for card in self._cards.values():
+            if card.note is not None and card.note.source == diffnotes.USER:
+                return card
+        return None
+
+    @property
+    def placed_notes(self) -> list[tuple[diffnotes.Note, int]]:
+        return list(self._placed_notes)
+
+    @property
+    def placed_highlights(self) -> list[tuple[diffnotes.Highlight, int]]:
+        return list(self._placed_highlights)
 
     def apply_options(self, options: _Options) -> None:
         """Re-read the options: a layout or word-diff change rebuilds the
@@ -1744,9 +2170,14 @@ class DiffView(Gtk.Box):
         # (the file, the load, the grain, the hunk and lines). The page
         # reads the file's patch, plans, confirms, runs and reloads.
         "mutation-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
-        # *Add note* on a hunk: the path, the hunk index, the side and the
-        # 1-based line under the cursor (0: none) — the note cards' door.
-        "note-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, int, str, int)),
+        # The notes or highlights changed (added, edited, deleted, cleared,
+        # or pruned by a reload): what the page and the tools re-read
+        # `notes()` / `highlights()` on.
+        "notes-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # A note editor opened (True) or closed (False): the page must
+        # disable the page-local letter chords meanwhile, or `e` types
+        # nothing and `c` opens another card.
+        "editing-changed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
     }
 
     def __init__(self) -> None:
@@ -1783,6 +2214,12 @@ class DiffView(Gtk.Box):
         self._acting: _ActionButton | None = None
         self._busy = False
         self._pinned_section: _FileSection | None = None
+        # The notes and highlights (decision 8: the page's for the tab's
+        # life, keyed by hunk to survive a reload), the one note editor
+        # open, and whether the agent's cards are shown (`a`).
+        self._store = diffnotes.MarkStore()
+        self._editing: _NoteCard | None = None
+        self._agent_notes = True
         # The find bar's half: the query, one GtkSource.SearchContext per
         # hunk buffer (the highlight of every occurrence; weakly keyed so a
         # rebuilt hunk's context goes with its view), and the matches in
@@ -1961,6 +2398,19 @@ class DiffView(Gtk.Box):
         # for this load in its constructor).
         if self._selection is not None and self._selection.get_parent() is None:
             self._selection = None
+        # The marks: a note on a hunk this read still carries stays (the
+        # kept widget keeps its cards too), one on a hunk that changed or
+        # went is dropped; a draft being written in a dropped hunk went
+        # with it.
+        pruned = self._store.prune(self._files)
+        if self._editing is not None and self._editing.get_root() is None:
+            editing = self._editing
+            self._editing = None
+            editing.editing = False
+            self.emit("editing-changed", False)
+        self._apply_marks()
+        if pruned:
+            self.emit("notes-changed")
         self._rescan_search()
         self._schedule_scroll_sync()
 
@@ -2138,10 +2588,231 @@ class DiffView(Gtk.Box):
         self.emit("open-requested", section.file.path, line or 0)
 
     def request_note(self, section: _HunkSection) -> None:
-        """The context menu's *Add note*: where a note would go."""
-        where = section.cursor_line()
-        side, line = where if where else (diffmodel.NEW, 0)
-        self.emit("note-requested", section.file.path, section.hunk.index, side, line)
+        """The context menu's *Add note*: a draft card under the hunk,
+        anchored to the line the menu opened on."""
+        view = section._menu_view if section._menu_view in section.views else None
+        self._open_draft(section, section.anchor_at_cursor(view))
+
+    # -- notes and highlights --
+
+    def notes(self, path: str | None = None) -> list[diffnotes.Note]:
+        """Every note held (of *path*), in the order they were made — the
+        ones parked off the current load included (diffnotes.MarkStore)."""
+        return self._store.notes(path)
+
+    def highlights(self, path: str | None = None) -> list[diffnotes.Highlight]:
+        return self._store.highlights(path)
+
+    def add_notes(
+        self, specs: Sequence[diffnotes.NoteSpec], focus: bool = False, source: str = diffnotes.AGENT
+    ) -> list[str] | str:
+        """Land *specs* as *source*'s notes (the annotate tool's door):
+        the whole batch or none, validated against the loaded diff first
+        — a refusal is its reason, a success the ids. With *focus* the
+        view reveals the first one's hunk (without taking the keyboard
+        from where it was, unless it is already in the view)."""
+        added = self._store.add_notes(self._files, specs, source)
+        if isinstance(added, str):
+            return added
+        self._apply_marks()
+        self.emit("notes-changed")
+        if focus and added:
+            self._reveal_mark(added[0])
+        return [note.id for note in added]
+
+    def add_highlights(self, specs: Sequence[diffnotes.HighlightSpec], focus: bool = False) -> int | str:
+        """Land *specs* as highlights (the highlight tool's door), the
+        batch or none; the count, or the reason."""
+        added = self._store.add_highlights(self._files, specs)
+        if isinstance(added, str):
+            return added
+        self._apply_marks()
+        self.emit("notes-changed")
+        if focus and added:
+            self._reveal_mark(added[0])
+        return len(added)
+
+    def clear_marks(
+        self,
+        path: str | None = None,
+        notes: bool = False,
+        highlights: bool = False,
+        include_user: bool = False,
+    ) -> int:
+        """Drop the agent's notes (the user's too with *include_user*)
+        and / or the highlights, of *path* or of every file."""
+        gone = self._store.clear(path, notes, highlights, include_user)
+        if gone:
+            self._apply_marks()
+            self.emit("notes-changed")
+        return gone
+
+    def add_note_at_cursor(self) -> bool:
+        """`c`: a draft card under the focused (or current) hunk, anchored
+        to the cursor line, its editor open. With an editor already open,
+        the keyboard goes back to it. False with no hunk."""
+        if self._editing is not None and self._editing.get_root() is not None:
+            self._editing.start_edit()
+            return True
+        section = self._target_hunk()
+        if section is None:
+            return False
+        return self._open_draft(section, section.anchor_at_cursor())
+
+    def edit_first_note(self) -> bool:
+        """`E`: the focused (or current) hunk's first user note opens in
+        its editor. False with none."""
+        section = self._target_hunk()
+        card = section.first_user_card() if section is not None else None
+        if card is None:
+            return False
+        card.start_edit()
+        return True
+
+    def edit_note(self, note_id: object) -> bool:
+        """Open *note_id*'s card for editing (a user note)."""
+        card = self._card_for(note_id)
+        if card is None or card.note is None or card.note.source != diffnotes.USER:
+            return False
+        card.start_edit()
+        return True
+
+    def delete_note(self, note_id: object) -> bool:
+        """A card's *Delete*: the note goes (agent or user; a note with
+        replies would stay, but replies are a later PR's)."""
+        card = self._card_for(note_id)
+        if not self._store.remove(note_id):
+            return False
+        if card is not None and card is self._editing:
+            self._editing = None
+            card.editing = False
+            self.emit("editing-changed", False)
+        self._apply_marks()
+        self.emit("notes-changed")
+        if card is not None:
+            card.section.grab()
+        return True
+
+    def set_agent_notes_shown(self, shown: bool) -> None:
+        """`a`: show or fold the agent's cards (the markers stay, `}` still
+        finds the hunk)."""
+        self._agent_notes = bool(shown)
+        for section in self._sections():
+            for hunk in section.hunks:
+                hunk.set_agent_notes_shown(self._agent_notes)
+
+    @property
+    def agent_notes_shown(self) -> bool:
+        return self._agent_notes
+
+    def editing(self) -> bool:
+        """Whether a note editor is open (the page's letter chords are off
+        meanwhile, and Escape is the editor's)."""
+        return self._editing is not None and self._editing.get_root() is not None
+
+    def _open_draft(self, section: _HunkSection, where: tuple[str, int]) -> bool:
+        side, line = where
+        anchor = diffnotes.resolve_anchor(self._files, section.file.path, side, line)
+        if isinstance(anchor, str):
+            log.info("note refused: %s", anchor)
+            return False
+        card = section.add_draft(side, line)
+        card.start_edit()
+        return True
+
+    def _card_for(self, note_id: object) -> _NoteCard | None:
+        for section in self._sections():
+            for hunk in section.hunks:
+                for card in hunk.cards():
+                    if card.note is not None and card.note.id == note_id:
+                        return card
+        return None
+
+    def _apply_marks(self) -> None:
+        """Hand every hunk section the marks the store places in it."""
+        notes = self._store.placed_notes(self._files)
+        highlights = self._store.placed_highlights(self._files)
+        for section in self._sections():
+            for hunk in section.hunks:
+                key = (section.file.path, hunk.hunk.index)
+                hunk.set_marks(notes.get(key, []), highlights.get(key, []))
+                hunk.set_agent_notes_shown(self._agent_notes)
+
+    def _reveal_mark(self, mark: diffnotes.Note | diffnotes.Highlight) -> None:
+        section = self._section_for(mark.path, mark.side)
+        if section is None:
+            return
+        located = diffmodel.locate(self._files, section.file.path, mark.side, mark.line)
+        if located is None:
+            return
+        _file, index, _line = located
+        target = next((h for h in section.hunks if h.hunk.index == index), None)
+        if target is None:
+            return
+        section.set_folded(False)
+        keyedslots.scroll_to(self._scroller, target)
+        self._set_current(section.file.path, target.hunk.index)
+
+    # -- what the cards call back --
+
+    def on_note_editing(self, card: _NoteCard, editing: bool) -> None:
+        if editing:
+            was_editing = self.editing()
+            previous = self._editing
+            self._editing = card
+            if previous is not None and previous is not card and previous.editing:
+                # One editor at a time: the other closes unsaved, a draft
+                # going with it.
+                previous.close_quietly()
+                if previous.draft:
+                    previous.section.drop_draft(previous)
+            if not was_editing:
+                self.emit("editing-changed", True)
+            return
+        if self._editing is card:
+            self._editing = None
+            self.emit("editing-changed", False)
+
+    def on_note_saved(self, card: _NoteCard, text: str) -> bool:
+        """`Ctrl+Enter` / *Save* on *card*: the text's first line is the
+        summary, the rest the rationale; an empty text keeps the editor
+        open. A draft becomes a user note; an existing note is re-worded."""
+        summary, rationale = diffnotes.split_note_text(text)
+        if not summary:
+            return False
+        section = card.section
+        if card.note is None:
+            spec = diffnotes.NoteSpec(section.file.path, summary, rationale, side=card.side, line=card.line)
+            added = self._store.add_notes(self._files, [spec], diffnotes.USER)
+            if isinstance(added, str):
+                log.info("note not saved: %s", added)
+                self.on_note_cancelled(card)
+                return False
+            card.editing = False
+            section.drop_draft(card)
+            if self._editing is card:
+                self._editing = None
+                self.emit("editing-changed", False)
+        else:
+            self._store.edit(card.note.id, summary, rationale)
+            card.finish()
+        self._apply_marks()
+        self.emit("notes-changed")
+        section.grab()
+        return True
+
+    def on_note_cancelled(self, card: _NoteCard) -> None:
+        """`Esc` / *Cancel*: a draft goes away, an edit is dropped."""
+        section = card.section
+        if card.draft:
+            card.editing = False
+            section.drop_draft(card)
+            if self._editing is card:
+                self._editing = None
+                self.emit("editing-changed", False)
+        else:
+            card.finish()
+        section.grab()
 
     def expand_gap_before(self, section: _HunkSection) -> bool:
         """Draw every unchanged line above *section* (the context menu's
@@ -2534,6 +3205,60 @@ class DiffView(Gtk.Box):
     def busy(self) -> bool:
         return self._busy
 
+    def note_rows(self, path: str, hunk: int) -> list[tuple[str, str, str, int, str, bool]]:
+        """Probe: the cards under *path*'s hunk *hunk* as (id, source,
+        side, line, summary, shown) — a draft's id is ""."""
+        section = self._section_for(path, diffmodel.NEW)
+        target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
+        if target is None:
+            return []
+        return [
+            (
+                card.note.id if card.note else "",
+                card.note.source if card.note else diffnotes.USER,
+                card.side,
+                card.line,
+                card.note.summary if card.note else card.text(),
+                card.get_visible(),
+            )
+            for card in target.cards()
+        ]
+
+    def note_marks(self, path: str, hunk: int) -> list[int]:
+        """Probe: the indexes into the hunk's lines that carry a note."""
+        section = self._section_for(path, diffmodel.NEW)
+        target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
+        return sorted({index for _note, index in target.placed_notes}) if target else []
+
+    def highlight_rows(self, path: str, hunk: int) -> list[tuple[int, int, int, str]]:
+        """Probe: (line index, start, end, tone) of the highlights painted
+        on the hunk's views, as the views hold them."""
+        section = self._section_for(path, diffmodel.NEW)
+        target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
+        if target is None:
+            return []
+        return sorted((index, m.start, m.end, m.tone) for m, index in target.placed_highlights)
+
+    def note_editor_text(self) -> str | None:
+        return self._editing.text() if self.editing() else None
+
+    def set_note_editor_text(self, text: str) -> bool:
+        if not self.editing():
+            return False
+        self._editing.set_text(text)
+        return True
+
+    def commit_note(self) -> bool:
+        """Probe: what `Ctrl+Enter` does in the open editor."""
+        return self.editing() and self._editing.commit()
+
+    def cancel_note(self) -> bool:
+        """Probe: what `Esc` does in the open editor."""
+        if not self.editing():
+            return False
+        self._editing.cancel()
+        return True
+
     def pinned_header_text(self) -> str | None:
         return self._pinned_path.get_text() if self._pinned.get_visible() else None
 
@@ -2578,6 +3303,8 @@ class DiffView(Gtk.Box):
         section.sync_actions()
 
     def _on_key_pressed(self, _ctrl, keyval: int, _keycode: int, _state) -> bool:
+        if self.editing():
+            return False  # the note editor's own controller reads Escape
         if keyval == Gdk.KEY_Escape and self.has_selection():
             self.clear_selection()
             return True

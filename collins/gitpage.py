@@ -586,6 +586,7 @@ class GitPage(Adw.Bin):
         self._diffview.connect("current-changed", self._on_current_changed)
         self._diffview.connect("open-requested", self._on_open_requested)
         self._diffview.connect("mutation-requested", self._on_mutation_requested)
+        self._diffview.connect("editing-changed", self._on_note_editing_changed)
         self._diffview.apply_keybindings(keybindings.current())
         self._stack.add_named(self._diffview, _NATIVE)
         self._install_actions()
@@ -970,7 +971,12 @@ class GitPage(Adw.Bin):
         it too while open (Escape closes the bar), and the view while
         lines are selected (Escape clears the selection)."""
         return self.hunk_alive or (
-            self._native and (self._search_bar.get_search_mode() or self._diffview.has_selection())
+            self._native
+            and (
+                self._search_bar.get_search_mode()
+                or self._diffview.has_selection()
+                or self._diffview.editing()  # Escape cancels the note editor
+            )
         )
 
     def apply_settings(self, settings: dict) -> None:
@@ -2507,6 +2513,7 @@ class GitPage(Adw.Bin):
         view = Gio.Menu()
         view.append(_("Line numbers"), f"{_ACTIONS}.line-numbers")
         view.append(_("Wrap long lines"), f"{_ACTIONS}.wrap")
+        view.append(_("Agent notes"), f"{_ACTIONS}.agent-notes")
         menu.append_section(None, view)
         more = Gio.Menu()
         more.append(_("Reload the diff"), f"{_ACTIONS}.refresh")
@@ -2533,6 +2540,8 @@ class GitPage(Adw.Bin):
             "stage": self._diffview.request_stage,
             "stage-file": self._diffview.request_stage_file,
             "discard": self._diffview.request_discard,
+            "add-note": self._diffview.add_note_at_cursor,
+            "edit-note": self._diffview.edit_first_note,
             "layout-auto": lambda: self._write_option("git_layout", "auto"),
             "layout-split": lambda: self._write_option("git_layout", "split"),
             "layout-stack": lambda: self._write_option("git_layout", "stack"),
@@ -2568,7 +2577,27 @@ class GitPage(Adw.Bin):
             "change-state", lambda _a, value: self._write_option("git_wrap_lines", value.get_boolean())
         )
         group.add_action(self._wrap_action)
+        # The agent's note cards shown or folded (`a`, the menu's check):
+        # the page's for the tab's life, no setting behind it.
+        self._agent_notes_action = Gio.SimpleAction.new_stateful("agent-notes", None, GLib.Variant("b", True))
+        self._agent_notes_action.connect("change-state", self._on_agent_notes_state)
+        group.add_action(self._agent_notes_action)
+        self._git_actions = group
         self.insert_action_group(_ACTIONS, group)
+
+    def _on_agent_notes_state(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self._diffview.set_agent_notes_shown(value.get_boolean())
+
+    def _on_note_editing_changed(self, _view: DiffView, editing: bool) -> None:
+        """A note editor opened or closed: every `git.*` action goes
+        insensitive meanwhile — a disabled named action lets its chord
+        fall through, so `e` types an e and `q` a q into the editor
+        instead of closing the page."""
+        for name in self._git_actions.list_actions():
+            action = self._git_actions.lookup_action(name)
+            if action is not None:
+                action.set_enabled(not editing)
 
     def _sync_action_states(self) -> None:
         """The stateful actions follow the settings (apply_settings), so
