@@ -194,13 +194,7 @@ BINDINGS: tuple[Binding, ...] = (
     Binding("git.layout-stack", N_("Layout: stacked"), ("2",), GROUP_GIT, N_("In the diff.")),
     Binding("git.line-numbers", N_("Show/hide line numbers"), ("l",), GROUP_GIT, N_("In the diff.")),
     Binding("git.wrap", N_("Wrap long lines"), ("w",), GROUP_GIT, N_("In the diff.")),
-    Binding(
-        "git.toggle-notes",
-        N_("Show/hide agent notes"),
-        ("a",),
-        GROUP_GIT,
-        N_("In the diff."),
-    ),
+    # `a` (show/hide agent notes) arrives with the note cards themselves.
     Binding("git.refresh", N_("Reload the diff"), ("r",), GROUP_GIT, N_("In the diff.")),
     Binding("git.filter", N_("Filter the files list"), ("slash",), GROUP_GIT, N_("In the diff.")),
     Binding("git.find", N_("Find in the diff"), ("<Control>f",), GROUP_GIT, N_("In the diff.")),

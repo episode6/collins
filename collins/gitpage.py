@@ -2455,14 +2455,7 @@ class GitPage(Adw.Bin):
             "change-state", lambda _a, value: self._write_option("git_wrap_lines", value.get_boolean())
         )
         group.add_action(self._wrap_action)
-        notes = Gio.SimpleAction.new_stateful("toggle-notes", None, GLib.Variant("b", True))
-        notes.connect("change-state", self._on_notes_toggled)
-        group.add_action(notes)
         self.insert_action_group(_ACTIONS, group)
-
-    def _on_notes_toggled(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
-        action.set_state(value)
-        self._diffview.set_notes_shown(value.get_boolean())
 
     def _sync_action_states(self) -> None:
         """The stateful actions follow the settings (apply_settings), so

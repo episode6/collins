@@ -1383,10 +1383,6 @@ class DiffView(Gtk.Box):
         self._focused_hunk: _HunkSection | None = None
         self._refocus = False
         self._scroll_source = 0
-        # Whether the agent-note cards (a later PR's) show; the `a` key flips
-        # it. Nothing draws them yet — the flag is kept so the key and the
-        # cards land on one switch.
-        self.notes_shown = True
         # The find bar's half: the query, one GtkSource.SearchContext per
         # hunk buffer (the highlight of every occurrence; weakly keyed so a
         # rebuilt hunk's context goes with its view), and the matches in
@@ -1752,11 +1748,6 @@ class DiffView(Gtk.Box):
             return False
         self.on_gap_expand(gap, ALL, 0)
         return True
-
-    def set_notes_shown(self, shown: bool) -> None:
-        """`a`: whether the agent-note cards show (kept for the cards a later
-        PR draws; nothing here changes yet)."""
-        self.notes_shown = bool(shown)
 
     def request_open(self) -> bool:
         """Emit `open-requested` for the file and line under the cursor."""
