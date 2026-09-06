@@ -611,7 +611,23 @@ page needs hunk 0.21 or newer:
     line), and reloads the view by key, so a selection survives with its
     hunk. The sidebar's *Stage hunk* / *Anchor line* / *Discard* buttons
     hide while the native view draws: the headers carry the buttons now.
-    Not yet: notes and highlights — the next release's.
+  - **Notes on the diff.** `c` (or the right-click menu's *Add note*)
+    opens a card under the focused hunk, anchored to the cursor line —
+    a text box where `Ctrl+Enter` saves and `Esc` cancels; the first
+    line is the note's summary, the rest its rationale. The card names
+    its source (*You*, or *Agent* with the author when a session lands
+    one through the annotate tool) and the line it sits on, the marker
+    column shows a glyph beside that line, and `}` / `{` walk the
+    annotated hunks. `E` re-opens the hunk's first note of yours, *Edit*
+    and *Delete* sit on the card (the agent's cards delete too, and `a`
+    folds them all away, their markers staying). While an editor is open
+    the diff's letter keys type into it, nothing else. Notes live in the
+    page for the tab's life — nothing is written to disk — and follow a
+    reload: a note on a hunk the edit left alone keeps its card, one on
+    a hunk that changed is dropped, one on a file the current load
+    doesn't show waits for a load that does. Highlights (attention
+    marks on a range of a line, in hunk's tones) share the same store
+    and rules; the tools that land them are the next PR's.
 
 ## Knowing what's happening
 

@@ -17,7 +17,8 @@ description: >-
   following the view, the files filter, the find bar, the page-local git.*
   chords, the file monitors' watch, the line selection and the headers'
   stage / unstage / discard / revert buttons with the page's plan-confirm-run
-  path), Preferences → Git,
+  path, the note cards and highlights over the GTK-free diffnotes.py store
+  — c / E / a, the agent tools' doors, survival by hunk key), Preferences → Git,
   the parent-branch rule, freshness reloads, and gitinfo.py's cheap .git
   reads for the footer branch. Use when changing the git page, the sidebar,
   the diff view, the extension, the show_diff tool's page-driving half,
@@ -324,8 +325,11 @@ from the column's own coordinates, since bounds against the scroller are
 stale until the layout after a `set_value`), `}` `{` annotated hunk (a
 view with marks — `_HunkView.marks`, the notes/highlights hook), `z`
 expand the gap above the focused hunk (all of it; one way), `0` `1` `2`
-layout, `l` line numbers, `w` wrap (`a`, agent notes shown, arrives with
-the note cards — no inert binding), `r` reload, `/` the filter, `Ctrl+F`
+layout, `l` line numbers, `w` wrap, `c` add a note / `E` (`<Shift>e`)
+edit the hunk's first user note / `a` show or fold the agent's notes
+(`git.agent-notes`, a boolean-stateful action on the page with no
+setting behind it — the page's for the tab's life; the notes paragraph
+below), `r` reload, `/` the filter, `Ctrl+F`
 find, `?` Keyboard Bindings opened **on the Git page group**
 (`win.keyboard-bindings-group (s)` → `KeyboardBindingsDialog(group=)`:
 it scrolls after the first layout past `map`, and takes the viewport's
@@ -349,9 +353,14 @@ and `question` work because Shift is consumed producing them) and `D`
 `git.discard` (`<Shift>d`); `Esc` is not a binding — a capture key
 controller on the view clears the selection and swallows the press only
 while one exists, so the dock's restore-from-maximized still gets it
-otherwise (`GitPage.holds_escape` says so). Nothing
-editable lives inside the view today; the note editor the notes step adds
-must disable the letter actions while it has focus, or `e` types nothing.
+otherwise (`GitPage.holds_escape` says so — and while a note editor is
+open, whose own controller reads Escape; the view's steps aside for
+it). The note editor is the one editable widget inside the view:
+`DiffView`'s `editing-changed(bool)` → `GitPage._on_note_editing_changed`
+sets every `git.*` action insensitive while one is open — a disabled
+named action lets its chord fall through, so `e` types an e and `q` a
+q into the editor instead of closing the page — and enables them all
+again when it closes.
 `keybindings.LOCAL_PREFIXES` / `may_overlap`: `editor.*` and `git.*` are
 page-local scopes that never see one press, so `Ctrl+F` in both is not a
 conflict (`conflicts` / `holders` skip such pairs; the dialog too). The
@@ -416,10 +425,83 @@ and the inclusive line indexes) and emit `mutation-requested(request)` —
 not a Plan: the planners take the file's patch re-read from git, which
 is the page's thread read. `set_busy(busy)` makes every button
 insensitive and spins `_acting`, the one pressed; `busy()` is the probe.
-`note-requested(path, hunk, side, line)` is *Add note*'s door for the
-notes step (nothing listens yet). Probes: `select_lines(path, hunk,
-first, last)`, `hunk_action_labels` / `file_action_labels`,
+*Add note* is `request_note(section)`: a draft card under the hunk,
+anchored to the row the menu opened on (`_on_secondary_click` places
+the cursor under the pointer when no lines are selected — placing it
+would clear a selection). Probes: `select_lines(path, hunk, first,
+last)`, `hunk_action_labels` / `file_action_labels`,
 `click_hunk_action` / `click_file_action`.
+
+**Notes and highlights (PR 3, the other half; decisions 5 and 8).**
+`diffnotes.py` is the GTK-free half: `Note` (id, source USER / AGENT,
+path, side, 1-based line, summary, rationale, author, `hunk_key`) and
+`Highlight` (id, path, side, line, `[start, end)` in code points, tone
+of `TONES`, `hunk_key`), `NoteSpec` / `HighlightSpec` (what a caller
+asks for: a path with exactly one of `line` on a `side` or a 1-based
+`hunk`), `resolve_anchor(files, path, side, line, hunk)` → an `Anchor`
+or the reason (through `diffmodel.locate`; a hunk address takes the
+hunk's first line numbered on that side), `bound_text` (CRLF folded,
+controls dropped, cut at `NOTE_MAX_CHARS` 4000; authors at 80),
+`split_note_text` / `join_note_text` (the editor's first line is the
+summary, the rest the rationale), and `MarkStore`: `add_notes(files,
+specs, source)` / `add_highlights(files, specs)` land a batch **whole or
+not at all** (the whole batch is resolved first; the first bad address,
+empty summary, bad range or tone refuses it with one line naming the
+offender; `MAX_NOTES` / `MAX_HIGHLIGHTS` per page, `MAX_*_PER_BATCH`),
+`edit`, `remove`, `clear(path, notes, highlights, include_user)` (the
+user's notes only with `include_user`), and the reload rule: **a mark
+survives by the stable key of the hunk it was placed in** — `prune
+(files)` drops a mark whose file the load shows without that hunk
+(changed, moved — the key holds the ranges — or gone) and parks one
+whose file the load doesn't show at all (Ctrl+2 and back keeps them);
+`placed_notes` / `placed_highlights(files)` → `{(path, hunk index):
+[(mark, line index)]}` is what the view draws. The spec's words keyed
+the highlights by the file's patch hash; the hunk key is the superset
+that also honours "an untouched hunk keeps its widget, its selection
+and its notes" (Watch mode) — an edit elsewhere in the file leaves the
+note where it was.
+
+The widgets: `DiffView` owns one `MarkStore` (`_store`), `_apply_marks`
+hands each `_HunkSection` its share (`set_marks(notes, highlights)`:
+`_NoteCard`s in a `.git-hunk-notes` box under the views, kept by note
+id so one being edited keeps its editor, drafts — cards with no note
+yet — last; `_apply_view_marks` puts the glyphs in the marker column
+(`_NOTE_ICON` over `_HIGHLIGHT_ICON`, bundled icons) and the tone tags
+(`_HunkView.set_highlights`, `_TONE_STYLES`, one tag per tone made
+lazily) on the side's view — the one view in stack; a rebuilt body
+re-applies them). A `_NoteCard` is the header (*You* / *Agent · author*,
+`new line 12`, *Edit* for user notes, *Delete* for any) over a
+`Gtk.Stack` of the words (labels, `set_text`, wrapped) and the editor
+(a `Gtk.TextView` in a scroller capped at `_NOTE_EDITOR_MAX_HEIGHT`,
+a CAPTURE key controller: Escape cancels, Ctrl+Enter commits; *Save* /
+*Cancel* buttons). `start_edit` grabs the keyboard **before** telling
+the view (`on_note_editing`), which closes any other editor unsaved (a
+draft going). `c` is `add_note_at_cursor` (the focused / current hunk,
+`_HunkSection.anchor_at_cursor`: the cursor row's new number, else its
+old, a pad taking the next numbered row), `E` `edit_first_note`,
+`on_note_saved` refuses an empty text (the editor stays open), lands a
+draft as a USER note or re-words the note, then `section.grab()` puts
+the keyboard back in the hunk; `delete_note(id)` and `clear_marks`
+likewise. `notes-changed()` fires on every store change (a reload's
+prune included); `notes()` / `highlights()` list everything held,
+parked marks included. **`_HunkSection._remove_card` hides a dropped
+card at once and unparents it `_CARD_REAP_MS` (500) later**: a
+`Gtk.TextView` unrealized within a few milliseconds of its focus
+leaving segfaults GTK's Wayland input method — the compositor's
+text-input reply lands after the widget is gone and the handler asks it
+for its display (`gtk_widget_get_display: assertion 'GTK_IS_WIDGET'`
+then `wl_proxy_get_version` in the trace); measured with
+`scripts/probe_diffview.py --notes --layout split`, every run, and
+never with half a second in between. The same class of crash would hit
+any focused text view dropped by a reload in the turn its focus is
+parked (`park_focus`); it has not been seen there. PR 5's tools land on
+`add_notes(specs, focus, source)` → ids or the reason, `add_highlights
+(specs, focus)` → the count or the reason, `clear_marks(...)`, `notes()`
+/ `highlights()`; `set_agent_notes_shown` folds the agent's cards
+(their glyphs stay, so `}` still finds the hunk). Probes: `note_rows
+(path, hunk)` → (id, source, side, line, summary, shown), `note_marks`
+(line indexes), `highlight_rows`, `editing()`, `note_editor_text` /
+`set_note_editor_text`, `commit_note` / `cancel_note`.
 
 **The page runs the request (`GitPage._on_mutation_requested`).** Gated
 on the sidebar's and the view's busy and on `request.load == self.
@@ -555,7 +637,16 @@ the index read back and the untouched hunk's serial kept, unstage hunk /
 file on the staged load, a cancelled then a confirmed discard (the
 question's words), the untracked trash and the deleted restore, a revert
 hunk from a commit, the dirty warning on the next ask, and the
-three-way retry over a committed context move. `scripts/probe_diffview.py`
+three-way retry over a committed context move. `check_native_notes`
+(before it, on the same tree) walks the notes: `c` → a draft with the
+chords off and the page holding Escape, the keyboard in the editor, an
+empty save refused, Ctrl+Enter splitting summary and rationale, `}` /
+`{`, `E` and Esc, the menu's *Add note*, `add_notes` / `add_highlights`
+(a hunk address, a bad batch landing nothing, a range past the line),
+`a`, delete, the clears, and an edit to hunk 1 reloading with hunk 0's
+note kept and hunk 1's dropped. `scripts/probe_diffview.py --notes`
+renders `-notes.png` (a user note, an agent note, a highlight per tone)
+and `-notes-draft.png` (the editor open). `scripts/probe_diffview.py`
 draws a real repository's diff to a PNG and prints the timings above.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)

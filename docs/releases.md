@@ -140,8 +140,19 @@ downloads of each version, see the
   so). The outcome is a toast, the view reloads by key, and a selection
   survives with its hunk. The sidebar's *Stage hunk* / *Anchor line* /
   *Discard* buttons hide while the native view draws — the headers
-  carry the buttons now. Notes and highlights come next; hunk is
-  retired once they do.
+  carry the buttons now.
+- **Notes on the native diff.** `c` (or the hunk menu's *Add note*)
+  opens a card under the focused hunk, anchored to the cursor line: a
+  text box where `Ctrl+Enter` saves (the first line the summary, the
+  rest the rationale) and `Esc` cancels, the diff's other letters typing
+  into it meanwhile. Cards say who wrote them — *You*, or *Agent* with
+  the author — and the line they sit on, a glyph marks that line in the
+  gutter, `}` / `{` walk the annotated hunks, `E` re-opens your first
+  note on the hunk, *Edit* / *Delete* sit on the card, and `a` folds the
+  agent's cards away. Notes live in the page for the tab's life (nothing
+  is written to disk) and survive a reload on any hunk the edit left
+  alone. The agent's own doors — the tools that annotate, highlight and
+  clear — are the next release's; hunk is retired once they land.
 - **Preferences → Git.** A group for the git page: hunk's layout
   (automatic / split / stacked) and theme, whether working-tree reviews
   show untracked files, how many commits each group of the commits panel
