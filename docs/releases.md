@@ -76,7 +76,9 @@ downloads of each version, see the
   being the parent the *vs* diff is measured against — then the default
   branch's latest page with *load more…*; a click loads that commit or
   branch, a stack branch's header that branch against the one below it,
-  and the `▸` mark follows what the page has loaded; a branch created,
+  and the `▸` mark follows what the page has loaded; a caret on each
+  branch header folds its commits away; branches on one commit share a
+  header, slash-separated, and ellipsized rows carry a tooltip; a branch created,
   deleted or moved re-reads the stack on the next tick), the **files
   list** (the diff's files with their counts on the live side of the
   working tree, the other side off `git status`, one flat list for any

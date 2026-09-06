@@ -11,7 +11,9 @@ stack under it down to the default branch — the page reads the stack off
 git and hands it in with set_context — and the default branch's latest
 page with `load more…`), the loaded row marked `▸` after what the page
 has loaded (set_context, not the last click — a load made by the agent's
-show_diff is reflected). The files list is the loaded diff's own files
+show_diff is reflected), and a caret on every branch header that folds
+the group's rows away (collapse_group; which groups are folded is the
+widget's for the page's life). The files list is the loaded diff's own files
 (refresh_files, one gitmodel.FileSummary per file with counts and rename
 pairs) split into UNSTAGED / STAGED on the working tree, the side the
 page has loaded live and the other read off `git status` (gitmodel.
@@ -79,6 +81,10 @@ _CODE_CLASSES: dict[str, str | None] = {
 }
 # The mark on the loaded commits row.
 _LOADED_MARK = "▸"
+# The leading column every commits row shares: a header's caret or the
+# other rows' mark cell, one width so the branch names and the `↑` column
+# line up.
+_LEAD_WIDTH = 16
 _UNPUSHED_MARK = "↑"
 _BRANCH_GLYPH = "⎇"
 # How many commits the Fix up picker lists at most.
@@ -96,26 +102,50 @@ def _restore_scroll(adjustment: Gtk.Adjustment, value: float) -> bool:
 
 
 class _CommitRow(Gtk.ListBoxRow):
-    """One line of the commits list, drawn from a gitmodel.Row: a mark
-    column (`▸` while loaded), the `↑` for an unpushed commit, the
-    abbreviated sha in monospace, and the subject (or the branch name on a
-    header, with `⎇` in front)."""
+    """One line of the commits list, drawn from a gitmodel.Row. Two
+    columns lead every row: the first holds the caret that folds a branch
+    header's group (or the `▸` mark on a loaded working-tree or commit
+    row), the second the `↑` of an unpushed commit (blank, on the working
+    tree row, so its label lines up with the commits' shas); then the
+    abbreviated sha in monospace and the subject — or, on a header, the
+    branch name with `⎇` in front, flush against the caret. The caret is
+    its own button — a press on it never activates the row, so folding a
+    branch does not load its diff — and *on_fold* hears the group id; a
+    loaded header is tinted and bold, the caret standing where its mark
+    would."""
 
-    def __init__(self, row: Row) -> None:
+    def __init__(self, row: Row, on_fold: Callable[[str], None] | None = None) -> None:
         super().__init__()
         self.row = row
         self.set_activatable(row.kind != "header" or row.load is not None)
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         box.add_css_class("git-commit-row")
-        self._mark = Gtk.Label(width_chars=1, xalign=0.5)
-        self._mark.add_css_class("git-row-mark")
-        box.append(self._mark)
+        self._mark: Gtk.Label | None = None
+        self._caret: Gtk.Button | None = None
+        if row.kind == "header":
+            caret = Gtk.Button(icon_name="pan-down-symbolic", focusable=False)
+            caret.add_css_class("flat")
+            caret.add_css_class("git-group-caret")
+            caret.set_valign(Gtk.Align.CENTER)
+            caret.set_size_request(_LEAD_WIDTH, -1)
+            caret.set_tooltip_text(_("Fold or unfold the branch"))
+            if on_fold is not None:
+                caret.connect("clicked", lambda _b: on_fold(row.group))
+            box.append(caret)
+            self._caret = caret
+        else:
+            mark = Gtk.Label(width_chars=1, xalign=0.5)
+            mark.add_css_class("git-row-mark")
+            mark.set_size_request(_LEAD_WIDTH, -1)
+            box.append(mark)
+            self._mark = mark
         if row.kind == "header":
             label = Gtk.Label(xalign=0, hexpand=True)
             label.set_text(f"{_BRANCH_GLYPH} {row.label}")
             label.set_ellipsize(Pango.EllipsizeMode.END)
             label.add_css_class("git-group-header")
             box.append(label)
+            self.set_tooltip_text(row.label)  # ellipsized: every twin's full name
         elif row.kind == "commit":
             up = Gtk.Label(width_chars=1, xalign=0.5)
             up.set_text(_UNPUSHED_MARK if row.unpushed else "")
@@ -130,7 +160,11 @@ class _CommitRow(Gtk.ListBoxRow):
             subject.set_text(row.label)
             subject.set_ellipsize(Pango.EllipsizeMode.END)
             box.append(subject)
+            self.set_tooltip_text(row.label)  # the whole subject line
         else:
+            # The working tree row and `load more…` sit in the commits'
+            # column: a blank `↑` cell in front of the label.
+            box.append(Gtk.Label(width_chars=1))
             label = Gtk.Label(xalign=0, hexpand=True)
             label.set_text(row.label)
             label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -140,7 +174,8 @@ class _CommitRow(Gtk.ListBoxRow):
         self.set_child(box)
 
     def set_loaded(self, loaded: bool) -> None:
-        self._mark.set_text(_LOADED_MARK if loaded else "")
+        if self._mark is not None:
+            self._mark.set_text(_LOADED_MARK if loaded else "")
         if loaded:
             self.add_css_class("git-row-loaded")
         else:
@@ -151,6 +186,11 @@ class _CommitRow(Gtk.ListBoxRow):
             self.add_css_class("git-group-loaded")
         else:
             self.remove_css_class("git-group-loaded")
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        """Turn a header's caret to say whether its group is folded."""
+        if self._caret is not None:
+            self._caret.set_icon_name("pan-end-symbolic" if collapsed else "pan-down-symbolic")
 
 
 class _SectionRow(Gtk.ListBoxRow):
@@ -248,6 +288,7 @@ class GitSidebar(Gtk.Box):
 
         # -- context (set_context) -------------------------------------------
         self._branch: str | None = None
+        self._twins: tuple[str, ...] = ()
         self._parent: BranchRef | None = None
         self._default: BranchRef | None = None
         # The branches under the parent, nearest first (gitops.stack_branches
@@ -266,6 +307,9 @@ class GitSidebar(Gtk.Box):
         self._rows: list[Row] = []
         self._commit_widgets: dict[str, _CommitRow] = {}
         self._loaded_row_id: str | None = None
+        # The groups whose commits are folded away under their header
+        # (the caret), by group id; kept across re-reads.
+        self._collapsed: set[str] = set()
 
         # -- the files list ------------------------------------------------------
         self._session_files: tuple[gitmodel.FileSummary, ...] = ()
@@ -423,6 +467,22 @@ class GitSidebar(Gtk.Box):
         """What the files list draws (for the e2e)."""
         return self._sections
 
+    def collapsed_groups(self) -> set[str]:
+        """The group ids folded under their header (for the e2e)."""
+        return set(self._collapsed)
+
+    def collapse_group(self, group: str, collapsed: bool | None = None) -> None:
+        """Fold (True), unfold (False) or toggle (None) the commits under
+        the header of *group*: the caret's click. The header stays as the
+        handle; the rows below it hide."""
+        if collapsed is None:
+            collapsed = group not in self._collapsed
+        if collapsed:
+            self._collapsed.add(group)
+        else:
+            self._collapsed.discard(group)
+        self._apply_folds()
+
     def loaded_row_id(self) -> str | None:
         """The id of the row marked `▸`, or None."""
         return self._loaded_row_id
@@ -451,8 +511,10 @@ class GitSidebar(Gtk.Box):
         resolved_sha: str | None,
         live: bool,
         stack: Sequence[BranchRef] = (),
+        twins: Sequence[str] = (),
     ) -> bool:
-        """What the page knows: the checked-out *branch*, the *parent* and
+        """What the page knows: the checked-out *branch* (and its *twins*,
+        the other local branches at HEAD, which share its header), the *parent* and
         *default* branches the groups are built on (None when the tree
         can't name one) and the *stack* of branches between them (the
         branches under the parent, nearest first, as gitops.stack_branches
@@ -465,9 +527,11 @@ class GitSidebar(Gtk.Box):
         so the list was re-read here) — the page refreshes it itself
         otherwise after an open."""
         stack = tuple(stack)
-        groups = (branch, parent, default, stack)
-        groups_changed = groups != (self._branch, self._parent, self._default, self._stack)
+        twins = tuple(twins)
+        groups = (branch, twins, parent, default, stack)
+        groups_changed = groups != (self._branch, self._twins, self._parent, self._default, self._stack)
         self._branch = branch
+        self._twins = twins
         self._parent = parent
         self._default = default
         self._stack = stack
@@ -539,6 +603,7 @@ class GitSidebar(Gtk.Box):
             default_commits,
             default_more,
             unpushed,
+            twins=self._twins,
         )
         self._rebuild_commits()
         return GLib.SOURCE_REMOVE
@@ -767,10 +832,11 @@ class GitSidebar(Gtk.Box):
         self._commit_list.remove_all()
         self._commit_widgets = {}
         for row in self._rows:
-            widget = _CommitRow(row)
+            widget = _CommitRow(row, self.collapse_group)
             self._commit_list.append(widget)
             self._commit_widgets[row.id] = widget
         self._mark_loaded_row()
+        self._apply_folds()
         if value > 0:
             GLib.idle_add(_restore_scroll, adjustment, value)
 
@@ -783,6 +849,11 @@ class GitSidebar(Gtk.Box):
         for row_id, widget in self._commit_widgets.items():
             widget.set_loaded(row_id == self._loaded_row_id)
             widget.set_group_loaded(widget.row.kind == "header" and widget.row.group == loaded_group)
+
+    def _apply_folds(self) -> None:
+        for widget in self._commit_widgets.values():
+            widget.set_visible(not gitmodel.row_folded(widget.row, self._collapsed))
+            widget.set_collapsed(widget.row.group in self._collapsed)
 
     def _on_commit_row_activated(self, _list: Gtk.ListBox, widget: Gtk.ListBoxRow) -> None:
         if not isinstance(widget, _CommitRow):

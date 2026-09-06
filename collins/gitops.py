@@ -638,37 +638,56 @@ def stack_branches(
     run=subprocess.run,
     timeout: float = GIT_TIMEOUT_S,
 ) -> list[BranchRef]:
-    """The stack under *upper*: every local branch whose tip is a commit
-    *upper* has and *lower* (the default branch's target) hasn't, nearest
-    *upper* first — what the commits list groups by, and what names the
-    branch the current one stacks on (the first of them). A tip at
-    *upper*'s own commit is left out (that is the current branch, or a
-    twin of it with no commits of its own), and so is any name
-    gitloads.safe_ref refuses (it ends up in an argv). Two git runs: the
-    branch tips (branch_tips_argv) and the walk (stack_walk_argv, capped at
+    """The stack under *upper* (read_stack's first half): every local
+    branch whose tip is a commit *upper* has and *lower* (the default
+    branch's target) hasn't, nearest *upper* first — what the commits list
+    groups by, and what names the branch the current one stacks on (the
+    first of them)."""
+    return read_stack(cwd, lower, upper, run=run, timeout=timeout)[0]
+
+
+def read_stack(
+    cwd: str | Path | None,
+    lower: str | None,
+    upper: str = "HEAD",
+    run=subprocess.run,
+    timeout: float = GIT_TIMEOUT_S,
+) -> tuple[list[BranchRef], list[str]]:
+    """(the stack under *upper*, the branches at *upper*'s own commit).
+    The stack is every local branch whose tip is a commit *upper* has and
+    *lower* (the default branch's target) hasn't, nearest *upper* first;
+    branches at one commit are one BranchRef — the first by name, the
+    rest its twins — so the commits list gives them one header rather
+    than a group of nothing each. The tips at *upper*'s own commit (the
+    current branch and any twin of it) are the second half, sorted, for
+    the current header's words. A name gitloads.safe_ref refuses (it
+    ends up in an argv) is dropped. Two git runs: the branch tips
+    (branch_tips_argv) and the walk (stack_walk_argv, capped at
     MAX_STACK_WALK commits — a tip further down than that is not seen);
-    [] when either couldn't be asked, or the targets aren't safe."""
+    ([], []) when either couldn't be asked, or the targets aren't safe."""
     if (lower is not None and not gitloads.safe_ref(lower)) or not gitloads.safe_ref(upper):
-        return []
+        return [], []
     tips = run_git(cwd, branch_tips_argv(), run=run, timeout=timeout)
     if not tips.ok:
-        return []
+        return [], []
     by_sha: dict[str, list[str]] = {}
     for line in tips.stdout.splitlines():
         sha, _sep, name = line.strip().partition(" ")
         if _FULL_SHA.match(sha) and gitloads.safe_ref(name):
             by_sha.setdefault(sha, []).append(name)
     if not by_sha:
-        return []
+        return [], []
     walk = run_git(cwd, stack_walk_argv(lower, upper, MAX_STACK_WALK), run=run, timeout=timeout)
     if not walk.ok:
-        return []
+        return [], []
     shas = [line.strip() for line in walk.stdout.splitlines() if _FULL_SHA.match(line.strip())]
     stack: list[BranchRef] = []
     for sha in shas[1:]:  # the first is upper's own commit
-        for name in sorted(by_sha.get(sha, ())):
-            stack.append(BranchRef(name, name))
-    return stack
+        names = sorted(by_sha.get(sha, ()))
+        if names:
+            stack.append(BranchRef(names[0], names[0], tuple(names[1:])))
+    head = sorted(by_sha.get(shas[0], ())) if shas else []
+    return stack, head
 
 
 def staged_paths(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT_TIMEOUT_S) -> list[str]:

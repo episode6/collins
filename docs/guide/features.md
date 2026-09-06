@@ -415,9 +415,15 @@ to install, and nothing in it is a terminal.
   commit, a branch header everything the branch did since it forked (a
   stack branch's header, that branch against the one below it) — except
   the default branch's, which stays put: a whole trunk is more than a
-  diff should be handed. The loaded row wears `▸`, and its group's
-  header is bold; the mark follows what the page has loaded, not the
-  last click. A right-click offers *Copy sha* and *Reload*.
+  diff should be handed. Branches sitting on one commit share a header,
+  their names separated by slashes (the group and its load are the
+  first's); a header or a commit cut short by the panel's width shows
+  its full words in a tooltip. The loaded row wears `▸` (a loaded branch
+  header is tinted instead), and its group's header is bold; the mark
+  follows what the page has loaded, not the last click. The caret at the
+  left of a branch header folds its commits away (and unfolds them)
+  without loading anything; folds hold for the page's life. A
+  right-click offers *Copy sha* and *Reload*.
 - **The files list splits on the working tree.** With *working tree*
   loaded it shows **UNSTAGED · n** and **STAGED · n** sections; the page
   holds one of the two at a time, so that side is live — the diff's own

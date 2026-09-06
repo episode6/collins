@@ -39,6 +39,8 @@ LOG_FORMAT = "--format=%H%x00%h%x00%s%x1e"
 SUBJECT_MAX_CHARS = 200
 PATH_MAX_CHARS = gitloads.MAX_PATH_CHARS
 MAX_ROWS = 2000
+# Between the names of branches sharing one commit on a header row.
+TWIN_SEPARATOR = " / "
 
 # The status letters a row may carry: git's own (M A D R T C, U for an
 # unmerged path) plus `?` for untracked. Anything else — a code a future git
@@ -88,10 +90,23 @@ class Status:
 @dataclass(frozen=True)
 class BranchRef:
     """A branch as the model needs it: its name and the ref git is given for
-    it (`main`, or `origin/main` when only the remote has it)."""
+    it (`main`, or `origin/main` when only the remote has it), plus its
+    *twins* — the other local branches at the same commit, which share
+    its row (`a / b`) rather than each getting a group of nothing."""
 
     name: str
     target: str
+    twins: tuple[str, ...] = ()
+
+    @property
+    def label(self) -> str:
+        return branch_label(self.name, self.twins)
+
+
+def branch_label(name: str, twins: Iterable[str]) -> str:
+    """The header's words for a branch and its twins: `name / twin / twin`,
+    *name* itself left out of the twins if it is listed there."""
+    return TWIN_SEPARATOR.join([name, *(twin for twin in twins if twin != name)])
 
 
 @dataclass(frozen=True)
@@ -320,6 +335,13 @@ def commit_row_id(sha: str) -> str:
     return f"commit:{sha}"
 
 
+def row_folded(row: Row, collapsed: Collection[str]) -> bool:
+    """Whether *row* hides under a collapsed group: every row of a group in
+    *collapsed* but its header, which stays as the handle that unfolds it
+    (the sidebar's caret)."""
+    return row.kind != "header" and row.group in collapsed
+
+
 def _commit_rows(commits: Iterable[Commit], group: str, unpushed: Collection[str]) -> list[Row]:
     rows = []
     for commit in commits:
@@ -352,6 +374,7 @@ def build_rows(
     default_commits: Sequence[Commit],
     default_more: bool,
     unpushed: Collection[str],
+    twins: Iterable[str] = (),
 ) -> list[Row]:
     """The rows of the commits list, top to bottom: the current branch (its
     header, `working tree`, its commits `<parent>..HEAD`, `load more…`),
@@ -370,8 +393,10 @@ def build_rows(
     range `<below>...<branch>` (stack_ranges), none when nothing lies
     below. The default branch's header loads nothing: a whole trunk is
     more than a viewer should be handed. Branch names are shown as
-    written. *unpushed* is the set of shas the `↑` mark goes on. The
-    whole list is capped at MAX_ROWS.
+    written; branches at one commit share a header (`a / b`,
+    branch_label — the current one's *twins* are the other branches at
+    HEAD, a stack branch's ride on its BranchRef). *unpushed* is the set
+    of shas the `↑` mark goes on. The whole list is capped at MAX_ROWS.
     """
     rows: list[Row] = []
     oldest = current[-1] if current else None
@@ -381,7 +406,9 @@ def build_rows(
         current_load = {gitloads.RANGE_KEY: f"{oldest.sha}^...HEAD"}
     else:
         current_load = None
-    rows.append(Row(header_row_id(CURRENT_GROUP), "header", CURRENT_GROUP, branch, current_load))
+    rows.append(
+        Row(header_row_id(CURRENT_GROUP), "header", CURRENT_GROUP, branch_label(branch, twins), current_load)
+    )
     rows.append(Row(WORKTREE_ROW_ID, "worktree", CURRENT_GROUP, _("working tree"), "unstaged"))
     rows.extend(_commit_rows(current, CURRENT_GROUP, unpushed))
     if current_more:
@@ -394,13 +421,13 @@ def build_rows(
         if below is not None:
             candidate = {gitloads.RANGE_KEY: f"{below}...{ref.target}"}
             load = candidate if gitloads.is_range(candidate) else None
-        rows.append(Row(header_row_id(group), "header", group, ref.name, load))
+        rows.append(Row(header_row_id(group), "header", group, ref.label, load))
         rows.extend(_commit_rows(page.commits, group, unpushed))
         if page.more:
             rows.append(_more_row(group))
 
     if default is not None:
-        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, default.name))
+        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, default.label))
         rows.extend(_commit_rows(default_commits, DEFAULT_GROUP, unpushed))
         if default_more:
             rows.append(_more_row(DEFAULT_GROUP))

@@ -211,10 +211,23 @@ def test_stack_branches_orders_the_tips_by_the_walk_and_drops_the_head_tip():
     )
     run = fake_runner({"for-each-ref": ok(tips), "rev-list": ok(f"{SHA_A}\n{SHA_B}\n{SHA_C}\n")})
     assert gitops.stack_branches("/repo", "main", run=run) == [
-        BranchRef("step2", "step2"), BranchRef("alt", "alt"), BranchRef("step1", "step1"),
+        BranchRef("step2", "step2"), BranchRef("alt", "alt", ("step1",)),
     ]
     assert run.calls[0][0][1:] == gitops.branch_tips_argv()
     assert run.calls[1][0][1:] == gitops.stack_walk_argv("main", "HEAD", gitops.MAX_STACK_WALK)
+
+
+def test_read_stack_merges_twins_at_one_commit_and_lists_the_tips_at_head():
+    """Two branches at SHA_C are one BranchRef (the first by name, the
+    other its twin); the tips at HEAD's own commit — the current branch
+    and a twin — come back sorted as the second half, not in the stack."""
+    tips = f"{SHA_A} feat\n{SHA_A} feat-twin\n{SHA_B} step2\n{SHA_C} step1\n{SHA_C} alt\n{SHA_D} main\n"
+    run = fake_runner({"for-each-ref": ok(tips), "rev-list": ok(f"{SHA_A}\n{SHA_B}\n{SHA_C}\n")})
+    stack, head = gitops.read_stack("/repo", "main", run=run)
+    assert stack == [BranchRef("step2", "step2"), BranchRef("alt", "alt", ("step1",))]
+    assert head == ["feat", "feat-twin"]
+    assert stack[1].label == "alt / step1"
+    assert gitops.read_stack("/repo", "main", run=fake_runner({"for-each-ref": failed("x")})) == ([], [])
 
 
 def test_stack_branches_is_empty_when_git_cant_answer_or_the_targets_are_unsafe():
@@ -527,7 +540,9 @@ def test_stack_branches_reads_the_stack_off_a_repository(repo):
     assert gitops.stack_branches(repo, "main", "step2") == [BranchRef("step1", "step1")]
     assert gitops.stack_branches(repo, "step1") == [BranchRef("step2", "step2")]
     assert gitops.stack_branches(repo, None)[:2] == [BranchRef("step2", "step2"), BranchRef("step1", "step1")]
-    assert BranchRef("base", "base") in gitops.stack_branches(repo, None)  # no floor: the trunk's tips too
+    # No floor: the trunk's tips too — base and main sit on one commit, one ref.
+    assert BranchRef("base", "base", ("main",)) in gitops.stack_branches(repo, None)
+    assert gitops.read_stack(repo, "main")[1] == ["feat", "twin"]  # HEAD's own tips
     _git(repo, "checkout", "-q", "step2")
     assert gitops.stack_branches(repo, "main") == [BranchRef("step1", "step1")]
 

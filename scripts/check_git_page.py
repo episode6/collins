@@ -246,6 +246,30 @@ def check_sidebar(repo: str) -> None:
         and sidebar._commit_widgets["header:current"].has_css_class("git-group-loaded"),
     )
 
+    # -- the caret folds a group's rows under its header -----------------------------------
+    sidebar.collapse_group("current")
+    folded = [r.id for r in rows if r.group == "current" and r.kind != "header"]
+    check(
+        "folding the current group hides its rows, the header stays",
+        sidebar.collapsed_groups() == {"current"}
+        and not any(sidebar._commit_widgets[i].get_visible() for i in folded)
+        and sidebar._commit_widgets["header:current"].get_visible()
+        and sidebar._commit_widgets["header:default"].get_visible(),
+        sidebar.collapsed_groups(),
+    )
+    sidebar.refresh_commits()
+    wait_for(lambda: sidebar.commit_rows() and not sidebar._commit_widgets["worktree"].get_visible())
+    check(
+        "a re-read keeps the fold",
+        sidebar.collapsed_groups() == {"current"} and not sidebar._commit_widgets["worktree"].get_visible(),
+    )
+    sidebar.collapse_group("current")
+    check(
+        "the caret again unfolds them",
+        not sidebar.collapsed_groups() and all(sidebar._commit_widgets[i].get_visible() for i in folded),
+    )
+    check("folding loaded nothing", sidebar.loaded_row_id() == "worktree" and page.loaded == "unstaged")
+
     # -- a commit row click loads it; the default header loads nothing --------------------
     def shows(loaded) -> bool:
         return page.shows(loaded) and page.settled()

@@ -111,10 +111,18 @@ when it lands. A native mutation from the sidebar or the view (`mutated`)
 re-seeds the signatures, re-reads the stack and reloads at once.
 
 **Parent branch and the stack.** Git is the source of truth: `gitops.
-stack_branches(cwd, trunk)` — `for-each-ref refs/heads` tips intersected
-with `rev-list --topo-order <trunk>..HEAD` (capped at `MAX_STACK_WALK`),
-HEAD's own commit dropped — lists the local branches on the current
-branch's history since the default branch, nearest first. The page reads
+read_stack(cwd, trunk)` — `for-each-ref refs/heads` tips intersected
+with `rev-list --topo-order <trunk>..HEAD` (capped at `MAX_STACK_WALK`) —
+lists the local branches on the current branch's history since the
+default branch, nearest first (`stack_branches` is its first half), and
+the tips at HEAD's own commit as its second half. **Branches at one
+commit are one `BranchRef`** (the first by name, the rest in `.twins`;
+`.label` / `gitmodel.branch_label` is `a / b`), so they share a header
+row — the group id, the range and the parent name are the first's. The
+page keeps HEAD's tips as `_head_twins` and hands them to `set_context
+(twins=)` for the current header, and grafts the parent's twins back
+onto the `BranchRef` that `resolve_group_branches` re-resolves from
+`.git` (which knows no twins). The page reads
 it on the open's thread and on a thread after every move
 (`_refresh_branch_stack` → `_branch_stack_read`, generation-guarded;
 `_branch_stack` is cleared on a branch change), keeps it in
@@ -140,9 +148,11 @@ non-selectable `caption-heading` rows), a `Gtk.SearchEntry` files filter
 above the files list, and a wrapping `Gtk.FlowBox` action row. It never
 imports `gitpage`; the page feeds it and listens:
 
-- Feed: `set_context(branch=, parent=, default=, loaded=, resolved_sha=,
-  live=, stack=)` after every load / open / stack read (`_sync_context`;
-  a changed branch, parent, stack or default re-reads the commits;
+- Feed: `set_context(branch=, twins=, parent=, default=, loaded=,
+  resolved_sha=, live=, stack=)` after every load / open / stack read
+  (`_sync_context`; a changed branch, twins, parent, stack or default
+  re-reads the commits; header and commit rows carry their full label as
+  a tooltip, since both ellipsize;
   returns whether it did), `refresh_commits()` (threads: `gitops.read_page`
   per group — the current `<parent>..HEAD`, then the parent and each stack
   branch as `<below>..<branch>` (`gitmodel.stack_ranges`), the default —
@@ -177,7 +187,12 @@ imports `gitpage`; the page feeds it and listens:
   toast, while one runs): the page runs the diff view's plans behind the
   same `busy`. The e2e reaches rows with `click_commit_row(id)`,
   `click_file_row(path, side)`, `click_section(side)` and reads
-  `commit_rows()`, `file_rows()`, `loaded_row_id()`, `selected_path`.
+  `commit_rows()`, `file_rows()`, `loaded_row_id()`, `selected_path`,
+  and folds groups with `collapse_group(group, collapsed=None)` /
+  `collapsed_groups()` — the caret on a header row (`_CommitRow`, a
+  focusable=False flat button, so its press never activates the row);
+  `gitmodel.row_folded` says which rows hide, the header never, and the
+  fold set lives on the widget for the page's life (not in `page_state`).
 - The per-hunk and per-line buttons are the diff view's own, on its
   headers (decision 7 of the spec): the sidebar has no cursor buttons.
 

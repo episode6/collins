@@ -1119,6 +1119,11 @@ popover.menu button.open-with-row:hover {
 .git-group-loaded .git-group-header {
   font-weight: bold;
 }
+.git-group-caret {
+  padding: 0px;
+  min-width: 16px;
+  min-height: 16px;
+}
 .git-actions {
   padding: 4px 4px;
 }
