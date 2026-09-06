@@ -2401,11 +2401,15 @@ class GitPage(Adw.Bin):
     def _mutation_planned(
         self, gen: int, request: gitpatch.MutationRequest, fresh: str | None, status: object
     ) -> bool:
-        self._diffview.set_busy(False)
+        # The view stays busy — the pressed button spinning — for the
+        # request's whole life: set_busy(False) forgets which button it
+        # was, so it is called only where the request ends.
         if gen != self._gen or self._closing or not self._native_opened:
+            self._diffview.set_busy(False)
             return GLib.SOURCE_REMOVE
         plan = request.plan(fresh, gitpatch.is_dirty(status, request.path))
         if isinstance(plan, gitpatch.Refusal):
+            self._diffview.set_busy(False)
             self._toast(plan.reason)
             if plan.stale:
                 self._native_load(self._loaded)
@@ -2415,7 +2419,6 @@ class GitPage(Adw.Bin):
             return GLib.SOURCE_REMOVE
         heading, button = request.confirm_words(plan)
         # The spinner stays on the pressed button while the question is up.
-        self._diffview.set_busy(True)
         dialogs.confirm_dialog(
             self,
             heading,
@@ -2636,7 +2639,7 @@ def _trash_paths(root: str, paths: Sequence[str]) -> gitops.GitResult:
         try:
             Gio.File.new_for_path(os.path.join(root, path)).trash(None)
         except GLib.Error as exc:
-            return gitops.GitResult(False, "", exc.message or "trash failed")
+            return gitops.GitResult(False, "", exc.message or _("trash failed"))
     return gitops.GitResult(True, "", "")
 
 
