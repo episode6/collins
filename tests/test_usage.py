@@ -81,6 +81,18 @@ def test_parse_three_bars_in_display_order():
     assert snap.subscription == "max"
 
 
+def test_parse_two_bars_when_the_scoped_limit_is_gone():
+    # The model-scoped weekly bar is a per-model limit Anthropic can retire;
+    # a response with only session + weekly must yield exactly those two.
+    data = dict(SAMPLE_RESPONSE)
+    data["limits"] = [
+        entry for entry in SAMPLE_RESPONSE["limits"] if entry["kind"] != "weekly_scoped"
+    ]
+    snap = parse_snapshot(data)
+    assert [b.kind for b in snap.bars] == ["session", "weekly_all"]
+    assert all(b.model_name is None for b in snap.bars)
+
+
 def test_parse_scoped_bar_carries_model_name():
     snap = parse_snapshot(SAMPLE_RESPONSE)
     scoped = snap.bars[2]
