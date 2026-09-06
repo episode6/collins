@@ -574,8 +574,44 @@ page needs hunk 0.21 or newer:
     similarity), a binary, an image, a mode change.
   - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`, the commits list, the breadcrumb, the
     tab title, `show_diff` and the layout persistence all work as with
-    hunk. Not yet: staging, discarding, reverting, notes and highlights,
-    line selection — the next release's.
+    hunk.
+  - **Staging, in the diff itself.** The buttons sit on the headers
+    (SourceTree's placement, Sublime Merge's words), always there and
+    lifted while the pointer is over the file or hunk:
+
+    | Load | File header | Hunk header, nothing selected | Hunk header, lines selected |
+    | --- | --- | --- | --- |
+    | unstaged | *Stage file* · *Discard file* | *Stage hunk* · *Discard hunk* | *Stage lines* · *Discard lines* |
+    | staged | *Unstage file* | *Unstage hunk* | *Unstage lines* |
+    | a commit, the branch, a range | *Revert file* | *Revert hunk* | *Revert lines* |
+
+    **Select lines** by dragging in the text, dragging or clicking (and
+    shift-clicking) on the line numbers, or with `Shift`+arrows: the
+    selection snaps to whole lines, lives in one hunk at a time
+    (selecting in another clears it), and `Esc` clears it; padding cells
+    and expanded context never count. `x` stages, unstages or reverts
+    the selection or, with none, the focused hunk; `X` the file; `D`
+    discards (reverts, on a commit or branch) after a confirmation. A
+    right-click on a hunk offers the same, plus *Copy*, *Open in editor*,
+    *Add note* and *Expand context*; the pinned file header carries the
+    file's buttons too.
+  - Every action **re-reads the file's patch from git** at that moment
+    and refuses, with a word rather than half done, what the arithmetic
+    can't describe: a binary, a file too large, a rename or a new /
+    deleted file by hunk (use the file button), a symlink or submodule,
+    and a file that changed since the view loaded it — which reloads.
+    Stage and unstage ask nothing; a discard confirms (an untracked
+    file's discard moves it to the **trash**, never an unlink; a deleted
+    file's *Discard file* restores it from the index); a revert applies
+    the commit's patch in reverse to the working tree after a confirm
+    that warns when the file has unstaged changes, and when the context
+    has moved retries three-way and says so (the result is staged, and
+    may carry conflict markers). Each runs behind the sidebar's busy —
+    the pressed button spins — toasts its outcome (or git's first error
+    line), and reloads the view by key, so a selection survives with its
+    hunk. The sidebar's *Stage hunk* / *Anchor line* / *Discard* buttons
+    hide while the native view draws: the headers carry the buttons now.
+    Not yet: notes and highlights — the next release's.
 
 ## Knowing what's happening
 

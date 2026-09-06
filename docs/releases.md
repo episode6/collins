@@ -117,10 +117,31 @@ downloads of each version, see the
   place, and the tick still covers the index, `HEAD` and the refs;
   `show_diff` reveals the file and line in it. It runs on git alone: a
   machine without hunk gets the diff instead of the install card.
-  Read-only for now — staging, discarding, reverting, notes and
-  highlights come next, and hunk is retired once they do. hunk stays the
-  default; three new Git rows (*Line numbers*, *Wrap long lines*,
-  *Highlight changed words*) are the native view's.
+  hunk stays the default; three new Git rows (*Line numbers*, *Wrap long
+  lines*, *Highlight changed words*) are the native view's.
+- **The native diff viewer stages, unstages, discards and reverts.** Every
+  file header carries *Stage file* · *Discard file* (on the index
+  *Unstage file*; on a commit, the branch or a range *Revert file*), every
+  hunk header *Stage hunk* · *Discard hunk* — and a **line selection**
+  (drag in the text or on the line numbers, `Shift`+arrows; whole lines,
+  one hunk at a time, `Esc` clears) turns the hunk's buttons into *Stage
+  lines* / *Discard lines* / *Revert lines*, SourceTree's placement with
+  Sublime Merge's words. `x` / `X` / `D` press the same from the keyboard
+  (the *Git page* group of Keyboard Bindings), a right-click on a hunk
+  offers them with *Copy*, *Open in editor* and *Expand context*, and the
+  pinned file header carries the file's. Every action re-reads the
+  file's patch from git first and refuses — with a word, not half done —
+  a binary, a file too large, a rename or a new / deleted file by hunk,
+  and a file that changed since the view loaded (which reloads);
+  discards and reverts confirm first (an untracked file's discard moves
+  it to the trash, never an unlink; a deleted file's restores it; a
+  revert onto a file with unstaged changes warns that the two may
+  conflict, and retries three-way when the context has moved, saying
+  so). The outcome is a toast, the view reloads by key, and a selection
+  survives with its hunk. The sidebar's *Stage hunk* / *Anchor line* /
+  *Discard* buttons hide while the native view draws — the headers
+  carry the buttons now. Notes and highlights come next; hunk is
+  retired once they do.
 - **Preferences → Git.** A group for the git page: hunk's layout
   (automatic / split / stacked) and theme, whether working-tree reviews
   show untracked files, how many commits each group of the commits panel

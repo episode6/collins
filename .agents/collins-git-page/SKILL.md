@@ -13,9 +13,11 @@ description: >-
   package data (TypeScript in collins/hunkext/collins-git: the five keys at
   hunk's cursor, line ranges, the sidecar v2 contract), the experimental
   native diff view behind the temporary git_viewer switch (diffview.py over
-  diffmodel.py: the page's native load path, the sidebar following the view,
-  the files filter, the find bar, the page-local git.* chords, the file
-  monitors' watch), Preferences → Git,
+  diffmodel.py and gitpatch.py: the page's native load path, the sidebar
+  following the view, the files filter, the find bar, the page-local git.*
+  chords, the file monitors' watch, the line selection and the headers'
+  stage / unstage / discard / revert buttons with the page's plan-confirm-run
+  path), Preferences → Git,
   the parent-branch rule, freshness reloads, and gitinfo.py's cheap .git
   reads for the footer branch. Use when changing the git page, the sidebar,
   the diff view, the extension, the show_diff tool's page-driving half,
@@ -163,8 +165,14 @@ row. It never imports `gitpage`; the page feeds it and listens:
   `anchor_button_label()` / `stage_button_label()`.
 - The cursor buttons (`x`, `v`/escape, `D`) are hidden — not merely
   insensitive — when hunk runs without the extension
-  (`hunkctl.extension_dir()` None: a broken install), and insensitive off
-  a live working tree or a dead hunk.
+  (`hunkctl.extension_dir()` None: a broken install), **and while the
+  native view draws** (`set_cursor_buttons_shown(False)` from
+  `GitPage._set_native`: the hunk headers carry the buttons, decision 7),
+  and insensitive off a live working tree or a dead hunk. They, with
+  `key-requested`, `set_anchor` and the two label probes, are hunk's and
+  go in PR 4 of the native-diff stack. `run_mutation(work, done)` is
+  public (it returns False, with a toast, while one runs): the page runs
+  the diff view's plans behind the same `busy`.
 
 The GTK-free halves: `gitmodel.py` (ports of the old extension's
 `model.ts` / parsers: `parse_log` over `LOG_FORMAT`, `parse_status_v2`,
@@ -331,9 +339,19 @@ apply_keybindings`, scoped `LOCAL` **on the view** (spec) and in the
 **CAPTURE** phase — a bare letter must beat the `GtkSource.View` under it
 (the editor uses BUBBLE because its chords are Ctrl chords); the
 `NamedAction`s resolve to a `Gio.SimpleActionGroup` inserted on the *page*
-under `git` (an ancestor's groups are found from the view). Nothing
-editable lives inside the view today; the note editor PR 3 adds must
-disable the letter actions while it has focus, or `e` types nothing.
+under `git` (an ancestor's groups are found from the view). The staging
+keys are three more: `x` `git.stage` (`DiffView.request_stage`: the
+selected lines when the selection is in the focused hunk, else the focused
+hunk — the current one when none has the keyboard), `X` `git.stage-file`
+(`<Shift>x` in the catalogue: GTK lowercases the event's keyval and
+compares the Shift bit, so a bare `X` would never match — `braceright`
+and `question` work because Shift is consumed producing them) and `D`
+`git.discard` (`<Shift>d`); `Esc` is not a binding — a capture key
+controller on the view clears the selection and swallows the press only
+while one exists, so the dock's restore-from-maximized still gets it
+otherwise (`GitPage.holds_escape` says so). Nothing
+editable lives inside the view today; the note editor the notes step adds
+must disable the letter actions while it has focus, or `e` types nothing.
 `keybindings.LOCAL_PREFIXES` / `may_overlap`: `editor.*` and `git.*` are
 page-local scopes that never see one press, so `Ctrl+F` in both is not a
 conflict (`conflicts` / `holders` skip such pairs; the dialog too). The
@@ -346,6 +364,94 @@ window action to reach — a page in a bare test window — `_write_option`
 applies the dict to the page alone. `_sync_action_states` mirrors
 `apply_settings` back into the menu's checks. `Ctrl+1/2/3` stay on the
 page's raw capture controller.
+
+**The selection and the buttons (PR 3 of the stack).** Decision 4: the
+line selection *is* the buffer's own selection, snapped to whole
+paragraphs. `_HunkView` connects `mark-set` (only for the `insert` /
+`selection_bound` marks) and `_snap`s inside it — the start of the first
+line to the start of the line after the last, the insert mark kept on
+the end it was on so Shift+arrows keep extending; `_snapping` guards the
+re-entry `select_range` causes — so a drag in the text, Shift+arrows, a
+double-click, all land in one range. The line numbers get a
+`Gtk.GestureDrag` on the gutter widget (`view.get_gutter(LEFT)`):
+press selects the row under it (Shift extends from the far end of what
+is selected), drag extends, `_gutter_row` mapping gutter y through
+`window_to_buffer_coords(LEFT)` + `get_line_at_y`. `_owned` says the
+selection is the model's: the find bar's current match goes through
+`select_match` (no snap, `_owned` False), so `selected_rows()` is None
+for it and the buttons stay unselected. `_Row.line` is the index into
+`hunk.lines` (None for a padding cell and for expanded context);
+`_HunkSection.selection()` is `(min, max)` of the selected rows' line
+indexes — a span in **patch order** (gitpatch.LineRange's rule: in split,
+a selection from a context line through additions takes the deletions
+between them too, as the extension did), None when only pads are
+selected. One selection in the stream: `DiffView.on_hunk_selection`
+clears every other hunk's and the hunk's other side; `_selection` names
+the section; `clear_selection` (Esc), `has_selection`, `selection()` →
+`(path, hunk, first, last)`, `current()`'s third element. A kept hunk
+keeps its buffer and so its selection across a reload by key; a rebuilt
+one loses it (`load` drops a `_selection` whose section is gone).
+PyGObject returns `get_selection_bounds()` as an empty tuple with no
+selection — never unpack three values (`_selection_bounds`).
+
+The buttons are `_ActionButton`s (a label / spinner `Gtk.Stack`, so the
+width holds) on every `_FileSection` header (`primary_button`,
+`discard_button`), every `_HunkSection` header, and the pinned header
+(copies acting on `_pinned_section`, re-worded in `_sync_pinned`; the
+pinned box is targetable now, and forwards the wheel to the column's
+adjustment through an `EventControllerScroll`). `gitpatch.action_labels
+(load, grain, selected)` words them (the spec's table; the discard button
+only on the unstaged load) and `sync_actions` re-reads them on every
+load and selection change; the CSS lifts their opacity on `:hover` /
+focus (`.git-hunk-actions button`, `.git-file-actions button`). A
+right-click on a hunk view (a CAPTURE-phase `GestureClick(button=3)`,
+claimed ahead of the text view's own Cut/Paste menu) pops a
+`Gtk.PopoverMenu` built fresh from a `Gio.Menu` — the two actions, then
+Copy / Open in editor / Add note / Expand context — over the `hunk.*`
+`SimpleActionGroup` each section inserts on itself. Every button, menu
+item and key ends in `request_hunk(section, discard)` / `request_file
+(section, discard)`, which build a **`gitpatch.MutationRequest`** (the
+File, the load, the grain FILE / HUNK / LINES, discard, the hunk index
+and the inclusive line indexes) and emit `mutation-requested(request)` —
+not a Plan: the planners take the file's patch re-read from git, which
+is the page's thread read. `set_busy(busy)` makes every button
+insensitive and spins `_acting`, the one pressed; `busy()` is the probe.
+`note-requested(path, hunk, side, line)` is *Add note*'s door for the
+notes step (nothing listens yet). Probes: `select_lines(path, hunk,
+first, last)`, `hunk_action_labels` / `file_action_labels`,
+`click_hunk_action` / `click_file_action`.
+
+**The page runs the request (`GitPage._on_mutation_requested`).** Gated
+on the sidebar's and the view's busy and on `request.load == self.
+_loaded`; a thread reads `gitops.file_patch` when `request.needs_patch`
+(a file-grain plan takes none) and, for a revert (`request.revert`: a
+read-only load), `gitops.read_status` for `gitpatch.is_dirty`; then
+`_mutation_planned` calls `request.plan(fresh, dirty)` → the ported
+planners (`plan_file` / `plan_hunk` / `plan_lines`, `same_hunks` and
+`find_disagreement` inside). A `Refusal` is a toast and, when `stale`, a
+`_native_load` (the reload the words promise). A plan with `confirm`
+asks through `dialogs.confirm_dialog` (heading and button from `request.
+confirm_words(plan)`: *Move to the trash?* / *Restore the file?* /
+*Discard the changes?* / *Revert into the working tree?*; a revert's
+question opens with `revert_warning` when the file is dirty; the spinner
+stays on while it is up, `on_dismiss` clears it), then `_run_plan`:
+`gitops.run_plan(cwd, plan, three_way=request.three_way(plan), trash=
+_trash_paths)` on the sidebar's `run_mutation` thread — `add` / `reset`
+/ `checkout` of the paths, the applies through `apply_patch`, OP_TRASH
+through the mover (`gitpage._trash_paths`: `Gio.File.trash`, never an
+unlink; the e2e stubs it — **Gio refuses to trash on "system internal"
+mounts**, a tmpfs `/tmp` included, and the toast then says so) — the
+toast from `gitpatch.outcome_words` (the plan's `done`, "merged
+three-way" when the retry applied, the conflict-markers line, else git's
+first stderr line), and `sidebar.emit("mutated")` when it landed or
+left conflicts → `_on_mutated` re-seeds the signatures, re-reads the
+stack and `_native_load`s by key. `three_way` is only a revert's
+(`OP_APPLY_WORKTREE_REVERSE` on a read-only load): **`--3way` implies
+`--index`, so it needs the file clean against the index** — a dirty
+file is refused with "does not match index" (which is what the warning
+anticipates), the case it helps is a *committed* move of the context
+(the e2e commits line 6, then reverts the older commit's hunk over it),
+and it stages the merged result.
 
 **Find.** `Gtk.SearchBar` under the header (no `key_capture_widget`: typing
 in the page must not open it — the letters are the view's), a toggle in
@@ -441,8 +547,16 @@ spec's word; the files list's `?` row says it is not in the index), an
 untracked *picture* reads `binary` with the badge `new · binary` (the
 `--no-index` diff says "Binary files differ"; `KIND_BINARY` wins over
 `KIND_NEW`), a pure rename has no hunk, a mode change no hunk and no
-counts. `scripts/probe_diffview.py` draws a real repository's diff to a
-PNG and prints the timings above.
+counts. `check_native_mutations` (called from `check_native` on the
+working tree it left) stubs `dialogs.confirm_dialog` and
+`gitpage._trash_paths` and walks the staging interface: the words per
+load, `select_lines` and the one-hunk rule, Esc, stage lines / hunk with
+the index read back and the untouched hunk's serial kept, unstage hunk /
+file on the staged load, a cancelled then a confirmed discard (the
+question's words), the untracked trash and the deleted restore, a revert
+hunk from a commit, the dirty warning on the next ask, and the
+three-way retry over a committed context move. `scripts/probe_diffview.py`
+draws a real repository's diff to a PNG and prints the timings above.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 

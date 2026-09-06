@@ -106,6 +106,7 @@ Keyboard Bindings dialog:
 | `j` / `k` | Git page (native diff) | Move the cursor line down / up in the focused hunk, the page scrolling to keep it on screen; past the hunk's last (first) line the keyboard walks on into the next (previous) hunk |
 | `}` / `{` | Git page (native diff) | The next / previous hunk carrying a note or highlight |
 | `z` | Git page (native diff) | Draw every unchanged line above the focused hunk |
+| `x` / `X`, `D`, `Esc` | Git page (native diff) | Stage, unstage or revert — by the load — the selected lines or, with none, the focused hunk; the same for the whole file; discard (revert, on a commit or branch) the selection or hunk after a confirmation; clear the line selection (made by dragging in the text or on the line numbers, or with `Shift`+arrows). The hunk and file headers' buttons press the same |
 | `0` / `1` / `2`, `l`, `w` | Git page (native diff) | Layout automatic / split / stacked, line numbers on or off, wrap long lines — each writes the Preferences → Git setting, so every page follows |
 | `r`, `/`, `?`, `e`, `q` | Git page (native diff) | Reload the diff; focus the files filter (`Esc` there clears it and comes back); open the Keyboard Bindings dialog on its Git page group; open the file under the cursor in the editor, at that line; close the page |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
