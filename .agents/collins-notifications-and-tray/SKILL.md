@@ -27,7 +27,7 @@ flag one-for-one), `update` (a newer Collins; no session). Focus states from
 window active — hidden windows are never active).
 
 `delivery(kind, focus, announce_finished_runs)` returns a frozenset of
-`card`, `sound` (only ever beside a card — the desktop sounds its own),
+`card`, `sound` (beside a card or a desktop notification — GNOME never sounds a Gio.Notification, it has no sound hint to carry),
 `row`, `row-read`, `flag` (sidebar unread), `flash`, `desktop`, `beep`.
 Rules it settles: a message to the selected tab is a read row and nothing
 more (nothing silently does nothing — `tool_reply` tells the agent where it

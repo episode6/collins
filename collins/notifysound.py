@@ -1,6 +1,8 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""The notification sound: played beside an in-app card, and nowhere else.
+"""The notification sound: played beside an in-app card or a desktop
+notification (the desktop sounds none of its own for ours, see
+notifycenter.delivery), and nowhere else.
 
 Playback goes through GStreamer — a `playbin` on a file URI, one pipeline
 kept and reused, put back to NULL when the file ends or fails — behind a

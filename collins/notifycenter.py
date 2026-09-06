@@ -84,7 +84,7 @@ FOCUSES = frozenset({FOCUS_SELECTED, FOCUS_ELSEWHERE, FOCUS_UNFOCUSED})
 # The things delivery() can ask for. Each is one widget-side act; the window
 # does the ones it is handed and nothing else.
 DELIVER_CARD = "card"  # the in-app card, in the active window
-DELIVER_SOUND = "sound"  # the notification sound (only ever beside a card)
+DELIVER_SOUND = "sound"  # the notification sound, beside a card or a desktop notification
 DELIVER_ROW = "row"  # a history row, unread (for `finished`: the synthetic row set_green owns)
 DELIVER_ROW_READ = "row-read"  # a history row that is already read
 DELIVER_FLAG = "flag"  # flag the session's sidebar row unread (MainWindow._flag_unread)
@@ -213,19 +213,21 @@ _TABLE: dict[tuple[str, str], frozenset[str]] = {
     (KIND_MESSAGE, FOCUS_ELSEWHERE): frozenset(
         {DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLAG, DELIVER_FLASH}
     ),
-    (KIND_MESSAGE, FOCUS_UNFOCUSED): frozenset({DELIVER_DESKTOP, DELIVER_ROW, DELIVER_FLAG}),
+    (KIND_MESSAGE, FOCUS_UNFOCUSED): frozenset(
+        {DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLAG}
+    ),
     (KIND_BELL, FOCUS_SELECTED): frozenset({DELIVER_BEEP, DELIVER_FLASH}),
     (KIND_BELL, FOCUS_ELSEWHERE): frozenset({DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLASH}),
-    (KIND_BELL, FOCUS_UNFOCUSED): frozenset({DELIVER_DESKTOP, DELIVER_ROW, DELIVER_FLASH}),
+    (KIND_BELL, FOCUS_UNFOCUSED): frozenset({DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW, DELIVER_FLASH}),
     (KIND_FINISHED, FOCUS_SELECTED): frozenset(),
     (KIND_FINISHED, FOCUS_ELSEWHERE): frozenset({DELIVER_ROW}),
     (KIND_FINISHED, FOCUS_UNFOCUSED): frozenset({DELIVER_ROW}),
     # An update has no session: nothing to flag or flash, no tab to be
-    # looking at — in Collins it is a card and the sound, away from it the
-    # desktop notification, and a row either way.
+    # looking at — in Collins it is a card, away from it the desktop
+    # notification, the sound beside either, and a row either way.
     (KIND_UPDATE, FOCUS_SELECTED): frozenset({DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW}),
     (KIND_UPDATE, FOCUS_ELSEWHERE): frozenset({DELIVER_CARD, DELIVER_SOUND, DELIVER_ROW}),
-    (KIND_UPDATE, FOCUS_UNFOCUSED): frozenset({DELIVER_DESKTOP, DELIVER_ROW}),
+    (KIND_UPDATE, FOCUS_UNFOCUSED): frozenset({DELIVER_DESKTOP, DELIVER_SOUND, DELIVER_ROW}),
 }
 
 
@@ -239,19 +241,27 @@ def delivery(kind: str, focus: str, announce_finished_runs: bool = False) -> fro
     desktop notification, not just a beep, because the beep never said which
     of six sessions rang; a bell from the *selected* tab keeps the compositor
     beep and gets no row, since a bell you were there for is not history.
-    And the sound plays only beside an in-app card: the desktop sounds its
-    own notifications, and ours on top would ring twice.
+    And the sound plays beside the card and the desktop notification alike.
+    It used to be the card's alone, on the theory that the desktop sounds
+    its own notifications and ours on top would ring twice — but it does
+    not: GNOME Shell only plays a sound for a notification that carries a
+    `sound-name` or `sound-file` hint, which the freedesktop protocol has
+    and Gio.Notification (what Collins sends through) cannot express, so a
+    desktop notification of ours arrived in silence. The sound is ours to
+    play either way; notifysound already honours the desktop's own
+    event-sounds switch, so a muted desktop still mutes it.
 
     A `finished` run is a row and nothing more — the synthetic row set_green
     already put there — unless *announce_finished_runs* is on, in which case
-    it goes out exactly as a message would: a card and the sound when the
-    user is elsewhere in Collins, a desktop notification when they are not.
+    it goes out exactly as a message would: a card when the user is
+    elsewhere in Collins, a desktop notification when they are not, and the
+    sound beside either.
     A selected tab never goes green, so that cell stays empty either way.
 
     An `update` (a newer Collins, see updatecheck) has no session, so
     nothing is flagged or flashed and there is no tab to be looking at:
-    a card and the sound while any window is active, the desktop
-    notification while none is, and a row either way.
+    a card while any window is active, the desktop notification while none
+    is, the sound beside either, and a row either way.
 
     Unknown kinds and focuses raise rather than deliver nothing: a typo in a
     caller must not read as "the table said to stay quiet".
@@ -286,14 +296,13 @@ def focus_state(any_window_active: bool, tab_window_active: bool, tab_selected: 
 
 def without_cards(deliveries: Iterable[str]) -> frozenset[str]:
     """The same delivery with the in-app card turned off (the
-    inapp_notifications switch): the card and the sound that only ever
-    plays beside it become a desktop notification — the desktop is where
-    every notification went before there were cards, and it sounds its own.
-    Everything else (the row, the flag, the flash) stays."""
+    inapp_notifications switch): the card becomes a desktop notification —
+    the desktop is where every notification went before there were cards.
+    Everything else (the sound, the row, the flag, the flash) stays."""
     deliveries = frozenset(deliveries)
     if DELIVER_CARD not in deliveries:
         return deliveries
-    return (deliveries - {DELIVER_CARD, DELIVER_SOUND}) | {DELIVER_DESKTOP}
+    return (deliveries - {DELIVER_CARD}) | {DELIVER_DESKTOP}
 
 
 def tool_reply(deliveries: Iterable[str]) -> str:

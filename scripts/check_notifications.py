@@ -534,8 +534,9 @@ def steps(app: App):
     def message_unfocused():
         win.is_active = lambda: False
         result = win.notify_session(shared["tab_b"], "Away message")
-        check("with no window active the message is a desktop notification, a row and a flag",
-              result == {notifycenter.DELIVER_DESKTOP, notifycenter.DELIVER_ROW, notifycenter.DELIVER_FLAG},
+        check("with no window active the message is a desktop notification, the sound, a row and a flag",
+              result == {notifycenter.DELIVER_DESKTOP, notifycenter.DELIVER_SOUND,
+                         notifycenter.DELIVER_ROW, notifycenter.DELIVER_FLAG},
               str(result))
         check("the tool reply says the desktop",
               notifycenter.tool_reply(result) == notifycenter.REPLY_DESKTOP)
@@ -610,9 +611,9 @@ def steps(app: App):
         cards.dismiss_all()
         win.state.set_setting("inapp_notifications", False)
         result = win.notify_session(shared["tab_b"], "Cards off")
-        check("with in-app notifications off the card becomes a desktop notification",
+        check("with in-app notifications off the card becomes a desktop notification, sound kept",
               notifycenter.DELIVER_DESKTOP in result and notifycenter.DELIVER_CARD not in result
-              and notifycenter.DELIVER_SOUND not in result, str(result))
+              and notifycenter.DELIVER_SOUND in result, str(result))
         check("the row and the flag still land",
               notifycenter.DELIVER_ROW in result and store.get_item(SESSION_B).unread)
         win.state.set_setting("inapp_notifications", True)

@@ -602,7 +602,8 @@ to install, and nothing in it is a terminal.
   Click anywhere on it to go there; the × dismisses the card and leaves the row
   waiting in the history. Away from Collins, it is a **desktop
   notification** titled with the session, so clicking it jumps straight to
-  that tab. Looking at that very session already, nothing pops up at all —
+  that tab — with the same sound, since the desktop plays none of its own
+  for it. Looking at that very session already, nothing pops up at all —
   the message goes straight into the history, and the tool tells the agent
   so. The card and the desktop notification both flag the session's sidebar
   row until you visit it, and both wear the project's own `project-icon.svg`
@@ -612,8 +613,8 @@ to install, and nothing in it is a terminal.
   every finish too.
 - **Bells from other sessions** ring the same way: a terminal bell (`\a`,
   from the agent or from a `make` in a session's panel shell) in a session
-  you aren't looking at is a card and the sound in Collins, a desktop
-  notification saying *Rang the bell* when Collins isn't focused, and one
+  you aren't looking at is a card in Collins, a desktop notification
+  saying *Rang the bell* when Collins isn't focused, the sound beside either, and one
   coalesced row in the history however many times it rings. The selected
   session's bell stays the desktop's beep — a bell you were there for is
   not history — and *Bells from other sessions* in Preferences turns the
@@ -622,8 +623,8 @@ to install, and nothing in it is a terminal.
   GitHub for the latest release — through your `gh` login when it has one,
   anonymously over the public API otherwise (no token, no account) — and
   when that release is newer than the one running, says so once: a card
-  and the sound in Collins, a desktop notification away from it, and a row
-  in the history either way, titled with the version. Clicking any of them
+  in Collins, a desktop notification away from it, the sound beside either,
+  and a row in the history either way, titled with the version. Clicking any of them
   opens the release page in your browser. The same release is never
   announced twice, a launch that has caught up retires the row, and
   *Check for updates* in Preferences → *General* turns the whole check off.

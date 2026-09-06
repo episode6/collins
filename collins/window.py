@@ -5071,8 +5071,9 @@ class MainWindow(Adw.ApplicationWindow):
     ) -> frozenset[str]:
         """Do what the delivery table asked for a notification of *kind*
         from *page*'s tab, and return what was done — the set itself, after
-        the *In-app notifications* switch has had its say (off, a card and
-        its sound become a desktop notification: notifycenter.without_cards).
+        the *In-app notifications* switch has had its say (off, a card
+        becomes a desktop notification, the sound staying:
+        notifycenter.without_cards).
 
         One act per name. The flash and the beep need no page (a bell from
         a tab this window doesn't hold flashes the header and nothing else).
@@ -5084,9 +5085,10 @@ class MainWindow(Adw.ApplicationWindow):
         posted for it. Given a row, the desktop notification is keyed by the
         row's session — the key the app withdraws it under when the row
         goes (App._on_notifications_changed). The card goes to the *active*
-        window, whichever window the tab lives in. The sound plays only
-        beside a card (the desktop sounds its own notifications), debounced
-        and single-flight in notifysound.
+        window, whichever window the tab lives in. The sound plays beside
+        the card and the desktop notification alike (GNOME never sounds a
+        Gio.Notification of ours, see notifycenter.delivery), debounced and
+        single-flight in notifysound.
         """
         if not self.state.get_setting("inapp_notifications"):
             deliveries = notifycenter.without_cards(deliveries)

@@ -38,6 +38,13 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **Desktop notifications make a sound.** A `notify_user` message, a bell
+  or an update announced while no Collins window is focused was silent:
+  the sound only ever played beside an in-app card, on the theory that the
+  desktop sounds its own notifications — and GNOME doesn't, for a
+  notification sent the way Collins sends them. The notification sound now
+  plays beside the desktop notification too, and the desktop's own
+  event-sounds switch still mutes it.
 - **A git page beside the session, drawn by Collins itself.** `F6`, the
   footer's git button (beside the terminal and editor toggles, greyed
   outside a repository), or a click on the footer's ⎇ branch label, opens

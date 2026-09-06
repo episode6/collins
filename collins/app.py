@@ -3248,8 +3248,8 @@ class App(Adw.Application):
         GLib.idle_add(self.announce_update, release)
 
     def announce_update(self, release: updatecheck.Release) -> bool:
-        """A newer Collins is out: the row, and — by where the user is —
-        the card and the sound, or the desktop notification (see
+        """A newer Collins is out: the row, the sound, and — by where the
+        user is — the card or the desktop notification (see
         notifycenter.delivery for the update's cells). The row goes in
         first, so the card holds the row the center will find when it is
         clicked, and a click on either opens the release's page (see
