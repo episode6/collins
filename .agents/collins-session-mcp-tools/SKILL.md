@@ -133,7 +133,12 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   a summary and a rationale. `annotate_diff` /
   `highlight_diff` shape their batches with `mcptools.note_specs` /
   `highlight_specs` (each refuses a non-repo path by index, `notes[1]
-  (x.py)`, and a note with both or neither of `line` / `hunk`) and hand
+  (x.py)`, and a note with both or neither of `line` / `hunk`; the path
+  resolver, `App._mcp_diff_path_resolver(tab, page)`, works against
+  `page.repo_root` — the diff the agent sees — not the tab's live cwd,
+  which the agent may have `cd`ed out of since `show_diff`; the cwd only
+  breaks a relative path's tie, and a page on its card answers
+  `PAGE_NOT_OVER_A_REPO`) and hand
   them to `page.add_notes(specs, focus, source=diffnotes.AGENT)` /
   `add_highlights(specs, focus)` — the `diffnotes.MarkStore` lands the
   batch whole or not at all and its reason names the first bad address

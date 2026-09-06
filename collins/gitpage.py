@@ -472,6 +472,13 @@ class GitPage(Adw.Bin):
         return self._opened
 
     @property
+    def repo_root(self) -> Path | None:
+        """The repository the view is over, None on the card. What the
+        marking tools resolve a file against: the diff the agent sees,
+        not wherever its shell has gone since."""
+        return self._repo_root if self._opened or self._opening else None
+
+    @property
     def opening(self) -> bool:
         """Whether the view is on its way up (the open's thread is out):
         a card still showing meanwhile is not the page's last word."""

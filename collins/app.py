@@ -2527,14 +2527,16 @@ class App(Adw.Application):
         return deferred
 
     @staticmethod
-    def _mcp_diff_path_resolver(tab):
-        """The tool's file → repo-relative path (gitloads.diff_file_path),
-        or None for a caller outside a repository."""
-        cwd = tab.current_agent_cwd()
-        root = gitinfo.repo_root(cwd)
+    def _mcp_diff_path_resolver(tab, page):
+        """The tool's file → repo-relative path (gitloads.diff_file_path)
+        against the repository *page* shows — not the tab's live cwd,
+        which an agent may have `cd`ed out of since show_diff — or None
+        while the page is on its card. The cwd only breaks a tie for a
+        relative path that exists there and not under the root."""
+        root = page.repo_root
         if root is None:
             return None
-        return lambda raw: gitloads.diff_file_path(raw, str(root), cwd)
+        return lambda raw: gitloads.diff_file_path(raw, str(root), tab.current_agent_cwd())
 
     def _mcp_diff_context(self, found, args: dict) -> mcptools.ToolResult:
         _window, tab = found
@@ -2553,9 +2555,9 @@ class App(Adw.Application):
         _window, tab = found
 
         def act(page) -> tuple[bool, str]:
-            resolve = self._mcp_diff_path_resolver(tab)
+            resolve = self._mcp_diff_path_resolver(tab, page)
             if resolve is None:
-                return False, "The session's working directory isn't inside a git repository"
+                return False, mcptools.PAGE_NOT_OVER_A_REPO
             specs = mcptools.note_specs(args["notes"], resolve)
             if isinstance(specs, str):
                 return False, f"No notes added: {specs}"
@@ -2572,9 +2574,9 @@ class App(Adw.Application):
         _window, tab = found
 
         def act(page) -> tuple[bool, str]:
-            resolve = self._mcp_diff_path_resolver(tab)
+            resolve = self._mcp_diff_path_resolver(tab, page)
             if resolve is None:
-                return False, "The session's working directory isn't inside a git repository"
+                return False, mcptools.PAGE_NOT_OVER_A_REPO
             specs = mcptools.highlight_specs(args["marks"], resolve)
             if isinstance(specs, str):
                 return False, f"No highlights added: {specs}"
@@ -2591,7 +2593,7 @@ class App(Adw.Application):
         def act(page) -> tuple[bool, str]:
             path = None
             if "file" in args:
-                resolve = self._mcp_diff_path_resolver(tab)
+                resolve = self._mcp_diff_path_resolver(tab, page)
                 path = resolve(args["file"]) if resolve is not None else None
                 if path is None:
                     return False, f"'file' must be a path inside the repository: {args['file']!r}"

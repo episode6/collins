@@ -1006,6 +1006,7 @@ _DIFF_REPLY_MARGIN = _TERMINAL_REPLY_MARGIN
 
 # The agent-facing refusal every diff tool but show_diff shares when the
 # page isn't up: it names the tool that opens it.
+PAGE_NOT_OVER_A_REPO = "The git page isn't over a repository: open one with show_diff first"
 PAGE_NOT_OPEN = "The git page isn't open in this session — call show_diff to open it on a diff"
 
 
@@ -1214,17 +1215,21 @@ def diff_context_reply(
         )
         if step != asked:
             reply["truncated"] = "the reply was too large; some of what was asked for was left out"
-        if _fits_frame(reply, budget):
-            return json.dumps(reply, ensure_ascii=False, indent=1)
+        text = _framed(reply, budget)
+        if text is not None:
+            return text
     # Every step but the bare object is bounded by the parser's caps (a
     # path, a breadcrumb, a hunk header): this is a placeholder, not a path
     # the tests can reach, but it still answers with a JSON object.
     return json.dumps({"loaded": context.loaded, "truncated": "the reply was too large to send"})
 
 
-def _fits_frame(reply: dict, budget: int) -> bool:
+def _framed(reply: dict, budget: int) -> str | None:
+    """*reply* as the tool returns it when its frame fits *budget*, else
+    None: the text is measured as encode_message will escape it, and the
+    text measured is the text sent."""
     text = json.dumps(reply, ensure_ascii=False, indent=1)
-    return len(json.dumps(text).encode("utf-8")) <= budget
+    return text if len(json.dumps(text).encode("utf-8")) <= budget else None
 
 
 def _index_word(prefix: str, index: int, entry: dict) -> str:

@@ -516,12 +516,31 @@ def script():
     )
     check("focus never took the keyboard", not page.has_page_focus())
 
+    # The agent's shell has left the repository since show_diff: a file
+    # still resolves against the repository the page shows, not the cwd.
+    real_cwd = caller.current_agent_cwd
+    caller.current_agent_cwd = lambda: E2E
+    try:
+        got = yield "annotate_diff", {"notes": [{"file": "a.txt", "line": 2, "summary": "From elsewhere"}]}
+    finally:
+        caller.current_agent_cwd = real_cwd
+    check("a note from a shell outside the repository lands against the page's root", got == (True, "Added 1 note: n3."), got)
+    got = yield "clear_diff_marks", {"notes": True, "file": "a.txt"}
+    check("…and clears the same way", got == (True, "Cleared 3 notes from a.txt."), got)
+    got = yield "annotate_diff", {
+        "notes": [
+            {"file": "a.txt", "line": 2, "summary": "Note one", "rationale": "because"},
+            {"file": "a.txt", "hunk": 1, "side": "old", "summary": "Note two", "author": "reviewer"},
+        ],
+    }
+    check("the two notes are back for the reads below", got == (True, "Added 2 notes: n4, n5."), got)
+
     ok, text = yield "diff_context", {"notes": True, "patch": True, "files": True}
     context = json.loads(text)
     check(
         "diff_context lists the notes",
         [(n["id"], n["source"], n["line"], n.get("rationale"), n.get("author")) for n in context["notes"]]
-        == [("n1", "agent", 2, "because", None), ("n2", "agent", 1, None, "reviewer")],
+        == [("n4", "agent", 2, "because", None), ("n5", "agent", 1, None, "reviewer")],
         context.get("notes"),
     )
     check("…and the patch when asked", "+two\n" in context["files"][0].get("patch", ""), context["files"][0])
@@ -543,7 +562,7 @@ def script():
     check(
         "diff_context lists the highlight",
         [(h["id"], h["line"], h["start"], h["end"], h["tone"]) for h in context["highlights"]]
-        == [("h3", 2, 0, 3, "warning")],  # the store's serial is shared: n1, n2, h3
+        == [("h6", 2, 0, 3, "warning")],  # the store's serial is shared: n1..n5, h6
         context.get("highlights"),
     )
     check("…without the files when told not to", "files" not in context, list(context))
