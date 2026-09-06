@@ -21,7 +21,7 @@ downloads of each version, see the
 - ✅ **Pull requests** — every session's PRs tracked through `gh` (checks, conflicts, unanswered comments) as sidebar marks, footer chips, and an in-app PR page; merge / auto-merge / ready-for-review / request-a-review actions, with red CI, conflicts, and unanswered comments sendable back to the agent as prompts
 - ✅ **Editor** — a per-tab code editor beside the terminal: file tree, quick open, an agent-files list of what the session just wrote, pop-out to a second monitor
 - ✅ **Composer** — a spell-checked, multi-line prompt box that opens the moment you start typing, floating or docked, with dropped or pasted image attachments; an unsent prompt is a **draft** kept with its session across tab close and quit — or a sidebar Draft row, for a session not started yet
-- ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file, a diff or an image on your screen, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
+- ✅ **Session tools** — an in-app MCP server every launched session can call: rename itself, open a file, a diff or an image on your screen, read and annotate the diff you are looking at, notify you when it needs you, attach a pull request to its own row, spawn a sibling session, and read or drive the terminal panel
 - ✅ **Desktop presence** — a status icon with an unread badge, close-to-hide (sessions keep running without a window), notifications wearing each project's own icon, an in-app notification center (cards, a header bell, a history sheet, a choice of sounds), a daily update check, Caffeine Mode
 - ✅ **Theming** — light/dark plus selectable terminal color palettes
 - ✅ **Localization** — English, Hungarian, German, Spanish, French
@@ -112,15 +112,28 @@ downloads of each version, see the
   header menu's *Agent notes* check) folds the agent's cards away. Notes
   live in the page for the tab's life (nothing is written to disk) and
   survive a reload on any hunk the edit left alone (one whose line
-  numbers shifted counts as changed). The agent's own doors — the tools
-  that annotate, highlight and clear — are the next release's.
+  numbers shifted counts as changed).
 - **`show_diff`, a session tool for the git page.** The agent can put a
   change on your screen: `show_diff("unstaged" | "staged" | "branch" |
-  <commit ref>, file?, line?)` opens the session's git page on that diff
-  (revealed, never focused) and reveals the file and line in it; a line
-  no hunk carries lands on the nearest hunk, and the reply says so. Its
-  switch sits with the other tools' under Preferences → *Built-in MCP
-  tools*.
+  <commit ref>, file?, line?, side?, hunk?)` opens the session's git
+  page on that diff (revealed, never focused) and reveals the file in it
+  — at a line on either side, or at a hunk by number; a line no hunk
+  carries lands on the nearest hunk, and the reply says so, naming the
+  file's hunk count and the hunk the view landed on. Its switch sits
+  with the other tools' under Preferences → *Built-in MCP tools*.
+- **The agent reads and annotates the git page.** Four more session
+  tools, each with its own switch: `diff_context` reads back what the
+  page shows — the diff loaded, the file and hunk you are on and the
+  lines you have selected, every file's hunks with their line ranges,
+  and on request the patches (capped at 200 kB) and the notes — so
+  "this hunk" means the same thing to you and the agent;
+  `annotate_diff` lands note cards under hunks (an *Agent* card with the
+  author, anchored to a line or a hunk; a batch with one bad address
+  lands nothing and the reply names it); `highlight_diff` marks
+  character ranges of lines in six tones; `clear_diff_marks` takes the
+  agent's marks off the page, everywhere or from one file, your own
+  notes kept unless it asks. Nothing is written to disk, and none of
+  them takes your keyboard.
 - **Preferences → Git.** A group for the git page: the diff's layout
   (automatic / split / stacked), line numbers, wrapping and changed-word
   emphasis, whether working-tree reviews show untracked files, how many

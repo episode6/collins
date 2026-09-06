@@ -19,10 +19,11 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
-from . import APP_ID, DEBUG_APP_ID
+from . import APP_ID, DEBUG_APP_ID, diffmodel, diffnotes
 
 # One frame on the shim↔app socket never legitimately approaches this; a line
 # that does is garbage or an attack, not a tool call. Mirrored in mcp_shim.py.
@@ -33,6 +34,14 @@ MAX_LINE = 1024 * 1024
 # where terminal_reply's own frame-budget shrinking takes over anyway.
 TERMINAL_DEFAULT_LINES = 200
 TERMINAL_MAX_LINES = 2000
+
+# diff_context's cap on the patch text one reply carries (the spec's 200 kB):
+# past it the remaining files' patches are left out and the reply says so.
+DIFF_CONTEXT_PATCH_BYTES = 200_000
+
+# The most a note's summary or rationale may hold: diffnotes' cap, which
+# annotate_diff's schema below states so the two can't drift apart.
+NOTE_MAX_CHARS = diffnotes.NOTE_MAX_CHARS
 
 # The tools Collins serves to sessions, in MCP's own tool shape (the app
 # hands these to the shim verbatim for `tools/list`). A tool earns its place
@@ -96,17 +105,21 @@ TOOLS: list[dict] = [
     {
         "name": "show_diff",
         "description": (
-            "Open this session's Collins git page — the diff view beside the "
-            "terminal — on a diff, and optionally point it at a file and "
-            "line: put a change on the user's screen instead of pasting a "
-            "diff or asking them to run git. 'what' is one of 'unstaged' "
-            "(the working tree), 'staged' (the index), 'branch' (the current "
-            "branch against its parent), or a commit — any ref git resolves: "
-            "a sha, HEAD~1, a branch or tag name. Reach for it when the user "
-            "should look at a change: 'show me what you did', a review, a "
-            "commit to walk through, the hunk a test failure points at. The "
-            "page is shown without taking the user's keyboard. The reply "
-            "names what loaded and, with a file, what was revealed."
+            "Open this session's Collins git page — the native diff view "
+            "beside the terminal — on a diff, and optionally point it at a "
+            "file, a line or a hunk: put a change on the user's screen "
+            "instead of pasting a diff or asking them to run git. 'what' is "
+            "one of 'unstaged' (the working tree), 'staged' (the index), "
+            "'branch' (the current branch against its parent), or a commit — "
+            "any ref git resolves: a sha, HEAD~1, a branch or tag name. Reach "
+            "for it when the user should look at a change: 'show me what you "
+            "did', a review, a commit to walk through, the hunk a test "
+            "failure points at. The page is shown without taking the user's "
+            "keyboard. The reply names what loaded and, with a file, what was "
+            "revealed: the file's hunk count and the hunk the view landed "
+            "on (1-based, the number annotate_diff and diff_context use). "
+            "Once the page is open, diff_context reads it back, and "
+            "annotate_diff / highlight_diff put your notes and marks on it."
         ),
         "inputSchema": {
             "type": "object",
@@ -135,13 +148,321 @@ TOOLS: list[dict] = [
                     "type": "integer",
                     "minimum": 1,
                     "description": (
-                        "1-based line number on the new side of the diff to "
-                        "reveal, within 'file'; omit to land on the file's "
-                        "first hunk. Needs 'file'."
+                        "1-based line number to reveal within 'file', on "
+                        "'side' (the new side by default); omit both this "
+                        "and 'hunk' to land on the file's first hunk. Needs "
+                        "'file'; exclusive with 'hunk'."
+                    ),
+                },
+                "hunk": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "1-based hunk of 'file' to reveal, in the order the "
+                        "diff lists them (diff_context numbers them the same "
+                        "way). Needs 'file'; exclusive with 'line'."
+                    ),
+                },
+                "side": {
+                    "type": "string",
+                    "enum": ["old", "new"],
+                    "description": (
+                        "Which side 'line' counts on: 'new' (the default — "
+                        "the file as it is after the change) or 'old' (the "
+                        "file before it; a deleted line only has an old "
+                        "number). Needs 'file'."
                     ),
                 },
             },
             "required": ["what"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "diff_context",
+        "description": (
+            "Read back what this session's Collins git page is showing — "
+            "the diff the user is looking at, so you can talk about the "
+            "same hunk: which diff is loaded, the file and hunk the user is "
+            "on and any lines they have selected, every file in the diff "
+            "with its hunks (1-based, with each hunk's old and new line "
+            "ranges — null on a side the hunk has no lines on, like a new "
+            "file's old side), and optionally the patch text and the notes "
+            "on the page (the user's and yours). Reach for it when the user "
+            "says 'this hunk', 'the selected lines', 'what I'm looking at', "
+            "or before annotating. The page must be open: show_diff opens "
+            "it. The reply is one JSON object; one too large to send is "
+            "shrunk (patches, hunk lists, notes, files, the selection's "
+            "text, in that order) and carries a 'truncated' key."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "files": {
+                    "type": "boolean",
+                    "description": (
+                        "List every file in the diff with its hunks and "
+                        "their ranges (default true)."
+                    ),
+                },
+                "patch": {
+                    "type": "boolean",
+                    "description": (
+                        "Include each file's patch text (default false). "
+                        f"Capped at {DIFF_CONTEXT_PATCH_BYTES // 1000} kB in "
+                        "total; a truncated reply says so."
+                    ),
+                },
+                "notes": {
+                    "type": "boolean",
+                    "description": (
+                        "Include the notes on the page — id, source ('user' "
+                        "or 'agent'), file, side, line, summary, rationale, "
+                        "author — and the highlights (default false)."
+                    ),
+                },
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "annotate_diff",
+        "description": (
+            "Put notes on this session's Collins git page: a card under the "
+            "hunk, anchored to a line, that the user reads beside the code "
+            "— review findings, an explanation of a change, a question "
+            "about a line. Each note names a file in the loaded diff and "
+            "exactly one of a line (1-based, on 'side', new by default) or "
+            "a hunk (1-based). The whole batch is checked against the diff "
+            "first: a file that isn't in it or a line no hunk carries "
+            "refuses the batch, nothing lands, and the reply names the "
+            "offender. Reach for it instead of pasting line-by-line "
+            "commentary in the terminal. The page must be open on the right "
+            "diff (show_diff); with 'focus' the view scrolls to the first "
+            "note. The reply lists the note ids (clear_diff_marks removes "
+            "them)."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "notes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "The notes to add, 1–100 per call.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "file": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "description": (
+                                    "The file, as a path relative to the "
+                                    "repository root (or absolute, inside "
+                                    "it); it must be in the loaded diff."
+                                ),
+                            },
+                            "side": {
+                                "type": "string",
+                                "enum": ["old", "new"],
+                                "description": (
+                                    "Which side 'line' counts on: 'new' (the "
+                                    "default) or 'old'."
+                                ),
+                            },
+                            "line": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": (
+                                    "1-based line on that side; it must be in "
+                                    "one of the file's hunks. Exclusive with "
+                                    "'hunk'."
+                                ),
+                            },
+                            "hunk": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": (
+                                    "1-based hunk of the file (the note "
+                                    "anchors on its first line). Exclusive "
+                                    "with 'line'."
+                                ),
+                            },
+                            "summary": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": NOTE_MAX_CHARS,
+                                "description": (
+                                    "The note's headline — one line, what the "
+                                    "user should know about that spot."
+                                ),
+                            },
+                            "rationale": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": NOTE_MAX_CHARS,
+                                "description": (
+                                    "The longer explanation shown under the "
+                                    "summary; plain text, may span lines."
+                                ),
+                            },
+                            "author": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 80,
+                                "description": (
+                                    "Who is speaking, shown on the card — "
+                                    "'reviewer', a subagent's name; omit for "
+                                    "plain 'Agent'."
+                                ),
+                            },
+                        },
+                        "required": ["file", "summary"],
+                        "additionalProperties": False,
+                    },
+                },
+                "focus": {
+                    "type": "boolean",
+                    "description": (
+                        "Scroll the view to the first note (default false). "
+                        "Never takes the user's keyboard."
+                    ),
+                },
+            },
+            "required": ["notes"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "highlight_diff",
+        "description": (
+            "Mark character ranges of lines in this session's Collins git "
+            "page — attention marks the user sees in the diff, such as the "
+            "identifier a finding is about, the token that changed, every "
+            "call site of a function. Each mark names a file in the loaded "
+            "diff, a line (1-based on 'side', new by default) and a "
+            "[start, end) range in characters of that line's text, with a "
+            "tone. Checked whole like annotate_diff: one bad address refuses "
+            "the batch and the reply names it. The page must be open "
+            "(show_diff). The reply is the count."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "marks": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "description": "The ranges to mark, 1–500 per call.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "file": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4096,
+                                "description": (
+                                    "The file, as a path relative to the "
+                                    "repository root (or absolute, inside "
+                                    "it); it must be in the loaded diff."
+                                ),
+                            },
+                            "side": {
+                                "type": "string",
+                                "enum": ["old", "new"],
+                                "description": "'new' (the default) or 'old'.",
+                            },
+                            "line": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": (
+                                    "1-based line on that side; it must be in "
+                                    "one of the file's hunks."
+                                ),
+                            },
+                            "start": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": (
+                                    "First character of the range, 0-based, "
+                                    "counted in code points of the line's "
+                                    "text (without the diff's +/- sign)."
+                                ),
+                            },
+                            "end": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": (
+                                    "One past the last character; must be "
+                                    "greater than 'start' and within the line."
+                                ),
+                            },
+                            "tone": {
+                                "type": "string",
+                                "enum": ["match", "current", "info", "warning", "error", "dim"],
+                                "description": (
+                                    "How the range is painted: 'match' (the "
+                                    "default), 'current', 'info', 'warning', "
+                                    "'error' or 'dim'."
+                                ),
+                            },
+                        },
+                        "required": ["file", "line", "start", "end"],
+                        "additionalProperties": False,
+                    },
+                },
+                "focus": {
+                    "type": "boolean",
+                    "description": (
+                        "Scroll the view to the first mark (default false). "
+                        "Never takes the user's keyboard."
+                    ),
+                },
+            },
+            "required": ["marks"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "clear_diff_marks",
+        "description": (
+            "Remove notes and highlights from this session's Collins git "
+            "page: the ones annotate_diff and highlight_diff put there, on "
+            "every file or one file. Notes the user typed themselves are "
+            "kept unless 'user' is true. With neither 'notes' nor "
+            "'highlights' given, both are cleared; one given alone names "
+            "what to clear ('notes': true — the notes only; 'notes': false "
+            "— the highlights only). The reply counts what went."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "description": (
+                        "Only this file's marks (a path relative to the "
+                        "repository root, or absolute inside it); omit for "
+                        "every file."
+                    ),
+                },
+                "notes": {
+                    "type": "boolean",
+                    "description": "Clear the notes (yours; the user's too with 'user').",
+                },
+                "user": {
+                    "type": "boolean",
+                    "description": (
+                        "Also drop the notes the user wrote (default false)."
+                    ),
+                },
+                "highlights": {
+                    "type": "boolean",
+                    "description": "Clear the highlights.",
+                },
+            },
             "additionalProperties": False,
         },
     },
@@ -531,6 +852,36 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
         # rejects a bool for the same reason.
         if not isinstance(value, bool):
             return f"'{key}' must be true or false"
+    elif kind == "array":
+        # The batch tools (annotate_diff, highlight_diff): a bounded list of
+        # closed objects, each item checked as its own little schema and
+        # named by its index in the refusal so the offender is findable.
+        if not isinstance(value, list):
+            return f"'{key}' must be a list"
+        if len(value) < spec.get("minItems", 0):
+            return f"'{key}' must hold at least {spec['minItems']} item(s)"
+        if len(value) > spec.get("maxItems", float("inf")):
+            return f"'{key}' must hold at most {spec['maxItems']} items"
+        items = spec.get("items")
+        if items is not None:
+            for index, item in enumerate(value):
+                error = _validate_value(f"{key}[{index}]", item, items)
+                if error is not None:
+                    return error
+    elif kind == "object":
+        if not isinstance(value, dict):
+            return f"'{key}' must be an object"
+        properties = spec.get("properties", {})
+        for name in spec.get("required", ()):
+            if name not in value:
+                return f"'{key}' is missing '{name}'"
+        for name, inner in value.items():
+            inner_spec = properties.get(name)
+            if inner_spec is None:
+                return f"'{key}' has an unexpected '{name}'"
+            error = _validate_value(f"{key}.{name}", inner, inner_spec)
+            if error is not None:
+                return error
     return None
 
 
@@ -636,6 +987,409 @@ def terminal_reply(sections: list[tuple[int, bool, str]], lines: int) -> str:
         tails = [
             (number, busy, text[(len(text) + 1) // 2 :]) for number, busy, text in tails
         ]
+
+
+# -- the diff tools -------------------------------------------------------------
+#
+# The GTK-free half of show_diff, diff_context, annotate_diff, highlight_diff
+# and clear_diff_marks: the handlers in app.py read the page's face
+# (GitPage.context() hands back a DiffContext), and everything that turns
+# the agent's arguments into the store's specs or the page's state into a
+# reply lives here so the unit suite can pin it. The batch rule — a whole
+# batch refused before anything lands, the reply naming the offender — is
+# diffnotes.MarkStore's (resolve_anchor over diffmodel.locate); note_specs /
+# highlight_specs only shape the arguments and refuse what can't be a path.
+
+# The room a diff_context reply leaves inside one MAX_LINE frame for the
+# envelope: the same margin as read_terminal's.
+_DIFF_REPLY_MARGIN = _TERMINAL_REPLY_MARGIN
+
+# The agent-facing refusal every diff tool but show_diff shares when the
+# page isn't up: it names the tool that opens it.
+PAGE_NOT_OVER_A_REPO = "The git page isn't over a repository: open one with show_diff first"
+PAGE_NOT_OPEN = "The git page isn't open in this session — call show_diff to open it on a diff"
+
+
+@dataclass(frozen=True)
+class DiffContext:
+    """What the git page shows, read off its face in one go (GitPage.
+    context()): the Loaded and its breadcrumb, the files of the load, the
+    file and hunk the reader is on (the hunk 0-based, None when none), the
+    line selection as DiffView.selection() gives it — (path, hunk index,
+    first, last) inclusive indexes into the hunk's lines — and every note
+    and highlight the page holds."""
+
+    loaded: object
+    breadcrumb: str
+    files: tuple[diffmodel.File, ...]
+    path: str | None = None
+    hunk: int | None = None
+    selection: tuple[str, int, int, int] | None = None
+    notes: tuple[diffnotes.Note, ...] = ()
+    highlights: tuple[diffnotes.Highlight, ...] = ()
+
+
+def _hunk_entry(hunk: diffmodel.Hunk) -> dict:
+    # A side the hunk has no lines on (a new file's old side, `-0,0`) is
+    # null: the view pads such a side to one row (diffmodel.hunk_range),
+    # but no address a note or highlight can give lands there.
+    return {
+        "hunk": hunk.index + 1,
+        "header": hunk.header,
+        "old": list(diffmodel.hunk_range(hunk, diffmodel.OLD)) if hunk.old_count else None,
+        "new": list(diffmodel.hunk_range(hunk, diffmodel.NEW)) if hunk.new_count else None,
+    }
+
+
+def _side_span(lines: Sequence[diffmodel.Line], side: str) -> list[int] | None:
+    numbers = [line.new if side == diffmodel.NEW else line.old for line in lines]
+    known = [n for n in numbers if n is not None]
+    return [min(known), max(known)] if known else None
+
+
+def _current_entry(context: DiffContext) -> dict | None:
+    if not context.path:
+        return None
+    entry: dict = {"file": context.path}
+    file = diffmodel.find_file(context.files, context.path)
+    if file is not None and context.hunk is not None and 0 <= context.hunk < len(file.hunks):
+        entry.update(_hunk_entry(file.hunks[context.hunk]))
+    return entry
+
+
+def _selection_entry(context: DiffContext, text: bool = True) -> dict | None:
+    if context.selection is None:
+        return None
+    path, index, first, last = context.selection
+    file = diffmodel.find_file(context.files, path)
+    if file is None or not (0 <= index < len(file.hunks)):
+        return None
+    lines = file.hunks[index].lines
+    if not (0 <= first <= last < len(lines)):
+        return None
+    chosen = lines[first : last + 1]
+    entry = {
+        "file": path,
+        "hunk": index + 1,
+        "lines": len(chosen),
+        "old": _side_span(chosen, diffmodel.OLD),
+        "new": _side_span(chosen, diffmodel.NEW),
+    }
+    if text:
+        entry["text"] = "".join(f"{_SIGNS.get(line.kind, ' ')}{line.text}\n" for line in chosen)
+    else:
+        entry["text_omitted"] = True
+    return entry
+
+
+_SIGNS = {diffmodel.ADD: "+", diffmodel.DEL: "-", diffmodel.CONTEXT: " "}
+
+
+def _file_entry(file: diffmodel.File, hunks: bool = True) -> dict:
+    entry: dict = {
+        "path": file.path,
+        "kind": file.kind,
+        "additions": file.additions,
+        "deletions": file.deletions,
+    }
+    if hunks:
+        entry["hunks"] = [_hunk_entry(hunk) for hunk in file.hunks]
+    else:
+        entry["hunk_count"] = len(file.hunks)
+        entry["hunks_omitted"] = True
+    if file.previous_path is not None:
+        entry["previous_path"] = file.previous_path
+    if file.untracked:
+        entry["untracked"] = True
+    return entry
+
+
+def _note_entry(note: diffnotes.Note) -> dict:
+    entry = {
+        "id": note.id,
+        "source": note.source,
+        "file": note.path,
+        "side": note.side,
+        "line": note.line,
+        "summary": note.summary,
+    }
+    if note.rationale:
+        entry["rationale"] = note.rationale
+    if note.author:
+        entry["author"] = note.author
+    return entry
+
+
+def _highlight_entry(mark: diffnotes.Highlight) -> dict:
+    return {
+        "id": mark.id,
+        "file": mark.path,
+        "side": mark.side,
+        "line": mark.line,
+        "start": mark.start,
+        "end": mark.end,
+        "tone": mark.tone,
+    }
+
+
+def _context_object(
+    context: DiffContext,
+    files: bool,
+    patch: bool,
+    notes: bool,
+    patch_budget: int,
+    hunks: bool = True,
+    selection_text: bool = True,
+) -> dict:
+    reply: dict = {
+        "loaded": context.loaded,
+        "breadcrumb": context.breadcrumb,
+        "current": _current_entry(context),
+        "selection": _selection_entry(context, text=selection_text),
+    }
+    if files:
+        entries = [_file_entry(file, hunks=hunks) for file in context.files]
+        if patch:
+            spent = 0
+            truncated = False
+            for file, entry in zip(context.files, entries, strict=True):
+                size = len(file.patch.encode("utf-8"))
+                if truncated or spent + size > patch_budget:
+                    truncated = True
+                    entry["patch_omitted"] = True
+                    continue
+                entry["patch"] = file.patch
+                spent += size
+            if truncated:
+                reply["patch_truncated"] = (
+                    f"the patches stop at {patch_budget // 1000} kB; call diff_context per "
+                    "file (or read the files) for the rest"
+                )
+        reply["files"] = entries
+    if notes:
+        reply["notes"] = [_note_entry(note) for note in context.notes]
+        reply["highlights"] = [_highlight_entry(mark) for mark in context.highlights]
+    return reply
+
+
+def diff_context_reply(
+    context: DiffContext,
+    files: bool = True,
+    patch: bool = False,
+    notes: bool = False,
+    patch_budget: int = DIFF_CONTEXT_PATCH_BYTES,
+) -> str:
+    """The diff_context reply: one JSON object (hunks numbered 1-based, as
+    the tools' `hunk` arguments count them). The patches stop at
+    *patch_budget* bytes with a note; and whatever the options, the reply
+    fits one wire frame — an oversize one is shrunk step by step (the
+    patches go first, then the hunk lists, then the notes, then the file
+    list, then the selection's text), each step saying so under
+    `truncated`, rather than closing the connection (see mcpserver._send).
+
+    The measure is the reply as the frame carries it — the string
+    JSON-escaped once more inside `{"id", "ok", "message"}` (encode_message
+    dumps with ensure_ascii, so every quote, newline and non-ASCII
+    character grows on the wire) — with _DIFF_REPLY_MARGIN left for the
+    envelope, as terminal_reply measures its own."""
+    budget = MAX_LINE - _DIFF_REPLY_MARGIN
+    asked = (files, True, patch, notes, True)
+    steps = [
+        asked,
+        (files, True, False, notes, True),
+        (files, False, False, notes, True),
+        (files, False, False, False, True),
+        (False, False, False, False, True),
+        (False, False, False, False, False),
+    ]
+    for step in steps:
+        step_files, step_hunks, step_patch, step_notes, step_text = step
+        reply = _context_object(
+            context,
+            step_files,
+            step_patch,
+            step_notes,
+            patch_budget,
+            hunks=step_hunks,
+            selection_text=step_text,
+        )
+        if step != asked:
+            reply["truncated"] = "the reply was too large; some of what was asked for was left out"
+        text = _framed(reply, budget)
+        if text is not None:
+            return text
+    # Every step but the bare object is bounded by the parser's caps (a
+    # path, a breadcrumb, a hunk header): this is a placeholder, not a path
+    # the tests can reach, but it still answers with a JSON object.
+    return json.dumps({"loaded": context.loaded, "truncated": "the reply was too large to send"})
+
+
+def _framed(reply: dict, budget: int) -> str | None:
+    """*reply* as the tool returns it when its frame fits *budget*, else
+    None: the text is measured as encode_message will escape it, and the
+    text measured is the text sent."""
+    text = json.dumps(reply, ensure_ascii=False, indent=1)
+    return text if len(json.dumps(text).encode("utf-8")) <= budget else None
+
+
+def _index_word(prefix: str, index: int, entry: dict) -> str:
+    where = entry.get("file")
+    return f"{prefix}[{index}]" + (f" ({where})" if isinstance(where, str) else "")
+
+
+def note_specs(
+    entries: Sequence[dict], resolve_path: Callable[[str], str | None]
+) -> list[diffnotes.NoteSpec] | str:
+    """annotate_diff's `notes` as NoteSpecs, or the refusal naming the
+    first entry that can't be one: a file that can't be a path in the
+    diff (*resolve_path* — gitloads.diff_file_path against the repository
+    — answers None), or both / neither of line and hunk. The rest of the
+    validation (the file in the diff, the line in a hunk) is the store's,
+    against the loaded diff; the schema has already checked the shapes."""
+    specs: list[diffnotes.NoteSpec] = []
+    for index, entry in enumerate(entries):
+        word = _index_word("notes", index, entry)
+        path = resolve_path(entry["file"])
+        if path is None:
+            return f"{word}: 'file' must be a path inside the repository"
+        if ("line" in entry) == ("hunk" in entry):
+            return f"{word}: give exactly one of 'line' and 'hunk'"
+        specs.append(
+            diffnotes.NoteSpec(
+                path,
+                entry["summary"],
+                rationale=entry.get("rationale"),
+                author=entry.get("author"),
+                side=entry.get("side"),
+                line=entry.get("line"),
+                hunk=entry.get("hunk"),
+            )
+        )
+    return specs
+
+
+def highlight_specs(
+    entries: Sequence[dict], resolve_path: Callable[[str], str | None]
+) -> list[diffnotes.HighlightSpec] | str:
+    """highlight_diff's `marks` as HighlightSpecs, or the refusal (as
+    note_specs); the range against the line is the store's check."""
+    specs: list[diffnotes.HighlightSpec] = []
+    for index, entry in enumerate(entries):
+        word = _index_word("marks", index, entry)
+        path = resolve_path(entry["file"])
+        if path is None:
+            return f"{word}: 'file' must be a path inside the repository"
+        specs.append(
+            diffnotes.HighlightSpec(
+                path,
+                entry["line"],
+                entry["start"],
+                entry["end"],
+                side=entry.get("side"),
+                tone=entry.get("tone"),
+            )
+        )
+    return specs
+
+
+def annotate_reply(ids: Sequence[str]) -> str:
+    noun = "note" if len(ids) == 1 else "notes"
+    return f"Added {len(ids)} {noun}: {', '.join(ids)}."
+
+
+def highlight_reply(count: int) -> str:
+    return f"Added {count} highlight{'' if count == 1 else 's'}."
+
+
+CLEAR_NOTHING = "Nothing to clear: 'notes' and 'highlights' are both false"
+
+
+def clear_targets(args: dict) -> tuple[bool, bool] | str:
+    """clear_diff_marks' (notes, highlights) from its arguments, or the
+    refusal: neither given clears both; one given alone means that kind —
+    `notes: true` the notes only, `notes: false` everything but the
+    notes; both false is nothing to do, refused rather than answered
+    with an empty "Cleared"."""
+    notes, highlights = args.get("notes"), args.get("highlights")
+    if notes is None and highlights is None:
+        return True, True
+    if notes is None:
+        notes = not highlights
+    elif highlights is None:
+        highlights = not notes
+    if not notes and not highlights:
+        return CLEAR_NOTHING
+    return bool(notes), bool(highlights)
+
+
+def clear_reply(notes: int | None, highlights: int | None, path: str | None) -> str:
+    parts = []
+    if notes is not None:
+        parts.append(f"{notes} note{'' if notes == 1 else 's'}")
+    if highlights is not None:
+        parts.append(f"{highlights} highlight{'' if highlights == 1 else 's'}")
+    where = f" from {path}" if path else ""
+    if not parts:
+        return f"Nothing cleared{where}."
+    return f"Cleared {' and '.join(parts)}{where}."
+
+
+_NO_HUNK_WORDS = {
+    diffmodel.KIND_BINARY: "it is binary",
+    diffmodel.KIND_TOO_LARGE: "it is too large to show",
+    diffmodel.KIND_MODE: "only its mode changed",
+    diffmodel.KIND_RENAME: "it was renamed without a change",
+}
+
+
+def hunk_refusal(path: str, hunk: int, file: diffmodel.File | None) -> str | None:
+    """Why show_diff can't reveal 1-based *hunk* of *path*: the file has
+    fewer (or none — a placeholder, a pure rename). None when it can."""
+    if file is None:
+        return f"{path} isn't in that diff"
+    count = len(file.hunks)
+    if count == 0:
+        return f"{path} has no hunks in that diff ({_NO_HUNK_WORDS.get(file.kind, 'nothing to show')})"
+    if hunk > count:
+        return f"{path} has {count} hunk{'' if count == 1 else 's'} in that diff, not {hunk}"
+    return None
+
+
+def reveal_reply(
+    breadcrumb: str,
+    path: str | None = None,
+    side: str = diffmodel.NEW,
+    line: int | None = None,
+    hunk: int | None = None,
+    file: diffmodel.File | None = None,
+    revealed: int | None = None,
+    holds_line: bool = True,
+) -> str:
+    """show_diff's reply: what loaded, and with *path* what was revealed —
+    the *line* (on *side*) or the 1-based *hunk* asked for, the file's hunk
+    count and the 1-based hunk the view landed on (*revealed*, 0-based as
+    the view counts). A *line* no hunk holds (*holds_line* False) says the
+    nearest hunk stands in."""
+    lines = [f"Loaded {breadcrumb} in the session's git page."]
+    if path is None:
+        return lines[0]
+    count = len(file.hunks) if file is not None else 0
+    landed = f"hunk {revealed + 1} of {count}" if revealed is not None and count else None
+    if count == 0:
+        why = _NO_HUNK_WORDS.get(file.kind, "no hunks") if file is not None else "no hunks"
+        lines.append(f"Revealed {path} ({why}).")
+    elif line is not None:
+        lines.append(f"Revealed {path}, line {line} ({side} side): {landed or 'no hunk'}.")
+        if not holds_line:
+            lines.append(
+                f"Line {line} ({side} side) isn't in a changed region of that diff; "
+                "the nearest hunk is shown."
+            )
+    elif hunk is not None:
+        lines.append(f"Revealed {path}, hunk {hunk} of {count}.")
+    else:
+        lines.append(f"Revealed {path}: {landed or f'{count} hunks'}.")
+    return "\n".join(lines)
 
 
 class DeferredResult:

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from collins import mcptools
+from collins import diffmodel, diffnotes, mcptools
 
 # ---- the tool table ----------------------------------------------------------
 
@@ -18,6 +18,10 @@ def test_serves_exactly_the_landed_tools():
         "set_session_title",
         "open_in_editor",
         "show_diff",
+        "diff_context",
+        "annotate_diff",
+        "highlight_diff",
+        "clear_diff_marks",
         "show_image",
         "notify_user",
         "attach_pr",
@@ -65,6 +69,10 @@ def test_enabled_tools_serves_only_what_is_switched_on():
         "set_session_title",
         "open_in_editor",
         "show_diff",
+        "diff_context",
+        "annotate_diff",
+        "highlight_diff",
+        "clear_diff_marks",
         "notify_user",
         "attach_pr",
         "start_session",
@@ -192,6 +200,461 @@ def test_show_diff_line_must_be_a_positive_integer():
         "show_diff", {"what": "staged", "file": "x.py", "line": 0}
     )
     assert "mode" in mcptools.validate_args("show_diff", {"what": "staged", "mode": "x"})
+
+
+def test_show_diff_takes_a_side_and_a_hunk():
+    """The native view's additions: a side for the line, a 1-based hunk as
+    an alternative address. Their exclusivity and their needing a file are
+    the handler's checks."""
+    ok = mcptools.validate_args
+    assert ok("show_diff", {"what": "staged", "file": "x.py", "line": 2, "side": "old"}) is None
+    assert ok("show_diff", {"what": "staged", "file": "x.py", "hunk": 2}) is None
+    assert "one of: old, new" in ok("show_diff", {"what": "staged", "file": "x.py", "side": "left"})
+    assert "at least 1" in ok("show_diff", {"what": "staged", "file": "x.py", "hunk": 0})
+    assert "integer" in ok("show_diff", {"what": "staged", "file": "x.py", "hunk": "2"})
+    description = mcptools.tool_schema("show_diff")["description"]
+    assert "hunk" in description and "diff_context" in description and "annotate_diff" in description
+
+
+def test_diff_tools_descriptions_name_show_diff_as_the_opener():
+    for name in ("diff_context", "annotate_diff", "highlight_diff"):
+        assert "show_diff" in mcptools.tool_schema(name)["description"], name
+    assert "show_diff" in mcptools.PAGE_NOT_OPEN
+
+
+def test_diff_context_args():
+    ok = mcptools.validate_args
+    assert ok("diff_context", {}) is None
+    assert ok("diff_context", {"files": False, "patch": True, "notes": True}) is None
+    assert "true or false" in ok("diff_context", {"patch": "yes"})
+    assert "Unexpected" in ok("diff_context", {"file": "x"})
+
+
+def test_annotate_diff_args():
+    ok = mcptools.validate_args
+    note = {"file": "a.py", "line": 3, "summary": "Off by one"}
+    assert ok("annotate_diff", {"notes": [note]}) is None
+    full = dict(note, side="old", rationale="Why", author="reviewer")
+    assert ok("annotate_diff", {"notes": [full]}) is None
+    by_hunk = {"file": "a.py", "hunk": 1, "summary": "s"}
+    assert ok("annotate_diff", {"notes": [by_hunk], "focus": True}) is None
+    assert "notes" in ok("annotate_diff", {})
+    assert "list" in ok("annotate_diff", {"notes": note})
+    assert "at least 1" in ok("annotate_diff", {"notes": []})
+    assert "at most 100" in ok("annotate_diff", {"notes": [note] * 101})
+    assert "notes[0]" in ok("annotate_diff", {"notes": ["x"]})
+    assert "missing 'summary'" in ok("annotate_diff", {"notes": [{"file": "a.py", "line": 1}]})
+    assert "notes[1]" in ok("annotate_diff", {"notes": [note, {"file": "a.py", "line": 1}]})
+    assert "unexpected 'lines'" in ok("annotate_diff", {"notes": [dict(note, lines=1)]})
+    assert "notes[0].line" in ok("annotate_diff", {"notes": [dict(note, line=0)]})
+    assert "notes[0].side" in ok("annotate_diff", {"notes": [dict(note, side="left")]})
+    assert "notes[0].summary" in ok("annotate_diff", {"notes": [dict(note, summary="")]})
+    assert "4000" in ok("annotate_diff", {"notes": [dict(note, rationale="r" * 4001)]})
+    assert "80" in ok("annotate_diff", {"notes": [dict(note, author="a" * 81)]})
+    assert "true or false" in ok("annotate_diff", {"notes": [note], "focus": 1})
+
+
+def test_highlight_diff_args():
+    ok = mcptools.validate_args
+    mark = {"file": "a.py", "line": 3, "start": 0, "end": 4}
+    assert ok("highlight_diff", {"marks": [mark]}) is None
+    assert ok("highlight_diff", {"marks": [dict(mark, side="old", tone="warning")], "focus": False}) is None
+    assert "at most 500" in ok("highlight_diff", {"marks": [mark] * 501})
+    assert "missing 'end'" in ok("highlight_diff", {"marks": [{"file": "a.py", "line": 3, "start": 0}]})
+    assert "at least 0" in ok("highlight_diff", {"marks": [dict(mark, start=-1)]})
+    assert "at least 1" in ok("highlight_diff", {"marks": [dict(mark, end=0)]})
+    assert "one of: match, current, info, warning, error, dim" in ok(
+        "highlight_diff", {"marks": [dict(mark, tone="loud")]}
+    )
+    assert "unexpected 'hunk'" in ok("highlight_diff", {"marks": [dict(mark, hunk=1)]})
+
+
+def test_clear_diff_marks_args():
+    ok = mcptools.validate_args
+    assert ok("clear_diff_marks", {}) is None
+    assert ok("clear_diff_marks", {"file": "a.py", "notes": True, "user": True, "highlights": False}) is None
+    assert "empty" in ok("clear_diff_marks", {"file": ""})
+    assert "true or false" in ok("clear_diff_marks", {"user": "yes"})
+    assert "Unexpected" in ok("clear_diff_marks", {"all": True})
+
+
+def test_every_diff_tool_has_a_switch_label():
+    """tokensettings' labels are GTK, but their table is what a switch is
+    titled with: a tool without one falls back to its bare name."""
+    source = (Path(__file__).parent.parent / "collins" / "tokensettings.py").read_text(encoding="utf-8")
+    for name in ("diff_context", "annotate_diff", "highlight_diff", "clear_diff_marks"):
+        assert f'"{name}": (' in source, name
+
+
+# ---- the diff tools' GTK-free half --------------------------------------------
+
+_DIFF = """\
+diff --git a/src/app.py b/src/app.py
+index 3b18e51..a1b2c3d 100644
+--- a/src/app.py
++++ b/src/app.py
+@@ -1,4 +1,5 @@ def main():
+ import os
+-import sys
++import sys, re
++import json
+
+ print(os.name)
+@@ -20,3 +21,3 @@ class App:
+     def run(self):
+-        return 1
++        return 2
+     # end
+diff --git a/img/logo.png b/img/logo.png
+index 3b18e51..a1b2c3d 100644
+Binary files a/img/logo.png and b/img/logo.png differ
+"""
+
+
+def _files():
+    return diffmodel.parse(_DIFF)
+
+
+def _resolve(raw: str) -> str | None:
+    return None if raw.startswith("/") or raw.startswith("..") else raw
+
+
+def test_note_specs_shape_the_arguments_and_default_the_side():
+    specs = mcptools.note_specs(
+        [
+            {"file": "src/app.py", "line": 3, "summary": "s", "rationale": "r", "author": "bot"},
+            {"file": "src/app.py", "hunk": 2, "side": "old", "summary": "t"},
+        ],
+        _resolve,
+    )
+    assert specs == [
+        diffnotes.NoteSpec("src/app.py", "s", rationale="r", author="bot", side=None, line=3, hunk=None),
+        diffnotes.NoteSpec("src/app.py", "t", side="old", hunk=2),
+    ]
+
+
+def test_note_specs_refuse_a_path_outside_the_repository_naming_the_entry():
+    got = mcptools.note_specs(
+        [
+            {"file": "src/app.py", "line": 3, "summary": "s"},
+            {"file": "../etc/passwd", "line": 1, "summary": "s"},
+        ],
+        _resolve,
+    )
+    assert got == "notes[1] (../etc/passwd): 'file' must be a path inside the repository"
+
+
+def test_note_specs_want_exactly_one_address():
+    both = mcptools.note_specs([{"file": "src/app.py", "line": 3, "hunk": 1, "summary": "s"}], _resolve)
+    assert both == "notes[0] (src/app.py): give exactly one of 'line' and 'hunk'"
+    neither = mcptools.note_specs([{"file": "src/app.py", "summary": "s"}], _resolve)
+    assert neither == "notes[0] (src/app.py): give exactly one of 'line' and 'hunk'"
+
+
+def test_highlight_specs_shape_the_arguments():
+    specs = mcptools.highlight_specs(
+        [{"file": "src/app.py", "line": 3, "start": 0, "end": 6, "tone": "error", "side": "new"}], _resolve
+    )
+    assert specs == [diffnotes.HighlightSpec("src/app.py", 3, 0, 6, side="new", tone="error")]
+    got = mcptools.highlight_specs([{"file": "/abs/x", "line": 1, "start": 0, "end": 1}], _resolve)
+    assert got == "marks[0] (/abs/x): 'file' must be a path inside the repository"
+
+
+def test_a_batch_with_one_bad_address_lands_nothing_and_names_the_offender():
+    """The rule the tools promise: validated whole against the loaded diff
+    (diffnotes.MarkStore over diffmodel.locate) before anything lands."""
+    files = _files()
+    store = diffnotes.MarkStore()
+    specs = mcptools.note_specs(
+        [
+            {"file": "src/app.py", "line": 3, "summary": "fine"},
+            {"file": "src/app.py", "line": 10, "summary": "in the gap"},
+            {"file": "src/app.py", "line": 22, "summary": "fine too"},
+        ],
+        _resolve,
+    )
+    assert store.add_notes(files, specs, diffnotes.AGENT) == (
+        "line 10 (new) of src/app.py is not in a hunk of the loaded diff"
+    )
+    assert store.notes() == []
+    missing = mcptools.note_specs(
+        [
+            {"file": "src/app.py", "line": 3, "summary": "fine"},
+            {"file": "gone.py", "line": 1, "summary": "x"},
+        ],
+        _resolve,
+    )
+    assert store.add_notes(files, missing, diffnotes.AGENT) == "gone.py is not in the loaded diff"
+    binary = mcptools.note_specs([{"file": "img/logo.png", "hunk": 1, "summary": "x"}], _resolve)
+    assert store.add_notes(files, binary, diffnotes.AGENT) == "img/logo.png has no hunk 1 (it has 0)"
+    assert store.notes() == []
+    marks = mcptools.highlight_specs(
+        [
+            {"file": "src/app.py", "line": 3, "start": 0, "end": 6},
+            {"file": "src/app.py", "line": 3, "start": 0, "end": 99},
+        ],
+        _resolve,
+    )
+    assert "range [0, 99)" in store.add_highlights(files, marks)
+    assert store.highlights() == []
+    good = mcptools.note_specs(
+        [
+            {"file": "src/app.py", "line": 3, "summary": "fine"},
+            {"file": "src/app.py", "hunk": 2, "summary": "x"},
+        ],
+        _resolve,
+    )
+    added = store.add_notes(files, good, diffnotes.AGENT)
+    assert [note.id for note in added] == ["n1", "n2"]
+    assert mcptools.annotate_reply([note.id for note in added]) == "Added 2 notes: n1, n2."
+    assert mcptools.annotate_reply(["n3"]) == "Added 1 note: n3."
+    assert mcptools.highlight_reply(1) == "Added 1 highlight."
+    assert mcptools.highlight_reply(3) == "Added 3 highlights."
+
+
+def test_diff_context_reply_is_one_json_object_with_1_based_hunks():
+    files = _files()
+    context = mcptools.DiffContext(
+        loaded="unstaged",
+        breadcrumb="working tree · unstaged",
+        files=tuple(files),
+        path="src/app.py",
+        hunk=1,
+        selection=("src/app.py", 0, 1, 3),
+        notes=(diffnotes.Note("n1", "agent", "src/app.py", "new", 3, "s", "r", "bot", "k"),),
+        highlights=(diffnotes.Highlight("h1", "src/app.py", "new", 3, 0, 6, "match", "k"),),
+    )
+    reply = json.loads(mcptools.diff_context_reply(context))
+    assert reply["loaded"] == "unstaged"
+    assert reply["breadcrumb"] == "working tree · unstaged"
+    assert reply["current"] == {
+        "file": "src/app.py",
+        "hunk": 2,
+        "header": "@@ -20,3 +21,3 @@ class App:",
+        "old": [20, 22],
+        "new": [21, 23],
+    }
+    assert reply["selection"] == {
+        "file": "src/app.py",
+        "hunk": 1,
+        "lines": 3,
+        "old": [2, 2],
+        "new": [2, 3],
+        "text": "-import sys\n+import sys, re\n+import json\n",
+    }
+    assert [entry["path"] for entry in reply["files"]] == ["src/app.py", "img/logo.png"]
+    app = reply["files"][0]
+    assert (app["kind"], app["additions"], app["deletions"]) == ("change", 3, 2)
+    assert [hunk["hunk"] for hunk in app["hunks"]] == [1, 2]
+    assert app["hunks"][0] == {
+        "hunk": 1,
+        "header": "@@ -1,4 +1,5 @@ def main():",
+        "old": [1, 4],
+        "new": [1, 5],
+    }
+    assert reply["files"][1]["hunks"] == [] and reply["files"][1]["kind"] == "binary"
+    assert "patch" not in app and "notes" not in reply
+    assert "previous_path" not in app
+
+
+def test_diff_context_reply_options_and_the_empty_page():
+    files = _files()
+    context = mcptools.DiffContext(loaded={"show": "abc"}, breadcrumb="abc Subject", files=tuple(files))
+    reply = json.loads(mcptools.diff_context_reply(context, files=False, notes=True))
+    assert reply["loaded"] == {"show": "abc"}
+    assert reply["current"] is None and reply["selection"] is None
+    assert "files" not in reply
+    assert reply["notes"] == [] and reply["highlights"] == []
+    with_notes = json.loads(
+        mcptools.diff_context_reply(
+            mcptools.DiffContext(
+                "staged",
+                "x",
+                (),
+                notes=(diffnotes.Note("n1", "user", "a", "old", 2, "s", None, None, "k"),),
+                highlights=(diffnotes.Highlight("h1", "a", "new", 3, 0, 6, "dim", "k"),),
+            ),
+            notes=True,
+        )
+    )
+    assert with_notes["notes"] == [
+        {"id": "n1", "source": "user", "file": "a", "side": "old", "line": 2, "summary": "s"}
+    ]
+    assert with_notes["highlights"] == [
+        {"id": "h1", "file": "a", "side": "new", "line": 3, "start": 0, "end": 6, "tone": "dim"}
+    ]
+    assert with_notes["files"] == []
+
+
+def test_diff_context_reply_carries_patches_up_to_the_cap():
+    files = _files()
+    context = mcptools.DiffContext("unstaged", "x", tuple(files))
+    reply = json.loads(mcptools.diff_context_reply(context, patch=True))
+    assert reply["files"][0]["patch"] == files[0].patch
+    assert reply["files"][1]["patch"] == files[1].patch
+    assert "patch_truncated" not in reply
+    budget = len(files[0].patch.encode("utf-8"))
+    capped = json.loads(mcptools.diff_context_reply(context, patch=True, patch_budget=budget))
+    assert capped["files"][0]["patch"] == files[0].patch
+    assert "patch" not in capped["files"][1] and capped["files"][1]["patch_omitted"] is True
+    assert "patch_truncated" in capped
+    assert mcptools.DIFF_CONTEXT_PATCH_BYTES == 200_000
+
+
+def _framed(text: str) -> bytes:
+    """The reply as mcpserver._send puts it on the wire."""
+    return mcptools.encode_message({"id": 1, "ok": True, "message": text})
+
+
+def _big_file(name: str = "big.txt", hunks: int = 1, width: int = 300_000) -> diffmodel.File:
+    huge = "x" * width
+    lines = tuple(diffmodel.Line(diffmodel.ADD, huge, None, i + 1) for i in range(4))
+    hunk = diffmodel.Hunk(0, "@@ -0,0 +1,4 @@", 0, 0, 1, 4, "", lines)
+    return diffmodel.File(name, None, "new", None, None, None, False, (hunk,) * hunks, 4, 0, "+" + huge, "h")
+
+
+def test_diff_context_reply_always_fits_one_wire_frame():
+    """A reply over MAX_LINE closes the shim's connection, so an oversize one
+    shrinks — the patches first, then the hunk lists, then the notes, then
+    the files, then the selection's text — and says so. The measure is
+    the framed reply, not the raw text: encode_message escapes every
+    quote and newline of the indented JSON once more."""
+    file = _big_file()
+    notes = tuple(
+        diffnotes.Note(f"n{i}", "agent", "big.txt", "new", 1, "s" * 4000, "r" * 4000, None, "k")
+        for i in range(200)
+    )
+    context = mcptools.DiffContext("unstaged", "x", (file,) * 3, notes=notes)
+    text = mcptools.diff_context_reply(context, patch=True, notes=True, patch_budget=10_000_000)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply
+    assert "files" in reply and "patch" not in reply["files"][0]
+    small = mcptools.diff_context_reply(mcptools.DiffContext("unstaged", "x", (file,)), patch=True)
+    assert "truncated" not in json.loads(small)
+    assert len(_framed(small)) <= mcptools.MAX_LINE
+
+
+def test_diff_context_reply_measures_the_framed_reply():
+    """The two replies that fit the raw measure but not the frame: notes
+    full of quotes, tabs and newlines (their escapes double in the frame),
+    and a plain files-only list of thousands of hunks (the indentation's
+    newlines do the same)."""
+    noisy = ('"\t\n' * 1000)[:4000]
+    notes = tuple(
+        diffnotes.Note(f"n{i}", "agent", "a.txt", "new", 1, noisy, noisy, None, "k") for i in range(116)
+    )
+    files = _files()
+    context = mcptools.DiffContext("unstaged", "x", tuple(files), notes=notes)
+    text = mcptools.diff_context_reply(context, files=True, notes=True)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply and "notes" not in reply
+
+    many = _big_file("many.txt", hunks=9000, width=1)
+    context = mcptools.DiffContext("unstaged", "x", (many,))
+    text = mcptools.diff_context_reply(context)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply
+    entry = reply["files"][0]
+    assert "hunks" not in entry and entry["hunks_omitted"] is True and entry["hunk_count"] == 9000
+    assert entry["path"] == "many.txt"
+
+
+def test_diff_context_reply_drops_the_selection_text_last():
+    """A selection across a hunk of huge lines is the one unbounded thing
+    the bare object carries: its text goes when nothing else is left."""
+    file = _big_file(width=400_000)
+    context = mcptools.DiffContext("unstaged", "x", (file,), selection=("big.txt", 0, 0, 3))
+    text = mcptools.diff_context_reply(context, files=False)
+    assert len(_framed(text)) <= mcptools.MAX_LINE
+    reply = json.loads(text)
+    assert "truncated" in reply
+    assert reply["selection"]["text_omitted"] is True and "text" not in reply["selection"]
+    assert reply["selection"]["lines"] == 4 and reply["selection"]["new"] == [1, 4]
+
+
+def test_diff_context_hunk_ranges_are_null_on_an_empty_side():
+    """A new file's hunk (`@@ -0,0 +1,4 @@`) has no old line for a note to
+    land on: the view pads that side to a row, the tool says null."""
+    file = _big_file(width=3)
+    reply = json.loads(mcptools.diff_context_reply(mcptools.DiffContext("unstaged", "x", (file,))))
+    assert reply["files"][0]["hunks"][0]["old"] is None
+    assert reply["files"][0]["hunks"][0]["new"] == [1, 4]
+    app = _files()[0]
+    reply = json.loads(mcptools.diff_context_reply(mcptools.DiffContext("unstaged", "x", (app,))))
+    assert reply["files"][0]["hunks"][0]["old"] == [1, 4]
+
+
+def test_note_schema_caps_match_diffnotes():
+    schema = mcptools.tool_schema("annotate_diff")
+    note = schema["inputSchema"]["properties"]["notes"]["items"]["properties"]
+    assert note["summary"]["maxLength"] == diffnotes.NOTE_MAX_CHARS
+    assert note["rationale"]["maxLength"] == diffnotes.NOTE_MAX_CHARS
+    assert mcptools.NOTE_MAX_CHARS == diffnotes.NOTE_MAX_CHARS
+
+
+def test_reveal_reply_names_the_load_the_spot_and_the_hunk():
+    files = _files()
+    app, logo = files
+    assert mcptools.reveal_reply("working tree · unstaged") == (
+        "Loaded working tree · unstaged in the session's git page."
+    )
+    assert mcptools.reveal_reply("x", "src/app.py", "new", 3, None, app, 0, True) == (
+        "Loaded x in the session's git page.\nRevealed src/app.py, line 3 (new side): hunk 1 of 2."
+    )
+    assert mcptools.reveal_reply("x", "src/app.py", "old", 21, None, app, 1, True).endswith(
+        "Revealed src/app.py, line 21 (old side): hunk 2 of 2."
+    )
+    nearest = mcptools.reveal_reply("x", "src/app.py", "new", 10, None, app, 0, False).split("\n")
+    assert nearest[1] == "Revealed src/app.py, line 10 (new side): hunk 1 of 2."
+    assert nearest[2] == (
+        "Line 10 (new side) isn't in a changed region of that diff; the nearest hunk is shown."
+    )
+    assert mcptools.reveal_reply("x", "src/app.py", "new", None, 2, app, 1, True).endswith(
+        "Revealed src/app.py, hunk 2 of 2."
+    )
+    assert mcptools.reveal_reply("x", "src/app.py", "new", None, None, app, 0, True).endswith(
+        "Revealed src/app.py: hunk 1 of 2."
+    )
+    assert mcptools.reveal_reply("x", "img/logo.png", "new", None, None, logo, None, True).endswith(
+        "Revealed img/logo.png (it is binary)."
+    )
+
+
+def test_hunk_refusal_words():
+    app, logo = _files()
+    assert mcptools.hunk_refusal("src/app.py", 1, app) is None
+    assert mcptools.hunk_refusal("src/app.py", 2, app) is None
+    assert mcptools.hunk_refusal("src/app.py", 3, app) == "src/app.py has 2 hunks in that diff, not 3"
+    assert mcptools.hunk_refusal("img/logo.png", 1, logo) == (
+        "img/logo.png has no hunks in that diff (it is binary)"
+    )
+    assert mcptools.hunk_refusal("gone", 1, None) == "gone isn't in that diff"
+
+
+def test_clear_reply_words():
+    assert mcptools.clear_reply(2, 3, None) == "Cleared 2 notes and 3 highlights."
+    assert mcptools.clear_reply(1, None, "a.py") == "Cleared 1 note from a.py."
+    assert mcptools.clear_reply(None, 1, None) == "Cleared 1 highlight."
+    assert mcptools.clear_reply(0, 0, None) == "Cleared 0 notes and 0 highlights."
+    assert mcptools.clear_reply(None, None, None) == "Nothing cleared."
+    assert mcptools.clear_reply(None, None, "a.txt") == "Nothing cleared from a.txt."
+
+
+def test_clear_targets_reads_one_flag_as_the_other_kind():
+    """Neither flag clears both; one alone names what to clear, an explicit
+    false the other kind; both false is refused, never 'Cleared .'."""
+    assert mcptools.clear_targets({}) == (True, True)
+    assert mcptools.clear_targets({"file": "a.txt"}) == (True, True)
+    assert mcptools.clear_targets({"notes": True}) == (True, False)
+    assert mcptools.clear_targets({"highlights": True}) == (False, True)
+    assert mcptools.clear_targets({"notes": False}) == (False, True)
+    assert mcptools.clear_targets({"highlights": False}) == (True, False)
+    assert mcptools.clear_targets({"notes": True, "highlights": True}) == (True, True)
+    assert mcptools.clear_targets({"notes": True, "highlights": False}) == (True, False)
+    assert mcptools.clear_targets({"notes": False, "highlights": False}) == mcptools.CLEAR_NOTHING
 
 
 def test_show_image_args():

@@ -3,7 +3,8 @@ name: collins-session-mcp-tools
 description: >-
   How the Collins MCP server works — the tools every launched Claude Code
   session can call back into the app with (set_session_title, open_in_editor,
-  show_diff, show_image, notify_user, attach_pr, start_session, read_terminal,
+  show_diff, diff_context, annotate_diff, highlight_diff, clear_diff_marks,
+  show_image, notify_user, attach_pr, start_session, read_terminal,
   run_in_terminal): the stdlib-only stdio shim (mcp_shim.py), the GTK-free
   tool table, validation, framing and runtime paths (mcptools.py), the Gio
   socket service (mcpserver.py), the handlers in app.py, session identity via
@@ -17,7 +18,7 @@ description: >-
 
 Every session Collins starts gets `--mcp-config <file>` naming one stdio
 server, `python3 -m collins.mcp_shim`, so the agent sees a `collins` server in
-`/mcp` with the tools the user left on. Nine tools today; each has an
+`/mcp` with the tools the user left on. Thirteen tools today; each has an
 on/off switch in Preferences → Built-in MCP tools (`mcp_tool_<name>`, derived
 from the tool table by `mcptools.default_tool_settings()` so a new tool can't
 ship without a switch). The config file itself is per app id under
@@ -100,6 +101,58 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   not-a-repo card ends the poll only while `page.opening` is False — a
   page that stood on the card when the tree turned up shows it until its
   open lands. Decisions in `gitloads.show_diff_load` / `diff_file_path`.
+  `side` (`old`/`new`) and `hunk` (1-based, exclusive with `line`; past
+  the file's count → `mcptools.hunk_refusal`, never a silent hunk 1)
+  joined the schema in PR 5; `line`, `hunk` and `side` all need `file`.
+  The reply is `mcptools.reveal_reply` (the load, then the file, the
+  spot, the hunk count and the 1-based hunk landed on).
+- `diff_context`, `annotate_diff`, `highlight_diff`, `clear_diff_marks` —
+  the page-reading and marking half of the diff tools, all behind
+  `App._mcp_on_diff_page(tab, act)`: refused with `mcptools.PAGE_NOT_OPEN`
+  (which names `show_diff`) when the tab has no page or one that is
+  neither `opened` nor `opening`; run at once on a settled page; and
+  otherwise waited for behind a `DeferredResult` through
+  `app._await_page_settled` (the one settle poll `_ShowDiff` uses too —
+  the watch or the footer's tick may have a reload out), so an agent
+  calling right after an edit isn't flaky. `diff_context` is
+  `mcptools.diff_context_reply(page.context(), files, patch, notes)`:
+  **one JSON object** (hunks 1-based with header / old / new ranges — a
+  side the hunk has no lines on, a new file's old side, is `null`, not
+  the view's padded `[0, 0]` — the current file + hunk, the selection's
+  spans and text, the files, the patches under
+  `DIFF_CONTEXT_PATCH_BYTES` (200 kB, a file that doesn't fit is
+  `patch_omitted` and so are the later ones), the notes and highlights),
+  shrunk stepwise — patches, then the hunk lists (`hunks_omitted` +
+  `hunk_count` per file), then notes, then the file list, then the
+  selection's text (`text_omitted`) — with a `truncated` key so it always
+  fits one frame. **The measure is the framed reply**, `json.dumps(text)`
+  as `encode_message` will escape it (indent-1 JSON doubles every newline
+  and quote on the wire; a raw-bytes measure passed replies that closed
+  the connection) with the same 16 KiB margin as `terminal_reply`.
+  `mcptools.NOTE_MAX_CHARS` (diffnotes') is the schema's `maxLength` for
+  a summary and a rationale. `annotate_diff` /
+  `highlight_diff` shape their batches with `mcptools.note_specs` /
+  `highlight_specs` (each refuses a non-repo path by index, `notes[1]
+  (x.py)`, and a note with both or neither of `line` / `hunk`; the path
+  resolver, `App._mcp_diff_path_resolver(tab, page)`, works against
+  `page.repo_root` — the diff the agent sees — not the tab's live cwd,
+  which the agent may have `cd`ed out of since `show_diff`; the cwd only
+  breaks a relative path's tie, and a page on its card answers
+  `PAGE_NOT_OVER_A_REPO`) and hand
+  them to `page.add_notes(specs, focus, source=diffnotes.AGENT)` /
+  `add_highlights(specs, focus)` — the `diffnotes.MarkStore` lands the
+  batch whole or not at all and its reason names the first bad address
+  (`line 99 (new) of a.txt is not in a hunk of the loaded diff`); the
+  replies are prefixed `No notes added: ` / `No highlights added: `.
+  Highlight offsets are code points (diffnotes' rule; the schema says
+  so). `clear_diff_marks`' flags are read by `mcptools.clear_targets`:
+  neither given clears both, one alone names the kind (`notes: true` the
+  notes only, `notes: false` the highlights only), both false is refused
+  (`CLEAR_NOTHING`) — an explicit false beside an omitted key once
+  cleared nothing and answered `Cleared .`; `user` only widens the notes;
+  two `clear_marks` calls so the reply (`mcptools.clear_reply`) counts
+  each. The switch labels are in
+  `tokensettings._MCP_TOOL_LABELS`.
 - `show_image` — a local path or an `http(s)` URL: URLs are fetched on a
   worker thread (`remoteimages.py`, stdlib urllib, redirects to http(s) only,
   size and content-type gated, into the pruned cache dir; localhost is
@@ -149,10 +202,29 @@ shim — so it should arm and ride the busy→idle finish edge
 4. Add the tool to `prefslayout` if the switch group's order is pinned, to
    the README's "Tools the session itself can call" bullet, `docs/guide`, and
    the `docs/guide/how-it-works.md` token-use list.
-5. An e2e check with a real `App` and a fake shim connection (see
-   `scripts/check_terminal_tools.py`, `check_start_session.py`,
-   `check_show_diff.py`); the protocol itself is unit-tested with a fake
-   service (`tests/test_mcpserver.py`, `test_mcp_shim.py`).
+5. An e2e check with a real `App`: either call the handler directly
+   (`scripts/check_terminal_tools.py`, `check_start_session.py`) or go
+   the whole way through the socket as `check_show_diff.py` does — its
+   `claude` stub spawns the real `collins.mcp_shim` from the tab's
+   `--mcp-config` file (so the shim's ancestry reaches the tab and the
+   pid lookup finds the caller), speaks JSON-RPC to it, and relays
+   `tools/list` / `tools/call` requests the script drops as files; that
+   is how a `tools/list` reflecting a switch, a schema refusal at the
+   door and a `DeferredResult` crossing the socket are proven. The
+   protocol itself is unit-tested with a fake service
+   (`tests/test_mcpserver.py`, `test_mcp_shim.py`).
+6. The acceptance pass with the real CLI (the spec's "a real session
+   calling each tool"): a throwaway `App` behind the headless display
+   with `HOME` moved to a scratch dir carrying *copies* of `~/.claude.json`
+   and `~/.claude/.credentials.json` (delete the dir afterwards — it holds
+   a token) and a scratch `~/.claude/settings.json` of `{"permissions":
+   {"allow": ["mcp__collins"]}}` so no permission prompt blocks the turn;
+   `trust.trust_dir(repo)` against `COLLINS_CLAUDE_CONFIG` (the copy) —
+   a nested temp repository is its own project and inherits nothing;
+   `win.start_background_session(repo, options=SessionOptions(model=
+   "haiku"))`, `inject_prompt_unfocused` once `takes_prompt()`, then read
+   the `tool_use` / `tool_result` blocks off the scratch transcript. The
+   diff tools passed it on 2026-09-06 (CLI 2.1.261): seven calls, 28 s.
 
 ## The lightbox and attachments
 

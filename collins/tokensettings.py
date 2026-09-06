@@ -80,9 +80,28 @@ _MCP_TOOL_LABELS = {
     "show_diff": (
         N_("Show diffs in the git page"),
         N_(
-            "show_diff — open the git page on a working-tree, branch or commit diff, at a file "
-            "and line"
+            "show_diff — open the git page on a working-tree, branch or commit diff, at a file, "
+            "line or hunk"
         ),
+    ),
+    "diff_context": (
+        N_("Read the git page"),
+        N_(
+            "diff_context — what the page shows: the diff, the hunk and lines you are on, the "
+            "files, the notes"
+        ),
+    ),
+    "annotate_diff": (
+        N_("Annotate the git page"),
+        N_("annotate_diff — note cards under a hunk, anchored to a line of the diff"),
+    ),
+    "highlight_diff": (
+        N_("Highlight in the git page"),
+        N_("highlight_diff — attention marks on character ranges of the diff's lines"),
+    ),
+    "clear_diff_marks": (
+        N_("Clear its marks in the git page"),
+        N_("clear_diff_marks — remove the notes and highlights it put on the page"),
     ),
     "show_image": (
         N_("Show images"),

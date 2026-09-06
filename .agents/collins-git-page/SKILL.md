@@ -416,7 +416,8 @@ too**: staging a range out of hunk 0 (or an edit above that adds or
 removes lines) shifts every later hunk's start, and each of them rebuilds
 — widget, selection and notes gone. The e2e's survivals put the change in
 the *last* hunk on purpose. A key without the spans (the body digest plus
-an ordinal among equal bodies) would keep them; it is a PR 5 item.
+an ordinal among equal bodies) would keep them; it is a follow-up (the
+spec's "Later" list), not part of the five-PR stack.
 
 The widgets: `DiffView` owns one `MarkStore` (`_store`), `_apply_marks`
 hands each `_HunkSection` its share (`set_marks(notes, highlights)`:
@@ -443,10 +444,15 @@ unrealized within a few milliseconds of its focus leaving segfaults GTK's
 Wayland input method (the compositor's text-input reply lands after the
 widget is gone; `gtk_widget_get_display: assertion 'GTK_IS_WIDGET'` then
 `wl_proxy_get_version` in the trace); measured with
-`scripts/probe_diffview.py --notes --layout split`. PR 5's tools land on
-`add_notes(specs, focus, source)` → ids or the reason, `add_highlights
-(specs, focus)`, `clear_marks(...)`, `notes()` / `highlights()`;
-`set_agent_notes_shown` folds the agent's cards. Probes: `note_rows(path,
+`scripts/probe_diffview.py --notes --layout split`. The agent's tools
+(`annotate_diff`, `highlight_diff`, `clear_diff_marks`, `diff_context` —
+`collins-session-mcp-tools`) land on `add_notes(specs, focus, source)` →
+ids or the reason, `add_highlights(specs, focus)`, `clear_marks(...)`,
+`notes()` / `highlights()`, and read `GitPage.context()` → a
+`mcptools.DiffContext` (the `Loaded`, the breadcrumb, `DiffView.files`,
+`current()`, the selection, the marks; empty files while the view isn't
+up); `set_agent_notes_shown` folds the agent's cards. The ids are one
+serial across notes and highlights (`n1`, `n2`, `h3`). Probes: `note_rows(path,
 hunk)`, `note_marks`, `highlight_rows`, `editing()`, `note_editor_text` /
 `set_note_editor_text`, `commit_note` / `cancel_note`.
 
@@ -586,10 +592,22 @@ and the page holding Escape, an empty save refused, Ctrl+Enter splitting
 summary and rationale, `}` / `{`, `E` and Esc, the menu's *Add note*,
 `add_notes` / `add_highlights`, `a`, delete, the clears, and an edit to
 hunk 1 reloading with hunk 0's note kept and hunk 1's dropped.
-`scripts/check_show_diff.py` drives the tool end to end through the MCP
-socket on a temp repository (a `second` commit on `feat` so the branch
-diff holds `a.txt`, `b.txt` staged): the reply lines, a missing file
-refused by name, a line no hunk holds noted, the keyboard never taken.
+`scripts/check_show_diff.py` drives the five diff tools end to end
+through the MCP socket on a temp repository (a `second` commit on `feat`
+so the branch diff holds `a.txt`, `b.txt` staged): its `claude` stub
+spawns the real shim from the tab's `--mcp-config` and relays JSON-RPC
+requests the script drops as files, so every reply crossed stdio, the
+socket, the pid lookup and the dispatch. It checks the tool list, the
+four page tools refused with `PAGE_NOT_OPEN` before any page, show_diff's
+reply lines (the load, the spot, the side, the hunk landed on), a missing
+file refused by name, a line no hunk holds noted, a hunk past the count
+refused, the old side, a switched-off tool refused and gone from the
+list, `diff_context`'s JSON (load, current, files / hunks, patch and
+notes only when asked), a note batch with one bad address landing
+nothing, a good one's cards under the hunk, a highlight painted
+(`highlight_rows`) and a bad range refused, the clears' counts (a lone
+`notes: false` clearing the highlights, both false refused) — and the
+keyboard never taken, `focus: true` included.
 `scripts/check_git_prefs.py`: the seven Git rows, the settle-timer rules
 on the parent-branch entry. `scripts/probe_diffview.py` draws a real
 repository's diff to a PNG and prints the timings above; `--notes`
