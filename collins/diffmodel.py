@@ -571,8 +571,17 @@ def parse_numstat(text: object) -> dict[str, tuple[int, int]]:
     """
     if not isinstance(text, str) or not text:
         return {}
+    truncated = False
+    if len(text) > MAX_PATCH_CHARS:
+        # The same bound parse() puts on the stream, before the whole text
+        # is tokenized. The cut lands inside a record, whose remains would
+        # read as a shortened path: dropped.
+        text = text[:MAX_PATCH_CHARS]
+        truncated = True
     counts: dict[str, tuple[int, int]] = {}
     tokens = text.split("\0") if "\0" in text else text.split("\n")
+    if truncated:
+        tokens.pop()
     index = 0
     while index < len(tokens):
         record = tokens[index]

@@ -174,7 +174,11 @@ extension's staging arithmetic ported (partial-patch writers, `plan_file` /
 `plan_hunk` / `plan_lines` → a `Plan` or a `Refusal`, the confirm and toast
 words; `parse_file_patch` answers only the stanza whose path was asked
 for and `_same_file` re-checks it before a patch is written, so a re-read
-can never plan another file's change under this file's confirm; the
+can never plan another file's change under this file's confirm, and
+`_became_rename` refuses stale — the view reloads — when the fresh stanza
+is a rename the shown file was not, in `plan_hunk` as in the shared
+`_guard_partial`, since a partial patch keeps the `rename from` / `rename
+to` lines and `git apply --cached` would move the file whole; the
 planners take `dirty` — the page must pass whether `DiffRead.status`
 lists the path under unstaged — and a revert's confirm then opens with
 `revert_warning`, the spec's "may conflict" sentence); and `gitops.py`

@@ -920,7 +920,7 @@ def test_plan_lines_refuses_in_order_binary_too_large_untracked_rename_empty_unr
         "index 1111111..2222222 100644",
         "similarity index 90%\nrename from e.txt\nrename to f.txt\nindex 1111111..2222222 100644",
     )
-    assert refusal(fresh=renamed) == "renames stage whole: use Stage file"
+    assert refusal(fresh=renamed) == "f.txt changed since it was loaded, reloading (it is a rename now)"
 
 
 def test_plan_lines_refuses_when_the_spans_or_the_lines_no_longer_match_the_disk():
@@ -1139,8 +1139,8 @@ def test_a_fresh_stanza_for_another_path_is_never_taken_as_the_files():
         "index 1111111..2222222 100644",
         "similarity index 90%\nrename from e.txt\nrename to f.txt\nindex 1111111..2222222 100644",
     )
-    assert gitpatch.parse_file_patch(renamed, "f.txt", "e.txt").previous_path == "e.txt"
-    assert gitpatch.parse_file_patch(renamed, "e.txt", "e.txt") is None
+    assert gitpatch.parse_file_patch(renamed, "f.txt").previous_path == "e.txt"
+    assert gitpatch.parse_file_patch(renamed, "e.txt") is None
     none = "cannot read the patch for f.txt: no stanza for it"
     assert reason(gitpatch.plan_hunk(STAGING, 1, UNSTAGED, other)) == none
     assert reason(gitpatch.plan_hunk(STAGING, None, UNSTAGED, other)) == none
@@ -1557,9 +1557,39 @@ def test_a_selection_in_a_rename_is_refused_whether_the_view_or_only_the_patch_s
     assert (flagged.kind, flagged.previous_path) == (KIND_RENAME, "f.txt")
     whole = Refusal("renames unstage whole: use Unstage file")
     assert lines_plan(flagged, NEW, 2, NEW, 2, STAGED, text) == whole
+    # The view loaded a plain change and the path became a rename's
+    # destination since: stale, so the view reloads and shows the rename.
+    became = Refusal("g.txt changed since it was loaded, reloading (it is a rename now)", stale=True)
     unflagged = replace(flagged, kind=KIND_CHANGE, previous_path=None)
-    assert lines_plan(unflagged, NEW, 2, NEW, 2, STAGED, text) == whole
+    assert lines_plan(unflagged, NEW, 2, NEW, 2, STAGED, text) == became
     assert _index(repo, "g.txt") == THIRTY.replace("line 2\n", "line 2 changed\n")
+
+
+@needs_git
+def test_a_hunk_of_a_file_that_became_a_rename_since_the_load_is_refused_not_renamed_in_the_index(repo):
+    # The shown file is a plain change whose hunk spans still match the
+    # fresh patch's; the fresh patch is a rename. A partial patch written
+    # from it would carry `rename from` / `rename to`, and `git apply
+    # --cached` would move the whole file in the index behind "stage hunk 1".
+    _write(repo, "f.txt", THIRTY.replace("line 2\n", "line 2 changed\n"))
+    shown, _text = _loaded(repo)
+    assert (shown.kind, shown.previous_path) == (KIND_CHANGE, None)
+    _git(repo, "mv", "f.txt", "g.txt")
+    _git(repo, "add", "g.txt")
+    text = _file_patch(repo, "g.txt", staged=True, previous="f.txt")
+    assert "rename from f.txt" in text
+    stale = replace(shown, path="g.txt")
+    became = Refusal("g.txt changed since it was loaded, reloading (it is a rename now)", stale=True)
+    for hunk_index in (0, None):
+        assert gitpatch.plan_hunk(stale, hunk_index, STAGED, text) == became
+    # Nothing moved: the rename is still staged whole, as `git mv` left it.
+    assert _index(repo, "g.txt") == THIRTY.replace("line 2\n", "line 2 changed\n")
+    assert "rename from f.txt" in _git(repo, "diff", "--cached", "-M", "--", "f.txt", "g.txt")
+    # A view that shows the rename takes the file whole, both paths.
+    flagged = parse_one(text)
+    assert gitpatch.plan_hunk(flagged, 0, STAGED, text) == Plan(
+        OP_RESET, ("f.txt", "g.txt"), None, None, "Unstaged g.txt"
+    )
 
 
 # staging.integration.test.ts

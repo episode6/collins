@@ -507,16 +507,13 @@ def unreadable_reason(file: File) -> str | None:
     return None
 
 
-def parse_file_patch(text: object, path: str, previous_path: str | None = None) -> File | None:
+def parse_file_patch(text: object, path: str) -> File | None:
     """The File a single-file `git diff -- <path>` (or `<old> <new>` for a
     rename) re-read at action time describes: the stanza whose new-side
     path is *path*, or None when the text has none — never another
     stanza, whatever git returned. A lone stanza for a different path was
     once taken as the file's; that planned, confirmed and toasted a
-    mutation of one file while the patch touched another. *previous_path*
-    is what the view knows of a rename; the planners compare it
-    (`_same_file`) once the stanza is found."""
-    del previous_path
+    mutation of one file while the patch touched another."""
     for file in diffmodel.parse(text):
         if file.path == path:
             return file
@@ -532,6 +529,18 @@ def _same_file(shown: File, fresh: File, wording: _Wording) -> Refusal | None:
     the guards as "renames … whole"."""
     if fresh.path != shown.path:
         return wording.changed(shown.path, _("the patch names {other}").format(other=fresh.path))
+    return None
+
+
+def _became_rename(shown: File, fresh: File, wording: _Wording) -> Refusal | None:
+    """The refusal when the fresh stanza is a rename the shown file was not:
+    the path became a rename's destination since the load. A partial patch
+    written from it would carry the `rename from` / `rename to` header
+    lines, and `git apply --cached` would perform the whole index-level
+    rename behind a hunk or a selection. Stale, so the view reloads and
+    shows the rename, whose file button takes both paths."""
+    if fresh.kind == diffmodel.KIND_RENAME and not _is_rename(shown):
+        return wording.changed(shown.path, _("it is a rename now"))
     return None
 
 
@@ -657,7 +666,7 @@ def _guard_partial(
         return Refusal(wording.whole(file.path, "rename"))
     if not isinstance(fresh_patch, str) or not fresh_patch.strip():
         return wording.nothing(file.path)
-    fresh = parse_file_patch(fresh_patch, file.path, file.previous_path)
+    fresh = parse_file_patch(fresh_patch, file.path)
     unreadable = _("no stanza for it") if fresh is None else unreadable_reason(fresh)
     if fresh is None or unreadable is not None:
         return Refusal(_("cannot read the patch for {path}: {why}").format(path=file.path, why=unreadable))
@@ -674,8 +683,9 @@ def _guard_partial(
         return Refusal(
             _("cannot {action} {path} by hunk: {why}").format(action=wording.verb, path=file.path, why=mode)
         )
-    if fresh.kind == diffmodel.KIND_RENAME:
-        return Refusal(wording.whole(file.path, "rename"))
+    renamed = _became_rename(file, fresh, wording)
+    if renamed is not None:
+        return renamed
     if fresh.kind == diffmodel.KIND_DELETED and deleted_whole:
         return _DELETED_WHOLE
     if fresh.kind in (diffmodel.KIND_NEW, diffmodel.KIND_DELETED):
@@ -821,13 +831,16 @@ def plan_hunk(
         return plan_file(file, load)
     if not isinstance(fresh_patch, str) or not fresh_patch.strip():
         return plan_file(file, load) if file.kind == diffmodel.KIND_NEW else wording.nothing(file.path)
-    fresh = parse_file_patch(fresh_patch, file.path, file.previous_path)
+    fresh = parse_file_patch(fresh_patch, file.path)
     unreadable = _("no stanza for it") if fresh is None else unreadable_reason(fresh)
     if fresh is None or unreadable is not None:
         return Refusal(_("cannot read the patch for {path}: {why}").format(path=file.path, why=unreadable))
     other = _same_file(file, fresh, wording)
     if other is not None:
         return other
+    renamed = _became_rename(file, fresh, wording)
+    if renamed is not None:
+        return renamed
     if fresh.kind == diffmodel.KIND_BINARY:
         return Refusal(wording.whole(file.path, "binary"))
     unsafe = unsafe_path_reason(fresh.path)

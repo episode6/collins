@@ -463,6 +463,16 @@ def test_parse_numstat_tolerates_garbage(text):
     assert parse_numstat(text) == {}
 
 
+def test_parse_numstat_is_bounded_like_the_stream_before_it_is_tokenized(monkeypatch):
+    monkeypatch.setattr(diffmodel, "MAX_PATCH_CHARS", 20)
+    # 20 characters end inside the third record's path: it is dropped, not
+    # read as a file called "cccc".
+    text = "1\t1\ta\0" "1\t1\tb\0" "1\t1\tccccccccccc\0" "1\t1\td\0"
+    assert parse_numstat(text) == {"a": (1, 1), "b": (1, 1)}
+    assert parse_numstat(text.replace("\0", "\n")) == {"a": (1, 1), "b": (1, 1)}
+    assert parse_numstat("1\t1\ta\0" "1\t1\tb\0") == {"a": (1, 1), "b": (1, 1)}  # under the cap: whole
+
+
 def test_parse_numstat_bounds_paths_and_the_file_count(monkeypatch):
     long_path = "x" * (diffmodel.MAX_PATH_CHARS + 1)
     assert parse_numstat(f"1\t1\t{long_path}\0" "1\t1\tok\0") == {"ok": (1, 1)}
