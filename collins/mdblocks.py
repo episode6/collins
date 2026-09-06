@@ -51,6 +51,12 @@ MAX_DEPTH = 6
 # GitHub's alert kinds, as written in the marker (`> [!NOTE]`), lowercased
 # for `Quote.kind`.
 ALERT_KINDS = ("note", "tip", "important", "warning", "caution")
+# What a table renders as a grid: the rows and columns past these caps are
+# a count in a "more on GitHub" link (`cap_table`). Parsing is unbounded —
+# a 5 000-row table parses in a few tens of ms — the cap is on the cell
+# labels a grid builds, which is layout the main loop pays for.
+TABLE_MAX_ROWS = 50
+TABLE_MAX_COLUMNS = 8
 
 _md = None
 _import_error: str | None = None
@@ -248,6 +254,24 @@ def line_cost(block: Block, image_lines: int = 4) -> int:
     if isinstance(block, ImageRow):
         return image_lines
     return 1
+
+
+def cap_table(table: Table) -> tuple[Table, int, int]:
+    """*table* trimmed to what a grid draws — `TABLE_MAX_COLUMNS` columns
+    of `TABLE_MAX_ROWS` rows, every row squared to the header's width (a
+    short row padded with empty cells, a long one cut, as GitHub squares
+    them) — and the counts of rows and columns left out. The caps bound
+    the cell labels one body can ask for; the counts feed the link to the
+    rest on GitHub."""
+    width = len(table.header)
+    columns = min(width, TABLE_MAX_COLUMNS)
+    aligns = tuple(table.aligns[:columns]) + (None,) * (columns - len(table.aligns[:columns]))
+    rows = tuple(
+        tuple(row[:columns]) + ("",) * (columns - len(row[:columns]))
+        for row in table.rows[:TABLE_MAX_ROWS]
+    )
+    shown = Table(aligns, tuple(table.header[:columns]), rows, table.source)
+    return shown, len(table.rows) - len(rows), width - columns
 
 
 _IMG_TAG_RE = re.compile(r"<img\b[^<>]{0,1000}>", re.I)

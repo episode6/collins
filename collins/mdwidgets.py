@@ -3,10 +3,11 @@
 One widget per block: paragraphs and headings are the selectable wrapped
 labels the page always used (a heading's markup wrapped in a size span),
 a list is a column of glyph-plus-content rows that nests structurally, a
-quote a bordered column, a rule a separator, an image row whatever the
-page's own image slot builder makes of it. Blocks with no widget of their
-own yet — tables, code blocks, `<details>` — render as a label of their
-escaped source, monospace for code: visibly plain, never dropped.
+quote a bordered column, a rule a separator, a table a grid of cell labels
+that scrolls sideways on its own (the page body never does), an image row
+whatever the page's own image slot builder makes of it. Blocks with no
+widget of their own yet — code blocks, `<details>` — render as a label of
+their escaped source, monospace for code: visibly plain, never dropped.
 
 A widget budget bounds what one body can build (`Budget`): past it, the
 rest of the blocks become one plain label of their source. The cap is on
@@ -63,11 +64,13 @@ def build(
     budget: Budget,
     image_row: Callable[[tuple], Gtk.Widget],
     depth: int = 0,
+    page_url: str = "",
 ) -> list[Gtk.Widget]:
     """Widgets for *blocks*, in order, spending *budget*; *image_row* is
     what turns an `ImageRow`'s images into a widget (the page's own slot
-    builder). Once the budget runs dry the remaining blocks come back as a
-    single plain label of their source."""
+    builder); *page_url* is where the body lives on GitHub — what a capped
+    table's "more" link opens. Once the budget runs dry the remaining
+    blocks come back as a single plain label of their source."""
     widgets: list[Gtk.Widget] = []
     for index, block in enumerate(blocks):
         if budget.left <= 0:
@@ -75,7 +78,7 @@ def build(
             if rest:
                 widgets.append(plain_label(rest))
             break
-        widgets.append(build_one(block, budget, image_row, depth))
+        widgets.append(build_one(block, budget, image_row, depth, page_url))
     return widgets
 
 
@@ -90,6 +93,7 @@ def build_one(
     budget: Budget,
     image_row: Callable[[tuple], Gtk.Widget],
     depth: int = 0,
+    page_url: str = "",
 ) -> Gtk.Widget:
     """The widget for one block. Containers recurse through `build`."""
     if isinstance(block, mdblocks.Text):
@@ -107,15 +111,17 @@ def build_one(
         rule.add_css_class("pr-md-rule")
         return rule
     if isinstance(block, mdblocks.ListBlock):
-        return _list(block, budget, image_row, depth)
+        return _list(block, budget, image_row, depth, page_url)
     if isinstance(block, mdblocks.Quote):
-        return _quote(block, budget, image_row, depth)
+        return _quote(block, budget, image_row, depth, page_url)
+    if isinstance(block, mdblocks.Table):
+        return _table(block, budget, page_url)
     if isinstance(block, mdblocks.CodeBlock):
         budget.take()
         label = text_label(f"<tt>{GLib.markup_escape_text(block.text.rstrip())}</tt>", block.text)
         label.add_css_class("pr-md-code")
         return label
-    # Tables and <details> wait for their own widgets: their source, escaped.
+    # <details> waits for its own widget: its source, escaped.
     budget.take()
     return plain_label(block.source)
 
@@ -148,7 +154,9 @@ def heading_label(block: mdblocks.Heading) -> Gtk.Label:
     return label
 
 
-def _list(block: mdblocks.ListBlock, budget: Budget, image_row, depth: int) -> Gtk.Widget:
+def _list(
+    block: mdblocks.ListBlock, budget: Budget, image_row, depth: int, page_url: str = ""
+) -> Gtk.Widget:
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
     column.add_css_class("pr-md-list")
     if block.ordered:
@@ -183,14 +191,16 @@ def _list(block: mdblocks.ListBlock, budget: Budget, image_row, depth: int) -> G
         budget.take()
         row.append(mark)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
-        for widget in build(list(item.children), budget, image_row, depth + 1):
+        for widget in build(list(item.children), budget, image_row, depth + 1, page_url):
             content.append(widget)
         row.append(content)
         column.append(row)
     return column
 
 
-def _quote(block: mdblocks.Quote, budget: Budget, image_row, depth: int) -> Gtk.Widget:
+def _quote(
+    block: mdblocks.Quote, budget: Budget, image_row, depth: int, page_url: str = ""
+) -> Gtk.Widget:
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
     column.add_css_class("pr-md-quote")
     if block.kind != "plain":
@@ -200,6 +210,115 @@ def _quote(block: mdblocks.Quote, budget: Budget, image_row, depth: int) -> Gtk.
         title.add_css_class("pr-md-alert-title")
         budget.take()
         column.append(title)
-    for widget in build(list(block.children), budget, image_row, depth + 1):
+    for widget in build(list(block.children), budget, image_row, depth + 1, page_url):
         column.append(widget)
     return column
+
+
+def _table(block: mdblocks.Table, budget: Budget, page_url: str = "") -> Gtk.Widget:
+    """A grid of cell labels — the header row bold, each column's text
+    aligned as the delimiter row asked — inside a scroller that scrolls
+    sideways only and takes its natural height (the pattern the Files
+    view's patch scroller uses), so a wide table scrolls within its own
+    band and the page body never does. Rows and columns past
+    `mdblocks.TABLE_MAX_ROWS` / `TABLE_MAX_COLUMNS` — or past the widget
+    budget, which each row spends one leaf of (the columns are capped at
+    eight, a constant factor, the way a list item's glyph rides along
+    with its label) — are a dim link to the rest on GitHub, under the
+    grid. Cells are inline-only markup (mdblocks degrades an image in one
+    to its alt-text anchor), each wrapping past `_CELL_WRAP_CHARS` so one
+    long cell can't make the grid a mile wide."""
+    shown, more_rows, more_columns = mdblocks.cap_table(block)
+    grid = Gtk.Grid(column_spacing=0, row_spacing=0)
+    grid.add_css_class("pr-md-table")
+    grid.set_halign(Gtk.Align.START)
+    budget.take()
+    for column, cell in enumerate(shown.header):
+        label = _cell(f"<b>{cell}</b>", shown.aligns[column])
+        label.add_css_class("pr-md-th")
+        grid.attach(label, column, 0, 1, 1)
+    for index, row in enumerate(shown.rows):
+        if not budget.take():
+            # The budget bounds rows too, not only the caps: what is left
+            # of the table joins the count in the link.
+            more_rows += len(shown.rows) - index
+            break
+        for column, cell in enumerate(row):
+            label = _cell(cell, shown.aligns[column])
+            label.add_css_class("pr-md-td")
+            grid.attach(label, column, index + 1, 1, 1)
+    scroller = _TableScroller(child=grid, hexpand=True)
+    scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+    scroller.set_propagate_natural_height(True)
+    # The viewport gives its child its *minimum* width by default, which
+    # for wrapping labels is a character or two: the grid would squeeze
+    # every column to a sliver and never scroll. Natural policy starts the
+    # scrolling where the grid's natural width overruns the panel's.
+    scroller.get_child().set_hscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    scroller.add_css_class("pr-md-table-scroller")
+    if not more_rows and not more_columns:
+        return scroller
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
+    box.append(scroller)
+    box.append(_more_link(more_rows, more_columns, page_url))
+    return box
+
+
+class _TableScroller(Gtk.ScrolledWindow):
+    """The table's scroller, measured as tall as its grid is at the grid's
+    natural width. A Gtk.ScrolledWindow asks its child for a height at
+    width -1, which a height-for-width grid of wrapping labels answers
+    with its height at its *minimum* width — every cell wrapped a word
+    per line, a two-row table four thousand pixels tall. The grid is
+    allocated its natural width whatever the panel's (halign START inside
+    a viewport that scrolls where that overruns), so the height at that
+    width is the height it will draw."""
+
+    def do_measure(self, orientation: Gtk.Orientation, for_size: int) -> tuple[int, int, int, int]:
+        grid = self.get_child().get_child() if self.get_child() is not None else None
+        if orientation == Gtk.Orientation.VERTICAL and grid is not None:
+            _, width, _, _ = grid.measure(Gtk.Orientation.HORIZONTAL, -1)
+            minimum, natural, _, _ = grid.measure(Gtk.Orientation.VERTICAL, width)
+            return minimum, natural, -1, -1
+        return Gtk.ScrolledWindow.do_measure(self, orientation, for_size)
+
+
+# Where a cell wraps, in characters: wide enough for a sentence, narrow
+# enough that one long cell can't push the grid — and the scrollbar the
+# reader must drag to see the rest — out to the width of a paragraph.
+_CELL_WRAP_CHARS = 60
+
+
+def _cell(markup: str, align: str | None) -> Gtk.Label:
+    """One table cell: the page's selectable label, aligned per its column
+    and wrapping past `_CELL_WRAP_CHARS`; a bad markup shows the escaped
+    text rather than blanking the cell."""
+    label = Gtk.Label(selectable=True, wrap=True, yalign=0.0)
+    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+    label.set_max_width_chars(_CELL_WRAP_CHARS)
+    label.set_xalign({"center": 0.5, "right": 1.0}.get(align, 0.0))
+    label.set_halign(Gtk.Align.FILL)
+    label.set_markup(markup if markup_ok(markup) else GLib.markup_escape_text(markup))
+    return label
+
+
+def _more_link(more_rows: int, more_columns: int, page_url: str) -> Gtk.Label:
+    """The dim line under a capped table: the counts of what the grid left
+    out, linked to *page_url* — the body's own place on GitHub — when
+    there is an http(s) one to link to. Plain `_()` strings with the count
+    formatted in: the translations carry no plurals."""
+    parts = []
+    if more_rows:
+        parts.append(_("{n} more rows on GitHub").format(n=more_rows))
+    if more_columns:
+        parts.append(_("{n} more columns on GitHub").format(n=more_columns))
+    text = GLib.markup_escape_text(", ".join(parts))
+    label = Gtk.Label(xalign=0.0)
+    label.add_css_class("caption")
+    label.add_css_class("dim-label")
+    label.add_css_class("pr-md-table-more")
+    if page_url.lower().startswith(("http://", "https://")) and len(page_url) <= 2_000:
+        label.set_markup(f'<a href="{GLib.markup_escape_text(page_url)}">{text}</a>')
+    else:
+        label.set_markup(text)
+    return label

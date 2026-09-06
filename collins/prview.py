@@ -119,6 +119,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from functools import partial
 
 import gi
 
@@ -929,7 +930,7 @@ class PrViewPage(Adw.Bin):
         self._description_fold = None
         card = _card(detail.author, detail.created_at)
         if detail.body:
-            body = _folded_body(detail.body, self._inline_images)
+            body = _folded_body(detail.body, self._inline_images, self._pr.url)
             if isinstance(body, _Fold):
                 self._description_fold = body
                 if previous is not None:
@@ -1003,7 +1004,7 @@ class PrViewPage(Adw.Bin):
 
     def _comment_card(self, comment: prdetail.PrComment) -> Gtk.Widget:
         card = _card(comment.author, comment.created_at, url=comment.url)
-        card.append(_body_label(comment.body, self._inline_images))
+        card.append(_body_label(comment.body, self._inline_images, comment.url or self._pr.url))
         return card
 
     def _review_card(self, review: prdetail.PrReview) -> Gtk.Widget:
@@ -1020,7 +1021,7 @@ class PrViewPage(Adw.Bin):
             verdict.add_css_class("dim-label")
         card = _card(review.author, review.created_at, trailing=[icon, verdict])
         if review.body:
-            card.append(_body_label(review.body, self._inline_images))
+            card.append(_body_label(review.body, self._inline_images, self._pr.url))
         return card
 
     def _thread_card(self, thread: prdetail.PrThread) -> _ThreadCard:
@@ -2109,7 +2110,7 @@ class _ThreadCard(Gtk.Box):
         for comment in thread.comments:
             block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             block.append(_byline(comment.author, comment.created_at, url=comment.url))
-            block.append(_body_label(comment.body, images))
+            block.append(_body_label(comment.body, images, comment.url or pr.url))
             body.append(block)
         body.append(self._write_row())
         body.append(self._reply_editor())
@@ -2562,7 +2563,7 @@ def _card(
     return card
 
 
-def _folded_body(text: str, images: bool = False) -> Gtk.Widget:
+def _folded_body(text: str, images: bool = False, page_url: str = "") -> Gtk.Widget:
     """The description's body, folded to `_FOLD_LINES` lines behind "Show
     more" — a long description shouldn't push the conversation off screen.
 
@@ -2580,7 +2581,7 @@ def _folded_body(text: str, images: bool = False) -> Gtk.Widget:
     sat behind "Show more" would have made rendering them pointless for
     exactly the bodies this is for.
     """
-    segments, fill = _segments(text, images)
+    segments, fill = _segments(text, images, page_url)
     preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
     if fill(preview, segments, _FOLD_CHARS, _FOLD_LINES, preview=True):
         return preview
@@ -2636,17 +2637,19 @@ def _fold(preview: Gtk.Widget, full: Gtk.Widget) -> _Fold:
     return _Fold(preview, full)
 
 
-def _body_label(text: str, images: bool = False) -> Gtk.Widget:
+def _body_label(text: str, images: bool = False, page_url: str = "") -> Gtk.Widget:
     """A markdown body as selectable wrapped text — with the images it
     embeds rendered in place when *images* is on (the `pr_inline_images`
     setting; off, an image stays the alt-text link md_to_pango makes of
     it). Past the render cap the rest waits behind "Show more" (the whole
     text is already bounded by prdetail; this cap is about Pango layout
-    cost, which the main loop pays)."""
-    return _body_widget(*_segments(text, images))
+    cost, which the main loop pays). *page_url* is the body's own place on
+    GitHub — the comment's anchor, or the PR — where a capped table's
+    "more" link leads."""
+    return _body_widget(*_segments(text, images, page_url))
 
 
-def _segments(text: str, images: bool) -> tuple[list, Callable]:
+def _segments(text: str, images: bool, page_url: str = "") -> tuple[list, Callable]:
     """A body as the list its renderer walks and the walker for it: the
     block tree with `_fill_blocks` when the block layer parses it, else
     the regex pipeline's segments with `_fill_body` — the fallback ladder's
@@ -2655,7 +2658,8 @@ def _segments(text: str, images: bool) -> tuple[list, Callable]:
     call."""
     if mdblocks.available():
         try:
-            return mdblocks.parse_blocks(text, images=images), _fill_blocks
+            blocks = mdblocks.parse_blocks(text, images=images)
+            return blocks, partial(_fill_blocks, page_url=page_url)
         except Exception as exc:  # noqa: BLE001 — this body alone falls back
             log.debug("block parse failed, body falls back to the regex renderer: %s", exc)
     return (split_body(text) if images else [text]), _fill_body
@@ -2757,9 +2761,11 @@ def _fill_blocks(
     lines: int | None,
     preview: bool = False,
     keep_first_image: bool = True,
+    page_url: str = "",
 ) -> bool:
     """`_fill_body` over mdblocks' tree: append the blocks that fit
-    *chars*/*lines* to *box*; return whether all of them did.
+    *chars*/*lines* to *box*; return whether all of them did. *page_url*
+    reaches the widgets that link back to GitHub (a capped table's rest).
 
     Same walk, same budgets, same rules — spent front to back, an image
     row costing `_IMAGE_FOLD_LINES`, the first picture always kept — with
@@ -2840,7 +2846,7 @@ def _fill_blocks(
                 spent = True
                 complete = False
                 continue
-            box.append(mdwidgets.build_one(block, budget, _image_row))
+            box.append(mdwidgets.build_one(block, budget, _image_row, page_url=page_url))
         if chars is not None:
             chars -= len(block.source)
             spent = spent or chars <= 0
