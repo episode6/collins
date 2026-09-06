@@ -26,7 +26,7 @@ action time (file_patch), fetches a blob for a gap or an image (file_at,
 side_ref), and carries gitpatch's plans out (apply_patch with its
 `--3way` retry, stage_paths, unstage_paths, checkout_paths). Its watch
 compares tree_state_signature. Every runner takes *run*
-(subprocess.run by default) and a timeout — hunkctl.commit_subject's shape
+(subprocess.run by default) and a timeout — gitloads.commit_subject's shape
 — passes *cwd*, captures both streams as text, catches OSError and
 SubprocessError, and never raises: a git that is missing, slow or
 refuses answers a GitResult that says so, and the caller decides what to
@@ -49,7 +49,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import diffmodel, gitinfo, hunkctl
+from . import diffmodel, gitinfo, gitloads
 from .diffmodel import File
 from .gitmodel import LOG_FORMAT, BranchRef, Commit, Status, parse_log, parse_status_v2
 from .i18n import _
@@ -370,8 +370,8 @@ def _range_args(load: object, parent_target: str | None) -> list[str] | None:
         return ["--staged"]
     if load == "branch":
         return [f"{parent_target}...HEAD"] if parent_target else None
-    if hunkctl.is_range(load):
-        return [hunkctl.range_of(load)]
+    if gitloads.is_range(load):
+        return [gitloads.range_of(load)]
     return None
 
 
@@ -389,7 +389,7 @@ def diff_argv(
     pathspecs: Sequence[str] = (),
     excludes: Sequence[str] = (),
 ) -> list[str] | None:
-    """The whole read of *load* (a hunkctl.Loaded), hunk's `hunk diff` /
+    """The whole read of *load* (a gitloads.Loaded), hunk's `hunk diff` /
     `hunk show` argv: [*DIFF_PREFIX_ARGS, "diff", "--no-ext-diff",
     "--find-renames", "--no-color", <nothing | --staged | parent...HEAD |
     a...b>, "--", *pathspecs, *excludes], or show_argv for a commit load.
@@ -401,8 +401,8 @@ def diff_argv(
     nothing here: git's diff never lists untracked files — read_diff
     synthesizes them (untracked_diff_argv) when the flag is on."""
     del untracked
-    if hunkctl.is_show(load):
-        return show_argv(hunkctl.show_ref(load), pathspecs, excludes)
+    if gitloads.is_show(load):
+        return show_argv(gitloads.show_ref(load), pathspecs, excludes)
     revisions = _range_args(load, parent_target)
     if revisions is None:
         return None
@@ -417,8 +417,8 @@ def numstat_argv(
     pathspecs], or ["show", "--format=", "--numstat", "-z", *DIFF_ARGS,
     ref, "--", *literal pathspecs] for a commit. No prefix options:
     numstat prints bare paths. None where diff_argv is."""
-    if hunkctl.is_show(load):
-        ref = hunkctl.show_ref(load)
+    if gitloads.is_show(load):
+        ref = gitloads.show_ref(load)
         return ["show", "--format=", "--numstat", "-z", *DIFF_ARGS, ref, "--", *_pathspecs(pathspecs)]
     revisions = _range_args(load, parent_target)
     if revisions is None:
@@ -475,14 +475,14 @@ def side_ref(
         return INDEX_REF if old else None
     if load == "staged":
         return "HEAD" if old else INDEX_REF
-    if hunkctl.is_show(load):
-        ref = hunkctl.show_ref(load)
+    if gitloads.is_show(load):
+        ref = gitloads.show_ref(load)
         return f"{ref}^" if old else ref
     if load == "branch":
         if not parent_target:
             return None
         return (merge_base or parent_target) if old else "HEAD"
-    halves = hunkctl.range_halves(hunkctl.range_of(load))
+    halves = gitloads.range_halves(gitloads.range_of(load))
     if halves is None:
         return None
     return (merge_base or halves[0]) if old else halves[1]
@@ -613,11 +613,11 @@ def stack_branches(
     branch the current one stacks on (the first of them). A tip at
     *upper*'s own commit is left out (that is the current branch, or a
     twin of it with no commits of its own), and so is any name
-    hunkctl.safe_ref refuses (it ends up in an argv). Two git runs: the
+    gitloads.safe_ref refuses (it ends up in an argv). Two git runs: the
     branch tips (branch_tips_argv) and the walk (stack_walk_argv, capped at
     MAX_STACK_WALK commits — a tip further down than that is not seen);
     [] when either couldn't be asked, or the targets aren't safe."""
-    if (lower is not None and not hunkctl.safe_ref(lower)) or not hunkctl.safe_ref(upper):
+    if (lower is not None and not gitloads.safe_ref(lower)) or not gitloads.safe_ref(upper):
         return []
     tips = run_git(cwd, branch_tips_argv(), run=run, timeout=timeout)
     if not tips.ok:
@@ -625,7 +625,7 @@ def stack_branches(
     by_sha: dict[str, list[str]] = {}
     for line in tips.stdout.splitlines():
         sha, _sep, name = line.strip().partition(" ")
-        if _FULL_SHA.match(sha) and hunkctl.safe_ref(name):
+        if _FULL_SHA.match(sha) and gitloads.safe_ref(name):
             by_sha.setdefault(sha, []).append(name)
     if not by_sha:
         return []
@@ -678,7 +678,7 @@ def is_root_commit(
     `--root`. True too when git couldn't answer or *sha* isn't safe to
     ask about: the command is named, never run, and `--root` is the
     harmless guess."""
-    if not hunkctl.safe_ref(sha):
+    if not gitloads.safe_ref(sha):
         return True
     result = run_git(cwd, rev_parse_argv(f"{sha}^"), run=run, timeout=timeout)
     return not (result.ok and _FULL_SHA.match(result.stdout.strip()))
@@ -702,7 +702,7 @@ def commit_fixup(
     """`git commit -q -m "fixup! <sha>"` (fixup_argv), with the long
     timeout. A *sha* that isn't safe as an argument is refused without a
     call."""
-    if not hunkctl.safe_ref(sha):
+    if not gitloads.safe_ref(sha):
         return GitResult(False, "", f"not a commit: {sha!r}")
     return run_git(cwd, fixup_argv(sha), run=run, timeout=timeout)
 
@@ -740,7 +740,7 @@ def unpushed_in_group(
     belongs on the parent branch); the rest are filtered by
     NOT_ON_ANY_REMOTE, exactly what the list marks `↑`. [] when git
     couldn't answer, or the target isn't safe."""
-    if parent_target is not None and not hunkctl.safe_ref(parent_target):
+    if parent_target is not None and not gitloads.safe_ref(parent_target):
         return []
     head = [f"{parent_target}..HEAD"] if parent_target else ["HEAD"]
     result = run_git(cwd, log_argv([*head, *NOT_ON_ANY_REMOTE], limit), run=run, timeout=timeout)
@@ -785,11 +785,11 @@ def _root(cwd: str | Path | None) -> str | None:
 def _load_refusal(load: object, parent_target: str | None, pathspecs: Sequence[str]) -> str | None:
     """Why *load* can't be read, or None: not one of the five, a branch
     load without a parent, an unsafe parent or pathspec."""
-    if not hunkctl.loaded_ok(load):
+    if not gitloads.loaded_ok(load):
         return "not a load"
     if load == "branch" and not parent_target:
         return "no parent branch"
-    if parent_target is not None and not hunkctl.safe_ref(parent_target):
+    if parent_target is not None and not gitloads.safe_ref(parent_target):
         return "unsafe parent"
     if any(not safe_path(spec) for spec in pathspecs):
         return "unsafe pathspec"
@@ -875,7 +875,7 @@ def read_diff(
     run=subprocess.run,
     timeout: float = DIFF_TIMEOUT_S,
 ) -> DiffRead:
-    """Everything the diff view shows for *load* (a hunkctl.Loaded), in one
+    """Everything the diff view shows for *load* (a gitloads.Loaded), in one
     call from the repository root, the way hunk reads a changeset:
 
     1. numstat_argv — the pre-pass; every path over diffmodel's
@@ -979,7 +979,7 @@ def file_at(
                 return handle.read(MAX_BLOB_BYTES + 1)[:MAX_BLOB_BYTES]
         except OSError:
             return None
-    if ref != INDEX_REF and not hunkctl.safe_ref(ref):
+    if ref != INDEX_REF and not gitloads.safe_ref(ref):
         return None
     try:
         result = run(["git", *file_at_argv(ref, path)], cwd=root, capture_output=True, timeout=timeout)
@@ -997,7 +997,7 @@ def merge_base(
     `a...b` starts, which is where its old-side files are read from
     (side_ref). None when either ref isn't safe, they share no history,
     or git couldn't be asked."""
-    if not hunkctl.safe_ref(a) or not hunkctl.safe_ref(b):
+    if not gitloads.safe_ref(a) or not gitloads.safe_ref(b):
         return None
     result = run_git(cwd, merge_base_argv(a, b), run=run, timeout=timeout)
     sha = result.stdout.strip()

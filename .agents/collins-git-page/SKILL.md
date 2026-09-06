@@ -210,8 +210,10 @@ from_settings` with `LAYOUTS`, the `LOG_PAGE` bounds, `safe_theme` /
 `MAX_THEME_LEN` (the theme goes with decision 3 of the native-diff spec,
 not before), and `MAX_PATH_CHARS`. **`hunkctl` re-exports every one of
 those names** (redundant `X as X` aliases, so ruff reads them as
-re-exports; `tests/test_hunkctl.py` pins the identity), so no caller moved
-— new code imports `gitloads` directly. `hunkctl` itself keeps what is
+re-exports; `tests/test_hunkctl.py` pins the identity), so the widgets
+have not moved yet — the GTK-free half (`gitops`, `gitmodel`, `gitpatch`)
+and any new code import `gitloads` directly; `gitmodel` still takes
+`hunkctl.SessionFile`, which is hunk's. `hunkctl` itself keeps what is
 hunk's: `loaded_from_title` / `title_tail` / `foreign_tab_title`,
 `Session.files` / `selected_path` / `selected_hunk` parsed off `session
 get`'s `files[]` (hunk 0.21.1's `fileSummarySchema`: id, path,

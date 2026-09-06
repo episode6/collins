@@ -27,7 +27,7 @@ import re
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 
-from . import hunkctl
+from . import gitloads, hunkctl
 from .i18n import _
 
 # `git log` as parse_log reads it: NUL between the fields (sha, abbreviated
@@ -37,7 +37,7 @@ from .i18n import _
 LOG_FORMAT = "--format=%H%x00%h%x00%s%x1e"
 # Bounds on foreign content (see the module docstring).
 SUBJECT_MAX_CHARS = 200
-PATH_MAX_CHARS = hunkctl.MAX_PATH_CHARS
+PATH_MAX_CHARS = gitloads.MAX_PATH_CHARS
 MAX_ROWS = 2000
 
 # The status letters a row may carry: git's own (M A D R T C, U for an
@@ -108,14 +108,14 @@ class BranchPage:
 @dataclass(frozen=True)
 class Row:
     """One line of the commits list. *load* is what a click loads (a
-    hunkctl.Loaded), None where a click does nothing on its own (the
+    gitloads.Loaded), None where a click does nothing on its own (the
     default branch's header; `load more…`, which pages instead)."""
 
     id: str
     kind: str
     group: str
     label: str
-    load: hunkctl.Loaded | None = None
+    load: gitloads.Loaded | None = None
     sha: str | None = None
     abbrev: str | None = None
     unpushed: bool = False
@@ -314,7 +314,7 @@ def _commit_rows(commits: Iterable[Commit], group: str, unpushed: Collection[str
                 kind="commit",
                 group=group,
                 label=commit.subject[:SUBJECT_MAX_CHARS],
-                load={hunkctl.SHOW_KEY: commit.sha},
+                load={gitloads.SHOW_KEY: commit.sha},
                 sha=commit.sha,
                 abbrev=commit.abbrev,
                 unpushed=commit.sha in unpushed,
@@ -361,9 +361,9 @@ def build_rows(
     rows: list[Row] = []
     oldest = current[-1] if current else None
     if parent is not None:
-        current_load: hunkctl.Loaded | None = "branch"
-    elif oldest is not None and hunkctl.safe_ref(f"{oldest.sha}^"):
-        current_load = {hunkctl.RANGE_KEY: f"{oldest.sha}^...HEAD"}
+        current_load: gitloads.Loaded | None = "branch"
+    elif oldest is not None and gitloads.safe_ref(f"{oldest.sha}^"):
+        current_load = {gitloads.RANGE_KEY: f"{oldest.sha}^...HEAD"}
     else:
         current_load = None
     rows.append(Row(header_row_id(CURRENT_GROUP), "header", CURRENT_GROUP, branch, current_load))
@@ -375,10 +375,10 @@ def build_rows(
     ranges = stack_ranges([page.branch for page in stack], default)
     for page, (ref, below) in zip(stack, ranges, strict=True):
         group = stack_group(ref.name)
-        load: hunkctl.Loaded | None = None
+        load: gitloads.Loaded | None = None
         if below is not None:
-            candidate = {hunkctl.RANGE_KEY: f"{below}...{ref.target}"}
-            load = candidate if hunkctl.is_range(candidate) else None
+            candidate = {gitloads.RANGE_KEY: f"{below}...{ref.target}"}
+            load = candidate if gitloads.is_range(candidate) else None
         rows.append(Row(header_row_id(group), "header", group, ref.name, load))
         rows.extend(_commit_rows(page.commits, group, unpushed))
         if page.more:
@@ -404,7 +404,7 @@ def loaded_row_id(rows: Sequence[Row], loaded: object, resolved_sha: str | None 
         return next((row.id for row in rows if row.kind == "worktree"), None)
     if loaded == "branch":
         return next((row.id for row in rows if row.kind == "header" and row.group == "current"), None)
-    ref = hunkctl.show_ref(loaded)
+    ref = gitloads.show_ref(loaded)
     if ref is not None:
         for row in rows:
             if row.kind == "commit" and row.sha and row.sha.startswith(ref):
@@ -414,10 +414,10 @@ def loaded_row_id(rows: Sequence[Row], loaded: object, resolved_sha: str | None 
                 if row.kind == "commit" and row.sha == resolved_sha:
                     return row.id
         return None
-    text = hunkctl.range_of(loaded)
+    text = gitloads.range_of(loaded)
     if text is not None:
         for row in rows:
-            if row.kind == "header" and hunkctl.range_of(row.load) == text:
+            if row.kind == "header" and gitloads.range_of(row.load) == text:
                 return row.id
     return None
 
