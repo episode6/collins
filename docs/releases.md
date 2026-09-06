@@ -53,10 +53,14 @@ downloads of each version, see the
   structurally, ☐ / ☑ task lists, ordered lists counting from their first
   number, quotes and alerts behind a bar, horizontal rules, reference-style
   links, bare URLs linked the way GitHub links them, `<kbd>` / `<sub>` /
-  `<sup>` / `<br>`. Tables, code blocks and `<details>` show as their
-  source for now (their own widgets follow); any other HTML shows escaped.
-  The folded preview still opens with the first paragraph, and without
-  the parser the page falls back to the previous renderer.
+  `<sup>` / `<br>`. Tables render as grids: the header row bold, each
+  column aligned as its delimiter row asks, cells selectable, a wide table
+  scrolling sideways within its own band rather than widening the page;
+  one past 50 rows or 8 columns shows that much and a dim link to the
+  rest on GitHub. Code blocks and `<details>` show as their source for
+  now (their own widgets follow); any other HTML shows escaped. The folded
+  preview still opens with the first paragraph, and without the parser
+  the page falls back to the previous renderer.
 - **Archiving a session reads its notifications.** A session's message
   and bell rows stayed unread in the history after the session was
   archived, so the bell and the badge kept counting a session with

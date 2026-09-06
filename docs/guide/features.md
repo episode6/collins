@@ -167,10 +167,13 @@ Enter opens, Esc closes.
   their first number, block quotes and GitHub alerts behind a bar,
   horizontal rules, reference-style links, bare `https://` and `www.`
   URLs linked, `<kbd>`, `<sub>`, `<sup>` and `<br>`, and images in place
-  as before. Tables, code blocks and `<details>` show as their source for
-  now — never dropped. Every other HTML tag shows escaped, as text. Without
-  the parser installed the page falls back to its plainer built-in
-  renderer.
+  as before. Tables are grids — the header row bold, columns aligned as
+  the delimiter row asks, cells selectable — that scroll sideways within
+  their own band rather than widening the page; a table past 50 rows or
+  8 columns shows that much and a link to the rest on GitHub. Code blocks
+  and `<details>` show as their source for now — never dropped. Every
+  other HTML tag shows escaped, as text. Without the parser installed the
+  page falls back to its plainer built-in renderer.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
   file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —
   renders as the picture itself, on a transparency checkerboard: **before
