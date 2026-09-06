@@ -45,8 +45,8 @@ controller scoped to the view: bare letters must beat the text views and
 never reach the agent's terminal), the notes and highlights — `notes` /
 `highlights`, `add_notes` / `add_highlights` / `clear_marks` (the agent
 tools' doors: a batch lands whole or not at all), `add_note_at_cursor`
-(`c`), `edit_first_note` (`E`), `edit_note` / `delete_note` (the cards'
-buttons), `set_agent_notes_shown` (`a`), `editing` — held in a
+(`c`), `edit_first_note` (`E`), `delete_note` (the card's *Delete*; its
+*Edit* is the card's own), `set_agent_notes_shown` (`a`), `editing` — held in a
 diffnotes.MarkStore for the tab's life and drawn as `_NoteCard`s under
 their hunk with a glyph in the marker column (decision 5), the probes
 `file_rows` / `hunk_rows` / `note_rows`, and the signals
@@ -690,7 +690,15 @@ class _HunkView:
             self.buffer.place_cursor(it)
 
     def cursor_row(self) -> int:
-        return self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_line()
+        """The row the insert mark is on — for a line selection, the last
+        selected row when the mark sits on the selection's end (the snap
+        parks it at the start of the line after, which is no row the user
+        chose: `c` and `e` speak of the selection's last line)."""
+        row = self.buffer.get_iter_at_mark(self.buffer.get_insert()).get_line()
+        rows = self.selected_rows()
+        if rows is not None and row > rows[1]:
+            return rows[1]
+        return row
 
     # -- the selection --
 
@@ -800,31 +808,59 @@ class _HunkView:
         if not self.rows:
             return None
         _x, buffer_y = self.view.window_to_buffer_coords(Gtk.TextWindowType.LEFT, 0, int(y))
-        _ok, it = self.view.get_line_at_y(buffer_y)
+        # PyGObject hands back (target_iter, line_top) — the C out
+        # parameters in order, no boolean first.
+        it, _top = self.view.get_line_at_y(buffer_y)
         return min(it.get_line(), len(self.rows) - 1)
 
-    def _on_gutter_drag_begin(self, gesture: Gtk.GestureDrag, _x: float, y: float) -> None:
+    def gutter_y(self, row: int) -> float | None:
+        """Probe: a y in the gutter (the LEFT text window's coordinates)
+        over *row*, the inverse of _gutter_row — None before the view has
+        a layout."""
+        if not self.rows or not 0 <= row < len(self.rows):
+            return None
+        _ok, it = self.buffer.get_iter_at_line(row)
+        rect = self.view.get_iter_location(it)
+        if rect.height <= 0:
+            return None
+        middle = rect.y + rect.height // 2
+        _wx, wy = self.view.buffer_to_window_coords(Gtk.TextWindowType.LEFT, rect.x, middle)
+        return float(wy)
+
+    def gutter_press(self, y: float, shift: bool = False) -> bool:
+        """A press on the line numbers at gutter *y*: the row under it is
+        selected (with Shift, the selection extends from the far end of
+        what is selected); a drag then goes through gutter_extend."""
         row = self._gutter_row(y)
         if row is None:
-            return
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        shift = bool(gesture.get_current_event_state() & Gdk.ModifierType.SHIFT_MASK)
+            return False
         current = self.selected_rows()
         if shift and current is not None:
-            # Extend from the far end of what is selected.
             self._gutter_anchor = current[0] if row >= current[0] else current[1]
         else:
             self._gutter_anchor = row
         self.view.grab_focus()
         self.select_rows(self._gutter_anchor, row)
+        return True
+
+    def gutter_extend(self, y: float) -> bool:
+        """The drag after gutter_press reached gutter *y*."""
+        if self._gutter_anchor is None:
+            return False
+        row = self._gutter_row(y)
+        if row is None:
+            return False
+        self.select_rows(self._gutter_anchor, row)
+        return True
+
+    def _on_gutter_drag_begin(self, gesture: Gtk.GestureDrag, _x: float, y: float) -> None:
+        shift = bool(gesture.get_current_event_state() & Gdk.ModifierType.SHIFT_MASK)
+        if self.gutter_press(y, shift):
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
 
     def _on_gutter_drag_update(self, gesture: Gtk.GestureDrag, _dx: float, dy: float) -> None:
-        if self._gutter_anchor is None:
-            return
         _ok, _x, y = gesture.get_start_point()
-        row = self._gutter_row(y + dy)
-        if row is not None:
-            self.select_rows(self._gutter_anchor, row)
+        self.gutter_extend(y + dy)
 
 
 class _ActionButton(Gtk.Button):
@@ -1181,6 +1217,7 @@ class _HunkSection(Gtk.Box):
         self._pane: _SplitPane | None = None
         self._focused = False
         self._menu_view: _HunkView | None = None
+        self._menu_popover: Gtk.PopoverMenu | None = None
         # The marks placed in this hunk — (mark, line index into
         # hunk.lines) — and the cards by note id; drafts are cards with no
         # note yet, kept at the end of the notes box.
@@ -1274,8 +1311,25 @@ class _HunkSection(Gtk.Box):
             # cursor line: put it under the pointer (a selection stays —
             # placing the cursor would clear it).
             _bx, by = view.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(x), int(y))
-            _ok, it = view.view.get_line_at_y(by)
+            it, _top = view.view.get_line_at_y(by)  # (target_iter, line_top): no boolean first
             view.place_cursor(min(it.get_line(), max(0, len(view.rows) - 1)))
+        popover = Gtk.PopoverMenu.new_from_model(self.context_menu(selected))
+        popover.set_parent(view.view)
+        popover.set_has_arrow(False)
+        popover.set_halign(Gtk.Align.START)
+        rect = Gdk.Rectangle()
+        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
+        popover.set_pointing_to(rect)
+        # Unparent from the main loop, not the idle: under a busy frame
+        # clock (CI's Xvfb) a default-idle callback never runs.
+        popover.connect("closed", lambda p: GLib.idle_add(p.unparent, priority=GLib.PRIORITY_DEFAULT))
+        self._menu_popover = popover
+        popover.popup()
+
+    def context_menu(self, selected: bool) -> Gio.Menu:
+        """The right-click menu's model: the hunk's two actions worded for
+        the load and the selection, then Copy / Open in editor / Add note /
+        Expand context, over the `hunk.*` group."""
         primary, discard = gitpatch.action_labels(self._owner.loaded, gitpatch.HUNK, selected)
         menu = Gio.Menu()
         acts = Gio.Menu()
@@ -1289,15 +1343,22 @@ class _HunkSection(Gtk.Box):
         more.append(_("Add note"), f"{_HUNK_ACTIONS}.note")
         more.append(_("Expand context"), f"{_HUNK_ACTIONS}.expand")
         menu.append_section(None, more)
-        popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(view.view)
-        popover.set_has_arrow(False)
-        popover.set_halign(Gtk.Align.START)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        return menu
+
+    def open_context_menu(self, view: _HunkView, row: int) -> Gtk.PopoverMenu | None:
+        """Probe: a right-click on *row* of *view*, through the gesture's
+        handler with the pointer over the row (the WIDGET window's
+        coordinates); the popover it left up, for its model and popdown."""
+        if view not in self.views or not view.rows or not 0 <= row < len(view.rows):
+            return None
+        _ok, it = view.buffer.get_iter_at_line(row)
+        rect = view.view.get_iter_location(it)
+        if rect.height <= 0:
+            return None
+        middle = rect.y + rect.height // 2
+        x, y = view.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x + 4, middle)
+        self._on_secondary_click(Gtk.GestureClick(), view, float(x), float(y))
+        return self._menu_popover
 
     def _copy(self) -> None:
         view = self._menu_view if self._menu_view in self.views else self.focused_view
@@ -1356,9 +1417,6 @@ class _HunkSection(Gtk.Box):
             if lines:
                 return min(lines), max(lines)
         return None
-
-    def selected_view(self) -> _HunkView | None:
-        return next((view for view in self.views if view.selected_rows() is not None), None)
 
     def clear_selection(self) -> None:
         for view in self.views:
@@ -2669,14 +2727,6 @@ class DiffView(Gtk.Box):
         card.start_edit()
         return True
 
-    def edit_note(self, note_id: object) -> bool:
-        """Open *note_id*'s card for editing (a user note)."""
-        card = self._card_for(note_id)
-        if card is None or card.note is None or card.note.source != diffnotes.USER:
-            return False
-        card.start_edit()
-        return True
-
     def delete_note(self, note_id: object) -> bool:
         """A card's *Delete*: the note goes (agent or user; a note with
         replies would stay, but replies are a later PR's)."""
@@ -2700,10 +2750,6 @@ class DiffView(Gtk.Box):
         for section in self._sections():
             for hunk in section.hunks:
                 hunk.set_agent_notes_shown(self._agent_notes)
-
-    @property
-    def agent_notes_shown(self) -> bool:
-        return self._agent_notes
 
     def editing(self) -> bool:
         """Whether a note editor is open (the page's letter chords are off
@@ -3204,6 +3250,66 @@ class DiffView(Gtk.Box):
 
     def busy(self) -> bool:
         return self._busy
+
+    def acting_button_spinning(self) -> bool:
+        """Probe: the button the running request came from shows its
+        spinner (set_busy keeps it for the request's whole life: the plan
+        read, the confirm dialog, the run)."""
+        acting = self._acting
+        return acting is not None and acting._stack.get_visible_child_name() == "spinner"
+
+    def _probe_view(self, path: str, hunk: int, row: int) -> tuple[_HunkSection, _HunkView] | None:
+        """The hunk section and the view a gutter or pointer probe drives:
+        the stack's one view, or the split's new side."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None or not 0 <= hunk < len(section.hunks):
+            return None
+        target = section.hunks[hunk]
+        view = target.views[-1] if target.views else None
+        if view is None or not 0 <= row < len(view.rows):
+            return None
+        return target, view
+
+    def gutter_press(self, path: str, hunk: int, row: int, shift: bool = False) -> bool:
+        """Probe: a press on the line numbers over *row* (a row index of
+        the hunk's view) through the gutter mapping the gesture uses."""
+        found = self._probe_view(path, hunk, row)
+        if found is None:
+            return False
+        _section, view = found
+        y = view.gutter_y(row)
+        return y is not None and view.gutter_press(y, shift)
+
+    def gutter_drag(self, path: str, hunk: int, row: int) -> bool:
+        """Probe: the drag after gutter_press reached *row*."""
+        found = self._probe_view(path, hunk, row)
+        if found is None:
+            return False
+        _section, view = found
+        y = view.gutter_y(row)
+        return y is not None and view.gutter_extend(y)
+
+    def context_menu_labels(self, path: str, hunk: int, row: int) -> list[str] | None:
+        """Probe: right-click *row* of the hunk's view as the gesture
+        would; the labels of the menu that opened (popped down again), or
+        None when none did."""
+        found = self._probe_view(path, hunk, row)
+        if found is None:
+            return None
+        section, view = found
+        popover = section.open_context_menu(view, row)
+        if popover is None:
+            return None
+        labels: list[str] = []
+        model = popover.get_menu_model()
+        for i in range(model.get_n_items() if model is not None else 0):
+            part = model.get_item_link(i, Gio.MENU_LINK_SECTION)
+            for j in range(part.get_n_items() if part is not None else 0):
+                label = part.get_item_attribute_value(j, Gio.MENU_ATTRIBUTE_LABEL, GLib.VariantType("s"))
+                if label is not None:
+                    labels.append(label.get_string())
+        popover.popdown()
+        return labels
 
     def note_rows(self, path: str, hunk: int) -> list[tuple[str, str, str, int, str, bool]]:
         """Probe: the cards under *path*'s hunk *hunk* as (id, source,

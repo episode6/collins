@@ -424,12 +424,25 @@ File, the load, the grain FILE / HUNK / LINES, discard, the hunk index
 and the inclusive line indexes) and emit `mutation-requested(request)` —
 not a Plan: the planners take the file's patch re-read from git, which
 is the page's thread read. `set_busy(busy)` makes every button
-insensitive and spins `_acting`, the one pressed; `busy()` is the probe.
-*Add note* is `request_note(section)`: a draft card under the hunk,
-anchored to the row the menu opened on (`_on_secondary_click` places
-the cursor under the pointer when no lines are selected — placing it
-would clear a selection). Probes: `select_lines(path, hunk, first,
-last)`, `hunk_action_labels` / `file_action_labels`,
+insensitive and spins `_acting`, the one pressed — and **`set_busy
+(False)` forgets `_acting`**, so the page calls it only where the
+request ends (the plan read landing on a stale generation or a
+`Refusal`, the dialog's `on_dismiss`, the run's `done`); between the
+plan read, the confirm and the run the view stays busy and the button
+keeps spinning. `busy()` and `acting_button_spinning()` are the
+probes. *Add note* is `request_note(section)`: a draft card under the
+hunk, anchored to the row the menu opened on (`_on_secondary_click`
+places the cursor under the pointer when no lines are selected —
+placing it would clear a selection). **`Gtk.TextView.get_line_at_y`
+returns `(target_iter, line_top)`** — the two C out parameters, no
+boolean first; unpacked as `(ok, iter)` the "iter" is an int and the
+gutter press and the right-click both raised (swallowed by the signal
+dispatch: a dead gesture, no traceback). Probes: `select_lines(path,
+hunk, first, last)`, `gutter_press(path, hunk, row, shift)` /
+`gutter_drag(path, hunk, row)` (the gesture's handlers through
+`_HunkView.gutter_y`, the mapping's inverse), `context_menu_labels
+(path, hunk, row)` (a right-click on the row: the menu's words, popped
+down again), `hunk_action_labels` / `file_action_labels`,
 `click_hunk_action` / `click_file_action`.
 
 **Notes and highlights (PR 3, the other half; decisions 5 and 8).**
@@ -486,7 +499,11 @@ a CAPTURE key controller: Escape cancels, Ctrl+Enter commits; *Save* /
 the view (`on_note_editing`), which closes any other editor unsaved (a
 draft going). `c` is `add_note_at_cursor` (the focused / current hunk,
 `_HunkSection.anchor_at_cursor`: the cursor row's new number, else its
-old, a pad taking the next numbered row), `E` `edit_first_note`,
+old, a pad taking the next numbered row — and with a line selection
+the cursor row is the selection's *last* row: the snap parks the
+insert mark at the start of the line after, which `_HunkView.
+cursor_row` folds back, so `c` and `e` speak of a line the user
+chose), `E` `edit_first_note`,
 `on_note_saved` refuses an empty text (the editor stays open), lands a
 draft as a USER note or re-words the note, then `section.grab()` puts
 the keyboard back in the hunk; `delete_note(id)` and `clear_marks`
@@ -625,8 +642,8 @@ deletion, a mode change) and reads them back through the view's probes —
 after the dropped widget is freed), `set_scroll(fraction)`,
 `pinned_header_text()` — then a gap expanding, a files-list click
 revealing, the watch reloading an edit that keeps the line counts within
-2 s (0.4 s measured) with the untouched hunk's widget and the keyboard
-kept, the `git.*` actions, the highlight following a scroll to the end
+2 s (0.4 s measured) with the untouched hunk's widget, the keyboard
+and its line selection kept, the `git.*` actions, the highlight following a scroll to the end
 (and the pinned header), the filter, the find bar's counts across hunks,
 the staged (rename) and commit loads, settings and a layout change leaving
 `page_state` alone while a page restored from it takes the layout off the
@@ -644,17 +661,22 @@ Adw dialog opens in a window of its own and nothing finds it.
 `check_native_mutations` (called from `check_native` on the working
 tree it left) records the page's toasts (`page._toast` wrapped), stubs
 `gitpage._trash_paths`, and walks the staging interface: the words per
-load, `select_lines` and the one-hunk rule, Esc, stage lines / hunk
-with the index read back through **`gitops.read_status`** (what the
+load, `select_lines` and the one-hunk rule, Esc, the gutter gesture
+(`gutter_press` / `gutter_drag`: press, drag down and back, Shift+press
+from either end, the cursor reading the selection's last row) and the
+right-click menu (`context_menu_labels`: the cursor under the pointer
+with nothing selected, the *lines* words with a selection kept), stage
+lines / hunk with the index read back through **`gitops.read_status`** (what the
 files list reads: the path under `staged` and, while the other hunk is
 in the tree, under `unstaged` too) and the untouched hunk's serial
 kept, *Stage file* on the binary (whole, no patch) and its *Unstage
 file* on the staged load, unstage hunk / file, then the **real confirm
 dialog** — *Discard hunk* → `get_visible_dialog()` is the AlertDialog
 with the heading, body and `cancel` as close and default response,
-`dialog.close()` cancels (Escape's path; the pressed button spun
-meanwhile), *Discard file* on the binary → `set_close_response
-("confirm")` + `close()` runs it (the `response` signal fires once,
+`dialog.close()` cancels (Escape's path; `acting_button_spinning()`
+held meanwhile and is off after), *Discard file* on the binary →
+`set_close_response("confirm")` + `close()` runs it (the spinner still
+on while the run's thread works; the `response` signal fires once,
 through the same path as a key; never `emit("response")` and then
 `close()`, which fires a second `cancel`) — then with
 `dialogs.confirm_dialog` stubbed a cancelled and a confirmed discard

@@ -148,8 +148,9 @@ downloads of each version, see the
   into it meanwhile. Cards say who wrote them — *You*, or *Agent* with
   the author — and the line they sit on, a glyph marks that line in the
   gutter, `}` / `{` walk the annotated hunks, `E` re-opens your first
-  note on the hunk, *Edit* / *Delete* sit on the card, and `a` folds the
-  agent's cards away. Notes live in the page for the tab's life (nothing
+  note on the hunk, *Edit* / *Delete* sit on the card, and `a` (or the
+  header menu's *Agent notes* check) folds the agent's cards away. Notes
+  live in the page for the tab's life (nothing
   is written to disk) and survive a reload on any hunk the edit left
   alone (one whose line numbers shifted counts as changed). The agent's
   own doors — the tools that annotate, highlight and

@@ -622,7 +622,9 @@ page needs hunk 0.21 or newer:
     column shows a glyph beside that line, and `}` / `{` walk the
     annotated hunks. `E` re-opens the hunk's first note of yours, *Edit*
     and *Delete* sit on the card (the agent's cards delete too, and `a`
-    folds them all away, their markers staying). While an editor is open
+    — or the header menu's *Agent notes* check — folds them all away,
+    their markers staying). With lines selected, `c` anchors the note
+    on the selection's last line. While an editor is open
     the diff's letter keys type into it, nothing else. Notes live in the
     page for the tab's life — nothing is written to disk — and follow a
     reload: a note on a hunk the edit left alone keeps its card, one on

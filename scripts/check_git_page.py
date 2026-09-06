@@ -1788,6 +1788,9 @@ def check_native(repo: str, state_path: str) -> None:
     check("the highlight followed the click", page.sidebar.selected_path == "text.txt", page.sidebar.selected_path)
 
     # -- the watch: an external edit reloads within 2 s, an untouched hunk keeps its widget --
+    # A line selection in the untouched hunk must ride the reload too (the
+    # kept buffer keeps its range; a rebuilt hunk 1 must not clear it).
+    check("a line selection in hunk 0 before the edit", view.select_lines("text.txt", 0, 2, 3) and view.selection() == ("text.txt", 0, 2, 3), view.selection())
     ids_before = view.hunk_serials("text.txt")
     focus_before = window.get_focus()
     lines[44] = "line 45 changed again\n"
@@ -1799,6 +1802,8 @@ def check_native(repo: str, state_path: str) -> None:
     ids_after = view.hunk_serials("text.txt")
     check("the edited hunk was rebuilt, the untouched one kept its widget", len(ids_after) == 2 and ids_after[0] == ids_before[0] and ids_after[1] != ids_before[1], (ids_before, ids_after))
     check("the keyboard stayed in the untouched hunk", window.get_focus() is focus_before and view.current()[:2] == ("text.txt", 0), (window.get_focus(), view.current()))
+    check("and so did its line selection", view.selection() == ("text.txt", 0, 2, 3) and view.hunk_action_labels("text.txt", 0) == ("Stage lines", "Discard lines"), (view.selection(), view.hunk_action_labels("text.txt", 0)))
+    view.clear_selection()
     check("the file's badge is still none and its hunks two", len(view.hunk_rows("text.txt")) == 2)
     check("the sections speak the read's hunk indexes", view.hunk_indexes("text.txt") == [0, 1], view.hunk_indexes("text.txt"))
 
@@ -2145,6 +2150,12 @@ def check_native_notes(repo: str, page: GitPage, window: Gtk.Window, lines: list
         check("E again, Esc drops the edit", view.edit_first_note() and view.set_note_editor_text("scratch") and view.cancel_note() and not view.editing() and view.notes()[0].summary == "Keep line five", view.notes())
         check("c then Esc leaves no draft behind", view.add_note_at_cursor() and view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1, view.note_rows("text.txt", 0))
         check("the chords are on again", enabled("stage") and not page.holds_escape())
+        # With lines selected the cursor is the selection's last row: the
+        # note lands there, not on the line after (hunk 0's rows 3..4 are
+        # `-line 5` / `+line 5 changed`; row 5 is `line 6`).
+        check("c with a selection anchors on its last line", view.select_lines("text.txt", 0, 3, 4) and view.add_note_at_cursor() and view.note_rows("text.txt", 0)[-1][:4] == ("", "user", "new", 5), view.note_rows("text.txt", 0))
+        check("Esc drops that draft too", view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1)
+        view.clear_selection()
         # The context menu's *Add note*: a draft anchored to the menu's row
         # (the cursor's, with no pointer here: the hunk's first line).
         section_1 = view._section_for("text.txt", "new").hunks[1]
@@ -2312,6 +2323,23 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("and the words go back", view.hunk_action_labels("text.txt", 0) == ("Stage hunk", "Discard hunk"))
         check("a second Esc has nothing to clear", not view.clear_selection())
 
+        # -- the line numbers: press, drag, shift-press, through the gutter's y mapping ----------
+        check("a press on the line numbers selects the row under it", view.gutter_press("text.txt", 0, 2) and view.selection() == ("text.txt", 0, 2, 2), view.selection())
+        check("a drag down extends to the row under the pointer", view.gutter_drag("text.txt", 0, 5) and view.selection() == ("text.txt", 0, 2, 5), view.selection())
+        check("a drag back up shrinks it", view.gutter_drag("text.txt", 0, 3) and view.selection() == ("text.txt", 0, 2, 3), view.selection())
+        check("a Shift+press extends from the far end", view.gutter_press("text.txt", 0, 6, shift=True) and view.selection() == ("text.txt", 0, 2, 6), view.selection())
+        check("a Shift+press above extends from the last row", view.gutter_press("text.txt", 0, 1, shift=True) and view.selection() == ("text.txt", 0, 1, 6), view.selection())
+        check("the cursor reads the selection's last row (c and e speak of it)", view._focused_hunk is not None and view._focused_hunk.cursor_line() == ("new", 7), view._focused_hunk.cursor_line() if view._focused_hunk else None)
+        view.clear_selection()
+
+        # -- the right-click menu: the cursor lands under the pointer, the items -----------------------
+        labels = view.context_menu_labels("text.txt", 1, 3)
+        check("a right-click with nothing selected opens the menu", labels == ["Stage hunk", "Discard hunk", "Copy", "Open in editor", "Add note", "Expand context"], labels)
+        section_1 = view._section_for("text.txt", "new").hunks[1]
+        check("and put the cursor on the row under the pointer (the deletion, old 45)", section_1.anchor_at_cursor(section_1.views[-1]) == ("old", 45) and view.selection() is None, section_1.anchor_at_cursor(section_1.views[-1]))
+        check("with lines selected the menu reads lines and keeps the selection", view.select_lines("text.txt", 1, 3, 4) and view.context_menu_labels("text.txt", 1, 0) == ["Stage lines", "Discard lines", "Copy", "Open in editor", "Add note", "Expand context"] and view.selection() == ("text.txt", 1, 3, 4), view.selection())
+        view.clear_selection()
+
         # -- stage lines: the partial patch lands in the index, the view reloads by key --------
         serials = view.hunk_serials("text.txt")
         check("select the change of hunk 1 again", view.select_lines("text.txt", 1, 3, 4))
@@ -2366,15 +2394,17 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
             dialog = window.get_visible_dialog()
             if isinstance(dialog, Adw.AlertDialog):
                 check("its heading, body and Cancel", dialog.get_heading() == "Discard the changes?" and dialog.get_body().startswith("Discard hunk 1 in text.txt?") and dialog.get_close_response() == "cancel" and dialog.get_default_response() == "cancel", (dialog.get_heading(), dialog.get_body(), dialog.get_default_response()))
-                check("the pressed button spins while the question is up", view.busy())
+                check("the pressed button spins while the question is up", view.busy() and view.acting_button_spinning(), (view.busy(), view.acting_button_spinning()))
                 dialog.close()  # Escape: the close response, cancel
             check("cancelled: the dialog is gone, the tree untouched, the view free", wait_for(lambda: window.get_visible_dialog() is None and idle(), timeout=5.0) and "line 5 changed" in git_out(repo, "diff", "--", "text.txt"), (window.get_visible_dialog(), view.busy()))
+            check("and the spinner is off", not view.acting_button_spinning())
             check("Discard file on the binary asks", view.click_file_action("blob.bin", discard=True) and wait_for(lambda: isinstance(window.get_visible_dialog(), Adw.AlertDialog), timeout=5.0), window.get_visible_dialog())
             dialog = window.get_visible_dialog()
             if isinstance(dialog, Adw.AlertDialog):
                 check("the question names the file, its button Discard", dialog.get_heading() == "Discard the changes?" and dialog.get_body().startswith("Discard the changes to blob.bin?") and dialog.get_response_label("confirm") == "Discard", (dialog.get_heading(), dialog.get_body()))
                 dialog.set_close_response("confirm")
                 dialog.close()  # the Discard button
+                check("the pressed button still spins while the plan runs", view.busy() and view.acting_button_spinning(), (view.busy(), view.acting_button_spinning()))
             check("confirmed: the binary's change is checked out of the index", wait_for(lambda: window.get_visible_dialog() is None and idle(), timeout=5.0) and wait_for(lambda: "blob.bin" not in shown_paths(), timeout=5.0) and "blob.bin" not in unstaged_paths(), (shown_paths(), unstaged_paths()))
             check("the toast said so", toasts[-1:] == ["Discarded the changes to blob.bin"], toasts[-1:])
         finally:
