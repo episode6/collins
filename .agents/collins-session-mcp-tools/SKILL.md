@@ -208,6 +208,18 @@ shim — so it should arm and ride the busy→idle finish edge
    door and a `DeferredResult` crossing the socket are proven. The
    protocol itself is unit-tested with a fake service
    (`tests/test_mcpserver.py`, `test_mcp_shim.py`).
+6. The acceptance pass with the real CLI (the spec's "a real session
+   calling each tool"): a throwaway `App` behind the headless display
+   with `HOME` moved to a scratch dir carrying *copies* of `~/.claude.json`
+   and `~/.claude/.credentials.json` (delete the dir afterwards — it holds
+   a token) and a scratch `~/.claude/settings.json` of `{"permissions":
+   {"allow": ["mcp__collins"]}}` so no permission prompt blocks the turn;
+   `trust.trust_dir(repo)` against `COLLINS_CLAUDE_CONFIG` (the copy) —
+   a nested temp repository is its own project and inherits nothing;
+   `win.start_background_session(repo, options=SessionOptions(model=
+   "haiku"))`, `inject_prompt_unfocused` once `takes_prompt()`, then read
+   the `tool_use` / `tool_result` blocks off the scratch transcript. The
+   diff tools passed it on 2026-09-06 (CLI 2.1.261): seven calls, 28 s.
 
 ## The lightbox and attachments
 
