@@ -197,14 +197,15 @@ class _CommitRow(Gtk.ListBoxRow):
 
 class _SectionRow(Gtk.ListBoxRow):
     """A files-list section heading — `UNSTAGED · 3` — in the house style
-    (caption-heading + dim-label, never selected). Activatable only when a
-    click means something: the working tree's other side, which a click
-    loads."""
+    (caption-heading + dim-label, never selected). A click on the live
+    side's (or the flat list's) heading shows the whole stream again
+    after a row's click soloed one file; the working tree's other side's
+    heading loads that side."""
 
-    def __init__(self, title: str, count: int, side: str, activatable: bool) -> None:
+    def __init__(self, title: str, count: int, side: str) -> None:
         super().__init__(selectable=False)
         self.side = side
-        self.set_activatable(activatable)
+        self.set_activatable(True)
         self.add_css_class("git-section")
         label = Gtk.Label(xalign=0, hexpand=True)
         label.set_text(f"{title} · {count}")
@@ -273,6 +274,7 @@ class GitSidebar(Gtk.Box):
     __gsignals__ = {
         "load-requested": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         "navigate-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
+        "show-all-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "revert-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # The files filter's text changed (the view hides the sections
@@ -911,13 +913,13 @@ class GitSidebar(Gtk.Box):
                 ("unstaged", _("UNSTAGED"), sections.unstaged),
                 ("staged", _("STAGED"), sections.staged),
             ):
-                self._file_list.append(_SectionRow(title, len(rows), side, activatable=side != sections.live))
+                self._file_list.append(_SectionRow(title, len(rows), side))
                 for file in rows:
                     widget = _FileRow(file, side)
                     self._file_list.append(widget)
                     self._file_widgets[(side, file.path)] = widget
         else:
-            self._file_list.append(_SectionRow(_("FILES"), len(sections.flat), "", activatable=False))
+            self._file_list.append(_SectionRow(_("FILES"), len(sections.flat), ""))
             for file in sections.flat:
                 widget = _FileRow(file, "")
                 self._file_list.append(widget)
@@ -960,6 +962,8 @@ class GitSidebar(Gtk.Box):
         if isinstance(widget, _SectionRow):
             if widget.side and widget.side != self._sections.live:
                 self.emit("load-requested", widget.side)
+            else:
+                self.emit("show-all-requested")
             return
         if isinstance(widget, _FileRow):
             self.emit("navigate-requested", widget.file.path, widget.side)

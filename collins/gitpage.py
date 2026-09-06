@@ -407,6 +407,7 @@ class GitPage(Adw.Bin):
         self.sidebar = GitSidebar(cwd_provider, self._options)
         self.sidebar.connect("load-requested", lambda _s, loaded: self.load(loaded))
         self.sidebar.connect("navigate-requested", self._on_navigate_requested)
+        self.sidebar.connect("show-all-requested", lambda _s: self._show_all())
         self.sidebar.connect("revert-requested", self._on_revert_requested)
         self.sidebar.connect("mutated", self._on_mutated)
         self.sidebar.connect("filter-changed", lambda _s, text: self._on_filter_changed(text))
@@ -507,6 +508,7 @@ class GitPage(Adw.Bin):
             return False
         if self._diffview.hidden_by_filter(path, side):
             self.sidebar.set_filter_text("")  # its rows follow (debounced), and the signal
+            self._diffview.solo(None)  # a soloed file gives way too
             self._diffview.filter("")  # the sections, now: the reveal scrolls to one
             self._sync_search_label()
         return self._diffview.reveal(path, hunk, side, line, focus=focus)
@@ -623,6 +625,7 @@ class GitPage(Adw.Bin):
         if not gitloads.loaded_ok(loaded):
             raise ValueError(f"unknown git page load: {loaded!r}")
         self._pending_navigate = None
+        self._diffview.solo(None)  # a new load is the whole stream (a row click re-solos)
         if loaded == "branch" and self._resolve_parent() is None:
             self._sync_header()
             return
@@ -1365,12 +1368,23 @@ class GitPage(Adw.Bin):
             self._navigate(path)
 
     def _navigate(self, path: str) -> None:
-        """Reveal *path*'s section in the view (synchronous); a miss is a
-        toast."""
+        """Show *path*'s section alone in the view and reveal it
+        (synchronous); a miss is a toast. The section heading's click
+        (_show_all) brings the whole stream back."""
         if self._closing or not self._opened:
             return
-        if not self._diffview.reveal(path):
+        if not self._diffview.solo(path) or not self._diffview.reveal(path):
             self._toast(_("{path} isn't in this diff").format(path=path))
+            return
+        self._sync_search_label()
+
+    def _show_all(self) -> None:
+        """The live section heading clicked: every file of the load again
+        (the files filter's word still applies)."""
+        if self._closing or not self._opened:
+            return
+        self._diffview.solo(None)
+        self._sync_search_label()
 
     def _on_mutated(self, _sidebar: GitSidebar) -> None:
         """A mutation landed (stage all, a commit, one of the view's

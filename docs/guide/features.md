@@ -438,10 +438,14 @@ to install, and nothing in it is a terminal.
   untracked dim), and each row carries the file-type icon the editor's
   tree shows for the name. The list **follows the view** — the file at
   the top of the viewport, or the hunk the keyboard moved into, is
-  highlighted — and a click scrolls to the file and focuses its first
-  hunk. A **filter**
+  highlighted — and a click shows **that file's diff alone** and focuses
+  its first hunk; `]` `[` and `.` `,` still walk on into the next file,
+  which then shows alone in turn. Click the section's heading (**FILES**,
+  or the live side's **UNSTAGED** / **STAGED**) to see the whole list of
+  diffs again; loading anything else does too. A **filter**
   box above the list (`/`) narrows both the list and the diff to the
-  paths that contain what you type; `Esc` clears it.
+  paths that contain what you type (a word that leaves out the file
+  shown alone shows the matching files instead); `Esc` clears it.
 - **The action row.** *Stage all* and *Unstage all* confirm with the
   count, then run `git add -A` / `git reset`; the **Commit** menu has
   *Commit…*, *Commit with body…* (a summary, and a body — Enter commits,
@@ -584,8 +588,9 @@ to install, and nothing in it is a terminal.
   on a diff and reveals a file and a line (on either side) or a hunk in
   it without taking your keyboard; a line that no hunk carries (an
   unchanged stretch) still reveals the file, on the hunk nearest that
-  line, and the reply tells the agent so. A file your files filter was
-  hiding is shown: the filter clears first. Once the page is open,
+  line, and the reply tells the agent so. A file your files filter (or
+  a files-list click showing one file alone) was hiding is shown: the
+  filter clears first. Once the page is open,
   `diff_context` reads it back (the load, the file and hunk you are on
   and the lines you have selected, every file's hunks, the patches and
   the notes on request), `annotate_diff` lands note cards under hunks,

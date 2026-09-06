@@ -676,6 +676,32 @@ def check_native(repo: str) -> None:
     focus = window.get_focus()
     check("the keyboard is in the view", focus is not None and focus.is_ancestor(view), focus)
     check("the highlight followed the click", page.sidebar.selected_path == "text.txt", page.sidebar.selected_path)
+    check(
+        "the click shows the file's section alone",
+        view.soloed == "text.txt" and [p for p, _k, shown in view.file_rows() if shown] == ["text.txt"],
+        (view.soloed, view.file_rows()),
+    )
+    check("`.` walks into the next file, which shows alone in turn", view.focus_file(1) and view.soloed not in (None, "text.txt"))
+    check(
+        "and only that file shows",
+        [p for p, _k, shown in view.file_rows() if shown] == [view.soloed],
+        (view.soloed, view.file_rows()),
+    )
+    page.sidebar.click_section("unstaged")
+    check(
+        "the live heading's click shows every section again",
+        view.soloed is None and all(shown for _p, _k, shown in view.file_rows()),
+        (view.soloed, view.file_rows()),
+    )
+    check("solo text.txt again", view.solo("text.txt") and view.soloed == "text.txt")
+    check("a filter word the soloed file matches keeps the solo", view.filter("text") == 1 and view.soloed == "text.txt")
+    check(
+        "a word that leaves the soloed file out drops the solo: the filter's files show",
+        view.filter("") >= 1 and view.solo("text.txt") and view.soloed == "text.txt"
+        and view.filter("png") >= 1 and view.soloed is None,
+        (view.soloed, view.file_rows()),
+    )
+    view.filter("")
 
     # -- the watch: an external edit reloads within 2 s, an untouched hunk keeps its widget --
     # A line selection in the untouched hunk must ride the reload too (the
