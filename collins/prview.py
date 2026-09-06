@@ -113,7 +113,7 @@ import gi
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
     avatars,
@@ -544,8 +544,10 @@ class PrViewPage(Adw.Bin):
     def page_title(self) -> str:
         return f"#{self._pr.number}"
 
-    def page_icon(self) -> str | None:
-        return prmenu.state_icon_name(self._pr.state)
+    def page_icon(self) -> Gio.Icon:
+        # The tab wears the same mark the chips and the header do — state
+        # color plus status badge — rasterized, since a tab takes a GIcon.
+        return prmenu.mark_icon(self._pr, self._dark, self.get_scale_factor())
 
     def grab_page_focus(self) -> None:
         if self._stack.get_visible_child_name() == "files":
@@ -1206,6 +1208,7 @@ class PrViewPage(Adw.Bin):
         self._dark = manager.get_dark()
         if not self._scheme_setting:  # "" = following the app's scheme
             self._apply_scheme()
+        self.emit("title-changed")  # the tab's mark is baked per scheme
 
     def _apply_scheme(self) -> None:
         scheme = style_scheme(self._scheme_setting, self._dark)

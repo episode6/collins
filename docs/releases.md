@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-05. Full change history: git log for this file.
+fork. Last modified: 2026-09-06. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -203,6 +203,10 @@ downloads of each version, see the
 - **The *Composer in new sessions* preference is gone.** The new-chat
   screen writes every first prompt in its own composer, which is what the
   setting was for; a saved value is dropped on load.
+- **A PR page's tab wears the PR's mark.** The tab used to carry a plain
+  grey pull-request glyph; it now shows the same mark the footer chip and
+  the page header do — the state's color, with the status badge on its
+  corner — and follows the status as it moves and the theme as it flips.
 
 ### v0.1.2 — 2026-08-30
 

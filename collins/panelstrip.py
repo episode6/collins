@@ -8,7 +8,8 @@ widget implementing the duck-typed `PanelPage` protocol:
 
     page_kind: str                 # "shell", "pr", ... (class attribute)
     page_title() -> str            # tab label ("Terminal 2", "#241")
-    page_icon() -> str | None      # symbolic icon for the tab
+    page_icon() -> str | Gio.Icon | None  # tab icon: a symbolic name, or
+                                   # a ready GIcon (a PR page's rendered mark)
     grab_page_focus() -> None      # strip shown / tab selected
     has_page_focus() -> bool       # for hide-time focus return
     page_busy() -> bool            # running command -> confirm close
@@ -369,7 +370,9 @@ class PanelStrip(Gtk.Box):
         widget = page.get_child()
         page.set_title(widget.page_title())
         icon = widget.page_icon()
-        page.set_icon(Gio.ThemedIcon.new(icon) if icon else None)
+        if isinstance(icon, str):
+            icon = Gio.ThemedIcon.new(icon)
+        page.set_icon(icon)
 
     def _on_title_changed(self, widget) -> None:
         page = self._find_page(widget)

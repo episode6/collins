@@ -100,7 +100,13 @@ green open / purple merged / red closed; grey also = nothing fetched) with a
 badge at the bottom-left ranked **failed > conflicting > pending >
 unresolved > passed**; merged/closed (`settled`) suppress badges. Sidebar rows
 aggregate a session's list with `combined_icon` (base = least settled, badge
-= loudest live problem). The badge glyphs are Octicons drawn as filled paths
+= loudest live problem). A PR page's *tab* takes a GIcon, not a widget, so
+`mark_icon(pr, dark, scale)` rasterizes the same mark into a `Gdk.Texture`
+(a GIcon) with a `Gsk.CairoRenderer` realized for the display — colors
+straight from `MARK_COLORS` (app.py's scheme CSS paints those same shades
+onto the `.pr-*` classes), cached per state/badge/scheme/scale; the page
+re-emits `title-changed` on the style manager's `notify::dark` so the strip
+re-reads it. The badge glyphs are Octicons drawn as filled paths
 (`circle-fill-symbolic` is in-repo: Octicons' dot vanishes at 8 px). Footer
 chips (`terminal._build_pr_chip`; `PrChipRow` measures overflow into an
 ellipsis menu) and the row mark open the same popover list: left click asks

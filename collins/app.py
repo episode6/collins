@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -41,6 +41,7 @@ from . import (
     notifycenter,
     notifypanel,
     notifysound,
+    prmenu,
     proctree,
     providers,
     remoteimages,
@@ -1275,23 +1276,17 @@ _SCHEME_CSS = """
 .ft-pink { color: %(ft_pink)s; }
 .ft-grey { color: %(ft_grey)s; }
 """
+# The mark shades themselves live in prmenu.MARK_COLORS (the rasterized tab
+# mark reads them without CSS); the merge buttons' greens are only ever CSS.
 _MARK_COLORS = {
     False: {  # light
-        "merged_purple": "#8250df",
-        "passed_green": "#1a7f37",
-        "failed_red": "#cf222e",
-        "pending_yellow": "#bf8700",
-        "draft_grey": "#59636e",
+        **prmenu.MARK_COLORS[False],
         "merge_green": "#1f883d",
         "merge_green_hover": "#1a7f37",
         "merge_green_active": "#187733",
     },
     True: {  # dark
-        "merged_purple": "#a371f7",
-        "passed_green": "#3fb950",
-        "failed_red": "#f85149",
-        "pending_yellow": "#d29922",
-        "draft_grey": "#9198a1",
+        **prmenu.MARK_COLORS[True],
         "merge_green": "#238636",
         "merge_green_hover": "#2ea043",
         "merge_green_active": "#1f7a33",
