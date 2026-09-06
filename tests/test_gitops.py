@@ -4,7 +4,13 @@
 without git), the runners against a fake `run` and, when git is on PATH,
 against a temp repository — commit, fixup, stage all, the `↑` marks, the
 commit gate's in-progress check. Ports of the collins-git extension's
-`bun test` cases (test/git.test.ts, test/commit.integration.test.ts)."""
+`bun test` cases (test/git.test.ts, test/commit.integration.test.ts).
+
+The diff view's half: hunk's diff / show / numstat argv, the apply and
+file-grain argv, read_diff against a repository with an untracked file, a
+rename, a binary and a too-large file, file_patch, file_at, merge_base,
+apply_patch cached / reverse / worktree and its `--3way` retry, the paths
+mutations and tree_state_signature."""
 
 import shutil
 import subprocess
@@ -12,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from collins import gitinfo, gitops
+from collins import diffmodel, gitinfo, gitops
 from collins.gitmodel import LOG_FORMAT, BranchRef, Commit, Status, StatusRow
 
 SHA_A = "bdda3818b622d8af5190c55f25c15356d76c7806"
@@ -543,3 +549,699 @@ def test_resolve_group_branches(repo):
     _git(repo, "update-ref", "refs/remotes/origin/develop", "HEAD")
     _git(repo, "config", "remote.origin.url", "/nowhere")
     assert gitops.resolve_group_branches(repo, "develop", "main")[0] == BranchRef("develop", "origin/develop")
+
+
+# == the diff view ====================================================================
+
+PREFIX = list(gitops.DIFF_PREFIX_ARGS)
+DIFF = ["--no-ext-diff", "--find-renames", "--no-color"]
+SHOW = {"show": SHA_A}
+RANGE = {"range": "main...feature"}
+
+
+def lit(path: str) -> str:
+    """The path as the builders put it after `--`: `:(literal)path`."""
+    return f":(literal){path}"
+
+
+def _subcommand(argv: list[str]) -> str:
+    """The git subcommand of *argv*: past `git`, the `-c key=value` pairs
+    and any option."""
+    rest = argv[1:]
+    while rest:
+        head = rest[0]
+        if head == "-c":
+            rest = rest[2:]
+        elif head.startswith("-"):
+            rest = rest[1:]
+        else:
+            return head
+    return ""
+
+
+class _BytesResult:
+    def __init__(self, returncode: int, stdout: bytes = b"", stderr: bytes = b"") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def bytes_runner(answers: dict):
+    """A `run` for the binary-mode runners: records every call, checks the
+    call is binary (no `text`), answers from a table keyed by subcommand —
+    a callable answer sees (argv, stdin)."""
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert argv[0] == "git" and kwargs["capture_output"] and kwargs["cwd"] == "/repo"
+        # read_status is the panels' text-mode reader; every patch read is
+        # binary, or CRLF would fold.
+        assert "text" not in kwargs or _subcommand(argv) == "status", "a diff read must not fold CRLF"
+        answer = answers.get(_subcommand(argv))
+        if callable(answer):
+            answer = answer(argv, kwargs.get("input"))
+        if isinstance(answer, _Result):  # read_status runs in text mode
+            return answer
+        if answer is None:
+            return _BytesResult(1, b"", f"no answer for {' '.join(argv)}".encode())
+        return answer
+
+    run.calls = calls
+    return run
+
+
+def _calls_of(run, subcommand: str) -> list[list[str]]:
+    """The argv (past `git`) of every recorded call of *subcommand*."""
+    return [argv[1:] for argv, _kw in run.calls if _subcommand(argv) == subcommand]
+
+
+# -- argv builders -------------------------------------------------------------------
+
+
+def test_diff_argv_spells_hunks_read_for_every_load():
+    assert gitops.diff_argv("unstaged") == [*PREFIX, "diff", *DIFF, "--"]
+    assert gitops.diff_argv("staged") == [*PREFIX, "diff", *DIFF, "--staged", "--"]
+    assert gitops.diff_argv("branch", "main") == [*PREFIX, "diff", *DIFF, "main...HEAD", "--"]
+    assert gitops.diff_argv(RANGE) == [*PREFIX, "diff", *DIFF, "main...feature", "--"]
+    assert gitops.diff_argv(SHOW) == gitops.show_argv(SHA_A)
+    assert gitops.show_argv(SHA_A) == [*PREFIX, "show", "--format=", *DIFF, SHA_A, "--"]
+    # Pathspecs go on literal — `foo[1].txt` is one file, not a glob over
+    # foo1.txt as well — and the excludes after them.
+    assert gitops.literal_pathspec("foo[1].txt") == ":(literal)foo[1].txt"
+    assert gitops.diff_argv("unstaged", pathspecs=["a.txt", "dir/"]) == [
+        *PREFIX, "diff", *DIFF, "--", lit("a.txt"), lit("dir/"),
+    ]
+    assert gitops.diff_argv("staged", pathspecs=["a*b.txt"], excludes=["big.txt"]) == [
+        *PREFIX, "diff", *DIFF, "--staged", "--", lit("a*b.txt"), ":(exclude,literal)big.txt",
+    ]
+    assert gitops.show_argv(SHA_A, ["f.txt"], ["big.txt"]) == [
+        *PREFIX, "show", "--format=", *DIFF, SHA_A, "--", lit("f.txt"), ":(exclude,literal)big.txt",
+    ]
+    # untracked is read_diff's concern; the argv is the same either way.
+    assert gitops.diff_argv("unstaged", untracked=False) == gitops.diff_argv("unstaged", untracked=True)
+    # A branch without a parent has nothing to measure against.
+    assert gitops.diff_argv("branch", None) is None
+    assert gitops.diff_argv("branch", "") is None
+    for garbage in ("wat", {"show": "a b"}, {"range": "a..b"}, {"range": "a...b...c"}, None, 3, {}):
+        assert gitops.diff_argv(garbage) is None, garbage
+
+
+def test_numstat_argv_is_the_same_load_without_prefixes():
+    assert gitops.numstat_argv("unstaged") == ["diff", "--numstat", "-z", *DIFF, "--"]
+    assert gitops.numstat_argv("staged", pathspecs=["x"]) == [
+        "diff", "--numstat", "-z", *DIFF, "--staged", "--", lit("x"),
+    ]
+    assert gitops.numstat_argv(SHOW, pathspecs=["x"]) == [
+        "show", "--format=", "--numstat", "-z", *DIFF, SHA_A, "--", lit("x"),
+    ]
+    assert gitops.numstat_argv("branch", "main") == ["diff", "--numstat", "-z", *DIFF, "main...HEAD", "--"]
+    assert gitops.numstat_argv(RANGE) == ["diff", "--numstat", "-z", *DIFF, "main...feature", "--"]
+    assert gitops.numstat_argv(SHOW) == ["show", "--format=", "--numstat", "-z", *DIFF, SHA_A, "--"]
+    assert gitops.numstat_argv("branch") is None and gitops.numstat_argv("nope") is None
+
+
+def test_untracked_and_file_patch_and_file_at_argv():
+    assert gitops.untracked_diff_argv("n.txt") == [
+        *PREFIX, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", "n.txt",
+    ]
+    assert gitops.file_patch_argv("unstaged", "f.txt") == [*PREFIX, "diff", *DIFF, "--", lit("f.txt")]
+    assert gitops.file_patch_argv("staged", "f.txt") == [
+        *PREFIX, "diff", *DIFF, "--staged", "--", lit("f.txt"),
+    ]
+    # A rename names both paths so the patch carries the rename record;
+    # a previous path equal to the path is named once.
+    assert gitops.file_patch_argv("staged", "new.txt", "old.txt") == [
+        *PREFIX, "diff", *DIFF, "--staged", "--", lit("old.txt"), lit("new.txt"),
+    ]
+    assert gitops.file_patch_argv("unstaged", "f.txt", "f.txt") == [
+        *PREFIX, "diff", *DIFF, "--", lit("f.txt"),
+    ]
+    assert gitops.file_patch_argv(SHOW, "f.txt") == [
+        *PREFIX, "show", "--format=", *DIFF, SHA_A, "--", lit("f.txt"),
+    ]
+    assert gitops.file_patch_argv("branch", "f.txt", parent_target="main") == [
+        *PREFIX, "diff", *DIFF, "main...HEAD", "--", lit("f.txt"),
+    ]
+    assert gitops.file_patch_argv("branch", "f.txt") is None
+    assert gitops.file_at_argv(gitops.INDEX_REF, "dir/f.txt") == ["show", ":dir/f.txt"]
+    assert gitops.file_at_argv("HEAD", "f.txt") == ["show", "HEAD:f.txt"]
+    assert gitops.file_at_argv(f"{SHA_A}^", "f.txt") == ["show", f"{SHA_A}^:f.txt"]
+
+
+def test_side_ref_names_where_each_side_of_a_load_reads_a_whole_file_from():
+    OLD, NEW = diffmodel.OLD, diffmodel.NEW
+    # The working tree: index → disk (None); the index: HEAD → index.
+    assert (gitops.side_ref("unstaged", OLD), gitops.side_ref("unstaged", NEW)) == (gitops.INDEX_REF, None)
+    assert (gitops.side_ref("staged", OLD), gitops.side_ref("staged", NEW)) == ("HEAD", gitops.INDEX_REF)
+    assert (gitops.side_ref(SHOW, OLD), gitops.side_ref(SHOW, NEW)) == (f"{SHA_A}^", SHA_A)
+    # A branch and a range read their old side at the merge base the caller
+    # resolved, else the parent's / left half's tip.
+    assert gitops.side_ref("branch", OLD, "main", SHA_B) == SHA_B
+    assert gitops.side_ref("branch", OLD, "main") == "main"
+    assert gitops.side_ref("branch", NEW, "main", SHA_B) == "HEAD"
+    assert gitops.side_ref("branch", OLD, None) is None and gitops.side_ref("branch", NEW, None) is None
+    assert gitops.side_ref(RANGE, OLD, merge_base=SHA_B) == SHA_B
+    assert gitops.side_ref(RANGE, OLD) == "main" and gitops.side_ref(RANGE, NEW) == "feature"
+    assert gitops.side_ref("nope", OLD) is None and gitops.side_ref({"range": "a..b"}, NEW) is None
+
+
+def test_apply_and_paths_argv():
+    base = ["apply", "--recount", "--unidiff-zero"]
+    assert gitops.apply_argv(cached=True, reverse=False) == [*base, "--cached", "-"]
+    assert gitops.apply_argv(cached=True, reverse=True) == [*base, "--cached", "--reverse", "-"]
+    assert gitops.apply_argv(cached=False, reverse=True) == [*base, "--reverse", "-"]
+    assert gitops.apply_argv(cached=False, reverse=False) == [*base, "-"]
+    assert gitops.apply_argv(cached=False, reverse=True, three_way=True) == [
+        *base, "--reverse", "--3way", "-",
+    ]
+    # The paths are literal: a confirmed discard of `foo[1].txt` must not
+    # also check out foo1.txt.
+    assert gitops.checkout_paths_argv(["a", "b[1]"]) == ["checkout", "-q", "--", lit("a"), lit("b[1]")]
+    assert gitops.add_paths_argv(["old", "new"]) == ["add", "-A", "--", lit("old"), lit("new")]
+    assert gitops.reset_paths_argv(["a"]) == ["reset", "-q", "--", lit("a")]
+    assert gitops.merge_base_argv("main", "HEAD") == ["merge-base", "main", "HEAD"]
+
+
+def test_safe_path():
+    for path in ("f.txt", "dir/sub/f.txt", "with space.txt", "é.txt", ".hidden", "a..b", "dir/-dash"):
+        assert gitops.safe_path(path), path
+    unsafe = ("", "-flag", "/abs", "C:x", "../up", "dir/../up", "a\0b", "a\nb", "a\rb", None, 3, "x" * 513)
+    for path in unsafe:
+        assert not gitops.safe_path(path), path
+
+
+# -- runners against a fake run ------------------------------------------------------------
+
+
+def test_run_git_bytes_keeps_the_bytes_and_hands_stdin_through():
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen.update(kwargs)
+        return _BytesResult(1, b"a\r\nb\xff", b"error: x\n")
+
+    result = gitops.run_git_bytes("/repo", ["apply", "-"], stdin=b"patch\r\n", run=run, ok_statuses=(0, 1))
+    assert result == gitops.GitResult(True, "a\r\nb�", "error: x\n")
+    assert seen["input"] == b"patch\r\n" and "text" not in seen and seen["timeout"] == gitops.GIT_TIMEOUT_S
+    assert not gitops.run_git_bytes("/repo", ["apply", "-"], stdin=b"", run=run).ok
+    assert not gitops.run_git_bytes(None, ["apply"], run=run).ok
+
+    def boom(argv, **_kw):
+        raise subprocess.TimeoutExpired(argv, 1)
+
+    assert not gitops.run_git_bytes("/repo", ["diff"], run=boom).ok
+
+
+def test_read_diff_refuses_a_bad_load_without_a_call():
+    run = bytes_runner({})
+    for load, parent, specs, reason in (
+        ("nope", None, (), "not a load"),
+        ("branch", None, (), "no parent branch"),
+        ("branch", "a b", (), "unsafe parent"),
+        ("unstaged", None, ("-x",), "unsafe pathspec"),
+    ):
+        read = gitops.read_diff("/repo", load, parent, pathspecs=specs, run=run)
+        assert read == gitops.DiffRead((), None, False, reason), (load, parent, specs)
+    assert run.calls == []
+    no_cwd = gitops.read_diff(None, "unstaged", run=run)
+    assert no_cwd == gitops.DiffRead((), None, False, "no working directory")
+
+
+PATCH_F = (
+    "diff --git a/f.txt b/f.txt\n"
+    "index 5626abf..f719efd 100644\n"
+    "--- a/f.txt\n"
+    "+++ b/f.txt\n"
+    "@@ -1 +1 @@\n"
+    "-one\n"
+    "+two\n"
+)
+PATCH_N = (
+    "diff --git a/n.txt b/n.txt\n"
+    "new file mode 100644\n"
+    "index 0000000..3e75765\n"
+    "--- /dev/null\n"
+    "+++ b/n.txt\n"
+    "@@ -0,0 +1 @@\n"
+    "+new\n"
+)
+STATUS_V2 = "1 .M N... 100644 100644 100644 5626abf f719efd f.txt\0? n.txt\0? big.txt\0"
+
+
+def _fake_working_tree(numstat: bytes = b"1\t1\tf.txt\x0030000\t0\tbig.txt\x00"):
+    def diff(argv, _stdin):
+        if "--numstat" in argv:
+            return _BytesResult(0, numstat)
+        if "--no-index" in argv:
+            assert argv[-1] in ("n.txt", "big.txt"), argv
+            return _BytesResult(1, PATCH_N.encode()) if argv[-1] == "n.txt" else _BytesResult(1, b"")
+        return _BytesResult(0, PATCH_F.encode())
+
+    return bytes_runner({"diff": diff, "status": ok(STATUS_V2)})
+
+
+def test_read_diff_excludes_the_too_large_paths_and_stands_a_placeholder_in(monkeypatch):
+    monkeypatch.setattr(gitops, "_file_size", lambda path: 4)
+    run = _fake_working_tree()
+    read = gitops.read_diff("/repo", "unstaged", run=run)
+    assert read.ok and read.error == ""
+    assert [(f.path, f.kind, f.untracked) for f in read.files] == [
+        ("big.txt", diffmodel.KIND_TOO_LARGE, False),
+        ("f.txt", diffmodel.KIND_CHANGE, False),
+        ("n.txt", diffmodel.KIND_NEW, True),
+    ]
+    big = read.files[0]
+    assert (big.additions, big.deletions, big.hunks, big.patch) == (30000, 0, (), "")
+    assert read.status == Status(
+        unstaged=(StatusRow("f.txt", "M"), StatusRow("n.txt", "?"), StatusRow("big.txt", "?")), staged=()
+    )
+    diffs = _calls_of(run, "diff")
+    assert diffs[0] == gitops.numstat_argv("unstaged")
+    assert diffs[1] == [*PREFIX, "diff", *DIFF, "--", ":(exclude,literal)big.txt"]
+    assert _calls_of(run, "status") == [gitops.status_argv()]
+    # The untracked reads, in status order: n.txt synthesized, big.txt
+    # (untracked too in this status, and over the line cap) tried and,
+    # answering nothing, dropped.
+    assert [argv[-1] for argv in diffs[2:]] == ["n.txt", "big.txt"]
+    assert all("--no-index" in argv for argv in diffs[2:])
+
+
+def test_read_diff_without_untracked_and_on_the_other_loads(monkeypatch):
+    monkeypatch.setattr(gitops, "_file_size", lambda path: 4)
+    run = _fake_working_tree(numstat=b"1\t1\tf.txt\x00")
+    read = gitops.read_diff("/repo", "unstaged", untracked=False, run=run)
+    assert [f.path for f in read.files] == ["f.txt"] and read.status is not None
+    assert all("--no-index" not in argv for argv in _calls_of(run, "diff"))
+    # The staged side reads status for the sidebar but synthesizes nothing.
+    run = _fake_working_tree(numstat=b"1\t1\tf.txt\x00")
+    read = gitops.read_diff("/repo", "staged", run=run)
+    assert [f.path for f in read.files] == ["f.txt"] and read.status is not None
+    assert all("--no-index" not in argv for argv in _calls_of(run, "diff"))
+    assert _calls_of(run, "diff")[1] == [*PREFIX, "diff", *DIFF, "--staged", "--"]
+    # A commit, a branch and a range: no status at all.
+    def show(argv, _stdin):
+        return _BytesResult(0, b"" if "--numstat" in argv else PATCH_F.encode())
+
+    for load, parent in ((SHOW, None), ("branch", "main"), (RANGE, None)):
+        run = _fake_working_tree(numstat=b"1\t1\tf.txt\x00")
+        chosen = bytes_runner({"show": show}) if load is SHOW else run
+        read = gitops.read_diff("/repo", load, parent, run=chosen)
+        assert read.ok and [f.path for f in read.files] == ["f.txt"] and read.status is None, load
+        assert _calls_of(chosen, "status") == []
+
+
+def test_read_diff_reports_a_failed_read_and_survives_a_failed_status():
+    run = bytes_runner({"diff": lambda argv, _s: _BytesResult(128, b"", b"fatal: not a git repository\n")})
+    read = gitops.read_diff("/repo", "unstaged", run=run)
+    assert read == gitops.DiffRead((), None, False, "fatal: not a git repository")
+
+    def diff(argv, _stdin):
+        return _BytesResult(0, b"1\t1\tf.txt\x00" if "--numstat" in argv else PATCH_F.encode())
+
+    run = bytes_runner({"diff": diff, "status": failed("fatal: index locked")})
+    read = gitops.read_diff("/repo", "unstaged", run=run)
+    assert read.ok and [f.path for f in read.files] == ["f.txt"] and read.status is None
+
+
+def test_read_diff_pathspecs_narrow_the_reads_and_the_untracked_files(monkeypatch):
+    monkeypatch.setattr(gitops, "_file_size", lambda path: 4)
+    run = _fake_working_tree(numstat=b"1\t1\tf.txt\x00")
+    read = gitops.read_diff("/repo", "unstaged", pathspecs=["f.txt"], run=run)
+    assert [f.path for f in read.files] == ["f.txt"]
+    assert _calls_of(run, "diff")[0][-1] == lit("f.txt") and _calls_of(run, "diff")[1][-1] == lit("f.txt")
+    # Narrowed to the untracked file: git's diff has nothing, the
+    # synthesis keeps only the file the pathspec names (or one under it).
+    def narrowed(argv, _stdin):
+        if "--no-index" in argv:
+            return _BytesResult(1, PATCH_N.encode())
+        return _BytesResult(0, b"")
+
+    run = bytes_runner({"diff": narrowed, "status": ok(STATUS_V2)})
+    read = gitops.read_diff("/repo", "unstaged", pathspecs=["n.txt"], run=run)
+    assert [f.path for f in read.files] == ["n.txt"]
+    assert [argv[-1] for argv in _calls_of(run, "diff") if "--no-index" in argv] == ["n.txt"]
+    run = bytes_runner({"diff": narrowed, "status": ok("? dir/a.txt\0? dirt.txt\0")})
+    read = gitops.read_diff("/repo", "unstaged", pathspecs=["dir"], run=run)
+    assert [argv[-1] for argv in _calls_of(run, "diff") if "--no-index" in argv] == ["dir/a.txt"]
+
+
+def test_apply_patch_retries_with_three_way_only_when_asked_and_reports_conflicts():
+    def apply(argv, stdin):
+        assert stdin == b"a\r\nb\n"
+        if "--3way" in argv:
+            return _BytesResult(0, b"", b"Applied patch to 'f.txt' cleanly.\n")
+        return _BytesResult(1, b"", b"error: patch failed: f.txt:2\nerror: f.txt: patch does not apply\n")
+
+    run = bytes_runner({"apply": apply})
+    plain = gitops.apply_patch("/repo", "a\r\nb\n", cached=False, reverse=True, run=run)
+    assert plain == gitops.ApplyResult(
+        False, "", "error: patch failed: f.txt:2\nerror: f.txt: patch does not apply\n"
+    )
+    assert not plain.three_way and not plain.conflicts and len(run.calls) == 1
+    retried = gitops.apply_patch("/repo", "a\r\nb\n", cached=False, reverse=True, three_way=True, run=run)
+    assert retried.ok and retried.three_way and not retried.conflicts
+    assert [argv[1:] for argv, _kw in run.calls[1:]] == [
+        gitops.apply_argv(False, True), gitops.apply_argv(False, True, three_way=True),
+    ]
+
+    def conflicting(argv, _stdin):
+        if "--3way" in argv:
+            return _BytesResult(1, b"", b"Applied patch to 'f.txt' with conflicts.\nU f.txt\n")
+        return _BytesResult(1, b"", b"error: f.txt: patch does not apply\n")
+
+    run = bytes_runner({"apply": conflicting})
+    result = gitops.apply_patch("/repo", "x\n", cached=False, reverse=True, three_way=True, run=run)
+    assert (result.ok, result.three_way, result.conflicts) == (False, True, True)
+    assert gitops.first_line(result.stderr) == "Applied patch to 'f.txt' with conflicts."
+    # A plain success never retries; an empty patch is refused without a call.
+    run = bytes_runner({"apply": lambda argv, _s: _BytesResult(0)})
+    assert gitops.apply_patch("/repo", "x\n", cached=True, reverse=False, three_way=True, run=run).ok
+    assert len(run.calls) == 1
+    assert gitops.apply_patch("/repo", "", cached=True, reverse=False, run=run) == gitops.ApplyResult(
+        False, "", "empty patch"
+    )
+    assert len(run.calls) == 1
+
+
+def test_paths_mutations_refuse_an_unsafe_path_without_a_call():
+    run = fake_runner({"add": ok(), "reset": ok(), "checkout": ok()})
+    assert gitops.stage_paths("/repo", ["a.txt", "b/c.txt"], run=run).ok
+    assert gitops.unstage_paths("/repo", ["a.txt"], run=run).ok
+    assert gitops.checkout_paths("/repo", ["a.txt"], run=run).ok
+    assert [argv[1:] for argv, _kw in run.calls] == [
+        ["add", "-A", "--", lit("a.txt"), lit("b/c.txt")],
+        ["reset", "-q", "--", lit("a.txt")],
+        ["checkout", "-q", "--", lit("a.txt")],
+    ]
+    for bad in (["-x"], [], ["../up"], "a.txt", [""], ["ok", "/abs"]):
+        assert gitops.stage_paths("/repo", bad, run=run) == gitops.GitResult(False, "", "no safe paths"), bad
+        assert not gitops.unstage_paths("/repo", bad, run=run).ok
+        assert not gitops.checkout_paths("/repo", bad, run=run).ok
+    assert len(run.calls) == 3
+
+
+def test_file_patch_and_merge_base_against_a_fake():
+    run = bytes_runner({"diff": lambda argv, _s: _BytesResult(0, PATCH_F.encode())})
+    assert gitops.file_patch("/repo", "unstaged", "f.txt", run=run) == PATCH_F
+    assert _calls_of(run, "diff") == [gitops.file_patch_argv("unstaged", "f.txt")]
+    assert gitops.file_patch("/repo", "unstaged", "-f", run=run) is None
+    assert gitops.file_patch("/repo", "unstaged", "f.txt", "../x", run=run) is None
+    assert gitops.file_patch("/repo", "branch", "f.txt", run=run) is None
+    assert gitops.file_patch("/repo", "nope", "f.txt", run=run) is None
+    assert len(run.calls) == 1
+    failing = bytes_runner({})
+    assert gitops.file_patch("/repo", "staged", "f.txt", run=failing) is None
+    run = fake_runner({"merge-base": ok(f"{SHA_B}\n")})
+    assert gitops.merge_base("/repo", "main", "HEAD", run=run) == SHA_B
+    assert gitops.merge_base("/repo", "a b", "HEAD", run=run) is None
+    assert gitops.merge_base("/repo", "main", "a..b", run=run) is None
+    assert gitops.merge_base("/repo", "main", "HEAD", run=fake_runner({"merge-base": ok("nonsense")})) is None
+    assert gitops.merge_base("/repo", "main", "HEAD", run=fake_runner({})) is None
+
+
+def test_tree_state_signature_hashes_status_and_numstat():
+    run = bytes_runner({"status": _BytesResult(0, b"1 .M x\x00"), "diff": _BytesResult(0, b"1\t0\tx\x00")})
+    first = gitops.tree_state_signature("/repo", run=run)
+    assert first and len(first) == 40
+    assert _calls_of(run, "status") == [gitops.status_argv()]
+    assert _calls_of(run, "diff") == [gitops.numstat_argv("unstaged")]
+    moved = bytes_runner({"status": _BytesResult(0, b"1 .M x\x00"), "diff": _BytesResult(0, b"2\t0\tx\x00")})
+    assert gitops.tree_state_signature("/repo", run=moved) != first
+    status_only = bytes_runner({"status": _BytesResult(0, b"1 .M x\x00")})
+    assert gitops.tree_state_signature("/repo", run=status_only) is None
+    assert gitops.tree_state_signature("/repo", run=bytes_runner({})) is None
+
+
+# -- runners against a temp repository ------------------------------------------------------
+
+
+def _write(root: Path, path: str, content: str | bytes) -> None:
+    (root / path).parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, str):
+        (root / path).write_bytes(content.encode())
+    else:
+        (root / path).write_bytes(content)
+
+
+def _files(read: gitops.DiffRead) -> list[tuple[str, str, bool]]:
+    return [(f.path, f.kind, f.untracked) for f in read.files]
+
+
+@pytest.fixture
+def tree(repo):
+    """The repo with every kind the view draws: f.txt changed, big.txt
+    (one committed line) rewritten to 20 001 lines, img.bin's bytes
+    changed, an untracked n.txt and an untracked binary bin.dat."""
+    _write(repo, "big.txt", "x\n")
+    _write(repo, "img.bin", b"\x00\x01\x02")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "second")
+    _write(repo, "f.txt", "two\n")
+    _write(repo, "big.txt", "y\n" * 20_001)
+    _write(repo, "img.bin", b"\x00\x02\x03")
+    _write(repo, "n.txt", "new\n")
+    _write(repo, "bin.dat", b"\x00\xff\x00")
+    return repo
+
+
+@needs_git
+def test_read_diff_reads_the_working_tree_with_every_kind(tree):
+    read = gitops.read_diff(tree, "unstaged")
+    assert read.ok and read.error == ""
+    assert _files(read) == [
+        ("big.txt", diffmodel.KIND_TOO_LARGE, False),
+        ("bin.dat", diffmodel.KIND_BINARY, True),
+        ("f.txt", diffmodel.KIND_CHANGE, False),
+        ("img.bin", diffmodel.KIND_BINARY, False),
+        ("n.txt", diffmodel.KIND_NEW, True),
+    ]
+    big, bin_dat, f, img, n = read.files
+    assert (big.additions, big.deletions, big.patch) == (20_001, 1, "")
+    assert bin_dat.new_mode == "100644" and "Binary files /dev/null and b/bin.dat differ" in bin_dat.patch
+    assert [line.text for line in f.hunks[0].lines] == ["one", "two"]
+    assert n.hunks[0].lines[0].text == "new" and n.patch.startswith("diff --git a/n.txt b/n.txt\n")
+    assert img.hunks == ()
+    assert read.status == Status(
+        unstaged=(
+            StatusRow("big.txt", "M"), StatusRow("f.txt", "M"), StatusRow("img.bin", "M"),
+            StatusRow("bin.dat", "?"), StatusRow("n.txt", "?"),
+        ),
+        staged=(),
+    )
+    # Untracked off: the status still lists them, the files don't.
+    without = gitops.read_diff(tree, "unstaged", untracked=False)
+    assert [f.path for f in without.files] == ["big.txt", "f.txt", "img.bin"]
+    assert without.status == read.status
+    # From a subdirectory the paths are still the repository's.
+    (tree / "sub").mkdir()
+    assert _files(gitops.read_diff(tree / "sub", "unstaged", pathspecs=["f.txt", "n.txt"])) == [
+        ("f.txt", diffmodel.KIND_CHANGE, False), ("n.txt", diffmodel.KIND_NEW, True),
+    ]
+
+
+@needs_git
+def test_read_diff_reads_a_staged_rename_a_commit_a_branch_and_a_range(tree):
+    _git(tree, "checkout", "-q", "--", "f.txt", "big.txt", "img.bin")
+    _git(tree, "mv", "f.txt", "g.txt")
+    staged = gitops.read_diff(tree, "staged")
+    assert _files(staged) == [("g.txt", diffmodel.KIND_RENAME, False)]
+    assert (staged.files[0].previous_path, staged.files[0].similarity) == ("f.txt", 100)
+    assert staged.status.staged == (StatusRow("g.txt", "R", "f.txt"),)
+    assert staged.status.unstaged == (StatusRow("bin.dat", "?"), StatusRow("n.txt", "?"))
+    _git(tree, "checkout", "-qb", "feature")
+    _git(tree, "commit", "-qm", "rename f to g")
+    sha = _git(tree, "rev-parse", "HEAD").strip()
+    shown = gitops.read_diff(tree, {"show": sha})
+    assert shown.ok and shown.status is None
+    assert _files(shown) == [("g.txt", diffmodel.KIND_RENAME, False)]
+    assert shown.files[0].hunks == () and shown.files[0].previous_path == "f.txt"
+    branch = gitops.read_diff(tree, "branch", "main")
+    assert _files(branch) == _files(shown) and branch.status is None
+    ranged = gitops.read_diff(tree, {"range": "main...feature"})
+    assert _files(ranged) == _files(shown)
+    assert not gitops.read_diff(tree, "branch", None).ok
+    assert not gitops.read_diff(tree, {"show": "nosuch"}).ok
+    assert "nosuch" in gitops.read_diff(tree, {"show": "nosuch"}).error
+
+
+@needs_git
+def test_read_diff_keeps_crlf_and_the_patch_applies_back(repo):
+    _write(repo, "crlf.txt", "a\r\nb\r\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "crlf")
+    _write(repo, "crlf.txt", "a\r\nc\r\n")
+    read = gitops.read_diff(repo, "unstaged")
+    (file,) = read.files
+    assert file.patch.endswith("-b\r\n+c\r\n")
+    assert gitops.file_patch(repo, "unstaged", "crlf.txt") == file.patch
+    assert gitops.apply_patch(repo, file.patch, cached=True, reverse=False).ok
+    assert gitops.read_status(repo) == Status(unstaged=(), staged=(StatusRow("crlf.txt", "M"),))
+    assert gitops.file_at(repo, gitops.INDEX_REF, "crlf.txt") == b"a\r\nc\r\n"
+
+
+@needs_git
+def test_file_patch_file_at_and_merge_base(tree):
+    patch = gitops.file_patch(tree, "unstaged", "f.txt")
+    assert patch.startswith("diff --git a/f.txt b/f.txt\n") and "+two" in patch
+    assert gitops.file_patch(tree, "staged", "f.txt") == ""
+    assert gitops.file_patch(tree, "unstaged", "nosuch.txt") == ""
+    assert gitops.file_at(tree, None, "f.txt") == b"two\n"
+    assert gitops.file_at(tree, gitops.INDEX_REF, "f.txt") == b"one\n"
+    assert gitops.file_at(tree, "HEAD", "f.txt") == b"one\n"
+    assert gitops.file_at(tree, "HEAD", "img.bin") == b"\x00\x01\x02"
+    assert gitops.file_at(tree, "HEAD^", "big.txt") is None  # not there yet
+    assert gitops.file_at(tree, "HEAD", "n.txt") is None
+    assert gitops.file_at(tree, None, "nosuch.txt") is None
+    assert gitops.file_at(tree, "nosuch", "f.txt") is None
+    assert gitops.file_at(tree, "HEAD", "-f") is None
+    assert gitops.file_at(tree, "a b", "f.txt") is None
+    _git(tree, "checkout", "-qb", "feature")
+    _git(tree, "commit", "-qam", "on feature")
+    main_sha = _git(tree, "rev-parse", "main").strip()
+    assert gitops.merge_base(tree, "main", "HEAD") == main_sha
+    assert gitops.merge_base(tree, "main", "feature") == main_sha
+    assert gitops.merge_base(tree, "main", "nosuch") is None
+
+
+@needs_git
+def test_apply_patch_cached_reverse_and_in_the_working_tree(repo):
+    _write(repo, "f.txt", "two\n")
+    patch = gitops.file_patch(repo, "unstaged", "f.txt")
+    assert gitops.apply_patch(repo, patch, cached=True, reverse=False).ok
+    assert gitops.read_status(repo) == Status(unstaged=(), staged=(StatusRow("f.txt", "M"),))
+    staged = gitops.file_patch(repo, "staged", "f.txt")
+    assert gitops.apply_patch(repo, staged, cached=True, reverse=True).ok
+    assert gitops.read_status(repo) == Status(unstaged=(StatusRow("f.txt", "M"),), staged=())
+    # A discard: the reverse in the working tree, the index untouched.
+    assert gitops.apply_patch(repo, patch, cached=False, reverse=True).ok
+    assert gitops.read_status(repo) == Status() and (repo / "f.txt").read_text() == "one\n"
+    # Nothing to apply any more: apply refuses and nothing changes.
+    failed_apply = gitops.apply_patch(repo, patch, cached=False, reverse=True)
+    assert not failed_apply.ok and not failed_apply.three_way and "does not apply" in failed_apply.stderr
+    # From a subdirectory, the same (apply would otherwise skip the path).
+    (repo / "sub").mkdir()
+    _write(repo, "f.txt", "two\n")
+    assert gitops.apply_patch(repo / "sub", patch, cached=True, reverse=False).ok
+    assert gitops.read_status(repo).staged == (StatusRow("f.txt", "M"),)
+
+
+@needs_git
+def test_apply_patch_three_way_retry_reverts_a_hunk_whose_context_moved(repo):
+    """A revert of an older commit's change from `show`: a later commit
+    edited a context line, so the plain apply fails; `--3way` merges it
+    (and stages the result, as `--3way` does). A later commit inside the
+    change itself conflicts, and the result says so."""
+    _write(repo, "f.txt", "".join(f"{i}\n" for i in range(1, 31)))
+    _git(repo, "commit", "-qam", "thirty")
+    _write(repo, "f.txt", (repo / "f.txt").read_text().replace("5\n", "five\n"))
+    _git(repo, "commit", "-qam", "five")
+    sha = _git(repo, "rev-parse", "HEAD").strip()
+    (file,) = gitops.read_diff(repo, {"show": sha}).files
+    _write(repo, "f.txt", (repo / "f.txt").read_text().replace("8\n", "eight\n"))
+    _git(repo, "commit", "-qam", "eight")
+    plain = gitops.apply_patch(repo, file.patch, cached=False, reverse=True)
+    assert not plain.ok and gitops.read_status(repo) == Status()
+    result = gitops.apply_patch(repo, file.patch, cached=False, reverse=True, three_way=True)
+    assert (result.ok, result.three_way, result.conflicts) == (True, True, False)
+    text = (repo / "f.txt").read_text().splitlines()
+    assert text[3:8] == ["4", "5", "6", "7", "eight"]
+    assert gitops.read_status(repo) == Status(unstaged=(), staged=(StatusRow("f.txt", "M"),))
+    # A conflict: the change itself was edited later.
+    _git(repo, "reset", "-q", "--hard")
+    _write(repo, "f.txt", (repo / "f.txt").read_text().replace("five\n", "FIVE\n"))
+    _git(repo, "commit", "-qam", "FIVE")
+    result = gitops.apply_patch(repo, file.patch, cached=False, reverse=True, three_way=True)
+    assert (result.ok, result.three_way, result.conflicts) == (False, True, True)
+    assert "<<<<<<<" in (repo / "f.txt").read_text()
+    assert gitops.first_line(result.stderr) == "Applied patch to 'f.txt' with conflicts."
+
+
+@needs_git
+def test_stage_unstage_and_checkout_paths(tree):
+    assert gitops.stage_paths(tree, ["n.txt", "f.txt"]).ok
+    assert gitops.read_status(tree).staged == (StatusRow("f.txt", "M"), StatusRow("n.txt", "A"))
+    assert gitops.unstage_paths(tree, ["f.txt"]).ok
+    status = gitops.read_status(tree)
+    assert status.staged == (StatusRow("n.txt", "A"),) and StatusRow("f.txt", "M") in status.unstaged
+    assert gitops.checkout_paths(tree, ["f.txt"]).ok
+    assert (tree / "f.txt").read_text() == "one\n"
+    assert StatusRow("f.txt", "M") not in gitops.read_status(tree).unstaged
+    # A rename staged as one R by naming both paths.
+    _git(tree, "reset", "-q")
+    (tree / "f.txt").rename(tree / "g.txt")
+    assert gitops.stage_paths(tree, ["f.txt", "g.txt"]).ok
+    assert gitops.read_status(tree).staged == (StatusRow("g.txt", "R", "f.txt"),)
+    # A deleted file restored from the index; a path git doesn't know fails
+    # the way git says.
+    (tree / "big.txt").unlink()
+    assert gitops.checkout_paths(tree, ["big.txt"]).ok and (tree / "big.txt").exists()
+    missing = gitops.checkout_paths(tree, ["nosuch.txt"])
+    assert not missing.ok and "did not match" in missing.stderr
+    # From a subdirectory the paths are still the repository's.
+    (tree / "sub").mkdir()
+    assert gitops.stage_paths(tree / "sub", ["bin.dat"]).ok
+    assert StatusRow("bin.dat", "A") in gitops.read_status(tree).staged
+
+
+@needs_git
+def test_paths_with_glob_characters_name_one_file_each(repo):
+    """`foo[1].txt` beside foo1.txt, `a*b.txt` beside axb.txt: every read
+    and mutation names exactly the file it was given — as a glob pathspec
+    the bracket form matches foo1.txt too, and a confirmed discard of one
+    file wiped the other's changes."""
+    for name in ("foo1.txt", "foo[1].txt", "a*b.txt", "axb.txt"):
+        _write(repo, name, "one\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "globs")
+    for name in ("foo1.txt", "foo[1].txt", "a*b.txt", "axb.txt"):
+        _write(repo, name, f"changed {name}\n")
+    _write(repo, "new[2].txt", "fresh\n")
+    _write(repo, "new2.txt", "fresh\n")
+    # Reads: one stanza for the named file, the sibling absent.
+    assert _files(gitops.read_diff(repo, "unstaged", pathspecs=["foo[1].txt"])) == [
+        ("foo[1].txt", diffmodel.KIND_CHANGE, False),
+    ]
+    assert _files(gitops.read_diff(repo, "unstaged", pathspecs=["new[2].txt"])) == [
+        ("new[2].txt", diffmodel.KIND_NEW, True),
+    ]
+    patch = gitops.file_patch(repo, "unstaged", "foo[1].txt")
+    assert patch.count("diff --git ") == 1 and patch.startswith("diff --git a/foo[1].txt b/foo[1].txt\n")
+    assert gitops.file_patch(repo, "unstaged", "a*b.txt").count("diff --git ") == 1
+    # Mutations: the sibling is untouched.
+    assert gitops.stage_paths(repo, ["a*b.txt"]).ok
+    assert gitops.read_status(repo).staged == (StatusRow("a*b.txt", "M"),)
+    assert gitops.unstage_paths(repo, ["a*b.txt"]).ok
+    assert gitops.read_status(repo).staged == ()
+    assert gitops.checkout_paths(repo, ["foo[1].txt"]).ok
+    assert (repo / "foo[1].txt").read_text() == "one\n"
+    assert (repo / "foo1.txt").read_text() == "changed foo1.txt\n"
+    assert StatusRow("foo1.txt", "M") in gitops.read_status(repo).unstaged
+    # The too-large exclude stays literal beside a literal include.
+    _write(repo, "big[1].txt", "x\n")
+    _write(repo, "big1.txt", "x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "bigs")
+    _write(repo, "big[1].txt", "y\n" * 20_001)
+    _write(repo, "big1.txt", "z\n")
+    read = gitops.read_diff(repo, "unstaged", pathspecs=["big[1].txt", "big1.txt"], untracked=False)
+    assert _files(read) == [
+        ("big1.txt", diffmodel.KIND_CHANGE, False), ("big[1].txt", diffmodel.KIND_TOO_LARGE, False),
+    ]
+
+
+@needs_git
+def test_tree_state_signature_moves_with_the_working_tree(repo, tmp_path):
+    clean = gitops.tree_state_signature(repo)
+    assert clean and gitops.tree_state_signature(repo) == clean
+    _write(repo, "f.txt", "two\n")
+    edited = gitops.tree_state_signature(repo)
+    assert edited != clean
+    # A second edit keeps the status letter and moves the numstat.
+    _write(repo, "f.txt", "two\nthree\n")
+    assert gitops.tree_state_signature(repo) not in (clean, edited)
+    _write(repo, "n.txt", "new\n")
+    assert gitops.tree_state_signature(repo) not in (clean, edited)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert gitops.tree_state_signature(outside) is None
