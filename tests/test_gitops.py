@@ -559,6 +559,11 @@ SHOW = {"show": SHA_A}
 RANGE = {"range": "main...feature"}
 
 
+def lit(path: str) -> str:
+    """The path as the builders put it after `--`: `:(literal)path`."""
+    return f":(literal){path}"
+
+
 def _subcommand(argv: list[str]) -> str:
     """The git subcommand of *argv*: past `git`, the `-c key=value` pairs
     and any option."""
@@ -621,8 +626,17 @@ def test_diff_argv_spells_hunks_read_for_every_load():
     assert gitops.diff_argv(RANGE) == [*PREFIX, "diff", *DIFF, "main...feature", "--"]
     assert gitops.diff_argv(SHOW) == gitops.show_argv(SHA_A)
     assert gitops.show_argv(SHA_A) == [*PREFIX, "show", "--format=", *DIFF, SHA_A, "--"]
+    # Pathspecs go on literal — `foo[1].txt` is one file, not a glob over
+    # foo1.txt as well — and the excludes after them.
+    assert gitops.literal_pathspec("foo[1].txt") == ":(literal)foo[1].txt"
     assert gitops.diff_argv("unstaged", pathspecs=["a.txt", "dir/"]) == [
-        *PREFIX, "diff", *DIFF, "--", "a.txt", "dir/",
+        *PREFIX, "diff", *DIFF, "--", lit("a.txt"), lit("dir/"),
+    ]
+    assert gitops.diff_argv("staged", pathspecs=["a*b.txt"], excludes=["big.txt"]) == [
+        *PREFIX, "diff", *DIFF, "--staged", "--", lit("a*b.txt"), ":(exclude,literal)big.txt",
+    ]
+    assert gitops.show_argv(SHA_A, ["f.txt"], ["big.txt"]) == [
+        *PREFIX, "show", "--format=", *DIFF, SHA_A, "--", lit("f.txt"), ":(exclude,literal)big.txt",
     ]
     # untracked is read_diff's concern; the argv is the same either way.
     assert gitops.diff_argv("unstaged", untracked=False) == gitops.diff_argv("unstaged", untracked=True)
@@ -636,7 +650,10 @@ def test_diff_argv_spells_hunks_read_for_every_load():
 def test_numstat_argv_is_the_same_load_without_prefixes():
     assert gitops.numstat_argv("unstaged") == ["diff", "--numstat", "-z", *DIFF, "--"]
     assert gitops.numstat_argv("staged", pathspecs=["x"]) == [
-        "diff", "--numstat", "-z", *DIFF, "--staged", "--", "x",
+        "diff", "--numstat", "-z", *DIFF, "--staged", "--", lit("x"),
+    ]
+    assert gitops.numstat_argv(SHOW, pathspecs=["x"]) == [
+        "show", "--format=", "--numstat", "-z", *DIFF, SHA_A, "--", lit("x"),
     ]
     assert gitops.numstat_argv("branch", "main") == ["diff", "--numstat", "-z", *DIFF, "main...HEAD", "--"]
     assert gitops.numstat_argv(RANGE) == ["diff", "--numstat", "-z", *DIFF, "main...feature", "--"]
@@ -648,19 +665,23 @@ def test_untracked_and_file_patch_and_file_at_argv():
     assert gitops.untracked_diff_argv("n.txt") == [
         *PREFIX, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", "n.txt",
     ]
-    assert gitops.file_patch_argv("unstaged", "f.txt") == [*PREFIX, "diff", *DIFF, "--", "f.txt"]
-    assert gitops.file_patch_argv("staged", "f.txt") == [*PREFIX, "diff", *DIFF, "--staged", "--", "f.txt"]
+    assert gitops.file_patch_argv("unstaged", "f.txt") == [*PREFIX, "diff", *DIFF, "--", lit("f.txt")]
+    assert gitops.file_patch_argv("staged", "f.txt") == [
+        *PREFIX, "diff", *DIFF, "--staged", "--", lit("f.txt"),
+    ]
     # A rename names both paths so the patch carries the rename record;
     # a previous path equal to the path is named once.
     assert gitops.file_patch_argv("staged", "new.txt", "old.txt") == [
-        *PREFIX, "diff", *DIFF, "--staged", "--", "old.txt", "new.txt",
+        *PREFIX, "diff", *DIFF, "--staged", "--", lit("old.txt"), lit("new.txt"),
     ]
-    assert gitops.file_patch_argv("unstaged", "f.txt", "f.txt") == [*PREFIX, "diff", *DIFF, "--", "f.txt"]
+    assert gitops.file_patch_argv("unstaged", "f.txt", "f.txt") == [
+        *PREFIX, "diff", *DIFF, "--", lit("f.txt"),
+    ]
     assert gitops.file_patch_argv(SHOW, "f.txt") == [
-        *PREFIX, "show", "--format=", *DIFF, SHA_A, "--", "f.txt",
+        *PREFIX, "show", "--format=", *DIFF, SHA_A, "--", lit("f.txt"),
     ]
     assert gitops.file_patch_argv("branch", "f.txt", parent_target="main") == [
-        *PREFIX, "diff", *DIFF, "main...HEAD", "--", "f.txt",
+        *PREFIX, "diff", *DIFF, "main...HEAD", "--", lit("f.txt"),
     ]
     assert gitops.file_patch_argv("branch", "f.txt") is None
     assert gitops.file_at_argv(gitops.INDEX_REF, "dir/f.txt") == ["show", ":dir/f.txt"]
@@ -694,9 +715,11 @@ def test_apply_and_paths_argv():
     assert gitops.apply_argv(cached=False, reverse=True, three_way=True) == [
         *base, "--reverse", "--3way", "-",
     ]
-    assert gitops.checkout_paths_argv(["a", "b"]) == ["checkout", "-q", "--", "a", "b"]
-    assert gitops.add_paths_argv(["old", "new"]) == ["add", "-A", "--", "old", "new"]
-    assert gitops.reset_paths_argv(["a"]) == ["reset", "-q", "--", "a"]
+    # The paths are literal: a confirmed discard of `foo[1].txt` must not
+    # also check out foo1.txt.
+    assert gitops.checkout_paths_argv(["a", "b[1]"]) == ["checkout", "-q", "--", lit("a"), lit("b[1]")]
+    assert gitops.add_paths_argv(["old", "new"]) == ["add", "-A", "--", lit("old"), lit("new")]
+    assert gitops.reset_paths_argv(["a"]) == ["reset", "-q", "--", lit("a")]
     assert gitops.merge_base_argv("main", "HEAD") == ["merge-base", "main", "HEAD"]
 
 
@@ -846,7 +869,7 @@ def test_read_diff_pathspecs_narrow_the_reads_and_the_untracked_files(monkeypatc
     run = _fake_working_tree(numstat=b"1\t1\tf.txt\x00")
     read = gitops.read_diff("/repo", "unstaged", pathspecs=["f.txt"], run=run)
     assert [f.path for f in read.files] == ["f.txt"]
-    assert _calls_of(run, "diff")[0][-1] == "f.txt" and _calls_of(run, "diff")[1][-1] == "f.txt"
+    assert _calls_of(run, "diff")[0][-1] == lit("f.txt") and _calls_of(run, "diff")[1][-1] == lit("f.txt")
     # Narrowed to the untracked file: git's diff has nothing, the
     # synthesis keeps only the file the pathspec names (or one under it).
     def narrowed(argv, _stdin):
@@ -907,9 +930,9 @@ def test_paths_mutations_refuse_an_unsafe_path_without_a_call():
     assert gitops.unstage_paths("/repo", ["a.txt"], run=run).ok
     assert gitops.checkout_paths("/repo", ["a.txt"], run=run).ok
     assert [argv[1:] for argv, _kw in run.calls] == [
-        ["add", "-A", "--", "a.txt", "b/c.txt"],
-        ["reset", "-q", "--", "a.txt"],
-        ["checkout", "-q", "--", "a.txt"],
+        ["add", "-A", "--", lit("a.txt"), lit("b/c.txt")],
+        ["reset", "-q", "--", lit("a.txt")],
+        ["checkout", "-q", "--", lit("a.txt")],
     ]
     for bad in (["-x"], [], ["../up"], "a.txt", [""], ["ok", "/abs"]):
         assert gitops.stage_paths("/repo", bad, run=run) == gitops.GitResult(False, "", "no safe paths"), bad
@@ -1159,6 +1182,52 @@ def test_stage_unstage_and_checkout_paths(tree):
     (tree / "sub").mkdir()
     assert gitops.stage_paths(tree / "sub", ["bin.dat"]).ok
     assert StatusRow("bin.dat", "A") in gitops.read_status(tree).staged
+
+
+@needs_git
+def test_paths_with_glob_characters_name_one_file_each(repo):
+    """`foo[1].txt` beside foo1.txt, `a*b.txt` beside axb.txt: every read
+    and mutation names exactly the file it was given — as a glob pathspec
+    the bracket form matches foo1.txt too, and a confirmed discard of one
+    file wiped the other's changes."""
+    for name in ("foo1.txt", "foo[1].txt", "a*b.txt", "axb.txt"):
+        _write(repo, name, "one\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "globs")
+    for name in ("foo1.txt", "foo[1].txt", "a*b.txt", "axb.txt"):
+        _write(repo, name, f"changed {name}\n")
+    _write(repo, "new[2].txt", "fresh\n")
+    _write(repo, "new2.txt", "fresh\n")
+    # Reads: one stanza for the named file, the sibling absent.
+    assert _files(gitops.read_diff(repo, "unstaged", pathspecs=["foo[1].txt"])) == [
+        ("foo[1].txt", diffmodel.KIND_CHANGE, False),
+    ]
+    assert _files(gitops.read_diff(repo, "unstaged", pathspecs=["new[2].txt"])) == [
+        ("new[2].txt", diffmodel.KIND_NEW, True),
+    ]
+    patch = gitops.file_patch(repo, "unstaged", "foo[1].txt")
+    assert patch.count("diff --git ") == 1 and patch.startswith("diff --git a/foo[1].txt b/foo[1].txt\n")
+    assert gitops.file_patch(repo, "unstaged", "a*b.txt").count("diff --git ") == 1
+    # Mutations: the sibling is untouched.
+    assert gitops.stage_paths(repo, ["a*b.txt"]).ok
+    assert gitops.read_status(repo).staged == (StatusRow("a*b.txt", "M"),)
+    assert gitops.unstage_paths(repo, ["a*b.txt"]).ok
+    assert gitops.read_status(repo).staged == ()
+    assert gitops.checkout_paths(repo, ["foo[1].txt"]).ok
+    assert (repo / "foo[1].txt").read_text() == "one\n"
+    assert (repo / "foo1.txt").read_text() == "changed foo1.txt\n"
+    assert StatusRow("foo1.txt", "M") in gitops.read_status(repo).unstaged
+    # The too-large exclude stays literal beside a literal include.
+    _write(repo, "big[1].txt", "x\n")
+    _write(repo, "big1.txt", "x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "bigs")
+    _write(repo, "big[1].txt", "y\n" * 20_001)
+    _write(repo, "big1.txt", "z\n")
+    read = gitops.read_diff(repo, "unstaged", pathspecs=["big[1].txt", "big1.txt"], untracked=False)
+    assert _files(read) == [
+        ("big1.txt", diffmodel.KIND_CHANGE, False), ("big[1].txt", diffmodel.KIND_TOO_LARGE, False),
+    ]
 
 
 @needs_git

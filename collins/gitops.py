@@ -337,6 +337,27 @@ def merge_base_argv(a: str, b: str) -> list[str]:
 # -- argv builders: the diff view ------------------------------------------------------
 
 
+def literal_pathspec(path: str) -> str:
+    """`:(literal)path`: *path* as the one file — or directory, which still
+    matches everything under it — it names. Without the magic git reads a
+    pathspec as a glob: `foo[1].txt` names foo1.txt too, `a*b.txt` names
+    axb.txt, and a `checkout -- foo[1].txt` the user confirmed for one
+    file discards the other's changes as well. Every path a caller hands
+    the builders after `--` goes through here."""
+    return f":(literal){path}"
+
+
+def _exclude_pathspec(path: str) -> str:
+    """`:(exclude,literal)path`: keeps *path* out of a diff; alone after
+    `--` it means "everything but"."""
+    return f":(exclude,literal){path}"
+
+
+def _pathspecs(pathspecs: Sequence[str], excludes: Sequence[str] = ()) -> list[str]:
+    """The tail after `--`: every pathspec literal, then every exclude."""
+    return [*(literal_pathspec(path) for path in pathspecs), *(_exclude_pathspec(path) for path in excludes)]
+
+
 def _range_args(load: object, parent_target: str | None) -> list[str] | None:
     """The revision part of a `git diff` for *load*: [] for the unstaged
     working tree, ["--staged"] for the index, ["<parent_target>...HEAD"]
@@ -354,48 +375,55 @@ def _range_args(load: object, parent_target: str | None) -> list[str] | None:
     return None
 
 
-def show_argv(ref: str, pathspecs: Sequence[str] = ()) -> list[str]:
+def show_argv(ref: str, pathspecs: Sequence[str] = (), excludes: Sequence[str] = ()) -> list[str]:
     """[*DIFF_PREFIX_ARGS, "show", "--format=", "--no-ext-diff",
-    "--find-renames", "--no-color", ref, "--", *pathspecs]: one commit's
-    diff with no message, hunk's `hunk show`."""
-    return [*DIFF_PREFIX_ARGS, "show", "--format=", *DIFF_ARGS, ref, "--", *pathspecs]
+    "--find-renames", "--no-color", ref, "--", *literal pathspecs,
+    *excludes]: one commit's diff with no message, hunk's `hunk show`."""
+    return [*DIFF_PREFIX_ARGS, "show", "--format=", *DIFF_ARGS, ref, "--", *_pathspecs(pathspecs, excludes)]
 
 
 def diff_argv(
-    load: object, parent_target: str | None = None, untracked: bool = True, pathspecs: Sequence[str] = ()
+    load: object,
+    parent_target: str | None = None,
+    untracked: bool = True,
+    pathspecs: Sequence[str] = (),
+    excludes: Sequence[str] = (),
 ) -> list[str] | None:
     """The whole read of *load* (a hunkctl.Loaded), hunk's `hunk diff` /
     `hunk show` argv: [*DIFF_PREFIX_ARGS, "diff", "--no-ext-diff",
     "--find-renames", "--no-color", <nothing | --staged | parent...HEAD |
-    a...b>, "--", *pathspecs], or show_argv for a commit load. None for a
-    branch load without *parent_target*, and for a load that is none of
-    the five. *untracked* is carried for symmetry with read_diff and
-    changes nothing here: git's diff never lists untracked files —
-    read_diff synthesizes them (untracked_diff_argv) when the flag is
-    on."""
+    a...b>, "--", *pathspecs, *excludes], or show_argv for a commit load.
+    Every pathspec goes on as `:(literal)path` (literal_pathspec) and
+    every exclude as `:(exclude,literal)path`: the paths came out of a
+    diff or a status and name files, never globs. None for a branch load
+    without *parent_target*, and for a load that is none of the five.
+    *untracked* is carried for symmetry with read_diff and changes
+    nothing here: git's diff never lists untracked files — read_diff
+    synthesizes them (untracked_diff_argv) when the flag is on."""
     del untracked
     if hunkctl.is_show(load):
-        return show_argv(hunkctl.show_ref(load), pathspecs)
+        return show_argv(hunkctl.show_ref(load), pathspecs, excludes)
     revisions = _range_args(load, parent_target)
     if revisions is None:
         return None
-    return [*DIFF_PREFIX_ARGS, "diff", *DIFF_ARGS, *revisions, "--", *pathspecs]
+    return [*DIFF_PREFIX_ARGS, "diff", *DIFF_ARGS, *revisions, "--", *_pathspecs(pathspecs, excludes)]
 
 
 def numstat_argv(
     load: object, parent_target: str | None = None, pathspecs: Sequence[str] = ()
 ) -> list[str] | None:
     """read_diff's pre-pass, the same load as `--numstat -z`: ["diff",
-    "--numstat", "-z", *DIFF_ARGS, <revisions>, "--", *pathspecs], or
-    ["show", "--format=", "--numstat", "-z", *DIFF_ARGS, ref, "--",
-    *pathspecs] for a commit. No prefix options: numstat prints bare
-    paths. None where diff_argv is."""
+    "--numstat", "-z", *DIFF_ARGS, <revisions>, "--", *literal
+    pathspecs], or ["show", "--format=", "--numstat", "-z", *DIFF_ARGS,
+    ref, "--", *literal pathspecs] for a commit. No prefix options:
+    numstat prints bare paths. None where diff_argv is."""
     if hunkctl.is_show(load):
-        return ["show", "--format=", "--numstat", "-z", *DIFF_ARGS, hunkctl.show_ref(load), "--", *pathspecs]
+        ref = hunkctl.show_ref(load)
+        return ["show", "--format=", "--numstat", "-z", *DIFF_ARGS, ref, "--", *_pathspecs(pathspecs)]
     revisions = _range_args(load, parent_target)
     if revisions is None:
         return None
-    return ["diff", "--numstat", "-z", *DIFF_ARGS, *revisions, "--", *pathspecs]
+    return ["diff", "--numstat", "-z", *DIFF_ARGS, *revisions, "--", *_pathspecs(pathspecs)]
 
 
 def untracked_diff_argv(path: str) -> list[str]:
@@ -412,10 +440,10 @@ def file_patch_argv(
 ) -> list[str] | None:
     """One file's patch of *load*, re-read at action time so its numbers
     are exact: the extension's readFilePatch — [*DIFF_PREFIX_ARGS, "diff",
-    ("--staged",) *DIFF_ARGS, "--", *paths] for a working-tree side (a
-    rename names both paths so the patch carries the rename record), and
-    diff_argv with the paths as pathspecs for a commit, branch or range.
-    None where diff_argv is."""
+    ("--staged",) *DIFF_ARGS, "--", *literal paths] for a working-tree
+    side (a rename names both paths so the patch carries the rename
+    record), and diff_argv with the paths as pathspecs for a commit,
+    branch or range. None where diff_argv is."""
     paths = [previous_path, path] if previous_path and previous_path != path else [path]
     return diff_argv(load, parent_target, pathspecs=paths)
 
@@ -481,22 +509,25 @@ def apply_argv(cached: bool, reverse: bool, three_way: bool = False) -> list[str
 
 
 def checkout_paths_argv(paths: Sequence[str]) -> list[str]:
-    """["checkout", "-q", "--", *paths]: the paths back the way the index
-    has them — a whole-file discard, and what restores a file deleted in
-    the working tree (a binary too, no patch needed)."""
-    return ["checkout", "-q", "--", *paths]
+    """["checkout", "-q", "--", *literal paths]: the paths back the way
+    the index has them — a whole-file discard, and what restores a file
+    deleted in the working tree (a binary too, no patch needed). Literal
+    (literal_pathspec) because this one is destructive and confirmed for
+    the paths named, not for whatever a glob reading of them matches."""
+    return ["checkout", "-q", "--", *_pathspecs(paths)]
 
 
 def add_paths_argv(paths: Sequence[str]) -> list[str]:
-    """["add", "-A", "--", *paths]: stage the paths as they are, a deletion
-    or an untracked file included; a rename's two paths make one `R`."""
-    return ["add", "-A", "--", *paths]
+    """["add", "-A", "--", *literal paths]: stage the paths as they are, a
+    deletion or an untracked file included; a rename's two paths make one
+    `R`."""
+    return ["add", "-A", "--", *_pathspecs(paths)]
 
 
 def reset_paths_argv(paths: Sequence[str]) -> list[str]:
-    """["reset", "-q", "--", *paths]: the paths' index entries back to
-    HEAD's, the working tree untouched."""
-    return ["reset", "-q", "--", *paths]
+    """["reset", "-q", "--", *literal paths]: the paths' index entries
+    back to HEAD's, the working tree untouched."""
+    return ["reset", "-q", "--", *_pathspecs(paths)]
 
 
 def safe_path(path: object) -> bool:
@@ -784,12 +815,6 @@ def _placeholder(path: str, additions: int, deletions: int, untracked: bool = Fa
     )
 
 
-def _exclude_pathspec(path: str) -> str:
-    """`:(exclude,literal)path`: keeps *path* out of a diff without
-    reading it as a glob; alone after `--` it means "everything but"."""
-    return f":(exclude,literal){path}"
-
-
 def _under(path: str, pathspecs: Sequence[str]) -> bool:
     """Whether an untracked *path* is one the *pathspecs* would have
     matched: no pathspecs match everything; a pathspec matches itself and
@@ -856,7 +881,10 @@ def read_diff(
     1. numstat_argv — the pre-pass; every path over diffmodel's
        TOO_LARGE_LINES is excluded from the diff (`:(exclude,literal)`) and
        stands in the result as a KIND_TOO_LARGE placeholder carrying its
-       counts (the byte cap is applied by diffmodel.parse on each stanza).
+       counts. hunk's other cap, TOO_LARGE_BYTES, is applied after the
+       read, by diffmodel.parse on each stanza's own text: a numstat
+       says how many lines moved, not how heavy the patch is, and the
+       placeholder comes out the same — only the read is not saved.
     2. diff_argv (or show_argv) — the patch stream, diffmodel.parse'd.
     3. For a working-tree side, status_argv — the status the sidebar's
        letters come from, returned as DiffRead.status; and for the
@@ -884,8 +912,7 @@ def read_diff(
         for path, (added, deleted) in counts.items()
         if diffmodel.too_large(added, deleted, 0) and safe_path(path)
     }
-    excludes = [_exclude_pathspec(path) for path in sorted(skipped)]
-    argv = diff_argv(load, parent_target, untracked, [*pathspecs, *excludes])
+    argv = diff_argv(load, parent_target, untracked, pathspecs, sorted(skipped))
     result = run_git_bytes(root, argv, run=run, timeout=timeout)
     if not result.ok:
         return DiffRead((), None, False, first_line(result.stderr) or "diff failed")
