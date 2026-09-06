@@ -190,6 +190,19 @@ disk, `sessions.remove_worktree` deletes it (`worktree remove --force
 tab / background agent works in it, and never for bulk archives.
 `scripts/check_archive_worktree.py` drives all of it.
 
+**Automatic delete** (`autodelete.py`, GTK-free): `AppState.set_archived`
+stamps `archived_at` (first archive wins; a restore drops it; archives from
+before the stamp are stamped at first read, never earlier). The
+`auto_delete_archived_after` / `auto_delete_archived_unit` pair (0 = never,
+the default; month = 30 d, year = 365 d) is read by `autodelete.maybe_sweep`,
+which `App._sweep_archived` calls at launch and on the update check's hourly
+timer; a cache file (`archive-sweep.json`) holds it to one sweep a day. The
+trash goes through `MainWindow.trash_expired_archives` — the manual bulk
+delete's path minus the dialog: running sessions are skipped, an emptied
+project is kept as a header. Sessions out of sight only because their
+*project* is archived carry no stamp and are never swept.
+`scripts/check_auto_delete.py` drives the row and the sweep.
+
 **Trust.** `trust.py` walks `~/.claude.json`'s `hasTrustDialogAccepted`
 entries up the ancestor chain (the CLI honours ancestors), and asks the
 "Do you trust this folder?" dialog before a first launch. `claude -w` checks

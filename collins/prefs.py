@@ -19,6 +19,7 @@ from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
     apppicker,
+    autodelete,
     clisetup,
     editor,
     footerapps,
@@ -519,6 +520,7 @@ class PreferencesDialog(Adw.Dialog):
         sessions_group.add(
             _searchable(self._remote_archive_row, "claude.ai", "remote", "web", "sync")
         )
+        self._build_auto_delete_row(state, sessions_group)
         self._attach_autodock_row = Adw.SwitchRow(
             title=_("Show the attachments panel automatically"),
             subtitle=_(
@@ -557,6 +559,47 @@ class PreferencesDialog(Adw.Dialog):
         self._bg_poll_row.connect("notify::active", self._on_bg_poll_changed)
         sessions_group.add(self._bg_poll_row)
         return sessions_group
+
+    def _build_auto_delete_row(self, state: AppState, group: _SearchableGroup) -> None:
+        """Delete archived sessions after: a number and, as its suffix, the
+        unit drop-down (days / weeks / months / years). 0 is never, and the
+        row says so in its subtitle rather than with a separate switch."""
+        unit_labels = [_(label) for _v, label, _s in autodelete.UNITS]
+        self._auto_delete_row = Adw.SpinRow.new_with_range(0, autodelete.MAX_COUNT, 1)
+        self._auto_delete_row.set_title(_("Delete archived sessions after"))
+        self._auto_delete_row.set_subtitle(
+            _(
+                "Move a session's transcript to the trash once it has been "
+                "archived this long; 0 keeps them forever. Checked once a day"
+            )
+        )
+        count = state.get_setting(autodelete.SETTING_COUNT)
+        if isinstance(count, bool) or not isinstance(count, (int, float)) or count < 0:
+            count = 0
+        self._auto_delete_row.set_value(min(int(count), autodelete.MAX_COUNT))
+        self._auto_delete_unit = Gtk.DropDown.new_from_strings(unit_labels)
+        self._auto_delete_unit.set_valign(Gtk.Align.CENTER)
+        unit = state.get_setting(autodelete.SETTING_UNIT)
+        unit_values = [value for value, _l, _s in autodelete.UNITS]
+        if unit not in unit_values:
+            unit = autodelete.DEFAULT_UNIT
+        self._auto_delete_unit.set_selected(unit_values.index(unit))
+        self._auto_delete_row.add_suffix(self._auto_delete_unit)
+        self._auto_delete_row.connect("notify::value", self._on_auto_delete_count_changed)
+        self._auto_delete_unit.connect("notify::selected", self._on_auto_delete_unit_changed)
+        group.add(
+            _searchable(
+                self._auto_delete_row,
+                "auto",
+                "automatic",
+                "delete",
+                "trash",
+                "archive",
+                "retention",
+                "expire",
+                *unit_labels,
+            )
+        )
 
     def _build_notifications_group(self, state: AppState) -> _SearchableGroup:
         """The spec's Notifications group: the in-app card and its own
@@ -1668,6 +1711,16 @@ class PreferencesDialog(Adw.Dialog):
     ) -> None:
         self._state.set_setting(key, values[row.get_selected()])
         self._on_change()
+
+    def _on_auto_delete_count_changed(self, row: Adw.SpinRow, _pspec) -> None:
+        # Read at each sweep (autodelete.maybe_sweep reads the settings
+        # dict); no listener needs an apply nudge.
+        self._state.set_setting(autodelete.SETTING_COUNT, int(row.get_value()))
+
+    def _on_auto_delete_unit_changed(self, dropdown: Gtk.DropDown, _pspec) -> None:
+        index = dropdown.get_selected()
+        if 0 <= index < len(autodelete.UNITS):
+            self._state.set_setting(autodelete.SETTING_UNIT, autodelete.UNITS[index][0])
 
     def _on_remote_archive_changed(self, row: Adw.SwitchRow, _pspec) -> None:
         # Read at each archive, so it takes effect immediately; no listener

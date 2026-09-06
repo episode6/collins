@@ -6591,6 +6591,46 @@ class MainWindow(Adw.ApplicationWindow):
     def _sync_trash_archived_action(self) -> None:
         self._trash_archived_action.set_enabled(bool(self.store.archived_sessions()))
 
+    def session_is_running(self, session_id: str) -> bool:
+        """Whether the session has a tab in this window or runs as a
+        background agent — what the automatic archive sweep asks before it
+        trashes anything (see autodelete)."""
+        return self._page_for(session_id) is not None or self._is_detached(session_id)
+
+    def trash_expired_archives(self, session_ids: list[str]) -> list[str]:
+        """The automatic delete (autodelete.maybe_sweep's *trash*): the same
+        path as *Delete archived sessions…* without the dialog. Sessions
+        still running are skipped — they come round again tomorrow — and a
+        project this empties out is kept in the sidebar as an empty header,
+        the way the dialog's default keeps it: an automatic delete has nobody
+        to ask, and losing a project you never removed is the surprise.
+        Returns the ids that were not trashed."""
+        wanted = [
+            sid
+            for sid in session_ids
+            if sid in self.store.sessions
+            and self.store.state.is_archived(sid)
+            and not self.session_is_running(sid)
+        ]
+        skipped = [sid for sid in session_ids if sid not in wanted]
+        if not wanted:
+            return skipped
+        emptied = emptied_projects(self.store.sessions.values(), set(wanted))
+        if emptied:
+            self.store.keep_projects(emptied)
+        errors = self.store.trash_many(wanted)
+        gone = [sid for sid in wanted if sid not in errors]
+        self._drop_undo(gone)
+        for session_id in gone:
+            self._forget_transcript(session_id)
+            # The row is gone for good — don't leave its id (and its archive
+            # stamp) in state forever.
+            self.state.set_archived(session_id, False)
+        for session_id, error in errors.items():
+            log.warning("archive sweep: could not trash %s: %s", session_id, error)
+        self._sync_trash_archived_action()
+        return skipped + list(errors)
+
     def _trash_archived(self) -> None:
         """Sidebar menu → trash every session the sidebar keeps out of sight:
         the ones archived individually plus everything inside an archived
