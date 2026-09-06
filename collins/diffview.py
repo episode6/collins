@@ -51,6 +51,7 @@ not the unit suite.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import logging
 import re
 import threading
@@ -644,6 +645,9 @@ class _Options:
     word_diff: bool
 
 
+_HUNK_SERIALS = itertools.count(1)
+
+
 class _HunkSection(Gtk.Box):
     """One hunk: its `@@` header row (the buttons' home in the next PR) over
     its view(s). Wears `.git-hunk`, and `.git-hunk-focused` while one of
@@ -663,6 +667,10 @@ class _HunkSection(Gtk.Box):
         self.add_css_class("git-hunk")
         self.file = file
         self.hunk = hunk
+        # A number no other section ever gets (an id() could be reused
+        # once a dropped widget is freed): the probe that says "this hunk
+        # kept its widget across a reload" compares these.
+        self.serial = next(_HUNK_SERIALS)
         self._language = language
         self._scheme = scheme
         self._palette = palette
@@ -1752,6 +1760,27 @@ class DiffView(Gtk.Box):
         """The hunk headers of *path*'s section, in order."""
         section = self._section_for(path, diffmodel.NEW)
         return [h.hunk.header for h in section.hunks] if section is not None else []
+
+    def hunk_serials(self, path: str) -> list[int]:
+        """The serial of each hunk section of *path*, in order — a number
+        minted once per widget, so a check can say across a reload which
+        hunks kept theirs (and hold no reference to a widget for it)."""
+        section = self._section_for(path, diffmodel.NEW)
+        return [h.serial for h in section.hunks] if section is not None else []
+
+    def badge_rows(self) -> list[tuple[str, str, bool]]:
+        """(path label, badge, has picture) per section, in order — the
+        header's words as drawn, and whether an image preview sits under
+        it."""
+        return [(*s.header_text(), s._preview is not None) for s in self._sections()]
+
+    def set_scroll(self, fraction: float) -> None:
+        """Scroll the stream to *fraction* of its range (0.0 top, 1.0
+        bottom), as a wheel would — the current file follows after the
+        settle."""
+        adjustment = self._scroller.get_vadjustment()
+        span = adjustment.get_upper() - adjustment.get_page_size()
+        adjustment.set_value(adjustment.get_lower() + max(span, 0.0) * min(max(fraction, 0.0), 1.0))
 
     def gap_rows(self, path: str) -> list[tuple[str, int, int]]:
         """(address, remaining, shown) per gap row of *path*."""
