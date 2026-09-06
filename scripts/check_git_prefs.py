@@ -2,14 +2,15 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """End-to-end check for the Git preferences group — dev machine.
 
-The git page's knobs sit in a Git group directly under Pull requests: hunk's
-layout and theme, the untracked-files switch, the commits panel's page size,
-and a default parent branch. The two free-text rows keep a name only when
-it can stand as one (a half-typed or flag-shaped word wears the error style
-and leaves the stored answer alone), and only once the typing settles —
-Enter, leaving the row and closing the dialog save at once — since a theme
-change restarts hunk on every open git page; the search bar finds the group
-by the words people have for it. None of it is reachable from pytest —
+The git page's knobs sit in a Git group directly under Pull requests: the
+diff view's layout and its three switches, the untracked-files switch, the
+commits panel's page size, and a default parent branch. The free-text row
+keeps a name only when it can stand as one (a half-typed or flag-shaped
+word wears the error style and leaves the stored answer alone), and only
+once the typing settles — Enter, leaving the row and closing the dialog
+save at once — since a prefix that names a branch would reload every
+branch diff against it; the search bar finds the group by the words
+people have for it. None of it is reachable from pytest —
 tests/conftest.py blocks the GTK stack, and the layout promise the unit
 suite holds (tests/test_prefslayout.py) is data, not widgets — so it is
 checked here, against a real App:
@@ -17,8 +18,8 @@ checked here, against a real App:
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_git_prefs.py
 
-The CLI is a shim that draws an idle prompt; nothing here starts hunk or
-reaches the network.
+The CLI is a shim that draws an idle prompt; nothing here opens a git
+page or reaches the network.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
@@ -91,9 +92,7 @@ PASSED = 0
 FAILED = 0
 
 ROW_TITLES = [
-    "Diff viewer",  # temporary: the native view's switch (PR 2 of the native-diff stack)
     "Layout",
-    "Theme",
     "Line numbers",
     "Wrap long lines",
     "Highlight changed words",
@@ -232,33 +231,24 @@ def step_layout() -> bool:
         (git.get_description() or "").startswith("The git page:"),
         git.get_description(),
     )
-    # The two entries each carry a title-less reason row beneath them, the
-    # way the CLI path row does.
-    check("the group holds its nine rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
-    check("each entry has a reason row under it", titles(git)[3] == "" and titles(git)[-1] == "", titles(git))
-    viewer, layout, theme, _r1, numbers, wrap, words, untracked, log_page, parent, _r2 = git.rows
-    model = viewer.get_model()
-    labels = [model.get_string(i) for i in range(model.get_n_items())]
-    check("the Diff viewer row lists hunk and Native", labels == ["hunk", "Native"], labels)
-    check("and opens on hunk (the default while the native view is experimental)", viewer.get_selected() == 0)
-    check("the viewer row says it is experimental", "Experimental" in (viewer.get_subtitle() or ""), viewer.get_subtitle())
+    # The entry carries a title-less reason row beneath it, the way the
+    # CLI path row does.
+    check("the group holds its seven rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
+    check("the entry has a reason row under it", titles(git)[-1] == "", titles(git))
+    check("no viewer switch and no theme row (the diff view is the one viewer)", "Diff viewer" not in titles(git) and "Theme" not in titles(git), titles(git))
+    layout, numbers, wrap, words, untracked, log_page, parent, _r2 = git.rows
     model = layout.get_model()
     labels = [model.get_string(i) for i in range(model.get_n_items())]
-    check("the Layout row lists hunk's three modes", labels == ["Automatic", "Split", "Stacked"], labels)
+    check("the Layout row lists the view's three layouts", labels == ["Automatic", "Split", "Stacked"], labels)
     check("and opens on Automatic (the default)", layout.get_selected() == 0, layout.get_selected())
     check(
-        "the native view's switches open on their defaults (numbers on, wrap off, words on)",
+        "the view's switches open on their defaults (numbers on, wrap off, words on)",
         all(isinstance(r, Adw.SwitchRow) for r in (numbers, wrap, words))
         and numbers.get_active()
         and not wrap.get_active()
         and words.get_active(),
     )
-    state.update(viewer=viewer, wrap=wrap)
-    check(
-        "the Theme box opens empty",
-        isinstance(theme, Adw.EntryRow) and theme.get_text() == "",
-        theme.get_text(),
-    )
+    state.update(wrap=wrap)
     check("untracked files open shown", isinstance(untracked, Adw.SwitchRow) and untracked.get_active())
     check("the page size opens on twenty", isinstance(log_page, Adw.SpinRow) and log_page.get_value() == 20)
     check(
@@ -266,75 +256,60 @@ def step_layout() -> bool:
         isinstance(parent, Adw.EntryRow) and parent.get_text() == "",
         parent.get_text(),
     )
-    state.update(
-        page=page, git=git, layout=layout, theme=theme, untracked=untracked, log_page=log_page, parent=parent
-    )
+    state.update(page=page, git=git, layout=layout, untracked=untracked, log_page=log_page, parent=parent)
     return later(step_writes, 200)
 
 
 def step_writes() -> bool:
-    layout, theme = state["layout"], state["theme"]
+    layout, parent = state["layout"], state["parent"]
 
     layout.set_selected(1)
-    check("picking Split writes hunk's mode word", setting("git_layout") == "split", setting("git_layout"))
+    check("picking Split writes the layout word", setting("git_layout") == "split", setting("git_layout"))
     check("and calls on_change", changes() == 1, changes())
-    state["viewer"].set_selected(1)
-    check("picking Native writes git_viewer", setting("git_viewer") == "native", setting("git_viewer"))
     state["wrap"].set_active(True)
     check("the wrap switch writes git_wrap_lines", setting("git_wrap_lines") is True, setting("git_wrap_lines"))
-    check("both called on_change", changes() == 3, changes())
-    state["viewer"].set_selected(0)
+    check("and called on_change", changes() == 2, changes())
     state["wrap"].set_active(False)
-    del state["changes"][1:]  # the counts below predate these rows: back to the one Layout change
+    del state["changes"][1:]  # the counts below predate this row: back to the one Layout change
 
-    # Typing alone saves nothing until it settles: "dr", "dra"… on the way
-    # to a theme name must not each restart hunk.
-    theme.set_text("dr")
+    # Typing alone saves nothing until it settles: "de", "dev"… on the way
+    # to a branch name must not each reload every branch diff.
+    parent.set_text("de")
     settle()
-    theme.set_text("dra")
+    parent.set_text("dev")
     settle()
-    check("a keystroke alone saves nothing yet", setting("git_theme") == "", setting("git_theme"))
+    check("a keystroke alone saves nothing yet", setting("git_parent_branch") == "", setting("git_parent_branch"))
     check("and calls on_change no earlier", changes() == 1, changes())
-    check("but the box already says the word can stand", not theme.has_css_class("error"))
-    theme.set_text("bad name")
+    check("but the box already says the word can stand", not parent.has_css_class("error"))
+    parent.set_text("bad name")
     settle()
-    check("and when it can't, at once", theme.has_css_class("error"))
-    theme.set_text("dracula")
+    check("and when it can't, at once", parent.has_css_class("error"))
+    parent.set_text("develop")
     settle()
     return later(step_writes_settled, 900)
 
 
 def step_writes_settled() -> bool:
-    theme, untracked = state["theme"], state["untracked"]
+    untracked = state["untracked"]
     log_page, parent = state["log_page"], state["parent"]
-    check("the name lands once the typing settles", setting("git_theme") == "dracula", setting("git_theme"))
+    check("the name lands once the typing settles", setting("git_parent_branch") == "develop", setting("git_parent_branch"))
     check("and calls on_change once", changes() == 2, changes())
-
-    typed(theme, "nord")
-    check("a theme name is kept on Enter", setting("git_theme") == "nord", setting("git_theme"))
+    typed(parent, "")
+    check("clearing the box is automatic again", setting("git_parent_branch") == "", setting("git_parent_branch"))
+    check("and drops the error style", not parent.has_css_class("error"))
     check("and calls on_change", changes() == 3, changes())
-    typed(theme, " bad name")
-    check("a name with a space in it is not", setting("git_theme") == "nord", setting("git_theme"))
-    check("and wears the error style", theme.has_css_class("error"))
-    check("without calling on_change", changes() == 3, changes())
-    typed(theme, "-x")
-    check("nor is a flag-shaped one", setting("git_theme") == "nord", setting("git_theme"))
-    typed(theme, "")
-    check("clearing the box is hunk's default again", setting("git_theme") == "", setting("git_theme"))
-    check("and drops the error style", not theme.has_css_class("error"))
-    check("and calls on_change", changes() == 4, changes())
 
     untracked.set_active(False)
     check("switching untracked files off writes the setting", setting("git_untracked") is False)
-    check("and calls on_change", changes() == 5, changes())
+    check("and calls on_change", changes() == 4, changes())
 
     log_page.set_value(50)
     check("the page size writes an int", setting("git_log_page") == 50, repr(setting("git_log_page")))
-    check("and calls on_change", changes() == 6, changes())
+    check("and calls on_change", changes() == 5, changes())
 
     typed(parent, "develop")
     check("a branch name is kept", setting("git_parent_branch") == "develop", setting("git_parent_branch"))
-    check("and calls on_change", changes() == 7, changes())
+    check("and calls on_change", changes() == 6, changes())
     typed(parent, "-x")
     check("a flag-shaped one is not", setting("git_parent_branch") == "develop", setting("git_parent_branch"))
     check("and wears the error style", parent.has_css_class("error"))
@@ -357,7 +332,7 @@ def step_writes_settled() -> bool:
         setting("git_parent_branch") == "",
         setting("git_parent_branch"),
     )
-    check("no other setting moved", changes() == 10, changes())
+    check("no other setting moved", changes() == 9, changes())
     # Focus leaving the row saves at once, too.
     state["focus_tries"] = 0
     return later(step_focus_out, 50)
@@ -402,13 +377,10 @@ def step_search() -> bool:
         # The entry and the reason row under it show and hide together.
         ("trunk", ["Default parent branch", ""]),
         ("load more", ["Commits per page"]),
-        # A theme name finds the terminal's palette row too.
-        ("dracula", ["Color theme", "Theme", ""]),
-        # The group's own words keep every row, by design; "hunk" also
-        # finds the show_diff switch (Built-in MCP tools, above this
-        # group), whose subtitle says the tool is offered while hunk is
-        # installed.
-        ("hunk", ["Show diffs in the git page", *titles(git)]),
+        # A theme name finds the terminal's palette row alone: the diff
+        # view has no theme of its own (it follows the editor's scheme).
+        ("dracula", ["Color theme"]),
+        # The group's own words keep every row, by design.
         ("untracked", titles(git)),
         ("parent branch", titles(git)),
     ):
@@ -428,15 +400,15 @@ def step_search() -> bool:
     rows = visible_rows(page)
     check("and the group's rows are all showing", all(t in rows for t in ROW_TITLES), rows)
     # Closing the dialog on a word still settling keeps it.
-    state["theme"].set_text("gruvbox")
+    state["parent"].set_text("trunk")
     settle()
-    check("a settling word is not saved before the close", setting("git_theme") == "", setting("git_theme"))
+    check("a settling word is not saved before the close", setting("git_parent_branch") == "", setting("git_parent_branch"))
     dialog.force_close()
     return later(step_closed, 300)
 
 
 def step_closed() -> bool:
-    check("closing the dialog keeps the word", setting("git_theme") == "gruvbox", setting("git_theme"))
+    check("closing the dialog keeps the word", setting("git_parent_branch") == "trunk", setting("git_parent_branch"))
     return done()
 
 
