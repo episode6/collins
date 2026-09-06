@@ -29,6 +29,8 @@ def test_git_page_keys_are_page_local_and_hunks_words():
     assert git["git.prev-hunk"] == ("bracketleft",)
     assert git["git.next-file"] == ("period",)
     assert git["git.prev-file"] == ("comma",)
+    assert git["git.cursor-down"] == ("j",)
+    assert git["git.cursor-up"] == ("k",)
     assert git["git.next-note"] == ("braceright",)
     assert git["git.prev-note"] == ("braceleft",)
     assert git["git.expand-gap"] == ("z",)

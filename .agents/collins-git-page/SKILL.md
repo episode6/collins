@@ -305,13 +305,24 @@ terminal), `filter-changed(str)` → `DiffView.filter` hides sections
 must `wait_for` the words to land.
 
 **Keys.** `keybindings.GROUP_GIT` (`git.*`): `]` `[` next/prev hunk, `.`
-`,` file, `}` `{` annotated hunk (a view with marks — `_HunkView.marks`,
-the notes/highlights hook), `z` expand the gap above the focused hunk
-(all of it; one way), `0` `1` `2` layout, `l` line numbers, `w` wrap, `a`
-notes shown (a flag until the cards land), `r` reload, `/` the filter,
-`Ctrl+F` find, `?` Keyboard Bindings, `e` open in the editor at the cursor
-line (`win.open-in-editor (sii)`, 1-based line), `q` close (`win.
-toggle-git`). The mechanism copies the editor's `editor.*` row:
+`,` file, `j` `k` the cursor a row down/up in the focused hunk's view
+(`DiffView.step_cursor`: past the hunk's edge it enters the neighbouring
+hunk on the same side, first/last row; `_show_cursor` scrolls the
+*column* to the line — each hunk's scroller never scrolls vertically —
+from the column's own coordinates, since bounds against the scroller are
+stale until the layout after a `set_value`), `}` `{` annotated hunk (a
+view with marks — `_HunkView.marks`, the notes/highlights hook), `z`
+expand the gap above the focused hunk (all of it; one way), `0` `1` `2`
+layout, `l` line numbers, `w` wrap (`a`, agent notes shown, arrives with
+the note cards — no inert binding), `r` reload, `/` the filter, `Ctrl+F`
+find, `?` Keyboard Bindings opened **on the Git page group**
+(`win.keyboard-bindings-group (s)` → `KeyboardBindingsDialog(group=)`:
+it scrolls after the first layout past `map`, and takes the viewport's
+`scroll-to-focus` off around the first row's grab — that scroll reads
+pre-`set_value` bounds and animates the page 1 100 px past the group),
+`e` open in the editor at the cursor line (`win.open-in-editor (sii)`,
+1-based line), `q` close (`win.toggle-git`). The mechanism copies the
+editor's `editor.*` row:
 `keymap.shortcut_controller(custom, "git", …)` in `DiffView.
 apply_keybindings`, scoped `LOCAL` **on the view** (spec) and in the
 **CAPTURE** phase — a bare letter must beat the `GtkSource.View` under it

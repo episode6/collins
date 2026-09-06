@@ -879,20 +879,32 @@ class _HunkSection(Gtk.Box):
                 return index
         return 0
 
+    @property
+    def focused_view(self) -> _HunkView | None:
+        """The view holding the keyboard (one side's, in split), else None."""
+        for view in self.views:
+            root = view.view.get_root()
+            if view.view.has_focus() or (root is not None and root.get_focus() is view.view):
+                return view
+        return None
+
+    def side_of(self, view: _HunkView) -> str:
+        """Which side *view* draws: OLD for the split's left view, NEW for
+        the right one and for the stack's single view."""
+        return diffmodel.OLD if len(self.views) == 2 and view is self.views[0] else diffmodel.NEW
+
     def cursor_line(self) -> tuple[str, int] | None:
         """(side, 1-based line number) under the cursor of the focused
         view, for `open-requested`: the new side's number when the line has
         one, else the old side's."""
-        for view in self.views:
-            root = view.view.get_root()
-            if view.view.has_focus() or (root is not None and root.get_focus() is view.view):
-                row = view.rows[view.cursor_row()] if view.rows else None
-                if row is None:
-                    return None
-                if row.new is not None:
-                    return diffmodel.NEW, row.new
-                if row.old is not None:
-                    return diffmodel.OLD, row.old
+        view = self.focused_view
+        if view is None or not view.rows:
+            return None
+        row = view.rows[min(view.cursor_row(), len(view.rows) - 1)]
+        if row.new is not None:
+            return diffmodel.NEW, row.new
+        if row.old is not None:
+            return diffmodel.OLD, row.old
         return None
 
 
@@ -1641,6 +1653,84 @@ class DiffView(Gtk.Box):
             return bool(after) and self._focus(after[0])
         before = [h for h in hunks[:index] if h.marked]
         return bool(before) and self._focus(before[-1])
+
+    def step_cursor(self, delta: int) -> bool:
+        """`j` / `k`: the cursor a row down (up) in the focused hunk's view,
+        the column scrolling to keep the line on screen; past the hunk's
+        last (first) row the keyboard moves into the next (previous)
+        hunk's first (last) row on the same side, as a reader walking the
+        stream expects. With nothing focused, the first (last) hunk's
+        edge. False at the end of the stream."""
+        focused = self._focused_hunk
+        if focused is None or focused.get_parent() is None:
+            if not self.focus_hunk(1 if delta >= 0 else -1):
+                return False
+            focused = self._focused_hunk
+            view = focused.focused_view if focused is not None else None
+            if view is None:
+                return False
+            view.place_cursor(0 if delta >= 0 else len(view.rows) - 1)
+            self._show_cursor(view)
+            return True
+        view = focused.focused_view
+        if view is None:
+            return focused.grab()
+        target = view.cursor_row() + delta
+        if 0 <= target < len(view.rows):
+            view.place_cursor(target)
+            self._show_cursor(view)
+            return True
+        hunks = [h for s in self._sections() if s.get_visible() and not s.folded for h in s.hunks]
+        index = self._focused_index(hunks)
+        if index is None:
+            return False
+        index += 1 if delta > 0 else -1
+        if not 0 <= index < len(hunks):
+            return False
+        section = hunks[index]
+        side = focused.side_of(view)
+        old_side = len(section.views) == 2 and side == diffmodel.OLD
+        entering = section.views[0] if old_side else section.views[-1]
+        entering.place_cursor(0 if delta > 0 else len(entering.rows) - 1)
+        ok = section.grab(None, side)
+        self._set_current(section.file.path, section.hunk.index)
+        self._show_cursor(entering)
+        return ok
+
+    def _show_cursor(self, view: _HunkView) -> None:
+        """Scroll the column so *view*'s cursor line is on screen (each hunk
+        sits in a scroller that never scrolls vertically: the column
+        must). Placed now and again from a low idle, past the viewport's
+        own scroll-to-focus and a fresh buffer's estimated heights."""
+
+        def place() -> bool:
+            if view.view.get_parent() is None:
+                return GLib.SOURCE_REMOVE
+            it = view.buffer.get_iter_at_mark(view.buffer.get_insert())
+            y, height = view.view.get_line_yrange(it)
+            _x, top = view.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, 0, y)
+            # In the column's coordinates (plus its top margin: the
+            # viewport's content), which hold whatever the scroll value
+            # is — bounds against the scroller itself are stale until the
+            # next layout after a set_value.
+            ok, bounds = view.view.compute_bounds(self._column)
+            if not ok:
+                return GLib.SOURCE_REMOVE
+            adj = self._scroller.get_vadjustment()
+            line_top = bounds.get_y() + self._column.get_margin_top() + top
+            line_bottom = line_top + height
+            value = adj.get_value()
+            page = adj.get_page_size()
+            margin = height  # a line of air, so the next step is on screen too
+            if line_top - value < margin:
+                adj.set_value(max(0.0, line_top - margin))
+            elif line_bottom - value > page - margin:
+                end = adj.get_upper() - page
+                adj.set_value(max(0.0, min(end, line_bottom - page + margin)))
+            return GLib.SOURCE_REMOVE
+
+        place()
+        GLib.idle_add(place, priority=GLib.PRIORITY_LOW)
 
     def expand_gap_before_focus(self) -> bool:
         """`z`: draw every unchanged line above the focused hunk (the

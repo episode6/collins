@@ -32,13 +32,16 @@ from .state import AppState  # noqa: E402
 
 class KeyboardBindingsDialog(Adw.Dialog):
     """*on_change* runs after every save; *suspend(True/False)* takes the
-    window's shortcuts off and puts them back around a capture."""
+    window's shortcuts off and puts them back around a capture. *group*
+    (a keybindings.GROUP_* id) opens the dialog scrolled to that group
+    with its first row focused — a page's `?`, asking for its own keys."""
 
     def __init__(
         self,
         state: AppState,
         on_change: Callable[[], None],
         suspend: Callable[[bool], None],
+        group: str | None = None,
     ) -> None:
         super().__init__(title=_("Keyboard Bindings"), content_width=640, content_height=700)
         self._state = state
@@ -46,6 +49,8 @@ class KeyboardBindingsDialog(Adw.Dialog):
         self._suspend = suspend
         self._rows: dict[str, Adw.ActionRow] = {}
         self._suffixes: dict[str, Gtk.Box] = {}
+        self._groups: dict[str, Adw.PreferencesGroup] = {}
+        self._first_rows: dict[str, Adw.ActionRow] = {}
 
         self._reset_all_btn = Gtk.Button(label=_("Reset All"), valign=Gtk.Align.CENTER)
         self._reset_all_btn.add_css_class("flat")
@@ -62,7 +67,8 @@ class KeyboardBindingsDialog(Adw.Dialog):
 
         page = Adw.PreferencesPage()
         for group_id, group_label in keybindings.GROUP_LABELS.items():
-            group = Adw.PreferencesGroup(title=_(group_label))
+            group_widget = Adw.PreferencesGroup(title=_(group_label))
+            self._groups[group_id] = group_widget
             for binding in keybindings.BINDINGS:
                 if binding.group != group_id:
                     continue
@@ -73,16 +79,69 @@ class KeyboardBindingsDialog(Adw.Dialog):
                 suffix.set_valign(Gtk.Align.CENTER)
                 row.add_suffix(suffix)
                 row.connect("activated", self._on_row_activated, binding.action)
-                group.add(row)
+                group_widget.add(row)
                 self._rows[binding.action] = row
                 self._suffixes[binding.action] = suffix
-            page.add(group)
+                self._first_rows.setdefault(group_id, row)
+            page.add(group_widget)
+        self._page = page
 
         view = Adw.ToolbarView()
         view.add_top_bar(header)
         view.set_content(page)
         self.set_child(view)
         self._refresh()
+        if group in self._groups:
+            # The page's bounds are estimates until its first layout after
+            # the dialog maps: scroll from after that layout, not from
+            # here (an idle after map still reads the unscrolled page).
+            self._groups[group].connect("map", self._on_wanted_group_mapped)
+
+    # -- opening on a group --------------------------------------------------------
+
+    def _on_wanted_group_mapped(self, group: Adw.PreferencesGroup) -> None:
+        clock = group.get_frame_clock()
+        if clock is None:
+            return
+        handler = 0
+
+        def after_layout(_clock) -> None:
+            clock.disconnect(handler)
+            self.scroll_to_group(group)
+
+        handler = clock.connect_after("layout", after_layout)
+        clock.request_phase(Gdk.FrameClockPhase.LAYOUT)
+
+    def scroll_to_group(self, group: Adw.PreferencesGroup) -> bool:
+        """Put *group*'s title at the top of the page and the keyboard on
+        its first row. False when the page has no scroller to move yet."""
+        scroller = _scrolled_window_in(self._page)
+        viewport = scroller.get_child() if scroller is not None else None
+        content = viewport.get_child() if isinstance(viewport, Gtk.Viewport) else None
+        if scroller is None or content is None:
+            return False
+        ok, bounds = group.compute_bounds(content)
+        if not ok:
+            return False
+        adjustment = scroller.get_vadjustment()
+        end = adjustment.get_upper() - adjustment.get_page_size()
+        adjustment.set_value(max(0.0, min(bounds.get_y(), end)))
+        group_id = next((gid for gid, widget in self._groups.items() if widget is group), None)
+        row = self._first_rows.get(group_id) if group_id is not None else None
+        if row is not None:
+            # The viewport scrolls to a newly focused child at once, from
+            # bounds the set_value above has not reached yet (they hold
+            # until the next layout), and animates the page off the group
+            # (measured: 1 100 px past it). Off around the grab; Tab through
+            # the rows scrolls as before.
+            viewport.set_scroll_to_focus(False)
+            row.grab_focus()
+            viewport.set_scroll_to_focus(True)
+        return True
+
+    def group_widget(self, group_id: str) -> Adw.PreferencesGroup | None:
+        """The group *group_id*'s widget (the e2e reads its position)."""
+        return self._groups.get(group_id)
 
     # -- state ----------------------------------------------------------------
 
@@ -192,6 +251,22 @@ class _Chord(Gtk.Box):
 
 
 _Chord.set_css_name("shortcut")
+
+
+def _scrolled_window_in(widget: Gtk.Widget) -> Gtk.ScrolledWindow | None:
+    """The first Gtk.ScrolledWindow under *widget* (an Adw.PreferencesPage
+    keeps its groups in one; the page itself has no scroll API beyond
+    scroll_to_top)."""
+    queue = [widget.get_first_child()]
+    while queue:
+        child = queue.pop(0)
+        if child is None:
+            continue
+        if isinstance(child, Gtk.ScrolledWindow):
+            return child
+        queue.append(child.get_first_child())
+        queue.append(child.get_next_sibling())
+    return None
 
 
 def _keycaps(accelerator: str) -> Gtk.Widget:

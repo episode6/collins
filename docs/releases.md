@@ -107,9 +107,10 @@ downloads of each version, see the
   *▼ 20* / *all*, before/after pictures for images, a pinned file header,
   a find bar (`Ctrl+F`, *n of m* across hunks), a files filter (`/`) that
   narrows the list and the diff together, and hunk's navigation keys —
-  `]` `[` `.` `,` `}` `{` `z` `0` `1` `2` `l` `w` `r` `e` `q` `?` — bound
-  page-locally in the new *Git page* group of Keyboard Bindings, never
-  reaching the agent's terminal. The files list follows the view and a
+  `]` `[` `.` `,` `j` `k` `}` `{` `z` `0` `1` `2` `l` `w` `r` `e` `q` `?`
+  — bound page-locally in the new *Git page* group of Keyboard Bindings
+  (which `?` opens on that group), never reaching the agent's terminal.
+  The files list follows the view and a
   click reveals the file; edits reload through file monitors within half
   a second — an edit that only rewrites an already-changed line included
   — an untouched hunk keeping its widget and the keyboard, the scroll its

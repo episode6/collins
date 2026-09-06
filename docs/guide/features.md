@@ -550,12 +550,17 @@ page needs hunk 0.21 or newer:
     hunk, every occurrence highlighted, *n of m* counted, `Enter` /
     `Shift+Enter` stepping across hunks and files.
   - **Keys**, page-local (they never reach the agent's terminal): `]` /
-    `[` and `.` / `,` move between hunks and files, `}` / `{` between
-    annotated hunks, `0` / `1` / `2` pick the layout, `l` and `w` flip
-    line numbers and wrap (writing the setting, so every page follows),
-    `r` reloads, `e` opens the file in the editor at the cursor's line,
-    `?` opens Keyboard Bindings, `q` closes the page. The header's menu
-    has the same layout, line-number and wrap switches.
+    `[` and `.` / `,` move between hunks and files, `j` / `k` move the
+    cursor line within the focused hunk and on into the next one past its
+    edge, the page scrolling along, `}` / `{` between annotated hunks,
+    `0` / `1` / `2` pick the layout, `l` and `w` flip line numbers and
+    wrap (writing the setting, so every page follows), `r` reloads, `e`
+    opens the file in the editor at the cursor's line, `?` opens Keyboard
+    Bindings on the Git page group, `q` closes the page. The header's
+    menu has the same layout, line-number and wrap switches.
+  - `show_diff` with a line that no hunk carries (an unchanged stretch)
+    still reveals the file, on the hunk nearest that line, and tells the
+    agent so.
   - It **keeps itself fresh** without hunk's `--watch`: the loaded files'
     directories are watched, an edit re-reads the diff a third of a second
     later — any edit, one that only rewrites an already-changed line

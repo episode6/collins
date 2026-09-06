@@ -1439,6 +1439,9 @@ class MainWindow(Adw.ApplicationWindow):
             "open-folder-terminal": self._on_open_folder_terminal,
             "open-github": self._on_open_github,
             "git-pull": self._on_git_pull,
+            # The Keyboard Bindings dialog opened on one of its groups (a
+            # keybindings.GROUP_* id): what a page's `?` fires.
+            "keyboard-bindings-group": lambda _a, p: self._show_keyboard_bindings(p.get_string()),
         }
         for name, callback in per_session.items():
             action = Gio.SimpleAction(name=name, parameter_type=GLib.VariantType("s"))
@@ -1582,9 +1585,9 @@ class MainWindow(Adw.ApplicationWindow):
             self.add_controller(self._shortcut_controller)
             keymap.apply_app_accels(app, self.state.get_setting(keybindings.SETTING))
 
-    def _show_keyboard_bindings(self) -> None:
+    def _show_keyboard_bindings(self, group: str | None = None) -> None:
         KeyboardBindingsDialog(
-            self.state, self._apply_keybindings, self._suspend_shortcuts
+            self.state, self._apply_keybindings, self._suspend_shortcuts, group=group
         ).present(self)
 
     def _apply_keybindings(self) -> None:

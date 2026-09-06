@@ -2408,13 +2408,15 @@ class GitPage(Adw.Bin):
         """The `git.*` actions the view's chords (keybindings.GROUP_GIT) and
         the header menu fire. The three stateful ones mirror the settings
         (layout, line numbers, wrap) and write them back through
-        win.git-option; the notes switch is the page's own."""
+        win.git-option."""
         group = Gio.SimpleActionGroup()
         plain: dict[str, Callable[[], object]] = {
             "next-hunk": lambda: self._diffview.focus_hunk(1),
             "prev-hunk": lambda: self._diffview.focus_hunk(-1),
             "next-file": lambda: self._diffview.focus_file(1),
             "prev-file": lambda: self._diffview.focus_file(-1),
+            "cursor-down": lambda: self._diffview.step_cursor(1),
+            "cursor-up": lambda: self._diffview.step_cursor(-1),
             "next-note": lambda: self._diffview.focus_annotated(1),
             "prev-note": lambda: self._diffview.focus_annotated(-1),
             "expand-gap": self._diffview.expand_gap_before_focus,
@@ -2424,7 +2426,9 @@ class GitPage(Adw.Bin):
             "refresh": self.refresh,
             "filter": self._focus_filter,
             "find": self._toggle_find,
-            "help": lambda: self.activate_action("win.keyboard-bindings", None),
+            "help": lambda: self.activate_action(
+                "win.keyboard-bindings-group", GLib.Variant("s", keybindings.GROUP_GIT)
+            ),
             "open-editor": self._diffview.request_open,
             "close": lambda: self.activate_action("win.toggle-git", None),
         }

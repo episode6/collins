@@ -155,6 +155,20 @@ BINDINGS: tuple[Binding, ...] = (
     Binding("git.next-file", N_("Next file"), ("period",), GROUP_GIT, N_("In the diff.")),
     Binding("git.prev-file", N_("Previous file"), ("comma",), GROUP_GIT, N_("In the diff.")),
     Binding(
+        "git.cursor-down",
+        N_("Cursor down a line"),
+        ("j",),
+        GROUP_GIT,
+        N_("In the diff; past the hunk's last line, into the next hunk."),
+    ),
+    Binding(
+        "git.cursor-up",
+        N_("Cursor up a line"),
+        ("k",),
+        GROUP_GIT,
+        N_("In the diff; past the hunk's first line, into the previous hunk."),
+    ),
+    Binding(
         "git.next-note",
         N_("Next annotated hunk"),
         ("braceright",),

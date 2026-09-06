@@ -103,9 +103,10 @@ Keyboard Bindings dialog:
 | `Enter`, `Shift+Enter` | Git page commit dialog | Commit; a newline in the body |
 | `x` / `X`, `v` / `Esc`, `D` | Git page (hunk) | Stage or unstage the hunk or file under hunk's cursor; anchor a line range at the cursor and clear it (`x` then stages the range); discard the hunk or range after hunk's confirmation — the sidebar's *Stage hunk*, *Anchor line* and *Discard* buttons press the same |
 | `]` / `[`, `.` / `,` | Git page (native diff, experimental) | Focus the next / previous hunk, the next / previous file — scrolled into view, the files list following. This row and the four below are the **Git page** group of the Keyboard Bindings dialog: bare letters bound to the diff alone, rebindable there like any other |
+| `j` / `k` | Git page (native diff) | Move the cursor line down / up in the focused hunk, the page scrolling to keep it on screen; past the hunk's last (first) line the keyboard walks on into the next (previous) hunk |
 | `}` / `{` | Git page (native diff) | The next / previous hunk carrying a note or highlight |
 | `z` | Git page (native diff) | Draw every unchanged line above the focused hunk |
 | `0` / `1` / `2`, `l`, `w` | Git page (native diff) | Layout automatic / split / stacked, line numbers on or off, wrap long lines — each writes the Preferences → Git setting, so every page follows |
-| `r`, `/`, `?`, `e`, `q` | Git page (native diff) | Reload the diff; focus the files filter (`Esc` there clears it and comes back); open the Keyboard Bindings dialog; open the file under the cursor in the editor, at that line; close the page |
+| `r`, `/`, `?`, `e`, `q` | Git page (native diff) | Reload the diff; focus the files filter (`Esc` there clears it and comes back); open the Keyboard Bindings dialog on its Git page group; open the file under the cursor in the editor, at that line; close the page |
 | `←` / `→` | Sidebar project header | Collapse / expand the group |
 | `Esc` | Notification sheet, attachments overlay, Open with picker | Close |
