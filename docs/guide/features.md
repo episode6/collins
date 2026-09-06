@@ -558,9 +558,14 @@ page needs hunk 0.21 or newer:
     has the same layout, line-number and wrap switches.
   - It **keeps itself fresh** without hunk's `--watch`: the loaded files'
     directories are watched, an edit re-reads the diff a third of a second
-    later — an untouched hunk keeps its widget and the keyboard, the
-    scroll stays put — and the two-second tick still catches the index,
+    later — any edit, one that only rewrites an already-changed line
+    included — an untouched hunk keeps its widget and the keyboard, the
+    scroll stays put, and the two-second tick still catches the index,
     `HEAD` and the refs.
+  - It needs **git alone**: a machine without hunk gets the diff instead
+    of the install card, and every kind of change draws — an edit, a new
+    or deleted file, an untracked one, a rename (as `old → new` with its
+    similarity), a binary, an image, a mode change.
   - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`, the commits list, the breadcrumb, the
     tab title, `show_diff` and the layout persistence all work as with
     hunk. Not yet: staging, discarding, reverting, notes and highlights,

@@ -27,6 +27,13 @@ description: >-
 
 ## Shape
 
+The page has two faces behind the temporary `git_viewer` setting: hunk in a
+VTE (this section, today's default) or the native `DiffView` (the section
+"The native viewer behind `git_viewer`" below — the same header, sidebar,
+loads, breadcrumb and persistence, a different review stream). What
+follows describes the hunk face; every hunk-only path is gated on
+`GitPage._native`.
+
 `GitPage` (`gitpage.py`) is a `PanelPage` (`page_kind="git"`; opened by F6,
 the footer's git button, a click on the footer's ⎇ branch label, or the
 `show_diff` tool; the button fires `win.toggle-git`, so it closes the page
@@ -201,7 +208,9 @@ path)` → bytes (`side_ref` names the ref per load and side: `INDEX_REF`
 cached, reverse, three_way)` → `ApplyResult` (the `--3way` retry only when
 asked, flagged, `conflicts` when it left markers), `stage_paths` /
 `unstage_paths` / `checkout_paths` behind `safe_path`, and
-`tree_state_signature` (status + numstat hashed) for the watch. Footguns:
+`tree_state_signature` (status + numstat + the size and mtime of every
+working-tree path status lists, `MAX_STAT_PATHS`, hashed) for the watch.
+Footguns:
 every one of these runs from `gitinfo.repo_root` (`_root`) — from a
 subdirectory git reads pathspecs against the cwd and `apply` silently
 skips paths outside it; every path after `--` goes on as
@@ -348,11 +357,24 @@ view keeps the scroll and an untouched hunk's widget and focus). One
 compare at a time (`_watch_stale` re-runs); none while a read is out.
 `_native_tick` re-compares every `_WATCH_SLOW_TICKS` (5) ticks regardless.
 The 2 s tick's `tree_signature` still covers index / HEAD / refs moves.
+The signature hashes `git status` **and** `numstat` **and** the size +
+mtime of every path on the working-tree side: an edit that rewrites an
+already-changed line moves neither the letter nor the counts and went
+unnoticed until the stats were added — a `touch` now costs one reload by
+key, which keeps every widget. Measured: the monitor fires at once, the
+compare lands ~20 ms after the debounce, the reload ~40 ms later (0.38 s
+edit-to-view on the e2e's fixture).
 
-**Measured (PR 2).** `read_diff` + `DiffView.load` of PR 500's squash (16
-files, 76 hunks, 3118 lines): `load()` 317 ms ≈ 102 ms per 1000 patch
-lines, first paint ~1.1 s; a reload keeps 76/76 hunk widgets, a changed
-hunk rebuilds only itself. Keyboard selection with `cursor_visible=False`
+**Measured (PR 2, this machine, headless).** `read_diff` + `DiffView.load`
+of PR 500's squash (`git show 449fc98`: 16 files, 76 hunks, 3118 patch
+lines): `read_diff` 23 ms; `load()` 335 ms ≈ **108 ms per 1000 patch
+lines**; first paint 1146 ms ≈ **370 ms per 1000 patch lines** (the rest
+is GTK's first allocation and GtkSourceView's highlighting); a reload
+keeps 76/76 hunk widgets, a changed hunk rebuilds only itself; split under
+wrap: 0 of 2920 rows misaligned. Re-measure with `scripts/probe_diffview.py
+--ref 449fc98` after touching `_HunkView` or the section builders — a
+second per thousand lines is the point to start deferring hunk builds
+below the fold. Keyboard selection with `cursor_visible=False`
 selects nothing on GtkSourceView 5.18 — the cursor shows while a view has
 focus. Tab width is the constant `diffview.TAB_WIDTH = 4` (the editor has
 no tab-width setting). Facts the view codes around: `GutterRendererText`
@@ -362,13 +384,37 @@ may not reach its `propagate_natural_height` scroller until the next
 resize (the vadjustment's `changed` queues one from an idle); under wrap
 the split alignment must re-fire on height changes too.
 
-**E2E.** `scripts/check_git_page.py`'s `check_native` pass: the switch
-before map, no hunk spawned, the watch reloading an edit, the files list
-and highlight following, a click revealing, the `git.*` actions routed
-(`next-hunk`, `open-editor`, `expand-gap`, `layout-stack`, `line-numbers`),
-the filter, the find bar's counts, the staged and commit loads, the
-settings, the switch flipping both ways with the shim hunk going down.
-`scripts/probe_diffview.py` draws a real repository's diff to a PNG.
+**E2E.** `scripts/check_git_page.py` runs its viewer-agnostic passes with
+**both** viewers: `check_sidebar(repo, state_path, native=)` (the 500 /
+900 px collapse, the toggle and its persistence, the commits list, a
+commit / header / working-tree row loading, the split files list and the
+other side's click, stage_all and commit reloading exactly once — hunk's
+count off the shim's state file, the native page's by wrapping
+`page._native_load` — and the page size), `check_without_hunk` (the
+install card for hunk, the diff for native, on a PATH holding git alone)
+and `check_outside_a_repo`. `check_native` stages every section kind in
+the tmp repository (`stage_native_fixture`: two unstaged hunks with gaps
+around them, a staged edit, a staged rename, a modified binary, an image
+before/after, an untracked text file and an untracked picture, a
+deletion, a mode change) and reads them back through the view's probes —
+`file_rows()` (path, kind, shown), `hunk_rows(path)`, `gap_rows(path)`,
+`badge_rows()` (path label, badge, has picture), `hunk_serials(path)`
+(`_HunkSection.serial`, minted once per widget: an `id()` can be reused
+after the dropped widget is freed), `set_scroll(fraction)`,
+`pinned_header_text()` — then a gap expanding, a files-list click
+revealing, the watch reloading an edit that keeps the line counts within
+2 s (0.4 s measured) with the untouched hunk's widget and the keyboard
+kept, the `git.*` actions, the highlight following a scroll to the end
+(and the pinned header), the filter, the find bar's counts across hunks,
+the staged (rename) and commit loads, settings and a layout change leaving
+`page_state` alone while a page restored from it takes the layout off the
+setting, the switch flipping both ways with the shim hunk going down,
+re-parent vs. unparent, and a page restored into a commit / a commit git
+no longer has. Kinds to expect: an untracked *picture* reads `binary`
+with the badge `untracked · binary` (the `--no-index` diff says "Binary
+files differ"; `KIND_BINARY` wins over `KIND_NEW`), a pure rename has no
+hunk, a mode change no hunk and no counts. `scripts/probe_diffview.py`
+draws a real repository's diff to a PNG and prints the timings above.
 
 ## The sidecar contract (`COLLINS_GIT_STATE`, version 2)
 
@@ -485,6 +531,30 @@ out and is asked on demand only.
 - Two tabs on one worktree make `--repo` ambiguous; pid is the only key.
 - Hunk cancels any open dialog on reload; a shell-side commit while a `D`
   confirmation is up closes it — by design, press the key again.
+- **The native view's scroll range settles late.** A hunk or context
+  `GtkSource.View` validates its height a beat after allocation, so the
+  column's `upper` grows after the widgets are in the tree: a
+  `set_value(upper - page_size)` issued right after a load or a gap
+  expansion lands short of the real end (the e2e waits for the range to
+  hold still, `range_settled`, before `set_scroll(1.0)`), and a one-line
+  hunk can sit at 0 px until the vadjustment's `changed` queues a resize.
+- **The split padding pass is a convergence, not a one-shot.** Under wrap
+  the two views' rows are aligned with `pixels-below-lines` tags after
+  every allocation whose width *or* height changed (`_SplitPane`, 40 ms
+  settle); a pad changes a height, which re-fires the pass, which
+  converges once nothing changes. Don't assert on row alignment before it
+  has settled, and don't add a `queue_resize` inside the pass.
+- **Every hunk scrolls on its own.** With wrap off each `_HunkView` sits
+  in a `ScrolledWindow` with horizontal AUTOMATIC / vertical NEVER: a long
+  line scrolls within its hunk, never the column. Anything that measures
+  the column's height must ask the hunk scrollers
+  (`propagate_natural_height`), and a wheel over a hunk with a horizontal
+  bar is the hunk's, not the stream's.
+- **A files-list highlight that "flickers" between two files at a scroll
+  end** is the top-of-viewport rule: the first section whose bottom edge
+  is still below the viewport's top is current, so a section 8 px in
+  counts. The pinned header has its own rule (the top section's header
+  fully off) and so can name the next file down.
 
 Related: `collins-session-mcp-tools` (`show_diff`), `collins-panel-dock`,
 `collins-terminal-tab`.

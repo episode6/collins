@@ -110,12 +110,15 @@ downloads of each version, see the
   `]` `[` `.` `,` `}` `{` `z` `0` `1` `2` `l` `w` `r` `e` `q` `?` — bound
   page-locally in the new *Git page* group of Keyboard Bindings, never
   reaching the agent's terminal. The files list follows the view and a
-  click reveals the file; edits reload through file monitors (an
-  untouched hunk keeps its widget, the scroll its place), the tick still
-  covers the index, `HEAD` and the refs; `show_diff` reveals the file and
-  line in it. Read-only for now — staging, discarding, reverting, notes
-  and highlights come next, and hunk is retired once they do. hunk stays
-  the default; three new Git rows (*Line numbers*, *Wrap long lines*,
+  click reveals the file; edits reload through file monitors within half
+  a second — an edit that only rewrites an already-changed line included
+  — an untouched hunk keeping its widget and the keyboard, the scroll its
+  place, and the tick still covers the index, `HEAD` and the refs;
+  `show_diff` reveals the file and line in it. It runs on git alone: a
+  machine without hunk gets the diff instead of the install card.
+  Read-only for now — staging, discarding, reverting, notes and
+  highlights come next, and hunk is retired once they do. hunk stays the
+  default; three new Git rows (*Line numbers*, *Wrap long lines*,
   *Highlight changed words*) are the native view's.
 - **Preferences → Git.** A group for the git page: hunk's layout
   (automatic / split / stacked) and theme, whether working-tree reviews
