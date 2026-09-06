@@ -105,8 +105,8 @@ aggregate a session's list with `combined_icon` (base = least settled, badge
 (a GIcon) with a `Gsk.CairoRenderer` realized for the display — colors
 straight from `MARK_COLORS` (app.py's scheme CSS paints those same shades
 onto the `.pr-*` classes), cached per state/badge/scheme/scale; the page
-re-emits `title-changed` on the style manager's `notify::dark` so the strip
-re-reads it. The badge glyphs are Octicons drawn as filled paths
+re-emits `title-changed` on the style manager's `notify::dark` and on its own
+`notify::scale-factor` so the strip re-reads it. The badge glyphs are Octicons drawn as filled paths
 (`circle-fill-symbolic` is in-repo: Octicons' dot vanishes at 8 px). Footer
 chips (`terminal._build_pr_chip`; `PrChipRow` measures overflow into an
 ellipsis menu) and the row mark open the same popover list: left click asks

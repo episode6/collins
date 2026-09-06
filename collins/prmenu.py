@@ -365,11 +365,20 @@ def _render_mark(state: str | None, badge_name: str | None, dark: bool, scale: i
     name, css_class = _BASE_ICONS.get(state or "", _BASE_FALLBACK)
     # Badged, the base sits against the top-right corner and the badge hangs
     # into the bottom-left; alone, the base fills the box.
-    _snapshot_symbolic(snapshot, theme, name, base_px, overhang, 0, colors[MARK_CLASS_COLORS[css_class]])
+    _snapshot_symbolic(
+        snapshot, theme, name, base_px, scale, overhang, 0, colors[MARK_CLASS_COLORS[css_class]]
+    )
     if badge is not None:
         name, css_class = badge
         _snapshot_symbolic(
-            snapshot, theme, name, TAB_BADGE_PX, 0, box - TAB_BADGE_PX, colors[MARK_CLASS_COLORS[css_class]]
+            snapshot,
+            theme,
+            name,
+            TAB_BADGE_PX,
+            scale,
+            0,
+            box - TAB_BADGE_PX,
+            colors[MARK_CLASS_COLORS[css_class]],
         )
     node = snapshot.to_node()
     renderer = Gsk.CairoRenderer.new()
@@ -381,11 +390,26 @@ def _render_mark(state: str | None, badge_name: str | None, dark: bool, scale: i
 
 
 def _snapshot_symbolic(
-    snapshot: Gtk.Snapshot, theme: Gtk.IconTheme, name: str, px: int, x: int, y: int, color: str
+    snapshot: Gtk.Snapshot,
+    theme: Gtk.IconTheme,
+    name: str,
+    px: int,
+    scale: int,
+    x: int,
+    y: int,
+    color: str,
 ) -> None:
-    """Draw one symbolic icon at *px* into the snapshot, at (x, y), in *color*."""
+    """Draw one symbolic icon at *px* into the snapshot, at (x, y), in *color*.
+
+    *scale* goes to the lookup as well as being the snapshot's transform.
+    Measured, it makes no difference to these SVG icons — an SVG paintable
+    is drawn from the vector at whatever the final transform is, and a
+    16 px icon under a 2x transform came out pixel-identical to a direct
+    32 px render — but it is what the lookup asks for, and a bitmap theme
+    icon would pick its 2x file by it.
+    """
     paintable = theme.lookup_icon(
-        name, None, px, 1, Gtk.TextDirection.NONE, Gtk.IconLookupFlags.FORCE_SYMBOLIC
+        name, None, px, scale, Gtk.TextDirection.NONE, Gtk.IconLookupFlags.FORCE_SYMBOLIC
     )
     rgba = Gdk.RGBA()
     rgba.parse(color)

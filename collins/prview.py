@@ -414,6 +414,9 @@ class PrViewPage(Adw.Bin):
         self._dark = style_manager.get_dark()
         self._dark_id = style_manager.connect("notify::dark", self._on_dark_changed)
         self.connect("destroy", self._on_destroy)
+        # The tab's mark is a texture baked at the page's scale factor (see
+        # page_icon), so a move to a differently-scaled monitor re-bakes it.
+        self.connect("notify::scale-factor", lambda *_: self.emit("title-changed"))
 
         self._sections: list[_FileSection] = []
         self._file_list = Gtk.ListBox()
