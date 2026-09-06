@@ -6298,9 +6298,10 @@ class MainWindow(Adw.ApplicationWindow):
         nobody else is working in, ask what should become of it. Keep and
         Trash both archive the session — Trash also records the worktree
         for _settle_archived_worktree, which moves it to the trash once the
-        session has stopped; Cancel archives nothing. A session with nothing to ask about
-        (no worktree, or one another tab or background agent shares, or one
-        this session runs on in as a background agent) archives right away.
+        session has stopped; Cancel archives nothing. A session with nothing
+        to ask about (no worktree, or one another tab or background agent
+        shares, or one this session runs on in as a background agent)
+        archives right away.
         """
         session = self.store.get_session(session_id)
         if session is None or self._is_detached(session_id):
@@ -6420,10 +6421,10 @@ class MainWindow(Adw.ApplicationWindow):
         worktree it records (sessions.removable_worktree — nothing when the
         session never had one, left it, or the CLI already reaped it on
         exit) and trashes it. Either way the archive's Undo brings the
-        worktree back (_trashed_worktrees). Neither while the session runs on as a background agent, nor
-        while another tab or background agent is working in that worktree: a
-        session that shares one — a fork, a /bg handoff still listed —
-        hasn't stopped using it.
+        worktree back (_trashed_worktrees). Neither while the session runs
+        on as a background agent, nor while another tab or background agent
+        is working in that worktree: a session that shares one — a fork, a
+        /bg handoff still listed — hasn't stopped using it.
 
         Only single archives come here: bulk archives (select mode, a whole
         project) would ask once per worktree, and leave them all alone
