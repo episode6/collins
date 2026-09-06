@@ -1129,7 +1129,7 @@ popover.menu button.open-with-row:hover {
 /* the native diff view (diffview.py): one .git-file card per file, its
    header row, then .git-gap rows and .git-hunk sections. A hunk wears a
    rail down its left edge; the focused one's rail is the accent. The
-   hunk header is the @@ line (and, next PR, the buttons). The pinned
+   hunk header is the @@ line and the staging buttons. The pinned
    header floats over the top of the scroll, so it paints its own ground. */
 .git-file {
   padding: 4px 6px 6px 6px;
@@ -1171,9 +1171,55 @@ popover.menu button.open-with-row:hover {
 .git-hunk-ranges {
   opacity: 0.8;
 }
+/* the headers' staging buttons: always there (keyboard and touch find
+   them), lifted to full opacity while the pointer is over their file or
+   hunk, or the keyboard is in it (Sublime's hover reveal as a lift). */
+.git-hunk-actions button,
+.git-file-actions button {
+  padding: 0px 8px;
+  min-height: 22px;
+  opacity: 0.55;
+  transition: opacity 120ms ease-out;
+}
+.git-hunk:hover .git-hunk-actions button,
+.git-hunk-focused .git-hunk-actions button,
+.git-file:hover > .git-file-header .git-file-actions button,
+.git-pinned-header:hover .git-file-actions button,
+.git-hunk-actions button:hover,
+.git-file-actions button:hover,
+.git-hunk-actions button:focus,
+.git-file-actions button:focus {
+  opacity: 1;
+}
 .git-hunk-text,
 .git-gap-text {
   padding: 2px 0px;
+}
+/* the note cards under a hunk: a soft card per note, the agent's with
+   the accent rail, the editor a framed text box. */
+.git-hunk-notes {
+  padding: 4px 8px 6px 8px;
+}
+.git-note {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border-left: 3px solid alpha(currentColor, 0.25);
+  background-color: alpha(currentColor, 0.05);
+}
+.git-note-agent {
+  border-left-color: @accent_bg_color;
+}
+.git-note-header button.caption {
+  padding: 0px 6px;
+  min-height: 20px;
+}
+.git-note-editor-frame {
+  border: 1px solid alpha(currentColor, 0.2);
+  border-radius: 6px;
+}
+.git-note-editor {
+  background-color: @view_bg_color;
+  color: @view_fg_color;
 }
 .git-gap {
   padding: 0px 8px;

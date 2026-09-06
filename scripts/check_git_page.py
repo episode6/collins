@@ -110,7 +110,8 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import gitinfo, gitpage, hunkctl  # noqa: E402
+from collins import gitinfo, gitops, gitpage, hunkctl  # noqa: E402
+from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
 
 PASSED = 0
@@ -1453,12 +1454,12 @@ def check_sidebar(repo: str, state_path: str, native: bool = False) -> None:
         check("with no navigate", read_state(state_path).get("navigates") == 2)
 
     if native:
-        # -- no hunk: the cursor buttons (hunk's keys) are drawn but off ------------------
+        # -- the cursor buttons (hunk's keys) hide: the hunk headers carry the buttons ---
         check(
-            "the cursor buttons are insensitive with no hunk to feed",
-            not sidebar._stage_button.get_sensitive()
-            and not sidebar._anchor_button.get_sensitive()
-            and not sidebar._discard_button.get_sensitive(),
+            "the sidebar's cursor buttons are hidden with the native view",
+            not sidebar._action_children[sidebar._stage_button].get_visible()
+            and not sidebar._action_children[sidebar._anchor_button].get_visible()
+            and not sidebar._action_children[sidebar._discard_button].get_visible(),
         )
         check(
             "stage all, unstage all and commit are live on the working tree",
@@ -1684,8 +1685,11 @@ def check_native(repo: str, state_path: str) -> None:
     check("the page reads the switch before it maps", page.native and not page.hunk_alive)
     opened: list[tuple[str, int]] = []
     page.diff_view.connect("open-requested", lambda _v, path, line: opened.append((path, line)))
-    window = Gtk.Window(title="native", default_width=900, default_height=600)
-    window.set_child(page)
+    # An Adw.Window: the mutations check reaches the page's real confirm
+    # dialog through get_visible_dialog (a bare Gtk.Window would host an
+    # Adw.Dialog in a window of its own).
+    window = Adw.Window(title="native", default_width=900, default_height=600)
+    window.set_content(page)
     window.present()
     check("the view opens and the first read lands", wait_for(page.settled))
     check(
@@ -1784,6 +1788,9 @@ def check_native(repo: str, state_path: str) -> None:
     check("the highlight followed the click", page.sidebar.selected_path == "text.txt", page.sidebar.selected_path)
 
     # -- the watch: an external edit reloads within 2 s, an untouched hunk keeps its widget --
+    # A line selection in the untouched hunk must ride the reload too (the
+    # kept buffer keeps its range; a rebuilt hunk 1 must not clear it).
+    check("a line selection in hunk 0 before the edit", view.select_lines("text.txt", 0, 2, 3) and view.selection() == ("text.txt", 0, 2, 3), view.selection())
     ids_before = view.hunk_serials("text.txt")
     focus_before = window.get_focus()
     lines[44] = "line 45 changed again\n"
@@ -1795,6 +1802,8 @@ def check_native(repo: str, state_path: str) -> None:
     ids_after = view.hunk_serials("text.txt")
     check("the edited hunk was rebuilt, the untouched one kept its widget", len(ids_after) == 2 and ids_after[0] == ids_before[0] and ids_after[1] != ids_before[1], (ids_before, ids_after))
     check("the keyboard stayed in the untouched hunk", window.get_focus() is focus_before and view.current()[:2] == ("text.txt", 0), (window.get_focus(), view.current()))
+    check("and so did its line selection", view.selection() == ("text.txt", 0, 2, 3) and view.hunk_action_labels("text.txt", 0) == ("Stage lines", "Discard lines"), (view.selection(), view.hunk_action_labels("text.txt", 0)))
+    view.clear_selection()
     check("the file's badge is still none and its hunks two", len(view.hunk_rows("text.txt")) == 2)
     check("the sections speak the read's hunk indexes", view.hunk_indexes("text.txt") == [0, 1], view.hunk_indexes("text.txt"))
 
@@ -1968,6 +1977,9 @@ def check_native(repo: str, state_path: str) -> None:
     check("monitors are back", page._monitors != [])
     check("page_state carries the load", page.page_state() == {"kind": "git", "loaded": "unstaged"}, page.page_state())
 
+    check_native_notes(repo, page, window, lines)
+    check_native_mutations(repo, page, window, lines)
+
     # -- settings and the keys that write them; page_state round-trips a layout change ----------
     page.apply_settings({**NATIVE_SETTINGS, "git_wrap_lines": True, "git_layout": "split", "git_line_numbers": False})
     check(
@@ -2021,8 +2033,8 @@ def check_native(repo: str, state_path: str) -> None:
     check("the view shows the working tree again", page._stack.get_visible_child_name() == "native" and page.loaded == "unstaged")
 
     # -- unparented for good, the view closes; re-parented, it stays ---------------------------------
-    window.set_child(None)  # a drag to another strip: unrealized, then realized again
-    window.set_child(page)
+    window.set_content(None)  # a drag to another strip: unrealized, then realized again
+    window.set_content(page)
     wait_for(lambda: False, timeout=0.3)
     check("a re-parented page keeps its view and monitors", page._native_opened and page._monitors != [])
     page.page_closed()
@@ -2070,6 +2082,462 @@ def check_native(repo: str, state_path: str) -> None:
     page.page_closed()
     window.destroy()
     clear_native_fixture(repo)
+
+
+def check_native_notes(repo: str, page: GitPage, window: Gtk.Window, lines: list[str]) -> None:
+    """The notes and highlights (PR 3 of the native-diff stack), on the
+    working-tree view the native check left: `c` opens a draft card under
+    the focused hunk with its editor (the page-local chords off, the page
+    holding Escape), Ctrl+Enter saves the first line as the summary and
+    the rest as the rationale, `E` re-opens it, Esc drops an edit or a
+    draft, `}` / `{` walk the annotated hunks, the agent tools' doors
+    (add_notes / add_highlights / clear_marks) land a batch whole or not
+    at all, `a` folds the agent's cards, Delete drops one, and a reload
+    keeps the notes of an untouched hunk and drops the changed hunk's."""
+    print("-- the native viewer's notes and highlights")
+    view = page.diff_view
+    group = page._git_actions
+    changed: list[int] = []
+    editing_events: list[bool] = []
+    handlers = [
+        view.connect("notes-changed", lambda _v: changed.append(1)),
+        view.connect("editing-changed", lambda _v, e: editing_events.append(e)),
+    ]
+
+    def enabled(name: str) -> bool:
+        action = group.lookup_action(name)
+        return action is not None and action.get_enabled()
+
+    try:
+        check("no notes to begin with", view.notes() == [] and view.highlights() == [] and not view.editing())
+        check("reveal hunk 0 of text.txt", page.reveal("text.txt", hunk=0) and view.current()[:2] == ("text.txt", 0), view.current())
+
+        # -- c: a draft card, its editor, the chords off meanwhile --------------------------------
+        check("c opens a draft card with its editor", view.add_note_at_cursor() and view.editing() and page.holds_escape())
+        rows = view.note_rows("text.txt", 0)
+        check("the draft is anchored to the cursor line (new line 2, the hunk's first)", rows and rows[-1][:4] == ("", "user", "new", 2), rows)
+        check("the page-local chords are off while the editor is open", not enabled("stage") and not enabled("close") and not enabled("add-note") and editing_events == [True], (editing_events, enabled("stage")))
+        focus = window.get_focus()
+        check("the keyboard is in the editor", isinstance(focus, Gtk.TextView) and focus.has_css_class("git-note-editor"), focus)
+        check("the editor opens empty", view.note_editor_text() == "", view.note_editor_text())
+        check("Ctrl+Enter on an empty text keeps the editor open", not view.commit_note() and view.editing())
+        view.set_note_editor_text("Keep line 5\nit is load-bearing\r\n")
+        check("Ctrl+Enter saves the note and closes the editor", view.commit_note() and not view.editing() and editing_events == [True, False], editing_events)
+        notes = view.notes()
+        check(
+            "the note is a user note on new line 2 of text.txt, summary and rationale split",
+            len(notes) == 1
+            and (notes[0].source, notes[0].path, notes[0].side, notes[0].line, notes[0].summary, notes[0].rationale, notes[0].author)
+            == ("user", "text.txt", "new", 2, "Keep line 5", "it is load-bearing", None),
+            notes,
+        )
+        check("notes-changed fired once", changed == [1], changed)
+        check("the card shows under hunk 0", view.note_rows("text.txt", 0) == [(notes[0].id, "user", "new", 2, "Keep line 5", True)], view.note_rows("text.txt", 0))
+        check("the marker sits on the hunk's first line", view.note_marks("text.txt", 0) == [0], view.note_marks("text.txt", 0))
+        check("the chords are back on and the page lets Escape go", enabled("stage") and enabled("close") and not page.holds_escape())
+        check("the keyboard is back in the hunk", view._focused_hunk is not None and view.current()[:2] == ("text.txt", 0), (window.get_focus(), view.current()))
+
+        # -- } / {: the annotated hunks --------------------------------------------------------------
+        check("] moves to hunk 1", view.focus_hunk(1) and view.current()[:2] == ("text.txt", 1), view.current())
+        check("{ walks back to the annotated hunk", view.focus_annotated(-1) and view.current()[:2] == ("text.txt", 0), view.current())
+        check("} finds no annotated hunk after it", not view.focus_annotated(1) and view.current()[:2] == ("text.txt", 0))
+
+        # -- E: edit; Esc: drop an edit, drop a draft -------------------------------------------------
+        check("E opens the note's editor on its text", view.edit_first_note() and view.editing() and view.note_editor_text() == "Keep line 5\nit is load-bearing", view.note_editor_text())
+        view.set_note_editor_text("Keep line five")
+        edited = view.commit_note() and view.notes()
+        check("saving re-words the note under the same id", edited and (view.notes()[0].id, view.notes()[0].summary, view.notes()[0].rationale) == (notes[0].id, "Keep line five", None), view.notes())
+        check("E again, Esc drops the edit", view.edit_first_note() and view.set_note_editor_text("scratch") and view.cancel_note() and not view.editing() and view.notes()[0].summary == "Keep line five", view.notes())
+        check("c then Esc leaves no draft behind", view.add_note_at_cursor() and view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1, view.note_rows("text.txt", 0))
+        check("the chords are on again", enabled("stage") and not page.holds_escape())
+        # With lines selected the cursor is the selection's last row: the
+        # note lands there, not on the line after (hunk 0's rows 3..4 are
+        # `-line 5` / `+line 5 changed`; row 5 is `line 6`).
+        check("c with a selection anchors on its last line", view.select_lines("text.txt", 0, 3, 4) and view.add_note_at_cursor() and view.note_rows("text.txt", 0)[-1][:4] == ("", "user", "new", 5), view.note_rows("text.txt", 0))
+        check("Esc drops that draft too", view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1)
+        # The same selection made upward (Shift+Up, a drag that ends above
+        # where it started) parks the insert mark on the first row: the
+        # cursor row, and the note, are still the selection's last line.
+        upward = False
+        if view.select_lines("text.txt", 0, 3, 4) and view._focused_hunk is not None:
+            hunk_view = view._focused_hunk.focused_view
+            rows = hunk_view.selected_rows()
+            if rows is not None:
+                _ok, top = hunk_view.buffer.get_iter_at_line(rows[0])
+                _ok, after = hunk_view.buffer.get_iter_at_line(rows[1] + 1)
+                hunk_view.buffer.select_range(top, after)  # the insert mark at the top
+                upward = (
+                    hunk_view.buffer.get_iter_at_mark(hunk_view.buffer.get_insert()).get_line() == rows[0]
+                    and view.selection() == ("text.txt", 0, 3, 4)
+                    and hunk_view.cursor_row() == rows[1]
+                )
+        check("an upward selection's cursor row is its last row too", upward, view.selection())
+        check("and c anchors on its last line", view.add_note_at_cursor() and view.note_rows("text.txt", 0)[-1][:4] == ("", "user", "new", 5), view.note_rows("text.txt", 0))
+        check("Esc drops this draft as well", view.cancel_note() and not view.editing() and len(view.note_rows("text.txt", 0)) == 1)
+        view.clear_selection()
+        # The context menu's *Add note*: a draft anchored to the menu's row
+        # (the cursor's, with no pointer here: the hunk's first line).
+        section_1 = view._section_for("text.txt", "new").hunks[1]
+        view.request_note(section_1)
+        rows = view.note_rows("text.txt", 1)
+        check("the menu's Add note opens a draft under that hunk", view.editing() and rows and rows[-1][:4] == ("", "user", "new", 42), rows)
+        check("Esc drops it", view.cancel_note() and view.note_rows("text.txt", 1) == [])
+
+        # -- the agent's doors: add_notes, a batch whole or not at all ------------------------------------
+        ids = view.add_notes([NoteSpec("text.txt", "Agent says", rationale="why", author="claude", line=45)])
+        check("add_notes lands an agent note on hunk 1", isinstance(ids, list) and len(ids) == 1 and view.note_rows("text.txt", 1) == [(ids[0], "agent", "new", 45, "Agent says", True)], (ids, view.note_rows("text.txt", 1)))
+        check("the note is marked on its line (the addition, index 4)", view.note_marks("text.txt", 1) == [4], view.note_marks("text.txt", 1))
+        check("[ back to hunk 0 (the cancelled draft's hunk kept the keyboard)", view.focus_hunk(-1) and view.current()[:2] == ("text.txt", 0), view.current())
+        check("} walks to it", view.focus_annotated(1) and view.current()[:2] == ("text.txt", 1), view.current())
+        bad = view.add_notes([NoteSpec("text.txt", "fine", line=45), NoteSpec("nope.txt", "x", line=1)])
+        check("a batch with a bad address lands nothing and names the offender", isinstance(bad, str) and "nope.txt" in bad and len(view.notes()) == 2, (bad, len(view.notes())))
+        by_hunk = view.add_notes([NoteSpec("text.txt", "by hunk", hunk=2, side="old")])
+        check("a hunk address anchors on its first line of that side", isinstance(by_hunk, list) and (view.notes()[-1].side, view.notes()[-1].line) == ("old", 42), view.notes()[-1:])
+        check("the hunk's cards follow the store's order", [r[4] for r in view.note_rows("text.txt", 1)] == ["Agent says", "by hunk"], view.note_rows("text.txt", 1))
+        view.set_agent_notes_shown(False)
+        check("a folds the agent's cards, the marks stay", all(not r[5] for r in view.note_rows("text.txt", 1)) and view.note_marks("text.txt", 1) == [0, 4], (view.note_rows("text.txt", 1), view.note_marks("text.txt", 1)))
+        check("the user's card stays shown", view.note_rows("text.txt", 0)[0][5])
+        view.set_agent_notes_shown(True)
+        check("a again shows them", all(r[5] for r in view.note_rows("text.txt", 1)))
+
+        # -- highlights ------------------------------------------------------------------------------------
+        count = view.add_highlights([HighlightSpec("text.txt", 45, 0, 4), HighlightSpec("text.txt", 45, 5, 7, side="old", tone="error")])
+        check("add_highlights paints two ranges", count == 2 and view.highlight_rows("text.txt", 1) == [(3, 5, 7, "error"), (4, 0, 4, "match")], (count, view.highlight_rows("text.txt", 1)))
+        painted = [span for v in section_1.views for span in v.highlights]
+        check("the views hold the tags", sorted(painted) == [(3, 5, 7, "error"), (4, 0, 4, "match")], painted)
+        bad = view.add_highlights([HighlightSpec("text.txt", 45, 0, 99)])
+        check("a range past the line is refused", isinstance(bad, str) and "not within" in bad and len(view.highlights()) == 2, bad)
+
+        # -- delete and clear --------------------------------------------------------------------------------
+        check("Delete drops the agent's note", view.delete_note(ids[0]) and ids[0] not in [n.id for n in view.notes()] and [r[4] for r in view.note_rows("text.txt", 1)] == ["by hunk"], view.note_rows("text.txt", 1))
+        check("an unknown id is refused", not view.delete_note("n999"))
+        check("clear_marks(notes) spares the user's", view.clear_marks(notes=True) == 1 and [n.source for n in view.notes()] == ["user"], view.notes())
+        check("clear_marks(highlights) clears them", view.clear_marks(highlights=True) == 2 and view.highlights() == [] and view.highlight_rows("text.txt", 1) == [] and not any(v.highlights for v in section_1.views))
+
+        # -- a reload keeps the untouched hunk's notes, drops the changed hunk's -----------------------------
+        check("a note on hunk 1 again", isinstance(view.add_notes([NoteSpec("text.txt", "on hunk 1", line=45)]), list) and len(view.notes()) == 2)
+        serials = view.hunk_serials("text.txt")
+        lines[44] = "line 45 changed thrice\n"
+        write_file(repo, "text.txt", "".join(lines))
+        check("an edit to hunk 1 reloads the view", wait_for(lambda: view.hunk_serials("text.txt")[1:] != serials[1:] and page.settled(), timeout=2.0), view.hunk_serials("text.txt"))
+        check(
+            "the untouched hunk kept its note and card, the changed hunk lost its",
+            [n.summary for n in view.notes()] == ["Keep line five"]
+            and view.note_rows("text.txt", 0) == [(notes[0].id, "user", "new", 2, "Keep line five", True)]
+            and view.note_rows("text.txt", 1) == []
+            and view.hunk_serials("text.txt")[0] == serials[0],
+            (view.notes(), view.note_rows("text.txt", 0), view.note_rows("text.txt", 1)),
+        )
+        serials = view.hunk_serials("text.txt")
+        lines[44] = "line 45 changed again\n"
+        write_file(repo, "text.txt", "".join(lines))
+        check("the edit put back reloads again", wait_for(lambda: view.hunk_serials("text.txt")[1:] != serials[1:] and page.settled(), timeout=2.0))
+        check("a second user note, by the menu on hunk 1, saved", (view.request_note(view._section_for("text.txt", "new").hunks[1]) or True) and view.set_note_editor_text("Second") and view.commit_note() and [n.summary for n in view.notes()] == ["Keep line five", "Second"], view.notes())
+        fired = len(changed)
+        check("Delete drops the user's note and its card", view.delete_note(notes[0].id) and [n.summary for n in view.notes()] == ["Second"] and view.note_rows("text.txt", 0) == [], (view.notes(), view.note_rows("text.txt", 0)))
+        check("notes-changed fired for the delete", len(changed) == fired + 1, (fired, len(changed)))
+        check("clear with include_user empties the store", view.clear_marks(notes=True, include_user=True) == 1 and view.notes() == [] and view.note_rows("text.txt", 1) == [])
+        check("no editor is left open", not view.editing() and enabled("stage"))
+    finally:
+        for handler in handlers:
+            view.disconnect(handler)
+
+
+def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: list[str]) -> None:
+    """The staging interface (PR 3 of the native-diff stack), on the view
+    the native check left on the working tree: the headers' buttons and
+    their words per load and selection, a line selection (one hunk at a
+    time, Esc clears, the page holds Escape meanwhile), staging lines
+    and a hunk with the index read back (gitops.read_status, what the
+    files list reads), staging a file (the binary, whole), unstaging a
+    hunk and a file from the staged load, the real confirm dialog
+    cancelled and confirmed on a discard, then a discard and an untracked
+    file's trash with dialogs.confirm_dialog stubbed, a revert of a hunk
+    from a commit and from `show HEAD`, the dirty warning on the next, the
+    three-way retry over a committed context move, a binary's revert
+    refused with a toast, and every mutation reloading the view by key
+    with the untouched hunk's widget kept."""
+    print("-- the native viewer's staging interface")
+    view = page.diff_view
+    sidebar = page.sidebar
+
+    def status(*args: str) -> list[str]:
+        return git_out(repo, *args).split()
+
+    def index_paths() -> set[str]:
+        """The staged paths as the files list reads them (gitops.read_status)."""
+        read = gitops.read_status(repo)
+        return {row.path for row in read.staged} if read is not None else {"<no status>"}
+
+    def unstaged_paths() -> set[str]:
+        read = gitops.read_status(repo)
+        return {row.path for row in read.unstaged} if read is not None else {"<no status>"}
+
+    def shown_paths() -> list[str]:
+        return [p for p, _k, _s in view.file_rows()]
+
+    def idle() -> bool:
+        return not sidebar.busy and not view.busy() and page.settled()
+
+    toasts: list[str] = []
+    real_toast = page._toast
+
+    def recording_toast(text: str) -> None:
+        toasts.append(text)
+        real_toast(text)
+
+    page._toast = recording_toast
+
+    asked: list[tuple[str, str, str]] = []
+    answers: list[bool] = []
+
+    def fake_confirm(_parent, heading, body, confirm_label, on_confirm, on_dismiss=None, **_kw) -> None:
+        asked.append((heading, body, confirm_label))
+        answer = answers.pop(0) if answers else True
+        if answer:
+            on_confirm()
+        elif on_dismiss is not None:
+            on_dismiss()
+
+    # Gio refuses to trash on "system internal" mounts (a tmpfs /tmp, where
+    # this repository lives): the mover is stubbed with one that records
+    # the ask and moves the file aside, as the trash would.
+    trashed: list[tuple[str, tuple[str, ...]]] = []
+    aside = tempfile.mkdtemp(prefix="collins-trash-")
+
+    def fake_trash(root: str, paths) -> gitops.GitResult:
+        trashed.append((root, tuple(paths)))
+        for path in paths:
+            os.rename(os.path.join(root, path), os.path.join(aside, os.path.basename(path)))
+        return gitops.GitResult(True, "", "")
+
+    real_confirm = gitpage.dialogs.confirm_dialog
+    real_trash = gitpage._trash_paths
+    gitpage.dialogs.confirm_dialog = fake_confirm
+    gitpage._trash_paths = fake_trash
+    try:
+        # -- the buttons' words on the unstaged load -----------------------------------
+        check("the file header offers Stage file · Discard file", view.file_action_labels("text.txt") == ("Stage file", "Discard file"), view.file_action_labels("text.txt"))
+        check("the hunk header offers Stage hunk · Discard hunk", view.hunk_action_labels("text.txt", 0) == ("Stage hunk", "Discard hunk"), view.hunk_action_labels("text.txt", 0))
+        check("an untracked file's header offers the same (Discard file trashes it)", view.file_action_labels("untracked.txt") == ("Stage file", "Discard file"))
+        check("a deleted file's header too (Discard file restores it)", view.file_action_labels("gone.txt") == ("Stage file", "Discard file"))
+
+        # -- a line selection: one hunk at a time, the words follow, Esc clears --------------
+        # text.txt's hunk 1: three context lines, `-line 45`, `+line 45
+        # changed again`, three context lines (indexes 3 and 4 are the change).
+        check("nothing is selected to begin with", view.selection() is None and not page.holds_escape())
+        check("select_lines selects the change of hunk 1", view.select_lines("text.txt", 1, 3, 4))
+        check("the selection reads (path, hunk, first, last)", view.selection() == ("text.txt", 1, 3, 4), view.selection())
+        check("current() carries it", view.current() == ("text.txt", 1, ("text.txt", 1, 3, 4)), view.current())
+        check("the hunk's buttons read Stage lines · Discard lines", view.hunk_action_labels("text.txt", 1) == ("Stage lines", "Discard lines"), view.hunk_action_labels("text.txt", 1))
+        check("the other hunk's still read hunk", view.hunk_action_labels("text.txt", 0) == ("Stage hunk", "Discard hunk"))
+        check("the page holds Escape while lines are selected", page.holds_escape())
+        # A selection made across the change and into the context counts its
+        # patch lines (every row of hunk 0 is a patch line here).
+        check("selecting in another hunk moves the selection there", view.select_lines("text.txt", 0, 2, 5) and view.selection() == ("text.txt", 0, 2, 5), view.selection())
+        check("and cleared the first hunk's", view.hunk_action_labels("text.txt", 1) == ("Stage hunk", "Discard hunk") and view.hunk_action_labels("text.txt", 0) == ("Stage lines", "Discard lines"))
+        hunk_view = view._focused_hunk.focused_view if view._focused_hunk is not None else None
+        check("the buffer's selection is snapped to whole rows", hunk_view is not None and hunk_view.selected_rows() == (2, 5), hunk_view.selected_rows() if hunk_view else None)
+        check("Esc clears the selection", view.clear_selection() and view.selection() is None and not page.holds_escape())
+        check("and the words go back", view.hunk_action_labels("text.txt", 0) == ("Stage hunk", "Discard hunk"))
+        check("a second Esc has nothing to clear", not view.clear_selection())
+
+        # -- the line numbers: press, drag, shift-press, through the gutter's y mapping ----------
+        check("a press on the line numbers selects the row under it", view.gutter_press("text.txt", 0, 2) and view.selection() == ("text.txt", 0, 2, 2), view.selection())
+        check("a drag down extends to the row under the pointer", view.gutter_drag("text.txt", 0, 5) and view.selection() == ("text.txt", 0, 2, 5), view.selection())
+        check("a drag back up shrinks it", view.gutter_drag("text.txt", 0, 3) and view.selection() == ("text.txt", 0, 2, 3), view.selection())
+        check("a Shift+press extends from the far end", view.gutter_press("text.txt", 0, 6, shift=True) and view.selection() == ("text.txt", 0, 2, 6), view.selection())
+        check("a Shift+press above extends from the last row", view.gutter_press("text.txt", 0, 1, shift=True) and view.selection() == ("text.txt", 0, 1, 6), view.selection())
+        check("the cursor reads the selection's last row (c and e speak of it)", view._focused_hunk is not None and view._focused_hunk.cursor_line() == ("new", 7), view._focused_hunk.cursor_line() if view._focused_hunk else None)
+        view.clear_selection()
+
+        # -- the right-click menu: the cursor lands under the pointer, the items -----------------------
+        labels = view.context_menu_labels("text.txt", 1, 3)
+        check("a right-click with nothing selected opens the menu", labels == ["Stage hunk", "Discard hunk", "Copy", "Open in editor", "Add note", "Expand context"], labels)
+        section_1 = view._section_for("text.txt", "new").hunks[1]
+        check("and put the cursor on the row under the pointer (the deletion, old 45)", section_1.anchor_at_cursor(section_1.views[-1]) == ("old", 45) and view.selection() is None, section_1.anchor_at_cursor(section_1.views[-1]))
+        check("with lines selected the menu reads lines and keeps the selection", view.select_lines("text.txt", 1, 3, 4) and view.context_menu_labels("text.txt", 1, 0) == ["Stage lines", "Discard lines", "Copy", "Open in editor", "Add note", "Expand context"] and view.selection() == ("text.txt", 1, 3, 4), view.selection())
+        view.clear_selection()
+
+        # -- stage lines: the partial patch lands in the index, the view reloads by key --------
+        serials = view.hunk_serials("text.txt")
+        check("select the change of hunk 1 again", view.select_lines("text.txt", 1, 3, 4))
+        check("the Stage lines button is pressed", view.click_hunk_action("text.txt", 1))
+        check("the request runs behind the busy and the view reloads", wait_for(idle, timeout=5.0) and wait_for(lambda: len(view.hunk_rows("text.txt")) == 1, timeout=5.0), (view.hunk_rows("text.txt"), sidebar.busy, view.busy()))
+        check("read_status lists text.txt in the index beside the fixture's staged files", index_paths() == {"renamed.txt", "staged.txt", "text.txt"}, index_paths())
+        check("and still under unstaged: the other hunk is in the tree", "text.txt" in unstaged_paths(), unstaged_paths())
+        cached = git_out(repo, "diff", "--cached", "--", "text.txt")
+        check("and exactly the selected change", "+line 45 changed again" in cached and "line 5 changed" not in cached, cached)
+        check("the toast counted the lines", toasts[-1:] == ["Staged 2 lines of text.txt"], toasts[-1:])
+        check("the untouched hunk kept its widget", view.hunk_serials("text.txt") == serials[:1], (serials, view.hunk_serials("text.txt")))
+        check("the selection went with its hunk", view.selection() is None)
+
+        # -- stage hunk: the whole remaining hunk --------------------------------------------------
+        check("Stage hunk on the remaining hunk", view.click_hunk_action("text.txt", 0))
+        check("text.txt leaves the unstaged view", wait_for(idle, timeout=5.0) and wait_for(lambda: "text.txt" not in shown_paths(), timeout=5.0), view.file_rows())
+        check("the working tree is clean of text.txt", "text.txt" not in unstaged_paths() and "text.txt" in index_paths(), (unstaged_paths(), index_paths()))
+        check("the toast named the hunk", toasts[-1:] == ["Staged hunk 1 of text.txt"], toasts[-1:])
+        check("the files list moved it to the staged side", wait_for(lambda: any(r.path == "text.txt" for r in sidebar.file_rows().staged) and not any(r.path == "text.txt" for r in sidebar.file_rows().unstaged)), sidebar.file_rows())
+
+        # -- stage file: the binary, whole (git add; no patch to read) ------------------------------------
+        check("Stage file on the binary", view.click_file_action("blob.bin"))
+        check("blob.bin leaves the unstaged view", wait_for(idle, timeout=5.0) and wait_for(lambda: "blob.bin" not in shown_paths(), timeout=5.0), view.file_rows())
+        check("read_status moved it to the index", "blob.bin" in index_paths() and "blob.bin" not in unstaged_paths(), (index_paths(), unstaged_paths()))
+        check("the toast named the file", toasts[-1:] == ["Staged blob.bin"], toasts[-1:])
+
+        # -- the staged load: Unstage hunk, Unstage file ----------------------------------------------
+        page.load("staged")
+        check("the staged load lands", wait_for(lambda: page.settled() and page.loaded == "staged"))
+        check("the binary is on the staged load with Unstage file alone", view.file_action_labels("blob.bin") == ("Unstage file", None), view.file_action_labels("blob.bin"))
+        check("Unstage file on the binary", view.click_file_action("blob.bin"))
+        check("blob.bin leaves the staged view", wait_for(idle, timeout=5.0) and wait_for(lambda: "blob.bin" not in shown_paths(), timeout=5.0), view.file_rows())
+        check("read_status has it back under unstaged", "blob.bin" in unstaged_paths() and "blob.bin" not in index_paths(), (index_paths(), unstaged_paths()))
+        check("the words read Unstage, with no discard", view.file_action_labels("text.txt") == ("Unstage file", None) and view.hunk_action_labels("text.txt", 0) == ("Unstage hunk", None), (view.file_action_labels("text.txt"), view.hunk_action_labels("text.txt", 0)))
+        check("a selection reads Unstage lines", view.select_lines("text.txt", 0, 3, 4) and view.hunk_action_labels("text.txt", 0) == ("Unstage lines", None))
+        view.clear_selection()
+        check("Unstage hunk on hunk 0", view.click_hunk_action("text.txt", 0))
+        check("the index keeps the other hunk", wait_for(idle, timeout=5.0) and wait_for(lambda: len(view.hunk_rows("text.txt")) == 1, timeout=5.0), view.hunk_rows("text.txt"))
+        cached = git_out(repo, "diff", "--cached", "--", "text.txt")
+        check("hunk 0 is back in the working tree, hunk 1 still staged", "line 5 changed" not in cached and "line 45 changed again" in cached, cached)
+        check("Unstage file", view.click_file_action("text.txt"))
+        check("text.txt leaves the staged view", wait_for(idle, timeout=5.0) and wait_for(lambda: "text.txt" not in [p for p, _k, _s in view.file_rows()], timeout=5.0), view.file_rows())
+        check("the index has none of it", "text.txt" not in index_paths() and "text.txt" in unstaged_paths(), (index_paths(), unstaged_paths()))
+        check("no dialog was asked for a stage or unstage", asked == [], asked)
+
+        # -- discard, after the real confirm dialog (cancelled, then confirmed) ---------------------------
+        page.load("unstaged")
+        check("back on the unstaged load with both hunks", wait_for(lambda: page.settled() and page.loaded == "unstaged" and len(view.hunk_rows("text.txt")) == 2, timeout=5.0), view.hunk_rows("text.txt"))
+        gitpage.dialogs.confirm_dialog = real_confirm
+        try:
+            check("Discard hunk opens the confirm dialog over the window", view.click_hunk_action("text.txt", 0, discard=True) and wait_for(lambda: isinstance(window.get_visible_dialog(), Adw.AlertDialog), timeout=5.0), window.get_visible_dialog())
+            dialog = window.get_visible_dialog()
+            if isinstance(dialog, Adw.AlertDialog):
+                check("its heading, body and Cancel", dialog.get_heading() == "Discard the changes?" and dialog.get_body().startswith("Discard hunk 1 in text.txt?") and dialog.get_close_response() == "cancel" and dialog.get_default_response() == "cancel", (dialog.get_heading(), dialog.get_body(), dialog.get_default_response()))
+                check("the pressed button spins while the question is up", view.busy() and view.acting_button_spinning(), (view.busy(), view.acting_button_spinning()))
+                dialog.close()  # Escape: the close response, cancel
+            check("cancelled: the dialog is gone, the tree untouched, the view free", wait_for(lambda: window.get_visible_dialog() is None and idle(), timeout=5.0) and "line 5 changed" in git_out(repo, "diff", "--", "text.txt"), (window.get_visible_dialog(), view.busy()))
+            check("and the spinner is off", not view.acting_button_spinning())
+            check("Discard file on the binary asks", view.click_file_action("blob.bin", discard=True) and wait_for(lambda: isinstance(window.get_visible_dialog(), Adw.AlertDialog), timeout=5.0), window.get_visible_dialog())
+            dialog = window.get_visible_dialog()
+            if isinstance(dialog, Adw.AlertDialog):
+                check("the question names the file, its button Discard", dialog.get_heading() == "Discard the changes?" and dialog.get_body().startswith("Discard the changes to blob.bin?") and dialog.get_response_label("confirm") == "Discard", (dialog.get_heading(), dialog.get_body()))
+                dialog.set_close_response("confirm")
+                dialog.close()  # the Discard button
+                check("the pressed button still spins while the plan runs", view.busy() and view.acting_button_spinning(), (view.busy(), view.acting_button_spinning()))
+            check("confirmed: the binary's change is checked out of the index", wait_for(lambda: window.get_visible_dialog() is None and idle(), timeout=5.0) and wait_for(lambda: "blob.bin" not in shown_paths(), timeout=5.0) and "blob.bin" not in unstaged_paths(), (shown_paths(), unstaged_paths()))
+            check("the toast said so", toasts[-1:] == ["Discarded the changes to blob.bin"], toasts[-1:])
+        finally:
+            gitpage.dialogs.confirm_dialog = fake_confirm
+        check("no dialog is left up", window.get_visible_dialog() is None)
+
+        # -- discard, the confirm stubbed: the words, the lines, the trash, the restore ----------------------
+        serials = view.hunk_serials("text.txt")
+        answers.append(False)
+        check("Discard hunk asks first", view.click_hunk_action("text.txt", 0, discard=True) and wait_for(lambda: len(asked) == 1, timeout=5.0), asked)
+        check("the question names the hunk and the file, its button Discard", asked[-1][0] == "Discard the changes?" and asked[-1][1].startswith("Discard hunk 1 in text.txt?") and asked[-1][2] == "Discard", asked[-1])
+        check("Cancel leaves the tree alone and the view free", wait_for(idle) and "line 5 changed" in git_out(repo, "diff", "--", "text.txt"))
+        # A confirm can sit open while the page moves on: the plan was read
+        # for the unstaged load, and an answer given after the sidebar
+        # loaded the staged side runs nothing.
+        held: list = []
+
+        def holding_confirm(_parent, heading, body, confirm_label, on_confirm, on_dismiss=None, **_kw) -> None:
+            held.append(on_confirm)
+
+        gitpage.dialogs.confirm_dialog = holding_confirm
+        check("Discard hunk asks, the question held open", view.click_hunk_action("text.txt", 0, discard=True) and wait_for(lambda: len(held) == 1, timeout=5.0), held)
+        page.load("staged")
+        check("the page moved to the staged load meanwhile", wait_for(lambda: page.loaded == "staged" and page.settled(), timeout=5.0), page.loaded)
+        if held:
+            held[0]()
+        check("the late answer runs nothing: the tree is untouched, the toast says so, the view is free", wait_for(idle, timeout=5.0) and "line 5 changed" in git_out(repo, "diff", "--", "text.txt") and toasts[-1:] == ["The view changed since the request: nothing was done"], toasts[-1:])
+        gitpage.dialogs.confirm_dialog = fake_confirm
+        page.load("unstaged")
+        check("back on the unstaged load", wait_for(lambda: page.loaded == "unstaged" and page.settled(), timeout=5.0), page.loaded)
+        serials = view.hunk_serials("text.txt")  # the load switch rebuilt the sections
+        check("Discard lines of the second hunk, confirmed", view.select_lines("text.txt", 1, 3, 4) and view.click_hunk_action("text.txt", 1, discard=True))
+        check("the lines are gone from the working tree and the view", wait_for(idle, timeout=5.0) and wait_for(lambda: len(view.hunk_rows("text.txt")) == 1, timeout=5.0) and "line 45 changed again" not in git_out(repo, "diff", "--", "text.txt"), (view.hunk_rows("text.txt"), asked[-1]))
+        check("the confirm counted the lines", asked[-1][1].startswith("Discard 2 lines in text.txt?"), asked[-1])
+        check("the untouched hunk kept its widget through the discard", view.hunk_serials("text.txt") == serials[:1], (serials, view.hunk_serials("text.txt")))
+        lines[44] = "line 45\n"
+        check("Discard file on an untracked file moves it to the trash after the confirm", view.click_file_action("untracked.txt", discard=True) and wait_for(idle, timeout=5.0) and wait_for(lambda: not os.path.exists(os.path.join(repo, "untracked.txt")), timeout=5.0), (asked[-1], os.path.exists(os.path.join(repo, "untracked.txt"))))
+        check("its question said trash", asked[-1] == ("Move to the trash?", "Move untracked.txt to the trash?", "Move to trash"), asked[-1])
+        check("the mover was handed the repository root and the one path", trashed == [(repo, ("untracked.txt",))], trashed)
+        check("the section left the view", wait_for(lambda: "untracked.txt" not in [p for p, _k, _s in view.file_rows()], timeout=5.0), view.file_rows())
+        check("Discard file on a deleted file restores it", view.click_file_action("gone.txt", discard=True) and wait_for(idle, timeout=5.0) and wait_for(lambda: os.path.exists(os.path.join(repo, "gone.txt")), timeout=5.0), asked[-1])
+        check("its question said restore", asked[-1][0] == "Restore the file?" and asked[-1][2] == "Restore", asked[-1])
+
+        # -- revert from a commit, and the dirty warning ---------------------------------------------------
+        git(repo, "commit", "-qm", "staged edit")
+        edit_sha = head_sha(repo)
+        page.poll_tick()
+        page.load({"show": edit_sha})
+        check("the commit of the staged edit loads", wait_for(lambda: page.settled() and page.shows({"show": edit_sha}), timeout=5.0), page.loaded)
+        check("the words read Revert, with no discard", view.file_action_labels("staged.txt") == ("Revert file", None) and view.hunk_action_labels("staged.txt", 0) == ("Revert hunk", None), (view.file_action_labels("staged.txt"), view.hunk_action_labels("staged.txt", 0)))
+        check("a selection reads Revert lines", view.select_lines("staged.txt", 0, 0, 1) and view.hunk_action_labels("staged.txt", 0) == ("Revert lines", None))
+        view.clear_selection()
+        check("Revert hunk, confirmed", view.click_hunk_action("staged.txt", 0))
+        check("the working tree got the reverse of the hunk", wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0), asked[-1])
+        check("its question said revert, without a warning (the file was clean)", asked[-1][0] == "Revert into the working tree?" and asked[-1][1].startswith("Revert hunk 1 of staged.txt") and asked[-1][2] == "Revert", asked[-1])
+        check("the commit's view is unchanged by a revert into the tree", view.hunk_rows("staged.txt") != [] and page.shows({"show": edit_sha}))
+        answers.append(False)
+        check("Revert file on the now-dirty file asks with the warning", view.click_file_action("staged.txt") and wait_for(lambda: asked[-1][1].startswith("staged.txt has unstaged changes"), timeout=5.0), asked[-1])
+        check("cancelled: the view is free again", wait_for(idle))
+        # A revert whose context moved retries three-way: a later commit
+        # changed line 6 (inside the hunk's context), so the reverse apply
+        # of the older commit's hunk misses, and the merge lands both.
+        # (`--3way` implies `--index`, so the file must be clean first — a
+        # dirty one is refused with git's "does not match index".)
+        git(repo, "checkout", "-q", "--", "staged.txt")
+        ten = "".join(f"staged {n}\n" for n in range(1, 11)).replace("staged 3", "staged three")
+        write_file(repo, "staged.txt", ten.replace("staged 6", "staged SIX"))
+        git(repo, "add", "staged.txt")
+        git(repo, "commit", "-qm", "six")
+        page.poll_tick()
+        wait_for(page.settled)
+        check("Revert hunk of the older commit over the moved context", view.click_hunk_action("staged.txt", 0) and wait_for(idle, timeout=5.0))
+        merged = open(os.path.join(repo, "staged.txt")).read()
+        check("the three-way retry reverted the line and kept the later edit", wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0) and "staged SIX\n" in merged and "<<<<" not in merged, merged)
+        check("and staged the result, as --3way does", "staged.txt" in index_paths(), index_paths())
+        check("the toast said merged three-way", toasts[-1:] == ["Reverted hunk 1 of staged.txt — merged three-way (the result is staged)"], toasts[-1:])
+        git(repo, "reset", "-q", "--", "staged.txt")
+        git(repo, "checkout", "-q", "--", "staged.txt")
+
+        # -- revert a hunk from `show HEAD` into the working tree ------------------------------------------
+        page.load({"show": "HEAD"})
+        check("show HEAD loads (the `six` commit)", wait_for(lambda: page.settled() and page.shows({"show": "HEAD"}), timeout=5.0) and page._resolved_sha == head_sha(repo), (page.loaded, page._resolved_sha))
+        check("its hunk offers Revert hunk", view.hunk_action_labels("staged.txt", 0) == ("Revert hunk", None), view.hunk_action_labels("staged.txt", 0))
+        asks = len(asked)
+        check("Revert hunk, confirmed", view.click_hunk_action("staged.txt", 0) and wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 6\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0), asked[-1:])
+        check("the question asked once, without the warning (the file was clean)", len(asked) == asks + 1 and asked[-1][0] == "Revert into the working tree?" and "unstaged changes" not in asked[-1][1], asked[-1:])
+        check("the reverse of HEAD's hunk is in the working tree, unstaged", "staged SIX" not in open(os.path.join(repo, "staged.txt")).read() and "staged.txt" in unstaged_paths() and "staged.txt" not in index_paths(), (unstaged_paths(), index_paths()))
+        check("the toast", toasts[-1:] == ["Reverted hunk 1 of staged.txt"], toasts[-1:])
+        check("the commit's view stays", page.shows({"show": "HEAD"}) and view.hunk_rows("staged.txt") != [])
+        git(repo, "checkout", "-q", "--", "staged.txt")
+
+        # -- a binary's revert is refused with a toast (its data is not in the patch) --------------------------
+        write_file(repo, "blob.bin", bytes(range(0, 256, 2)) * 8)
+        git(repo, "add", "blob.bin")
+        git(repo, "commit", "-qm", "binary")
+        page.poll_tick()
+        page.load("unstaged")
+        check("off the commit", wait_for(lambda: page.settled() and page.loaded == "unstaged", timeout=5.0))
+        page.load({"show": "HEAD"})
+        check("show HEAD loads the binary commit", wait_for(lambda: page.settled() and page.shows({"show": "HEAD"}) and page._resolved_sha == head_sha(repo), timeout=5.0) and shown_paths() == ["blob.bin"], (shown_paths(), page._resolved_sha))
+        check("a binary has no hunk to revert; its file header offers Revert file", view.hunk_rows("blob.bin") == [] and view.file_action_labels("blob.bin") == ("Revert file", None), view.file_action_labels("blob.bin"))
+        asks, before = len(asked), len(toasts)
+        check("Revert file on the binary", view.click_file_action("blob.bin"))
+        check("the refusal toasts, asks nothing and changes nothing", wait_for(lambda: len(toasts) > before, timeout=5.0) and toasts[-1] == "blob.bin is binary: use git from a shell" and len(asked) == asks and wait_for(idle) and "blob.bin" not in unstaged_paths() and index_paths() == set(), (toasts[-1:], asked[asks:], unstaged_paths(), index_paths()))
+        check("the view is free after the refusal", not view.busy() and page.shows({"show": "HEAD"}))
+
+        page.load("unstaged")
+        check("back on the working tree", wait_for(lambda: page.settled() and page.loaded == "unstaged", timeout=5.0))
+        check("no lingering busy", idle())
+    finally:
+        page._toast = real_toast
+        gitpage.dialogs.confirm_dialog = real_confirm
+        gitpage._trash_paths = real_trash
+        shutil.rmtree(aside, ignore_errors=True)
 
 
 def check_without_hunk(repo: str) -> None:

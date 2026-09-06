@@ -834,6 +834,98 @@ def test_describe_names_what_was_done():
     ) == "Discarded hunk 2 of f.txt"
 
 
+# -- the view's requests (MutationRequest and the words around it) --------------
+
+
+def test_mutation_request_dispatches_to_the_planner_of_its_grain():
+    file = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.FILE)
+    assert not file.needs_patch and not file.revert
+    assert file.plan(None) == gitpatch.plan_file(STAGING, UNSTAGED)
+    assert file.path == "f.txt"
+    discard = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.FILE, discard=True)
+    assert discard.plan(None) == gitpatch.plan_file(STAGING, UNSTAGED, discard=True)
+    hunk = gitpatch.MutationRequest(STAGING, STAGED, gitpatch.HUNK, hunk_index=1)
+    assert hunk.needs_patch
+    assert hunk.plan(STAGING_TEXT) == gitpatch.plan_hunk(STAGING, 1, STAGED, STAGING_TEXT)
+    lines = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.LINES, hunk_index=0, first=1, last=2)
+    assert lines.plan(STAGING_TEXT) == gitpatch.plan_lines(STAGING, 0, 1, 2, UNSTAGED, STAGING_TEXT)
+    # A lines request without its numbers plans nothing.
+    half = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.LINES, hunk_index=0)
+    assert isinstance(half.plan(STAGING_TEXT), Refusal)
+    assert isinstance(gitpatch.MutationRequest(STAGING, UNSTAGED, "nonsense").plan(STAGING_TEXT), Refusal)
+
+
+def test_mutation_request_on_a_read_only_load_reverts_and_passes_dirty_through():
+    request = gitpatch.MutationRequest(STAGING, {"show": "abc123"}, gitpatch.HUNK, hunk_index=0)
+    assert request.revert
+    plan = request.plan(STAGING_TEXT, dirty=True)
+    assert isinstance(plan, Plan) and plan.op == OP_APPLY_WORKTREE_REVERSE
+    assert plan.confirm.startswith(gitpatch.revert_warning("f.txt"))
+    assert request.three_way(plan)
+    # The same op from a discard on the unstaged load never retries three-way.
+    discard = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.HUNK, discard=True, hunk_index=0)
+    discarded = discard.plan(STAGING_TEXT)
+    assert isinstance(discarded, Plan) and discarded.op == OP_APPLY_WORKTREE_REVERSE
+    assert not discard.three_way(discarded)
+    assert not discard.three_way(Plan(OP_ADD, ("f.txt",), None, None, "Staged f.txt"))
+
+
+def test_confirm_words_name_the_question_and_its_button():
+    unstaged = gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.FILE, discard=True)
+    trash = Plan(OP_TRASH, ("f.txt",), None, "?", "")
+    checkout = Plan(OP_CHECKOUT, ("f.txt",), None, "?", "")
+    assert unstaged.confirm_words(trash) == ("Move to the trash?", "Move to trash")
+    assert unstaged.confirm_words(checkout) == ("Discard the changes?", "Discard")
+    gone = replace(STAGING, kind=diffmodel.KIND_DELETED)
+    deleted = gitpatch.MutationRequest(gone, UNSTAGED, gitpatch.FILE, True)
+    assert deleted.confirm_words(checkout) == ("Restore the file?", "Restore")
+    assert unstaged.confirm_words(Plan(OP_APPLY_WORKTREE_REVERSE, ("f.txt",), "", "?", "")) == (
+        "Discard the changes?", "Discard"
+    )
+    revert = gitpatch.MutationRequest(STAGING, "branch", gitpatch.HUNK, hunk_index=0)
+    assert revert.confirm_words(Plan(OP_APPLY_WORKTREE_REVERSE, ("f.txt",), "", "?", "")) == (
+        "Revert into the working tree?", "Revert"
+    )
+
+
+def test_is_dirty_reads_the_unstaged_rows_of_a_status():
+    from collins.gitmodel import Status, StatusRow
+
+    status = Status(unstaged=(StatusRow("f.txt", "M"),), staged=(StatusRow("g.txt", "M"),))
+    assert gitpatch.is_dirty(status, "f.txt")
+    assert not gitpatch.is_dirty(status, "g.txt")
+    assert not gitpatch.is_dirty(None, "f.txt")
+    assert not gitpatch.is_dirty(object(), "f.txt")
+
+
+def test_action_labels_follow_the_spec_table():
+    assert gitpatch.action_labels(UNSTAGED, gitpatch.FILE) == ("Stage file", "Discard file")
+    assert gitpatch.action_labels(UNSTAGED, gitpatch.HUNK) == ("Stage hunk", "Discard hunk")
+    assert gitpatch.action_labels(UNSTAGED, gitpatch.HUNK, selected=True) == ("Stage lines", "Discard lines")
+    assert gitpatch.action_labels(UNSTAGED, gitpatch.LINES) == ("Stage lines", "Discard lines")
+    assert gitpatch.action_labels(STAGED, gitpatch.FILE) == ("Unstage file", None)
+    assert gitpatch.action_labels(STAGED, gitpatch.HUNK) == ("Unstage hunk", None)
+    assert gitpatch.action_labels(STAGED, gitpatch.HUNK, selected=True) == ("Unstage lines", None)
+    for load in ("branch", {"show": "abc"}, {"range": "a...b"}):
+        assert gitpatch.action_labels(load, gitpatch.FILE) == ("Revert file", None)
+        assert gitpatch.action_labels(load, gitpatch.HUNK) == ("Revert hunk", None)
+        assert gitpatch.action_labels(load, gitpatch.HUNK, selected=True) == ("Revert lines", None)
+
+
+def test_outcome_words_toast_the_result():
+    plan = Plan(OP_APPLY_WORKTREE_REVERSE, ("f.txt",), "", "?", "Reverted hunk 1 of f.txt", 2, 0)
+    assert gitpatch.outcome_words(plan, True, False, False, "") == "Reverted hunk 1 of f.txt"
+    assert gitpatch.outcome_words(plan, True, True, False, "") == (
+        "Reverted hunk 1 of f.txt — merged three-way (the result is staged)"
+    )
+    assert gitpatch.outcome_words(plan, False, True, True, "error: ...") == (
+        "The three-way revert of f.txt left conflict markers"
+    )
+    stderr = "\nerror: patch failed: f.txt:1\nerror: more\n"
+    assert gitpatch.outcome_words(plan, False, False, False, stderr) == "error: patch failed: f.txt:1"
+    assert gitpatch.outcome_words(plan, False, False, False, "") == "git failed"
+
+
 # -- staging.test.ts: planRangeToggle -----------------------------------------
 
 

@@ -45,11 +45,11 @@ import hashlib
 import os
 import re
 import subprocess
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import diffmodel, gitinfo, gitloads
+from . import diffmodel, gitinfo, gitloads, gitpatch
 from .diffmodel import File
 from .gitmodel import LOG_FORMAT, BranchRef, Commit, Status, parse_log, parse_status_v2
 from .i18n import _
@@ -1100,6 +1100,62 @@ def checkout_paths(
     repository root — destructive: the caller has confirmed. Refused
     without a call when a path isn't safe_path."""
     return _paths_mutation(cwd, paths, checkout_paths_argv, run, timeout)
+
+
+Trash = Callable[[str, Sequence[str]], GitResult]
+_APPLY_OPS = (gitpatch.OP_APPLY_CACHED, gitpatch.OP_APPLY_CACHED_REVERSE, gitpatch.OP_APPLY_WORKTREE_REVERSE)
+
+
+def run_plan(
+    cwd: str | Path | None,
+    plan: gitpatch.Plan,
+    three_way: bool = False,
+    trash: Trash | None = None,
+    run=subprocess.run,
+    timeout: float = GIT_TIMEOUT_S,
+) -> ApplyResult:
+    """Carry out a gitpatch.Plan from the repository root: `add` /
+    `reset` / `checkout` of its paths (stage_paths / unstage_paths /
+    checkout_paths), the applies of its patch (apply_patch, to the index
+    forward or in reverse, or to the working tree in reverse — with the
+    `--3way` retry when *three_way*, a revert's), or *trash* — the
+    caller's mover (the page's Gio.File.trash; never an unlink), handed
+    the root and the paths — for OP_TRASH, refused without one. Worker
+    thread; never raises."""
+    root = _root(cwd)
+    if root is None:
+        return ApplyResult(False, "", "not a git repository")
+    op = plan.op
+    if op == gitpatch.OP_ADD:
+        result = stage_paths(root, plan.paths, run=run, timeout=timeout)
+    elif op == gitpatch.OP_RESET:
+        result = unstage_paths(root, plan.paths, run=run, timeout=timeout)
+    elif op == gitpatch.OP_CHECKOUT:
+        result = checkout_paths(root, plan.paths, run=run, timeout=timeout)
+    elif op == gitpatch.OP_TRASH:
+        listed = _safe_paths(plan.paths)
+        if listed is None:
+            result = GitResult(False, "", "no safe paths")
+        elif trash is None:
+            result = GitResult(False, "", "no trash available")
+        else:
+            try:
+                result = trash(root, listed)
+            except Exception as err:  # the mover is the caller's; a failure is an answer
+                result = GitResult(False, "", str(err) or err.__class__.__name__)
+    elif op in _APPLY_OPS:
+        return apply_patch(
+            root,
+            plan.patch or "",
+            cached=op != gitpatch.OP_APPLY_WORKTREE_REVERSE,
+            reverse=op != gitpatch.OP_APPLY_CACHED,
+            three_way=three_way and op == gitpatch.OP_APPLY_WORKTREE_REVERSE,
+            run=run,
+            timeout=timeout,
+        )
+    else:
+        result = GitResult(False, "", f"unknown plan op {op!r}")
+    return ApplyResult(result.ok, result.stdout, result.stderr)
 
 
 def tree_state_signature(

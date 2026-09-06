@@ -1219,6 +1219,62 @@ def test_stage_unstage_and_checkout_paths(tree):
 
 
 @needs_git
+def test_run_plan_carries_out_every_op_from_the_root(tree):
+    """gitops.run_plan is what the page hands a gitpatch.Plan to: add,
+    reset and checkout of the paths, the caller's trash mover, and the
+    applies through apply_patch."""
+    from collins import gitpatch
+
+    def plan(op: str, paths=("f.txt",), patch=None) -> gitpatch.Plan:
+        return gitpatch.Plan(op, tuple(paths), patch, None, "done")
+
+    assert gitops.run_plan(tree / "sub" if (tree / "sub").exists() else tree, plan(gitpatch.OP_ADD)).ok
+    assert StatusRow("f.txt", "M") in gitops.read_status(tree).staged
+    assert gitops.run_plan(tree, plan(gitpatch.OP_RESET)).ok
+    assert StatusRow("f.txt", "M") in gitops.read_status(tree).unstaged
+    # The applies: the file's patch staged by hunk, then reversed out of the index.
+    patch = gitops.file_patch(tree, "unstaged", "f.txt")
+    assert patch
+    assert gitops.run_plan(tree, plan(gitpatch.OP_APPLY_CACHED, patch=patch)).ok
+    assert StatusRow("f.txt", "M") in gitops.read_status(tree).staged
+    cached = gitops.file_patch(tree, "staged", "f.txt")
+    assert gitops.run_plan(tree, plan(gitpatch.OP_APPLY_CACHED_REVERSE, patch=cached)).ok
+    assert StatusRow("f.txt", "M") not in gitops.read_status(tree).staged
+    # A reverse apply into the working tree takes the edit back out.
+    assert gitops.run_plan(tree, plan(gitpatch.OP_APPLY_WORKTREE_REVERSE, patch=patch)).ok
+    assert (tree / "f.txt").read_text() == "one\n"
+    # Applied twice it fails the way git says; nothing is retried without three_way.
+    again = gitops.run_plan(tree, plan(gitpatch.OP_APPLY_WORKTREE_REVERSE, patch=patch))
+    assert not again.ok and not again.three_way and "does not apply" in again.stderr
+    # An empty patch is refused before git is asked.
+    assert not gitops.run_plan(tree, plan(gitpatch.OP_APPLY_CACHED, patch="")).ok
+    # Checkout puts the index's copy back.
+    _write(tree, "f.txt", "three\n")
+    assert gitops.run_plan(tree, plan(gitpatch.OP_CHECKOUT)).ok
+    assert (tree / "f.txt").read_text() == "one\n"
+    # The trash is the caller's mover, handed the root and the safe paths.
+    moved: list[tuple[str, tuple[str, ...]]] = []
+
+    def trash(root: str, paths) -> gitops.GitResult:
+        moved.append((root, tuple(paths)))
+        return gitops.GitResult(True, "", "")
+
+    assert gitops.run_plan(tree, plan(gitpatch.OP_TRASH, paths=("n.txt",)), trash=trash).ok
+    assert moved == [(str(tree), ("n.txt",))]
+    assert not gitops.run_plan(tree, plan(gitpatch.OP_TRASH, paths=("n.txt",))).ok  # no mover
+    assert not gitops.run_plan(tree, plan(gitpatch.OP_TRASH, paths=("../n.txt",)), trash=trash).ok
+    assert len(moved) == 1
+
+    def raising(root: str, paths) -> gitops.GitResult:
+        raise OSError("read-only")
+
+    refused = gitops.run_plan(tree, plan(gitpatch.OP_TRASH, paths=("n.txt",)), trash=raising)
+    assert not refused.ok and refused.stderr == "read-only"
+    assert not gitops.run_plan(tree, plan("nonsense")).ok
+    assert not gitops.run_plan(tree.parent / "nowhere", plan(gitpatch.OP_ADD)).ok
+
+
+@needs_git
 def test_paths_with_glob_characters_name_one_file_each(repo):
     """`foo[1].txt` beside foo1.txt, `a*b.txt` beside axb.txt: every read
     and mutation names exactly the file it was given — as a glob pathspec

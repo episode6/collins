@@ -574,8 +574,65 @@ page needs hunk 0.21 or newer:
     similarity), a binary, an image, a mode change.
   - `Ctrl+1` / `Ctrl+2` / `Ctrl+3`, the commits list, the breadcrumb, the
     tab title, `show_diff` and the layout persistence all work as with
-    hunk. Not yet: staging, discarding, reverting, notes and highlights,
-    line selection — the next release's.
+    hunk.
+  - **Staging, in the diff itself.** The buttons sit on the headers
+    (SourceTree's placement, Sublime Merge's words), always there and
+    lifted while the pointer is over the file or hunk:
+
+    | Load | File header | Hunk header, nothing selected | Hunk header, lines selected |
+    | --- | --- | --- | --- |
+    | unstaged | *Stage file* · *Discard file* | *Stage hunk* · *Discard hunk* | *Stage lines* · *Discard lines* |
+    | staged | *Unstage file* | *Unstage hunk* | *Unstage lines* |
+    | a commit, the branch, a range | *Revert file* | *Revert hunk* | *Revert lines* |
+
+    **Select lines** by dragging in the text, dragging or clicking (and
+    shift-clicking) on the line numbers, or with `Shift`+arrows: the
+    selection snaps to whole lines, lives in one hunk at a time
+    (selecting in another clears it), and `Esc` clears it; padding cells
+    and expanded context never count. `x` stages, unstages or reverts
+    the selection or, with none, the focused hunk; `X` the file; `D`
+    discards (reverts, on a commit or branch) after a confirmation. A
+    right-click on a hunk offers the same, plus *Copy*, *Open in editor*,
+    *Add note* and *Expand context*; the pinned file header carries the
+    file's buttons too.
+  - Every action **re-reads the file's patch from git** at that moment
+    and refuses, with a word rather than half done, what the arithmetic
+    can't describe: a binary, a file too large, a rename or a new /
+    deleted file by hunk (use the file button — a binary stages and
+    unstages whole, and is never reverted from a patch), a symlink or
+    submodule, and a file that changed since the view loaded it — which
+    reloads.
+    Stage and unstage ask nothing; a discard confirms (an untracked
+    file's discard moves it to the **trash**, never an unlink; a deleted
+    file's *Discard file* restores it from the index); a revert applies
+    the commit's patch in reverse to the working tree after a confirm
+    that warns when the file has unstaged changes, and when the context
+    has moved retries three-way and says so (the result is staged, and
+    may carry conflict markers). Each runs behind the sidebar's busy —
+    the pressed button spins — toasts its outcome (or git's first error
+    line), and reloads the view by key, so a selection survives with its
+    hunk. The sidebar's *Stage hunk* / *Anchor line* / *Discard* buttons
+    hide while the native view draws: the headers carry the buttons now.
+  - **Notes on the diff.** `c` (or the right-click menu's *Add note*)
+    opens a card under the focused hunk, anchored to the cursor line —
+    a text box where `Ctrl+Enter` saves and `Esc` cancels; the first
+    line is the note's summary, the rest its rationale. The card names
+    its source (*You*, or *Agent* with the author when a session lands
+    one through the annotate tool) and the line it sits on, the marker
+    column shows a glyph beside that line, and `}` / `{` walk the
+    annotated hunks. `E` re-opens the hunk's first note of yours, *Edit*
+    and *Delete* sit on the card (the agent's cards delete too, and `a`
+    — or the header menu's *Agent notes* check — folds them all away,
+    their markers staying). With lines selected, `c` anchors the note
+    on the selection's last line. While an editor is open
+    the diff's letter keys type into it, nothing else. Notes live in the
+    page for the tab's life — nothing is written to disk — and follow a
+    reload: a note on a hunk the edit left alone keeps its card, one on
+    a hunk that changed — or whose line numbers shifted, because lines
+    were staged or added above it — is dropped, one on a file the
+    current load doesn't show waits for a load that does. Highlights (attention
+    marks on a range of a line, in hunk's tones) share the same store
+    and rules; the tools that land them are the next PR's.
 
 ## Knowing what's happening
 

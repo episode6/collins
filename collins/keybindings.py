@@ -189,12 +189,51 @@ BINDINGS: tuple[Binding, ...] = (
         GROUP_GIT,
         N_("In the diff."),
     ),
+    # The staging keys (the collins-git extension's, on hunk's cursor;
+    # here on the focused hunk and the view's own line selection).
+    Binding(
+        "git.stage",
+        N_("Stage, unstage or revert the hunk or the selected lines"),
+        ("x",),
+        GROUP_GIT,
+        N_("In the diff; the selected lines when there are any, else the focused hunk."),
+    ),
+    Binding(
+        "git.stage-file",
+        N_("Stage, unstage or revert the file"),
+        ("<Shift>x",),
+        GROUP_GIT,
+        N_("In the diff; the focused hunk's file."),
+    ),
+    Binding(
+        "git.discard",
+        N_("Discard or revert the hunk or the selected lines"),
+        ("<Shift>d",),
+        GROUP_GIT,
+        N_("In the diff; after a confirmation."),
+    ),
     Binding("git.layout-auto", N_("Layout: automatic"), ("0",), GROUP_GIT, N_("In the diff.")),
     Binding("git.layout-split", N_("Layout: split"), ("1",), GROUP_GIT, N_("In the diff.")),
     Binding("git.layout-stack", N_("Layout: stacked"), ("2",), GROUP_GIT, N_("In the diff.")),
     Binding("git.line-numbers", N_("Show/hide line numbers"), ("l",), GROUP_GIT, N_("In the diff.")),
     Binding("git.wrap", N_("Wrap long lines"), ("w",), GROUP_GIT, N_("In the diff.")),
-    # `a` (show/hide agent notes) arrives with the note cards themselves.
+    # The notes (hunk's c / E / a): cards under the hunk, anchored to the
+    # cursor line. The letters are off while a note editor is open.
+    Binding(
+        "git.add-note",
+        N_("Add a note"),
+        ("c",),
+        GROUP_GIT,
+        N_("In the diff; a card under the focused hunk, anchored to the cursor line."),
+    ),
+    Binding(
+        "git.edit-note",
+        N_("Edit the hunk's first note"),
+        ("<Shift>e",),
+        GROUP_GIT,
+        N_("In the diff; the first note you wrote on the focused hunk."),
+    ),
+    Binding("git.agent-notes", N_("Show/hide agent notes"), ("a",), GROUP_GIT, N_("In the diff.")),
     Binding("git.refresh", N_("Reload the diff"), ("r",), GROUP_GIT, N_("In the diff.")),
     Binding("git.filter", N_("Filter the files list"), ("slash",), GROUP_GIT, N_("In the diff.")),
     Binding("git.find", N_("Find in the diff"), ("<Control>f",), GROUP_GIT, N_("In the diff.")),

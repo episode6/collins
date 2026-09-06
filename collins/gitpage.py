@@ -169,11 +169,13 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import (  # noqa: E402
+    dialogs,
     diffmodel,
     diffview,
     gitinfo,
     gitloads,
     gitops,
+    gitpatch,
     hunkctl,
     keybindings,
     keymap,
@@ -583,6 +585,8 @@ class GitPage(Adw.Bin):
         self._diffview = DiffView()
         self._diffview.connect("current-changed", self._on_current_changed)
         self._diffview.connect("open-requested", self._on_open_requested)
+        self._diffview.connect("mutation-requested", self._on_mutation_requested)
+        self._diffview.connect("editing-changed", self._on_note_editing_changed)
         self._diffview.apply_keybindings(keybindings.current())
         self._stack.add_named(self._diffview, _NATIVE)
         self._install_actions()
@@ -964,8 +968,16 @@ class GitPage(Adw.Bin):
     def holds_escape(self) -> bool:
         """hunk reads Escape itself while it runs; the dock's restore-from-
         maximized yields to it (see paneldock). The native find bar holds
-        it too while open (Escape closes the bar)."""
-        return self.hunk_alive or (self._native and self._search_bar.get_search_mode())
+        it too while open (Escape closes the bar), and the view while
+        lines are selected (Escape clears the selection)."""
+        return self.hunk_alive or (
+            self._native
+            and (
+                self._search_bar.get_search_mode()
+                or self._diffview.has_selection()
+                or self._diffview.editing()  # Escape cancels the note editor
+            )
+        )
 
     def apply_settings(self, settings: dict) -> None:
         """Font ("font"), terminal theme ("terminal_theme"), the KeyMatcher
@@ -2022,6 +2034,9 @@ class GitPage(Adw.Bin):
         if not native:
             self._search_bar.set_search_mode(False)
         self.sidebar.set_filter_shown(native)
+        # The hunk headers carry the staging buttons natively (decision 7);
+        # the sidebar's cursor buttons are hunk's, and go with it (PR 4).
+        self.sidebar.set_cursor_buttons_shown(not native)
         if native:
             self._banner.set_revealed(False)
             if self.hunk_alive:
@@ -2348,6 +2363,112 @@ class GitPage(Adw.Bin):
         self._diffview.filter(text)
         self._sync_search_label()
 
+    # -- the view's mutations (stage, unstage, discard, revert) --
+
+    def _on_mutation_requested(self, _view: DiffView, request: gitpatch.MutationRequest) -> None:
+        """A header button, its menu, or `x` / `X` / `D`: re-read the
+        file's patch from git now (gitops.file_patch — the planners
+        compare the view against the disk before trusting a line), and
+        for a revert the working tree's status (the "may conflict"
+        warning), on a thread; then plan (_mutation_planned). The view's
+        buttons wait meanwhile, the pressed one spinning."""
+        if self._closing or not self._native_opened or not self._native:
+            return
+        if self.sidebar.busy or self._diffview.busy():
+            self._toast(_("Another git operation is still running"))
+            return
+        if request.load != self._loaded:
+            self._toast(_("The view is behind the page: reloading"))
+            self._native_load(self._loaded)
+            return
+        self._diffview.set_busy(True)
+        gen = self._gen
+        cwd = self._cwd_provider()
+        parent_target = self._parent_target
+        file = request.file
+
+        def work() -> None:
+            fresh = (
+                gitops.file_patch(cwd, request.load, file.path, file.previous_path, parent_target)
+                if request.needs_patch
+                else None
+            )
+            status = gitops.read_status(cwd) if request.revert else None
+            GLib.idle_add(
+                self._mutation_planned, gen, cwd, request, fresh, status, priority=GLib.PRIORITY_DEFAULT
+            )
+
+        threading.Thread(target=work, name="git-page-plan", daemon=True).start()
+
+    def _mutation_planned(
+        self, gen: int, cwd: str, request: gitpatch.MutationRequest, fresh: str | None, status: object
+    ) -> bool:
+        # The view stays busy — the pressed button spinning — for the
+        # request's whole life: set_busy(False) forgets which button it
+        # was, so it is called only where the request ends.
+        if gen != self._gen or self._closing or not self._native_opened:
+            self._diffview.set_busy(False)
+            return GLib.SOURCE_REMOVE
+        plan = request.plan(fresh, gitpatch.is_dirty(status, request.path))
+        if isinstance(plan, gitpatch.Refusal):
+            self._diffview.set_busy(False)
+            self._toast(plan.reason)
+            if plan.stale:
+                self._native_load(self._loaded)
+            return GLib.SOURCE_REMOVE
+        if plan.confirm is None:
+            self._run_plan(gen, cwd, request, plan)
+            return GLib.SOURCE_REMOVE
+        heading, button = request.confirm_words(plan)
+        # The spinner stays on the pressed button while the question is up.
+        dialogs.confirm_dialog(
+            self,
+            heading,
+            plan.confirm,
+            button,
+            lambda: self._run_plan(gen, cwd, request, plan),
+            on_dismiss=lambda: self._diffview.set_busy(False),
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _run_plan(self, gen: int, cwd: str, request: gitpatch.MutationRequest, plan: gitpatch.Plan) -> None:
+        """Carry the plan out (gitops.run_plan) on a thread behind the
+        sidebar's busy — the acting button spinning, every other button
+        insensitive — then toast the outcome and treat the tree as moved
+        (`mutated`: signatures re-seeded, the lists refreshed, the view
+        reloaded by key, so a selection survives with its hunk). The plan
+        was read against *cwd* under generation *gen* for the load the
+        request names: a confirm can sit open while the page moves on (the
+        agent `cd`s elsewhere, the sidebar loads another commit), and the
+        plan then runs against nothing — the tree it described is not the
+        one the page shows."""
+        if self._closing or not self._native_opened:
+            self._diffview.set_busy(False)
+            return
+        if gen != self._gen or request.load != self._loaded:
+            self._diffview.set_busy(False)
+            self._toast(_("The view changed since the request: nothing was done"))
+            return
+        three_way = request.three_way(plan)
+        self._diffview.set_busy(True)
+
+        def work() -> gitops.ApplyResult:
+            return gitops.run_plan(cwd, plan, three_way=three_way, trash=_trash_paths)
+
+        def done(answer: object) -> None:
+            self._diffview.set_busy(False)
+            if not isinstance(answer, gitops.ApplyResult):
+                self._toast(_("git failed"))
+                return
+            self._toast(
+                gitpatch.outcome_words(plan, answer.ok, answer.three_way, answer.conflicts, answer.stderr)
+            )
+            if answer.ok or answer.conflicts:
+                self.sidebar.emit("mutated")
+
+        if not self.sidebar.run_mutation(work, done):
+            self._diffview.set_busy(False)
+
     def _apply_scheme(self) -> None:
         dark = Adw.StyleManager.get_default().get_dark()
         self._diffview.set_scheme(style_scheme(self._scheme_setting, dark), dark)
@@ -2405,6 +2526,7 @@ class GitPage(Adw.Bin):
         view = Gio.Menu()
         view.append(_("Line numbers"), f"{_ACTIONS}.line-numbers")
         view.append(_("Wrap long lines"), f"{_ACTIONS}.wrap")
+        view.append(_("Agent notes"), f"{_ACTIONS}.agent-notes")
         menu.append_section(None, view)
         more = Gio.Menu()
         more.append(_("Reload the diff"), f"{_ACTIONS}.refresh")
@@ -2428,6 +2550,11 @@ class GitPage(Adw.Bin):
             "next-note": lambda: self._diffview.focus_annotated(1),
             "prev-note": lambda: self._diffview.focus_annotated(-1),
             "expand-gap": self._diffview.expand_gap_before_focus,
+            "stage": self._diffview.request_stage,
+            "stage-file": self._diffview.request_stage_file,
+            "discard": self._diffview.request_discard,
+            "add-note": self._diffview.add_note_at_cursor,
+            "edit-note": self._diffview.edit_first_note,
             "layout-auto": lambda: self._write_option("git_layout", "auto"),
             "layout-split": lambda: self._write_option("git_layout", "split"),
             "layout-stack": lambda: self._write_option("git_layout", "stack"),
@@ -2463,7 +2590,27 @@ class GitPage(Adw.Bin):
             "change-state", lambda _a, value: self._write_option("git_wrap_lines", value.get_boolean())
         )
         group.add_action(self._wrap_action)
+        # The agent's note cards shown or folded (`a`, the menu's check):
+        # the page's for the tab's life, no setting behind it.
+        self._agent_notes_action = Gio.SimpleAction.new_stateful("agent-notes", None, GLib.Variant("b", True))
+        self._agent_notes_action.connect("change-state", self._on_agent_notes_state)
+        group.add_action(self._agent_notes_action)
+        self._git_actions = group
         self.insert_action_group(_ACTIONS, group)
+
+    def _on_agent_notes_state(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        action.set_state(value)
+        self._diffview.set_agent_notes_shown(value.get_boolean())
+
+    def _on_note_editing_changed(self, _view: DiffView, editing: bool) -> None:
+        """A note editor opened or closed: every `git.*` action goes
+        insensitive meanwhile — a disabled named action lets its chord
+        fall through, so `e` types an e and `q` a q into the editor
+        instead of closing the page."""
+        for name in self._git_actions.list_actions():
+            action = self._git_actions.lookup_action(name)
+            if action is not None:
+                action.set_enabled(not editing)
 
     def _sync_action_states(self) -> None:
         """The stateful actions follow the settings (apply_settings), so
@@ -2492,6 +2639,18 @@ class GitPage(Adw.Bin):
         """`/`: the files filter, when the sidebar is on screen."""
         if self.sidebar.get_visible():
             self.sidebar.focus_filter()
+
+
+def _trash_paths(root: str, paths: Sequence[str]) -> gitops.GitResult:
+    """gitops.run_plan's mover for OP_TRASH: each path under *root* to the
+    system trash through Gio (never an unlink — the file exists nowhere
+    else). Worker thread; the first failure is the answer."""
+    for path in paths:
+        try:
+            Gio.File.new_for_path(os.path.join(root, path)).trash(None)
+        except GLib.Error as exc:
+            return gitops.GitResult(False, "", exc.message or _("trash failed"))
+    return gitops.GitResult(True, "", "")
 
 
 def _session_files(files: Sequence[diffmodel.File]) -> tuple[hunkctl.SessionFile, ...]:

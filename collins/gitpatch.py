@@ -1075,6 +1075,145 @@ def describe(plan: Plan | Refusal) -> str:
     return plan.reason if isinstance(plan, Refusal) else plan.done
 
 
+# -- what the view's buttons and keys ask for ---------------------------------
+
+# The grains a request comes in: the whole file (the file header's button,
+# `X`), one hunk (the hunk header's button with nothing selected, `x`), or
+# the selected lines of one hunk (the same button with a selection).
+FILE = "file"
+HUNK = "hunk"
+LINES = "lines"
+GRAINS: tuple[str, ...] = (FILE, HUNK, LINES)
+
+
+@dataclass(frozen=True)
+class MutationRequest:
+    """What a button or key in the diff view asked for, before the fresh
+    patch is read: the File the view loaded, the *load* it was made on,
+    the *grain*, whether it is the discard button (`D`) rather than the
+    stage / unstage / revert one, and for a hunk or a selection the hunk's
+    index and the inclusive line indexes. The view emits it
+    (`mutation-requested`); the page reads the file's patch on a thread
+    and calls `plan`, which hands the planners above their arguments —
+    the planners take that fresh patch, which is why the view cannot
+    build the Plan itself."""
+
+    file: File
+    load: object
+    grain: str
+    discard: bool = False
+    hunk_index: int | None = None
+    first: int | None = None
+    last: int | None = None
+
+    @property
+    def path(self) -> str:
+        return self.file.path
+
+    @property
+    def revert(self) -> bool:
+        """Whether the load is read-only, where every action is a revert
+        into the working tree (and the working tree's own state matters:
+        `dirty`, and apply_patch's three-way retry)."""
+        return working_side(self.load) is None
+
+    @property
+    def needs_patch(self) -> bool:
+        """Whether `plan` wants the file's patch re-read: a file-grain plan
+        takes none (plan_file works off the view's File), the others
+        compare the view against the disk before trusting a line."""
+        return self.grain != FILE
+
+    def plan(self, fresh_patch: object, dirty: bool = False) -> Plan | Refusal:
+        """The Plan (or Refusal) for this request, given the patch re-read
+        now (None when `needs_patch` is False) and whether the path has
+        unstaged changes in the working tree (`is_dirty`)."""
+        if self.grain == FILE:
+            return plan_file(self.file, self.load, discard=self.discard, dirty=dirty)
+        if self.grain == LINES:
+            if self.hunk_index is None or self.first is None or self.last is None:
+                return Refusal(_("nothing selected"))
+            return plan_lines(
+                self.file, self.hunk_index, self.first, self.last, self.load, fresh_patch,
+                discard=self.discard, dirty=dirty,
+            )
+        if self.grain == HUNK:
+            return plan_hunk(
+                self.file, self.hunk_index, self.load, fresh_patch, discard=self.discard, dirty=dirty
+            )
+        return Refusal(_("nothing selected"))
+
+    def three_way(self, plan: Plan) -> bool:
+        """Whether gitops.apply_patch should retry with `--3way`: a revert
+        into the working tree (the patch is an older commit's, its context
+        may have moved) — never a discard, whose patch was read off the
+        tree it is applied to."""
+        return self.revert and plan.op == OP_APPLY_WORKTREE_REVERSE
+
+    def confirm_words(self, plan: Plan) -> tuple[str, str]:
+        """(heading, the confirming button's label) for a plan that asks
+        first; the question itself is `plan.confirm`."""
+        if plan.op == OP_TRASH:
+            return _("Move to the trash?"), _("Move to trash")
+        if plan.op == OP_CHECKOUT:
+            if is_deletion(self.file):
+                return _("Restore the file?"), _("Restore")
+            return _("Discard the changes?"), _("Discard")
+        if self.revert:
+            return _("Revert into the working tree?"), _("Revert")
+        return _("Discard the changes?"), _("Discard")
+
+
+def is_dirty(status: object, path: str) -> bool:
+    """Whether the working tree holds unstaged changes to *path*: a row for
+    it under the status' `unstaged` (gitmodel.Status; None reads as clean).
+    What `plan_file` / `plan_hunk` / `plan_lines` take as *dirty* for a
+    revert's warning."""
+    rows = getattr(status, "unstaged", None)
+    if not rows:
+        return False
+    return any(getattr(row, "path", None) == path for row in rows)
+
+
+def action_labels(load: object, grain: str, selected: bool = False) -> tuple[str, str | None]:
+    """The words on a header's buttons — (the stage / unstage / revert
+    button, the discard button or None when the load has none) — for a
+    *grain* (FILE, HUNK, or LINES, which a HUNK with lines *selected*
+    also reads as). The spec's table: unstaged *Stage file* · *Discard
+    file*, *Stage hunk* · *Discard hunk*, *Stage lines* · *Discard lines*;
+    staged *Unstage …* alone; a commit, branch or range *Revert …* alone."""
+    if grain == FILE:
+        what = _("file")
+    elif grain == LINES or selected:
+        what = _("lines")
+    else:
+        what = _("hunk")
+    side = working_side(load)
+    if side is None:
+        return _("Revert {what}").format(what=what), None
+    if side == STAGED:
+        return _("Unstage {what}").format(what=what), None
+    return _("Stage {what}").format(what=what), _("Discard {what}").format(what=what)
+
+
+def outcome_words(plan: Plan, ok: bool, three_way: bool, conflicts: bool, stderr: str) -> str:
+    """The toast after gitops ran the plan: `plan.done` — with a word when
+    the `--3way` retry is what applied it (the result is staged too) — or,
+    when it failed, the conflict it left behind, else git's first stderr
+    line. *stderr* is untrusted text: the caller shows it through a toast
+    with markup off."""
+    if ok:
+        if three_way:
+            return _("{done} — merged three-way (the result is staged)").format(done=plan.done)
+        return plan.done
+    if conflicts:
+        return _("The three-way revert of {path} left conflict markers").format(path=", ".join(plan.paths))
+    for line in (stderr or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return _("git failed")
+
+
 # -- a selection across reloads -----------------------------------------------
 
 
