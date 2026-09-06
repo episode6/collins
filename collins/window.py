@@ -104,9 +104,10 @@ from .sessions import (
     path_within,
     project_name_for_cwd,
     removable_worktree,
-    remove_worktree,
+    restore_worktree,
     resume_cwd,
     session_from_file,
+    trash_worktree,
     worktree_project_root,
 )
 from .shellinput import shell_command
@@ -340,12 +341,18 @@ class MainWindow(Adw.ApplicationWindow):
         # Archive requested for an open session: applied only once its tab
         # really closes (page -> session id).
         self._archive_on_close: dict[Adw.TabPage, str] = {}
-        # Sessions whose archive is waiting on the "delete the worktree?"
+        # Sessions whose archive is waiting on the "trash the worktree?"
         # dialog (see _set_archived), and the worktree-state records of the
-        # ones whose answer was Delete, keyed by session id, for
+        # ones whose answer was Trash, keyed by session id, for
         # _settle_archived_worktree to act on once the archive has landed.
         self._worktree_asking: set[str] = set()
         self._worktree_deletions: dict[str, dict] = {}
+        # The worktree-state records of the worktrees an archive moved to
+        # the trash, keyed by session id, while Undo could still bring the
+        # session back (see _trash_worktree, _undo_archive_now): Undo
+        # restores the worktree along with the session. Pruned with the
+        # undo itself (_offer_undo, _drop_undo).
+        self._trashed_worktrees: dict[str, dict] = {}
         # What Undo (the snackbar's button, and Ctrl+Shift+Z) would restore:
         # the session ids of the last archive that landed. Replaced by the
         # next archive, emptied when the sessions come back — by Undo itself,
@@ -6289,9 +6296,9 @@ class MainWindow(Adw.ApplicationWindow):
         read the transcript off the main loop for the worktree the session
         still occupies (sessions.removable_worktree) and, if there is one
         nobody else is working in, ask what should become of it. Keep and
-        Delete both archive the session — Delete also records the worktree
-        for _settle_archived_worktree, which deletes it once the session has
-        stopped; Cancel archives nothing. A session with nothing to ask about
+        Trash both archive the session — Trash also records the worktree
+        for _settle_archived_worktree, which moves it to the trash once the
+        session has stopped; Cancel archives nothing. A session with nothing to ask about
         (no worktree, or one another tab or background agent shares, or one
         this session runs on in as a background agent) archives right away.
         """
@@ -6326,21 +6333,21 @@ class MainWindow(Adw.ApplicationWindow):
 
             dialogs.confirm_dialog(
                 self,
-                _("Delete the session's worktree?"),
+                _("Trash the session's worktree?"),
                 _(
                     "{path}\n\nArchiving the session leaves its worktree behind "
-                    "unless it is deleted with it. Deleting discards any "
-                    "uncommitted changes in the worktree; its branch is kept if "
-                    "it has unmerged commits. Cancel leaves the session where "
-                    "it is."
+                    "unless it is moved to the trash with it. The trash keeps "
+                    "the worktree whole, uncommitted changes included, and Undo "
+                    "brings it back with the session; its branch stays. Cancel "
+                    "leaves the session where it is."
                 ).format(path=str(state["worktreePath"])),
-                _("Delete Worktree"),
+                _("Trash Worktree"),
                 lambda: answered(delete),
                 on_dismiss=answered,
                 extra_label=_("Keep Worktree"),
                 on_extra=lambda: answered(lambda: self._archive_now(session_id, True)),
                 default_response="extra",
-                keys={"d": "confirm", "k": "extra"},
+                keys={"t": "confirm", "k": "extra"},
             )
             return GLib.SOURCE_REMOVE
 
@@ -6407,12 +6414,13 @@ class MainWindow(Adw.ApplicationWindow):
         setting says happens to the git worktree the session still occupies.
 
         "never" leaves it. "ask" already asked, before the archive began
-        (_ask_worktree_then_archive): the answer was Delete if this session
-        has a record in _worktree_deletions, and that worktree goes now.
-        "always" reads the transcript off the main loop for the worktree it
-        records (sessions.removable_worktree — nothing when the session never
-        had one, left it, or the CLI already reaped it on exit) and deletes
-        it. Neither while the session runs on as a background agent, nor
+        (_ask_worktree_then_archive): the answer was Trash if this session
+        has a record in _worktree_deletions, and that worktree goes to the
+        trash now. "always" reads the transcript off the main loop for the
+        worktree it records (sessions.removable_worktree — nothing when the
+        session never had one, left it, or the CLI already reaped it on
+        exit) and trashes it. Either way the archive's Undo brings the
+        worktree back (_trashed_worktrees). Neither while the session runs on as a background agent, nor
         while another tab or background agent is working in that worktree: a
         session that shares one — a fork, a /bg handoff still listed —
         hasn't stopped using it.
@@ -6438,7 +6446,7 @@ class MainWindow(Adw.ApplicationWindow):
             # back in the list and may be resumed into its worktree any moment.
             if not self.state.is_archived(session_id) or self._worktree_in_use(path):
                 return GLib.SOURCE_REMOVE
-            self._delete_worktree(state)
+            self._trash_worktree(session_id, state)
             return GLib.SOURCE_REMOVE
 
         if policy == "ask":
@@ -6474,22 +6482,59 @@ class MainWindow(Adw.ApplicationWindow):
                 return True
         return False
 
-    def _delete_worktree(self, state: dict) -> None:
-        """Remove a stopped session's worktree on a worker thread (git checks
-        out nothing, but it walks the tree); a toast when it is gone, git's
-        words in an error dialog when it refused."""
+    def _trash_worktree(self, session_id: str, state: dict) -> None:
+        """Move a stopped session's worktree to the trash on a worker thread
+        (sessions.trash_worktree); a toast when it is there, the error's
+        words in a dialog when it isn't. The record is kept in
+        _trashed_worktrees so the archive's Undo restores the worktree too —
+        or, when Undo (or a restore by hand) beat the move, restored right
+        away."""
         path = str(state["worktreePath"])
 
         def work() -> None:
-            error = remove_worktree(state)
+            error = trash_worktree(state)
             GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
 
         def done(error: str) -> bool:
             if error:
-                dialogs.error_dialog(self, _("Deleting the worktree failed"), error)
+                dialogs.error_dialog(self, _("Moving the worktree to the trash failed"), error)
+                return GLib.SOURCE_REMOVE
+            if not self.state.is_archived(session_id):
+                self._restore_worktree(state)
+                return GLib.SOURCE_REMOVE
+            if session_id in self._undo_archive:
+                self._trashed_worktrees[session_id] = state
+            self.sidebar.toast_overlay.add_toast(
+                Adw.Toast(title=_("Moved worktree {name} to the trash").format(name=Path(path).name))
+            )
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _restore_worktree(self, state: dict) -> None:
+        """Bring a trashed worktree back (sessions.restore_worktree) on a
+        worker thread: a toast when it is back, the trouble's words in a
+        dialog otherwise — the directory may still be in the trash then, and
+        the dialog says so."""
+        path = str(state["worktreePath"])
+
+        def work() -> None:
+            error = restore_worktree(state)
+            GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
+
+        def done(error: str) -> bool:
+            if error:
+                dialogs.error_dialog(
+                    self,
+                    _("Restoring the worktree failed"),
+                    _(
+                        "{error}\n\nWhatever the trash still holds of {path} can be "
+                        "restored from there by hand."
+                    ).format(error=error, path=path),
+                )
             else:
                 self.sidebar.toast_overlay.add_toast(
-                    Adw.Toast(title=_("Deleted worktree {name}").format(name=Path(path).name))
+                    Adw.Toast(title=_("Restored worktree {name}").format(name=Path(path).name))
                 )
             return GLib.SOURCE_REMOVE
 
@@ -6500,6 +6545,11 @@ class MainWindow(Adw.ApplicationWindow):
         previous archive armed — and float the snackbar that says so over the
         bottom of the sessions panel."""
         self._undo_archive = list(session_ids)
+        # The worktrees the previous archive trashed stay in the trash: their
+        # sessions can no longer be undone from here.
+        self._trashed_worktrees = {
+            sid: state for sid, state in self._trashed_worktrees.items() if sid in self._undo_archive
+        }
         # One snackbar at a time: a fresh archive's toast replaces the last
         # one instead of queueing behind it (the overlay's default), which
         # would show it seconds after the archive it speaks for.
@@ -6541,6 +6591,8 @@ class MainWindow(Adw.ApplicationWindow):
         if remaining == self._undo_archive:
             return
         self._undo_archive = remaining
+        for sid in gone:
+            self._trashed_worktrees.pop(sid, None)
         if self._undo_toast is None:
             return
         if remaining:
@@ -6564,6 +6616,14 @@ class MainWindow(Adw.ApplicationWindow):
             for session_id in session_ids:
                 self.sidebar.begin_arrival(session_id)
         self.store.restore_many(session_ids)
+        # The worktrees the archive moved to the trash come back with their
+        # sessions. One still on its way there (the trash runs on a thread)
+        # has no record yet: _trash_worktree sees the session restored when
+        # it lands and turns straight around.
+        for session_id in session_ids:
+            state = self._trashed_worktrees.pop(session_id, None)
+            if state is not None:
+                self._restore_worktree(state)
 
     def _on_archive_project(self, _action, param: GLib.Variant) -> None:
         name = param.get_string()
