@@ -61,7 +61,11 @@ downloads of each version, see the
   view, highlighted for the fence's language (`python`, `bash`, `json`,
   `diff`… and any name GtkSourceView knows) and wearing the editor's style
   scheme like the Files view's diffs, a long line scrolling sideways
-  within the block. A `<details>` block shows as its source for now (its
+  within the block. `#123`, `owner/repo#123`, `@user` and commit hashes
+  link into the PR's own repository as they do on GitHub, and a relative
+  link (`[guide](docs/guide.md)`) opens the file at the PR's head commit —
+  never inside a code span or an author's own link. A `<details>` block
+  shows as its source for now (its
   own widget follows); any other HTML shows escaped. The folded
   preview still opens with the first paragraph, and without the parser
   the page falls back to the previous renderer.
