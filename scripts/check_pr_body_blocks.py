@@ -8,8 +8,9 @@ labels in a sideways-only scroller (capped, with a link to the rest), code
 blocks as read-only GtkSource views highlighted for the fence's language
 and wearing the page's style scheme, GitHub references (#123,
 owner/repo#123, @user, a commit's hex) and relative links as links into
-the page's own repository, and every block the widget layer has no widget
-for yet as its escaped source.
+the page's own repository, <details> as expanders that build their
+children on first opening (an unmatched one stays literal text), and
+GitHub's alerts as colored columns under an icon-and-title row.
 The fold's preview cut, the "Show more" step and the regex fallback ride
 the same walk. None of that is reachable from pytest (tests/conftest.py
 blocks the GTK stack), so it is checked here against the real page in a
@@ -20,8 +21,7 @@ real window:
 
 `prdetail.fetch` is stubbed with a canned detail — a description made of
 the block fixture, one comment — so nothing leaves the machine. Grown per
-PR of the markdown stack: a Gtk.Expander for <details> joins the
-assertions when it lands.
+PR of the markdown stack.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
@@ -285,6 +285,14 @@ def step_expanded() -> bool:
         quotes and "Note" in texts(quotes[0]) and not any("[!NOTE]" in t for t in texts(quotes[0])),
         [texts(q) for q in quotes],
     )
+    icon = find(quotes[0], lambda w: isinstance(w, Gtk.Image)) if quotes else None
+    check(
+        "…under GitHub's note icon, the column wearing the kind's class",
+        icon is not None and icon.get_icon_name() == "alert-note-symbolic"
+        and quotes and has_class(quotes[0], "pr-md-alert-note") and has_class(quotes[0], "pr-md-alert"),
+        icon.get_icon_name() if icon else None,
+    )
+    check("…and the plain quote wears no alert class", quotes and not has_class(quotes[1], "pr-md-alert"))
     check("the rule is a separator", find(full, lambda w: isinstance(w, Gtk.Separator)) is not None)
     all_texts = texts(full)
     grid = find(full, lambda w: isinstance(w, Gtk.Grid))
@@ -351,10 +359,28 @@ def step_expanded() -> bool:
               after.get_id() if after else None)
         page._scheme_setting = ""
         page._apply_scheme()
-    check(
-        "the <details> renders as its source for now",
-        any(t.startswith("<details>") and "hidden text" in t for t in all_texts),
-    )
+    expanders = findall(full, lambda w: isinstance(w, Gtk.Expander))
+    check("the <details> renders as an expander", len(expanders) == 1, len(expanders))
+    check("…its source gone from the labels", not any(t.startswith("<details>") for t in all_texts))
+    if expanders:
+        expander = expanders[0]
+        summary = expander.summary_label
+        check("…wearing the summary", summary.get_label() == "More", summary.get_label())
+        check(
+            "…as a wrapping label, not the expander's own",
+            expander.get_label_widget() is summary and summary.get_wrap()
+            and "pr-md-details-summary" in summary.get_css_classes(),
+        )
+        check("…collapsed by default", not expander.get_expanded())
+        check("…its children not built until opened", "hidden text" not in all_texts, all_texts)
+        expander.set_expanded(True)
+        inner = [w for w in labels(expander) if has_class(w, "pr-md-text")]
+        check(
+            "…and built as blocks on opening",
+            [w.get_text() for w in inner] == ["hidden text"],
+            [w.get_text() for w in inner],
+        )
+        all_texts = texts(full)
     check("no label is blank (bad markup blanks a GTK 4 label)", all(t.strip() for t in all_texts), all_texts)
     check(
         "the last paragraph is there",
@@ -570,6 +596,132 @@ def step_budget_paragraphs() -> bool:
         len(body_labels),
     )
     check("…ending with the last paragraph", body_labels and body_labels[-1].get_text().endswith("p499"))
+    return land(replace(STAGED["detail"], body=DETAILS_BODY), step_details)
+
+
+# <details> in its shapes — open, closed around a fence, unmatched — and
+# one alert of every kind.
+ALERT_KINDS = ("note", "tip", "important", "warning", "caution")
+ALERT_ICONS = {
+    "note": "alert-note-symbolic",
+    "tip": "alert-tip-symbolic",
+    "important": "alert-important-symbolic",
+    "warning": "alert-symbolic",
+    "caution": "alert-caution-symbolic",
+}
+DETAILS_BODY = (
+    "<details open>\n<summary>Open &amp; shown</summary>\n\nshown at once\n\n</details>\n\n"
+    "<details>\n<summary>Closed with code</summary>\n\n```python\ny = 2\n```\n\n</details>\n\n"
+    + "\n\n".join(f"> [!{kind.upper()}]\n> the {kind} body" for kind in ALERT_KINDS)
+    + "\n\n<details>\n<summary>No close</summary>\n\nafter the unmatched"
+)
+
+
+def step_details() -> bool:
+    page = state["page"]
+    the_fold = fold(page)
+    if the_fold is not None and not the_fold.expanded:
+        # The details bodies fold; the blocks live in the expanded half.
+        the_fold.set_expanded(True)
+        return later(step_details)
+    card = the_fold._full if the_fold is not None else description_card(page)
+    expanders = findall(card, lambda w: isinstance(w, Gtk.Expander))
+    check("two matched <details> are expanders", len(expanders) == 2, len(expanders))
+    if len(expanders) != 2:
+        return done()
+    opened, closed = expanders
+    check("<details open> starts expanded", opened.get_expanded())
+    check(
+        "…its summary's entity read back",
+        opened.summary_label.get_label() == "Open &amp; shown" and "Open & shown" in texts(card),
+        opened.summary_label.get_label(),
+    )
+    check("…its children built at once", "shown at once" in texts(opened), texts(opened))
+    check("the closed one is collapsed", not closed.get_expanded())
+    check("…holding no source view yet", not findall(closed, lambda w: isinstance(w, GtkSource.View)))
+    # A scheme change before the expander opens reaches the view it builds.
+    page._scheme_setting = "classic"
+    page._apply_scheme()
+    closed.set_expanded(True)
+    views = findall(closed, lambda w: isinstance(w, GtkSource.View))
+    scheme = views[0].get_buffer().get_style_scheme() if views else None
+    check(
+        "…and builds its fence as a view wearing the page's current scheme when opened",
+        len(views) == 1 and scheme is not None and scheme.get_id() == "classic",
+        (len(views), scheme.get_id() if scheme else None),
+    )
+    page._scheme_setting = ""
+    page._apply_scheme()
+    after = views[0].get_buffer().get_style_scheme() if views else None
+    check("…and follows the scheme back", after is not None and after.get_id() != "classic",
+          after.get_id() if after else None)
+    all_texts = texts(card)
+    check(
+        "an unmatched <details> is literal text",
+        any(t.startswith("<details>") and "No close" in t for t in all_texts),
+        all_texts,
+    )
+    check("…and does not eat the body after it", "after the unmatched" in all_texts, all_texts[-1])
+    # The author's `open` spends the body's own budget: a body of open
+    # details hiding thousands of paragraphs builds the budget's worth of
+    # labels, not all of them. (The build layer alone: the page's render
+    # cap would gate a body this long behind "Show more".)
+    paragraphs = "\n\n".join("w" for _ in range(300))
+    body = "\n\n".join(
+        f"<details open>\n<summary>s{i}</summary>\n\n{paragraphs}\n\n</details>" for i in range(20)
+    )
+    column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    for widget in mdwidgets.build(mdblocks.parse_blocks(body), mdwidgets.Budget(), lambda _i: Gtk.Box()):
+        column.append(widget)
+    built = [w for w in walk(column) if has_class(w, "pr-md-text")]
+    check(
+        "<details open> spends the body's widget budget",
+        len(built) <= mdwidgets.WIDGET_BUDGET,
+        len(built),
+    )
+    # A summary as long as the parser allows stays a wrapping label whose
+    # minimum width is a word's, so it never sets the page's.
+    column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    long_summary = "<details>\n<summary>" + "x" * 5000 + "</summary>\n\nb\n\n</details>"
+    blocks = mdblocks.parse_blocks(long_summary)
+    for widget in mdwidgets.build(blocks, mdwidgets.Budget(), lambda _i: Gtk.Box()):
+        column.append(widget)
+    holder = Gtk.Window(child=column)
+    expander = column.get_first_child()
+    minimum, natural, *_ = expander.measure(Gtk.Orientation.HORIZONTAL, -1)
+    check(
+        "a long summary is cut and wraps, never widening the page",
+        len(expander.summary_label.get_text()) == mdblocks.SUMMARY_MAX and minimum < 80,
+        (len(expander.summary_label.get_text()), minimum, natural),
+    )
+    holder.destroy()
+    alerts = [w for w in walk(card) if has_class(w, "pr-md-alert")]
+    check("one alert column per kind", len(alerts) == len(ALERT_KINDS), len(alerts))
+    kinds = [next((k for k in ALERT_KINDS if has_class(a, f"pr-md-alert-{k}")), None) for a in alerts]
+    check("…each wearing its kind's class, in order", kinds == list(ALERT_KINDS), kinds)
+    icons = [
+        (i.get_icon_name() if (i := find(a, lambda w: isinstance(w, Gtk.Image))) is not None else None)
+        for a in alerts
+    ]
+    check("…each under GitHub's icon for the kind", icons == [ALERT_ICONS[k] for k in ALERT_KINDS], icons)
+    titles = [
+        (t.get_text() if (t := find(a, lambda w: has_class(w, "pr-md-alert-title"))) is not None else None)
+        for a in alerts
+    ]
+    check(
+        "…titled Note / Tip / Important / Warning / Caution",
+        titles == ["Note", "Tip", "Important", "Warning", "Caution"],
+        titles,
+    )
+    check(
+        "…the marker gone, the body kept",
+        all(
+            f"the {k} body" in texts(a) and not any("[!" in t for t in texts(a))
+            for k, a in zip(ALERT_KINDS, alerts, strict=True)
+        ),
+        [texts(a) for a in alerts],
+    )
+    check("…each quote also a bordered column", all(has_class(a, "pr-md-quote") for a in alerts))
     return done()
 
 

@@ -8,9 +8,9 @@ that scrolls sideways on its own (the page body never does), an image row
 whatever the page's own image slot builder makes of it, a code block a
 read-only GtkSource view built like the Files view's patch view (the
 fence's language highlighted, the editor's style scheme threaded in from
-the page, its own sideways scroller). Blocks with no widget of their own
-yet — `<details>` — render as a label of their escaped source: visibly
-plain, never dropped.
+the page, its own sideways scroller), a `<details>` an expander wearing
+its summary whose children are built the first time it opens, an alert
+quote a column with a colored bar under an icon-and-title row.
 
 A widget budget bounds what one body can build (`Budget`): past it, the
 rest of the blocks become one plain label of their source. The cap is on
@@ -52,6 +52,16 @@ _ALERT_TITLES = {
     "important": N_("Important"),
     "warning": N_("Warning"),
     "caution": N_("Caution"),
+}
+# GitHub's own Octicon for each alert kind (info, light-bulb, report,
+# alert, stop), bundled under data/icons; the warning one is the mark a
+# conflicted PR already wears.
+_ALERT_ICONS = {
+    "note": "alert-note-symbolic",
+    "tip": "alert-tip-symbolic",
+    "important": "alert-important-symbolic",
+    "warning": "alert-symbolic",
+    "caution": "alert-caution-symbolic",
 }
 
 
@@ -133,7 +143,10 @@ def build_one(
     if isinstance(block, mdblocks.CodeBlock):
         budget.take()
         return code_view(block, scheme)
-    # <details> waits for its own widget: its source, escaped.
+    if isinstance(block, mdblocks.Details):
+        budget.take()
+        return DetailsExpander(block, budget, image_row, depth, page_url, scheme)
+    # A block kind this layer doesn't know: its source, escaped.
     budget.take()
     return plain_label(block.source)
 
@@ -211,7 +224,9 @@ def code_view(block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -
 def restyle_code(root: Gtk.Widget, scheme: GtkSource.StyleScheme | None) -> None:
     """Put *scheme* on every code view under *root* — what the page does
     when the editor's scheme setting or the app's light/dark changes, the
-    way its Files view restyles its patch buffers."""
+    way its Files view restyles its patch buffers. A `<details>` that has
+    not been opened yet has no views to restyle; it is told the scheme,
+    so the ones it builds on opening wear the current one."""
     if scheme is None:
         return
     child = root.get_first_child()
@@ -219,8 +234,85 @@ def restyle_code(root: Gtk.Widget, scheme: GtkSource.StyleScheme | None) -> None
         if isinstance(child, GtkSource.View) and "pr-md-code" in child.get_css_classes():
             child.get_buffer().set_style_scheme(scheme)
         else:
+            if isinstance(child, DetailsExpander):
+                child.scheme = scheme
             restyle_code(child, scheme)
         child = child.get_next_sibling()
+
+
+class DetailsExpander(Gtk.Expander):
+    """A `<details>` block: a `Gtk.Expander` wearing the summary (GitHub's
+    "Details" when the author gave none), collapsed unless the tag said
+    ``open``, whose children are built on the first ``notify::expanded``
+    — a details block hiding two hundred blocks costs a label until it is
+    opened. A ``<details open>`` builds its children at construction
+    against the body's own *budget*, the one `build_one` is spending: the
+    ``open`` attribute is the author's, so what it shows counts like any
+    other block. Only a reader's click builds against a fresh `Budget` —
+    nothing under a closed expander existed to count. What the children
+    need from the page — the image-slot builder, the body's `page_url`,
+    the code blocks' scheme — is kept until then; `restyle_code`
+    refreshes the scheme meanwhile. The summary is its own wrapping label
+    (`summary_label`): GTK's built-in expander label neither wraps nor
+    ellipsizes, and a one-sentence summary would set the page's minimum
+    width."""
+
+    def __init__(
+        self,
+        block: mdblocks.Details,
+        budget: Budget,
+        image_row: Callable[[tuple], Gtk.Widget],
+        depth: int = 0,
+        page_url: str = "",
+        scheme: GtkSource.StyleScheme | None = None,
+    ) -> None:
+        super().__init__(hexpand=True)
+        self._children = block.children
+        self._image_row = image_row
+        self._depth = depth
+        self._page_url = page_url
+        self.scheme = scheme
+        self._built = False
+        self.add_css_class("pr-md-details")
+        # The summary is escaped plain text already (mdblocks strips its
+        # tags and caps it); as markup it shows the author's ampersands
+        # and angle brackets as written.
+        summary = Gtk.Label(xalign=0.0, wrap=True, hexpand=True)
+        summary.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        summary.add_css_class("pr-md-details-summary")
+        summary.set_markup(block.summary or GLib.markup_escape_text(_("Details")))
+        self.set_label_widget(summary)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
+        body.add_css_class("pr-md-details-body")
+        self.set_child(body)
+        self.connect("notify::expanded", self._on_expanded)
+        if block.open:
+            self._build(budget)
+            self.set_expanded(True)
+
+    @property
+    def summary_label(self) -> Gtk.Label:
+        """The label wearing the summary (its text is the markup shown)."""
+        return self.get_label_widget()
+
+    def _on_expanded(self, *_args) -> None:
+        if self._built or not self.get_expanded():
+            return
+        self._build(Budget())
+
+    def _build(self, budget: Budget) -> None:
+        self._built = True
+        body = self.get_child()
+        for widget in build(
+            list(self._children),
+            budget,
+            self._image_row,
+            self._depth + 1,
+            self._page_url,
+            self.scheme,
+        ):
+            body.append(widget)
+        self._children = ()
 
 
 def _list(
@@ -280,15 +372,28 @@ def _quote(
     page_url: str = "",
     scheme: GtkSource.StyleScheme | None = None,
 ) -> Gtk.Widget:
+    """A quote: its children behind a left bar. An alert — GitHub's
+    ``> [!NOTE]`` and kin — is the same column wearing
+    ``.pr-md-alert-<kind>`` (the bar and the title take the kind's color
+    from app.py's CSS: tip green, warning yellow, caution red, note the
+    accent, important purple) under a row of GitHub's own icon for the
+    kind and its title."""
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
     column.add_css_class("pr-md-quote")
     if block.kind != "plain":
+        column.add_css_class("pr-md-alert")
         column.add_css_class(f"pr-md-alert-{block.kind}")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.add_css_class("pr-md-alert-head")
+        icon = Gtk.Image.new_from_icon_name(_ALERT_ICONS.get(block.kind, "alert-note-symbolic"))
+        icon.add_css_class("pr-md-alert-icon")
+        row.append(icon)
         title = Gtk.Label(label=_(_ALERT_TITLES.get(block.kind, "Note")), xalign=0.0)
-        title.add_css_class("caption-heading")
+        title.add_css_class("heading")
         title.add_css_class("pr-md-alert-title")
+        row.append(title)
         budget.take()
-        column.append(title)
+        column.append(row)
     for widget in build(list(block.children), budget, image_row, depth + 1, page_url, scheme):
         column.append(widget)
     return column

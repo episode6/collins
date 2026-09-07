@@ -37,6 +37,7 @@ and is never used here — `tests/test_mdblocks.py` pins the preset name.
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from dataclasses import dataclass
@@ -62,6 +63,8 @@ ALERT_KINDS = ("note", "tip", "important", "warning", "caution")
 # labels a grid builds, which is layout the main loop pays for.
 TABLE_MAX_ROWS = 50
 TABLE_MAX_COLUMNS = 8
+# A <summary> is one label's text; past this it is cut with an ellipsis.
+SUMMARY_MAX = 300
 # GitHub's username alphabet (it also bans leading/trailing/double hyphens,
 # but a 404 on those is harmless — this only has to keep URLs sane). The
 # one gate for a login wherever one goes into a URL: `avatars` uses it too.
@@ -182,8 +185,10 @@ class ListBlock:
 @dataclass(frozen=True)
 class Details:
     """``<details>`` … ``</details>``: `summary` is escaped plain text (tags
-    stripped, no markdown), `open` whether the tag asked to start
-    expanded, `children` everything up to the matching close."""
+    stripped, no markdown, whitespace collapsed, at most `SUMMARY_MAX`
+    characters — it becomes a label whose width the page must bound),
+    `open` whether the tag asked to start expanded, `children` everything
+    up to the matching close."""
 
     summary: str
     children: tuple[Block, ...]
@@ -327,8 +332,23 @@ _DETAILS_TAG_RE = re.compile(r"<(/?)details\b", re.I)
 _SUMMARY_RE = re.compile(r"<summary\b[^>]*>(.*?)</summary\s*>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^<>]{0,1000}>")
 _OPEN_ATTR_RE = re.compile(r"(?:^|\s)open(?:\s|=|$)", re.I)
+_SPACE_RE = re.compile(r"\s+")
 _ALERT_RE = re.compile(r"^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]$")
 _TASK_RE = re.compile(r"^\[([ xX])\](?: |$)")
+
+
+def summary_text(raw: str) -> str:
+    """The text of a ``<summary>``'s *raw* inner HTML as an expander shows
+    it: tags stripped, the author's entities (``&amp;``, ``&lt;``,
+    ``&#10;``) read back as the characters they name, runs of whitespace
+    (newlines and tabs among them) folded to one space, cut to
+    `SUMMARY_MAX` characters with an ellipsis, then escaped once for
+    Pango. Foreign text: the cap is what keeps a summary from setting the
+    page's width."""
+    text = _SPACE_RE.sub(" ", html.unescape(_TAG_RE.sub("", raw))).strip()
+    if len(text) > SUMMARY_MAX:
+        text = text[: SUMMARY_MAX - 1].rstrip() + "\u2026"
+    return GLib.markup_escape_text(text)
 
 
 class _Folder:
@@ -536,7 +556,7 @@ class _Folder:
             rest = after_tag
         summary = ""
         if summary_match is not None:
-            summary = GLib.markup_escape_text(_TAG_RE.sub("", summary_match.group(1)).strip())
+            summary = summary_text(summary_match.group(1))
         children: list[Block] = []
         if rest.strip():
             children.append(_literal(rest.strip("\n")))

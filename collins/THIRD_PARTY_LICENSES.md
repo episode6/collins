@@ -68,7 +68,9 @@ derived from agent-session-manager (GPL-3.0), except the ones used unmodified fr
 `git-pull-request-draft-symbolic`, `git-pull-request-closed-symbolic` and
 `github-symbolic`, so that a pull request's state and status marks — merged, open,
 draft or closed, with the check, warning or error riding its corner — read the same
-here as on the site they came from; and the file tree's
+here as on the site they came from; `alert-note-symbolic`, `alert-tip-symbolic`,
+`alert-important-symbolic` and `alert-caution-symbolic` (Octicons' info, light-bulb,
+report and stop), so a PR body's alerts carry GitHub's own marks; and the file tree's
 file-type set, `ft-*-symbolic` (each SVG names its source Octicon in its header
 comment). The Collins app icon is original artwork.
 

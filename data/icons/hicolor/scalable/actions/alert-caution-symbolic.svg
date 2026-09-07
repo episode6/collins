@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- stop-16 from GitHub Octicons (https://github.com/primer/octicons),
+     used unmodified so a Caution alert in a PR body carries GitHub's own mark.
+
+     MIT License
+
+     Copyright (c) GitHub, Inc.
+
+     Permission is hereby granted, free of charge, to any person obtaining a
+     copy of this software and associated documentation files (the "Software"),
+     to deal in the Software without restriction, including without limitation
+     the rights to use, copy, modify, merge, publish, distribute, sublicense,
+     and/or sell copies of the Software, and to permit persons to whom the
+     Software is furnished to do so, subject to the following conditions:
+
+     The above copyright notice and this permission notice shall be included in
+     all copies or substantial portions of the Software.
+
+     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+     IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+     FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+     THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+     DEALINGS IN THE SOFTWARE.
+
+     Filled paths, as GTK's symbolic recoloring requires - Octicons are drawn
+     as fills already, so the upstream geometry carries over untouched.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"/></svg>

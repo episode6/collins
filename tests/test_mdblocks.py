@@ -916,3 +916,118 @@ def test_link_refs_is_linear_on_a_hostile_body():
     for body in ("#" * 100_000, "0123abc" * 15_000, "f" * 100_000, "@" * 100_000, "a/" * 50_000):
         link_refs(body, CTX)
     assert time.monotonic() - started < 2.0
+
+
+# -- details and alerts --------------------------------------------------------
+
+
+@pytest.mark.parametrize("kind", mdblocks.ALERT_KINDS)
+def test_every_alert_kind_is_detected_and_its_marker_dropped(kind):
+    (quote,) = parse_blocks(f"> [!{kind.upper()}]\n> the **body**\n> more")
+    assert quote == Quote(
+        (Text("the <b>body</b>\nmore", "the **body**\nmore"),),
+        f"> [!{kind.upper()}]\n> the **body**\n> more",
+        kind,
+    )
+
+
+def test_alert_marker_must_be_the_first_block():
+    # A marker after a paragraph, or in a nested quote's second block, is
+    # literal; only the quote's opening line names a kind.
+    (quote,) = parse_blocks("> intro\n>\n> [!TIP]\n> x")
+    assert quote.kind == "plain"
+    assert "[!TIP]" in quote.children[1].markup
+    (outer,) = parse_blocks("> > [!TIP]\n> > inner")
+    assert outer.kind == "plain"
+    assert outer.children[0].kind == "tip"
+
+
+def test_alert_with_blocks_after_its_first_paragraph():
+    (quote,) = parse_blocks("> [!WARNING]\n> first\n>\n> - item\n>\n> ```\n> code\n> ```")
+    assert quote.kind == "warning"
+    assert [type(c) for c in quote.children] == [Text, ListBlock, CodeBlock]
+    assert quote.children[0] == Text("first", "first")
+
+
+def test_details_open_attribute_forms():
+    body = "<details{attrs}>\n<summary>S</summary>\n\nbody\n\n</details>"
+    for attrs, expected in (
+        (" open", True),
+        (' open=""', True),
+        (" OPEN", True),
+        (' class="x" open', True),
+        ("", False),
+        (' class="open"', False),
+        (' data-open="1"', False),
+    ):
+        (details,) = parse_blocks(body.format(attrs=attrs))
+        assert isinstance(details, Details), attrs
+        assert details.open is expected, attrs
+        assert details.summary == "S"
+
+
+def test_details_without_a_summary():
+    (details,) = parse_blocks("<details>\n\nbody\n\n</details>")
+    assert details == Details("", (Text("body", "body"),), False, "<details>\n\nbody\n\n</details>")
+
+
+def test_details_summary_is_escaped_plain_text():
+    (details,) = parse_blocks(
+        '<details>\n<summary>A &amp; B <a href="x">*not md*</a> &lt;kbd&gt;</summary>\n\nb\n\n</details>'
+    )
+    assert details.summary == "A &amp; B *not md* &lt;kbd&gt;"
+    assert markup_ok(details.summary)
+
+
+def test_details_summary_whitespace_collapses_and_entities_stay_one_line():
+    # A newline written as &#10; (or a tab, or a real line break inside the
+    # tag) is one space in the label: the summary is one line of text.
+    (details,) = parse_blocks(
+        "<details>\n<summary>one&#10;two&#9;three\n  four</summary>\n\nb\n\n</details>"
+    )
+    assert details.summary == "one two three four"
+
+
+def test_details_summary_is_capped():
+    huge = "x" * 50_000
+    (details,) = parse_blocks(f"<details>\n<summary>{huge}</summary>\n\nb\n\n</details>")
+    assert len(details.summary) == mdblocks.SUMMARY_MAX
+    assert details.summary.endswith("\u2026")
+    # The cut lands before the escape, so a cut entity cannot leak.
+    words = "&amp; " * 200
+    (details,) = parse_blocks(f"<details>\n<summary>{words}</summary>\n\nb\n\n</details>")
+    assert markup_ok(details.summary)
+    assert len(details.summary.replace("&amp;", "&")) <= mdblocks.SUMMARY_MAX
+    assert mdblocks.summary_text(" a  b ") == "a b"
+
+
+def test_details_raw_lines_after_the_summary_are_one_literal_child():
+    (details,) = parse_blocks(
+        "<details>\n<summary>S</summary>\n**raw** <b>line</b>\nsecond raw\n\n*md*\n\n</details>"
+    )
+    assert details.children == (
+        Text("**raw** &lt;b&gt;line&lt;/b&gt;\nsecond raw", "**raw** <b>line</b>\nsecond raw"),
+        Text("<i>md</i>", "*md*"),
+    )
+
+
+def test_details_holding_every_block_kind():
+    (details,) = parse_blocks(
+        "<details>\n<summary>All</summary>\n\n# h\n\n- a\n\n> [!NOTE]\n> n\n\n| x |\n|---|\n| 1 |\n\n"
+        "```py\nz\n```\n\n---\n\n</details>"
+    )
+    assert [type(c) for c in details.children] == [Heading, ListBlock, Quote, Table, CodeBlock, Rule]
+    assert details.children[2].kind == "note"
+
+
+def test_details_nested_past_the_depth_cap_is_literal():
+    opens = "".join(f"<details>\n<summary>d{i}</summary>\n\n" for i in range(mdblocks.MAX_DEPTH + 2))
+    closes = "</details>\n\n" * (mdblocks.MAX_DEPTH + 2)
+    (outer,) = parse_blocks(opens + "deep\n\n" + closes)
+    node = outer
+    depth = 0
+    while isinstance(node, Details):
+        depth += 1
+        node = node.children[0]
+    assert depth == mdblocks.MAX_DEPTH
+    assert isinstance(node, Text) and node.markup.startswith("&lt;details&gt;")

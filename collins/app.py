@@ -1328,6 +1328,17 @@ popover.menu button.open-with-row:hover {
   border-left: 3px solid alpha(currentColor, 0.25);
   padding-left: 10px;
 }
+/* an alert (> [!NOTE] and kin): the bar and the icon-and-title row take
+   the kind's color. A note is the accent; the other four kinds follow the
+   light/dark palette in _SCHEME_CSS. */
+.pr-md-alert-note { border-left-color: @accent_color; }
+.pr-md-alert-note > .pr-md-alert-head { color: @accent_color; }
+.pr-md-alert-head { margin-bottom: 2px; }
+/* a <details> expander: its body indented under the summary */
+.pr-md-details-body {
+  margin-left: 18px;
+  margin-top: 4px;
+}
 .pr-md-glyph {
   min-width: 14px;
 }
@@ -1373,6 +1384,18 @@ _SCHEME_CSS = """
 .pr-checks-passed { color: %(passed_green)s; }
 .pr-checks-failed { color: %(failed_red)s; }
 .pr-checks-pending { color: %(pending_yellow)s; }
+/* A PR body's alerts (mdwidgets._quote) borrow the same shades: a tip is
+   the passed green, a warning the pending yellow, a caution the failed
+   red, an important the merged purple; the note is the accent, in the
+   static stylesheet. The bar and the icon-and-title row share the color. */
+.pr-md-alert-tip { border-left-color: %(passed_green)s; }
+.pr-md-alert-tip > .pr-md-alert-head { color: %(passed_green)s; }
+.pr-md-alert-warning { border-left-color: %(pending_yellow)s; }
+.pr-md-alert-warning > .pr-md-alert-head { color: %(pending_yellow)s; }
+.pr-md-alert-caution { border-left-color: %(failed_red)s; }
+.pr-md-alert-caution > .pr-md-alert-head { color: %(failed_red)s; }
+.pr-md-alert-important { border-left-color: %(merged_purple)s; }
+.pr-md-alert-important > .pr-md-alert-head { color: %(merged_purple)s; }
 
 /* The PR panel's merge buttons — the immediate merge and auto-merge both — in
    GitHub's own primary green rather than the accent: the button that lands a
