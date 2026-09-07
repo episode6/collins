@@ -275,8 +275,8 @@ def commit_message(
     thread — for the page's commit card. None whenever there isn't a
     commit to describe: no cwd, a ref that isn't safe to ask about, git
     saying it names no commit, git not answering, or an answer without a
-    full sha (the card is optional; the breadcrumb already names the
-    commit through `commit_subject_and_sha`). Every field is bounded, the
+    full sha (the card is optional; a page opened into a saved commit
+    already names it through `commit_subject`). Every field is bounded, the
     body last so a huge one can't hide the others."""
     if not cwd or not safe_ref(ref):
         return None

@@ -60,6 +60,7 @@ class CommitCard(Gtk.ScrolledWindow):
         self.add_css_class("git-commit-card-scroller")
         self._message: CommitMessage | None = None
         self._scheme: GtkSource.StyleScheme | None = None
+        self._github_url: str | None = None  # part of the no-op guard: the links are built from it
         self._fold: Fold | None = None
         self._body: Gtk.Widget | None = None
 
@@ -97,16 +98,19 @@ class CommitCard(Gtk.ScrolledWindow):
     def show(
         self, message: CommitMessage, github_url: str | None, scheme: GtkSource.StyleScheme | None
     ) -> None:
-        """Show *message*. The same message again (a reload of the same
-        commit) leaves the card alone, so a fold the reader opened stays
+        """Show *message*. The same message again, with the same GitHub URL
+        and scheme (a reload of the same commit; the byline's and the
+        body's links are built from the URL, so a remote that appeared or
+        went away rebuilds), leaves the card alone, so a fold the reader opened stays
         open; a different one rebuilds it, carrying the fold's state the
         way the PR page's description does across a refresh."""
-        if message == self._message and scheme is self._scheme:
+        if message == self._message and scheme is self._scheme and github_url == self._github_url:
             self.set_visible(True)
             return
         expanded = self._fold.expanded if self._fold is not None else False
         self._message = message
         self._scheme = scheme
+        self._github_url = github_url
         self._subject.set_text(message.subject or _("(no subject)"))
         self._author.set_text(message.author or _("unknown"))
         self._when.set_text(format_relative(message.authored_at))
