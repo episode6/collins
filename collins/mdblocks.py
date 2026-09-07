@@ -40,7 +40,8 @@ from __future__ import annotations
 import html
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from urllib.parse import unquote
 
 from gi.repository import GLib
 
@@ -307,6 +308,50 @@ def line_cost(block: Block, image_lines: int = 4) -> int:
     return 1
 
 
+def cut_block(block: Block, chars: int | None, lines: int | None) -> Block | None:
+    """The front of a list or a table that fits *chars*/*lines* — the
+    preview cut a paragraph gets (`formatting.body_head`), for the two
+    block kinds whose front is worth showing on its own: a list's first
+    items, a table's header and first rows. None when *block* is neither,
+    when not even its first item or row fits (nothing to show), or when
+    all of it does (nothing to cut). The cut keeps the block's `source`
+    whole: what it costs the budgets is the caller's to spend."""
+    if isinstance(block, ListBlock):
+        costs = [
+            (sum(len(c.source) for c in item.children), sum(line_cost(c) for c in item.children) or 1)
+            for item in block.items
+        ]
+        kept = _prefix(costs, chars, lines)
+        if not 0 < kept < len(block.items):
+            return None
+        return replace(block, items=block.items[:kept])
+    if isinstance(block, Table):
+        if lines is not None and lines <= 1:
+            return None
+        costs = [(sum(len(cell) for cell in row), 1) for row in block.rows]
+        head_chars = sum(len(cell) for cell in block.header)
+        chars = None if chars is None else chars - head_chars
+        kept = _prefix(costs, chars, None if lines is None else lines - 1)
+        if not 0 < kept < len(block.rows):
+            return None
+        return replace(block, rows=block.rows[:kept])
+    return None
+
+
+def _prefix(costs: list[tuple[int, int]], chars: int | None, lines: int | None) -> int:
+    """How many of *costs* — (characters, lines) per entry — fit in order."""
+    kept = 0
+    for size, cost in costs:
+        if (chars is not None and size > chars) or (lines is not None and cost > lines):
+            break
+        kept += 1
+        if chars is not None:
+            chars -= size
+        if lines is not None:
+            lines -= cost
+    return kept
+
+
 def cap_table(table: Table) -> tuple[Table, int, int]:
     """*table* trimmed to what a grid draws — `TABLE_MAX_COLUMNS` columns
     of `TABLE_MAX_ROWS` rows, every row squared to the header's width (a
@@ -326,6 +371,7 @@ def cap_table(table: Table) -> tuple[Table, int, int]:
 
 
 _IMG_TAG_RE = re.compile(r"<img\b[^<>]{0,1000}>", re.I)
+_BR_LINE_RE = re.compile(r"^\s*(?:<br\s*/?>\s*)+$", re.I)
 _DETAILS_OPEN_RE = re.compile(r"^\s*<details\b([^>]*)>", re.I)
 _DETAILS_CLOSE_RE = re.compile(r"^\s*</details\s*>", re.I)
 _DETAILS_TAG_RE = re.compile(r"<(/?)details\b", re.I)
@@ -466,7 +512,9 @@ class _Folder:
                 else:
                     rows[-1] = (line, rows[-1][1])
                 continue
-            if token.type == "text":
+            if token.type in ("text", "link_open", "link_close"):
+                # The link around a linked image is dropped: the picture
+                # is the row, and opens in the lightbox.
                 continue
             image = _image_of(token)
             if image is None:
@@ -583,6 +631,10 @@ class _Folder:
                 literal.clear()
 
         for line in content.rstrip("\n").split("\n"):
+            if _BR_LINE_RE.match(line):
+                # A <br> on a line of its own is an HTML block too; it
+                # breaks nothing here, and shown literal it says "<br>".
+                continue
             tags = _IMG_TAG_RE.findall(line)
             if tags and self._images and not _IMG_TAG_RE.sub("", line).strip():
                 row: list[BodyImage] = []
@@ -738,12 +790,15 @@ _SIMPLE_CLOSE = {"strong_close": "strong", "em_close": "em", "s_close": "s"}
 
 def _only_images(children: list) -> bool:
     """Whether a paragraph is nothing but images and the whitespace between
-    them — the shape that becomes image rows rather than text."""
+    them — the shape that becomes image rows rather than text. A link
+    wrapping an image (``[![alt](img)](url)``, how a badge or a full-size
+    screenshot is written) counts as the image: the picture shows, and
+    opens in the lightbox rather than at the link."""
     seen = False
     for token in children:
         if token.type == "image" or (token.type == "html_inline" and _tag_name(token.content) == ("", "img")):
             seen = True
-        elif token.type == "softbreak":
+        elif token.type in ("softbreak", "link_open", "link_close"):
             continue
         elif token.type == "text" and not token.content.strip():
             continue
@@ -770,10 +825,12 @@ def _image_of(token) -> BodyImage | None:
     return BodyImage(url=src, alt=(token.content or "").strip())
 
 
-def _image_anchor(token) -> str:
+def _image_anchor(token, linked: bool = False) -> str:
     """An image as text: its alt (or URL) as a link to the picture, the
     same degrade `md_to_pango` applies — or the escaped alt alone when the
-    source isn't linkable."""
+    source isn't linkable, or when the image sits inside a link already
+    (*linked*): an anchor inside an anchor is markup Pango takes and a
+    label can't honour, and the author's link is the one to keep."""
     if token.type == "html_inline":
         image = html_image(token.content)
         if image is None:
@@ -782,7 +839,7 @@ def _image_anchor(token) -> str:
     else:
         src = token.attrGet("src") or ""
         alt = (token.content or "").strip()
-    if len(src) > _MAX_HREF or not _HREF_OK_RE.match(src):
+    if linked or len(src) > _MAX_HREF or not _HREF_OK_RE.match(src):
         return GLib.markup_escape_text(alt or src)
     label = GLib.markup_escape_text(alt or src)
     return f'<a href="{GLib.markup_escape_text(src)}">{label}</a>'
@@ -827,7 +884,7 @@ class _Inline:
             elif kind == "link_close":
                 self._close("link", literal=False)
             elif kind == "image":
-                self._out.append(_image_anchor(token))
+                self._out.append(_image_anchor(token, self._linked()))
             elif kind == "html_inline":
                 self._html(token.content)
             elif token.children:
@@ -847,11 +904,16 @@ class _Inline:
         open around it (text inside an anchor, or inside a link the gate
         refused, is the author's link text, not a reference). Code spans
         never come here: they are `code_inline` tokens."""
-        if any(kind == "link" for kind, _tag in self._stack):
+        if self._linked():
             return GLib.markup_escape_text(content)
         if self._refs is None:
             return link_www(content)
         return link_refs(content, self._refs)
+
+    def _linked(self) -> bool:
+        """Whether a link is open around the current token (one the gate
+        refused counts: its text is still the author's link text)."""
+        return any(kind == "link" for kind, _tag in self._stack)
 
     def _open(self, kind: str, tag: str | None) -> None:
         self._stack.append((kind, tag))
@@ -893,7 +955,7 @@ class _Inline:
             return
         closing, tag = name
         if tag == "img" and not closing:
-            self._out.append(_image_anchor_html(content))
+            self._out.append(_image_anchor_html(content, self._linked()))
         elif tag == "br" and not closing:
             self._out.append("\n")
         elif tag in _HTML_TAGS:
@@ -937,11 +999,13 @@ def link_www(text: str) -> str:
     return "".join(out)
 
 
-def _image_anchor_html(content: str) -> str:
+def _image_anchor_html(content: str, linked: bool = False) -> str:
     image = html_image(content)
     if image is None:
         return GLib.markup_escape_text(content)
     label = GLib.markup_escape_text(image.alt or image.url)
+    if linked:
+        return label
     return f'<a href="{GLib.markup_escape_text(image.url)}">{label}</a>'
 
 
@@ -1030,7 +1094,9 @@ def relative_href(href: str, refs: RepoContext) -> str:
     http(s) gate to judge."""
     if not refs.head or not href or len(href) > _MAX_RELATIVE:
         return href
-    if not _RELATIVE_RE.match(href) or ".." in href.split("/"):
+    if not _RELATIVE_RE.match(href) or ".." in href.split("/") or ".." in unquote(href).split("/"):
+        # The second split reads the path as a server would (`%2e%2e`,
+        # `%2f`): a step up encoded is still a step up.
         return href
     path = href[2:] if href.startswith("./") else href
     return f"https://{refs.host}/{refs.repository}/blob/{refs.head}/{path}"
