@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1147,7 +1147,8 @@ popover.menu button.open-with-row:hover {
   padding: 2px 8px;
   min-height: 24px;
 }
-/* the native diff view (diffview.py): one .git-file card per file, its
+/* the native diff view (diffview.py): one .git-file card per file (a
+   bordered card, so a file boundary reads apart from a hunk boundary), its
    header row, then .git-gap rows and .git-hunk sections. A hunk wears a
    rail down its left edge; the focused one's rail is the accent. The
    hunk header is the @@ line and the staging buttons. The pinned
@@ -1155,6 +1156,7 @@ popover.menu button.open-with-row:hover {
 .git-file {
   padding: 4px 6px 6px 6px;
   border-radius: 8px;
+  border: 1px solid alpha(currentColor, 0.2);
   background-color: alpha(currentColor, 0.04);
 }
 .git-file-header {

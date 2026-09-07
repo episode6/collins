@@ -2328,7 +2328,9 @@ class DiffView(Gtk.Box):
         scroller.set_hexpand(True)
         scroller.set_vexpand(True)
         self._scroller = scroller
-        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        # 16 px between file cards: a hunk boundary inside a card is 2 px,
+        # so the wider gap is what tells a file split from a hunk split.
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
         column.set_margin_start(6)
         column.set_margin_end(6)
         column.set_margin_top(6)
