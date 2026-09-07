@@ -52,6 +52,11 @@ downloads of each version, see the
   the list no longer names it twice — a `main` header over an empty
   `main..HEAD` above the default group's own `main` header — the default
   group stands alone under the working tree row.
+- **The files list reads like the diff view.** A file row's `+n` and
+  `−n` counts wear the diff view's green and red, matching the file
+  headers over the hunks. The files filter box gains a margin, so the
+  divider between the commits and files lists stays visible and grabbable
+  instead of hiding against the entry's edge.
 - **Files in the diff view stand apart.** A file boundary and a hunk
   boundary in the git page's scroll looked alike at a glance. Each file
   card now wears a border and the cards sit 16 px apart, twice what they
