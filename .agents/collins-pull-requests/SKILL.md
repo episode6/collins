@@ -226,8 +226,22 @@ reference links (a PR whose summary has no repository yet). With a head,
 `mdblocks.relative_href` turns a relative link destination (`docs/a.md`,
 `./b.md`; no scheme, leading slash, fragment, query or `..` step) into
 `/blob/<head>/<path>` before the gate — never a linkify token, which is a
-domain not a path. `<details>`
-renders as its escaped source until its own PR lands. Images render
+domain not a path. A `Details` is `mdwidgets.DetailsExpander`, a
+`Gtk.Expander` wearing the summary (`_("Details")` when there is none;
+the summary is escaped text with the author's entities read back, so it
+is set with `use_markup`), collapsed unless the tag said `open`, whose
+children are built on the first `notify::expanded` with a fresh
+`Budget` of their own and whatever `image_row` / `page_url` / `scheme`
+the page handed it — `restyle_code` refreshes an unopened expander's
+`scheme` attribute so a fence built later wears the current one; a
+`<details open>` builds at construction. An alert `Quote` is the quote
+column wearing `.pr-md-alert` and `.pr-md-alert-<kind>` under a
+`.pr-md-alert-head` row of GitHub's Octicon for the kind
+(`alert-note/tip/important/caution-symbolic`, the warning one the
+conflict mark's `alert-symbolic`) and the translated title; the bar and
+the head take the kind's color from app.py's CSS — the note the
+accent in `_CSS`, tip/warning/caution/important the passed green, pending
+yellow, failed red and merged purple of `_SCHEME_CSS`. Images render
 via `bodyimages` / `pictures` (`BoundedPicture`
 measures height-for-width in a `Gtk.Box` slot); changed images render
 before/after from `prblobs` (`gh api …/contents/{path}?ref=<sha>` with the

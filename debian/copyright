@@ -47,6 +47,10 @@ Files: data/icons/hicolor/scalable/actions/alert-symbolic.svg
        data/icons/hicolor/scalable/actions/git-pull-request-draft-symbolic.svg
        data/icons/hicolor/scalable/actions/git-pull-request-closed-symbolic.svg
        data/icons/hicolor/scalable/actions/github-symbolic.svg
+       data/icons/hicolor/scalable/actions/alert-note-symbolic.svg
+       data/icons/hicolor/scalable/actions/alert-tip-symbolic.svg
+       data/icons/hicolor/scalable/actions/alert-important-symbolic.svg
+       data/icons/hicolor/scalable/actions/alert-caution-symbolic.svg
        data/icons/hicolor/scalable/actions/ft-*-symbolic.svg
 Copyright: GitHub, Inc.
 License: Expat

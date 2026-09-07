@@ -37,6 +37,7 @@ and is never used here — `tests/test_mdblocks.py` pins the preset name.
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from dataclasses import dataclass
@@ -536,7 +537,11 @@ class _Folder:
             rest = after_tag
         summary = ""
         if summary_match is not None:
-            summary = GLib.markup_escape_text(_TAG_RE.sub("", summary_match.group(1)).strip())
+            # Tags stripped, the author's entities (&amp;, &lt;) read back as
+            # the characters they name, then escaped once for Pango.
+            summary = GLib.markup_escape_text(
+                html.unescape(_TAG_RE.sub("", summary_match.group(1))).strip()
+            )
         children: list[Block] = []
         if rest.strip():
             children.append(_literal(rest.strip("\n")))
