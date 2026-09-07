@@ -27,14 +27,14 @@ Options:
     --only SUBSTR   run only checks whose filename contains SUBSTR
                     (repeatable; a check runs if it matches any)
     --shard I/N     run only the I-th of N time-balanced shards (1-based);
-                    CI runs the suite as four of these in parallel
+                    CI runs the suite as five of these in parallel
     --timeout SECS  per-check timeout, default 300
     --list          print the discovered checks and exit
 
 Sharding is by measured wall time, not by count: CHECK_SECONDS below holds
 each check's seconds from a CI run, and `shard()` deals the checks out
 longest-first, each to the shard with the least time so far (LPT), so the
-four shards finish together instead of one dragging a 30 s check behind
+five shards finish together instead of one dragging a 30 s check behind
 eight 3 s ones. A check missing from the table (new, or renamed) is dealt
 in at DEFAULT_SECONDS — it still runs, in exactly one shard — and gets a
 real weight the next time the table is refreshed from a run's logs (the
@@ -57,43 +57,43 @@ import time
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Seconds per check on CI's runner (ubuntu-latest, Xvfb), from the e2e job
-# of run 34134677209 (e2e-shards, 2026-09-07). Weights only — being off by a few
+# of run 34133941442 (main, 2026-09-07). Weights only — being off by a few
 # seconds costs balance, never correctness. Refresh with the
 # balance-e2e-shards skill when a check grows or a shard drifts.
 CHECK_SECONDS = {
-    "check_archive_worktree.py": 28.5,
-    "check_composer_paste_back.py": 18.0,
-    "check_new_chat.py": 16.7,
-    "check_welcome.py": 15.0,
-    "check_terminal_tools.py": 13.9,
-    "check_start_session.py": 12.4,
+    "check_archive_worktree.py": 28.4,
+    "check_composer_paste_back.py": 17.1,
+    "check_new_chat.py": 16.9,
+    "check_welcome.py": 16.5,
+    "check_terminal_tools.py": 14.1,
+    "check_start_session.py": 12.6,
     "check_pr_refresh_on_finish.py": 11.6,
-    "check_notifications.py": 10.2,
-    "check_git_page.py": 9.7,
-    "check_show_diff.py": 7.9,
-    "check_background_session.py": 7.8,
-    "check_hide_on_close.py": 7.5,
-    "check_worktree_fallback.py": 7.2,
-    "check_git_prefs.py": 6.6,
-    "check_pr_body_blocks.py": 6.6,
-    "check_composer_paste.py": 5.9,
+    "check_notifications.py": 9.9,
+    "check_git_page.py": 9.4,
+    "check_show_diff.py": 8.0,
+    "check_background_session.py": 7.6,
+    "check_hide_on_close.py": 7.1,
+    "check_worktree_fallback.py": 7.1,
+    "check_pr_body_blocks.py": 6.7,
+    "check_git_prefs.py": 6.3,
+    "check_composer_paste.py": 6.2,
     "check_composer_spell_click.py": 5.9,
+    "check_token_use_prefs.py": 5.0,
     "check_auto_delete.py": 4.9,
     "check_icon_dialog_none.py": 4.0,
     "check_panel_resize_save.py": 3.9,
-    "check_token_use_prefs.py": 3.9,
-    "check_composer_draft.py": 3.8,
-    "check_status_icon.py": 3.2,
-    "check_pr_page_focus.py": 3.1,
-    "check_pr_page_patch.py": 3.0,
-    "check_project_row_click.py": 2.8,
+    "check_composer_draft.py": 3.7,
+    "check_pr_page_focus.py": 3.2,
+    "check_pr_page_patch.py": 3.2,
+    "check_status_icon.py": 3.1,
+    "check_project_row_click.py": 3.0,
     "check_root_name_links.py": 2.8,
-    "check_panel_bg_tab_width.py": 1.7,
-    "check_editor_narrow.py": 1.3,
-    "check_notify_badge.py": 0.9,
-    "check_tab_drag.py": 0.8,
+    "check_panel_bg_tab_width.py": 1.8,
+    "check_editor_narrow.py": 1.2,
+    "check_notify_badge.py": 1.0,
     "check_panel_layout.py": 0.7,
-    "check_composer_spelling_optional.py": 0.3,
+    "check_tab_drag.py": 0.5,
+    "check_composer_spelling_optional.py": 0.4,
 }
 # A check the table doesn't know: about the median, so a new check neither
 # vanishes into the busiest shard nor tips the lightest one over.
@@ -133,7 +133,7 @@ def parse_shard(text):
         index, count = (int(part) for part in text.split("/"))
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f"expected I/N, e.g. 2/4, got {text!r}") from None
+            f"expected I/N, e.g. 2/5, got {text!r}") from None
     if count < 1 or not 1 <= index <= count:
         raise argparse.ArgumentTypeError(f"shard {text} is out of range")
     return index, count

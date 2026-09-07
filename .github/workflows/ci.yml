@@ -60,9 +60,9 @@ jobs:
   # lives here now so a Dockerfile-editing PR builds the image once instead
   # of racing two identical builds from two workflows.
   #
-  # The suite runs as four shards in parallel, dealt out by measured wall
+  # The suite runs as five shards in parallel, dealt out by measured wall
   # time (scripts/run_e2e.py --shard, weights in its CHECK_SECONDS table) so
-  # each leg takes about a minute instead of the serial four. The matrix
+  # each leg takes under a minute instead of the serial four. The matrix
   # legs are `e2e-shard (N)`; the `e2e` job below fans them back in under
   # the name the main-branch ruleset requires.
   e2e-shard:
@@ -74,16 +74,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
       # Worst case, every check in the shard hangs on both attempts:
-      # checks x 2 x 120s (36 min at 9 checks) plus the image pull.
+      # checks x 2 x 120s (32 min at 8 checks) plus the image pull.
       # timeout-minutes must stay comfortably above that — and grow as a
       # shard grows — so a pathological run still writes its step-summary
       # table instead of being hard-killed by GitHub mid-suite. A shard
       # passes in about a minute; a check that needs more than 120s is hung.
-      - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120 --shard ${{ matrix.shard }}/4
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120 --shard ${{ matrix.shard }}/5
 
   # Fan-in: `e2e` is a required status check on main, and a matrix job's
   # legs are named `e2e-shard (1)` … — no job called `e2e` would leave
