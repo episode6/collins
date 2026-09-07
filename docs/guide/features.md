@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-06. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 
 # Features
@@ -131,14 +131,18 @@ Enter opens, Esc closes.
 - **The model is one click from switching.** The footer's model name is a
   menu: every model your login can use, fetched from the Models API with
   the CLI's own token, the current one marked. Pick another and the
-  session gets the CLI's `/model` command — the footer follows once the
-  agent answers with it. The same menu sits in the composer's chrome, so
-  you can change model halfway through writing a prompt without losing the
-  draft. (Copying the full model id lives in the menu too.)
+  session gets the CLI's `/model` command, and the footer and both pickers
+  follow within a moment — Collins reads the CLI's own confirmation of the
+  switch off the transcript, so there is no waiting for the next reply. (A
+  model chosen in the CLI's own `/model` picker still shows up on the next
+  reply, since the CLI prints its name rather than its id.) The same menu
+  sits in the composer's chrome, so you can change model halfway through
+  writing a prompt without losing the draft. (Copying the full model id
+  lives in the menu too.)
 - **So is the effort level.** The level beside the model name is a menu of
   the CLI's effort levels (*Low*, *Medium*, *High*, *Extra high*, *Max*),
   the current one marked; a pick sends `/effort`, and the footer follows
-  the agent's next answer. Levels the current model can't take — the
+  as soon as the CLI confirms it. Levels the current model can't take — the
   Models API says which — are greyed out. The same menu sits beside the
   composer's model button.
 - **Pull request chips** trail the branch: one per PR the session has
@@ -422,8 +426,9 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 What the agent has changed, beside the terminal it is changing it in. The
 page is a diff drawn by Collins itself — one page per session, under a
 one-row header — with Collins' own **commits** and **files** panels in a
-sidebar to its left. It needs `git` alone: there is no external diff viewer
-to install, and nothing in it is a terminal.
+sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
+
+![The git page beside a session: the commits and files sidebar, an untracked file and an unstaged hunk with their Stage and Discard buttons](/img/git-page.png)
 
 - **The diff.** Every file of the load is a card — its path (`old → new`
   for a rename), `+` / `−` counts, and what kind of change it is (new —
@@ -547,6 +552,9 @@ to install, and nothing in it is a terminal.
   tones) share the same store and rules; the agent lands them with
   `highlight_diff`, its notes with `annotate_diff`, and clears both with
   `clear_diff_marks` (your own notes stay unless it asks for them too).
+
+  ![The branch's diff against main, with an agent's note card under a hunk and a highlight on a line](/img/git-page-notes.png)
+
 - **Find** (`Ctrl+F`, or the header's magnifier): one query over every
   hunk, every occurrence highlighted, *n of m* counted, `Enter` /
   `Shift+Enter` stepping across hunks and files.
@@ -818,11 +826,12 @@ is running in:
   sidebar row, live status and all — for a PR Collins can't spot on its
   own, like one opened by a subagent, or one the session is reviewing
   rather than authoring.
-- **`start_session(prompt, …)`** — spawn a **sibling session**: a new agent
+- **`start_session(prompt, model?, effort?, permission_mode?, …)`** — spawn a **sibling session**: a new agent
   in a background tab, handed a prompt to begin on, working in parallel
   while the caller keeps going. It never takes your tab selection or
   keyboard — it turns up as a new row in the sidebar, rings and flashes if
-  it needs you, and unless told otherwise runs on the **model, effort
+  it needs you, and unless told otherwise — `model`, `effort` (`low` …
+  `max`) and `permission_mode` each override — runs on the **model, effort
   level and permission mode its caller is using right now** (one exception: a
   bypass-permissions caller's siblings come up in acceptEdits, so an
   unattended session can't mint more of itself). Spawned sessions get
@@ -1023,14 +1032,18 @@ a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
 Tokyo Night, Monokai, One Dark…), the **composer's** switches (the typing
 trigger, Enter behavior, the floating button),
 the editor's **color scheme**, **font**, **line numbers**/**hidden
-files** toggles and the width below which it shows a **single column**, the
+files** toggles, the width below which it shows a **single column** and the
+screen width at or below which it **opens in a window** instead of a panel
+(1600 px; 0 never), the
 app's **Dark / Light Mode** (system / light / dark), the **Notifications**
 group — the **In-app notifications** switch, the **Sound** picker (the
 desktop theme's sounds, five bundled chimes, or a file of your own), the
 card's **Card theme** pin (follow app / light / dark), **Bells from other
 sessions**, and **Announce finished runs** — the
 **language** (English, Magyar, Deutsch, Español, Français), the sidebar's
-**Show folder paths in sidebar** and **Show Claude usage** toggles, a
+**Show folder paths in sidebar** and **Show Claude usage** toggles and its
+**Project icon size**, a **Tab drag handles** switch (on; off, panel tabs
+drag plainly and each panel gets a drag grip), a
 **Token use** group directly under General that gathers everything that runs
 Claude on your behalf — the **Session title model** and **Icon generation
 model** pickers (each with a **None** option — it replaced the
@@ -1040,9 +1053,12 @@ an expired login — off, the usage panel just says to run `claude` yourself —
 the **Model list** row, which is free — followed by a switch for each of the
 **built-in MCP tools** the agent can call, the **status icon**, **Reopen the
 last session**, what to do **when quitting with running sessions** (ask /
-exit / background / hide), **Archive on claude.ai too**, **Delete archived
-sessions after** (a number and a unit; 0 never), **Check for
-updates** (the once-a-day look at GitHub's latest release, through `gh` or
+exit / background / hide) and **when archiving a running session** (ask /
+exit / background), **Archive on claude.ai too**, **Delete
+archived sessions after** (a number and a unit; 0 never), **Exact busy
+tracking from the agent** (on: the sidebar's working indicator reads the
+CLI's own progress announcements) with a **Poll for background sessions**
+fallback (off), **Check for updates** (the once-a-day look at GitHub's latest release, through `gh` or
 anonymously), a **Pull requests** group — the PR page's **Text size**,
 whether a first prompt that links a pull request by URL **attaches it
 to the session** (on; a bare "PR 183" is not enough), whether sessions are **renamed after their pull

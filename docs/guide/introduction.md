@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 
 # What is Collins?
@@ -64,10 +64,22 @@ with respect to your agents' data — names, favorites, and all app state live i
   composer, or under a **Draft** row in the sidebar for a session you
   haven't started yet. The bare CLI drops an unsent prompt the moment it
   exits.
+- **Review the diff where it happens.** A git page beside the session,
+  drawn by Collins itself, shows what the agent has changed — the working
+  tree, the index, any commit of the branch's stack — with staging by
+  file, hunk or line, and note cards on the diff. The agent can open the
+  page on a change, read what you are looking at, and leave notes and
+  highlights of its own.
 - **Follow the work to the PR.** Every pull request a session opens is
   tracked on its row and tab — CI, conflicts, unanswered comments — with the
-  actions attached: read the diff beside the terminal, merge, ask for a
-  review, or send the failure back to the agent as a prompt.
+  actions attached: read its description and threads as GitHub renders
+  them, merge, ask for a review, or send the failure back to the agent as a
+  prompt.
+- **Let the session drive the window.** Every session gets a small set of
+  tools of Collins' own: it can name itself, open a file, a diff or an
+  image on your screen, notify you when it needs you, attach a pull
+  request to its row, spawn a sibling session, and read or run commands in
+  the terminal panel.
 - **Stay oriented.** Search the sidebar, search a terminal's scrollback, peek
   at a session's recent messages before resuming it, and keep an eye on your
   Claude subscription usage under the session list.
@@ -89,6 +101,8 @@ launches and organizes it:
 | A prompt you haven't sent yet | Gone when the CLI exits | ✅ Kept as a draft, per session — or as a sidebar Draft row for a session not started yet |
 | Finished-in-the-background alerts | ❌ | ✅ Notifications |
 | Pull request status & actions | `gh` by hand | ✅ On every session's row |
+| Reviewing and staging what the agent changed | `git diff` / `git add -p` in another terminal | ✅ A native diff beside the session, staging by file, hunk or line |
+| The agent showing you something | It pastes a path | ✅ It opens the file, diff or image on your screen, and can annotate the diff |
 
 ## What's next?
 

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-06. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -117,7 +117,7 @@ downloads of each version, see the
   a diff next to the agent's terminal showing the working tree, the
   index, a commit or the branch against its parent; `Ctrl+1` / `Ctrl+2` /
   `Ctrl+3` jump to the unstaged, staged and whole-branch diffs. It needs
-  `git` alone — no external diff viewer, nothing to install. The diff is
+  `git` alone. The diff is
   a card per file (renames, new, deleted, untracked, binary, too-large
   and mode changes named), a syntax-highlighted view per hunk in the
   editor's style scheme and font, split (row-aligned, wrap included) or
@@ -192,9 +192,9 @@ downloads of each version, see the
   survive a reload on any hunk the edit left alone (one whose line
   numbers shifted counts as changed).
 - **`show_diff`, a session tool for the git page.** The agent can put a
-  change on your screen: `show_diff("unstaged" | "staged" | "branch" |
-  <commit ref>, file?, line?, side?, hunk?)` opens the session's git
-  page on that diff (revealed, never focused) and reveals the file in it
+  change on your screen: `show_diff(what, file?, line?, side?, hunk?)` —
+  *what* being `"unstaged"`, `"staged"`, `"branch"` or a commit ref —
+  opens the session's git page on that diff (revealed, never focused) and reveals the file in it
   — at a line on either side, or at a hunk by number; a line no hunk
   carries lands on the nearest hunk, and the reply says so, naming the
   file's hunk count and the hunk the view landed on. Its switch sits

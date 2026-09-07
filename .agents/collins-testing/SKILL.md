@@ -160,7 +160,10 @@ a tab running a real CLI, kill the foreground process group
 
 ## CI
 
-`.github/workflows/ci.yml`: `lint` and `verify-versions` on the bare runner;
+`.github/workflows/ci.yml`: `lint`, `verify-versions` and `docs` (the
+VitePress build of `docs/`, so a page that Vue can't compile — a `<word>`
+outside a one-line code span — fails the PR rather than the deploy after
+the merge) on the bare runner;
 `test`, `e2e` (`xvfb-run … scripts/run_e2e.py --timeout 120`, 60-minute job
 cap), `packaging` and `ppa-source (resolute)` inside the resolute CI image;
 `ppa-source (noble)` in the noble packaging image; `rpm` in the Fedora image.

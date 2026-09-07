@@ -84,7 +84,10 @@ even though the image has GTK), `e2e` (`xvfb-run … scripts/run_e2e.py
 `build_deb.sh`), `ppa-source` (noble in the noble packaging image, resolute in
 full; unsigned, checks the upload set exists), `rpm` (Fedora image: SRPM,
 rpmlint, rebuild with `%check` = desktop-file + AppStream validation, `dnf
-install`, path assertions), `verify-versions`.
+install`, path assertions), `verify-versions`, `docs` (bare runner, Node 22:
+`npm run docs:build` in `docs/`, the same build `docs.yml` deploys from —
+here so a broken page fails the PR, since the deploy only runs on push to
+main and its red run appears in no PR's checks).
 
 `.github/docker/ci.Dockerfile` is **the one canonical list of build
 dependencies** — add a build-dep there, not in a workflow. Three stages/tags

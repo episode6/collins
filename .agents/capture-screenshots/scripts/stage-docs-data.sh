@@ -124,9 +124,89 @@ mkgit() { # dir branch
   git -C "$1" -c user.name=demo -c user.email=demo@example.com commit -q -m "Initial import"
   [ "$2" = main ] || git -C "$1" checkout -q -b "$2"
 }
-mkgit "$A" fix/spinner-flake
 mkgit "$B" main
 mkgit "$C" main
+
+# alpha-widgets gets a history for the git page: main's initial import
+# holds the pre-fix spinner (an animated width, no reduced-motion rule, one
+# test), the branch carries the fix in two commits on top, and the working
+# tree is dirty every way the page draws — an unstaged edit, a staged one,
+# an untracked file. The files on disk end up exactly as written above
+# (plus the unstaged tail on spinner.css), so the editor and attachments
+# shots hold.
+gitA() { git -C "$A" -c user.name=demo -c user.email=demo@example.com "$@"; }
+cp "$A/src/dashboard/spinner.css" "$E2E/spinner.css.fixed"
+cp "$A/tests/test_spinner.py" "$E2E/test_spinner.py.fixed"
+cat > "$A/src/dashboard/spinner.css" <<'EOF'
+/* Dashboard loading spinner. */
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--accent-dim);
+  border-top-color: var(--accent);
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  from { width: 28px; transform: rotate(0deg); }
+  50%  { width: 30px; }
+  to   { width: 28px; transform: rotate(360deg); }
+}
+EOF
+cat > "$A/tests/test_spinner.py" <<'EOF'
+from dashboard import spinner
+
+
+def test_spinner_animates():
+    assert spinner.animated_properties()
+EOF
+gitA init -q -b main
+gitA add -A
+gitA commit -q -m "Initial import"
+gitA checkout -q -b fix/spinner-flake
+cp "$E2E/spinner.css.fixed" "$A/src/dashboard/spinner.css"
+gitA add -A
+gitA commit -q -m "Spinner: animate transform only, honour reduced motion"
+cp "$E2E/test_spinner.py.fixed" "$A/tests/test_spinner.py"
+gitA add -A
+gitA commit -q -m "Add a reduced-motion regression test for the spinner"
+rm "$E2E/spinner.css.fixed" "$E2E/test_spinner.py.fixed"
+# Staged: index.js learns the reduced-motion class.
+cat > "$A/src/dashboard/index.js" <<'EOF'
+import "./spinner.css";
+
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+export function mountDashboard(root) {
+  const spinner = document.createElement("div");
+  spinner.className = reducedMotion.matches ? "spinner spinner--still" : "spinner";
+  root.append(spinner);
+  return () => spinner.remove();
+}
+EOF
+gitA add src/dashboard/index.js
+# Unstaged: the still variant's rule, and a small-size modifier.
+cat >> "$A/src/dashboard/spinner.css" <<'EOF'
+
+.spinner--still {
+  animation: none;
+  opacity: 0.6;
+}
+
+.spinner--small {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+EOF
+# Untracked: a helper nobody has added yet.
+cat > "$A/src/dashboard/motion.js" <<'EOF'
+export function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+EOF
 
 enc() { echo "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
 

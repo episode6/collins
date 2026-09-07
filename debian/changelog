@@ -5,7 +5,7 @@ collins (0.1.3) UNRELEASED; urgency=medium
     files panel beside it — and stages, unstages, discards and reverts
     files, hunks and selected lines from its headers and keys, with
     confirmations, notes on the diff, a find bar, and commit / fixup of the
-    index. It needs git alone: no external diff viewer.
+    index. It needs git alone.
   * Preferences gains a Git group: the diff layout, line numbers, wrapping
     and word emphasis, untracked files on or off, commits per page in the
     commits panel, and a default parent branch for the git page.
