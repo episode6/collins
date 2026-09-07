@@ -204,7 +204,29 @@ dark)`, threaded beside `page_url` through `_body_label` / `_folded_body` /
 `_segments` / `_fill_blocks` / `_ThreadCard` into `build_one` — and
 `_apply_scheme` restyles every live code view with
 `mdwidgets.restyle_code(page, scheme)` (a tree walk for `.pr-md-code`
-views) when the setting or the app's light/dark changes. `<details>`
+views) when the setting or the app's light/dark changes. **GitHub
+references** are a post-pass over `text` tokens alone (`mdblocks.link_refs`,
+called from the walker's `_text` — never for a `code_inline` token, never
+while a `link` entry is on the open-tag stack, so an author's own link text
+and a link the http(s) gate refused both stay theirs; the text between
+references goes through `link_www`, so both passes share one token): `#123` and
+`owner/repo#123` → `/issues/N` (GitHub forwards a PR's number), `@user` →
+the profile, a lowercase 7–40 hex word with at least one digit and one
+letter → `/commit/`, with GitHub's boundaries (not on the tail of a word,
+`&`, `/`, `#`, `@`, `.` or `-`; not followed by a word character, `/` or
+`-`; logins on `mdblocks.LOGIN_RE`, the gate `avatars` shares). Every URL
+is built from a `mdblocks.RepoContext` — `repo_context(repository, host,
+head)` holds each part to its shape (owner/name, a hostname, a 40-hex
+oid or "") — that `PrViewPage._refs()` makes from the PR's own
+`repository`, its URL's host and the detail's `head_oid`, threaded as
+`refs` beside `page_url` and `scheme` through `_body_label` /
+`_folded_body` / `_segments` / `_fill_blocks` / `_cut_markup` /
+`_ThreadCard` into `parse_blocks` and `render_inline`; None means no
+reference links (a PR whose summary has no repository yet). With a head,
+`mdblocks.relative_href` turns a relative link destination (`docs/a.md`,
+`./b.md`; no scheme, leading slash, fragment, query or `..` step) into
+`/blob/<head>/<path>` before the gate — never a linkify token, which is a
+domain not a path. `<details>`
 renders as its escaped source until its own PR lands. Images render
 via `bodyimages` / `pictures` (`BoundedPicture`
 measures height-for-width in a `Gtk.Box` slot); changed images render
@@ -263,6 +285,11 @@ gated to GitHub's username alphabet.
   autolinks are unaffected, `www.` ones come back from `link_www` (the
   same linear text-token pass shape as the reference links), and emails
   are never linked. A unit test pins the bound.
+- markdown-it's `text_join` folds escapes and entities into the text token,
+  so `\#123` and `&#35;123` reach `link_refs` as `#123` and link where
+  GitHub would show them literal; a `javascript:` destination is refused by
+  markdown-it outright, so `[#7](javascript:…)` is plain text in which `#7`
+  links. Neither is worth a token-level detour.
 
 Related: `collins-sessions-and-sidebar`, `collins-terminal-tab`,
 `collins-panel-dock`, `collins-gtk-sharp-edges`.

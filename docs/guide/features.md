@@ -174,10 +174,16 @@ Enter opens, Esc closes.
   indented code is a read-only source view — highlighted for the fence's
   language (`python`, `bash`, `json`, `diff`, `rust`… and any other name
   GtkSourceView knows), wearing the editor's style scheme like the Files
-  view's diffs, a long line scrolling sideways within the block. A
-  `<details>` block shows as its source for now — never dropped. Every
-  other HTML tag shows escaped, as text. Without the parser installed the
-  page falls back to its plainer built-in renderer.
+  view's diffs, a long line scrolling sideways within the block. GitHub
+  references link the way they do on GitHub: `#123` and `owner/repo#123`
+  to the issue or PR, `@user` to the profile, a commit's hex to the
+  commit — into the PR's own repository, on its own host — and a relative
+  link like `[guide](docs/guide.md)` opens the file at the PR's head
+  commit; a reference inside a code span, or inside a link the author
+  wrote, is left alone. A `<details>` block shows as its source for now
+  — never dropped. Every other HTML tag shows escaped, as text. Without
+  the parser installed the page falls back to its plainer built-in
+  renderer.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
   file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —
   renders as the picture itself, on a transparency checkerboard: **before
