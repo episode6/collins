@@ -3,19 +3,21 @@
 
 The PR page renders bodies through mdblocks (markdown-it-py) and mdwidgets:
 headings as sized labels, lists as glyph-plus-content rows with task-list
-glyphs, quotes behind a bar, rules as separators, and every block the
-widget layer has no widget for yet as its escaped source. The fold's
-preview cut, the "Show more" step and the regex fallback ride the same
-walk. None of that is reachable from pytest (tests/conftest.py blocks the
-GTK stack), so it is checked here against the real page in a real window:
+glyphs, quotes behind a bar, rules as separators, tables as grids of cell
+labels in a sideways-only scroller (capped, with a link to the rest), and
+every block the widget layer has no widget for yet as its escaped source.
+The fold's preview cut, the "Show more" step and the regex fallback ride
+the same walk. None of that is reachable from pytest (tests/conftest.py
+blocks the GTK stack), so it is checked here against the real page in a
+real window:
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_pr_body_blocks.py
 
 `prdetail.fetch` is stubbed with a canned detail — a description made of
 the block fixture, one comment — so nothing leaves the machine. Grown per
-PR of the markdown stack: a Gtk.Grid for tables, a GtkSource.View for
-code, a Gtk.Expander for <details> join the assertions as they land.
+PR of the markdown stack: a GtkSource.View for code and a Gtk.Expander for
+<details> join the assertions as they land.
 
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
@@ -159,6 +161,15 @@ def has_class(widget: Gtk.Widget, name: str) -> bool:
     return name in widget.get_css_classes()
 
 
+def ancestors(widget: Gtk.Widget) -> list[Gtk.Widget]:
+    out = []
+    parent = widget.get_parent()
+    while parent is not None:
+        out.append(parent)
+        parent = parent.get_parent()
+    return out
+
+
 def description_card(page) -> Gtk.Widget:
     return page._content_slots.widgets[0]
 
@@ -270,11 +281,32 @@ def step_expanded() -> bool:
     )
     check("the rule is a separator", find(full, lambda w: isinstance(w, Gtk.Separator)) is not None)
     all_texts = texts(full)
-    check(
-        "the table renders as its source for now, never dropped",
-        any(t.startswith("| col | val |") for t in all_texts),
-        all_texts,
-    )
+    grid = find(full, lambda w: isinstance(w, Gtk.Grid))
+    check("the table renders as a grid", grid is not None)
+    check("…its source gone", not any(t.startswith("| col | val |") for t in all_texts), all_texts)
+    if grid is not None:
+        cells = labels(grid)
+        check("…of one label per cell", [c.get_text() for c in cells] == ["col", "val", "a", "1"],
+              [c.get_text() for c in cells])
+        heads = [c for c in cells if has_class(c, "pr-md-th")]
+        check("…the header row wearing .pr-md-th (its bold is the CSS's alone)",
+              [c.get_text() for c in heads] == ["col", "val"]
+              and not any("<b>" in c.get_label() for c in heads))
+        check("…the right-aligned column aligned right",
+              [c.get_xalign() for c in cells] == [0.0, 1.0, 0.0, 1.0], [c.get_xalign() for c in cells])
+        check("…cells selectable", all(c.get_selectable() for c in cells))
+        scroller = grid.get_parent().get_parent() if grid.get_parent() is not None else None
+        check(
+            "…inside a scroller that scrolls sideways only",
+            isinstance(scroller, Gtk.ScrolledWindow)
+            and scroller.get_policy() == (Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+            and scroller.get_propagate_natural_height(),
+            type(scroller).__name__,
+        )
+        check("…as tall as its rows, not the page", grid is not None and 20 < grid.get_height() < 120,
+              grid.get_height())
+        check("…with no more-link under a table that fits",
+              not findall(full, lambda w: has_class(w, "pr-md-table-more")))
     check(
         "the fence renders as monospace text for now",
         any(t == 'print("hi")' and has_class(w, "pr-md-code") for w, t in zip(labels(full), all_texts, strict=True)),
@@ -332,6 +364,66 @@ def step_back() -> bool:
         and any(has_class(w, "pr-md-glyph") and w.get_text() == "☑" for w in labels(card)),
         texts(card),
     )
+    # A table past the caps: 50 rows of 8 columns drawn, the rest a link.
+    width = mdblocks.TABLE_MAX_COLUMNS + 2
+    rows = mdblocks.TABLE_MAX_ROWS + 10
+    wide = (
+        "| " + " | ".join(f"h{c}" for c in range(width)) + " |\n|" + "---|" * width + "\n"
+        + "\n".join("| " + " | ".join(f"r{r}c{c}" for c in range(width)) + " |" for r in range(rows))
+    )
+    return land(replace(STAGED["detail"], body="Before.\n\n" + wide + "\n\nAfter."), step_table_caps)
+
+
+def step_table_caps() -> bool:
+    page = state["page"]
+    full = fold(page)._full
+    grid = find(full, lambda w: isinstance(w, Gtk.Grid))
+    check("a big table still renders as a grid", grid is not None)
+    if grid is None:
+        return done()
+    cells = labels(grid)
+    check(
+        "…capped at the row and column caps",
+        len(cells) == (mdblocks.TABLE_MAX_ROWS + 1) * mdblocks.TABLE_MAX_COLUMNS,
+        len(cells),
+    )
+    last = f"r{mdblocks.TABLE_MAX_ROWS - 1}c{mdblocks.TABLE_MAX_COLUMNS - 1}"
+    check("…its last cell the last capped row's", cells[-1].get_text() == last, cells[-1].get_text())
+    more = find(full, lambda w: has_class(w, "pr-md-table-more"))
+    check(
+        "…the rest counted in a link to the PR on GitHub",
+        more is not None
+        and more.get_text() == "10 more rows on GitHub, 2 more columns on GitHub"
+        and f'href="{PR_URL}"' in more.get_label(),
+        (more.get_text(), more.get_label()) if more else None,
+    )
+    check("…dim", more is not None and has_class(more, "dim-label"))
+    check("…and the paragraph after it there", "After." in texts(full), texts(full)[-1])
+    # The same table nested in a list item and in a quote: the link still
+    # carries the page's URL through `_list` / `_quote`'s recursion.
+    rows = mdblocks.TABLE_MAX_ROWS + 3
+    tall = "| h |\n|---|\n" + "\n".join(f"| r{r} |" for r in range(rows))
+    nested = "- item\n\n" + "\n".join("  " + line for line in tall.split("\n"))
+    quoted = "\n".join("> " + line for line in tall.split("\n"))
+    return land(replace(STAGED["detail"], body=nested + "\n\n" + quoted), step_table_nested_caps)
+
+
+def step_table_nested_caps() -> bool:
+    page = state["page"]
+    full = fold(page)._full
+    grids = findall(full, lambda w: isinstance(w, Gtk.Grid))
+    check("a capped table nested in a list and in a quote renders both grids", len(grids) == 2, len(grids))
+    links = findall(full, lambda w: has_class(w, "pr-md-table-more"))
+    check(
+        "…each with its rest counted in a link to the PR on GitHub",
+        len(links) == 2
+        and all(link.get_text() == "3 more rows on GitHub" for link in links)
+        and all(f'href="{PR_URL}"' in link.get_label() for link in links),
+        [(link.get_text(), link.get_label()[:80]) for link in links],
+    )
+    in_list = bool(links) and any(has_class(w, "pr-md-list") for w in ancestors(links[0]))
+    in_quote = bool(links) and any(has_class(w, "pr-md-quote") for w in ancestors(links[-1]))
+    check("…inside the list row and the quote column", in_list and in_quote, (in_list, in_quote))
     # The widget budget: a body past it renders its tail as one plain
     # label — never dropped, never a widget per item (the body itself
     # sits under the render cap, so this is the widget budget alone).

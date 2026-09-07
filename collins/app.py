@@ -1321,13 +1321,26 @@ popover.menu button.open-with-row:hover {
 }
 /* markdown blocks in a PR body (mdwidgets.py): a quote is its children
    behind a left bar, an alert the same with a title row; list glyphs sit
-   in their own column ahead of the item's content. */
+   in their own column ahead of the item's content; a table is a grid of
+   cell labels in a hairline frame, the header row underlined, each cell
+   padded rather than spaced so the lines run unbroken. */
 .pr-md-quote {
   border-left: 3px solid alpha(currentColor, 0.25);
   padding-left: 10px;
 }
 .pr-md-glyph {
   min-width: 14px;
+}
+.pr-md-table {
+  border: 1px solid alpha(currentColor, 0.15);
+  border-radius: 6px;
+}
+.pr-md-th, .pr-md-td {
+  padding: 4px 10px;
+}
+.pr-md-th {
+  font-weight: bold;
+  border-bottom: 1px solid alpha(currentColor, 0.25);
 }
 """
 

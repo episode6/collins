@@ -178,9 +178,20 @@ what its own widget budget leaves over takes the same one-label shape
 False (import latch) → `split_body` + `md_to_pango` for every body; a body
 `parse_blocks` raises on → that body alone; bad markup on a label → escaped
 source (GTK 4's `set_markup` blanks a label on bad markup instead of
-raising, so a `try/except GLib.GError` around it guards nothing). Tables,
-code blocks and `<details>` render as their escaped source until their own
-PRs land. Images render via `bodyimages` / `pictures` (`BoundedPicture`
+raising, so a `try/except GLib.GError` around it guards nothing). A
+`Table` is a `Gtk.Grid` of selectable cell labels (header bold under
+`.pr-md-th`, `xalign` per the delimiter row's colons, each cell wrapping
+past 60 chars) inside `mdwidgets._TableScroller` — sideways scrolling
+only, natural height, `hscroll-policy` NATURAL on the viewport — so the
+page body never scrolls sideways; `mdblocks.cap_table` squares the rows
+to the header and trims to `TABLE_MAX_ROWS` (50) × `TABLE_MAX_COLUMNS`
+(8), and what it cut (plus what the widget budget stopped — a row spends
+one leaf, as a list item does) is a dim
+"N more rows on GitHub" link to the body's own `page_url` (the comment's
+anchor or the PR; threaded from `_body_label` through
+`_segments`'s partial into `build_one`). Code blocks and `<details>`
+render as their escaped source until their own PRs land. Images render
+via `bodyimages` / `pictures` (`BoundedPicture`
 measures height-for-width in a `Gtk.Box` slot); changed images render
 before/after from `prblobs` (`gh api …/contents/{path}?ref=<sha>` with the
 raw media type; a binary file *does* get a "Binary files differ" patch, so
@@ -207,6 +218,14 @@ gated to GitHub's username alphabet.
   block widget may add a `Gtk.Button` with a `Gtk.Box` child (how the focus
   check finds the fold's toggle). `check_pr_body_blocks.py` asserts on the
   `pr-md-*` CSS classes — keep them when restyling.
+- A `Gtk.ScrolledWindow` measures its child's height at width -1, which a
+  height-for-width grid of wrapping labels answers with its height at its
+  *minimum* width — a two-row table with one long cell came out four
+  thousand pixels tall. `mdwidgets._TableScroller.do_measure` reports the
+  grid's height at the grid's natural width instead (what `halign START`
+  in the viewport allocates it). The widths were never the problem; the
+  viewport's default `hscroll-policy` of MINIMUM was, which the table sets
+  to NATURAL so the grid scrolls rather than squeezes.
 - An `<img>` alone on its line is a CommonMark HTML *block* (type 7), not an
   `html_inline`: `mdblocks._html_lines` turns such lines into image rows. A
   `Text.source` is the inline token's content (indents and `>` stripped),

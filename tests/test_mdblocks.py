@@ -527,3 +527,76 @@ def test_line_costs():
 def test_empty_body_is_no_blocks():
     assert parse_blocks("") == []
     assert parse_blocks("\n\n  \n") == []
+
+
+# -- tables ------------------------------------------------------------------
+
+
+def test_table_golden_tree():
+    source = (
+        "| Name | Count | Note |\n|:-----|------:|:----:|\n"
+        "| **a** | 1 | `x` |\n| b | 22 | [l](https://e.x/) |"
+    )
+    (table,) = parse_blocks(source)
+    assert table == Table(
+        ("left", "right", "center"),
+        ("Name", "Count", "Note"),
+        (("<b>a</b>", "1", "<tt>x</tt>"), ("b", "22", '<a href="https://e.x/">l</a>')),
+        source,
+    )
+    for cell in table.header + tuple(c for row in table.rows for c in row):
+        assert markup_ok(cell)
+
+
+def test_table_rows_are_squared_to_the_header():
+    (table,) = parse_blocks("| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 |")
+    assert table.rows == (("1", "", ""), ("1", "2", "3"))
+
+
+def test_table_cells_are_inline_only():
+    (table,) = parse_blocks("| a |\n|---|\n| ![alt](https://x.example/i.png) |")
+    assert table.rows == (('<a href="https://x.example/i.png">alt</a>',),)
+    blocks = parse_blocks("| a |\n|---|\n| ![p](https://x.example/i.png) |\n")
+    assert not any(isinstance(b, ImageRow) for b in blocks)
+    (html,) = parse_blocks('| a |\n|---|\n| <b>x</b> & <img src="https://x.example/i.png" alt="pic"> |')
+    assert html.rows == (('&lt;b&gt;x&lt;/b&gt; &amp; <a href="https://x.example/i.png">pic</a>',),)
+    (piped,) = parse_blocks("| a |\n|---|\n| x \\| y |")
+    assert piped.rows == (("x | y",),)
+
+
+def test_table_header_only_and_nested():
+    (bare,) = parse_blocks("| a | b |\n|---|---|")
+    assert bare.header == ("a", "b") and bare.rows == ()
+    (item,) = parse_blocks("- item\n\n  | a |\n  |---|\n  | 1 |")
+    assert isinstance(item.items[0].children[1], Table)
+    (quote,) = parse_blocks("> | a |\n> |---|\n> | 1 |")
+    assert isinstance(quote.children[0], Table)
+
+
+def test_cap_table_leaves_a_small_table_alone():
+    (table,) = parse_blocks(FIXTURE)[6:7]
+    shown, more_rows, more_columns = mdblocks.cap_table(table)
+    assert shown == table and more_rows == 0 and more_columns == 0
+
+
+def test_cap_table_caps_rows_and_columns():
+    width = mdblocks.TABLE_MAX_COLUMNS + 3
+    header = "| " + " | ".join(f"h{i}" for i in range(width)) + " |\n|" + "---|" * width + "\n"
+    body = "\n".join("| " + " | ".join(f"r{r}c{c}" for c in range(width)) + " |" for r in range(70))
+    (table,) = parse_blocks(header + body)
+    shown, more_rows, more_columns = mdblocks.cap_table(table)
+    assert more_rows == 70 - mdblocks.TABLE_MAX_ROWS and more_columns == 3
+    assert len(shown.header) == mdblocks.TABLE_MAX_COLUMNS
+    assert len(shown.rows) == mdblocks.TABLE_MAX_ROWS
+    assert all(len(row) == mdblocks.TABLE_MAX_COLUMNS for row in shown.rows)
+    assert len(shown.aligns) == mdblocks.TABLE_MAX_COLUMNS
+    assert shown.rows[-1][0] == f"r{mdblocks.TABLE_MAX_ROWS - 1}c0"
+    assert shown.source == table.source
+
+
+def test_cap_table_squares_a_hand_built_table():
+    ragged = Table((None,), ("a", "b", "c"), (("1",), ("1", "2", "3", "4")), "")
+    shown, more_rows, more_columns = mdblocks.cap_table(ragged)
+    assert shown.aligns == (None, None, None)
+    assert shown.rows == (("1", "", ""), ("1", "2", "3"))
+    assert (more_rows, more_columns) == (0, 0)
