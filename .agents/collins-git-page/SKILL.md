@@ -145,30 +145,35 @@ encode_state(loaded, sidebar)` (`"sidebar": false` when folded,
 
 ## The commit card (`commitcard.py`)
 
-`GitPage.commit_card` is a `CommitCard` — a `Gtk.ScrolledWindow`
-(vertical only, natural height up to `MAX_HEIGHT` 360, then it scrolls
-alone) over a `.pr-card.git-commit-card` box — at the top of the `_VIEW`
-column, above the `DiffView`. It is hidden for every load but a commit:
-`_diff_read` calls `show(message, github_url, scheme)` when the read's
+`GitPage.commit_card` is a `CommitCard` — a vertical `Gtk.Box` wearing
+`.pr-card.git-commit-card` — at the top of the `_VIEW` column, above the
+`DiffView`. It is hidden for every load but a commit: `_diff_read` calls
+`show(message, github_url, scheme)` when the read's
 `gitloads.CommitMessage` landed on a `{"show": ref}` load and `clear()`
 otherwise; `load()` clears it the moment the load changes (a stale
-message over a new diff), `_close_view` too. The card is the subject
-(`heading`), a byline (author, `format_relative` age with the stamp in
-the tooltip, the short sha — a `<a>` to `<github_url>/commit/<sha>` when
-`gitinfo.github_url` knows one) and the body through **the PR page's own
-fold**: `prview.folded_body` / `prview.Fold` are the public names of
-`_folded_body` / `_Fold`, so the commit body gets the same eight-line
-preview, "Show more" / "Show less", markdown blocks (`mdblocks` /
-`mdwidgets`), code fences in the page's scheme (`set_scheme` restyles
-them on a scheme or light/dark change) and reference links
-(`mdblocks.repo_context(owner/name, host, sha)` off the GitHub URL —
-relative links resolve at the commit's own sha). `show` with the message
-already shown (a tick's reload of the same commit) is a no-op, so an
-opened fold stays open; a different message carries the fold's state
-across the rebuild like `PrViewPage._description_card`. Probes:
-`subject_text()`, `byline_text()`, `folded()` (None without a fold),
-`set_folded()`, `body_labels()`, `message`. `check_git_page.py`'s
-sidebar check gives its `second` commit `COMMIT_BODY` for this.
+message over a new diff), `_close_view` too. The card's fixed part is
+the subject (`heading`), a byline (author, `format_relative` age with
+the stamp in the tooltip, the short sha — a `<a>` to
+`<github_url>/commit/<sha>` when `gitinfo.github_url` knows one) and,
+for a commit with a body, the handle: one flat button, "Show more" /
+"Show less" with a caret, the PR fold's look built here. Under the
+handle sits a `Gtk.ScrolledWindow` (vertical only, natural height up to
+`MAX_HEIGHT` 360, then it scrolls alone) holding the **whole** body
+through `prview.body_label` (the public name of `_body_label`: markdown
+blocks via `mdblocks` / `mdwidgets`, code fences in the page's scheme —
+`set_scheme` restyles them on a scheme or light/dark change — and
+reference links from `mdblocks.repo_context(owner/name, host, sha)` off
+the GitHub URL, relative links at the commit's own sha). There is no
+preview: folded, the scroller is hidden and the card is the subject and
+the byline; the handle is the card's child, never the scroller's, so
+"Show less" stays put however far the body scrolls. `show` with the
+message already shown (a tick's reload of the same commit) is a no-op,
+so a body brought out stays out; a different message carries the fold's
+state across the rebuild like `PrViewPage._description_card`. Probes:
+`subject_text()`, `byline_text()`, `folded()` (None without a body),
+`set_folded()`, `toggle_text()`, `handle_is_sticky()`, `body_labels()`
+(empty while folded), `message`. `check_git_page.py`'s sidebar check
+gives its `second` commit `COMMIT_BODY` for this.
 
 ## The native sidebar (`gitsidebar.py`)
 
