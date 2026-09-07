@@ -234,4 +234,5 @@ spec's `%changelog`.
 
 Also in `.agents/`: `capture-screenshots` (headless captures of a throwaway
 instance), `gpl-modified-file-notices` (mandatory before committing),
+`balance-e2e-shards` (refresh the e2e timing table, change the shard count),
 `release-branch-skill`, `ship-release-skill`.

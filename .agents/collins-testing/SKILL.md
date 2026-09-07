@@ -178,8 +178,9 @@ the name the main-branch ruleset requires, so it must stay. The shard jobs
 `needs: image` and show up **after** the first `gh pr checks --watch` may
 have exited green — keep watching until the `e2e` row is listed and
 finished. A check that hangs is one that needs more than 120 s; a shard
-passes in about a minute. Refresh the weights from the shards' step-summary
-tables when the split looks lopsided. Reproduce a shard (or, without
+passes in about a minute. When a leg drifts or a check changes, the
+`balance-e2e-shards` skill refreshes the weights from a run's logs and
+previews the deal. Reproduce a shard (or, without
 `--shard`, the whole suite) on any machine with Docker:
 
 ```bash
