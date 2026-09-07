@@ -33,7 +33,8 @@ every scene with that env and drops the PNGs where the docs read them.
 (the window's size comes from there, as do the panel widths), so one staged
 tree serves every scene. --pr-body FILE stages a markdown file as the
 pr-page scene's description, for a PR's before/after shots of body rendering,
-and --pr-expand presses its Show more first.
+--pr-expand presses its Show more first, and --pr-copy right-click-copies its
+first code block just before the shot, so the "Copied" pill is in it.
 """
 
 import argparse
@@ -55,6 +56,8 @@ parser.add_argument("--pr-body", metavar="FILE",
                     help="pr-page: a markdown file to stage as the PR's description")
 parser.add_argument("--pr-expand", action="store_true",
                     help="pr-page: press the description's Show more before the shot")
+parser.add_argument("--pr-copy", action="store_true",
+                    help="pr-page: right-click-copy the description's first code block before the shot")
 args = parser.parse_args()
 
 SCENES = (
@@ -273,6 +276,31 @@ def stage(win) -> list[tuple[int, callable]]:
         steps = [(1500, lambda: tab.open_pr_page_url(PR_URL))]
         if args.pr_expand:
             steps.append((2000, lambda: tab._find_pr_page(PR_URL)._description_fold.set_expanded(True)))
+        if args.pr_copy:
+            # The copied pill shows for copylabel.FLASH_MS (1.2 s) and the
+            # shot comes settle_ms after the last step: copy 600 ms ahead
+            # of it (a source tree without CodeBlockView has no pill).
+            def walk(widget):
+                child = widget.get_first_child()
+                while child is not None:
+                    yield child
+                    yield from walk(child)
+                    child = child.get_next_sibling()
+
+            def copy_first_code() -> bool:
+                from collins import mdwidgets
+
+                kind = getattr(mdwidgets, "CodeBlockView", None)
+                page = tab._find_pr_page(PR_URL)
+                code = next((w for w in walk(page) if kind is not None and isinstance(w, kind)), None)
+                if code is not None:
+                    code.copy()
+                return GLib.SOURCE_REMOVE
+
+            def arm_copy() -> None:
+                GLib.timeout_add(max(0, args.settle_ms - 600), copy_first_code)
+
+            steps.append((2000 if not args.pr_expand else 400, arm_copy))
         return steps
     elif scene == "editor-panel":
         tab = open_tab(win, U1)
