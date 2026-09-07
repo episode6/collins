@@ -168,7 +168,14 @@ gitA commit -q -m "Initial import"
 gitA checkout -q -b fix/spinner-flake
 cp "$E2E/spinner.css.fixed" "$A/src/dashboard/spinner.css"
 gitA add -A
-gitA commit -q -m "Spinner: animate transform only, honour reduced motion"
+gitA commit -q -m "Spinner: animate transform only, honour reduced motion" -m "The width keyframes forced a layout on every tick, which is what made
+the dashboard suite flake under load. Animating \`transform\` alone keeps
+the spinner on the compositor and out of layout.
+
+- \`prefers-reduced-motion\` now stops the animation outright
+- the \`--spinner-size\` custom property is read once, at mount
+
+Fixes #218."
 cp "$E2E/test_spinner.py.fixed" "$A/tests/test_spinner.py"
 gitA add -A
 gitA commit -q -m "Add a reduced-motion regression test for the spinner"

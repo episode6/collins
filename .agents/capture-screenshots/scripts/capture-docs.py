@@ -14,7 +14,10 @@ file on a two-commit branch), the page revealed without taking the
 keyboard the way the footer's button does. git-page-notes opens the same
 page on the branch's whole diff and lands an agent note and a highlight
 on it through the page's own doors (what annotate_diff / highlight_diff
-would), then reveals the annotated file.
+would), then reveals the annotated file. git-page-commit and
+git-page-commit-folded are PR shots: the page on the branch's first commit
+(the one stage-docs-data.sh gives a body), its commit card brought out or
+folded.
 
 notifications opens a session, stages a few rows straight through the
 app's notification center (a message, a coalesced bell, a finished run —
@@ -73,7 +76,7 @@ SCENES = (
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
     "editor-panel", "editor-picker", "attachments-panel", "notifications",
     "notification-card", "preferences-notifications", "welcome", "welcome-cli",
-    "git-page", "git-page-notes",
+    "git-page", "git-page-notes", "git-page-commit", "git-page-commit-folded",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -333,6 +336,16 @@ def stage(win) -> list[tuple[int, callable]]:
     elif scene == "git-page":
         tab = open_tab(win, U1)
         return [(1500, lambda: tab.open_git_page("unstaged", focus=False))]
+    elif scene in ("git-page-commit", "git-page-commit-folded"):
+        # PR shots: the page on the branch's first commit (the one with a
+        # body), its commit card folded or brought out.
+        tab = open_tab(win, U1)
+        unfold = scene == "git-page-commit"
+
+        def show_commit() -> None:
+            tab.open_git_page({"show": "HEAD~1"}, focus=False)
+
+        return [(1500, show_commit), (3000, lambda: tab.git_page.commit_card.set_folded(not unfold))]
     elif scene == "git-page-notes":
         from collins import diffnotes
 

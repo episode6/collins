@@ -450,9 +450,10 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   when the repository has a page there — and the body as **markdown**,
   the way the PR page renders a description: lists, code fences in the
   editor's scheme, tables, `#123` / `@user` / sha references linked into
-  the repository. A long body folds to its first lines behind *Show
-  more*; the card scrolls on its own past a few hundred pixels so the
-  diff keeps the page. The working tree, a branch and a range have no
+  the repository. The body waits whole behind *Show more* — folded, the
+  card is the subject and the byline alone — and once out it scrolls on
+  its own past a few hundred pixels so the diff keeps the page, with
+  *Show less* staying put above it. The working tree, a branch and a range have no
   card.
 - **The commits list is the switch.** A *working tree* row on top, then
   one group per branch of the stack: the **current branch** — its own
