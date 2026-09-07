@@ -454,13 +454,15 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   more*; the card scrolls on its own past a few hundred pixels so the
   diff keeps the page. The working tree, a branch and a range have no
   card.
-- **The commits list is the switch.** One group per branch of the stack:
-  the **current branch** — a *working tree* row, then its own commits
-  since it forked from the branch it stacks on, unpushed ones marked `↑`
-  — then **each branch under it**, nearest first, with the commits it
-  added over the one below (a branch straight off the trunk has no such
-  groups), and the **default branch**'s latest *Commits per page* (twenty
-  by default) with a *load more…* row. A click loads it into the same
+- **The commits list is the switch.** A *working tree* row on top, then
+  one group per branch of the stack: the **current branch** — its own
+  commits since it forked from the branch it stacks on, unpushed ones
+  marked `↑` — then **each branch under it**, nearest first, with the
+  commits it added over the one below (a branch straight off the trunk
+  has no such groups), and the **default branch**'s latest *Commits per
+  page* (twenty by default) with a *load more…* row. With the default
+  branch checked out its group stands alone under the working tree row,
+  rather than a second header of the same name over an empty list. A click loads it into the same
   page: the *working tree* row the unstaged changes, a commit that one
   commit, a branch header everything the branch did since it forked (a
   stack branch's header, that branch against the one below it) — except

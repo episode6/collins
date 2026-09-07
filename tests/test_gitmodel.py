@@ -173,8 +173,8 @@ def base_rows(**overrides):
 def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_specs_loads():
     rows = base_rows()
     assert [f"{row.group}/{row.kind}:{row.label}" for row in rows] == [
+        "worktree/worktree:working tree",
         "current/header:feat/panel",
-        "current/worktree:working tree",
         "current/commit:commit 3",
         "current/commit:commit 2",
         "stack:develop/header:develop",
@@ -184,10 +184,10 @@ def test_build_rows_lists_current_parent_and_default_groups_in_order_with_the_sp
         "default/commit:commit 8",
         "default/more:load more…",
     ]
-    assert rows[0].load == "branch"
-    assert rows[0].id == "header:current"
-    assert rows[1].load == "unstaged"
-    assert rows[1].id == gitmodel.WORKTREE_ROW_ID
+    assert rows[0].load == "unstaged"
+    assert rows[0].id == gitmodel.WORKTREE_ROW_ID
+    assert rows[1].load == "branch"
+    assert rows[1].id == "header:current"
     assert rows[2].load == {"show": commit(3).sha}
     assert rows[2].id == f"commit:{commit(3).sha}"
     assert (rows[2].sha, rows[2].abbrev, rows[2].unpushed) == (commit(3).sha, commit(3).abbrev, True)
@@ -208,8 +208,8 @@ def test_build_rows_branches_at_one_commit_share_a_header_with_slashes():
     join that branch's header; the group id and the load stay the first
     branch's."""
     rows = base_rows(twins=("feat/panel", "feat/panel-2", "wip"))
-    assert rows[0].label == "feat/panel / feat/panel-2 / wip"
-    assert rows[0].id == "header:current"
+    assert rows[1].label == "feat/panel / feat/panel-2 / wip"
+    assert rows[1].id == "header:current"
     develop = gitmodel.BranchRef("develop", "origin/develop", ("develop-twin",))
     rows = base_rows(stack=[gitmodel.BranchPage(develop, (commit(5),), False)])
     header = next(row for row in rows if row.group == "stack:develop")
@@ -223,7 +223,6 @@ def test_row_folded_hides_every_row_of_a_collapsed_group_but_its_header():
     rows = base_rows()
     folded = [row.id for row in rows if gitmodel.row_folded(row, {"current", "default"})]
     assert folded == [
-        gitmodel.WORKTREE_ROW_ID,
         f"commit:{commit(3).sha}",
         f"commit:{commit(2).sha}",
         f"commit:{commit(9).sha}",
@@ -231,6 +230,10 @@ def test_row_folded_hides_every_row_of_a_collapsed_group_but_its_header():
         "more:default",
     ]
     assert not any(gitmodel.row_folded(row, set()) for row in rows)
+    # The working tree row sits above every header, in a group of its own
+    # that no caret folds.
+    assert rows[0].group == gitmodel.WORKTREE_GROUP
+    assert not gitmodel.row_folded(rows[0], {"current", "default", "worktree"})
 
 
 def test_build_rows_a_stack_is_one_group_per_branch_each_ranging_to_the_one_below():
@@ -242,8 +245,8 @@ def test_build_rows_a_stack_is_one_group_per_branch_each_ranging_to_the_one_belo
         stack=[BranchPage(step2, (commit(5),), True), BranchPage(step1, (commit(4),), False)],
     )
     assert [f"{row.group}/{row.kind}:{row.label}" for row in rows] == [
+        "worktree/worktree:working tree",
         "current/header:feat/panel",
-        "current/worktree:working tree",
         "current/commit:commit 3",
         "current/commit:commit 2",
         "stack:step2/header:step2",
@@ -268,7 +271,31 @@ def test_build_rows_a_stack_is_one_group_per_branch_each_ranging_to_the_one_belo
 def test_build_rows_omits_the_stack_when_the_parent_is_the_default_branch():
     rows = base_rows(parent=BranchRef("main", "main"), stack=[])
     assert not any(row.group.startswith(gitmodel.STACK_GROUP_PREFIX) for row in rows)
-    assert rows[0].load == "branch"
+    assert rows[1].load == "branch"
+
+
+def test_build_rows_on_the_default_branch_the_current_group_is_left_out():
+    """main checked out: a `main` header over an empty `main..HEAD` above
+    the default group's `main` header would name the branch twice, so the
+    list is the working tree row and the default group alone — the
+    default's header wearing the twins at HEAD — and a "branch" load marks
+    that header."""
+    main = BranchRef("main", "main")
+    rows = base_rows(branch="main", parent=main, stack=[], current=[], twins=("main", "release"))
+    assert [f"{row.group}/{row.kind}:{row.label}" for row in rows] == [
+        "worktree/worktree:working tree",
+        "default/header:main / release",
+        "default/commit:commit 9",
+        "default/commit:commit 8",
+        "default/more:load more…",
+    ]
+    assert rows[1].id == "header:default" and rows[1].load is None
+    assert loaded_row_id(rows, "branch") == "header:default"
+    assert loaded_row_id(rows, "unstaged") == gitmodel.WORKTREE_ROW_ID
+    # A branch of the same name as the default is only "on" it when a
+    # default is known at all.
+    rows = base_rows(branch="main", parent=None, default=None, stack=[], default_commits=[])
+    assert rows[1].id == "header:current"
 
 
 def test_build_rows_with_no_parent_at_all_the_header_loads_what_the_group_lists():
@@ -276,13 +303,13 @@ def test_build_rows_with_no_parent_at_all_the_header_loads_what_the_group_lists(
     something else): the header ranges over the listed commits, from the
     oldest one's parent — read as `diff <sha>^...HEAD`."""
     rows = base_rows(parent=None, default=None, stack=[], default_commits=[])
-    assert [row.group for row in rows] == ["current"] * 4
-    assert rows[0].load == {"range": f"{commit(2).sha}^...HEAD"}
-    assert gitloads.loaded_ok(rows[0].load)
+    assert [row.group for row in rows] == ["worktree"] + ["current"] * 3
+    assert rows[1].load == {"range": f"{commit(2).sha}^...HEAD"}
+    assert gitloads.loaded_ok(rows[1].load)
     # And nothing listed: nothing to load.
     rows = base_rows(parent=None, default=None, stack=[], current=[], default_commits=[])
-    assert rows[0].load is None
-    assert [row.kind for row in rows] == ["header", "worktree"]
+    assert rows[1].load is None
+    assert [row.kind for row in rows] == ["worktree", "header"]
 
 
 def test_build_rows_the_default_branchs_header_loads_nothing():

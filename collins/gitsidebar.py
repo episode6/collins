@@ -5,11 +5,13 @@ the action row under them.
 
 The commits panel and the files panel beside the diff view (gitpage
 places the widget; this module never imports gitpage). The commits list is
-one group per branch of interest (gitmodel.build_rows: the current branch
-with its `working tree` row and `↑` unpushed marks, every branch of the
-stack under it down to the default branch — the page reads the stack off
-git and hands it in with set_context — and the default branch's latest
-page with `load more…`), the loaded row marked `▸` after what the page
+the `working tree` row over one group per branch of interest
+(gitmodel.build_rows: the current branch with its `↑` unpushed marks —
+left out when the default branch is checked out, whose group would
+repeat it — every branch of the stack under it down to the default
+branch — the page reads the stack off git and hands it in with
+set_context — and the default branch's latest page with `load more…`),
+the loaded row marked `▸` after what the page
 has loaded (set_context, not the last click — a load made by the agent's
 show_diff is reflected), and a caret on every branch header that folds
 the group's rows away (collapse_group; which groups are folded is the
@@ -562,11 +564,13 @@ class GitSidebar(Gtk.Box):
         rebuild the commits list; a reply to an earlier ask is dropped.
         The stack's groups are the parent (when it isn't the default) and
         the branches under it, each read as `<below>..<branch>`
-        (gitmodel.stack_ranges)."""
+        (gitmodel.stack_ranges). On the default branch the current group
+        is not drawn (build_rows), so its page is not read either."""
         self._commits_gen += 1
         gen = self._commits_gen
         cwd = self._cwd_provider()
         parent, default = self._parent, self._default
+        on_default = default is not None and self._branch == default.name
         stack: tuple[BranchRef, ...] = ()
         if parent is not None and (default is None or parent.name != default.name):
             stack = (parent, *self._stack)
@@ -574,10 +578,13 @@ class GitSidebar(Gtk.Box):
         page_size = self._options.log_page
 
         def work() -> None:
-            current_range = [f"{parent.target}..HEAD"] if parent is not None else ["HEAD"]
-            current, current_more = gitops.read_page(
-                cwd, current_range, page_size, pages.get(gitmodel.CURRENT_GROUP, 1)
-            )
+            current: list[gitmodel.Commit] = []
+            current_more = False
+            if not on_default:
+                current_range = [f"{parent.target}..HEAD"] if parent is not None else ["HEAD"]
+                current, current_more = gitops.read_page(
+                    cwd, current_range, page_size, pages.get(gitmodel.CURRENT_GROUP, 1)
+                )
             stack_pages: list[gitmodel.BranchPage] = []
             for ref, below in gitmodel.stack_ranges(stack, default):
                 group = gitmodel.stack_group(ref.name)

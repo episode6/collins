@@ -184,7 +184,11 @@ imports `gitpage`; the page feeds it and listens:
   re-reads the commits; header and commit rows carry their full label as
   a tooltip, since both ellipsize;
   returns whether it did), `refresh_commits()` (threads: `gitops.read_page`
-  per group — the current `<parent>..HEAD`, then the parent and each stack
+  per group — the current `<parent>..HEAD` (skipped, and its group not
+  drawn, when the default branch is checked out: `gitmodel.build_rows`
+  leaves the current group out rather than name the branch twice; the
+  `working tree` row tops the list in `WORKTREE_GROUP`, above every header
+  and outside every fold), then the parent and each stack
   branch as `<below>..<branch>` (`gitmodel.stack_ranges`), the default —
   plus `unpushed_shas`, landed behind a generation; group ids are
   `current`, `stack:<name>`, `default`, and `_pages` is keyed by them),

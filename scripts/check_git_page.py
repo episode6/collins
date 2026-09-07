@@ -6,7 +6,7 @@ Exercises the GTK side that tests/test_gitloads.py, tests/test_diffmodel.py
 and tests/test_gitinfo.py can't reach: a real GitPage in a real window over
 a real repository, on a PATH holding git alone. A pass over the sidebar
 (collins/gitsidebar.py) checks its commits list off the repository (the
-branch header, the working tree row, the `main..HEAD` commits, the default
+working tree row, the branch header, the `main..HEAD` commits, the default
 branch's group; no stack group while the parent is the default, no `↑`
 without a remote), the header toggle and its persistence (page_state's
 "sidebar", a restore with it off), the collapse under the breakpoint on a
@@ -260,8 +260,8 @@ def check_sidebar(repo: str) -> None:
     rows = sidebar.commit_rows()
     check("the current group lists main..HEAD, newest first", landed, [r.label for r in rows])
     check(
-        "header feat, then the working tree row",
-        len(rows) > 1 and rows[0].kind == "header" and rows[0].label == "feat" and rows[1].kind == "worktree",
+        "the working tree row, then header feat",
+        len(rows) > 1 and rows[0].kind == "worktree" and rows[1].kind == "header" and rows[1].label == "feat",
         [(r.kind, r.label) for r in rows[:2]],
     )
     check(
@@ -275,27 +275,29 @@ def check_sidebar(repo: str) -> None:
     check("no load more… under a page of 20", not any(r.kind == "more" for r in rows))
     check("the working tree row is the loaded one", sidebar.loaded_row_id() == "worktree", sidebar.loaded_row_id())
     check(
-        "the loaded row wears the mark, its group's header the highlight",
+        "the loaded row wears the mark; the working tree is no branch's, so no header the highlight",
         sidebar._commit_widgets["worktree"].has_css_class("git-row-loaded")
-        and sidebar._commit_widgets["header:current"].has_css_class("git-group-loaded"),
+        and not any(w.has_css_class("git-group-loaded") for w in sidebar._commit_widgets.values()),
     )
 
     # -- the caret folds a group's rows under its header -----------------------------------
     sidebar.collapse_group("current")
     folded = [r.id for r in rows if r.group == "current" and r.kind != "header"]
     check(
-        "folding the current group hides its rows, the header stays",
+        "folding the current group hides its rows, the header and the working tree row stay",
         sidebar.collapsed_groups() == {"current"}
+        and folded
         and not any(sidebar._commit_widgets[i].get_visible() for i in folded)
+        and sidebar._commit_widgets["worktree"].get_visible()
         and sidebar._commit_widgets["header:current"].get_visible()
         and sidebar._commit_widgets["header:default"].get_visible(),
         sidebar.collapsed_groups(),
     )
     sidebar.refresh_commits()
-    wait_for(lambda: sidebar.commit_rows() and not sidebar._commit_widgets["worktree"].get_visible())
+    wait_for(lambda: sidebar.commit_rows() and not sidebar._commit_widgets[folded[0]].get_visible())
     check(
         "a re-read keeps the fold",
-        sidebar.collapsed_groups() == {"current"} and not sidebar._commit_widgets["worktree"].get_visible(),
+        sidebar.collapsed_groups() == {"current"} and not sidebar._commit_widgets[folded[0]].get_visible(),
     )
     sidebar.collapse_group("current")
     check(
