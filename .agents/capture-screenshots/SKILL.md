@@ -91,6 +91,14 @@ shrunken shot (a 1100×720 monitor gives a 1034×688 window).
 Without this wrapper the window appears on the user's desktop and takes focus
 for the whole settle period, interrupting whatever they're doing.
 
+The wrapper also cuts the headless shell and the command off from audio
+(`PULSE_SERVER`, `PIPEWIRE_REMOTE` and `CANBERRA_DRIVER` pointed at nothing).
+A headless shell shares the user's sound server, so every compositor bell the
+app rings — `check_notifications.py` rings a dozen a run — and every
+notification sound it plays would otherwise come out of the user's speakers
+with no window to explain them. `HEADLESS_AUDIO=1` keeps the sound for a run
+whose point is to hear it.
+
 ## Staging demo data
 
 `.agents/capture-screenshots/scripts/stage-demo-data.sh <dir>` — script paths

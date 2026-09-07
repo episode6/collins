@@ -17,7 +17,21 @@
 # Falls back to the current display, with a warning, when a headless
 # compositor isn't available — the capture still works, it just becomes
 # visible again.
+#
+# The headless shell has its own display but not its own sound server: every
+# compositor bell it rings (each Gdk.Display.beep the app under test makes,
+# and check_notifications.py makes a dozen a run) plays the desktop's alert
+# sound on the user's real speakers, and the app's own notification sound
+# plays there too. So both the shell and the command are cut off from audio,
+# by pointing every client library at a server that isn't there. HEADLESS_AUDIO=1
+# keeps the sound, for a run whose point is to hear it.
 set -u
+
+if [ "${HEADLESS_AUDIO:-0}" != 1 ]; then
+    export PULSE_SERVER=unix:/nonexistent/collins-headless-no-audio
+    export PIPEWIRE_REMOTE=collins-headless-no-audio
+    export CANBERRA_DRIVER=null
+fi
 
 if [ "$#" -eq 0 ]; then
     echo "usage: with-headless-display.sh <command> [args...]" >&2
