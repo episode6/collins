@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 
 name: CI
 
@@ -12,7 +12,7 @@ on:
 # Jobs that use image dependencies run inside a prebuilt CI image
 # (.github/docker/ci.Dockerfile is the one canonical list of build
 # dependencies); the image job resolves or builds the three tags. The tiny jobs
-# (lint, verify-versions) stay on the bare runner: they need nothing
+# (lint, verify-versions, docs) stay on the bare runner: they need nothing
 # from the image, and pulling one to run a one-second script would only slow
 # them down.
 # The package is public, so pulling needs no credentials; only the image job
@@ -160,3 +160,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: python3 scripts/verify_versions.py
+
+  # The docs site builds here on every PR, not only on docs.yml's deploy after
+  # a merge: VitePress compiles each page through Vue's template compiler, so
+  # a stray `<word>` outside a one-line code span is an unclosed tag and the
+  # build dies — which once went unnoticed on main for six merges, since the
+  # deploy workflow's red run is nowhere in a PR's checks. Same steps as the
+  # deploy's build job, minus the Pages upload.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: docs
+      - name: Build with VitePress
+        run: npm run docs:build
+        working-directory: docs

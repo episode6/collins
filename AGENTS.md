@@ -192,8 +192,9 @@ directories). Scripts run from outside the repo import the system-installed
 
 CI (`.github/workflows/ci.yml`) runs lint, the unit suite, the e2e suite under
 Xvfb, wheel + `.deb` packaging with `scripts/verify_wheel_data.py`, PPA source
-builds for noble and resolute, an RPM build + `dnf install`, and version
-verification. The e2e job appears late in `gh pr checks`
+builds for noble and resolute, an RPM build + `dnf install`, version
+verification, and a VitePress build of the docs site (`docs`; a `<word>`
+outside a one-line code span breaks it). The e2e job appears late in `gh pr checks`
 output — a run is green only when `e2e` is listed and passed. When you change a
 signal signature or a method the e2e scripts poke, grep `scripts/check_*.py`.
 
