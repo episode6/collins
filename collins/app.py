@@ -939,6 +939,19 @@ tabbar tab.bell-flash,
 row.session-child.bell-flash {
   animation: bell-flash 400ms ease-out;
 }
+/* The same bell over the ringing session's terminal (TerminalTab.flash_bell):
+   a veil laid over the terminal and its gutters, painted only while it wears
+   .bell-flash. A background rather than the inset shadow above, since the
+   veil has no background of its own to composite over, and a fainter tint:
+   it covers the text the user is reading. */
+.bell-veil { background-color: transparent; }
+@keyframes bell-veil {
+  from { background-color: alpha(#D97757, 0.3); }
+  to   { background-color: alpha(#D97757, 0); }
+}
+.bell-veil.bell-flash {
+  animation: bell-veil 400ms ease-out;
+}
 /* The attachments handle takes the same .bell-flash class (flash.py is the
    app's one "look here", see TerminalTab._note_attachment_news) but not this
    animation, for two reasons. An inset shadow spread across a 9999px-radius

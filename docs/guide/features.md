@@ -670,7 +670,9 @@ to install, and nothing in it is a terminal.
   coalesced row in the history however many times it rings. The selected
   session's bell stays the desktop's beep — a bell you were there for is
   not history — and *Bells from other sessions* in Preferences turns the
-  rest back into beeps.
+  rest back into beeps. Every bell, the selected session's included, is
+  also a visual bell: the ringing session's terminal, its sidebar row, its
+  tab and the header bar all flash for a beat.
 - **A newer Collins** is announced the same way. Once a day the app asks
   GitHub for the latest release — through your `gh` login when it has one,
   anonymously over the public API otherwise (no token, no account) — and

@@ -583,6 +583,8 @@ def steps(app: App):
         before = len(center.rows())
         win._on_bell(shared["tab_b"])
         check("a bell from the selected tab posts no row", len(center.rows()) == before)
+        check("but flashes the tab's terminal veil",
+              shared["tab_b"]._bell_veil.has_css_class("bell-flash"))
         win.tab_view.set_selected_page(page_a)
         win.state.set_setting("bell_notifications", False)
         win._on_bell(shared["tab_b"])

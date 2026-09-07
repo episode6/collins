@@ -49,6 +49,12 @@ downloads of each version, see the
   instead of waiting out a whole interval. Polls come every 10 minutes
   rather than 5, and any fetch, the refresh button's included, restarts
   that clock.
+- **The selected session's bell flashes its terminal.** A terminal bell
+  from the session you are looking at was the desktop's beep plus a
+  400ms tint of the header bar and a sidebar row that is already the
+  accent colour — a ping with no visible source. The ringing session's
+  terminal now flashes too, for every bell, selected or not; the
+  selected session's bell still posts no notification.
 - **A files-list click shows one file's diff.** Clicking a file in the
   git page's files list scrolled the whole stream to its section; it now
   shows that file's diff alone, and `]` / `.` walk on into the next file.
