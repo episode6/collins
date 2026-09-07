@@ -2682,8 +2682,6 @@ def _fold(preview: Gtk.Widget, full: Gtk.Widget) -> _Fold:
     return _Fold(preview, full)
 
 
-
-
 def _body_label(
     text: str,
     images: bool = False,
