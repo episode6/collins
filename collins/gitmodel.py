@@ -46,9 +46,13 @@ TWIN_SEPARATOR = " / "
 # unmerged path) plus `?` for untracked. Anything else — a code a future git
 # adds — drops the row rather than colouring it wrong.
 STATUS_CODES = frozenset("MADRTCU?")
-# The groups of the commits list, top to bottom: the current branch, one
-# group per branch of the stack under it (stack_group(name), the nearest
-# first), the default branch. The row kinds in them.
+# The groups of the commits list, top to bottom: the working tree row (a
+# group of its own, above every header, so no caret folds it), the current
+# branch (absent when the default branch is checked out: its group would
+# repeat the default's), one group per branch of the stack under it
+# (stack_group(name), the nearest first), the default branch. The row kinds
+# in them.
+WORKTREE_GROUP = "worktree"
 CURRENT_GROUP = "current"
 DEFAULT_GROUP = "default"
 STACK_GROUP_PREFIX = "stack:"
@@ -338,8 +342,9 @@ def commit_row_id(sha: str) -> str:
 def row_folded(row: Row, collapsed: Collection[str]) -> bool:
     """Whether *row* hides under a collapsed group: every row of a group in
     *collapsed* but its header, which stays as the handle that unfolds it
-    (the sidebar's caret)."""
-    return row.kind != "header" and row.group in collapsed
+    (the sidebar's caret). The working tree row is above every header and
+    never folds."""
+    return row.kind not in ("header", "worktree") and row.group in collapsed
 
 
 def _commit_rows(commits: Iterable[Commit], group: str, unpushed: Collection[str]) -> list[Row]:
@@ -376,12 +381,16 @@ def build_rows(
     unpushed: Collection[str],
     twins: Iterable[str] = (),
 ) -> list[Row]:
-    """The rows of the commits list, top to bottom: the current branch (its
-    header, `working tree`, its commits `<parent>..HEAD`, `load more…`),
-    then one group per branch of *stack* — the branch the current one
-    stacks on first, then the one under it, down to the last one above
-    the default branch (each its header, its commits `<below>..<branch>`,
-    `load more…`) — then the default branch (its header, its latest page).
+    """The rows of the commits list, top to bottom: `working tree` (its own
+    group, WORKTREE_GROUP, above every header), the current branch (its
+    header, its commits `<parent>..HEAD`, `load more…`), then one group per
+    branch of *stack* — the branch the current one stacks on first, then
+    the one under it, down to the last one above the default branch (each
+    its header, its commits `<below>..<branch>`, `load more…`) — then the
+    default branch (its header, its latest page). With the default branch
+    checked out (*branch* is *default*'s name) the current group is left
+    out: its header would repeat the default's name over an empty list,
+    so the default's header stands for both, wearing the current *twins*.
     The caller hands the stack as gitops.stack_branches lists it, nearest
     HEAD first, with a page read for each (BranchPage); a parent that is
     the default branch has no stack.
@@ -398,21 +407,22 @@ def build_rows(
     HEAD, a stack branch's ride on its BranchRef). *unpushed* is the set
     of shas the `↑` mark goes on. The whole list is capped at MAX_ROWS.
     """
-    rows: list[Row] = []
-    oldest = current[-1] if current else None
-    if parent is not None:
-        current_load: gitloads.Loaded | None = "branch"
-    elif oldest is not None and gitloads.safe_ref(f"{oldest.sha}^"):
-        current_load = {gitloads.RANGE_KEY: f"{oldest.sha}^...HEAD"}
-    else:
-        current_load = None
-    rows.append(
-        Row(header_row_id(CURRENT_GROUP), "header", CURRENT_GROUP, branch_label(branch, twins), current_load)
-    )
-    rows.append(Row(WORKTREE_ROW_ID, "worktree", CURRENT_GROUP, _("working tree"), "unstaged"))
-    rows.extend(_commit_rows(current, CURRENT_GROUP, unpushed))
-    if current_more:
-        rows.append(_more_row(CURRENT_GROUP))
+    rows: list[Row] = [Row(WORKTREE_ROW_ID, "worktree", WORKTREE_GROUP, _("working tree"), "unstaged")]
+    on_default = default is not None and branch == default.name
+    twins = tuple(twins)
+    if not on_default:
+        oldest = current[-1] if current else None
+        if parent is not None:
+            current_load: gitloads.Loaded | None = "branch"
+        elif oldest is not None and gitloads.safe_ref(f"{oldest.sha}^"):
+            current_load = {gitloads.RANGE_KEY: f"{oldest.sha}^...HEAD"}
+        else:
+            current_load = None
+        label = branch_label(branch, twins)
+        rows.append(Row(header_row_id(CURRENT_GROUP), "header", CURRENT_GROUP, label, current_load))
+        rows.extend(_commit_rows(current, CURRENT_GROUP, unpushed))
+        if current_more:
+            rows.append(_more_row(CURRENT_GROUP))
 
     ranges = stack_ranges([page.branch for page in stack], default)
     for page, (ref, below) in zip(stack, ranges, strict=True):
@@ -427,7 +437,8 @@ def build_rows(
             rows.append(_more_row(group))
 
     if default is not None:
-        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, default.label))
+        label = branch_label(default.name, twins) if on_default else default.label
+        rows.append(Row(header_row_id(DEFAULT_GROUP), "header", DEFAULT_GROUP, label))
         rows.extend(_commit_rows(default_commits, DEFAULT_GROUP, unpushed))
         if default_more:
             rows.append(_more_row(DEFAULT_GROUP))
@@ -437,7 +448,9 @@ def build_rows(
 def loaded_row_id(rows: Sequence[Row], loaded: object, resolved_sha: str | None = None) -> str | None:
     """The id of the row that describes what the page has loaded, or None when
     no row does: the working tree row for both working-tree loads, the
-    current header for "branch", a commit row for a {"show": ref} — matched
+    current header for "branch" (the default's when the default branch is
+    checked out and the list has no current group), a commit row for a
+    {"show": ref} — matched
     by sha prefix, then by *resolved_sha* (what a `show HEAD` or a branch
     name resolves to, when the caller could resolve it) — and the header
     whose range a {"range": "a...b"} is. Anything else (a foreign title,
@@ -445,7 +458,11 @@ def loaded_row_id(rows: Sequence[Row], loaded: object, resolved_sha: str | None 
     if loaded in ("unstaged", "staged"):
         return next((row.id for row in rows if row.kind == "worktree"), None)
     if loaded == "branch":
-        return next((row.id for row in rows if row.kind == "header" and row.group == "current"), None)
+        for group in (CURRENT_GROUP, DEFAULT_GROUP):
+            found = next((row.id for row in rows if row.kind == "header" and row.group == group), None)
+            if found is not None:
+                return found
+        return None
     ref = gitloads.show_ref(loaded)
     if ref is not None:
         for row in rows:

@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **The working tree row tops the commits list.** It sat under the current
+  branch's header as one of its rows; it now stands above every header in
+  a row of its own, outside any fold. With the default branch checked out
+  the list no longer names it twice — a `main` header over an empty
+  `main..HEAD` above the default group's own `main` header — the default
+  group stands alone under the working tree row.
 - **Files in the diff view stand apart.** A file boundary and a hunk
   boundary in the git page's scroll looked alike at a glance. Each file
   card now wears a border and the cards sit 16 px apart, twice what they
