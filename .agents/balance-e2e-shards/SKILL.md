@@ -4,7 +4,7 @@ description: >-
   How to rebalance Collins' sharded e2e CI job: refresh the per-check
   timing table (CHECK_SECONDS in scripts/run_e2e.py) from a CI run with the
   bundled refresh_weights.py, read the deal it prints, and change the shard
-  count (ci.yml matrix + the --shard N/10 string + the docs that say "ten").
+  count (ci.yml matrix + the --shard N/5 string + the docs that say "five").
   Use when an e2e-shard job runs noticeably longer than its siblings, when a
   check was added, removed, renamed or got much slower, when the user asks to
   rebalance / re-weight / re-shard the e2e tests or to add or remove shards,
@@ -13,8 +13,8 @@ description: >-
 
 # Balancing the e2e shards
 
-CI runs `scripts/run_e2e.py` as ten matrix legs, `e2e-shard (1..10)`, each
-given `--shard N/10`. The runner deals every `scripts/check_*.py` to a shard
+CI runs `scripts/run_e2e.py` as five matrix legs, `e2e-shard (1..5)`, each
+given `--shard N/5`. The runner deals every `scripts/check_*.py` to a shard
 by weight: `CHECK_SECONDS` (a dict in `run_e2e.py`) holds each check's
 seconds from one CI run, `shard()` walks the checks heaviest-first and hands
 each to the shard with the least time so far. Balance is only as good as
@@ -40,10 +40,10 @@ log through `gh`, rewrites the table sorted heaviest-first with the run id
 and date in the comment above it, and prints the deal before and after:
 
 ```
-deal with run 34142124506's table, 10 shards:
-  shard 1/10:   28.5s  (1 checks)
+deal with run 34133941442's table, 5 shards:
+  shard 1/5:   46.8s  (7 checks)
   …
-  spread: 5.9s
+  spread: 0.4s
 ```
 
 Read the spread. LPT cannot land closer than the heaviest single check's
@@ -71,18 +71,18 @@ What the script keeps, drops and cannot see:
 
 Refreshing by hand is the same recipe: `gh run view --job <id> --log`, the
 `=== check_x.py: PASS (8.2s) ===` lines, into the dict. The step summary of
-each shard (`E2E checks (shard N/10)`) shows the same numbers.
+each shard (`E2E checks (shard N/5)`) shows the same numbers.
 
 ## Change the shard count
 
 The count lives in more places than the matrix. For N shards:
 
 - `.github/workflows/ci.yml`: the `shard:` matrix list and the
-  `--shard ${{ matrix.shard }}/10` denominator, and the `e2e-shard` job
+  `--shard ${{ matrix.shard }}/5` denominator, and the `e2e-shard` job
   comment's worst-case arithmetic (checks per shard × 2 × 120 s must stay
   well under `timeout-minutes`).
-- `scripts/run_e2e.py`'s docstring says "ten"; `AGENTS.md`, `.agents/collins-testing/SKILL.md`
-  and `.agents/collins-packaging-and-ci/SKILL.md` say `(1..10)` / `N/10`.
+- `scripts/run_e2e.py`'s docstring says "five"; `AGENTS.md`, `.agents/collins-testing/SKILL.md`
+  and `.agents/collins-packaging-and-ci/SKILL.md` say `(1..5)` / `N/5`.
 - Nothing in the runner or the tests hard-codes 4 beyond the docstring;
   `tests/test_run_e2e.py` deals at 4 but only asserts balance, so it holds
   at any count.
