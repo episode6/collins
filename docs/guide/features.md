@@ -162,34 +162,36 @@ Enter opens, Esc closes.
   terminal itself.
 - **Bodies render as GitHub-flavored markdown.** The description, comments,
   reviews and review threads on the PR page are parsed with markdown-it-py
-  (the `gfm-like` preset): headings in three sizes, nested lists laid out
-  structurally, task lists with ☐ / ☑ glyphs, ordered lists counting from
-  their first number, block quotes and GitHub alerts behind a bar,
-  horizontal rules, reference-style links, bare `https://` and `www.`
-  URLs linked, `<kbd>`, `<sub>`, `<sup>` and `<br>`, and images in place
-  as before. Tables are grids — the header row bold, columns aligned as
-  the delimiter row asks, cells selectable — that scroll sideways within
-  their own band rather than widening the page; a table past 50 rows or
-  8 columns shows that much and a link to the rest on GitHub. Fenced and
-  indented code is a read-only source view — highlighted for the fence's
+  (the `gfm-like` preset) and drawn as blocks: headings in three sizes;
+  nested lists laid out structurally, task lists with ☐ / ☑ glyphs,
+  ordered lists counting from their first number; block quotes behind a
+  bar; horizontal rules; reference-style links; bare `https://` and
+  `www.` URLs linked; `<kbd>`, `<sub>`, `<sup>` and `<br>` honoured, every
+  other HTML tag shown escaped, as text; images in place (a linked image
+  is the picture). **Tables** are grids — the header row bold, columns
+  aligned as the delimiter row asks, cells selectable — that scroll
+  sideways within their own band rather than widening the page; past 50
+  rows or 8 columns, that much shows and a link leads to the rest on
+  GitHub. **Code** is a read-only source view highlighted for the fence's
   language (`python`, `bash`, `json`, `diff`, `rust`… and any other name
   GtkSourceView knows), wearing the editor's style scheme like the Files
-  view's diffs, a long line scrolling sideways within the block. GitHub
-  references link the way they do on GitHub: `#123` and `owner/repo#123`
-  to the issue or PR, `@user` to the profile, a commit's hex to the
-  commit — into the PR's own repository, on its own host — and a relative
-  link like `[guide](docs/guide.md)` opens the file at the PR's head
-  commit; a reference inside a code span, or inside a link the author
-  wrote, is left alone. A `<details>` block is an expander wearing its
-  `<summary>` (wrapped, and cut past 300 characters) — collapsed unless
-  the tag says `open`, its contents built the first time it is opened
-  and counted against the body's widget budget when the tag opened it;
-  one with no closing tag shows as text
-  rather than swallowing the rest of the body. GitHub's alerts (`> [!NOTE]`,
-  `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`) are quotes under
-  GitHub's own icon and title for the kind, bar and title in the kind's
-  color — the accent, green, purple, yellow, red. Every other HTML tag
-  shows escaped, as text. Without the parser installed the page falls
+  view's diffs, a long line scrolling sideways within the block; a
+  right-click copies the whole block, and one past 20 000 characters shows
+  that much and a link to the rest. **GitHub references** link the way
+  they do on GitHub: `#123` and `owner/repo#123` to the issue or PR,
+  `@user` to the profile, a commit's hex to the commit — into the PR's own
+  repository, on its own host — and a relative link like
+  `[guide](docs/guide.md)` opens the file at the PR's head commit; a
+  reference inside a code span, or inside a link the author wrote, is
+  left alone. A **`<details>`** block is an expander wearing its
+  `<summary>` (wrapped, cut past 300 characters), collapsed unless the tag
+  says `open`, its contents built the first time it is opened; one with
+  no closing tag shows as text rather than swallowing the rest of the
+  body. **Alerts** (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`,
+  `[!CAUTION]`) are quotes under GitHub's own icon and title for the kind,
+  bar and title in the kind's color. A long description folds to its
+  first paragraph — or the first items of a list, the first rows of a
+  table — behind *Show more*. Without the parser installed the page falls
   back to its plainer built-in renderer.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
   file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —

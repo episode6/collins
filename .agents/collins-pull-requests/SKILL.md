@@ -151,109 +151,132 @@ under a banner. Font scale is a display-level provider keyed on
 (`_park_focus`), and `gtk-label-select-on-focus` is off app-wide, or the
 description selects itself.
 
-**Bodies are markdown blocks.** `mdblocks.parse_blocks` (GTK-free; GLib
-only) runs markdown-it-py's `gfm-like` preset — the one preset, pinned by a
-unit test: `gfm-like2` exists only on 4.1+ and Ubuntu ships 3.0.0 — and
-folds the token stream into frozen dataclasses (`Text(markup, source)`,
-`Heading`, `CodeBlock`, `Table`, `Quote(kind)`, `ListBlock`/`ListItem(check)`,
-`Details`, `ImageRow`, `Rule`), each carrying its `source`. Inline runs are
-rendered to Pango markup by a walker with an open-tag stack (well-formed by
-construction), hrefs escaped and gated to http(s), a linkify link kept only
-when its visible text starts with `http://`, `https://` or `www.` (GitHub's
-autolink rule; markdown-it's fuzzy linkify would link `example.com` — and
-is switched off in `_load`, being quadratic, so `www.` autolinks come from
-`mdblocks.link_www`, a linear pass over text tokens),
-`<img>`/`<br>`/`<sub>`/`<sup>`/`<kbd>` honoured and every other tag escaped
-literal, nesting capped at `MAX_DEPTH` (6). `mdwidgets.build` turns blocks
-into widgets under a `Budget` of ~400 leaves — a list's items count too, so
-a ten-thousand-item list is a few hundred rows and one label of the rest —
-and past it the remaining blocks are one plain label of their source
-(`mdwidgets.rest_source`), never dropped; `prview._fill_blocks` walks them
-with per-block line costs (`mdblocks.line_cost`), cutting the overrunning
-*paragraph* on its source with `body_head` and re-rendering the front
-through `mdblocks.render_inline` (`set_lines` + ellipsize on that label
-alone) — any other block that doesn't fit whole waits for "Show more", and
-what its own widget budget leaves over takes the same one-label shape
-(`_rest_head`). Fallback ladder: `mdblocks.available()`
-False (import latch) → `split_body` + `md_to_pango` for every body; a body
-`parse_blocks` raises on → that body alone; bad markup on a label → escaped
-source (GTK 4's `set_markup` blanks a label on bad markup instead of
-raising, so a `try/except GLib.GError` around it guards nothing). A
-`Table` is a `Gtk.Grid` of selectable cell labels (header bold under
+**Bodies are markdown blocks.** Two modules, the parse/render split the
+codebase uses everywhere:
+
+- `mdblocks.py` (GTK-free; GLib only, unit-tested in
+  `tests/test_mdblocks.py`) runs markdown-it-py's `gfm-like` preset — the
+  one preset, pinned by a unit test: `gfm-like2` exists only on 4.1+, and
+  the code runs on both Ubuntu's 3.0.0 and Fedora/Arch's 4.2.0 — behind an
+  import latch (`available()`), and folds the token stream into frozen
+  dataclasses (`Text(markup, source)`, `Heading`, `CodeBlock`, `Table`,
+  `Quote(kind)`, `ListBlock`/`ListItem(check)`, `Details`, `ImageRow`,
+  `Rule`), each carrying its `source`, nesting capped at `MAX_DEPTH` (6).
+  Inline runs become Pango markup through a walker with an open-tag stack
+  (well-formed by construction): hrefs escaped and gated to http(s); a
+  linkify link kept only when its visible text starts with `http://`,
+  `https://` or `www.` (GitHub's autolink rule — markdown-it's fuzzy
+  linkify would link `example.com`, and is switched off in `_load`, being
+  quadratic, so `www.` autolinks come from `mdblocks.link_www`, a linear
+  pass over text tokens); `<img>`, `<br>`, `<sub>`, `<sup>`,
+  `<kbd>` honoured and every other tag escaped literal (a `<br>` alone on
+  its line — an HTML block — is dropped). An image inside a link is its
+  alt text, the author's link kept (an anchor in an anchor is markup a
+  label can't honour); a paragraph that is only a linked image is an
+  `ImageRow`, the link dropped for the lightbox. `line_cost` estimates
+  what each block draws; `cut_block` is the front of a list or table that
+  fits a budget (the preview cut a paragraph gets from `body_head`).
+- `mdwidgets.py` turns blocks into widgets under a `Budget` of ~400
+  leaves — a list's items and a table's rows count too — and past it the
+  remaining blocks are one plain label of their source
+  (`mdwidgets.rest_source`), never dropped. What the page hands in travels
+  as trailing keywords through `build` / `build_one` / `_list` / `_quote`
+  and into a `DetailsExpander`: `page_url` (the body's own place on
+  GitHub, for the "more on GitHub" links), `scheme` (the code views'), and
+  through `prview` also `refs`.
+
+`prview._segments` picks the block walk (`_fill_blocks`) or the fallback
+ladder: `available()` False → `split_body` + `md_to_pango` for every body;
+a body `parse_blocks` raises on → that body alone; bad markup on a label →
+escaped source (GTK 4's `set_markup` blanks a label on bad markup instead
+of raising, so a `try/except GLib.GError` around it guards nothing).
+`_fill_blocks` spends the fold's character and line budgets per block
+(`line_cost`), cuts the overrunning *paragraph* on its source with
+`body_head` and re-renders the front through `mdblocks.render_inline`
+(`set_lines` + ellipsize on that label alone), shows the front of an
+overrunning list or table through `cut_block`, and leaves any other block
+that doesn't fit whole for "Show more"; what the widget budget leaves over
+takes the one-label shape (`_rest_head`).
+
+A `Table` is a `Gtk.Grid` of selectable cell labels (header bold under
 `.pr-md-th`, `xalign` per the delimiter row's colons, each cell wrapping
 past 60 chars) inside `mdwidgets._TableScroller` — sideways scrolling
 only, natural height, `hscroll-policy` NATURAL on the viewport — so the
-page body never scrolls sideways; `mdblocks.cap_table` squares the rows
-to the header and trims to `TABLE_MAX_ROWS` (50) × `TABLE_MAX_COLUMNS`
-(8), and what it cut (plus what the widget budget stopped — a row spends
-one leaf, as a list item does) is a dim
-"N more rows on GitHub" link to the body's own `page_url` (the comment's
-anchor or the PR; threaded from `_body_label` through
-`_segments`'s partial into `build_one`). A `CodeBlock` is a read-only
-`GtkSource.View` (`mdwidgets.code_view`) built like the Files view's patch
-view — no cursor, monospace, 6/4 px margins, no line numbers, its own
-`AUTOMATIC/NEVER` scroller with natural height (`.pr-md-code` on the view,
-`.pr-md-code-scroller` on the frame), the buffer text capped at
-`mdwidgets.CODE_CAP` (the render cap, per block); its language is the
-fence's info word through `editorfiles.fence_language_id` (the alias map:
-`python`/`py` → `python3`, `js`/`ts`/`jsx`/`tsx` → `js`, `bash`/`zsh`/
-`shell`/`console` → `sh`, `suggestion` → plain), else the word itself when
+page body never scrolls sideways; `mdblocks.cap_table` squares the rows to
+the header and trims to `TABLE_MAX_ROWS` (50) × `TABLE_MAX_COLUMNS` (8),
+and what it cut (plus what the widget budget stopped — a row spends one
+leaf) is a dim "N more rows on GitHub" link to `page_url`
+(`mdwidgets._link_label`).
+
+A `CodeBlock` is `mdwidgets.CodeBlockView`, a `Gtk.Overlay` holding a
+read-only `GtkSource.View` (`.view`, `.pr-md-code`) in its own
+`AUTOMATIC/NEVER` scroller (`.pr-md-code-scroller`, natural height) built
+like the Files view's patch view — no cursor, monospace, 6/4 px margins,
+no line numbers. A right-click (a `GestureClick` claimed in the CAPTURE
+phase, ahead of the text view's own context menu) copies the block's whole
+text (`.text`, `copy()`) and shows the `.pr-md-copied` OSD pill over the
+top-right corner for `copylabel.FLASH_MS`; the tooltip says so. The buffer
+holds `CODE_CAP` (20 000) characters; past it, `code_view` adds a
+"N more lines on GitHub" link (`.pr-md-code-more`). The language is the
+fence's info word through `editorfiles.fence_language_id` (`python`/`py` →
+`python3`, `js`/`ts`/`jsx`/`tsx` → `js`, `bash`/`zsh`/`shell`/`console` →
+`sh`, `suggestion` → plain), else the word itself when
 `LanguageManager.get_language` knows it, else plain. The style scheme is
 the page's — `PrViewPage._body_scheme()` = `editor.style_scheme(setting,
-dark)`, threaded beside `page_url` through `_body_label` / `_folded_body` /
-`_segments` / `_fill_blocks` / `_ThreadCard` into `build_one` — and
-`_apply_scheme` restyles every live code view with
-`mdwidgets.restyle_code(page, scheme)` (a tree walk for `.pr-md-code`
-views) when the setting or the app's light/dark changes. **GitHub
-references** are a post-pass over `text` tokens alone (`mdblocks.link_refs`,
-called from the walker's `_text` — never for a `code_inline` token, never
-while a `link` entry is on the open-tag stack, so an author's own link text
-and a link the http(s) gate refused both stay theirs; the text between
-references goes through `link_www`, so both passes share one token): `#123` and
-`owner/repo#123` → `/issues/N` (GitHub forwards a PR's number), `@user` →
-the profile, a lowercase 7–40 hex word with at least one digit and one
-letter → `/commit/`, with GitHub's boundaries (not on the tail of a word,
-`&`, `/`, `#`, `@`, `.` or `-`; not followed by a word character, `/` or
-`-`; logins on `mdblocks.LOGIN_RE`, the gate `avatars` shares). Every URL
-is built from a `mdblocks.RepoContext` — `repo_context(repository, host,
-head)` holds each part to its shape (owner/name, a hostname, a 40-hex
-oid or "") — that `PrViewPage._refs()` makes from the PR's own
-`repository`, its URL's host and the detail's `head_oid`, threaded as
-`refs` beside `page_url` and `scheme` through `_body_label` /
-`_folded_body` / `_segments` / `_fill_blocks` / `_cut_markup` /
-`_ThreadCard` into `parse_blocks` and `render_inline`; None means no
-reference links (a PR whose summary has no repository yet). With a head,
-`mdblocks.relative_href` turns a relative link destination (`docs/a.md`,
-`./b.md`; no scheme, leading slash, fragment, query or `..` step) into
+dark)` — and `_apply_scheme` restyles every live code view with
+`mdwidgets.restyle_code(page, scheme)` when the setting or the app's
+light/dark changes; an unopened `DetailsExpander` gets its `scheme`
+attribute refreshed so a fence built later wears the current one.
+
+**GitHub references** are a post-pass over `text` tokens alone
+(`mdblocks.link_refs`, called from the walker's `_text` — never for a
+`code_inline` token, never while a `link` entry is on the open-tag stack,
+so an author's own link text and a link the http(s) gate refused both
+stay theirs; the text between references goes through `link_www`, so both
+passes share one token): `#123` and `owner/repo#123` → `/issues/N` (GitHub forwards a
+PR's number), `@user` → the profile, a lowercase 7–40 hex word with at
+least one digit and one letter → `/commit/`, with GitHub's boundaries (not
+on the tail of a word, `&`, `/`, `#`, `@`, `.` or `-`; not followed by a
+word character, `/` or `-`; logins on `mdblocks.LOGIN_RE`, the gate
+`avatars` shares). Every URL is built from a `mdblocks.RepoContext` —
+`repo_context(repository, host, head)` holds each part to its shape
+(owner/name, a hostname, a 40-hex oid or "") — that `PrViewPage._refs()`
+makes from the PR's own `repository`, its URL's host and the detail's
+`head_oid`, threaded as `refs` beside `page_url` and `scheme` through
+`_body_label` / `_folded_body` / `_segments` / `_fill_blocks` /
+`_cut_markup` / `_ThreadCard` into `parse_blocks` and `render_inline`;
+None means no reference links. With a head, `mdblocks.relative_href` turns
+a relative link destination (`docs/a.md`, `./b.md`; no scheme, leading
+slash, fragment, query or `..` step — percent-decoded too) into
 `/blob/<head>/<path>` before the gate — never a linkify token, which is a
-domain not a path. A `Details` is `mdwidgets.DetailsExpander`, a
-`Gtk.Expander` whose label widget is its own wrapping label
-(`summary_label`, `.pr-md-details-summary`; GTK's built-in expander
-label neither wraps nor ellipsizes, and a one-sentence summary set the
-page's minimum width) wearing the summary (`_("Details")` when there is
-none; `mdblocks.summary_text` strips tags, reads the author's entities
-back, folds whitespace and cuts at `SUMMARY_MAX` (300) before its one
-escape, so it is set with `use_markup`), collapsed unless the tag said
-`open`. A `<details open>` builds its children at construction against
-the body's own `Budget` — the attribute is the author's, so what it
-shows counts like any other block; only a reader's click builds on the
-first `notify::expanded` with a fresh `Budget`, with whatever
-`image_row` / `page_url` / `scheme` the page handed the expander —
-`restyle_code` refreshes an unopened expander's `scheme` attribute so a
-fence built later wears the current one. An alert `Quote` is the quote
-column wearing `.pr-md-alert` and `.pr-md-alert-<kind>` under a
+domain not a path.
+
+A `Details` is `mdwidgets.DetailsExpander`, a `Gtk.Expander` whose label
+widget is its own wrapping label (`summary_label`,
+`.pr-md-details-summary`; GTK's built-in expander label neither wraps nor
+ellipsizes, and a one-sentence summary set the page's minimum width)
+wearing the summary (`_("Details")` when there is none;
+`mdblocks.summary_text` strips tags, reads the author's entities back,
+folds whitespace and cuts at `SUMMARY_MAX` (300) before its one escape, so
+it is set with `use_markup`), collapsed unless the tag said `open`. A
+`<details open>` builds its children at construction against the body's
+own `Budget` — the attribute is the author's, so what it shows counts like
+any other block; only a reader's click builds on the first
+`notify::expanded` with a fresh `Budget`, with whatever `image_row` /
+`page_url` / `scheme` the page handed the expander. An alert `Quote` is
+the quote column wearing `.pr-md-alert` and `.pr-md-alert-<kind>` under a
 `.pr-md-alert-head` row of GitHub's Octicon for the kind
-(`alert-note/tip/important/caution-symbolic`, the warning one the
-conflict mark's `alert-symbolic`) and the translated title; the bar and
-the head take the kind's color from app.py's CSS — the note the
-accent in `_CSS`, tip/warning/caution/important the passed green, pending
-yellow, failed red and merged purple of `_SCHEME_CSS`. Images render
-via `bodyimages` / `pictures` (`BoundedPicture`
-measures height-for-width in a `Gtk.Box` slot); changed images render
-before/after from `prblobs` (`gh api …/contents/{path}?ref=<sha>` with the
-raw media type; a binary file *does* get a "Binary files differ" patch, so
-`patch is None` means over-cap). Avatars are `github.com/<login>.png`, logins
-gated to GitHub's username alphabet.
+(`alert-note/tip/important/caution-symbolic`, the warning one the conflict
+mark's `alert-symbolic`) and the translated title; the bar and the head
+take the kind's color from app.py's CSS — the note the accent in `_CSS`,
+tip/warning/caution/important the passed green, pending yellow, failed red
+and merged purple of `_SCHEME_CSS`. Images render via `bodyimages` /
+`pictures` (`BoundedPicture` measures height-for-width in a `Gtk.Box`
+slot); changed images render before/after from `prblobs` (`gh api
+…/contents/{path}?ref=<sha>` with the raw media type; a binary file *does*
+get a "Binary files differ" patch, so `patch is None` means over-cap).
+Avatars are `github.com/<login>.png`, logins gated to GitHub's username
+alphabet.
 
 ## Footguns
 
@@ -282,7 +305,12 @@ gated to GitHub's username alphabet.
   grid's height at the grid's natural width instead (what `halign START`
   in the viewport allocates it). The widths were never the problem; the
   viewport's default `hscroll-policy` of MINIMUM was, which the table sets
-  to NATURAL so the grid scrolls rather than squeezes.
+  to NATURAL so the grid scrolls rather than squeezes. Two prices, both
+  harmless: GTK logs "Trying to measure GtkGrid for height of N, but it
+  needs at least M" (the grid's height at its minimum width is taller than
+  the one the scroller reports), and chaining up to
+  `Gtk.ScrolledWindow.do_measure` from Python hands back zero baselines —
+  return -1 for both or GTK warns of "a horizontal baseline".
 - An `<img>` alone on its line is a CommonMark HTML *block* (type 7), not an
   `html_inline`: `mdblocks._html_lines` turns such lines into image rows. A
   `Text.source` is the inline token's content (indents and `>` stripped),
@@ -310,6 +338,15 @@ gated to GitHub's username alphabet.
   GitHub would show them literal; a `javascript:` destination is refused by
   markdown-it outright, so `[#7](javascript:…)` is plain text in which `#7`
   links. Neither is worth a token-level detour.
+- A right-click on a `GtkSource.View` pops the text view's own context
+  menu unless a `GestureClick` for `BUTTON_SECONDARY` claims it in the
+  CAPTURE phase (`CodeBlockView`, and the git page's hunk views the same
+  way). Under the headless shell the clipboard claim it makes can be
+  dropped until the window has seen input: `check_pr_body_blocks.py`
+  copies until `clipboard.is_local()`.
+- The alert titles, "Details", "Right-click to copy" and the "more … on
+  GitHub" counts have no `po/generate.py` entries yet — English until the
+  release-cut translation refresh, which must pick them up.
 
 Related: `collins-sessions-and-sidebar`, `collins-terminal-tab`,
 `collins-panel-dock`, `collins-gtk-sharp-edges`.

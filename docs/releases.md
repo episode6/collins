@@ -43,37 +43,44 @@ downloads of each version, see the
   shows that file's diff alone, and `]` / `.` walk on into the next file.
   Clicking the section heading (**FILES**, or the live **UNSTAGED** /
   **STAGED**) shows the whole list of diffs again.
-- **PR bodies render as real markdown blocks.** The PR page's description,
-  comments and reviews are parsed by markdown-it-py (the `gfm-like`
-  preset; `python3-markdown-it` / `python3-linkify-it` on Ubuntu,
-  `python3-markdown-it-py` / `python3-linkify-it-py` on Fedora,
-  `python-markdown-it-py` / `python-linkify-it-py` on Arch — new
-  dependencies, from the distro like everything else) into blocks Collins
-  draws itself: headings in three sizes, nested lists laid out
-  structurally, ☐ / ☑ task lists, ordered lists counting from their first
-  number, quotes and alerts behind a bar, horizontal rules, reference-style
-  links, bare URLs linked the way GitHub links them, `<kbd>` / `<sub>` /
-  `<sup>` / `<br>`. Tables render as grids: the header row bold, each
-  column aligned as its delimiter row asks, cells selectable, a wide table
-  scrolling sideways within its own band rather than widening the page;
-  one past 50 rows or 8 columns shows that much and a dim link to the
-  rest on GitHub. Fenced and indented code renders in a read-only source
-  view, highlighted for the fence's language (`python`, `bash`, `json`,
-  `diff`… and any name GtkSourceView knows) and wearing the editor's style
-  scheme like the Files view's diffs, a long line scrolling sideways
-  within the block. `#123`, `owner/repo#123`, `@user` and commit hashes
-  link into the PR's own repository as they do on GitHub, and a relative
-  link (`[guide](docs/guide.md)`) opens the file at the PR's head commit —
-  never inside a code span or an author's own link. A `<details>` block
-  is an expander wearing its summary (wrapped, cut past 300 characters)
-  — collapsed unless the tag says `open`, its contents built the first
-  time it opens, and counted against the body's widget budget when the
-  tag opened it; an unclosed one
-  stays text rather than swallowing the body — and GitHub's alerts
-  (`> [!NOTE]` and kin) are quotes under GitHub's own icon and title for
-  the kind, bar and title in its color; any other HTML shows escaped. The folded
-  preview still opens with the first paragraph, and without the parser
-  the page falls back to the previous renderer.
+- **PR bodies render as GitHub-flavored markdown.** The PR page's
+  description, comments, reviews and review threads are parsed by
+  markdown-it-py (its `gfm-like` preset — a new dependency, from the
+  distro like everything else: `python3-markdown-it` and
+  `python3-linkify-it` on Ubuntu, `python3-markdown-it-py` and
+  `python3-linkify-it-py` on Fedora, `python-markdown-it-py` and
+  `python-linkify-it-py` on Arch) into blocks Collins draws itself, where
+  one label used to carry a whole body. The folded description still
+  opens with its first paragraph — or the first items of a list, the
+  first rows of a table — and without the parser installed the page falls
+  back to the previous renderer.
+  - **Text.** Headings in three sizes; nested lists laid out
+    structurally, ☐ / ☑ task lists, ordered lists counting from their
+    first number; block quotes behind a bar; horizontal rules;
+    reference-style links; bare `https://` and `www.` URLs linked the way
+    GitHub links them; `<kbd>`, `<sub>`, `<sup>` and `<br>` honoured,
+    every other HTML tag shown escaped.
+  - **Tables** as grids: the header row bold, each column aligned as its
+    delimiter row asks, cells selectable, a wide table scrolling sideways
+    within its own band rather than widening the page; past 50 rows or 8
+    columns, that much and a dim link to the rest on GitHub.
+  - **Code** in a read-only source view highlighted for the fence's
+    language (`python`, `bash`, `json`, `diff`… and any name GtkSourceView
+    knows), in the editor's style scheme like the Files view's diffs, a
+    long line scrolling sideways within the block. A right-click copies
+    the whole block; one past 20 000 characters shows that much and a
+    link to the rest.
+  - **References.** `#123`, `owner/repo#123`, `@user` and commit hashes
+    link into the PR's own repository as on GitHub, and a relative link
+    (`[guide](docs/guide.md)`) opens the file at the PR's head commit —
+    never inside a code span or a link the author wrote.
+  - **`<details>`** as an expander wearing its summary, collapsed unless
+    the tag says `open`, its contents built the first time it opens; an
+    unclosed one stays text rather than swallowing the body. **Alerts**
+    (`> [!NOTE]` and kin) are quotes under GitHub's own icon and title
+    for the kind, bar and title in its color.
+  - **Images** in place as before; a linked image (`[![alt](img)](url)`)
+    is the picture, not a link.
 - **Archiving a session reads its notifications.** A session's message
   and bell rows stayed unread in the history after the session was
   archived, so the bell and the badge kept counting a session with
