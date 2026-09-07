@@ -52,8 +52,11 @@ and `{"range": "a...b"}`, picked by Ctrl+1/2/3 (a CAPTURE key controller
 on the page, `gitloads.load_for_key`), the sidebar's rows, the host's
 `open_git_page(mode)` or the agent's `show_diff`. `load(loaded)` →
 `_read_diff(loaded)`: one `gitops.read_diff(cwd, load, parent_target,
-untracked)` on a daemon thread behind `_gen`, plus `commit_subject_and_sha`
-for a commit, the `merge_base` a branch / range reads its old side at, and
+untracked)` on a daemon thread behind `_gen`, plus `gitloads.commit_message`
+for a commit (one `git log -1`: sha, author, date, subject, body — the
+breadcrumb's subject, the sidebar's `▸` sha and the commit card's words
+come from the same read) with `gitinfo.github_url` beside it, the
+`merge_base` a branch / range reads its old side at, and
 `tree_state_signature` for a working-tree load (sampled **before** the
 read, see Watch mode) — landing in `_diff_read` at `PRIORITY_DEFAULT`, one
 read at a time with a newer ask parked in `_pending_load` — **an ask for
@@ -139,6 +142,33 @@ signature (the base changed, not the tree) and reloads a branch diff. There
 is no picker and no persisted parent: the layout slot is `gitloads.
 encode_state(loaded, sidebar)` (`"sidebar": false` when folded,
 `decode_sidebar`); a `"parent"` key from older layouts is ignored.
+
+## The commit card (`commitcard.py`)
+
+`GitPage.commit_card` is a `CommitCard` — a `Gtk.ScrolledWindow`
+(vertical only, natural height up to `MAX_HEIGHT` 360, then it scrolls
+alone) over a `.pr-card.git-commit-card` box — at the top of the `_VIEW`
+column, above the `DiffView`. It is hidden for every load but a commit:
+`_diff_read` calls `show(message, github_url, scheme)` when the read's
+`gitloads.CommitMessage` landed on a `{"show": ref}` load and `clear()`
+otherwise; `load()` clears it the moment the load changes (a stale
+message over a new diff), `_close_view` too. The card is the subject
+(`heading`), a byline (author, `format_relative` age with the stamp in
+the tooltip, the short sha — a `<a>` to `<github_url>/commit/<sha>` when
+`gitinfo.github_url` knows one) and the body through **the PR page's own
+fold**: `prview.folded_body` / `prview.Fold` are the public names of
+`_folded_body` / `_Fold`, so the commit body gets the same eight-line
+preview, "Show more" / "Show less", markdown blocks (`mdblocks` /
+`mdwidgets`), code fences in the page's scheme (`set_scheme` restyles
+them on a scheme or light/dark change) and reference links
+(`mdblocks.repo_context(owner/name, host, sha)` off the GitHub URL —
+relative links resolve at the commit's own sha). `show` with the message
+already shown (a tick's reload of the same commit) is a no-op, so an
+opened fold stays open; a different message carries the fold's state
+across the rebuild like `PrViewPage._description_card`. Probes:
+`subject_text()`, `byline_text()`, `folded()` (None without a fold),
+`set_folded()`, `body_labels()`, `message`. `check_git_page.py`'s
+sidebar check gives its `second` commit `COMMIT_BODY` for this.
 
 ## The native sidebar (`gitsidebar.py`)
 
@@ -279,9 +309,11 @@ between two safe refs, two-dot ranges are refused), `loaded_ok`,
 integers), `initial_mode`, `encode_state` / `decode_state` /
 `decode_sidebar`, the `show_diff` tool's `show_diff_load` and
 `diff_file_path` plus `SHOW_DIFF_DEADLINE_S` / `SHOW_DIFF_POLL_MS`, the
-git calls behind a commit's name (`commit_subject`,
-`commit_subject_and_sha` — one `git log -1 --format=%s%x00%H` — and
-`resolve_commit`, `GIT_TIMEOUT_S`), `Options.from_settings` →
+git calls behind a commit's name (`commit_subject`, `commit_message` —
+one `git log -1 --format=%H%x00%an%x00%aI%x00%s%x00%b` into a
+`CommitMessage`, every field bounded, the body at
+`COMMIT_BODY_MAX_CHARS` — and `resolve_commit`, `GIT_TIMEOUT_S`),
+`Options.from_settings` →
 `Options(layout, untracked, log_page, line_numbers, wrap, word_diff)` with
 `LAYOUTS`, the `LOG_PAGE` bounds, and `MAX_PATH_CHARS`. The widgets and
 the GTK-free half alike import it directly.

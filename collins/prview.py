@@ -2682,6 +2682,14 @@ def _fold(preview: Gtk.Widget, full: Gtk.Widget) -> _Fold:
     return _Fold(preview, full)
 
 
+# The description's fold, lent out: the git page's commit card folds a
+# commit message the way this page folds a PR body (commitcard.py). The
+# widget class goes with it so a caller can carry an open fold across a
+# rebuild the way `_description_card` does.
+Fold = _Fold
+folded_body = _folded_body
+
+
 def _body_label(
     text: str,
     images: bool = False,
