@@ -234,7 +234,8 @@ def _table(block: mdblocks.Table, budget: Budget, page_url: str = "") -> Gtk.Wid
     grid.set_halign(Gtk.Align.START)
     budget.take()
     for column, cell in enumerate(shown.header):
-        label = _cell(f"<b>{cell}</b>", shown.aligns[column])
+        # Bold comes from `.pr-md-th` in app.py's CSS — the one place.
+        label = _cell(cell, shown.aligns[column])
         label.add_css_class("pr-md-th")
         grid.attach(label, column, 0, 1, 1)
     for index, row in enumerate(shown.rows):

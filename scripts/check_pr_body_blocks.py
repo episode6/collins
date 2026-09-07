@@ -161,6 +161,15 @@ def has_class(widget: Gtk.Widget, name: str) -> bool:
     return name in widget.get_css_classes()
 
 
+def ancestors(widget: Gtk.Widget) -> list[Gtk.Widget]:
+    out = []
+    parent = widget.get_parent()
+    while parent is not None:
+        out.append(parent)
+        parent = parent.get_parent()
+    return out
+
+
 def description_card(page) -> Gtk.Widget:
     return page._content_slots.widgets[0]
 
@@ -280,8 +289,9 @@ def step_expanded() -> bool:
         check("…of one label per cell", [c.get_text() for c in cells] == ["col", "val", "a", "1"],
               [c.get_text() for c in cells])
         heads = [c for c in cells if has_class(c, "pr-md-th")]
-        check("…the header row wearing .pr-md-th, bold", [c.get_text() for c in heads] == ["col", "val"]
-              and all("<b>" in c.get_label() for c in heads))
+        check("…the header row wearing .pr-md-th (its bold is the CSS's alone)",
+              [c.get_text() for c in heads] == ["col", "val"]
+              and not any("<b>" in c.get_label() for c in heads))
         check("…the right-aligned column aligned right",
               [c.get_xalign() for c in cells] == [0.0, 1.0, 0.0, 1.0], [c.get_xalign() for c in cells])
         check("…cells selectable", all(c.get_selectable() for c in cells))
@@ -389,6 +399,31 @@ def step_table_caps() -> bool:
     )
     check("…dim", more is not None and has_class(more, "dim-label"))
     check("…and the paragraph after it there", "After." in texts(full), texts(full)[-1])
+    # The same table nested in a list item and in a quote: the link still
+    # carries the page's URL through `_list` / `_quote`'s recursion.
+    rows = mdblocks.TABLE_MAX_ROWS + 3
+    tall = "| h |\n|---|\n" + "\n".join(f"| r{r} |" for r in range(rows))
+    nested = "- item\n\n" + "\n".join("  " + line for line in tall.split("\n"))
+    quoted = "\n".join("> " + line for line in tall.split("\n"))
+    return land(replace(STAGED["detail"], body=nested + "\n\n" + quoted), step_table_nested_caps)
+
+
+def step_table_nested_caps() -> bool:
+    page = state["page"]
+    full = fold(page)._full
+    grids = findall(full, lambda w: isinstance(w, Gtk.Grid))
+    check("a capped table nested in a list and in a quote renders both grids", len(grids) == 2, len(grids))
+    links = findall(full, lambda w: has_class(w, "pr-md-table-more"))
+    check(
+        "…each with its rest counted in a link to the PR on GitHub",
+        len(links) == 2
+        and all(link.get_text() == "3 more rows on GitHub" for link in links)
+        and all(f'href="{PR_URL}"' in link.get_label() for link in links),
+        [(link.get_text(), link.get_label()[:80]) for link in links],
+    )
+    in_list = bool(links) and any(has_class(w, "pr-md-list") for w in ancestors(links[0]))
+    in_quote = bool(links) and any(has_class(w, "pr-md-quote") for w in ancestors(links[-1]))
+    check("…inside the list row and the quote column", in_list and in_quote, (in_list, in_quote))
     # The widget budget: a body past it renders its tail as one plain
     # label — never dropped, never a widget per item (the body itself
     # sits under the render cap, so this is the widget budget alone).

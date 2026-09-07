@@ -223,9 +223,9 @@ gated to GitHub's username alphabet.
   *minimum* width — a two-row table with one long cell came out four
   thousand pixels tall. `mdwidgets._TableScroller.do_measure` reports the
   grid's height at the grid's natural width instead (what `halign START`
-  in the viewport allocates it). The widths were never the problem: the
-  viewport's default `hscroll-policy` MINIMUM is, which the table sets to
-  NATURAL so the grid scrolls rather than squeezes.
+  in the viewport allocates it). The widths were never the problem; the
+  viewport's default `hscroll-policy` of MINIMUM was, which the table sets
+  to NATURAL so the grid scrolls rather than squeezes.
 - An `<img>` alone on its line is a CommonMark HTML *block* (type 7), not an
   `html_inline`: `mdblocks._html_lines` turns such lines into image rows. A
   `Text.source` is the inline token's content (indents and `>` stripped),
