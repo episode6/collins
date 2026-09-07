@@ -444,6 +444,16 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   hunks fold into *⋯ n unchanged lines* rows with *▲ 20* / *▼ 20* /
   *all* buttons (`z` draws everything above the focused hunk); the
   header of the file you are scrolled into stays pinned at the top.
+- **A commit's message sits over its diff.** Loading a commit puts a
+  card above the files: the subject, the author, the age (the full
+  stamp in a tooltip) and the short sha — a link to the commit on GitHub
+  when the repository has a page there — and the body as **markdown**,
+  the way the PR page renders a description: lists, code fences in the
+  editor's scheme, tables, `#123` / `@user` / sha references linked into
+  the repository. A long body folds to its first lines behind *Show
+  more*; the card scrolls on its own past a few hundred pixels so the
+  diff keeps the page. The working tree, a branch and a range have no
+  card.
 - **The commits list is the switch.** One group per branch of the stack:
   the **current branch** — a *working tree* row, then its own commits
   since it forked from the branch it stacks on, unpushed ones marked `↑`

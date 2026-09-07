@@ -64,6 +64,7 @@ Adw.init()
 
 from collins import gitloads, gitops, gitpage  # noqa: E402
 from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
+from collins.editor import GtkSource  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
 
 PASSED = 0
@@ -155,6 +156,38 @@ def card_title(page: GitPage) -> str:
 # What every page in this check runs on: stacked, so the split padding
 # pass never enters the timings.
 SETTINGS = {"git_layout": "stack"}
+# The `second` commit's body (check_sidebar): markdown, and more lines than
+# the card's fold shows, so the commit card has something to fold.
+COMMIT_BODY = "\n".join(
+    [
+        "Why this commit exists, in **bold** terms.",
+        "",
+        "- first item",
+        "- second item",
+        "- third item",
+        "",
+        "```sh",
+        "echo one",
+        "echo two",
+        "```",
+        "",
+        "Fourth paragraph.",
+        "",
+        "Fifth paragraph.",
+        "",
+        "Last line of the body.",
+    ]
+)
+
+
+def _descendants(widget: Gtk.Widget) -> list[Gtk.Widget]:
+    found = []
+    child = widget.get_first_child()
+    while child is not None:
+        found.append(child)
+        found.extend(_descendants(child))
+        child = child.get_next_sibling()
+    return found
 
 
 def check_sidebar(repo: str) -> None:
@@ -169,7 +202,8 @@ def check_sidebar(repo: str) -> None:
     # the current group has something to list and a row to click.
     with open(os.path.join(repo, "a.txt"), "a") as fh:
         fh.write("two\n")
-    git(repo, "commit", "-qam", "second")
+    # ... with a markdown body long enough to fold, for the commit card.
+    git(repo, "commit", "-qam", "second", "-m", COMMIT_BODY)
     page = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",
@@ -285,6 +319,17 @@ def check_sidebar(repo: str) -> None:
         wait_for(lambda: page.breadcrumb_text() == f"{sha[:7]} {subject}"),
         page.breadcrumb_text(),
     )
+    # -- the commit card: subject, byline, the body folded like a PR description --------
+    card = page.commit_card
+    check("the commit card shows for a commit load", card.get_visible() and card.subject_text() == subject, card.subject_text())
+    check("its byline names the author and the short sha", card.byline_text().startswith("Test ") and card.byline_text().endswith(sha[:7]), card.byline_text())
+    check("a long body waits behind Show more", card.folded() is True, card.folded())
+    preview = card.body_labels()
+    check("the preview is the body's front", any(t.startswith("Why this commit") for t in preview) and not any("Last line" in t for t in preview), preview)
+    card.set_folded(False)
+    full = card.body_labels()
+    check("Show more brings the whole body out, markdown rendered", any("Last line" in t for t in full) and any(t.startswith("first item") for t in full) and not any("**" in t for t in full), full)
+    check("the body's code fence is a source view", any(isinstance(w, GtkSource.View) for w in _descendants(card)))
     landed = wait_for(lambda: sidebar.file_rows().mode == "flat" and [f.path for f in sidebar.file_rows().flat] == ["a.txt"])
     check("a commit load lists its files flat, with counts", landed and sidebar.file_rows().flat[0].additions == 1, sidebar.file_rows())
     reads: list[object] = []
@@ -302,6 +347,7 @@ def check_sidebar(repo: str) -> None:
     landed = wait_for(lambda: shows("branch"))
     check("the current header loads the branch diff", landed, page.loaded)
     check("the header row is the loaded one", wait_for(lambda: sidebar.loaded_row_id() == "header:current"))
+    check("a load that isn't a commit empties the card", not card.get_visible() and card.message is None)
 
     # -- the files list on the working tree: the other side's click loads it ------------
     with open(os.path.join(repo, "a.txt"), "w") as fh:

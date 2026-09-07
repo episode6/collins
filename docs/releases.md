@@ -55,6 +55,11 @@ downloads of each version, see the
   accent colour — a ping with no visible source. The ringing session's
   terminal now flashes too, for every bell, selected or not; the
   selected session's bell still posts no notification.
+- **A commit's message shows over its diff.** Loading a commit in the
+  git page put its subject in the breadcrumb and nothing else. The page
+  now puts a card over the diff — subject, author, age, the short sha
+  linked to GitHub — with the body rendered as markdown and folded
+  behind *Show more* the way the PR page folds a description.
 - **A files-list click shows one file's diff.** Clicking a file in the
   git page's files list scrolled the whole stream to its section; it now
   shows that file's diff alone, and `]` / `.` walk on into the next file.

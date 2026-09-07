@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1103,6 +1103,14 @@ popover.menu button.open-with-row:hover {
 }
 .git-breadcrumb {
   opacity: 0.7;
+}
+/* the commit card over the diff (commitcard.py): a .pr-card with the
+   diff column's side margins, scrolling on its own past its cap */
+.git-commit-card {
+  margin: 6px 10px 4px 10px;
+}
+.git-commit-card-scroller > scrollbar {
+  margin-right: 2px;
 }
 /* the git page's native sidebar: the commits list over the files list, the
    action row under them. Rows are navigation-sidebar rows; the loaded

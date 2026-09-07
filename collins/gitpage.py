@@ -123,6 +123,7 @@ from . import (  # noqa: E402
     mcptools,
     prefslayout,
 )
+from .commitcard import CommitCard  # noqa: E402
 from .diffview import DiffView  # noqa: E402
 from .editor import style_scheme  # noqa: E402
 from .gitmodel import BranchRef  # noqa: E402
@@ -394,7 +395,13 @@ class GitPage(Adw.Bin):
         self._diffview.connect("mutation-requested", self._on_mutation_requested)
         self._diffview.connect("editing-changed", self._on_note_editing_changed)
         self._diffview.apply_keybindings(keybindings.current())
-        self._stack.add_named(self._diffview, _VIEW)
+        # The view column: the commit card (empty but for a commit load,
+        # commitcard.py) over the diff.
+        self.commit_card = CommitCard()
+        view_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
+        view_column.append(self.commit_card)
+        view_column.append(self._diffview)
+        self._stack.add_named(view_column, _VIEW)
         self._stack.add_named(self._card_slot, _CARD)
         self._install_actions()
         # The view follows the editor's scheme, and the app's light/dark
@@ -629,6 +636,10 @@ class GitPage(Adw.Bin):
         if loaded == "branch" and self._resolve_parent() is None:
             self._sync_header()
             return
+        if loaded != self._loaded:
+            # The new load's read fills the card; a stale message over a
+            # new diff is worse than none.
+            self.commit_card.clear()
         self._loaded = dict(loaded) if isinstance(loaded, dict) else loaded
         self._subject = None
         self._resolved_sha = None
@@ -1059,6 +1070,7 @@ class GitPage(Adw.Bin):
         self._gen += 1
         self._drop_monitors()
         self._diffview.load((), None, None)
+        self.commit_card.clear()
         self._sync_search_label()
 
     def _reopen(self) -> None:
@@ -1100,7 +1112,10 @@ class GitPage(Adw.Bin):
             # reload by key, harmless) instead of one the watch never sees.
             state = gitops.tree_state_signature(cwd) if working else None
             read = gitops.read_diff(cwd, loaded, parent_target, untracked)
-            subject, sha = gitloads.commit_subject_and_sha(cwd, show_ref) if show_ref else (None, None)
+            # One `git log -1` names the commit for the breadcrumb, the
+            # sidebar's ▸ and the commit card alike.
+            message = gitloads.commit_message(cwd, show_ref) if show_ref else None
+            github_url = gitinfo.github_url(cwd) if message is not None else None
             base: str | None = None
             if loaded == "branch" and parent_target:
                 base = gitops.merge_base(cwd, parent_target, "HEAD")
@@ -1111,7 +1126,7 @@ class GitPage(Adw.Bin):
                 gen,
                 loaded,
                 read,
-                (subject, sha),
+                (message, github_url),
                 base,
                 state,
                 priority=GLib.PRIORITY_DEFAULT,
@@ -1124,7 +1139,7 @@ class GitPage(Adw.Bin):
         gen: int,
         loaded: gitloads.Loaded,
         read: gitops.DiffRead,
-        named: tuple[str | None, str | None],
+        named: tuple[gitloads.CommitMessage | None, str | None],
         base: str | None,
         state: str | None,
     ) -> bool:
@@ -1143,9 +1158,14 @@ class GitPage(Adw.Bin):
         # its signature past it, so nothing else would reload. This read is
         # drawn (something shows at once) and the ask re-reads after it.
         reread = pending is not None
-        subject, sha = named
-        self._subject = (subject or None) if gitloads.is_show(loaded) else None
-        self._resolved_sha = sha
+        message, github_url = named
+        showing = message is not None and gitloads.is_show(loaded)
+        self._subject = (message.subject or None) if showing else None
+        self._resolved_sha = message.sha if message is not None else None
+        if showing:
+            self.commit_card.show(message, github_url, self._scheme())
+        else:
+            self.commit_card.clear()
         self._sync_header()
         self.emit("title-changed")
         if not read.ok:
@@ -1528,9 +1548,16 @@ class GitPage(Adw.Bin):
         if not self.sidebar.run_mutation(work, done):
             self._diffview.set_busy(False)
 
+    def _scheme(self):
+        """The GtkSource scheme the page's buffers wear: the editor's
+        setting, resolved against the app's light/dark."""
+        return style_scheme(self._scheme_setting, Adw.StyleManager.get_default().get_dark())
+
     def _apply_scheme(self) -> None:
         dark = Adw.StyleManager.get_default().get_dark()
-        self._diffview.set_scheme(style_scheme(self._scheme_setting, dark), dark)
+        scheme = style_scheme(self._scheme_setting, dark)
+        self._diffview.set_scheme(scheme, dark)
+        self.commit_card.set_scheme(scheme)
 
     # -- the find bar --
 

@@ -16,7 +16,8 @@ rather than Gdk constants), what the footer click opens on
 decode_state / decode_sidebar), the `show_diff` session tool's reading of
 its `what` argument and the repo-relative file path it hands the view
 (show_diff_load, diff_file_path), and the three git calls behind them —
-commit_subject / commit_subject_and_sha for a commit's name and full sha,
+commit_subject for a commit's name, commit_message for the whole of it (the
+page's commit card: sha, author, date, subject and body, each bounded),
 resolve_commit for the sha a ref means right now — each one subprocess on
 a worker thread with commit_subject's three answers (a value, None for
 "git says no", "" for "git couldn't be asked").
@@ -244,33 +245,110 @@ def commit_subject(
     return lines[0].strip() if lines else ""
 
 
-def commit_subject_and_sha(
+# The whole of a commit message the page's card holds: its subject and
+# body are repository content (rule 5) — a body past this is cut, and the
+# fold's own "Show more" step is what the reader sees of that.
+COMMIT_BODY_MAX_CHARS = 20_000
+_COMMIT_FIELD_MAX_CHARS = 200
+_COMMIT_FORMAT = "%H%x00%an%x00%aI%x00%s%x00%b"
+
+
+@dataclass(frozen=True)
+class CommitMessage:
+    """What `commit_message` reads of one commit: the full *sha*, the
+    author's name, the author date as git's strict ISO 8601 (`%aI`), the
+    *subject* and the *body* (the message past the subject, the blank line
+    dropped, cut at `COMMIT_BODY_MAX_CHARS`; "" for a one-line message)."""
+
+    sha: str
+    author: str
+    authored_at: str
+    subject: str
+    body: str
+
+
+def commit_message(
     cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
-) -> tuple[str | None, str | None]:
-    """(subject, full sha) of the commit *ref* names — `git log -1
-    --format=%s%x00%H <ref>^{commit} --`, one subprocess, for the page's
-    worker threads: the subject feeds the breadcrumb, the sha is what the
-    native commits list matches a `show HEAD` (or `show <branch>`) title
-    against (gitmodel.loaded_row_id's resolved_sha). The subject follows
-    commit_subject's three answers — a subject when git resolved the ref,
-    None when it names no commit (or isn't safe to ask about), "" when
-    git couldn't be asked — and the sha is None whenever there isn't a
-    full one to report."""
+) -> CommitMessage | None:
+    """The commit *ref* names, whole — one `git log -1
+    --format=%H%x00%an%x00%aI%x00%s%x00%b <ref>^{commit} --` on a worker
+    thread — for the page's commit card. None whenever there isn't a
+    commit to describe: no cwd, a ref that isn't safe to ask about, git
+    saying it names no commit, git not answering, or an answer without a
+    full sha (the card is optional; the breadcrumb already names the
+    commit through `commit_subject_and_sha`). Every field is bounded, the
+    body last so a huge one can't hide the others."""
     if not cwd or not safe_ref(ref):
-        return None, None
-    argv = ["git", "log", "-1", "--format=%s%x00%H", f"{ref}^{{commit}}", "--"]
+        return None
+    argv = ["git", "log", "-1", f"--format={_COMMIT_FORMAT}", f"{ref}^{{commit}}", "--"]
     try:
         result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError):
-        return "", None
+        return None
     if getattr(result, "returncode", 1) != 0:
-        return None, None
-    lines = (result.stdout or "").strip().splitlines()
-    if not lines:
-        return "", None
-    subject, _nul, sha = lines[0].partition("\0")
+        return None
+    parts = (result.stdout or "").split("\0", 4)
+    if len(parts) != 5:
+        return None
+    sha, author, authored_at, subject, body = parts
     sha = sha.strip()
-    return subject.strip(), sha if _FULL_SHA.match(sha) else None
+    if not _FULL_SHA.match(sha):
+        return None
+    return CommitMessage(
+        sha=sha,
+        author=author.strip()[:_COMMIT_FIELD_MAX_CHARS],
+        authored_at=authored_at.strip()[:_COMMIT_FIELD_MAX_CHARS],
+        subject=subject.strip()[:_COMMIT_FIELD_MAX_CHARS],
+        body=body.strip("\n")[:COMMIT_BODY_MAX_CHARS].rstrip(),
+    )
+
+
+# A line that starts something other than running prose: a heading, a
+# quote, a list item, a table row, a fence, a horizontal rule — or a git
+# trailer (`Co-Authored-By: …`), which stays on its own line.
+_BLOCK_START_RE = re.compile(r"^ {0,3}(#{1,6}(\s|$)|>|[-*+]\s|\d{1,9}[.)]\s|\||```|~~~|([-*_]\s*){3,}$)")
+_TRAILER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]*: \S")
+_FENCE_RE = re.compile(r"^ {0,3}(```|~~~)")
+
+
+def reflow_body(body: str) -> str:
+    """*body* with git's hard wraps undone: consecutive prose lines of one
+    paragraph joined by a space, so a message wrapped at 72 columns
+    reflows to the card's width like a PR description does. Left as they
+    are: blank lines, fenced code (whole), indented code (four spaces),
+    headings, quotes, list items, table rows, rules, git trailers, and a
+    line ending in two spaces or a backslash (a markdown hard break). A
+    line indented one to three spaces with no marker of its own is a
+    continuation — of a list item too — and joins the line above."""
+    out: list[str] = []
+    in_fence = False
+    prev_joinable = False  # the last line written is prose (or a list item) a continuation may join
+    for line in body.split("\n"):
+        if in_fence:
+            out.append(line)
+            if _FENCE_RE.match(line):
+                in_fence = False
+            continue
+        if _FENCE_RE.match(line):
+            in_fence = True
+            out.append(line)
+            prev_joinable = False
+            continue
+        stripped = line.strip()
+        if not stripped or line.startswith(("    ", "\t")):
+            out.append(line)
+            prev_joinable = False
+            continue
+        block_start = _BLOCK_START_RE.match(line) is not None
+        trailer = _TRAILER_RE.match(stripped) is not None
+        list_item = block_start and re.match(r"^ {0,3}([-*+]|\d{1,9}[.)])\s", line) is not None
+        if prev_joinable and not block_start and not trailer:
+            out[-1] = out[-1].rstrip() + " " + stripped
+        else:
+            out.append(line)
+        hard_break = line.endswith(("  ", "\\"))
+        prev_joinable = (not block_start or list_item) and not trailer and not hard_break
+    return "\n".join(out)
 
 
 def resolve_commit(

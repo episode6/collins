@@ -202,50 +202,160 @@ def test_commit_subject_resolves():
     assert kwargs["timeout"] == gitloads.GIT_TIMEOUT_S
 
 
-def test_commit_subject_and_sha_resolves():
-    """One `git log -1 --format=%s%x00%H`: the subject for the breadcrumb
-    and the full sha the native commits list matches a `show HEAD` title
-    against."""
+def test_commit_message_reads_the_whole_commit():
+    """One `git log -1` with NUL-separated fields: the sha for the sidebar's
+    ▸, the subject for the breadcrumb, author, date and body for the card.
+    The body keeps its inner blank lines (markdown paragraphs) and loses
+    the outer ones."""
     calls = []
+    body = "\nWhy:\n\n- one\n- two\n\n"
+    stdout = "\0".join([SHA, "Ada Lovelace", "2026-09-07T10:00:00+02:00", "Wire the mode switch", body])
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0, stdout=f"Wire the mode switch\0{SHA}\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
-    assert gitloads.commit_subject_and_sha("/repo", "HEAD", run=run) == ("Wire the mode switch", SHA)
+    message = gitloads.commit_message("/repo", "HEAD", run=run)
+    assert message == gitloads.CommitMessage(
+        sha=SHA,
+        author="Ada Lovelace",
+        authored_at="2026-09-07T10:00:00+02:00",
+        subject="Wire the mode switch",
+        body="Why:\n\n- one\n- two",
+    )
     argv, kwargs = calls[0]
-    assert argv == ["git", "log", "-1", "--format=%s%x00%H", "HEAD^{commit}", "--"]
+    assert argv == ["git", "log", "-1", "--format=%H%x00%an%x00%aI%x00%s%x00%b", "HEAD^{commit}", "--"]
     assert kwargs["cwd"] == "/repo"
     assert kwargs["capture_output"] and kwargs["text"]
     assert kwargs["timeout"] == gitloads.GIT_TIMEOUT_S
 
 
-def test_commit_subject_and_sha_three_answers():
-    """The subject follows commit_subject's answers; the sha is None
-    whenever there isn't a full one — an empty subject still carries it."""
+def test_commit_message_none_when_nothing_to_describe():
+    """No cwd, an unsafe ref, git saying no, git not answering, a short
+    sha or a short answer: None — the card is optional."""
 
     def gone(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 128, stdout="", stderr="fatal: bad revision")
 
-    def empty_subject(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, stdout=f"\0{SHA}\n", stderr="")
-
-    def short(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, stdout="subject\0abc123\n", stderr="")
-
-    def nothing(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, stdout="\n", stderr="")
-
     def missing(argv, **kwargs):
         raise FileNotFoundError("git")
 
-    assert gitloads.commit_subject_and_sha("/repo", "deadbeef", run=gone) == (None, None)
-    assert gitloads.commit_subject_and_sha("/repo", "HEAD", run=empty_subject) == ("", SHA)
-    assert gitloads.commit_subject_and_sha("/repo", "HEAD", run=short) == ("subject", None)
-    assert gitloads.commit_subject_and_sha("/repo", "HEAD", run=nothing) == ("", None)
-    assert gitloads.commit_subject_and_sha("/repo", "HEAD", run=missing) == ("", None)
-    assert gitloads.commit_subject_and_sha(None, "HEAD", run=short) == (None, None)
-    assert gitloads.commit_subject_and_sha("/repo", "a..b", run=short) == (None, None)
+    def slow(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 1)
+
+    def short_sha(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="abc123\0a\0d\0s\0b", stderr="")
+
+    def few_fields(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{SHA}\0a\0d", stderr="")
+
+    def good(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=f"{SHA}\0a\0d\0s\0", stderr="")
+
+    assert gitloads.commit_message("/repo", "deadbeef", run=gone) is None
+    assert gitloads.commit_message("/repo", "HEAD", run=missing) is None
+    assert gitloads.commit_message("/repo", "HEAD", run=slow) is None
+    assert gitloads.commit_message("/repo", "HEAD", run=short_sha) is None
+    assert gitloads.commit_message("/repo", "HEAD", run=few_fields) is None
+    assert gitloads.commit_message(None, "HEAD", run=good) is None
+    assert gitloads.commit_message("/repo", "a..b", run=good) is None
+    assert gitloads.commit_message("/repo", "-x", run=good) is None
+    one_liner = gitloads.commit_message("/repo", "HEAD", run=good)
+    assert one_liner is not None and one_liner.body == "" and one_liner.subject == "s"
+
+
+def test_commit_message_bounds_every_field():
+    """Repository content: the body is cut at COMMIT_BODY_MAX_CHARS, the
+    author, date and subject at a line's worth — a huge body can't hide the
+    fields after it because it comes last."""
+    body = "x" * (gitloads.COMMIT_BODY_MAX_CHARS + 500)
+    long = "y" * 1000
+
+    stdout = "\0".join([SHA, long, long, long, body])
+
+    def run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
+
+    message = gitloads.commit_message("/repo", "HEAD", run=run)
+    assert message is not None
+    assert len(message.body) == gitloads.COMMIT_BODY_MAX_CHARS
+    assert len(message.author) == len(message.authored_at) == len(message.subject) == 200
+
+
+def test_reflow_body_joins_prose_and_leaves_structure():
+    """Git's 72-column wraps come undone within a paragraph; blank lines,
+    fences, indented code, headings, quotes, lists, tables, rules, hard
+    breaks and trailers keep their lines; an indented continuation joins
+    the list item above it."""
+    body = "\n".join(
+        [
+            "Adds a fifth leg to the CI matrix and bumps the",
+            "denominator to match. The table is refreshed",
+            "from the latest run.",
+            "",
+            "## Why",
+            "a heading is not joined to",
+            "> a quote line",
+            "> another quote line",
+            "- first item that wraps",
+            "  onto a continuation",
+            "- second item",
+            "1. numbered",
+            "2) numbered too",
+            "| a | b |",
+            "| - | - |",
+            "---",
+            "ends with a hard break  ",
+            "so this stays on its line",
+            "and this one joins it\\",
+            "but not this one",
+            "",
+            "```sh",
+            "echo one",
+            "echo two wraps at",
+            "```",
+            "    indented code",
+            "    stays",
+            "",
+            "Co-Authored-By: Someone <s@example.com>",
+            "Claude-Session: https://example.com/s/1",
+        ]
+    )
+    assert gitloads.reflow_body(body) == "\n".join(
+        [
+            "Adds a fifth leg to the CI matrix and bumps the denominator to match. The table is refreshed "
+            "from the latest run.",
+            "",
+            "## Why",
+            "a heading is not joined to",
+            "> a quote line",
+            "> another quote line",
+            "- first item that wraps onto a continuation",
+            "- second item",
+            "1. numbered",
+            "2) numbered too",
+            "| a | b |",
+            "| - | - |",
+            "---",
+            "ends with a hard break  ",
+            "so this stays on its line and this one joins it\\",
+            "but not this one",
+            "",
+            "```sh",
+            "echo one",
+            "echo two wraps at",
+            "```",
+            "    indented code",
+            "    stays",
+            "",
+            "Co-Authored-By: Someone <s@example.com>",
+            "Claude-Session: https://example.com/s/1",
+        ]
+    )
+    assert gitloads.reflow_body("") == ""
+    assert gitloads.reflow_body("one line") == "one line"
+    # An unclosed fence runs to the end, verbatim.
+    assert gitloads.reflow_body("```\na\nb") == "```\na\nb"
 
 
 def test_commit_subject_three_answers():
