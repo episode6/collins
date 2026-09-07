@@ -2633,9 +2633,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _flash_session(self, page: Adw.TabPage | None) -> None:
-        """Flash the header bar, and the ringing session's tab header and
-        sidebar row — the two places that say which session wants attention
-        when the bell isn't the selected tab's.
+        """Flash the header bar, the ringing session's terminal, and its tab
+        header and sidebar row — the latter two being the places that say
+        which session wants attention when the bell isn't the selected
+        tab's, the terminal being the one that is seen when it is.
 
         Rung by a terminal's BEL and by the `notify_user` tool, which wants
         the same "this session" cue for anyone still looking at the app.
@@ -2644,6 +2645,12 @@ class MainWindow(Adw.ApplicationWindow):
         flash(self._content_header)
         if page is None:
             return
+        # The terminal itself, for the tab the user is looking at: the
+        # header's 400ms tint and a row that is already selected-orange are
+        # easy to miss from inside the terminal (see TerminalTab.flash_bell).
+        flash_bell = getattr(page.get_child(), "flash_bell", None)
+        if flash_bell is not None:
+            flash_bell()
         tab_widget = self._tab_widget(page)
         if tab_widget is not None:
             flash(tab_widget)

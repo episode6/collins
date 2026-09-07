@@ -1533,6 +1533,17 @@ class TerminalTab(Gtk.Box):
         self._overlay.set_vexpand(True)
         self._overlay.add_css_class("terminal-gutter")
         self._overlay.set_child(self._width_clamp)
+        # The visual bell over the terminal itself: a veil the window tints
+        # for a beat when this tab's terminal rings (flash_bell, from
+        # MainWindow._flash_session). The header bar, the tab header and the
+        # sidebar row flash too, but for the tab the user is looking at
+        # those are the wrong places — the tab bar is hidden by default and
+        # the selected row is already the accent colour — so the flash
+        # lands where their eyes are. Transparent at rest and never a
+        # pointer target, so it costs the terminal nothing between bells.
+        self._bell_veil = Gtk.Box(can_target=False)
+        self._bell_veil.add_css_class("bell-veil")
+        self._overlay.add_overlay(self._bell_veil)
         # The terminal *and* its gutters, as one widget: where the window
         # hangs the "user is at this tab" click gesture (see
         # MainWindow._wire_tab), so a click beside a width-limited terminal
@@ -3051,6 +3062,13 @@ class TerminalTab(Gtk.Box):
         """
         view = self._attachments_view
         return view is not None and view.get_mapped()
+
+    def flash_bell(self) -> None:
+        """The visual bell: tint the veil over this tab's terminal once. Rung
+        by the window for a BEL from this tab or its panel shells, whether
+        or not the tab is the selected one — an unselected tab's veil is
+        just never seen."""
+        flash(self._bell_veil)
 
     def _note_attachment_news(self, shown: list[attachrecords.Attachment]) -> None:
         """Light the handle for pictures that landed with nobody looking, and
