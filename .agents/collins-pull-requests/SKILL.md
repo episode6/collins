@@ -160,7 +160,9 @@ folds the token stream into frozen dataclasses (`Text(markup, source)`,
 rendered to Pango markup by a walker with an open-tag stack (well-formed by
 construction), hrefs escaped and gated to http(s), a linkify link kept only
 when its visible text starts with `http://`, `https://` or `www.` (GitHub's
-autolink rule; markdown-it's fuzzy linkify would link `example.com`),
+autolink rule; markdown-it's fuzzy linkify would link `example.com` — and
+is switched off in `_load`, being quadratic, so `www.` autolinks come from
+`mdblocks.link_www`, a linear pass over text tokens),
 `<img>`/`<br>`/`<sub>`/`<sup>`/`<kbd>` honoured and every other tag escaped
 literal, nesting capped at `MAX_DEPTH` (6). `mdwidgets.build` turns blocks
 into widgets under a `Budget` of ~400 leaves — a list's items count too, so
@@ -218,6 +220,15 @@ gated to GitHub's username alphabet.
 - Task lists and alerts are text-token detectors (`[ ] `/`[x] ` as the first
   text of an item's first paragraph; `[!NOTE]` + softbreak as a quote's), and
   the detector mutates the token it strips — parse each body once.
+- The `gfm-like` preset's linkify runs with `fuzzy_link` and `fuzzy_email`
+  on, and both are quadratic per paragraph (markdown-it-py 3.0.0 /
+  linkify-it-py 2.0.3: 50 KB of `www.a.com ` parsed in 6 s, 20 KB of
+  `a@b.com ` in 4 s — inside prdetail's cap, on the main loop under
+  `_rebuild`). `mdblocks._load` sets both False right after constructing
+  the parser (`md.linkify` exists on 3.0.0 and 4.2.0); `http(s)://`
+  autolinks are unaffected, `www.` ones come back from `link_www` (the
+  same linear text-token pass shape as the reference links), and emails
+  are never linked. A unit test pins the bound.
 
 Related: `collins-sessions-and-sidebar`, `collins-terminal-tab`,
 `collins-panel-dock`, `collins-gtk-sharp-edges`.

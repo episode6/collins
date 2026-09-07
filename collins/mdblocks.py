@@ -1,7 +1,9 @@
 """GitHub-flavored markdown as a tree of blocks — the PR page's parse layer.
 
 `parse_blocks` hands a markdown body to markdown-it-py (its ``gfm-like``
-preset: tables, strikethrough, bare-URL linkification) and folds the token
+preset: tables, strikethrough, ``http(s)://`` linkification — the preset's
+fuzzy linkify of bare domains and emails is switched off in `_load`, being
+quadratic, and ``www.`` autolinks come back from `link_www`) and folds the token
 stream into a small frozen dataclass tree in Collins' own vocabulary, so
 the widget layer (mdwidgets) never sees a markdown-it token and the parser
 could be swapped without touching a widget. Inline runs are rendered here
@@ -63,6 +65,14 @@ def _load():
         from markdown_it import MarkdownIt
 
         _md = MarkdownIt(PRESET)
+        linkify = getattr(_md, "linkify", None)
+        if linkify is not None:
+            # The preset's fuzzy linkify (bare domains, emails) is quadratic
+            # per paragraph: 50 KB of `www.a.com ` parsed in 6 s, `a@b.com`
+            # likewise, on the main loop. Off, the same parses in
+            # milliseconds and http(s):// autolinks still come through;
+            # `link_www` puts GitHub's `www.` autolinks back in linear time.
+            linkify.set({"fuzzy_link": False, "fuzzy_email": False})
     except Exception as exc:  # noqa: BLE001 — ImportError, or the preset's own linkify import
         _import_error = f"{type(exc).__name__}: {exc}"
         log.info("markdown-it-py unavailable, PR bodies use the regex renderer: %s", _import_error)
@@ -172,7 +182,7 @@ class ImageRow:
     pair — which stay on one line on screen."""
 
     images: tuple[BodyImage, ...]
-    source: str = ""
+    source: str
 
 
 @dataclass(frozen=True)
@@ -348,13 +358,19 @@ class _Folder:
 
     def _image_rows(self, children: list, source: str, blocks: list[Block]) -> None:
         """An image-only paragraph as rows: images on one source line share
-        a row; past the body's image cap the rest are alt-text anchors."""
-        rows: list[list[BodyImage]] = [[]]
+        a row, and each row's source is its own line; past the body's image
+        cap the rest are alt-text anchors."""
+        lines = source.split("\n")
+        rows: list[tuple[int, list[BodyImage]]] = [(0, [])]
+        line = 0
         leftovers: list[str] = []
         for token in children:
             if token.type == "softbreak":
-                if rows[-1]:
-                    rows.append([])
+                line += 1
+                if rows[-1][1]:
+                    rows.append((line, []))
+                else:
+                    rows[-1] = (line, rows[-1][1])
                 continue
             if token.type == "text":
                 continue
@@ -363,12 +379,12 @@ class _Folder:
                 leftovers.append(_image_anchor(token))
             elif self._image_budget > 0:
                 self._image_budget -= 1
-                rows[-1].append(image)
+                rows[-1][1].append(image)
             else:
                 leftovers.append(_image_anchor(token))
-        for row in rows:
+        for line, row in rows:
             if row:
-                blocks.append(ImageRow(tuple(row), source))
+                blocks.append(ImageRow(tuple(row), lines[line] if line < len(lines) else source))
         if leftovers:
             blocks.append(Text(" ".join(leftovers), source))
 
@@ -702,7 +718,7 @@ class _Inline:
             token = children[i]
             kind = token.type
             if kind == "text":
-                self._out.append(GLib.markup_escape_text(token.content))
+                self._out.append(self._text(token.content))
             elif kind in _SIMPLE:
                 self._open(*_SIMPLE[kind])
             elif kind in _SIMPLE_CLOSE:
@@ -729,6 +745,15 @@ class _Inline:
             if tag:
                 self._out.append(f"</{tag}>")
         return "".join(self._out)
+
+    def _text(self, content: str) -> str:
+        """A text token as markup, its ``www.`` autolinks linked — unless a
+        link is already open around it (text inside an anchor, or inside a
+        link the gate refused, is the author's link text). Code spans never
+        come here: they are `code_inline` tokens."""
+        if any(kind == "link" for kind, _tag in self._stack):
+            return GLib.markup_escape_text(content)
+        return link_www(content)
 
     def _open(self, kind: str, tag: str | None) -> None:
         self._stack.append((kind, tag))
@@ -778,6 +803,38 @@ class _Inline:
                 self._open(f"html:{tag}", _HTML_TAGS[tag])
         else:
             self._out.append(GLib.markup_escape_text(content))
+
+
+# GitHub's extended `www.` autolink (GFM §6.9): `www.` at the start of a
+# word, a domain of at least two dot-separated segments, then anything up
+# to whitespace or `<`; trailing punctuation is left outside the link, as
+# is a `)` with no `(` in the link to match it. linkify-it's fuzzy_link
+# would find these too — quadratically (see `_load`); one linear scan of
+# each text token does the same job.
+_WWW_RE = re.compile(r"(?<![\w/@.-])www\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+[^\s<]*", re.I)
+_WWW_TRAIL = "?!.,:*_~"
+
+
+def link_www(text: str) -> str:
+    """*text* escaped, with every ``www.`` autolink in it an ``http://``
+    anchor — the one shape of GitHub's extended autolinks markdown-it no
+    longer supplies with fuzzy linkify off (``http(s)://`` still come
+    through as linkify tokens; emails are never linked, as a ``mailto:``
+    would not pass the http(s) gate)."""
+    out: list[str] = []
+    end = 0
+    for match in _WWW_RE.finditer(text):
+        word = match.group(0).rstrip(_WWW_TRAIL)
+        while word.endswith(")") and word.count(")") > word.count("("):
+            word = word[:-1].rstrip(_WWW_TRAIL)
+        if len(word) > _MAX_HREF - len("http://"):
+            continue
+        out.append(GLib.markup_escape_text(text[end : match.start()]))
+        label = GLib.markup_escape_text(word)
+        out.append(f'<a href="http://{label}">{label}</a>')
+        end = match.start() + len(word)
+    out.append(GLib.markup_escape_text(text[end:]))
+    return "".join(out)
 
 
 def _image_anchor_html(content: str) -> str:

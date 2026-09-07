@@ -7,6 +7,7 @@ the fallback latch.
 """
 
 import re
+import time
 
 import pytest
 from gi.repository import GLib
@@ -24,6 +25,7 @@ from collins.mdblocks import (
     Rule,
     Table,
     Text,
+    link_www,
     parse_blocks,
     render_inline,
 )
@@ -302,13 +304,65 @@ def test_links_linkify_filter_and_gates():
     assert "javascript" in text.markup and "<a" not in text.markup.split("auto.link</a>")[1]
 
 
+def test_fuzzy_linkify_is_off_and_www_autolinks_are_linear():
+    # The preset's fuzzy linkify (bare domains, emails) is quadratic per
+    # paragraph: 50 KB of `www.a.com ` took 6 s, 20 KB of `a@b.com ` 4 s,
+    # on the main loop. Off, the same parse in milliseconds; `link_www`
+    # puts the `www.` autolinks back in one linear pass.
+    started = time.perf_counter()
+    (text,) = parse_blocks("www.a.com " * 5000)
+    (mail,) = parse_blocks("a@b.com " * 2500)
+    assert time.perf_counter() - started < 2.0
+    assert text.markup.count('<a href="http://www.a.com">www.a.com</a>') == 5000
+    assert "<a" not in mail.markup and "mailto" not in mail.markup
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("see www.foo.org.", 'see <a href="http://www.foo.org">www.foo.org</a>.'),
+        ("(www.foo.org/a_(b))", '(<a href="http://www.foo.org/a_(b)">www.foo.org/a_(b)</a>)'),
+        ("(www.foo.org/a)", '(<a href="http://www.foo.org/a">www.foo.org/a</a>)'),
+        (
+            "www.foo.org/x?y=1&z, then",
+            '<a href="http://www.foo.org/x?y=1&amp;z">www.foo.org/x?y=1&amp;z</a>, then',
+        ),
+        ("WWW.Foo.ORG", '<a href="http://WWW.Foo.ORG">WWW.Foo.ORG</a>'),
+        ("www.foo", "www.foo"),  # one segment is no domain
+        ("a.www.foo.org", "a.www.foo.org"),  # the tail of a word
+        ("xwww.foo.org", "xwww.foo.org"),
+        ("www.foo.org<b>", '<a href="http://www.foo.org">www.foo.org</a>&lt;b&gt;'),
+    ],
+)
+def test_link_www_boundaries(text, expected):
+    assert link_www(text) == expected
+    assert markup_ok(link_www(text))
+
+
+def test_www_inside_a_link_or_code_stays_the_authors():
+    (text,) = parse_blocks("[www.foo.org](https://q.io) `www.foo.org` https://www.foo.org/x")
+    assert text.markup == (
+        '<a href="https://q.io">www.foo.org</a> <tt>www.foo.org</tt> '
+        '<a href="https://www.foo.org/x">https://www.foo.org/x</a>'
+    )
+
+
+def test_every_block_carries_its_source():
+    for block in walk(parse_blocks(FIXTURE)):
+        assert block.source.strip(), block
+        if isinstance(block, ListBlock):
+            for item in block.items:
+                for child in walk(item.children):
+                    assert child.source.strip(), child
+
+
 def test_image_rows_merge_on_a_line_and_split_on_a_break():
     blocks = parse_blocks(FIXTURE)
     assert blocks[13] == ImageRow(
         (BodyImage("https://img/1.png", "alt"), BodyImage("https://img/2.png", "alt2")),
-        blocks[13].source,
+        "![alt](https://img/1.png) ![alt2](https://img/2.png)",
     )
-    assert blocks[14].images == (BodyImage("https://img/3.png", "alt3"),)
+    assert blocks[14] == ImageRow((BodyImage("https://img/3.png", "alt3"),), "![alt3](https://img/3.png)")
     assert len(blocks) == 15
 
 
