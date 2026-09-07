@@ -6,7 +6,15 @@ Usage: python3 capture-docs.py <repo-root> <output.png> --scene NAME
 Scenes: main-window, hero, quick-switcher, session-details, mcp-servers,
 preferences, terminal-panel, new-chat, composer, pr-page, editor-panel,
 editor-picker, attachments-panel, notifications, notification-card,
-preferences-notifications, welcome, welcome-cli.
+preferences-notifications, welcome, welcome-cli, git-page, git-page-notes.
+
+git-page opens a session's git page on its working tree (stage-docs-data.sh
+leaves alpha-widgets with an unstaged edit, a staged one and an untracked
+file on a two-commit branch), the page revealed without taking the
+keyboard the way the footer's button does. git-page-notes opens the same
+page on the branch's whole diff and lands an agent note and a highlight
+on it through the page's own doors (what annotate_diff / highlight_diff
+would), then reveals the annotated file.
 
 notifications opens a session, stages a few rows straight through the
 app's notification center (a message, a coalesced bell, a finished run —
@@ -65,6 +73,7 @@ SCENES = (
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
     "editor-panel", "editor-picker", "attachments-panel", "notifications",
     "notification-card", "preferences-notifications", "welcome", "welcome-cli",
+    "git-page", "git-page-notes",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -321,6 +330,33 @@ def stage(win) -> list[tuple[int, callable]]:
     elif scene == "attachments-panel":
         tab = open_tab(win, U1)
         return [(1500, lambda: tab.dock_attachments(focus=False))]
+    elif scene == "git-page":
+        tab = open_tab(win, U1)
+        return [(1500, lambda: tab.open_git_page("unstaged", focus=False))]
+    elif scene == "git-page-notes":
+        from collins import diffnotes
+
+        tab = open_tab(win, U1)
+
+        def mark_up() -> None:
+            page = tab.git_page
+            page.add_notes([
+                diffnotes.NoteSpec(
+                    path="src/dashboard/spinner.css",
+                    summary="Width no longer animates — transform only, so layout never runs mid-frame.",
+                    rationale="This is what made the dashboard suite flake: the width keyframes forced a layout on every tick.",
+                    author="Claude",
+                    line=13,
+                ),
+            ])
+            page.add_highlights([
+                diffnotes.HighlightSpec(
+                    path="src/dashboard/spinner.css", line=17, start=8, end=30, tone=diffnotes.TONE_INFO,
+                ),
+            ])
+            page.reveal("src/dashboard/spinner.css", line=13, side="new", focus=False)
+
+        return [(1500, lambda: tab.open_git_page("branch", focus=False)), (3000, mark_up)]
     elif scene == "notifications":
         open_tab(win, U1)
         return [(1500, stage_notifications), (300, lambda: win.notify_bell.button.set_active(True))]

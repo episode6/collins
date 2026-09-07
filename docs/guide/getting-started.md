@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-06. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -12,6 +12,8 @@ Collins is a GTK4 app. You'll need:
 
 - **Python ≥ 3.10**
 - **GTK ≥ 4.10**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), **GtkSourceView 5**, and **PyGObject**
+- **markdown-it-py** with **linkify-it-py** (the PR page's markdown parser — without
+  them a PR's description falls back to plain text)
 - Optional: **libspelling** (spell-check in the composer) and **GStreamer** with its base
   plugins (the notification sound — without it the desktop's beep stands in)
 - The [`claude` CLI](https://claude.com/claude-code) on your `PATH`
@@ -23,23 +25,22 @@ out everything the PR menus offer. Without it a pull request is a number and
 nothing else, and Collins says so on every launch that finds `gh` missing or
 signed out — until you install it, or tick *Don't show this again*.
 
-The git page needs `git` alone — Collins draws the diffs itself, so there is
-no external diff viewer to install.
+The git page needs `git` alone — Collins draws the diffs itself.
 
 Install the system libraries with your distro's package manager:
 
 ::: code-group
 
 ```bash [Ubuntu / Debian]
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
 ```
 
 ```bash [Fedora]
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling gstreamer1 gstreamer1-plugins-base
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base
 ```
 
 ```bash [Arch]
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libspelling gstreamer gst-plugins-base-libs
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs
 ```
 
 :::
@@ -137,9 +138,9 @@ collins --install-desktop                     # optional: add it to the app grid
 ```
 
 `--system-site-packages` is not optional: Collins declares no PyPI
-dependencies on purpose, because PyGObject, GTK, VTE and GtkSourceView come
-from your distro's packages (above). An environment that cannot see them
-exits on `import gi` the first time you run the app.
+dependencies on purpose, because PyGObject, GTK, VTE, GtkSourceView and the
+markdown parser come from your distro's packages (above). An environment
+that cannot see them exits on `import gi` the first time you run the app.
 
 `collins --install-desktop` writes the launcher, app icon and metainfo under
 `~/.local/share` for your user — the same three files the `.deb` installs

@@ -205,6 +205,12 @@ GitHub), `editor-panel`, `editor-picker` (a PR shot: the editor with nothing
 opened — with `--set editor_width=380`, below the `editor_narrow_width`
 setting, that's the narrow pane's picker column; `editor-panel` at the same
 width is its file view with the back button), `attachments-panel`,
+`git-page` (the session's git page on its working tree — the staged
+alpha-widgets checkout has a two-commit branch over `main`, an unstaged
+edit, a staged one and an untracked file; shot at 2000×1100 on a
+2560×1440 headless monitor so the compositor doesn't maximize it),
+`git-page-notes` (the same page on the branch's diff, with an agent note
+and a highlight landed through the page's own doors),
 `notifications` (rows staged
 straight through the app's notification center, the sheet opened from the
 bell — no real bell rings), `notification-card` (the same rows, two of them

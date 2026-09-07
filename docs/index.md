@@ -1,7 +1,7 @@
 ---
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 # https://vitepress.dev/reference/default-theme-home-page
 layout: home
 
@@ -35,10 +35,10 @@ features:
     details: A real prompt box — multi-line, spell-checked, open the moment you start typing, pasted images and all — that never loses a prompt. Close the tab or quit mid-sentence and the draft is back when you return, for a running session or one you haven't started yet.
   - icon: 🔀
     title: Pull requests, start to merge
-    details: Every PR a session opens is tracked on its row and tab — CI, conflicts, unanswered comments — with the actions to match — read the diff beside the terminal, merge, ask for a review, or send the failure back to the agent as a prompt.
+    details: Every PR a session opens is tracked on its row and tab — CI, conflicts, unanswered comments — with the actions to match — read its description and threads as GitHub renders them, merge, ask for a review, or send the failure back to the agent as a prompt.
   - icon: 🧰
     title: An IDE around the agent
-    details: A code editor with the agent's latest edits one click away, shell panels under every tab, a gallery of everything the session has shown you, and the composer floating over the terminal or docked below it.
+    details: A native git page — the session's diff beside its terminal, with the commits of the whole stack, staging by file, hunk or line, and notes the agent can read and leave — plus a code editor with the agent's latest edits one click away, shell panels under every tab, a gallery of everything the session has shown you, and the composer floating over the terminal or docked below it.
   - icon: 🔔
     title: Stays out of your way
     details: Close the window and sessions keep running behind a status icon that counts what's waiting for you — reopen one and Collins re-attaches to the live process instead of resuming a copy. Sessions raise notifications when they need you — a card inside the window, or a desktop notification when you're away — a bell in the header keeps the history, and Caffeine Mode keeps the machine awake while agents work.

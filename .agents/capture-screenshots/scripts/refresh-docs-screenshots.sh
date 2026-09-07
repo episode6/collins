@@ -80,6 +80,13 @@ run_scene() {
     notification-card) shoot notification-card "$IMG/notification-card.png" --size 1280x860 --settle-ms 4000 ;;
     attachments-panel) shoot attachments-panel "$IMG/attachments-panel.png" --size 1500x1100 \
                       --set page_panel_size_right=420 --settle-ms 5000 ;;
+    # The git page wants room for its sidebar and a stacked hunk beside a
+    # terminal wide enough not to rewrap the shim: a 2000px window, on a
+    # monitor big enough that the compositor doesn't maximize it.
+    git-page)       HEADLESS_SIZE=2560x1440 shoot git-page "$IMG/git-page.png" --size 2000x1100 \
+                      --set page_panel_size_right=1020 --settle-ms 6000 ;;
+    git-page-notes) HEADLESS_SIZE=2560x1440 shoot git-page-notes "$IMG/git-page-notes.png" --size 2000x1100 \
+                      --set page_panel_size_right=1020 --settle-ms 6000 ;;
     welcome)        shoot welcome "$IMG/welcome.png" --size 1280x860 --set welcome_seen=false ;;
     welcome-cli)    shoot welcome-cli "$IMG/welcome-cli.png" --size 1280x860 --set welcome_seen=false ;;
   esac
@@ -92,8 +99,8 @@ run_scene() {
 # a Draft row in every scene shot after it.
 SCENES=("$@")
 for s in main-window hero quick-switcher session-details mcp-servers preferences \
-         terminal-panel composer pr-page editor-panel attachments-panel notifications \
-         notification-card welcome welcome-cli new-chat; do
+         terminal-panel composer pr-page editor-panel attachments-panel git-page \
+         git-page-notes notifications notification-card welcome welcome-cli new-chat; do
   run_scene "$s"
 done
 echo "staged data left in $E2E"

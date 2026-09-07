@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-06. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -87,10 +87,12 @@ The bindings are stored in `~/.config/collins/state.json` under
 `settings.keybindings`, as a map of action name to a list of GTK accelerator
 strings (`"win.close-tab": ["<Control>F4"]`; an empty list means unbound).
 
-## Keys that aren't rebindable
+## Keys of the widget under the cursor
 
-These belong to the widget under the cursor, so they don't appear in the
-Keyboard Bindings dialog:
+These belong to the widget under the cursor rather than to the window. Most
+don't appear in the Keyboard Bindings dialog; the git page's diff keys
+(the `]` / `[` row onwards) are the exception — they are its **Git page**
+group, rebindable there like any other:
 
 | Key | Where | Action |
 | --- | --- | --- |

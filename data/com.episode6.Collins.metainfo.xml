@@ -2,7 +2,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 <component type="desktop-application">
   <id>com.episode6.Collins</id>
@@ -26,9 +26,12 @@ fork. Last modified: 2026-08-30. Full change history: git log for this file.
     <ul>
       <li>Sessions grouped by project with favorites, search, and live updates</li>
       <li>Tabbed embedded terminals resuming sessions in their project directory</li>
-      <li>Attention indicators when a background session produces output</li>
+      <li>A native git page beside each session: the diff, the commits of the branch's stack, staging by file, hunk or line, and notes on the diff</li>
+      <li>Pull requests tracked through the GitHub CLI: checks, conflicts and comments on every row, with a PR page and actions</li>
+      <li>A code editor, shell panels and a prompt composer around every session</li>
+      <li>Notifications when a session needs you, and a status icon that counts what is waiting</li>
+      <li>Tools the session itself can call: open a file, a diff or an image, annotate the diff, spawn a sibling session</li>
       <li>Session details: message counts, models, token usage</li>
-      <li>Bulk selection for opening, starring, hiding, or trashing sessions</li>
     </ul>
     <p>
       Unofficial community tool — not affiliated with or endorsed by Anthropic.
