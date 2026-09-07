@@ -38,6 +38,10 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **`start_session` takes an effort level.** The session tool's new
+  `effort` argument sets the sibling's `--effort` (`low` … `max`); left
+  out, the sibling answers at the effort its caller is answering at right
+  now, `/effort` switches included, the way it already inherits the model.
 - **A files-list click shows one file's diff.** Clicking a file in the
   git page's files list scrolled the whole stream to its section; it now
   shows that file's diff alone, and `]` / `.` walk on into the next file.

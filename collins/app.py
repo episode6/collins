@@ -2933,8 +2933,18 @@ class App(Adw.Application):
             # the CLI's configured default, which /model may have left behind.
             model = mcptools.inherited_model(tab.current_model())
 
+        effort = args.get("effort")
+        if not effort:
+            # The schema's enum already refuses a level the CLI doesn't name,
+            # so an explicit pick passes straight through; without one the
+            # sibling answers at the effort its spawner is answering at *now*
+            # — the level stamped on the caller's last reply, /effort switches
+            # included — not whatever flag this tab launched with. See
+            # inherited_effort.
+            effort = mcptools.inherited_effort(tab.current_effort())
+
         worktree = args.get("worktree")  # bool, or None to use the project default
-        options = SessionOptions(model=model, permission_mode=mode or "")
+        options = SessionOptions(model=model, effort=effort, permission_mode=mode or "")
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
         # anything is spawned.

@@ -818,8 +818,8 @@ is running in:
   in a background tab, handed a prompt to begin on, working in parallel
   while the caller keeps going. It never takes your tab selection or
   keyboard — it turns up as a new row in the sidebar, rings and flashes if
-  it needs you, and unless told otherwise runs on the **model and
-  permission mode its caller is using right now** (one exception: a
+  it needs you, and unless told otherwise runs on the **model, effort
+  level and permission mode its caller is using right now** (one exception: a
   bypass-permissions caller's siblings come up in acceptEdits, so an
   unattended session can't mint more of itself). Spawned sessions get
   these same tools, so they can spawn siblings of their own.

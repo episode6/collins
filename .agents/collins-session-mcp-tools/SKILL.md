@@ -171,7 +171,9 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   terminal sized like the visible one else 120x40), from the caller's
   **project root** (`worktree_project_root(cwd) or cwd` — launching inside the
   caller's worktree broke the resolver's follow), inheriting the caller's
-  transcript permission mode and model, injecting the prompt unfocused, and
+  transcript permission mode, model and effort (`inherited_effort` passes
+  only one of `claudemodels.EFFORT_LEVELS`; the schema's enum gates an
+  explicit pick), injecting the prompt unfocused, and
   answering with the new session id once `session-resolved` fires (12 s
   deadline, `process-exited` fail-fast, tab kept on failure). Spawns
   **serialize per project root** (`_start_session_chains`) so two siblings
