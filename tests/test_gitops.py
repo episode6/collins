@@ -318,6 +318,15 @@ def test_revert_names_the_mode_and_refuses_an_unsafe_sha():
     refused = gitops.revert("/repo", "--no-edit", True, run=run)
     assert not refused.ok and len(run.calls) == 3
 
+    # A quit that fails is reported: the reverse change is staged, but the
+    # sequencer state stays until the user quits it by hand.
+    def revert_answers(argv):
+        return failed("could not remove REVERT_HEAD") if "--quit" in argv else ok()
+
+    stuck = gitops.revert("/repo", SHA_A, False, run=fake_runner({"revert": revert_answers}))
+    assert not stuck.ok
+    assert "git revert --quit" in stuck.stderr and "could not remove REVERT_HEAD" in stuck.stderr
+
 
 # -- in_progress_operation ------------------------------------------------------------
 
@@ -525,6 +534,8 @@ def test_revert_commits_or_stages_the_reverse_and_a_conflict_leaves_revert_head(
     conflicted = gitops.revert(repo, second, True)
     assert not conflicted.ok
     assert gitops.in_progress_operation(gitinfo.git_dir(repo)) == "revert"
+    status = gitops.read_status(repo)
+    assert [row.code for row in status.unstaged] == ["U"]  # what the sidebar's words key on
 
 
 @needs_git

@@ -796,18 +796,22 @@ class GitSidebar(Gtk.Box):
         def work() -> tuple:
             result = gitops.revert(cwd, sha, commit)
             head = gitops.head_abbrev(cwd) if result.ok and commit else None
-            in_progress = (
-                not result.ok and gitops.in_progress_operation(gitinfo.git_dir(cwd)) is not None
-            )
-            return result, head, in_progress
+            # A revert stopped on conflicts leaves unmerged paths behind
+            # (REVERT_HEAD alone would also mark a --no-commit whose quit
+            # failed, whose words are gitops's own).
+            conflicts = False
+            if not result.ok:
+                status = gitops.read_status(cwd)
+                conflicts = status is not None and any(row.code == "U" for row in status.unstaged)
+            return result, head, conflicts
 
         def done(read: tuple) -> None:
-            result, head, in_progress = read
+            result, head, conflicts = read
             if result.ok:
                 self._toast(gitmodel.revert_done(abbrev, commit, head))
             else:
                 self._toast(
-                    gitmodel.revert_failed(abbrev, gitops.first_line(result.stderr), in_progress),
+                    gitmodel.revert_failed(abbrev, gitops.first_line(result.stderr), conflicts),
                     refusal=True,
                 )
             self.emit("mutated")
@@ -1253,7 +1257,9 @@ class GitSidebar(Gtk.Box):
             return GLib.SOURCE_REMOVE
         abbrev = gitloads.short_ref(sha)
         widget = self._commit_widgets.get(gitmodel.commit_row_id(sha))
-        subject = widget.row.label if widget is not None else ""
+        # The row is what the menu was opened on; a sha the list no longer
+        # holds (a reload between the click and the gate) reads by its sha.
+        subject = widget.row.label if widget is not None else abbrev
         dialogs.confirm_dialog(
             self,
             _("Revert {sha}?").format(sha=abbrev),

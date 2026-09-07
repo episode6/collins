@@ -593,11 +593,11 @@ def revert_done(abbrev: str, commit: bool, head: str | None) -> str:
     return _("Reverted {sha} into the working tree — staged, nothing committed").format(sha=abbrev)
 
 
-def revert_failed(abbrev: str, stderr_line: str, in_progress: bool) -> str:
-    """The toast after a revert failed: a revert stopped on conflicts
-    names the way out (`git revert --continue` / `--abort`); any other
-    refusal is git's own first line."""
-    if in_progress:
+def revert_failed(abbrev: str, stderr_line: str, conflicts: bool) -> str:
+    """The toast after a revert failed: a revert stopped on *conflicts*
+    (unmerged paths left behind) names the way out (`git revert
+    --continue` / `--abort`); any other refusal is git's own first line."""
+    if conflicts:
         return _(
             "Reverting {sha} left conflicts — resolve them, then `git revert --continue`,"
             " or `git revert --abort`"

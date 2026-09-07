@@ -247,8 +247,9 @@ imports `gitpage`; the page feeds it and listens:
   --no-edit`, *Revert in working tree* → `revert(sha, False)` =
   `revert --no-commit` **followed by `revert --quit`**, since a clean
   `--no-commit` leaves REVERT_HEAD and the Commit gate would refuse;
-  a stopped revert's toast names `--continue` / `--abort` off
-  `in_progress_operation`, `gitmodel.revert_done` / `revert_failed`),
+  a failed quit comes back not ok with gitops's own words; a stopped
+  revert's toast names `--continue` / `--abort` off the unmerged paths
+  `read_status` lists, `gitmodel.revert_done` / `revert_failed`),
   and folds groups with `collapse_group(group, collapsed=None)` /
   `collapsed_groups()` — the caret on a header row (`_CommitRow`, a
   focusable=False flat button, so its press never activates the row);

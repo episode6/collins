@@ -784,12 +784,24 @@ def revert(
     REVERT_HEAD behind too (git counts the revert as in progress until
     the commit), which would have the sidebar's own Commit refuse with
     "a revert is half-finished" — so it is followed by `revert --quit`,
-    which forgets the operation and keeps the index and the tree."""
+    which forgets the operation and keeps the index and the tree. A quit
+    that fails (a `.git` nobody can write to) comes back not ok with
+    words of its own: the reverse change is staged, but the state stays
+    until the user runs the quit by hand."""
     if not gitloads.safe_ref(sha):
         return GitResult(False, "", f"not a commit: {sha!r}")
     result = run_git(cwd, revert_argv(sha, commit), run=run, timeout=timeout)
     if result.ok and not commit:
-        run_git(cwd, ["revert", "--quit"], run=run, timeout=GIT_TIMEOUT_S)
+        quit_result = run_git(cwd, ["revert", "--quit"], run=run, timeout=GIT_TIMEOUT_S)
+        if not quit_result.ok:
+            return GitResult(
+                False,
+                result.stdout,
+                _(
+                    "Reverted into the working tree, but git could not forget the revert"
+                    " ({error}) — run `git revert --quit` by hand"
+                ).format(error=first_line(quit_result.stderr) or "?"),
+            )
     return result
 
 
