@@ -1038,7 +1038,10 @@ def test_details_nested_past_the_depth_cap_is_literal():
 
 def test_linked_image_alone_is_an_image_row():
     (row,) = parse_blocks("[![alt](https://img/1.png)](https://link/x)")
-    assert row == ImageRow((BodyImage(url="https://img/1.png", alt="alt"),), "[![alt](https://img/1.png)](https://link/x)")
+    assert row == ImageRow(
+        (BodyImage(url="https://img/1.png", alt="alt"),),
+        "[![alt](https://img/1.png)](https://link/x)",
+    )
     (row,) = parse_blocks('[<img src="https://img/2.png" alt="pic">](https://link/y)')
     assert isinstance(row, ImageRow) and row.images[0].url == "https://img/2.png"
 
