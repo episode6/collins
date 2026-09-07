@@ -328,6 +328,16 @@ def fixup_argv(sha: str) -> list[str]:
     return ["commit", "-q", "-m", f"fixup! {sha}"]
 
 
+def revert_argv(sha: str, commit: bool) -> list[str]:
+    """["revert", "--no-edit", sha] for a commit made on the spot (git's
+    own "Revert …" message, no editor on a terminal nobody watches), or
+    ["revert", "--no-commit", sha] for the revert applied to the working
+    tree and the index alone — `--no-commit` leaves nothing to edit."""
+    if commit:
+        return ["revert", "--no-edit", sha]
+    return ["revert", "--no-commit", sha]
+
+
 def rev_parse_argv(rev: str) -> list[str]:
     """["rev-parse", "--verify", "--quiet", rev]"""
     return ["rev-parse", "--verify", "--quiet", rev]
@@ -755,6 +765,44 @@ def commit_fixup(
     if not gitloads.safe_ref(sha):
         return GitResult(False, "", f"not a commit: {sha!r}")
     return run_git(cwd, fixup_argv(sha), run=run, timeout=timeout)
+
+
+def revert(
+    cwd: str | Path | None,
+    sha: str,
+    commit: bool,
+    run=subprocess.run,
+    timeout: float = COMMIT_TIMEOUT_S,
+) -> GitResult:
+    """`git revert --no-edit <sha>` (a commit: hooks and signing run, so
+    the long timeout) or `git revert --no-commit <sha>` (the reverse
+    change left staged in the working tree, nothing committed). A *sha*
+    that isn't safe as an argument is refused without a call. A revert
+    that stops on conflicts exits non-zero having changed the tree and
+    left REVERT_HEAD behind — in_progress_operation then says "revert"
+    and the caller's words name the way out. A clean `--no-commit` leaves
+    REVERT_HEAD behind too (git counts the revert as in progress until
+    the commit), which would have the sidebar's own Commit refuse with
+    "a revert is half-finished" — so it is followed by `revert --quit`,
+    which forgets the operation and keeps the index and the tree. A quit
+    that fails (a `.git` nobody can write to) comes back not ok with
+    words of its own: the reverse change is staged, but the state stays
+    until the user runs the quit by hand."""
+    if not gitloads.safe_ref(sha):
+        return GitResult(False, "", f"not a commit: {sha!r}")
+    result = run_git(cwd, revert_argv(sha, commit), run=run, timeout=timeout)
+    if result.ok and not commit:
+        quit_result = run_git(cwd, ["revert", "--quit"], run=run, timeout=GIT_TIMEOUT_S)
+        if not quit_result.ok:
+            return GitResult(
+                False,
+                result.stdout,
+                _(
+                    "Reverted into the working tree, but git could not forget the revert"
+                    " ({error}) — run `git revert --quit` by hand"
+                ).format(error=first_line(quit_result.stderr) or "?"),
+            )
+    return result
 
 
 def stage_all(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT_TIMEOUT_S) -> GitResult:

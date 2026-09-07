@@ -38,6 +38,13 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **Revert a commit from the commits list.** A commit row's right-click
+  menu gains *Revert…*, which asks whether to commit the revert (`git
+  revert --no-edit`) or to revert into the working tree alone (`git
+  revert --no-commit`, the reverse change left staged with nothing
+  committed, git's half-finished-revert state cleared so Commit still
+  works), or to cancel. A revert stopped by conflicts toasts the
+  `--continue` / `--abort` way out.
 - **The working tree row tops the commits list.** It sat under the current
   branch's header as one of its rows; it now stands above every header in
   a row of its own, outside any fold. With the default branch checked out

@@ -476,7 +476,15 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   follows what the page has loaded, not the last click. The caret at the
   left of a branch header folds its commits away (and unfolds them)
   without loading anything; folds hold for the page's life. A
-  right-click offers *Copy sha* and *Reload*.
+  right-click offers *Copy sha*, *Revert…* and *Reload*. **Revert…** asks
+  how: *Commit revert* runs `git revert` and makes the commit (git's own
+  "Revert …" message, no editor); *Revert in working tree* runs it with
+  `--no-commit`, leaving the reverse change staged and nothing committed,
+  to edit and commit yourself — the half-finished-revert state git leaves
+  behind is cleared (`git revert --quit`), so the Commit button takes it
+  like any other staged change. Either refuses first while a rebase,
+  merge, cherry-pick or revert is half-finished, and a revert that stops
+  on conflicts toasts the way out (`git revert --continue` / `--abort`).
 - **The files list splits on the working tree.** With *working tree*
   loaded it shows **UNSTAGED · n** and **STAGED · n** sections; the page
   holds one of the two at a time, so that side is live — the diff's own

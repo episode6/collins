@@ -306,6 +306,28 @@ def test_unpushed_in_group_lists_the_groups_commits_on_no_remote_never_upstream(
     assert gitops.unpushed_in_group("/repo", "a b", 5, run=run) == [] and len(run.calls) == 2
 
 
+def test_revert_names_the_mode_and_refuses_an_unsafe_sha():
+    run = fake_runner({"revert": ok()})
+    assert gitops.revert("/repo", SHA_A, True, run=run).ok
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "revert", "--no-edit", SHA_A]
+    assert kwargs["timeout"] == gitops.COMMIT_TIMEOUT_S
+    assert gitops.revert("/repo", SHA_A, False, run=run).ok
+    assert run.calls[1][0] == ["git", "revert", "--no-commit", SHA_A]
+    assert run.calls[2][0] == ["git", "revert", "--quit"]  # REVERT_HEAD forgotten, the index kept
+    refused = gitops.revert("/repo", "--no-edit", True, run=run)
+    assert not refused.ok and len(run.calls) == 3
+
+    # A quit that fails is reported: the reverse change is staged, but the
+    # sequencer state stays until the user quits it by hand.
+    def revert_answers(argv):
+        return failed("could not remove REVERT_HEAD") if "--quit" in argv else ok()
+
+    stuck = gitops.revert("/repo", SHA_A, False, run=fake_runner({"revert": revert_answers}))
+    assert not stuck.ok
+    assert "git revert --quit" in stuck.stderr and "could not remove REVERT_HEAD" in stuck.stderr
+
+
 # -- in_progress_operation ------------------------------------------------------------
 
 
@@ -485,6 +507,35 @@ def test_unpushed_the_groups_commits_on_no_remote_tracking_ref_not_upstream(repo
     _git(repo, "update-ref", "refs/remotes/origin/feat", "HEAD")
     assert gitops.unpushed_in_group(repo, "main", 20) == []
     assert gitops.unpushed_shas(repo) == set()
+
+
+@needs_git
+def test_revert_commits_or_stages_the_reverse_and_a_conflict_leaves_revert_head(repo):
+    (repo / "f.txt").write_text("two\n")
+    _git(repo, "commit", "-qam", "second")
+    second = _git(repo, "rev-parse", "HEAD").strip()
+
+    assert gitops.revert(repo, second, False).ok
+    assert (repo / "f.txt").read_text() == "one\n"
+    assert gitops.staged_paths(repo) == ["f.txt"]
+    assert _git(repo, "log", "-1", "--format=%s") == "second\n"
+    assert gitops.in_progress_operation(gitinfo.git_dir(repo)) is None
+    _git(repo, "reset", "-q", "--hard", "HEAD")
+
+    assert gitops.revert(repo, second, True).ok
+    assert (repo / "f.txt").read_text() == "one\n"
+    assert _git(repo, "log", "-1", "--format=%s").startswith("Revert \"second\"")
+    assert gitops.staged_paths(repo) == []
+
+    # A conflicting revert stops with REVERT_HEAD behind: the sidebar's
+    # words name --continue / --abort off in_progress_operation.
+    (repo / "f.txt").write_text("three\n")
+    _git(repo, "commit", "-qam", "third")
+    conflicted = gitops.revert(repo, second, True)
+    assert not conflicted.ok
+    assert gitops.in_progress_operation(gitinfo.git_dir(repo)) == "revert"
+    status = gitops.read_status(repo)
+    assert [row.code for row in status.unstaged] == ["U"]  # what the sidebar's words key on
 
 
 @needs_git

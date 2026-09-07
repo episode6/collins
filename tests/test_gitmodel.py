@@ -487,6 +487,19 @@ def test_all_done_and_stage_noun():
     assert gitmodel.all_done(1, False) == "Unstaged 1 change"
 
 
+def test_revert_words():
+    assert gitmodel.revert_done("bdda381", True, "e4f5a6b") == (
+        "Reverted bdda381 as e4f5a6b — undo with `git reset --keep HEAD~1`"
+    )
+    assert gitmodel.revert_done("bdda381", True, None).startswith("Reverted bdda381 as ?")
+    assert gitmodel.revert_done("bdda381", False, None) == (
+        "Reverted bdda381 into the working tree — staged, nothing committed"
+    )
+    assert gitmodel.revert_failed("bdda381", "error: local changes", False) == "error: local changes"
+    assert gitmodel.revert_failed("bdda381", "", False) == "git revert failed"
+    assert "git revert --continue" in gitmodel.revert_failed("bdda381", "error: could not revert", True)
+
+
 def test_fixup_options_and_autosquash_command():
     assert gitmodel.fixup_options([commit(3, "Second"), commit(2, "First")]) == [
         f"{commit(3).abbrev}  Second",

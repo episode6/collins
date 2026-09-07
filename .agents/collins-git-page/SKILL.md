@@ -228,8 +228,8 @@ imports `gitpage`; the page feeds it and listens:
   clears it first); `mutated` → re-seed the signatures, re-read the
   stack, reload now. A `GtkSearchEntry`'s `search-changed` is **debounced**
   (~150 ms): a probe that sets the text must `wait_for` the words to land.
-- Native mutations (`commit`, `fixup`, `stage_all`, `unstage_all` — public
-  so the e2e drives them without dialogs) run on a thread behind `busy`
+- Native mutations (`commit`, `fixup`, `revert(sha, commit)`, `stage_all`,
+  `unstage_all` — public so the e2e drives them without dialogs) run on a thread behind `busy`
   (the Commit button spins, the other mutations go insensitive) and toast
   through the nearest `Adw.ToastOverlay` (`set_use_markup(False)`: titles
   carry commit summaries). The button handlers gate first
@@ -240,6 +240,16 @@ imports `gitpage`; the page feeds it and listens:
   same `busy`. The e2e reaches rows with `click_commit_row(id)`,
   `click_file_row(path, side)`, `click_section(side)` and reads
   `commit_rows()`, `file_rows()`, `loaded_row_id()`, `selected_path`,
+  `commit_menu_labels(id)` (a commit row's right-click: *Copy sha*,
+  *Revert…* — only while `live` — and *Reload*; `_on_revert_clicked`
+  gates on `in_progress_operation` on a thread, then a three-way
+  `confirm_dialog`: *Commit revert* → `revert(sha, True)` = `revert
+  --no-edit`, *Revert in working tree* → `revert(sha, False)` =
+  `revert --no-commit` **followed by `revert --quit`**, since a clean
+  `--no-commit` leaves REVERT_HEAD and the Commit gate would refuse;
+  a failed quit comes back not ok with gitops's own words; a stopped
+  revert's toast names `--continue` / `--abort` off the unmerged paths
+  `read_status` lists, `gitmodel.revert_done` / `revert_failed`),
   and folds groups with `collapse_group(group, collapsed=None)` /
   `collapsed_groups()` — the caret on a header row (`_CommitRow`, a
   focusable=False flat button, so its press never activates the row);

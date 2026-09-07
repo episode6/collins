@@ -582,6 +582,29 @@ def fixup_options(commits: Iterable[Commit]) -> list[str]:
     return [f"{commit.abbrev}  {commit.subject[:SUBJECT_MAX_CHARS]}" for commit in commits]
 
 
+def revert_done(abbrev: str, commit: bool, head: str | None) -> str:
+    """The toast after a revert landed: the commit made (`Reverted a1b2c3d
+    as e4f5a6b`, the undo named) or the reverse change staged in the
+    working tree, nothing committed."""
+    if commit:
+        return _("Reverted {sha} as {head} — undo with `git reset --keep HEAD~1`").format(
+            sha=abbrev, head=head or "?"
+        )
+    return _("Reverted {sha} into the working tree — staged, nothing committed").format(sha=abbrev)
+
+
+def revert_failed(abbrev: str, stderr_line: str, conflicts: bool) -> str:
+    """The toast after a revert failed: a revert stopped on *conflicts*
+    (unmerged paths left behind) names the way out (`git revert
+    --continue` / `--abort`); any other refusal is git's own first line."""
+    if conflicts:
+        return _(
+            "Reverting {sha} left conflicts — resolve them, then `git revert --continue`,"
+            " or `git revert --abort`"
+        ).format(sha=abbrev)
+    return stderr_line or _("git revert failed")
+
+
 def autosquash_command(abbrev: str, is_root: bool) -> str:
     """The fold-in command the fixup confirm names (never runs): `git
     rebase -i --autosquash --autostash <abbrev>^`, `--root` for a root
