@@ -180,10 +180,15 @@ Enter opens, Esc closes.
   commit — into the PR's own repository, on its own host — and a relative
   link like `[guide](docs/guide.md)` opens the file at the PR's head
   commit; a reference inside a code span, or inside a link the author
-  wrote, is left alone. A `<details>` block shows as its source for now
-  — never dropped. Every other HTML tag shows escaped, as text. Without
-  the parser installed the page falls back to its plainer built-in
-  renderer.
+  wrote, is left alone. A `<details>` block is an expander wearing its
+  `<summary>` — collapsed unless the tag says `open`, its contents built
+  the first time it is opened; one with no closing tag shows as text
+  rather than swallowing the rest of the body. GitHub's alerts (`> [!NOTE]`,
+  `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`) are quotes under
+  GitHub's own icon and title for the kind, bar and title in the kind's
+  color — the accent, green, purple, yellow, red. Every other HTML tag
+  shows escaped, as text. Without the parser installed the page falls
+  back to its plainer built-in renderer.
 - **A changed image is shown, not diffed.** In the PR page's *Files* view, a
   file whose name says image — `.png`, `.svg`, `.gif`, `.jpg`, `.webp`… —
   renders as the picture itself, on a transparency checkerboard: **before
