@@ -27,14 +27,14 @@ Options:
     --only SUBSTR   run only checks whose filename contains SUBSTR
                     (repeatable; a check runs if it matches any)
     --shard I/N     run only the I-th of N time-balanced shards (1-based);
-                    CI runs the suite as five of these in parallel
+                    CI runs the suite as ten of these in parallel
     --timeout SECS  per-check timeout, default 300
     --list          print the discovered checks and exit
 
 Sharding is by measured wall time, not by count: CHECK_SECONDS below holds
 each check's seconds from a CI run, and `shard()` deals the checks out
 longest-first, each to the shard with the least time so far (LPT), so the
-five shards finish together instead of one dragging a 30 s check behind
+ten shards finish together instead of one dragging a 30 s check behind
 eight 3 s ones. A check missing from the table (new, or renamed) is dealt
 in at DEFAULT_SECONDS — it still runs, in exactly one shard — and gets a
 real weight the next time the table is refreshed from a run's logs (the
@@ -133,7 +133,7 @@ def parse_shard(text):
         index, count = (int(part) for part in text.split("/"))
     except ValueError:
         raise argparse.ArgumentTypeError(
-            f"expected I/N, e.g. 2/5, got {text!r}") from None
+            f"expected I/N, e.g. 2/10, got {text!r}") from None
     if count < 1 or not 1 <= index <= count:
         raise argparse.ArgumentTypeError(f"shard {text} is out of range")
     return index, count
