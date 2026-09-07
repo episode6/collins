@@ -8,7 +8,8 @@ that scrolls sideways on its own (the page body never does), an image row
 whatever the page's own image slot builder makes of it, a code block a
 read-only GtkSource view built like the Files view's patch view (the
 fence's language highlighted, the editor's style scheme threaded in from
-the page, its own sideways scroller), a `<details>` an expander wearing
+the page, its own sideways scroller, a right-click copying the whole
+block), a `<details>` an expander wearing
 its summary whose children are built the first time it opens, an alert
 quote a column with a colored bar under an icon-and-title row.
 
@@ -26,9 +27,11 @@ from collections.abc import Callable
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk, Pango  # noqa: E402
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from . import mdblocks  # noqa: E402
+from .copylabel import FLASH_MS  # noqa: E402
 from .editor import GtkSource  # noqa: E402 — require_version + friendly exit live there
 from .editorfiles import fence_language_id  # noqa: E402
 from .formatting import markup_ok  # noqa: E402
@@ -142,7 +145,7 @@ def build_one(
         return _table(block, budget, page_url)
     if isinstance(block, mdblocks.CodeBlock):
         budget.take()
-        return code_view(block, scheme)
+        return code_view(block, scheme, page_url)
     if isinstance(block, mdblocks.Details):
         budget.take()
         return DetailsExpander(block, budget, image_row, depth, page_url, scheme)
@@ -179,7 +182,9 @@ def heading_label(block: mdblocks.Heading) -> Gtk.Label:
     return label
 
 
-def code_view(block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -> Gtk.Widget:
+def code_view(
+    block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None, page_url: str = ""
+) -> Gtk.Widget:
     """A fence or indented block as a read-only GtkSource view, built like
     the Files view's patch view: no cursor, monospace, 6/4 px margins, no
     line numbers (these are snippets), in its own scroller that scrolls
@@ -188,7 +193,75 @@ def code_view(block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -
     fence's info word through `editorfiles.fence_language_id`, or the word
     itself when GtkSource knows it by that name, or none; *scheme* is the
     editor's style scheme as the page computes it (`style_scheme`), and
-    `restyle_code` follows a later change. The text is capped at `CODE_CAP`."""
+    `restyle_code` follows a later change. The text is capped at `CODE_CAP`;
+    what that cut is counted in a link to *page_url* under the block, as
+    a capped table's rows are. A right-click copies the whole block
+    (`CodeBlockView.copy`)."""
+    view = CodeBlockView(block, scheme)
+    if len(block.text.rstrip("\n")) <= CODE_CAP:
+        return view
+    lines_cut = max(1, block.text.rstrip("\n").count("\n", CODE_CAP))
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
+    box.append(view)
+    more = _link_label(_("{n} more lines on GitHub").format(n=lines_cut), page_url)
+    more.add_css_class("pr-md-code-more")
+    box.append(more)
+    return box
+
+
+class CodeBlockView(Gtk.Overlay):
+    """The code block's widget: the view in its scroller, and over its top
+    right corner the "Copied to clipboard" pill that shows for a beat
+    after a right-click copies the block (`copy`) — the page's copyable
+    labels flash the same words in place, but a code block's text is the
+    one thing here that must not change under the pointer. The
+    right-click is claimed in the capture phase, ahead of the text view's
+    own context menu (Cut / Paste / Select all — none of them for a
+    read-only snippet); the tooltip says so, since a right-click nobody is
+    told about is one nobody finds."""
+
+    def __init__(self, block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -> None:
+        super().__init__(hexpand=True)
+        self.text = block.text.rstrip("\n")
+        self._flash: list[int] = []
+        self.view = _source_view(block, scheme)
+        self.view.set_tooltip_text(_("Right-click to copy"))
+        scroller = Gtk.ScrolledWindow(child=self.view, hexpand=True)
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroller.set_propagate_natural_height(True)
+        scroller.add_css_class("pr-md-code-scroller")
+        self.set_child(scroller)
+        self.copied = Gtk.Label(label=_("Copied to clipboard"), visible=False)
+        self.copied.add_css_class("osd")
+        self.copied.add_css_class("pr-md-copied")
+        self.copied.set_halign(Gtk.Align.END)
+        self.copied.set_valign(Gtk.Align.START)
+        self.copied.set_can_target(False)
+        self.add_overlay(self.copied)
+        secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        secondary.connect("pressed", self._on_secondary)
+        self.view.add_controller(secondary)
+
+    def _on_secondary(self, gesture: Gtk.GestureClick, _n_press: int, _x: float, _y: float) -> None:
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self.copy()
+
+    def copy(self) -> None:
+        """Put the block's whole text on the clipboard and flash the pill."""
+        self.get_clipboard().set(self.text)
+        self.copied.set_visible(True)
+        if self._flash:
+            GLib.source_remove(self._flash.pop())
+        self._flash.append(GLib.timeout_add(FLASH_MS, self._unflash))
+
+    def _unflash(self) -> bool:
+        self._flash.clear()
+        self.copied.set_visible(False)
+        return GLib.SOURCE_REMOVE
+
+
+def _source_view(block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -> GtkSource.View:
     buffer = GtkSource.Buffer()
     manager = GtkSource.LanguageManager.get_default()
     language_id = fence_language_id(block.lang or "")
@@ -214,11 +287,7 @@ def code_view(block: mdblocks.CodeBlock, scheme: GtkSource.StyleScheme | None) -
     view.set_top_margin(4)
     view.set_bottom_margin(4)
     view.add_css_class("pr-md-code")
-    scroller = Gtk.ScrolledWindow(child=view, hexpand=True)
-    scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-    scroller.set_propagate_natural_height(True)
-    scroller.add_css_class("pr-md-code-scroller")
-    return scroller
+    return view
 
 
 def restyle_code(root: Gtk.Widget, scheme: GtkSource.StyleScheme | None) -> None:
@@ -465,7 +534,11 @@ class _TableScroller(Gtk.ScrolledWindow):
             _, width, _, _ = grid.measure(Gtk.Orientation.HORIZONTAL, -1)
             minimum, natural, _, _ = grid.measure(Gtk.Orientation.VERTICAL, width)
             return minimum, natural, -1, -1
-        return Gtk.ScrolledWindow.do_measure(self, orientation, for_size)
+        # Chaining up hands back whatever the C vfunc left in its baseline
+        # out-args (zeros, from PyGObject) and GTK warns of "a horizontal
+        # baseline"; a scroller has none.
+        minimum, natural, _, _ = Gtk.ScrolledWindow.do_measure(self, orientation, for_size)
+        return minimum, natural, -1, -1
 
 
 # Where a cell wraps, in characters: wide enough for a sentence, narrow
@@ -497,11 +570,19 @@ def _more_link(more_rows: int, more_columns: int, page_url: str) -> Gtk.Label:
         parts.append(_("{n} more rows on GitHub").format(n=more_rows))
     if more_columns:
         parts.append(_("{n} more columns on GitHub").format(n=more_columns))
-    text = GLib.markup_escape_text(", ".join(parts))
+    label = _link_label(", ".join(parts), page_url)
+    label.add_css_class("pr-md-table-more")
+    return label
+
+
+def _link_label(text: str, page_url: str) -> Gtk.Label:
+    """A dim caption saying *text*, linked to *page_url* when that is an
+    http(s) URL of sane length — the "the rest is on GitHub" line under a
+    capped table or code block."""
+    text = GLib.markup_escape_text(text)
     label = Gtk.Label(xalign=0.0)
     label.add_css_class("caption")
     label.add_css_class("dim-label")
-    label.add_css_class("pr-md-table-more")
     if page_url.lower().startswith(("http://", "https://")) and len(page_url) <= 2_000:
         label.set_markup(f'<a href="{GLib.markup_escape_text(page_url)}">{text}</a>')
     else:

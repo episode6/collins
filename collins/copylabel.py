@@ -16,7 +16,7 @@ from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 
-_FLASH_MS = 1200  # how long the "Copied" confirmation replaces the path
+FLASH_MS = 1200  # how long the "Copied" confirmation replaces the path
 # What a button wears while that confirmation is its own face (see
 # enable_copy_on_secondary_click) — the app's one "this worked" glyph.
 _COPIED_ICON = "check-circle-fill-symbolic"
@@ -107,7 +107,7 @@ def enable_copy_on_secondary_click(
                 return  # no icon to borrow — the copy still happened
             icon.append(face)
         button.set_icon_name(_COPIED_ICON)
-        flash_source.append(GLib.timeout_add(_FLASH_MS, restore))
+        flash_source.append(GLib.timeout_add(FLASH_MS, restore))
 
     secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
     secondary.connect("pressed", on_pressed)
@@ -149,7 +149,7 @@ def enable_copy_on_click(
         label.set_text(_("Copied to clipboard"))
         if flash_source:
             GLib.source_remove(flash_source.pop())
-        flash_source.append(GLib.timeout_add(_FLASH_MS, restore))
+        flash_source.append(GLib.timeout_add(FLASH_MS, restore))
 
     click = Gtk.GestureClick(button=button)
     click.connect("released", on_released)

@@ -2837,8 +2837,10 @@ def _fill_blocks(
     paragraph that overruns the budget is cut on its source with
     `body_head` (a word boundary, never inside an inline span), the front
     re-rendered through the same inline walker, and that label alone gets
-    the `set_lines` + ellipsize backstop and a trailing …. Only paragraphs
-    are cut: any other block that doesn't fit whole waits for "Show more".
+    the `set_lines` + ellipsize backstop and a trailing …. A list or a
+    table that overruns shows the items or rows that fit
+    (`mdblocks.cut_block`); any other block that doesn't fit whole waits
+    for "Show more".
 
     The widget budget (`mdwidgets.Budget`) is the third bound, on layout:
     once it runs dry the blocks left become one plain label of their
@@ -2907,6 +2909,14 @@ def _fill_blocks(
             if (chars is not None and len(block.source) > chars) or (
                 lines is not None and cost > lines
             ):
+                # A list or a table gets the paragraph's treatment: its
+                # front — the items or rows that fit — shows, the rest
+                # waits for "Show more". Any other block waits whole.
+                front = mdblocks.cut_block(block, chars, lines)
+                if front is not None:
+                    box.append(
+                        mdwidgets.build_one(front, budget, _image_row, page_url=page_url, scheme=scheme)
+                    )
                 spent = True
                 complete = False
                 continue

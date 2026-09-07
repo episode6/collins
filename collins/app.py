@@ -1359,6 +1359,13 @@ popover.menu button.open-with-row:hover {
   border: 1px solid alpha(currentColor, 0.15);
   border-radius: 6px;
 }
+/* the "Copied to clipboard" pill a right-click on a code block shows for
+   a beat, over the block's top right corner (an .osd label) */
+.pr-md-copied {
+  padding: 2px 8px;
+  margin: 6px;
+  border-radius: 6px;
+}
 """
 
 

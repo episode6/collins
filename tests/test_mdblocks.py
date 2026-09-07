@@ -1031,3 +1031,65 @@ def test_details_nested_past_the_depth_cap_is_literal():
         node = node.children[0]
     assert depth == mdblocks.MAX_DEPTH
     assert isinstance(node, Text) and node.markup.startswith("&lt;details&gt;")
+
+
+# -- polish: linked images, <br> lines, encoded steps, the preview cut ----------
+
+
+def test_linked_image_alone_is_an_image_row():
+    (row,) = parse_blocks("[![alt](https://img/1.png)](https://link/x)")
+    assert row == ImageRow((BodyImage(url="https://img/1.png", alt="alt"),), "[![alt](https://img/1.png)](https://link/x)")
+    (row,) = parse_blocks('[<img src="https://img/2.png" alt="pic">](https://link/y)')
+    assert isinstance(row, ImageRow) and row.images[0].url == "https://img/2.png"
+
+
+def test_linked_image_with_siblings_keeps_the_link_and_never_nests_anchors():
+    (text,) = parse_blocks("see [![alt](https://img/1.png)](https://link/x) now")
+    assert text.markup == 'see <a href="https://link/x">alt</a> now'
+    (text,) = parse_blocks('see [<img src="https://img/2.png" alt="pic">](https://link/y) now')
+    assert text.markup == 'see <a href="https://link/y">pic</a> now'
+    (text,) = parse_blocks("[![alt](https://img/1.png)](https://link/x)", images=False)
+    assert text.markup == '<a href="https://link/x">alt</a>'
+    assert markup_ok(text.markup) and text.markup.count("<a ") == 1
+
+
+def test_br_alone_on_a_line_is_dropped():
+    assert parse_blocks("a\n\n<br>\n\nb") == [Text("a", "a"), Text("b", "b")]
+    assert parse_blocks("a\n\n<br/>\n<br />\n\nb") == [Text("a", "a"), Text("b", "b")]
+    assert parse_blocks("<br>") == []
+    (text,) = parse_blocks("a<br/>b<BR />c</br>d")
+    assert text.markup == "a\nb\nc&lt;/br&gt;d"
+
+
+@pytest.mark.parametrize("href", ["docs/%2e%2e/x", "docs%2f..%2fx", "%2E%2E/x"])
+def test_relative_link_refuses_an_encoded_step_up(href):
+    ctx = RepoContext("o/r", head="a" * 40)
+    assert relative_href(href, ctx) == href
+
+
+def test_cut_block_takes_a_lists_first_items():
+    (block,) = parse_blocks("\n".join(f"- item {n}" for n in range(20)))
+    front = mdblocks.cut_block(block, None, 5)
+    assert isinstance(front, ListBlock) and len(front.items) == 5
+    assert front.items == block.items[:5] and front.source == block.source
+    front = mdblocks.cut_block(block, 32, None)
+    assert front is not None and len(front.items) == 5  # "item N" is 6 chars
+    assert mdblocks.cut_block(block, None, 0) is None  # not even one item
+    assert mdblocks.cut_block(block, None, 20) is None  # all of it fits: nothing to cut
+    assert mdblocks.cut_block(block, None, None) is None
+
+
+def test_cut_block_takes_a_tables_header_and_first_rows():
+    (table,) = parse_blocks("| h |\n|---|\n" + "\n".join(f"| r{n} |" for n in range(10)))
+    front = mdblocks.cut_block(table, None, 4)
+    assert isinstance(front, Table) and front.rows == table.rows[:3] and front.header == table.header
+    assert mdblocks.cut_block(table, None, 1) is None  # the header alone shows nothing
+    assert mdblocks.cut_block(table, None, 11) is None
+    by_chars = mdblocks.cut_block(table, 5, None)
+    assert by_chars is not None and len(by_chars.rows) == 2
+
+
+def test_cut_block_leaves_other_blocks_alone():
+    for body in ("para", "```\ncode\n```", "> q", "# h", "---"):
+        (block,) = parse_blocks(body)
+        assert mdblocks.cut_block(block, 1, 1) is None

@@ -50,7 +50,8 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+gi.require_version("Gdk", "4.0")
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from collins import i18n, mdblocks, mdwidgets, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
@@ -722,6 +723,128 @@ def step_details() -> bool:
         [texts(a) for a in alerts],
     )
     check("…each quote also a bordered column", all(has_class(a, "pr-md-quote") for a in alerts))
+    return land(replace(STAGED["detail"], body=INLINE_BODY), step_inline_html)
+
+
+# The inline HTML whitelist — <kbd>, <sub>, <sup>, <br> — beside a tag
+# outside it, a <br> on a line of its own, and a fence to copy.
+INLINE_BODY = (
+    "Press <kbd>Ctrl</kbd>+<kbd>C</kbd> for H<sub>2</sub>O and x<sup>2</sup><br>next line, "
+    "then <span>not</span>.\n\n<br>\n\n```sh\necho copy me\n```"
+)
+
+
+def step_inline_html() -> bool:
+    page = state["page"]
+    card = description_card(page)
+    body = [w for w in labels(card) if has_class(w, "pr-md-text")]
+    check("the inline HTML body is one paragraph label, the <br> line dropped", len(body) == 1, len(body))
+    if not body:
+        return done()
+    markup, text = body[0].get_label(), body[0].get_text()
+    check(
+        "<kbd> is monospace, <sub> and <sup> themselves, <br> a newline",
+        "<tt>Ctrl</tt>+<tt>C</tt>" in markup and "H<sub>2</sub>O" in markup and "x<sup>2</sup>" in markup
+        and "x2\nnext line" in text,
+        markup,
+    )
+    check("…a tag outside the whitelist shows escaped", "<span>not</span>" in text and "&lt;span&gt;" in markup)
+    code = find(card, lambda w: isinstance(w, mdwidgets.CodeBlockView))
+    check("the fence is a code block view", code is not None)
+    if code is None:
+        return done()
+    check("…its view saying a right-click copies", code.view.get_tooltip_text() == "Right-click to copy")
+    check("…the copied pill hidden", not code.copied.get_visible())
+    state["code"] = code
+    state["copy_tries"] = 0
+    return later(step_copy, 50)
+
+
+def step_copy() -> bool:
+    # A clipboard claim right after present() can be dropped under the
+    # headless shell (Wayland wants a recent input serial): copy until it
+    # takes, as the capture skill's clipboard shots do.
+    code = state["code"]
+    clipboard = Gdk.Display.get_default().get_clipboard()
+    code.copy()
+    state["copy_tries"] += 1
+    if not clipboard.is_local() and state["copy_tries"] < 40:
+        return later(step_copy, 50)
+    check("a copy claims the clipboard", clipboard.is_local(), state["copy_tries"])
+    check("…and shows the copied pill", code.copied.get_visible() and has_class(code.copied, "pr-md-copied"))
+
+    def on_text(clip, result) -> None:
+        try:
+            text = clip.read_text_finish(result)
+        except GLib.Error as exc:  # noqa: BLE001
+            text = f"error: {exc}"
+        check("…of the block's whole text", text == "echo copy me", text)
+        later(step_copy_settled, 1500)
+
+    clipboard.read_text_async(None, on_text)
+    return GLib.SOURCE_REMOVE
+
+
+def step_copy_settled() -> bool:
+    check("…which hides again after its beat", not state["code"].copied.get_visible())
+    # A list first in a body: the preview shows the items that fit,
+    # the way it shows a paragraph's front.
+    entries = "\n".join(f"- entry {n}" for n in range(40))
+    return land(replace(STAGED["detail"], body=entries + "\n\nafter the entries"), step_list_cut)
+
+
+def step_list_cut() -> bool:
+    page = state["page"]
+    the_fold = fold(page)
+    check("a body opening with a long list folds", the_fold is not None)
+    if the_fold is None:
+        return done()
+    preview_glyphs = [w for w in labels(the_fold._preview) if has_class(w, "pr-md-glyph")]
+    check(
+        "…its preview showing the first items, not nothing",
+        0 < len(preview_glyphs) <= prview._FOLD_LINES,
+        len(preview_glyphs),
+    )
+    check("…the first of them entry 0", "entry 0" in texts(the_fold._preview), texts(the_fold._preview))
+    check("…and not the paragraph after the list", "after the entries" not in texts(the_fold._preview))
+    the_fold.set_expanded(True)
+    full_glyphs = [w for w in labels(the_fold._full) if has_class(w, "pr-md-glyph")]
+    check("…the expanded half holding every item", len(full_glyphs) == 40, len(full_glyphs))
+    # A fence past the code cap: cut, the rest counted in a link.
+    lines = [f"line {n}" for n in range(3000)]
+    state["fence_content"] = "\n".join(lines) + "\n"
+    return land(replace(STAGED["detail"], body="```\n" + "\n".join(lines) + "\n```"), step_code_cap)
+
+
+def step_code_cap() -> bool:
+    page = state["page"]
+    the_fold = fold(page)
+    if the_fold is not None and not the_fold.expanded:
+        the_fold.set_expanded(True)
+    card = description_card(page)
+    more = find(card, lambda w: isinstance(w, Gtk.Button) and w.get_label() == "Show more")
+    check("a fence past the render cap waits behind Show more", more is not None)
+    if more is None:
+        return done()
+    more.emit("clicked")
+    code = find(card, lambda w: isinstance(w, mdwidgets.CodeBlockView))
+    check("…then renders as a code block view", code is not None)
+    if code is None:
+        return done()
+    buffer = code.view.get_buffer()
+    shown = buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)
+    check("…holding the code cap's worth of text", len(shown) <= mdwidgets.CODE_CAP and shown.startswith("line 0"),
+          len(shown))
+    content = state["fence_content"].rstrip("\n")
+    expected = max(1, content.count("\n", mdwidgets.CODE_CAP))
+    link = find(card, lambda w: has_class(w, "pr-md-code-more"))
+    check(
+        "…the lines cut counted in a link to the PR on GitHub",
+        link is not None and link.get_text() == f"{expected} more lines on GitHub"
+        and f'href="{PR_URL}"' in link.get_label(),
+        (link.get_text(), link.get_label()) if link else None,
+    )
+    check("…the copy still the whole fence", code.text == content)
     return done()
 
 
