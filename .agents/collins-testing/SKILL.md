@@ -50,8 +50,9 @@ headless compositor so nothing appears on screen:
 ```bash
 bash .agents/capture-screenshots/scripts/with-headless-display.sh \
     python3 scripts/run_e2e.py --only new_chat --timeout 120
+bash .agents/capture-screenshots/scripts/with-headless-display.sh \
     python3 scripts/run_e2e.py --shard 2/4          # what CI's second leg runs
-    python3 scripts/run_e2e.py --list --shard 2/4   # …and its estimated time
+python3 scripts/run_e2e.py --list --shard 2/4       # …and its estimate; no display needed
 ```
 
 Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
