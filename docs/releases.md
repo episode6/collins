@@ -38,6 +38,10 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **Files in the diff view stand apart.** A file boundary and a hunk
+  boundary in the git page's scroll looked alike at a glance. Each file
+  card now wears a border and the cards sit 16 px apart, twice what they
+  were, so the eye finds the next file without reading the header.
 - **`start_session` takes an effort level.** The session tool's new
   `effort` argument sets the sibling's `--effort` (`low` … `max`); left
   out, the sibling answers at the effort its caller is answering at right
