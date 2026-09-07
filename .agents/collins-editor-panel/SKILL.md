@@ -49,7 +49,9 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
 
 **Opening** (`open_file(path, restore_cursor)`): guarded by
 `editorfiles.load_guard` (size, binary, image) and `is_inside(root)`;
-language from `guess_language_id` (extension, then the first line's shebang);
+language from `guess_language_id` (extension, then the first line's shebang;
+its sibling `fence_language_id` maps a markdown fence's info word — `python`
+→ `python3`, `bash` → `sh` — for the PR page's code blocks in `mdwidgets`);
 style scheme from `editor.style_scheme(setting, dark)` (a bare
 `GtkSource.Buffer` defaults to the light `classic` scheme — never leave it
 unset). Cursor placement on a fresh buffer must re-issue `scroll_to_mark` from

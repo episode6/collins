@@ -1342,6 +1342,12 @@ popover.menu button.open-with-row:hover {
   font-weight: bold;
   border-bottom: 1px solid alpha(currentColor, 0.25);
 }
+/* a code block: a GtkSource view in a sideways-only scroller, framed like
+   a table so the scheme's background reads as a block of its own. */
+.pr-md-code-scroller {
+  border: 1px solid alpha(currentColor, 0.15);
+  border-radius: 6px;
+}
 """
 
 

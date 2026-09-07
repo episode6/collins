@@ -57,8 +57,12 @@ downloads of each version, see the
   column aligned as its delimiter row asks, cells selectable, a wide table
   scrolling sideways within its own band rather than widening the page;
   one past 50 rows or 8 columns shows that much and a dim link to the
-  rest on GitHub. Code blocks and `<details>` show as their source for
-  now (their own widgets follow); any other HTML shows escaped. The folded
+  rest on GitHub. Fenced and indented code renders in a read-only source
+  view, highlighted for the fence's language (`python`, `bash`, `json`,
+  `diff`… and any name GtkSourceView knows) and wearing the editor's style
+  scheme like the Files view's diffs, a long line scrolling sideways
+  within the block. A `<details>` block shows as its source for now (its
+  own widget follows); any other HTML shows escaped. The folded
   preview still opens with the first paragraph, and without the parser
   the page falls back to the previous renderer.
 - **Archiving a session reads its notifications.** A session's message

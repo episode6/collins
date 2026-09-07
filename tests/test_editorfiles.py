@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from collins.editorfiles import (
     _MAX_HIGHLIGHT_BYTES,
     _MAX_IMAGE_BYTES,
@@ -16,6 +18,7 @@ from collins.editorfiles import (
     PasteError,
     RenameError,
     RerootAction,
+    fence_language_id,
     follow_scope,
     format_copied_files,
     gallery_step,
@@ -1099,3 +1102,60 @@ def test_pane_layout_narrow_with_nothing_open_shows_the_picker():
 
 def test_pane_layout_narrow_back_button_shows_the_picker():
     assert pane_layout(True, 2, True) is PaneLayout.PICKER
+
+
+# -- fence_language_id ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        ("python", "python3"),
+        ("py", "python3"),
+        ("python3", "python3"),
+        ("js", "js"),
+        ("javascript", "js"),
+        ("ts", "js"),
+        ("typescript", "js"),
+        ("jsx", "js"),
+        ("tsx", "js"),
+        ("bash", "sh"),
+        ("sh", "sh"),
+        ("zsh", "sh"),
+        ("shell", "sh"),
+        ("console", "sh"),
+        ("yml", "yaml"),
+        ("yaml", "yaml"),
+        ("json", "json"),
+        ("css", "css"),
+        ("html", "html"),
+        ("c", "c"),
+        ("cpp", "cpp"),
+        ("c++", "cpp"),
+        ("rust", "rust"),
+        ("rs", "rust"),
+        ("go", "go"),
+        ("diff", "diff"),
+        ("patch", "diff"),
+        ("xml", "xml"),
+        ("toml", "toml"),
+        ("ini", "ini"),
+        ("md", "markdown"),
+        ("markdown", "markdown"),
+    ],
+)
+def test_fence_language_alias_map(info, expected):
+    assert fence_language_id(info) == expected
+
+
+def test_fence_language_takes_the_first_word_lowercased():
+    assert fence_language_id("Python extra words") == "python3"
+    assert fence_language_id("  BASH\t") == "sh"
+    assert fence_language_id("json5 title") is None
+
+
+def test_fence_language_suggestion_unknown_and_empty_are_none():
+    assert fence_language_id("suggestion") is None
+    assert fence_language_id("kotlin") is None
+    assert fence_language_id("") is None
+    assert fence_language_id("   ") is None

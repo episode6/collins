@@ -600,3 +600,48 @@ def test_cap_table_squares_a_hand_built_table():
     assert shown.aligns == (None, None, None)
     assert shown.rows == (("1", "", ""), ("1", "2", "3"))
     assert (more_rows, more_columns) == (0, 0)
+
+
+# -- code blocks -------------------------------------------------------------
+
+
+def test_code_block_golden_tree():
+    """One CodeBlock per fence, its text verbatim (trailing newline kept,
+    markup-free — the widget puts it in a buffer, never in Pango), its lang
+    the info string's first word lowercased, its source the fence lines."""
+    body = (
+        "Before.\n\n```py\nx = 1\n<b>&\n```\n\n~~~ JSON   trailing words\n{}\n~~~\n\n"
+        "    indented\n    two\n\nAfter."
+    )
+    blocks = parse_blocks(body)
+    assert [type(b).__name__ for b in blocks] == ["Text", "CodeBlock", "CodeBlock", "CodeBlock", "Text"]
+    assert blocks[1] == CodeBlock("x = 1\n<b>&\n", "py", "```py\nx = 1\n<b>&\n```")
+    assert blocks[2] == CodeBlock("{}\n", "json", "~~~ JSON   trailing words\n{}\n~~~")
+    assert blocks[3] == CodeBlock("indented\ntwo\n", None, "    indented\n    two")
+
+
+def test_code_block_without_an_info_word_has_no_lang():
+    (fence,) = parse_blocks("```\nplain\n```")
+    assert fence == CodeBlock("plain\n", None, "```\nplain\n```")
+    (empty,) = parse_blocks("```python\n```")
+    assert empty == CodeBlock("", "python", "```python\n```")
+
+
+def test_code_block_inside_a_list_item_and_a_quote():
+    (lst,) = parse_blocks("- item\n\n  ```sh\n  echo hi\n  ```")
+    (text, code) = lst.items[0].children
+    assert code == CodeBlock("echo hi\n", "sh", "  ```sh\n  echo hi\n  ```")
+    (quote,) = parse_blocks("> ```\n> a\n> ```")
+    assert quote.children == (CodeBlock("a\n", None, "> ```\n> a\n> ```"),)
+
+
+def test_code_block_line_cost_is_its_lines_capped_at_eight():
+    assert mdblocks.line_cost(CodeBlock("a\n", None, "")) == 2  # a line and its newline
+    assert mdblocks.line_cost(CodeBlock("a\nb\nc", None, "")) == 3
+    assert mdblocks.line_cost(CodeBlock("\n".join(["x"] * 200), None, "")) == 8
+
+
+def test_unclosed_fence_runs_to_the_end_of_the_body():
+    (fence,) = parse_blocks("```js\nlet a\n\nmore")
+    assert fence.lang == "js"
+    assert fence.text == "let a\n\nmore"
