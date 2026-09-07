@@ -69,9 +69,11 @@ the app reads, are in
 - A **Claude usage panel** under the session list: your subscription
   limits — the 5-hour session window, weekly limits, extra-usage credits —
   as progress bars with reset countdowns, read from the `claude` CLI's own
-  login and refreshed every 5 minutes. Its heading folds the bars away,
-  its refresh button asks again on the spot, and Preferences (*Show
-  Claude usage*) removes it.
+  login and refreshed every 10 minutes. A fetch that fails says why in the
+  endpoint's own words (`HTTP 429: Rate limited. Please try again later.`)
+  and tries again a minute later, and any fetch restarts the clock. Its
+  heading folds the bars away, its refresh button asks again on the spot,
+  and Preferences (*Show Claude usage*) removes it.
 
 ![The sidebar: each project wearing its own icon, sessions carrying pull request marks](/img/sidebar.png)
 

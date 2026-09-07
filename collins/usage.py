@@ -31,6 +31,10 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 
 _OAUTH_BETA = "oauth-2025-04-20"
 _HTTP_TIMEOUT_S = 15
+# An error body is foreign text bound for a sidebar caption: read this much
+# of it, show this much of what it says.
+_MAX_ERROR_BODY = 4096
+_MAX_ERROR_TEXT = 200
 
 # The /usage bars in display order; a response may carry any subset of these
 # (the model-scoped weekly bar comes and goes). Unknown kinds sort after.
@@ -174,6 +178,30 @@ def parse_snapshot(data: dict, subscription: str = "") -> UsageSnapshot:
     )
 
 
+def describe_http_error(code: int, body: bytes | str) -> str:
+    """The panel's line for a failed request: ``HTTP 429: Rate limited.
+    Please try again later.`` — the status code, then whatever the body
+    says. Anthropic's errors are ``{"error": {"message": ...}}``; anything
+    else (a proxy's HTML, an empty body) is shown as-is, flattened and cut
+    to a caption's worth, since the body is foreign text."""
+    if isinstance(body, bytes):
+        body = body[:_MAX_ERROR_BODY].decode("utf-8", errors="replace")
+    message = ""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        data = None
+    error = data.get("error") if isinstance(data, dict) else None
+    if isinstance(error, dict) and isinstance(error.get("message"), str):
+        message = error["message"]
+    elif isinstance(error, str):
+        message = error
+    else:
+        message = body
+    message = " ".join(message.split())[:_MAX_ERROR_TEXT]
+    return f"HTTP {code}: {message}" if message else f"HTTP {code}"
+
+
 def _http_get(url: str, headers: dict[str, str]) -> str:
     request = urllib.request.Request(url, headers=headers)
     try:
@@ -181,7 +209,11 @@ def _http_get(url: str, headers: dict[str, str]) -> str:
             return response.read().decode("utf-8")
     except urllib.error.HTTPError as err:
         kind = "auth" if err.code in (401, 403) else "http"
-        raise UsageError(kind, f"usage endpoint returned HTTP {err.code}") from err
+        try:
+            body = err.read(_MAX_ERROR_BODY)
+        except OSError:
+            body = b""
+        raise UsageError(kind, describe_http_error(err.code, body)) from err
     except (urllib.error.URLError, TimeoutError, OSError) as err:
         raise UsageError("network", f"usage endpoint unreachable: {err}") from err
 
