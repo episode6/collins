@@ -1319,6 +1319,16 @@ popover.menu button.open-with-row:hover {
 .pr-file-image-standin {
   padding: 6px 10px;
 }
+/* markdown blocks in a PR body (mdwidgets.py): a quote is its children
+   behind a left bar, an alert the same with a title row; list glyphs sit
+   in their own column ahead of the item's content. */
+.pr-md-quote {
+  border-left: 3px solid alpha(currentColor, 0.25);
+  padding-left: 10px;
+}
+.pr-md-glyph {
+  min-width: 14px;
+}
 """
 
 

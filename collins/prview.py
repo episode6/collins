@@ -94,12 +94,24 @@ well — an SVG — keeps it under the pictures, behind its own line-count
 expander when it is a long one, so the section can lead with the artwork
 without eagerly building a buffer. The same setting gates it.
 
+Bodies are markdown, parsed by `mdblocks` (markdown-it-py's ``gfm-like``
+preset) into a tree of blocks that `mdwidgets` turns into widgets — sized
+headings, structural lists with task-list glyphs, quotes, rules, image
+rows — and `_fill_blocks` walks that tree the way `_fill_body` walks the
+regex pipeline's segments: spending the fold's budgets front to back,
+cutting the paragraph that overruns them on its *source* and re-rendering
+the front through the same inline walker (so the preview never shows half
+a link), keeping the first picture. Where markdown-it is missing, or ever
+refuses a body, the page falls back to `formatting.split_body` +
+`formatting.md_to_pango`, the regex pipeline that stays chat's renderer.
+
 Everything shown is repository content and therefore untrusted: bodies go
-through `formatting.md_to_pango`'s escaping (mis-nested markup comes back as
-escaped plain text, since GTK 4 would render it as nothing), only http(s) URLs ever reach a browser or a fetch
-(prdetail and split_body both enforce that on the way in), and a
-pathological body renders capped behind a "Show more" step — with a cap on
-images too — so building labels can't wedge the main loop.
+through markup escaping either way (mis-nested markup comes back as
+escaped plain text, since GTK 4 would render it as nothing), only http(s)
+URLs ever reach a browser or a fetch (prdetail, mdblocks and split_body
+all enforce that on the way in), and a pathological body renders capped
+behind a "Show more" step — with a cap on images, nesting depth and
+widgets built too — so building labels can't wedge the main loop.
 """
 
 from __future__ import annotations
@@ -120,6 +132,8 @@ from . import (  # noqa: E402
     bodyimages,
     dialogs,
     keyedslots,
+    mdblocks,
+    mdwidgets,
     practions,
     prblobs,
     prdetail,
@@ -2566,11 +2580,11 @@ def _folded_body(text: str, images: bool = False) -> Gtk.Widget:
     sat behind "Show more" would have made rendering them pointless for
     exactly the bodies this is for.
     """
-    segments = split_body(text) if images else [text]
+    segments, fill = _segments(text, images)
     preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
-    if _fill_body(preview, segments, _FOLD_CHARS, _FOLD_LINES, preview=True):
+    if fill(preview, segments, _FOLD_CHARS, _FOLD_LINES, preview=True):
         return preview
-    return _fold(preview, _body_widget(segments))
+    return _fold(preview, _body_widget(segments, fill))
 
 
 class _Fold(Gtk.Box):
@@ -2629,15 +2643,31 @@ def _body_label(text: str, images: bool = False) -> Gtk.Widget:
     it). Past the render cap the rest waits behind "Show more" (the whole
     text is already bounded by prdetail; this cap is about Pango layout
     cost, which the main loop pays)."""
-    return _body_widget(split_body(text) if images else [text])
+    return _body_widget(*_segments(text, images))
 
 
-def _body_widget(segments: list) -> Gtk.Widget:
+def _segments(text: str, images: bool) -> tuple[list, Callable]:
+    """A body as the list its renderer walks and the walker for it: the
+    block tree with `_fill_blocks` when the block layer parses it, else
+    the regex pipeline's segments with `_fill_body` — the fallback ladder's
+    first two rungs (a missing markdown-it, then a body it refuses; the
+    third is per label, in `_set_md`). The two shapes never mix in one
+    call."""
+    if mdblocks.available():
+        try:
+            return mdblocks.parse_blocks(text, images=images), _fill_blocks
+        except Exception as exc:  # noqa: BLE001 — this body alone falls back
+            log.debug("block parse failed, body falls back to the regex renderer: %s", exc)
+    return (split_body(text) if images else [text]), _fill_body
+
+
+def _body_widget(segments: list, fill: Callable | None = None) -> Gtk.Widget:
     """Every segment that fits the render cap, and a "Show more" for the
     rest. Split out from `_body_label` because the fold's expanded half is
     this same widget over the same already-split segments."""
+    fill = fill or _fill_body
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
-    if _fill_body(box, segments, _RENDER_CAP, None):
+    if fill(box, segments, _RENDER_CAP, None):
         return box
     more = Gtk.Button(label=_("Show more"))
     more.add_css_class("flat")
@@ -2648,7 +2678,7 @@ def _body_widget(segments: list) -> Gtk.Widget:
         while child is not None:
             box.remove(child)
             child = box.get_first_child()
-        _fill_body(box, segments, None, None)
+        fill(box, segments, None, None)
         button.set_visible(False)
 
     more.connect("clicked", show_all)
@@ -2718,6 +2748,141 @@ def _fill_body(
             lines -= segment.count("\n") + 1
             spent = spent or lines <= 0
     return complete
+
+
+def _fill_blocks(
+    box: Gtk.Box,
+    blocks: list,
+    chars: int | None,
+    lines: int | None,
+    preview: bool = False,
+    keep_first_image: bool = True,
+) -> bool:
+    """`_fill_body` over mdblocks' tree: append the blocks that fit
+    *chars*/*lines* to *box*; return whether all of them did.
+
+    Same walk, same budgets, same rules — spent front to back, an image
+    row costing `_IMAGE_FOLD_LINES`, the first picture always kept — with
+    each block costing its estimated lines (`mdblocks.line_cost`). The
+    paragraph that overruns the budget is cut on its source with
+    `body_head` (a word boundary, never inside an inline span), the front
+    re-rendered through the same inline walker, and that label alone gets
+    the `set_lines` + ellipsize backstop and a trailing …. Only paragraphs
+    are cut: any other block that doesn't fit whole waits for "Show more".
+
+    The widget budget (`mdwidgets.Budget`) is the third bound, on layout:
+    once it runs dry the blocks left become one plain label of their
+    source — as many of them as the character and line budgets still
+    allow, the rest waiting for "Show more" like any other block. Nothing
+    is ever dropped: pressing it fills again with fresh budgets, and the
+    tail past the widget budget is that same one label.
+    """
+    spent = False
+    shown_image = False
+    complete = True
+    budget = mdwidgets.Budget()
+    for index, block in enumerate(blocks):
+        if budget.left <= 0:
+            if not spent:
+                rest, chars, lines, whole = _rest_head(blocks[index:], chars, lines)
+                if rest:
+                    box.append(mdwidgets.plain_label(rest))
+                complete = complete and whole
+            else:
+                complete = False
+            break
+        if isinstance(block, mdblocks.ImageRow):
+            if spent and not (keep_first_image and not shown_image):
+                complete = False
+                continue
+            budget.take()
+            box.append(_image_row(block.images))
+            shown_image = True
+            if lines is not None:
+                lines -= _IMAGE_FOLD_LINES
+                spent = spent or lines <= 0
+            continue
+        if spent:
+            complete = False
+            continue
+        if isinstance(block, mdblocks.Text):
+            head, whole = body_head(block.source, chars, lines)
+            if whole:
+                label = mdwidgets.text_label(block.markup, block.source)
+            else:
+                # rstrip: an "…" after a kept blank line would render as
+                # its own line. The cut front re-parses as inline markdown
+                # (body_head backed the cut out of any span it would split).
+                label = mdwidgets.text_label(
+                    _cut_markup(head.rstrip()) + "…", head.rstrip() + "…"
+                )
+                if preview:
+                    # The backstop for the shape a character budget can't
+                    # size: the cut paragraph wraps to however many lines
+                    # the panel's width makes of it. Only on the cut label —
+                    # one holding all its text must not ellipsize, or a body
+                    # that fits the fold in a narrow panel would hide its
+                    # tail with no "Show more" to press.
+                    label.set_lines(_FOLD_LINES)
+                    label.set_ellipsize(Pango.EllipsizeMode.END)
+            budget.take()
+            box.append(label)
+            if not whole:
+                spent = True
+                complete = False
+                continue
+            cost = mdblocks.line_cost(block, _IMAGE_FOLD_LINES)
+        else:
+            cost = mdblocks.line_cost(block, _IMAGE_FOLD_LINES)
+            if (chars is not None and len(block.source) > chars) or (
+                lines is not None and cost > lines
+            ):
+                spent = True
+                complete = False
+                continue
+            box.append(mdwidgets.build_one(block, budget, _image_row))
+        if chars is not None:
+            chars -= len(block.source)
+            spent = spent or chars <= 0
+        if lines is not None:
+            lines -= cost
+            spent = spent or lines <= 0
+    return complete
+
+
+def _rest_head(
+    blocks: list, chars: int | None, lines: int | None
+) -> tuple[str, int | None, int | None, bool]:
+    """The front of *blocks* that fits *chars*/*lines* as one source text,
+    the budgets left after it, and whether every block fit — the shape
+    the tail past the widget budget takes (whole blocks only: a plain
+    label of half a table is no better than none)."""
+    taken: list = []
+    whole = True
+    for block in blocks:
+        cost = mdblocks.line_cost(block, _IMAGE_FOLD_LINES)
+        if (chars is not None and len(block.source) > chars) or (
+            lines is not None and cost > lines
+        ):
+            whole = False
+            break
+        taken.append(block)
+        if chars is not None:
+            chars -= len(block.source)
+        if lines is not None:
+            lines -= cost
+    return mdwidgets.rest_source(taken), chars, lines, whole
+
+
+def _cut_markup(head: str) -> str:
+    """The cut front of a paragraph as markup — through the block layer's
+    inline walker, or escaped plain text if it refuses (the ladder's last
+    rung, per label)."""
+    try:
+        return mdblocks.render_inline(head)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("inline re-render failed: %s", exc)
+        return GLib.markup_escape_text(head)
 
 
 def _image_row(row: tuple) -> Gtk.Widget:

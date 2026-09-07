@@ -31,7 +31,9 @@ every scene with that env and drops the PNGs where the docs read them.
 
 --size and --set edit the staged state.json's settings before the app starts
 (the window's size comes from there, as do the panel widths), so one staged
-tree serves every scene.
+tree serves every scene. --pr-body FILE stages a markdown file as the
+pr-page scene's description, for a PR's before/after shots of body rendering,
+and --pr-expand presses its Show more first.
 """
 
 import argparse
@@ -49,6 +51,10 @@ parser.add_argument("--settle-ms", type=int, default=3000)
 parser.add_argument("--size", metavar="WxH", help="window size for this shot")
 parser.add_argument("--set", action="append", default=[], metavar="KEY=JSON",
                     help="a settings key to write into the staged state.json")
+parser.add_argument("--pr-body", metavar="FILE",
+                    help="pr-page: a markdown file to stage as the PR's description")
+parser.add_argument("--pr-expand", action="store_true",
+                    help="pr-page: press the description's Show more before the shot")
 args = parser.parse_args()
 
 SCENES = (
@@ -135,6 +141,9 @@ def staged_detail(_url: str) -> prdetail.PullRequestDetail:
         "- animate `transform: rotate()` instead of width\n"
         "- pin it with two regression tests in the dashboard suite"
     )
+    if args.pr_body:  # a PR's own fixture body, for before/after shots
+        with open(args.pr_body, encoding="utf-8") as fh:
+            body = fh.read()
     checks = tuple(prdetail.PrCheck(name=n, state="passed", url="") for n in ("lint", "test", "e2e"))
     review = prdetail.PrComment(
         author="claude", created_at=_iso(2 * 3600),
@@ -261,7 +270,10 @@ def stage(win) -> list[tuple[int, callable]]:
         return [(1500, tab.open_composer), (700, lambda: tab._composer.set_text(COMPOSER_TEXT))]
     elif scene == "pr-page":
         tab = open_tab(win, U1)
-        return [(1500, lambda: tab.open_pr_page_url(PR_URL))]
+        steps = [(1500, lambda: tab.open_pr_page_url(PR_URL))]
+        if args.pr_expand:
+            steps.append((2000, lambda: tab._find_pr_page(PR_URL)._description_fold.set_expanded(True)))
+        return steps
     elif scene == "editor-panel":
         tab = open_tab(win, U1)
         return [

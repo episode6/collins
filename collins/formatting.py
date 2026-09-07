@@ -321,10 +321,15 @@ def _md_image(match: re.Match) -> BodyImage | None:
 
 
 def _html_image(match: re.Match) -> BodyImage | None:
+    return html_image(match.group(0))
+
+
+def html_image(tag: str) -> BodyImage | None:
     """An `<img>` tag as a BodyImage, or None when its src isn't a URL we
-    can fetch — a relative path, a `data:` blob, a stray tag with no src."""
+    can fetch — a relative path, a `data:` blob, a stray tag with no src.
+    Public for mdblocks, whose parser hands it the same tags as tokens."""
     src = alt = width = ""
-    for attr in _ATTR_RE.finditer(match.group(0)):
+    for attr in _ATTR_RE.finditer(tag[:1_100]):
         name = attr.group(1).lower()
         value = attr.group(2) or attr.group(3) or attr.group(4) or ""
         if name == "src" and not src:

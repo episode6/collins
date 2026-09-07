@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-06. Full change history: git log for this file.
 
 pkgbase = collins
 	pkgdesc = Native GTK4 desktop app to manage and resume Claude Code sessions
@@ -19,6 +19,9 @@ pkgbase = collins
 	depends = gtk4
 	depends = libadwaita
 	depends = vte4
+	depends = gtksourceview5
+	depends = python-markdown-it-py
+	depends = python-linkify-it-py
 	optdepends = claude-code: resume Claude Code sessions
 	source = collins-0.1.2.tar.gz::https://github.com/episode6/collins/archive/refs/tags/v0.1.2.tar.gz
 	sha256sums = SKIP
