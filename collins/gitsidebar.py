@@ -922,13 +922,13 @@ class GitSidebar(Gtk.Box):
 
     def _commit_menu_items(self, row: Row | None) -> list[tuple[str, str, str | None]]:
         """(label, action, target) for the commits list's context menu:
-        *Copy sha* and *Revert…* on a commit row (the latter only while the
-        page is on a working tree the revert can land in), *Reload* always."""
+        *Copy sha* and *Revert…* on a commit row (whatever the page shows —
+        the revert lands in the session's working tree, not in the loaded
+        diff), *Reload* always."""
         items: list[tuple[str, str, str | None]] = []
         if row is not None and row.kind == "commit" and row.sha:
             items.append((_("Copy sha"), "copy-sha", row.sha))
-            if self._working_live():
-                items.append((_("Revert…"), "revert-commit", row.sha))
+            items.append((_("Revert…"), "revert-commit", row.sha))
         items.append((_("Reload"), "reload", None))
         return items
 
@@ -1235,8 +1235,10 @@ class GitSidebar(Gtk.Box):
         """The commits list's *Revert…*: refuse while a rebase / merge /
         cherry-pick / revert is half-finished (the revert would be that
         operation's next step), else ask — commit the revert, revert into
-        the working tree alone (`--no-commit`), or cancel."""
-        if not self._working_live() or self._busy or not gitloads.safe_ref(sha):
+        the working tree alone (`--no-commit`), or cancel. Offered on any
+        load: the revert acts on the session's working tree, whatever diff
+        the page is showing."""
+        if self._busy or not gitloads.safe_ref(sha):
             return
         cwd = self._cwd_provider()
 

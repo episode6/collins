@@ -1452,6 +1452,8 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("the commit's view is unchanged by a revert into the tree", view.hunk_rows("staged.txt") != [] and page.shows({"show": edit_sha}))
         git(repo, "checkout", "-q", "--", "staged.txt")
         check("the file row's context menu on a commit offers Revert file", sidebar.file_menu_labels("staged.txt") == ["Revert file"], sidebar.file_menu_labels("staged.txt"))
+        loaded_row = next(r for r in sidebar.commit_rows() if r.sha == edit_sha)
+        check("a commit row's menu still offers Revert… while that commit is loaded", sidebar.commit_menu_labels(loaded_row.id) == ["Copy sha", "Revert…", "Reload"], sidebar.commit_menu_labels(loaded_row.id))
         check("Revert file from the sidebar", sidebar.activate_file_menu("staged.txt", "Revert file"))
         check("the working tree got the reverse of the whole file, unstaged", wait_for(idle, timeout=5.0) and wait_for(lambda: "staged 3\n" in open(os.path.join(repo, "staged.txt")).read(), timeout=5.0) and "staged.txt" in unstaged_paths() and "staged.txt" not in index_paths(), (unstaged_paths(), index_paths()))
         check("with no question asked, and the file's toast", len(asked) == asks and toasts[-1:] == ["Reverted staged.txt"], (asked[asks:], toasts[-1:]))
