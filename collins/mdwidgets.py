@@ -47,7 +47,10 @@ CODE_CAP = 20_000
 # Heading sizes as Pango percentages: h1–h3 step down, h4–h6 are bold at
 # the reading size. They compose with the page's font-scale provider
 # (prview._apply_font_scale), which multiplies through CSS inheritance.
-_HEADING_SIZES = {1: "160%", 2: "140%", 3: "120%"}
+# The steps sit under GitHub's 2 / 1.5 / 1.25em on purpose: a label's line
+# box at the page's reading size is taller than a browser's, so the
+# browser ratios read big, `##` most of all.
+_HEADING_SIZES = {1: "160%", 2: "128%", 3: "112%"}
 _TASK_GLYPHS = {False: "☐", True: "☑"}
 _ALERT_TITLES = {
     "note": N_("Note"),
