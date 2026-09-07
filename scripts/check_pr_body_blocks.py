@@ -6,8 +6,10 @@ headings as sized labels, lists as glyph-plus-content rows with task-list
 glyphs, quotes behind a bar, rules as separators, tables as grids of cell
 labels in a sideways-only scroller (capped, with a link to the rest), code
 blocks as read-only GtkSource views highlighted for the fence's language
-and wearing the page's style scheme, and every block the widget layer has
-no widget for yet as its escaped source.
+and wearing the page's style scheme, GitHub references (#123,
+owner/repo#123, @user, a commit's hex) and relative links as links into
+the page's own repository, and every block the widget layer has no widget
+for yet as its escaped source.
 The fold's preview cut, the "Show more" step and the regex fallback ride
 the same walk. None of that is reachable from pytest (tests/conftest.py
 blocks the GTK stack), so it is checked here against the real page in a
@@ -25,6 +27,7 @@ Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
 import os
+import re
 import sys
 import tempfile
 from dataclasses import replace
@@ -401,6 +404,56 @@ def step_back() -> bool:
         and any(has_class(w, "pr-md-glyph") and w.get_text() == "☑" for w in labels(card)),
         texts(card),
     )
+    # GitHub references, under the page's own repository and head commit:
+    # the ones GitHub links, the ones it doesn't, and the places (a code
+    # span, an author's own link) a reference is never touched in.
+    return land(replace(STAGED["detail"], body=REFS_BODY, head_oid=HEAD), step_refs)
+
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+REFS_BODY = (
+    "Fixes #12 and other/repo#3, thanks @octocat; see 0123abc and `#99`, "
+    "x#5, deadbeef, [#7](https://example.com/z) and [the guide](docs/guide.md)."
+)
+
+
+def step_refs() -> bool:
+    page = state["page"]
+    card = description_card(page)
+    body = [w for w in labels(card) if has_class(w, "pr-md-text")]
+    check("the references body is one paragraph label", len(body) == 1, len(body))
+    if not body:
+        return done()
+    markup = body[0].get_label()
+    hrefs = re.findall(r'<a href="([^"]*)">([^<]*)</a>', markup)
+    check(
+        "#123, owner/repo#123, @user and a commit link into the page's repository",
+        hrefs[:4]
+        == [
+            ("https://github.com/episode6/collins/issues/12", "#12"),
+            ("https://github.com/other/repo/issues/3", "other/repo#3"),
+            ("https://github.com/octocat", "@octocat"),
+            ("https://github.com/episode6/collins/commit/0123abc", "0123abc"),
+        ],
+        hrefs,
+    )
+    check(
+        "…a reference in a code span or on a word's tail, and a hex word, stay text",
+        "<tt>#99</tt>" in markup and "x#5" in markup and "deadbeef" in markup
+        and "issues/99" not in markup and "issues/5" not in markup and "deadbeef</a>" not in markup,
+        markup,
+    )
+    check(
+        "…an author's own link keeps its destination",
+        ("https://example.com/z", "#7") in hrefs and "issues/7" not in markup,
+        hrefs,
+    )
+    check(
+        "…and a relative link reads the file at the head commit",
+        (f"https://github.com/episode6/collins/blob/{HEAD}/docs/guide.md", "the guide") in hrefs,
+        hrefs,
+    )
+    check("…all of it well-formed markup", body[0].get_text().startswith("Fixes #12 and other/repo#3"))
     # Fence languages the alias map doesn't name: one GtkSource knows by
     # that word, a `suggestion` fence, a word nobody knows.
     fences = "```kotlin\nval a = 1\n```\n\n```suggestion\nx\n```\n\n```nosuchlang-2\ny\n```"

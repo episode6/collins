@@ -22,12 +22,16 @@ from collins.mdblocks import (
     ListBlock,
     ListItem,
     Quote,
+    RepoContext,
     Rule,
     Table,
     Text,
+    link_refs,
     link_www,
     parse_blocks,
+    relative_href,
     render_inline,
+    repo_context,
 )
 
 pytestmark = pytest.mark.skipif(not mdblocks.available(), reason="markdown-it-py not installed")
@@ -645,3 +649,270 @@ def test_unclosed_fence_runs_to_the_end_of_the_body():
     (fence,) = parse_blocks("```js\nlet a\n\nmore")
     assert fence.lang == "js"
     assert fence.text == "let a\n\nmore"
+
+
+# -- GitHub references ---------------------------------------------------------
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+CTX = repo_context("episode6/collins", "github.com", HEAD)
+REPO = "https://github.com/episode6/collins"
+
+
+def anchors(markup: str) -> list[tuple[str, str]]:
+    return re.findall(r'<a href="([^"]*)">([^<]*)</a>', markup)
+
+
+def test_repo_context_holds_each_part_to_its_shape():
+    assert repo_context("episode6/collins") == RepoContext("episode6/collins", "github.com", "")
+    assert repo_context("o/n", "ghe.corp.example", HEAD) == RepoContext("o/n", "ghe.corp.example", HEAD)
+    assert repo_context(None) is None
+    assert repo_context("") is None
+    assert repo_context("no-slash") is None
+    assert repo_context("a/b/c") is None
+    assert repo_context("o/n", "not a host").host == "github.com"
+    assert repo_context("o/n", "github.com", "b").head == ""  # not a full oid
+    assert repo_context("o/n", "github.com", "B" * 40).head == ""
+
+
+def test_refs_link_into_the_page_repository():
+    (text,) = parse_blocks("Fixes #12 and other/repo#3, thanks @octocat, see 0123abc.", refs=CTX)
+    assert anchors(text.markup) == [
+        (f"{REPO}/issues/12", "#12"),
+        ("https://github.com/other/repo/issues/3", "other/repo#3"),
+        ("https://github.com/octocat", "@octocat"),
+        (f"{REPO}/commit/0123abc", "0123abc"),
+    ]
+    assert markup_ok(text.markup)
+
+
+def test_refs_use_the_pages_host():
+    ctx = repo_context("o/n", "ghe.corp.example")
+    (text,) = parse_blocks("#1 @u 0123abc", refs=ctx)
+    assert [href for href, _w in anchors(text.markup)] == [
+        "https://ghe.corp.example/o/n/issues/1",
+        "https://ghe.corp.example/u",
+        "https://ghe.corp.example/o/n/commit/0123abc",
+    ]
+
+
+def test_refs_and_www_autolinks_share_a_text_token():
+    (text,) = parse_blocks("see www.a.com/x#1 and #2, @u at www.b.org.", refs=CTX)
+    assert anchors(text.markup) == [
+        ("http://www.a.com/x#1", "www.a.com/x#1"),
+        (f"{REPO}/issues/2", "#2"),
+        ("https://github.com/u", "@u"),
+        ("http://www.b.org", "www.b.org"),
+    ]
+    assert markup_ok(text.markup)
+
+
+def test_no_context_leaves_refs_as_text():
+    (text,) = parse_blocks("Fixes #12, thanks @octocat, see 0123abc.")
+    assert "<a" not in text.markup
+    assert text.markup == "Fixes #12, thanks @octocat, see 0123abc."
+
+
+@pytest.mark.parametrize(
+    "body, linked",
+    [
+        ("#12", ["#12"]),
+        ("(#12)", ["#12"]),
+        ("[#12]", ["#12"]),
+        ("**#12**", ["#12"]),
+        ("#12.", ["#12"]),
+        ("#12,", ["#12"]),
+        ("x#12", []),  # on the tail of a word
+        ("&#12", []),  # an entity's tail
+        ("#12x", []),
+        ("#12-x", []),
+        ("#12/x", []),
+        ("#", []),
+        ("#abc", []),
+        ("#12345678901", []),  # past ten digits: not a number GitHub minted
+    ],
+)
+def test_issue_ref_boundaries(body, linked):
+    (text,) = parse_blocks(body, refs=CTX)
+    assert [word for _h, word in anchors(text.markup)] == linked
+
+
+@pytest.mark.parametrize(
+    "body, linked",
+    [
+        ("other/repo#3", ["other/repo#3"]),
+        ("(other/repo#3)", ["other/repo#3"]),
+        ("a-b/c.d_e#3", ["a-b/c.d_e#3"]),
+        (".foo/bar#5", []),  # a path's tail
+        ("x/foo/bar#5", []),  # three segments: no
+        ("foo/bar.#6", []),  # a name can't end in a dot
+        ("foo/bar#6x", []),
+    ],
+)
+def test_cross_repo_ref_boundaries(body, linked):
+    (text,) = parse_blocks(body, refs=CTX)
+    assert [word for _h, word in anchors(text.markup)] == linked
+
+
+@pytest.mark.parametrize(
+    "body, linked",
+    [
+        ("@octocat", ["@octocat"]),
+        ("@octocat's", ["@octocat"]),
+        ("(@a-b)", ["@a-b"]),
+        ("@a1", ["@a1"]),
+        ("@" + "a" * 39, ["@" + "a" * 39]),
+        ("@" + "a" * 40, []),  # past GitHub's 39
+        ("@-x", []),  # a login can't start with a hyphen
+        ("@x-", []),  # nor end with one
+        ("@@y", []),
+        ("@a/b", []),  # a team, or a path
+        ("end@z", []),
+        ("@", []),
+        ("@a_b", []),  # underscore isn't in the alphabet
+    ],
+)
+def test_mention_boundaries(body, linked):
+    (text,) = parse_blocks(body, refs=CTX)
+    assert [word for _h, word in anchors(text.markup)] == linked
+
+
+def test_mention_gate_is_the_avatar_gate():
+    assert mdblocks.LOGIN_RE.match("octo-cat")
+    assert not mdblocks.LOGIN_RE.match("octo_cat")
+    assert not mdblocks.LOGIN_RE.match("a" * 40)
+
+
+@pytest.mark.parametrize(
+    "body, linked",
+    [
+        ("0123abc", ["0123abc"]),
+        ("(0123abc)", ["0123abc"]),
+        ("0123abc.", ["0123abc"]),
+        ("deadbeef", []),  # a word: no digit
+        ("1234567", []),  # a number: no letter
+        ("0123ab", []),  # six: too short
+        ("0123ABC", []),  # commits are lowercase
+        ("x0123abc", []),
+        ("0123abcx", []),
+        ("0123abc-x", []),
+        ("sha/0123abc", []),
+        ("#0123abc", []),
+        (HEAD, [HEAD]),
+        (HEAD + "8", []),  # forty-one: not a commit
+    ],
+)
+def test_commit_boundaries(body, linked):
+    (text,) = parse_blocks(body, refs=CTX)
+    assert [word for _h, word in anchors(text.markup)] == linked
+
+
+def test_refs_inside_code_spans_stay_literal():
+    (text,) = parse_blocks("`#12` and `@octocat` and `0123abc`", refs=CTX)
+    assert "<a" not in text.markup
+    assert text.markup == "<tt>#12</tt> and <tt>@octocat</tt> and <tt>0123abc</tt>"
+
+
+def test_refs_inside_links_are_the_links_own_text():
+    (text,) = parse_blocks("[#7](https://example.com/z) and [@u](https://example.com/u)", refs=CTX)
+    assert anchors(text.markup) == [("https://example.com/z", "#7"), ("https://example.com/u", "@u")]
+
+
+def test_refs_inside_a_refused_link_stay_text():
+    (text,) = parse_blocks("[see #8](/x)", refs=CTX)
+    assert "<a" not in text.markup
+    # markdown-it refuses a javascript: destination outright, so that one
+    # is plain text — in which the reference links, as on GitHub.
+    (text,) = parse_blocks("[#7](javascript:alert(1))", refs=CTX)
+    assert anchors(text.markup) == [(f"{REPO}/issues/7", "#7")]
+    assert "javascript" in text.markup and 'href="javascript' not in text.markup
+
+
+def test_refs_in_fences_stay_literal():
+    (code,) = parse_blocks("```\nsee #12 @octocat 0123abc\n```", refs=CTX)
+    assert isinstance(code, CodeBlock)
+    assert code.text == "see #12 @octocat 0123abc\n"
+
+
+def test_refs_in_headings_table_cells_lists_and_quotes():
+    body = "# Fixes #1\n\n| #2 | @u |\n|--|--|\n| 0123abc | x |\n\n- see #3\n\n> by @v"
+    heading, table, lst, quote = parse_blocks(body, refs=CTX)
+    assert anchors(heading.markup) == [(f"{REPO}/issues/1", "#1")]
+    assert anchors(table.header[0]) == [(f"{REPO}/issues/2", "#2")]
+    assert anchors(table.header[1]) == [("https://github.com/u", "@u")]
+    assert anchors(table.rows[0][0]) == [(f"{REPO}/commit/0123abc", "0123abc")]
+    assert anchors(lst.items[0].children[0].markup) == [(f"{REPO}/issues/3", "#3")]
+    assert anchors(quote.children[0].markup) == [("https://github.com/v", "@v")]
+
+
+def test_ref_markup_is_escaped_and_well_formed():
+    (text,) = parse_blocks("<#1 & @b> 0123abc<x>", refs=CTX)
+    assert markup_ok(text.markup)
+    assert text.markup.startswith("&lt;<a ")
+    assert "&amp;" in text.markup and "&lt;x&gt;" in text.markup
+    for markup in markups(parse_blocks(FIXTURE, refs=CTX)):
+        assert markup_ok(markup), markup
+        assert not re.search(r"<(?!/?(?:a|b|i|s|tt|sub|sup|span)\b)", markup), markup
+
+
+def test_fixture_refs_line_links_under_a_context():
+    text = parse_blocks(FIXTURE, refs=CTX)[12]
+    assert "See example.com and" in text.markup  # the linkify post-filter still holds
+    assert '<a href="http://www.foo.org">www.foo.org</a>' in text.markup
+    assert f'<a href="{REPO}/blob/{HEAD}/docs/a.md">rel</a>' in text.markup
+
+
+def test_render_inline_links_refs():
+    assert render_inline("see #2", CTX) == f'see <a href="{REPO}/issues/2">#2</a>'
+    assert render_inline("see #2") == "see #2"
+
+
+def test_relative_links_resolve_at_the_head_commit():
+    (text,) = parse_blocks("[t](docs/a.md) [u](./b.md) [v](docs/a%20b.md)", refs=CTX)
+    assert anchors(text.markup) == [
+        (f"{REPO}/blob/{HEAD}/docs/a.md", "t"),
+        (f"{REPO}/blob/{HEAD}/b.md", "u"),
+        (f"{REPO}/blob/{HEAD}/docs/a%20b.md", "v"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "../c.md",
+        "docs/../c.md",
+        "/d.md",
+        "#frag",
+        "docs/a.md?x=1",
+        "docs/a.md#top",
+        "a//b",
+        "mailto:a@b",
+        "x:y",
+    ],
+)
+def test_relative_links_github_would_not_take_stay_text(href):
+    (text,) = parse_blocks(f"[w]({href})", refs=CTX)
+    assert "<a" not in text.markup, text.markup
+    assert text.markup == "w"
+
+
+def test_relative_links_without_a_head_stay_text():
+    ctx = repo_context("episode6/collins")
+    (text,) = parse_blocks("[t](docs/a.md)", refs=ctx)
+    assert text.markup == "t"
+    assert relative_href("docs/a.md", ctx) == "docs/a.md"
+    assert relative_href("a" * 2000, CTX) == "a" * 2000
+
+
+def test_relative_link_does_not_touch_a_linkified_domain():
+    # `b.md` reads as a domain to linkify; a linkify token is never a path.
+    (text,) = parse_blocks("see b.md here", refs=CTX)
+    assert "blob" not in text.markup
+
+
+def test_link_refs_is_linear_on_a_hostile_body():
+    import time
+
+    started = time.monotonic()
+    for body in ("#" * 100_000, "0123abc" * 15_000, "f" * 100_000, "@" * 100_000, "a/" * 50_000):
+        link_refs(body, CTX)
+    assert time.monotonic() - started < 2.0

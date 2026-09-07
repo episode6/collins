@@ -121,6 +121,7 @@ import logging
 import threading
 from collections.abc import Callable
 from functools import partial
+from urllib.parse import urlsplit
 
 import gi
 
@@ -932,7 +933,7 @@ class PrViewPage(Adw.Bin):
         card = _card(detail.author, detail.created_at)
         if detail.body:
             body = _folded_body(
-                detail.body, self._inline_images, self._pr.url, self._body_scheme()
+                detail.body, self._inline_images, self._pr.url, self._body_scheme(), self._refs()
             )
             if isinstance(body, _Fold):
                 self._description_fold = body
@@ -1009,7 +1010,11 @@ class PrViewPage(Adw.Bin):
         card = _card(comment.author, comment.created_at, url=comment.url)
         card.append(
             _body_label(
-                comment.body, self._inline_images, comment.url or self._pr.url, self._body_scheme()
+                comment.body,
+                self._inline_images,
+                comment.url or self._pr.url,
+                self._body_scheme(),
+                self._refs(),
             )
         )
         return card
@@ -1029,7 +1034,9 @@ class PrViewPage(Adw.Bin):
         card = _card(review.author, review.created_at, trailing=[icon, verdict])
         if review.body:
             card.append(
-                _body_label(review.body, self._inline_images, self._pr.url, self._body_scheme())
+                _body_label(
+                    review.body, self._inline_images, self._pr.url, self._body_scheme(), self._refs()
+                )
             )
         return card
 
@@ -1047,12 +1054,25 @@ class PrViewPage(Adw.Bin):
             self._acted,
             self._inline_images,
             self._body_scheme(),
+            self._refs(),
         )
 
     def _body_scheme(self) -> GtkSource.StyleScheme | None:
         """The style scheme a body's code blocks wear: the editor's, as the
         diff buffers wear it (`_apply_scheme` follows a change)."""
         return style_scheme(self._scheme_setting, self._dark)
+
+    def _refs(self) -> mdblocks.RepoContext | None:
+        """Where a body's ``#123`` / ``@user`` / commit references point:
+        this PR's own repository on its own host, and its head commit for
+        relative links — the page's knowledge, never the body's. None (no
+        reference links) until the summary names the repository."""
+        detail = self._detail
+        return mdblocks.repo_context(
+            self._pr.repository,
+            urlsplit(self._pr.url).hostname or "",
+            detail.head_oid if detail is not None else "",
+        )
 
     # -- the files view --------------------------------------------------------
 
@@ -2095,6 +2115,7 @@ class _ThreadCard(Gtk.Box):
         on_posted: Callable[[], None],
         images: bool = False,
         scheme: GtkSource.StyleScheme | None = None,
+        refs: mdblocks.RepoContext | None = None,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("pr-card")
@@ -2128,7 +2149,7 @@ class _ThreadCard(Gtk.Box):
         for comment in thread.comments:
             block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             block.append(_byline(comment.author, comment.created_at, url=comment.url))
-            block.append(_body_label(comment.body, images, comment.url or pr.url, scheme))
+            block.append(_body_label(comment.body, images, comment.url or pr.url, scheme, refs))
             body.append(block)
         body.append(self._write_row())
         body.append(self._reply_editor())
@@ -2586,6 +2607,7 @@ def _folded_body(
     images: bool = False,
     page_url: str = "",
     scheme: GtkSource.StyleScheme | None = None,
+    refs: mdblocks.RepoContext | None = None,
 ) -> Gtk.Widget:
     """The description's body, folded to `_FOLD_LINES` lines behind "Show
     more" — a long description shouldn't push the conversation off screen.
@@ -2604,7 +2626,7 @@ def _folded_body(
     sat behind "Show more" would have made rendering them pointless for
     exactly the bodies this is for.
     """
-    segments, fill = _segments(text, images, page_url, scheme)
+    segments, fill = _segments(text, images, page_url, scheme, refs)
     preview = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, hexpand=True)
     if fill(preview, segments, _FOLD_CHARS, _FOLD_LINES, preview=True):
         return preview
@@ -2665,6 +2687,7 @@ def _body_label(
     images: bool = False,
     page_url: str = "",
     scheme: GtkSource.StyleScheme | None = None,
+    refs: mdblocks.RepoContext | None = None,
 ) -> Gtk.Widget:
     """A markdown body as selectable wrapped text — with the images it
     embeds rendered in place when *images* is on (the `pr_inline_images`
@@ -2674,8 +2697,10 @@ def _body_label(
     cost, which the main loop pays). *page_url* is the body's own place on
     GitHub — the comment's anchor, or the PR — where a capped table's
     "more" link leads; *scheme* is the style scheme its code blocks wear
-    (the page's, the one its diff buffers wear too)."""
-    return _body_widget(*_segments(text, images, page_url, scheme))
+    (the page's, the one its diff buffers wear too); *refs* is the
+    repository its ``#123`` / ``@user`` / commit references link into
+    (`PrViewPage._refs`; None leaves them text)."""
+    return _body_widget(*_segments(text, images, page_url, scheme, refs))
 
 
 def _segments(
@@ -2683,6 +2708,7 @@ def _segments(
     images: bool,
     page_url: str = "",
     scheme: GtkSource.StyleScheme | None = None,
+    refs: mdblocks.RepoContext | None = None,
 ) -> tuple[list, Callable]:
     """A body as the list its renderer walks and the walker for it: the
     block tree with `_fill_blocks` when the block layer parses it, else
@@ -2692,8 +2718,8 @@ def _segments(
     call."""
     if mdblocks.available():
         try:
-            blocks = mdblocks.parse_blocks(text, images=images)
-            return blocks, partial(_fill_blocks, page_url=page_url, scheme=scheme)
+            blocks = mdblocks.parse_blocks(text, images=images, refs=refs)
+            return blocks, partial(_fill_blocks, page_url=page_url, scheme=scheme, refs=refs)
         except Exception as exc:  # noqa: BLE001 — this body alone falls back
             log.debug("block parse failed, body falls back to the regex renderer: %s", exc)
     return (split_body(text) if images else [text]), _fill_body
@@ -2797,11 +2823,13 @@ def _fill_blocks(
     keep_first_image: bool = True,
     page_url: str = "",
     scheme: GtkSource.StyleScheme | None = None,
+    refs: mdblocks.RepoContext | None = None,
 ) -> bool:
     """`_fill_body` over mdblocks' tree: append the blocks that fit
     *chars*/*lines* to *box*; return whether all of them did. *page_url*
     reaches the widgets that link back to GitHub (a capped table's rest);
-    *scheme* the code blocks' GtkSource views.
+    *scheme* the code blocks' GtkSource views; *refs* the re-render of a
+    cut paragraph, so its references link as the whole one's did.
 
     Same walk, same budgets, same rules — spent front to back, an image
     row costing `_IMAGE_FOLD_LINES`, the first picture always kept — with
@@ -2856,7 +2884,7 @@ def _fill_blocks(
                 # its own line. The cut front re-parses as inline markdown
                 # (body_head backed the cut out of any span it would split).
                 label = mdwidgets.text_label(
-                    _cut_markup(head.rstrip()) + "…", head.rstrip() + "…"
+                    _cut_markup(head.rstrip(), refs) + "…", head.rstrip() + "…"
                 )
                 if preview:
                     # The backstop for the shape a character budget can't
@@ -2918,12 +2946,12 @@ def _rest_head(
     return mdwidgets.rest_source(taken), chars, lines, whole
 
 
-def _cut_markup(head: str) -> str:
+def _cut_markup(head: str, refs: mdblocks.RepoContext | None = None) -> str:
     """The cut front of a paragraph as markup — through the block layer's
     inline walker, or escaped plain text if it refuses (the ladder's last
     rung, per label)."""
     try:
-        return mdblocks.render_inline(head)
+        return mdblocks.render_inline(head, refs)
     except Exception as exc:  # noqa: BLE001
         log.debug("inline re-render failed: %s", exc)
         return GLib.markup_escape_text(head)

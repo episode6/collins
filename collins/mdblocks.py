@@ -23,7 +23,12 @@ http(s) on top of markdown-it's own refusal of ``javascript:`` and friends,
 HTML is honoured for a five-tag whitelist and otherwise shown as escaped
 literal text, nesting is capped at `MAX_DEPTH` (markdown-it's own
 ``maxNesting`` of 20 is the outer wall), and `formatting.MAX_BODY_IMAGES`
-still caps how many pictures one body can ask for.
+still caps how many pictures one body can ask for. GitHub references
+(``#123``, ``owner/repo#123``, ``@user``, a commit's hex) become links
+only under a `RepoContext` the page hands in — built from the PR's own
+repository, host and head commit, never read off the body — and only in
+plain text tokens: a reference inside a code span or an existing link
+stays what it was.
 
 Package names, for the record: markdown-it-py 3.0.0 (Ubuntu) and 4.2.0
 (Fedora, Arch) both ship ``gfm-like``; ``gfm-like2`` exists only on 4.1+
@@ -57,6 +62,10 @@ ALERT_KINDS = ("note", "tip", "important", "warning", "caution")
 # labels a grid builds, which is layout the main loop pays for.
 TABLE_MAX_ROWS = 50
 TABLE_MAX_COLUMNS = 8
+# GitHub's username alphabet (it also bans leading/trailing/double hyphens,
+# but a 404 on those is harmless — this only has to keep URLs sane). The
+# one gate for a login wherever one goes into a URL: `avatars` uses it too.
+LOGIN_RE = re.compile(r"^[A-Za-z0-9-]{1,39}$")
 
 _md = None
 _import_error: str | None = None
@@ -199,13 +208,50 @@ class Rule:
 Block = Text | Heading | CodeBlock | Table | Quote | ListBlock | Details | ImageRow | Rule
 
 
+# -- the repository context -----------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RepoContext:
+    """Where a body's GitHub references point: the PR's own repository
+    (``owner/name``), the host its URL is on, and — for a relative link
+    like ``[x](docs/a.md)`` — the head commit to read the file at (a
+    40-hex oid, or "" to leave such links as text). Built through
+    `repo_context`, which holds each part to its shape; a body never
+    gets to choose any of them."""
+
+    repository: str
+    host: str = "github.com"
+    head: str = ""
+
+
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$")
+_HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
+_OID_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def repo_context(repository: str | None, host: str = "github.com", head: str = "") -> RepoContext | None:
+    """A `RepoContext` for *repository* on *host* at *head*, or None when
+    the repository isn't ``owner/name``-shaped — then nothing links. A
+    host that isn't hostname-shaped falls back to github.com and a head
+    that isn't a full oid to "" (relative links stay text)."""
+    if not repository or not _REPOSITORY_RE.match(repository):
+        return None
+    if not host or not _HOST_RE.match(host):
+        host = "github.com"
+    if not head or not _OID_RE.match(head):
+        head = ""
+    return RepoContext(repository, host, head)
+
+
 # -- parsing -----------------------------------------------------------------
 
 
-def parse_blocks(text: str, images: bool = True) -> list[Block]:
+def parse_blocks(text: str, images: bool = True, refs: RepoContext | None = None) -> list[Block]:
     """*text* as a list of top-level blocks. With *images* off (the
     ``pr_inline_images`` setting) no `ImageRow` is ever made: an image is
-    its alt-text link, as the regex renderer draws it.
+    its alt-text link, as the regex renderer draws it. With *refs*, GitHub
+    references in plain text link into that repository (`link_refs`).
 
     Raises when markdown-it is unavailable (`available()` says so first)
     or refuses the body — the caller's cue to fall back per body.
@@ -214,11 +260,11 @@ def parse_blocks(text: str, images: bool = True) -> list[Block]:
     if md is None:
         raise RuntimeError(_import_error or "markdown-it-py unavailable")
     lines = text.split("\n")
-    parser = _Folder(lines, images)
+    parser = _Folder(lines, images, refs)
     return parser.fold(md.parse(text), 0)
 
 
-def render_inline(text: str) -> str:
+def render_inline(text: str, refs: RepoContext | None = None) -> str:
     """One line or paragraph of markdown as Pango markup through the same
     walker `parse_blocks` uses — how a cut paragraph is re-rendered. Images
     degrade to their alt-text anchors (there is no row to put them in)."""
@@ -227,7 +273,7 @@ def render_inline(text: str) -> str:
         raise RuntimeError(_import_error or "markdown-it-py unavailable")
     tokens = md.parseInline(text)
     children = tokens[0].children if tokens and tokens[0].children else []
-    return _Inline(children).markup()
+    return _Inline(children, refs).markup()
 
 
 def line_cost(block: Block, image_lines: int = 4) -> int:
@@ -288,9 +334,10 @@ _TASK_RE = re.compile(r"^\[([ xX])\](?: |$)")
 class _Folder:
     """Folds a markdown-it token stream into blocks, one container at a time."""
 
-    def __init__(self, lines: list[str], images: bool) -> None:
+    def __init__(self, lines: list[str], images: bool, refs: RepoContext | None = None) -> None:
         self._lines = lines
         self._images = images
+        self._refs = refs
         self._image_budget = MAX_BODY_IMAGES
         self._pending: list[Block] = []  # blocks one token unfolded into several
 
@@ -328,7 +375,7 @@ class _Folder:
         if kind == "heading_open":
             close = _matching(tokens, i, "heading_close")
             inline = tokens[i + 1] if i + 1 < close else None
-            markup = _Inline(inline.children or []).markup() if inline is not None else ""
+            markup = self._inline(inline.children or []) if inline is not None else ""
             level = int(token.tag[1:]) if token.tag[1:].isdigit() else 1
             return Heading(min(max(level, 1), 6), markup, self.source(token)), close + 1
         if kind in ("fence", "code_block"):
@@ -370,13 +417,16 @@ class _Folder:
         source = self.source(token)
         return (_literal(source) if source.strip() else None), i + 1
 
+    def _inline(self, children: list) -> str:
+        return _Inline(children, self._refs).markup()
+
     def _paragraph(self, inline, blocks: list[Block]) -> None:
         children = list(inline.children or [])
         source = inline.content or ""
         if self._images and children and _only_images(children):
             self._image_rows(children, source, blocks)
             return
-        markup = _Inline(children).markup()
+        markup = self._inline(children)
         if markup.strip() or source.strip():
             blocks.append(Text(markup, source))
 
@@ -449,7 +499,7 @@ class _Folder:
                 if kind == "th_open":
                     aligns.append(_align(token))
             elif kind == "inline" and row is not None:
-                cell = _Inline(token.children or []).markup()
+                cell = self._inline(token.children or [])
                 if in_head:
                     header.append(cell)
                 else:
@@ -730,8 +780,9 @@ class _Inline:
     is closed then, so the result is well-formed whatever the input did.
     """
 
-    def __init__(self, children: list) -> None:
+    def __init__(self, children: list, refs: RepoContext | None = None) -> None:
         self._children = children
+        self._refs = refs
         self._out: list[str] = []
         self._stack: list[tuple[str, str | None]] = []
 
@@ -760,7 +811,7 @@ class _Inline:
             elif kind == "html_inline":
                 self._html(token.content)
             elif token.children:
-                self._out.append(_Inline(token.children).markup())
+                self._out.append(_Inline(token.children, self._refs).markup())
             elif token.content:
                 self._out.append(GLib.markup_escape_text(token.content))
             i += 1
@@ -771,13 +822,16 @@ class _Inline:
         return "".join(self._out)
 
     def _text(self, content: str) -> str:
-        """A text token as markup, its ``www.`` autolinks linked — unless a
-        link is already open around it (text inside an anchor, or inside a
-        link the gate refused, is the author's link text). Code spans never
-        come here: they are `code_inline` tokens."""
+        """A text token as markup: its ``www.`` autolinks linked, and with
+        a context its GitHub references too — unless a link is already
+        open around it (text inside an anchor, or inside a link the gate
+        refused, is the author's link text, not a reference). Code spans
+        never come here: they are `code_inline` tokens."""
         if any(kind == "link" for kind, _tag in self._stack):
             return GLib.markup_escape_text(content)
-        return link_www(content)
+        if self._refs is None:
+            return link_www(content)
+        return link_refs(content, self._refs)
 
     def _open(self, kind: str, tag: str | None) -> None:
         self._stack.append((kind, tag))
@@ -798,6 +852,8 @@ class _Inline:
 
     def _link(self, token, children: list, i: int) -> None:
         href = token.attrGet("href") or ""
+        if self._refs is not None and self._refs.head and token.markup != "linkify":
+            href = relative_href(href, self._refs)
         ok = len(href) <= _MAX_HREF and bool(_HREF_OK_RE.match(href))
         if ok and token.markup == "linkify":
             # GitHub's extended autolinks take http(s)://, www. and email
@@ -883,3 +939,78 @@ def _visible_text(children: list, i: int) -> str:
         elif token.type in ("text", "code_inline"):
             parts.append(token.content)
     return "".join(parts).strip()
+
+
+# -- GitHub references ---------------------------------------------------------
+#
+# A post-pass over the text a body writes in the open — never inside a
+# code span (its own token) or a link (the walker's stack says). The
+# boundaries are GitHub's: `#123` and `owner/repo#123` not on the tail of
+# a word or an `&` (an entity), `@user` on the login alphabet and not on
+# the tail of a word or another `@` (an email is a linkify token anyway),
+# and a commit's hex only as a whole word — lowercase, seven to forty
+# characters, with at least one digit and one letter, so a phone number,
+# a date or a word like "deadbeef" is left alone. A word character or a
+# hyphen right after any of them means it was something else.
+
+_REF_RE = re.compile(
+    r"(?<![\w&/#@.-])(?:"
+    r"(?P<owner>[A-Za-z0-9-]{1,39})/(?P<repo>[A-Za-z0-9._-]{0,99}[A-Za-z0-9_-])#(?P<xnum>\d{1,10})"
+    r"|#(?P<num>\d{1,10})"
+    r"|@(?P<login>[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)"
+    r"|(?P<sha>(?=[0-9a-f]{0,39}[a-f])(?=[0-9a-f]{0,39}\d)[0-9a-f]{7,40})"
+    r")(?![\w/-])"
+)
+# A link destination that is a path into the repository: no scheme, no
+# leading slash, fragment or query, only path characters, no `..` step.
+_RELATIVE_RE = re.compile(r"^(?:\./)?(?!/)(?:[A-Za-z0-9._~%-]+/)*[A-Za-z0-9._~%-]+$")
+_MAX_RELATIVE = 1_000
+
+
+def link_refs(text: str, refs: RepoContext) -> str:
+    """*text* escaped, with every GitHub reference in it an anchor into
+    *refs*' repository: ``#123`` and ``owner/repo#123`` to the issue (GitHub
+    forwards a PR's number from there), ``@user`` to the profile, a commit's
+    hex to the commit. Nothing in the URL comes from the body but the
+    reference's own characters, which the pattern holds to their alphabets.
+    The text between references goes through `link_www`, so a ``www.``
+    autolink links too (a ``#``, ``@`` or hex run inside one sits on the
+    tail of a word or after a ``/``, where the boundaries refuse it).
+    """
+    out: list[str] = []
+    end = 0
+    for match in _REF_RE.finditer(text):
+        out.append(link_www(text[end : match.start()]))
+        out.append(_ref_anchor(match, refs))
+        end = match.end()
+    out.append(link_www(text[end:]))
+    return "".join(out)
+
+
+def _ref_anchor(match: re.Match, refs: RepoContext) -> str:
+    word = match.group(0)
+    base = f"https://{refs.host}"
+    if match.group("xnum") is not None:
+        href = f"{base}/{match.group('owner')}/{match.group('repo')}/issues/{match.group('xnum')}"
+    elif match.group("num") is not None:
+        href = f"{base}/{refs.repository}/issues/{match.group('num')}"
+    elif match.group("login") is not None:
+        href = f"{base}/{match.group('login')}"
+    else:
+        href = f"{base}/{refs.repository}/commit/{match.group('sha')}"
+    return f'<a href="{GLib.markup_escape_text(href)}">{GLib.markup_escape_text(word)}</a>'
+
+
+def relative_href(href: str, refs: RepoContext) -> str:
+    """*href* as written, or — when it is a path into the repository and
+    *refs* names a head commit — the file's page at that commit
+    (``https://host/owner/name/blob/<head>/<path>``), as GitHub resolves a
+    relative link in a body. Anything else (an absolute URL, a fragment, a
+    ``..`` step, a path GitHub wouldn't take) comes back untouched for the
+    http(s) gate to judge."""
+    if not refs.head or not href or len(href) > _MAX_RELATIVE:
+        return href
+    if not _RELATIVE_RE.match(href) or ".." in href.split("/"):
+        return href
+    path = href[2:] if href.startswith("./") else href
+    return f"https://{refs.host}/{refs.repository}/blob/{refs.head}/{path}"

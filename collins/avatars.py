@@ -24,7 +24,6 @@ its bytes only ever become a texture, never markup.
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import urllib.request
 
@@ -34,11 +33,13 @@ gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 from gi.repository import Adw, Gdk, GLib  # noqa: E402
 
+from .mdblocks import LOGIN_RE  # noqa: E402
+
 log = logging.getLogger(__name__)
 
-# GitHub's username alphabet (it also bans leading/trailing/double hyphens,
-# but a 404 on those is harmless — this only has to keep URLs sane).
-_LOGIN = re.compile(r"^[A-Za-z0-9-]{1,39}$")
+# GitHub's username alphabet — the one gate a login passes before it goes
+# into a URL, shared with the body renderer's @-mentions.
+_LOGIN = LOGIN_RE
 _URL = "https://github.com/{login}.png?size={px}"
 # One fetch size for every widget, crisp on a hidpi screen at byline size.
 _FETCH_PX = 128
