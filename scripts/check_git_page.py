@@ -429,6 +429,36 @@ def check_sidebar(repo: str) -> None:
     landed = wait_for(lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == log_shas(repo, "main..HEAD"))
     check("the commits list gained the commit", landed, [r.label for r in sidebar.commit_rows()])
 
+    # -- revert a commit: the menu, committed, then into the working tree ------------------
+    native_sha = log_shas(repo, "-1", "HEAD")[0]
+    native_row = next(r for r in sidebar.commit_rows() if r.sha == native_sha)
+    check("a commit row's menu offers Copy sha, Revert… and Reload", sidebar.commit_menu_labels(native_row.id) == ["Copy sha", "Revert…", "Reload"], sidebar.commit_menu_labels(native_row.id))
+    check("the working tree row's menu is Reload alone", sidebar.commit_menu_labels("worktree") == ["Reload"], sidebar.commit_menu_labels("worktree"))
+    reads_before = len(reads)
+    sidebar.revert(native_sha, True)
+    landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
+    check("a committed revert reloads the view once", landed, len(reads) - reads_before)
+    check("and made the revert commit", git_out(repo, "log", "-1", "--format=%s").startswith('Revert "native commit"'), git_out(repo, "log", "-1", "--format=%s"))
+    check("with the tree clean", git_out(repo, "status", "--porcelain") == "", git_out(repo, "status", "--porcelain"))
+    revert_sha = log_shas(repo, "-1", "HEAD")[0]
+    landed = wait_for(lambda: any(r.sha == revert_sha for r in sidebar.commit_rows()))
+    check("the commits list gained the revert", landed, [r.label for r in sidebar.commit_rows()])
+    reads_before = len(reads)
+    sidebar.revert(revert_sha, False)
+    landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
+    check("a working-tree revert reloads the view once", landed, len(reads) - reads_before)
+    check("and staged the reverse change without committing", git_out(repo, "diff", "--cached", "--name-only").split() == ["a.txt"] and log_shas(repo, "-1", "HEAD")[0] == revert_sha, git_out(repo, "status", "--porcelain"))
+    check("leaving no revert half-finished", gitops.in_progress_operation(os.path.join(repo, ".git")) is None, gitops.in_progress_operation(os.path.join(repo, ".git")))
+    check(
+        "the files list shows a.txt on the staged side",
+        wait_for(lambda: [f.path for f in sidebar.file_rows().staged] == ["a.txt"] and not sidebar.file_rows().unstaged),
+        sidebar.file_rows(),
+    )
+    git(repo, "reset", "-q", "--hard", "HEAD")
+    page.poll_tick()
+    wait_for(page.settled)
+    check("the tree is clean again for what follows", wait_for(lambda: not sidebar.file_rows().staged and not sidebar.file_rows().unstaged), sidebar.file_rows())
+
     # -- an ask that lands while a read is out re-reads --------------------------------------
     # The read runs at once but lands late (gated), so it carries the tree
     # before the `git add`; the tick meanwhile sees the index move and asks

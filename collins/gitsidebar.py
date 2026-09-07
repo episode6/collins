@@ -451,6 +451,9 @@ class GitSidebar(Gtk.Box):
         revert = Gio.SimpleAction.new("revert-file", GLib.VariantType.new("s"))
         revert.connect("activate", lambda _a, param: self.emit("revert-requested", param.get_string()))
         group.add_action(revert)
+        revert_commit = Gio.SimpleAction.new("revert-commit", GLib.VariantType.new("s"))
+        revert_commit.connect("activate", lambda _a, param: self._on_revert_clicked(param.get_string()))
+        group.add_action(revert_commit)
         self._actions_group = group
         self.insert_action_group(_ACTIONS, group)
 
@@ -781,6 +784,36 @@ class GitSidebar(Gtk.Box):
 
         self.run_mutation(work, done)
 
+    def revert(self, sha: str, commit: bool) -> None:
+        """`git revert --no-edit <sha>` (*commit*) or `git revert
+        --no-commit <sha>` (the reverse change staged in the working tree)
+        on a thread; the toast names the commit made or the way out of a
+        revert that stopped on conflicts, and "mutated" fires either way.
+        Public so the e2e drives it without the dialog."""
+        cwd = self._cwd_provider()
+        abbrev = gitloads.short_ref(sha)
+
+        def work() -> tuple:
+            result = gitops.revert(cwd, sha, commit)
+            head = gitops.head_abbrev(cwd) if result.ok and commit else None
+            in_progress = (
+                not result.ok and gitops.in_progress_operation(gitinfo.git_dir(cwd)) is not None
+            )
+            return result, head, in_progress
+
+        def done(read: tuple) -> None:
+            result, head, in_progress = read
+            if result.ok:
+                self._toast(gitmodel.revert_done(abbrev, commit, head))
+            else:
+                self._toast(
+                    gitmodel.revert_failed(abbrev, gitops.first_line(result.stderr), in_progress),
+                    refusal=True,
+                )
+            self.emit("mutated")
+
+        self.run_mutation(work, done)
+
     def stage_all(self) -> None:
         """`git add -A` on a thread (the confirm is the button's, see
         _on_all_clicked); the toast counts what was staged."""
@@ -883,14 +916,37 @@ class GitSidebar(Gtk.Box):
         if row.load is not None:
             self.emit("load-requested", row.load)
 
+    def _commit_menu_items(self, row: Row | None) -> list[tuple[str, str, str | None]]:
+        """(label, action, target) for the commits list's context menu:
+        *Copy sha* and *Revert…* on a commit row (the latter only while the
+        page is on a working tree the revert can land in), *Reload* always."""
+        items: list[tuple[str, str, str | None]] = []
+        if row is not None and row.kind == "commit" and row.sha:
+            items.append((_("Copy sha"), "copy-sha", row.sha))
+            if self._working_live():
+                items.append((_("Revert…"), "revert-commit", row.sha))
+        items.append((_("Reload"), "reload", None))
+        return items
+
+    def commit_menu_labels(self, row_id: str) -> list[str] | None:
+        """The labels a right-click on the commits row *row_id* offers (for
+        the e2e); None for a row that isn't listed."""
+        widget = self._commit_widgets.get(row_id)
+        if widget is None:
+            return None
+        return [label for label, _action, _target in self._commit_menu_items(widget.row)]
+
     def _on_commits_secondary_click(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
-        row = self._commit_list.get_row_at_y(int(y))
+        widget = self._commit_list.get_row_at_y(int(y))
         menu = Gio.Menu()
-        if isinstance(row, _CommitRow) and row.row.kind == "commit" and row.row.sha:
-            item = Gio.MenuItem.new(_("Copy sha"), None)
-            item.set_action_and_target_value(f"{_ACTIONS}.copy-sha", GLib.Variant("s", row.row.sha))
+        row = widget.row if isinstance(widget, _CommitRow) else None
+        for label, action, target in self._commit_menu_items(row):
+            item = Gio.MenuItem.new(label, None)
+            if target is None:
+                item.set_action_and_target_value(f"{_ACTIONS}.{action}", None)
+            else:
+                item.set_action_and_target_value(f"{_ACTIONS}.{action}", GLib.Variant("s", target))
             menu.append_item(item)
-        menu.append(_("Reload"), f"{_ACTIONS}.reload")
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         popover = Gtk.PopoverMenu.new_from_model(menu)
         popover.set_parent(self._commit_list)
@@ -1168,6 +1224,50 @@ class GitSidebar(Gtk.Box):
             gitmodel.fixup_options(commits),
             picked,
             _("Choose"),
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _on_revert_clicked(self, sha: str) -> None:
+        """The commits list's *Revert…*: refuse while a rebase / merge /
+        cherry-pick / revert is half-finished (the revert would be that
+        operation's next step), else ask — commit the revert, revert into
+        the working tree alone (`--no-commit`), or cancel."""
+        if not self._working_live() or self._busy or not gitloads.safe_ref(sha):
+            return
+        cwd = self._cwd_provider()
+
+        def work() -> None:
+            operation = gitops.in_progress_operation(gitinfo.git_dir(cwd))
+            GLib.idle_add(self._revert_gated, sha, operation, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="git-sidebar-revert-gate", daemon=True).start()
+
+    def _revert_gated(self, sha: str, operation: str | None) -> bool:
+        if operation is not None:
+            self._toast(
+                _("A {operation} is half-finished here — finish or abort it first").format(
+                    operation=operation
+                ),
+                refusal=True,
+            )
+            return GLib.SOURCE_REMOVE
+        abbrev = gitloads.short_ref(sha)
+        widget = self._commit_widgets.get(gitmodel.commit_row_id(sha))
+        subject = widget.row.label if widget is not None else ""
+        dialogs.confirm_dialog(
+            self,
+            _("Revert {sha}?").format(sha=abbrev),
+            _(
+                "“{subject}” is applied in reverse. Commit the revert as `git revert` would,"
+                " or leave the reverse change staged in the working tree (`--no-commit`)"
+                " to edit and commit yourself."
+            ).format(subject=subject),
+            _("Commit revert"),
+            lambda: self.revert(sha, True),
+            default_response="confirm",
+            extra_label=_("Revert in working tree"),
+            on_extra=lambda: self.revert(sha, False),
+            destructive=False,
         )
         return GLib.SOURCE_REMOVE
 
