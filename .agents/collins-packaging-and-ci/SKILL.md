@@ -78,8 +78,8 @@ forever** (rejected uploads included); COPR does not.
 (reusable `ci-image.yml`: builds/pushes the three GHCR tags only when the
 Dockerfile hash has no tag yet), `lint` (bare runner, `ruff==0.16.4` pinned),
 `test` (unit suite in the full image; `tests/conftest.py` keeps it GTK-free
-even though the image has GTK), `e2e-shard (1..4)` (`xvfb-run …
-scripts/run_e2e.py --timeout 120 --shard N/4`, four time-balanced legs,
+even though the image has GTK), `e2e-shard (1..5)` (`xvfb-run …
+scripts/run_e2e.py --timeout 120 --shard N/5`, five time-balanced legs,
 60-minute cap each) fanned back into a bare `e2e` job because that is the
 name the main-branch ruleset requires, `packaging` (`python3 -m build
 --no-isolation`, `twine check --strict`, `verify_wheel_data.py`,
