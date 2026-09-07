@@ -145,7 +145,7 @@ def build_one(
         return code_view(block, scheme)
     if isinstance(block, mdblocks.Details):
         budget.take()
-        return DetailsExpander(block, image_row, depth, page_url, scheme)
+        return DetailsExpander(block, budget, image_row, depth, page_url, scheme)
     # A block kind this layer doesn't know: its source, escaped.
     budget.take()
     return plain_label(block.source)
@@ -245,15 +245,22 @@ class DetailsExpander(Gtk.Expander):
     "Details" when the author gave none), collapsed unless the tag said
     ``open``, whose children are built on the first ``notify::expanded``
     — a details block hiding two hundred blocks costs a label until it is
-    opened. The children get a widget budget of their own when they are
-    built: nothing under a closed expander exists to count, and an open
-    one is one the reader asked for. What they need from the page — the
-    image-slot builder, the body's `page_url`, the code blocks' scheme —
-    is kept until then; `restyle_code` refreshes the scheme meanwhile."""
+    opened. A ``<details open>`` builds its children at construction
+    against the body's own *budget*, the one `build_one` is spending: the
+    ``open`` attribute is the author's, so what it shows counts like any
+    other block. Only a reader's click builds against a fresh `Budget` —
+    nothing under a closed expander existed to count. What the children
+    need from the page — the image-slot builder, the body's `page_url`,
+    the code blocks' scheme — is kept until then; `restyle_code`
+    refreshes the scheme meanwhile. The summary is its own wrapping label
+    (`summary_label`): GTK's built-in expander label neither wraps nor
+    ellipsizes, and a one-sentence summary would set the page's minimum
+    width."""
 
     def __init__(
         self,
         block: mdblocks.Details,
+        budget: Budget,
         image_row: Callable[[tuple], Gtk.Widget],
         depth: int = 0,
         page_url: str = "",
@@ -268,25 +275,37 @@ class DetailsExpander(Gtk.Expander):
         self._built = False
         self.add_css_class("pr-md-details")
         # The summary is escaped plain text already (mdblocks strips its
-        # tags); as markup it shows the author's ampersands and angle
-        # brackets as written.
-        self.set_use_markup(True)
-        self.set_label(block.summary or GLib.markup_escape_text(_("Details")))
+        # tags and caps it); as markup it shows the author's ampersands
+        # and angle brackets as written.
+        summary = Gtk.Label(xalign=0.0, wrap=True, hexpand=True)
+        summary.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        summary.add_css_class("pr-md-details-summary")
+        summary.set_markup(block.summary or GLib.markup_escape_text(_("Details")))
+        self.set_label_widget(summary)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, hexpand=True)
         body.add_css_class("pr-md-details-body")
         self.set_child(body)
         self.connect("notify::expanded", self._on_expanded)
         if block.open:
+            self._build(budget)
             self.set_expanded(True)
+
+    @property
+    def summary_label(self) -> Gtk.Label:
+        """The label wearing the summary (its text is the markup shown)."""
+        return self.get_label_widget()
 
     def _on_expanded(self, *_args) -> None:
         if self._built or not self.get_expanded():
             return
+        self._build(Budget())
+
+    def _build(self, budget: Budget) -> None:
         self._built = True
         body = self.get_child()
         for widget in build(
             list(self._children),
-            Budget(),
+            budget,
             self._image_row,
             self._depth + 1,
             self._page_url,

@@ -227,14 +227,20 @@ reference links (a PR whose summary has no repository yet). With a head,
 `./b.md`; no scheme, leading slash, fragment, query or `..` step) into
 `/blob/<head>/<path>` before the gate — never a linkify token, which is a
 domain not a path. A `Details` is `mdwidgets.DetailsExpander`, a
-`Gtk.Expander` wearing the summary (`_("Details")` when there is none;
-the summary is escaped text with the author's entities read back, so it
-is set with `use_markup`), collapsed unless the tag said `open`, whose
-children are built on the first `notify::expanded` with a fresh
-`Budget` of their own and whatever `image_row` / `page_url` / `scheme`
-the page handed it — `restyle_code` refreshes an unopened expander's
-`scheme` attribute so a fence built later wears the current one; a
-`<details open>` builds at construction. An alert `Quote` is the quote
+`Gtk.Expander` whose label widget is its own wrapping label
+(`summary_label`, `.pr-md-details-summary`; GTK's built-in expander
+label neither wraps nor ellipsizes, and a one-sentence summary set the
+page's minimum width) wearing the summary (`_("Details")` when there is
+none; `mdblocks.summary_text` strips tags, reads the author's entities
+back, folds whitespace and cuts at `SUMMARY_MAX` (300) before its one
+escape, so it is set with `use_markup`), collapsed unless the tag said
+`open`. A `<details open>` builds its children at construction against
+the body's own `Budget` — the attribute is the author's, so what it
+shows counts like any other block; only a reader's click builds on the
+first `notify::expanded` with a fresh `Budget`, with whatever
+`image_row` / `page_url` / `scheme` the page handed the expander —
+`restyle_code` refreshes an unopened expander's `scheme` attribute so a
+fence built later wears the current one. An alert `Quote` is the quote
 column wearing `.pr-md-alert` and `.pr-md-alert-<kind>` under a
 `.pr-md-alert-head` row of GitHub's Octicon for the kind
 (`alert-note/tip/important/caution-symbolic`, the warning one the

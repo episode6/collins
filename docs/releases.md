@@ -65,8 +65,10 @@ downloads of each version, see the
   link into the PR's own repository as they do on GitHub, and a relative
   link (`[guide](docs/guide.md)`) opens the file at the PR's head commit —
   never inside a code span or an author's own link. A `<details>` block
-  is an expander wearing its summary — collapsed unless the tag says
-  `open`, its contents built the first time it opens; an unclosed one
+  is an expander wearing its summary (wrapped, cut past 300 characters)
+  — collapsed unless the tag says `open`, its contents built the first
+  time it opens, and counted against the body's widget budget when the
+  tag opened it; an unclosed one
   stays text rather than swallowing the body — and GitHub's alerts
   (`> [!NOTE]` and kin) are quotes under GitHub's own icon and title for
   the kind, bar and title in its color; any other HTML shows escaped. The folded

@@ -181,8 +181,10 @@ Enter opens, Esc closes.
   link like `[guide](docs/guide.md)` opens the file at the PR's head
   commit; a reference inside a code span, or inside a link the author
   wrote, is left alone. A `<details>` block is an expander wearing its
-  `<summary>` — collapsed unless the tag says `open`, its contents built
-  the first time it is opened; one with no closing tag shows as text
+  `<summary>` (wrapped, and cut past 300 characters) — collapsed unless
+  the tag says `open`, its contents built the first time it is opened
+  and counted against the body's widget budget when the tag opened it;
+  one with no closing tag shows as text
   rather than swallowing the rest of the body. GitHub's alerts (`> [!NOTE]`,
   `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`) are quotes under
   GitHub's own icon and title for the kind, bar and title in the kind's

@@ -979,6 +979,28 @@ def test_details_summary_is_escaped_plain_text():
     assert markup_ok(details.summary)
 
 
+def test_details_summary_whitespace_collapses_and_entities_stay_one_line():
+    # A newline written as &#10; (or a tab, or a real line break inside the
+    # tag) is one space in the label: the summary is one line of text.
+    (details,) = parse_blocks(
+        "<details>\n<summary>one&#10;two&#9;three\n  four</summary>\n\nb\n\n</details>"
+    )
+    assert details.summary == "one two three four"
+
+
+def test_details_summary_is_capped():
+    huge = "x" * 50_000
+    (details,) = parse_blocks(f"<details>\n<summary>{huge}</summary>\n\nb\n\n</details>")
+    assert len(details.summary) == mdblocks.SUMMARY_MAX
+    assert details.summary.endswith("\u2026")
+    # The cut lands before the escape, so a cut entity cannot leak.
+    words = "&amp; " * 200
+    (details,) = parse_blocks(f"<details>\n<summary>{words}</summary>\n\nb\n\n</details>")
+    assert markup_ok(details.summary)
+    assert len(details.summary.replace("&amp;", "&")) <= mdblocks.SUMMARY_MAX
+    assert mdblocks.summary_text(" a  b ") == "a b"
+
+
 def test_details_raw_lines_after_the_summary_are_one_literal_child():
     (details,) = parse_blocks(
         "<details>\n<summary>S</summary>\n**raw** <b>line</b>\nsecond raw\n\n*md*\n\n</details>"

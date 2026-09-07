@@ -364,7 +364,13 @@ def step_expanded() -> bool:
     check("…its source gone from the labels", not any(t.startswith("<details>") for t in all_texts))
     if expanders:
         expander = expanders[0]
-        check("…wearing the summary", expander.get_label() == "More", expander.get_label())
+        summary = expander.summary_label
+        check("…wearing the summary", summary.get_label() == "More", summary.get_label())
+        check(
+            "…as a wrapping label, not the expander's own",
+            expander.get_label_widget() is summary and summary.get_wrap()
+            and "pr-md-details-summary" in summary.get_css_classes(),
+        )
         check("…collapsed by default", not expander.get_expanded())
         check("…its children not built until opened", "hidden text" not in all_texts, all_texts)
         expander.set_expanded(True)
@@ -627,8 +633,8 @@ def step_details() -> bool:
     check("<details open> starts expanded", opened.get_expanded())
     check(
         "…its summary's entity read back",
-        opened.get_label() == "Open &amp; shown" and "Open & shown" in texts(card),
-        opened.get_label(),
+        opened.summary_label.get_label() == "Open &amp; shown" and "Open & shown" in texts(card),
+        opened.summary_label.get_label(),
     )
     check("…its children built at once", "shown at once" in texts(opened), texts(opened))
     check("the closed one is collapsed", not closed.get_expanded())
@@ -656,6 +662,39 @@ def step_details() -> bool:
         all_texts,
     )
     check("…and does not eat the body after it", "after the unmatched" in all_texts, all_texts[-1])
+    # The author's `open` spends the body's own budget: a body of open
+    # details hiding thousands of paragraphs builds the budget's worth of
+    # labels, not all of them. (The build layer alone: the page's render
+    # cap would gate a body this long behind "Show more".)
+    paragraphs = "\n\n".join("w" for _ in range(300))
+    body = "\n\n".join(
+        f"<details open>\n<summary>s{i}</summary>\n\n{paragraphs}\n\n</details>" for i in range(20)
+    )
+    column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    for widget in mdwidgets.build(mdblocks.parse_blocks(body), mdwidgets.Budget(), lambda _i: Gtk.Box()):
+        column.append(widget)
+    built = [w for w in walk(column) if has_class(w, "pr-md-text")]
+    check(
+        "<details open> spends the body's widget budget",
+        len(built) <= mdwidgets.WIDGET_BUDGET,
+        len(built),
+    )
+    # A summary as long as the parser allows stays a wrapping label whose
+    # minimum width is a word's, so it never sets the page's.
+    column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+    long_summary = "<details>\n<summary>" + "x" * 5000 + "</summary>\n\nb\n\n</details>"
+    blocks = mdblocks.parse_blocks(long_summary)
+    for widget in mdwidgets.build(blocks, mdwidgets.Budget(), lambda _i: Gtk.Box()):
+        column.append(widget)
+    holder = Gtk.Window(child=column)
+    expander = column.get_first_child()
+    minimum, natural, *_ = expander.measure(Gtk.Orientation.HORIZONTAL, -1)
+    check(
+        "a long summary is cut and wraps, never widening the page",
+        len(expander.summary_label.get_text()) == mdblocks.SUMMARY_MAX and minimum < 80,
+        (len(expander.summary_label.get_text()), minimum, natural),
+    )
+    holder.destroy()
     alerts = [w for w in walk(card) if has_class(w, "pr-md-alert")]
     check("one alert column per kind", len(alerts) == len(ALERT_KINDS), len(alerts))
     kinds = [next((k for k in ALERT_KINDS if has_class(a, f"pr-md-alert-{k}")), None) for a in alerts]
