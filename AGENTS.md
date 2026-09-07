@@ -177,7 +177,7 @@ Diagnostics: `COLLINS_LOG=INFO`, `COLLINS_SHIM_LOG=<file>`,
 python3 -m pytest tests/ -q                 # unit suite (GTK-free, ~seconds)
 ruff check collins/ tests/                  # CI pins ruff 0.16.4; rules E F W I UP B
 bash .agents/capture-screenshots/scripts/with-headless-display.sh \
-    python3 scripts/run_e2e.py [--only NAME] # e2e checks behind a headless compositor
+    python3 scripts/run_e2e.py [--only NAME] [--shard N/4] # e2e checks behind a headless compositor
 python3 scripts/verify_versions.py          # every version copy agrees
 ./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug)
 ```
@@ -191,12 +191,14 @@ directories). Scripts run from outside the repo import the system-installed
 `collins` — set `PYTHONPATH=<worktree>` or `sys.path.insert(0, repo_root)`.
 
 CI (`.github/workflows/ci.yml`) runs lint, the unit suite, the e2e suite under
-Xvfb, wheel + `.deb` packaging with `scripts/verify_wheel_data.py`, PPA source
-builds for noble and resolute, an RPM build + `dnf install`, version
-verification, and a VitePress build of the docs site (`docs`; a `<word>`
-outside a one-line code span breaks it). The e2e job appears late in `gh pr checks`
-output — a run is green only when `e2e` is listed and passed. When you change a
-signal signature or a method the e2e scripts poke, grep `scripts/check_*.py`.
+Xvfb as four time-balanced shards (`e2e-shard (N)`, fanned into the required
+`e2e` check; weights live in `scripts/run_e2e.py`), wheel + `.deb` packaging
+with `scripts/verify_wheel_data.py`, PPA source builds for noble and resolute,
+an RPM build + `dnf install`, version verification, and a VitePress build of
+the docs site (`docs`; a `<word>` outside a one-line code span breaks it). The
+e2e jobs appear late in `gh pr checks` output — a run is green only when
+`e2e` is listed and passed. When you change a signal signature or a method
+the e2e scripts poke, grep `scripts/check_*.py`.
 
 Docs: the README's feature list and `docs/guide/*.md` (VitePress; built by
 `docs.yml`) describe every user-visible feature, and `docs/releases.md` has an
@@ -232,4 +234,5 @@ spec's `%changelog`.
 
 Also in `.agents/`: `capture-screenshots` (headless captures of a throwaway
 instance), `gpl-modified-file-notices` (mandatory before committing),
+`balance-e2e-shards` (refresh the e2e timing table, change the shard count),
 `release-branch-skill`, `ship-release-skill`.

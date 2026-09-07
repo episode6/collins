@@ -50,6 +50,9 @@ headless compositor so nothing appears on screen:
 ```bash
 bash .agents/capture-screenshots/scripts/with-headless-display.sh \
     python3 scripts/run_e2e.py --only new_chat --timeout 120
+bash .agents/capture-screenshots/scripts/with-headless-display.sh \
+    python3 scripts/run_e2e.py --shard 2/4          # what CI's second leg runs
+python3 scripts/run_e2e.py --list --shard 2/4       # …and its estimate; no display needed
 ```
 
 Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
@@ -164,14 +167,22 @@ a tab running a real CLI, kill the foreground process group
 VitePress build of `docs/`, so a page that Vue can't compile — a `<word>`
 outside a one-line code span — fails the PR rather than the deploy after
 the merge) on the bare runner;
-`test`, `e2e` (`xvfb-run … scripts/run_e2e.py --timeout 120`, 60-minute job
-cap), `packaging` and `ppa-source (resolute)` inside the resolute CI image;
-`ppa-source (noble)` in the noble packaging image; `rpm` in the Fedora image.
-The e2e job `needs: image`
-and shows up **after** the first `gh pr checks --watch` may have exited green
-— keep watching until an `e2e` row is listed and finished. A check that hangs
-is one that needs more than 120 s; the whole suite passes in under two
-minutes. Reproduce the e2e job on any machine with Docker:
+`test`, `e2e-shard (1)` … `(4)` (`xvfb-run … scripts/run_e2e.py --timeout
+120 --shard N/4`, 60-minute job cap each), `packaging` and `ppa-source
+(resolute)` inside the resolute CI image; `ppa-source (noble)` in the noble
+packaging image; `rpm` in the Fedora image. The e2e suite runs as four
+parallel shards dealt out by measured time (the `CHECK_SECONDS` table in
+`scripts/run_e2e.py`; a check the table lacks is dealt in at a default
+weight, so a new check needs no registration, and a stale name fails
+`tests/test_run_e2e.py`). A bare `e2e` job fans the shards back in — it is
+the name the main-branch ruleset requires, so it must stay. The shard jobs
+`needs: image` and show up **after** the first `gh pr checks --watch` may
+have exited green — keep watching until the `e2e` row is listed and
+finished. A check that hangs is one that needs more than 120 s; a shard
+passes in about a minute. When a leg drifts or a check changes, the
+`balance-e2e-shards` skill refreshes the weights from a run's logs and
+previews the deal. Reproduce a shard (or, without
+`--shard`, the whole suite) on any machine with Docker:
 
 ```bash
 docker run --rm -it --init -v "$PWD:/src" -w /src ghcr.io/episode6/collins-ci:<tag> \
