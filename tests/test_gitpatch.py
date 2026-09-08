@@ -711,6 +711,28 @@ def test_plan_hunk_refuses_binaries_oversized_files_and_a_binary_patch():
     assert "binary" in reason(gitpatch.plan_hunk(image, 0, UNSTAGED, BINARY_PATCH))
 
 
+def test_an_unmerged_file_takes_no_partial_patch_and_no_discard_but_stages_whole():
+    """A conflict File (gitops's `diff --ours` read): the index holds
+    three stages, so a hunk or a selection is refused before any patch is
+    read — and the request says it needs none — a discard is sent to a
+    shell, and Stage file is the plain `add` that marks it resolved."""
+    clash = replace(STAGING, conflict=True)
+    for planned in (
+        gitpatch.plan_hunk(clash, 0, UNSTAGED, None),
+        gitpatch.plan_hunk(clash, 0, STAGED, None),
+        gitpatch.plan_lines(clash, 0, 0, 1, UNSTAGED, None),
+        gitpatch.plan_hunk(clash, 0, UNSTAGED, None, discard=True),
+        gitpatch.plan_lines(clash, 0, 0, 1, UNSTAGED, None, discard=True),
+        gitpatch.plan_file(clash, UNSTAGED, discard=True),
+    ):
+        assert isinstance(planned, Refusal) and "unmerged" in reason(planned), planned
+    assert "Stage file" in reason(gitpatch.plan_hunk(clash, 0, UNSTAGED, None))
+    assert "checkout --ours" in reason(gitpatch.plan_file(clash, UNSTAGED, discard=True))
+    assert gitpatch.plan_file(clash, UNSTAGED) == Plan(OP_ADD, ("f.txt",), None, None, "Staged f.txt")
+    assert not gitpatch.MutationRequest(clash, UNSTAGED, gitpatch.HUNK, hunk_index=0).needs_patch
+    assert gitpatch.MutationRequest(STAGING, UNSTAGED, gitpatch.HUNK, hunk_index=0).needs_patch
+
+
 def test_plan_hunk_renames_and_untracked_files_fall_through_to_the_whole_file():
     untracked = as_untracked(replace(parse_one(
         "diff --git a/n.txt b/n.txt\nnew file mode 100644\n--- /dev/null\n+++ b/n.txt\n@@ -0,0 +1 @@\n+hi\n"

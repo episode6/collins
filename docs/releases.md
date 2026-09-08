@@ -68,6 +68,17 @@ downloads of each version, see the
   follows the repository — an operation started in the terminal shows
   within a tick, a resolution re-words the hint — and a refused continue
   toasts git's own words.
+- **Conflicts have a section of their own, and a diff.** A stopped
+  rebase, merge, cherry-pick or revert's unmerged files were missing from
+  the files list until a staged file was clicked, and a click on one then
+  showed nothing: git writes them as a combined diff the page left out.
+  They are now listed under **Conflicts**, above *Unstaged*, the moment
+  the operation stops, and on the unstaged load each shows as the
+  working tree against our side — the conflict markers painted in
+  orange, the header badged *conflict*. The hunk buttons stay away (a
+  partial patch cannot apply to an unmerged path) and the file header
+  offers *Stage file* alone, which marks the file resolved once the
+  markers are gone.
 - **Screenshots in a PR body's table show as pictures.** A table cell
   that is nothing but images — the before/after pair most PR descriptions
   carry, one `<img>` per column — rendered as an alt-text link, since the

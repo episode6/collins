@@ -169,6 +169,11 @@ MAX_BLOB_BYTES = 64 * 1024 * 1024
 _WITH_CONFLICTS = "with conflicts"
 _DEV_NULL = "/dev/null"
 _STATUS_UNTRACKED = "?"
+_STATUS_UNMERGED = "U"
+# The unmerged paths of a half-finished operation read as `diff --ours`
+# in one call, at most this many: each is a whole stanza, and a stopped
+# rebase rarely clashes on more than a handful.
+MAX_CONFLICT_DIFFS = 200
 
 
 @dataclass(frozen=True)
@@ -517,6 +522,17 @@ def untracked_diff_argv(path: str) -> list[str]:
     when it is one. Exits 1 (the two differ), which run_git_bytes is told
     is fine."""
     return [*DIFF_PREFIX_ARGS, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", _DEV_NULL, path]
+
+
+def conflict_diff_argv(paths: Sequence[str]) -> list[str]:
+    """[*DIFF_PREFIX_ARGS, "diff", *DIFF_ARGS, "--ours", "--", *literal
+    paths]: the unmerged *paths* of a half-finished operation as plain
+    two-sided patches — the working tree, conflict markers and all,
+    against our side (stage 2: HEAD, the branch being rebased onto or
+    merged into). A bare `git diff` writes those paths as `diff --cc`
+    stanzas, which diffmodel.parse leaves out, and `--staged` lists them
+    as `* Unmerged path` lines with no patch at all."""
+    return [*DIFF_PREFIX_ARGS, "diff", *DIFF_ARGS, "--ours", "--", *_pathspecs(paths)]
 
 
 def file_patch_argv(
@@ -1027,7 +1043,9 @@ def _load_refusal(load: object, parent_target: str | None, pathspecs: Sequence[s
     return None
 
 
-def _placeholder(path: str, additions: int, deletions: int, untracked: bool = False) -> File:
+def _placeholder(
+    path: str, additions: int, deletions: int, untracked: bool = False, conflict: bool = False
+) -> File:
     """A KIND_TOO_LARGE File for a file the read skipped: no hunks, no
     patch, the numstat's counts (0/0 when it was skipped on size alone)."""
     return File(
@@ -1043,7 +1061,41 @@ def _placeholder(path: str, additions: int, deletions: int, untracked: bool = Fa
         deletions=deletions,
         patch="",
         patch_hash=hashlib.sha1(b"").hexdigest(),
+        conflict=conflict,
     )
+
+
+def _conflict_files(
+    root: str, status: Status, pathspecs: Sequence[str], run, timeout: float
+) -> list[File]:
+    """The unmerged paths the status lists (`U` rows, the first
+    MAX_CONFLICT_DIFFS of them, in status order) read as one `diff --ours`
+    (conflict_diff_argv) and parsed with the conflict flag on; nothing
+    when there are none, or when git wouldn't answer. A path over
+    TOO_LARGE_BYTES on disk stands in as a placeholder without a read."""
+    paths: list[str] = []
+    files: list[File] = []
+    seen: set[str] = set()
+    for row in status.unstaged:
+        if row.code != _STATUS_UNMERGED or row.path in seen or not safe_path(row.path):
+            continue
+        if not _under(row.path, pathspecs):
+            continue
+        seen.add(row.path)
+        if len(seen) > MAX_CONFLICT_DIFFS:
+            break
+        size = _file_size(os.path.join(root, row.path))
+        if size is not None and size > diffmodel.TOO_LARGE_BYTES:
+            files.append(_placeholder(row.path, 0, 0, conflict=True))
+            continue
+        paths.append(row.path)
+    if not paths:
+        return files
+    result = run_git_bytes(root, conflict_diff_argv(paths), run=run, timeout=timeout)
+    if not result.ok:
+        return files
+    files.extend(diffmodel.parse(result.stdout, conflict=True))
+    return files
 
 
 def _under(path: str, pathspecs: Sequence[str]) -> bool:
@@ -1118,7 +1170,10 @@ def read_diff(
        placeholder comes out the same — only the read is not saved.
     2. diff_argv (or show_argv) — the patch stream, diffmodel.parse'd.
     3. For a working-tree side, status_argv — the status the sidebar's
-       letters come from, returned as DiffRead.status; and for the
+       letters come from, returned as DiffRead.status; for the unstaged
+       side the unmerged paths of a half-finished operation as one
+       `diff --ours` (_conflict_files, conflict_diff_argv, capped at
+       MAX_CONFLICT_DIFFS, each File flagged `conflict`); and for the
        unstaged side with *untracked* on, the untracked files' synthesized
        patches (_untracked_files, capped at MAX_UNTRACKED_DIFFS).
 
@@ -1152,6 +1207,10 @@ def read_diff(
     status: Status | None = None
     if load in ("unstaged", "staged"):
         status = read_status(root, run=run, timeout=timeout)
+        if load == "unstaged" and status is not None:
+            # The unmerged paths of a half-finished operation: the bare
+            # diff wrote them as `diff --cc`, which the parser left out.
+            files.extend(_conflict_files(root, status, pathspecs, run, timeout))
         if load == "unstaged" and untracked and status is not None:
             files.extend(_untracked_files(root, status, pathspecs, run, timeout))
     files.sort(key=lambda file: file.path)

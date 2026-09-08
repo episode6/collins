@@ -342,6 +342,56 @@ def test_parse_marks_untracked_files_when_asked():
     assert not parse(UNTRACKED)[0].untracked
 
 
+CONFLICT = (
+    "* Unmerged path f.txt\n"
+    "diff --git a/f.txt b/f.txt\n"
+    "index af70335..14b52fc 100644\n"
+    "--- a/f.txt\n"
+    "+++ b/f.txt\n"
+    "@@ -1,3 +1,7 @@\n"
+    " a\n"
+    "+<<<<<<< HEAD\n"
+    " MAIN\n"
+    "+=======\n"
+    "+SIDE\n"
+    "+>>>>>>> 40991be (side)\n"
+    " c\n"
+)
+
+
+def test_parse_marks_conflict_files_when_asked_and_reads_past_the_unmerged_note():
+    """`git diff --ours` of an unmerged path: a plain stanza after a `*
+    Unmerged path` line (ignored, like anything before `diff --git`),
+    flagged conflict when gitops says so."""
+    file = parse(CONFLICT, conflict=True)[0]
+    assert file.conflict and file.path == "f.txt" and file.kind == diffmodel.KIND_CHANGE
+    assert (file.additions, file.deletions) == (4, 0)
+    assert not parse(CONFLICT)[0].conflict
+
+
+def test_is_conflict_marker_names_gits_four_markers_alone_or_labelled():
+    assert diffmodel.is_conflict_marker("<<<<<<< HEAD")
+    assert diffmodel.is_conflict_marker("=======")
+    assert diffmodel.is_conflict_marker(">>>>>>> 40991be (side)")
+    assert diffmodel.is_conflict_marker("||||||| parent of 1234567")
+    assert diffmodel.is_conflict_marker("<<<<<<<")
+    assert not diffmodel.is_conflict_marker("<<<<<<")  # six
+    assert not diffmodel.is_conflict_marker("========")  # eight, a heading rule
+    assert not diffmodel.is_conflict_marker(" =======")
+    assert not diffmodel.is_conflict_marker("<<<<<<<HEAD")
+    assert not diffmodel.is_conflict_marker(None)
+
+
+def test_palette_carries_a_conflict_tone_blended_into_the_background():
+    light = diffmodel.palette("#ffffff", "#26a269", "#c01c28")
+    assert light.conflict_fg == diffmodel.CONFLICT_TONE
+    assert light.conflict_bg == diffmodel._hex(
+        diffmodel.blend((255, 255, 255), (229, 165, 10), diffmodel.CONFLICT_BLEND)
+    )
+    dark = diffmodel.palette("#1e1e1e", "#33b2a4", "#f66151", dark=True)
+    assert dark.conflict_bg != light.conflict_bg
+
+
 def test_parse_unquotes_c_quoted_paths():
     file = only(QUOTED)
     assert file.path == "café x.txt"

@@ -602,7 +602,18 @@ class _Wording:
 
     def whole(self, path: str, why: str) -> str:
         """Why *path* can only be taken whole: *why* is binary, too-large,
-        untracked, rename, new or deleted."""
+        untracked, rename, new, deleted or conflict (an unmerged path: the
+        index holds three stages, no partial patch applies — resolve it in
+        the editor, then Stage file marks it resolved; a discard needs
+        `git checkout --ours` / `--theirs` from a shell)."""
+        if why == "conflict":
+            if self.action == _DISCARD:
+                return _("{path} is unmerged: use git checkout --ours or --theirs from a shell").format(
+                    path=path
+                )
+            return _("{path} is unmerged: resolve the conflict, then use {button}").format(
+                path=path, button=self.button
+            )
         if self.action == _DISCARD:
             if why == "binary":
                 return _("{path} is binary: use git from a shell").format(path=path)
@@ -656,6 +667,8 @@ def _guard_partial(
     *deleted_whole*, a patch that deletes the file comes back as the string
     _DELETED_WHOLE instead of a refusal, before the hunk comparisons: the
     caller takes the file whole."""
+    if file.conflict:
+        return Refusal(wording.whole(file.path, "conflict"))
     if file.kind == diffmodel.KIND_BINARY:
         return Refusal(wording.whole(file.path, "binary"))
     if file.kind == diffmodel.KIND_TOO_LARGE:
@@ -767,6 +780,8 @@ def plan_file(file: File, load: object, discard: bool = False) -> Plan | Refusal
     if discard:
         if side == STAGED:
             return Refusal(_("Discard works on the working tree: load the Unstaged view"))
+        if file.conflict:
+            return Refusal(_Wording(_DISCARD).whole(file.path, "conflict"))
         if file.untracked:
             return Plan(
                 OP_TRASH, (file.path,), None,
@@ -820,6 +835,8 @@ def plan_hunk(
         return _plan_discard(file, hunk_index, None, load, fresh_patch)
     stage = side == UNSTAGED
     wording = _Wording(_STAGE if stage else _UNSTAGE)
+    if file.conflict:
+        return Refusal(wording.whole(file.path, "conflict"))
     if file.kind == diffmodel.KIND_BINARY:
         return Refusal(wording.whole(file.path, "binary"))
     if file.kind == diffmodel.KIND_TOO_LARGE:
@@ -938,6 +955,8 @@ def _plan_discard(
     if working_side(load) == STAGED:
         return Refusal(_("Discard works on the working tree: load the Unstaged view"))
     wording = _Wording(_DISCARD)
+    if file.conflict:
+        return Refusal(wording.whole(file.path, "conflict"))
     restore = Plan(
         OP_CHECKOUT, (file.path,), None,
         _("Restore {path} from the index?").format(path=file.path),
@@ -1096,8 +1115,10 @@ class MutationRequest:
     def needs_patch(self) -> bool:
         """Whether `plan` wants the file's patch re-read: a file-grain plan
         takes none (plan_file works off the view's File), the others
-        compare the view against the disk before trusting a line."""
-        return self.grain != FILE
+        compare the view against the disk before trusting a line — except
+        on an unmerged file, which every partial planner refuses before
+        looking (and whose bare `git diff` is a `diff --cc` anyway)."""
+        return self.grain != FILE and not self.file.conflict
 
     def plan(self, fresh_patch: object) -> Plan | Refusal:
         """The Plan (or Refusal) for this request, given the patch re-read

@@ -440,12 +440,43 @@ def test_files_sections_with_untracked_files_off_the_staged_views_unstaged_side_
         staged=STATUS.staged,
     )
     sections = files_sections(with_new, FILES[:1], "staged", untracked=False)
-    assert [row.path for row in sections.unstaged] == ["a.txt", "u.txt"]
+    assert [row.path for row in sections.unstaged] == ["a.txt"]
+    assert [row.path for row in sections.conflicts] == ["u.txt"]
     shown = files_sections(with_new, FILES[:1], "staged", untracked=True)
-    assert [row.code for row in shown.unstaged] == ["M", "?", "U"]
+    assert [row.code for row in shown.unstaged] == ["M", "?"]
     # The live side is the diff's own list, read without untracked files already.
     live = files_sections(with_new, FILES[:2], "unstaged", untracked=False)
     assert [row.path for row in live.unstaged] == ["a.txt", "n.txt"]
+
+
+def test_files_sections_lists_the_unmerged_paths_in_a_section_of_their_own():
+    """A half-finished operation's `U` rows leave the unstaged side for
+    the conflicts section: on the unstaged load the diff's own row (the
+    read carried it as `diff --ours`, counts and all), or a status row
+    for one the read did not carry — so the clash is listed the moment
+    the operation stops, whatever the diff read managed; on the staged
+    load status rows, a click reloading the unstaged side."""
+    clashing = Status(
+        unstaged=(StatusRow("a.txt", "M"), StatusRow("u.txt", "U"), StatusRow("v.txt", "U")),
+        staged=(StatusRow("s.txt", "A"),),
+    )
+    read = [*FILES[:1], session_file("f9", "u.txt", 4, 0)]
+    live = files_sections(clashing, read, "unstaged")
+    assert [(row.path, row.code, row.live, row.additions) for row in live.conflicts] == [
+        ("u.txt", "U", True, 4),
+        ("v.txt", "U", False, None),
+    ]
+    assert [row.path for row in live.unstaged] == ["a.txt"]
+    assert [row.path for row in live.staged] == ["s.txt"]
+    other = files_sections(clashing, FILES[:1], "staged")
+    assert other.conflicts == (
+        FileRow("u.txt", "U", None, None, None, False),
+        FileRow("v.txt", "U", None, None, None, False),
+    )
+    assert [row.path for row in other.unstaged] == ["a.txt"]
+    # No clash, no section; a flat load never has one.
+    assert files_sections(STATUS, FILES, "unstaged").conflicts == ()
+    assert files_sections(clashing, read, {"show": "HEAD"}).conflicts == ()
 
 
 def test_files_sections_everything_else_is_flat_and_so_is_a_working_tree_with_no_status():

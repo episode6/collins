@@ -532,6 +532,15 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   operation started from the terminal shows within a tick, a resolved
   conflict re-words the hint, and a `--quit` from a shell takes it down.
   A refused continue (files still unmerged) toasts git's own words.
+- **Conflicts get their own section.** While an operation is stopped,
+  its unmerged files sit under **Conflicts** in the files list, above
+  *Unstaged*, from the moment it stops. On the unstaged load each shows
+  as the working tree against our side (`git diff --ours`): the
+  `<<<<<<<` / `=======` / `>>>>>>>` rows painted orange, the header
+  badged *conflict*. There are no hunk buttons on one — a partial patch
+  cannot apply to an unmerged path — and the file header offers *Stage
+  file* alone, which marks the file resolved; a discard is a `git
+  checkout --ours` / `--theirs` from a shell.
 - **Staging, in the diff itself.** The buttons sit on the headers
   (SourceTree's placement, Sublime Merge's words), always there and
   lifted while the pointer is over the file or hunk:
