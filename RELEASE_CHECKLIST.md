@@ -60,8 +60,8 @@ into one source is a future project; until then, every step below that says
 
 Mismatched versions are caught by CI (`scripts/verify_versions.py`), but
 nothing checks that the notes themselves are complete — before finalizing,
-list the PRs merged since the last release (`gh pr list --state merged
---search "merged:>YYYY-MM-DD"`) and check each one is reflected in all four.
+check each PR on the merged-since-last-release list (made once, in "Docs
+and translations first" below) is reflected in all four.
 
 ## Docs and translations first
 
@@ -78,6 +78,10 @@ them large and leaves the release branch needing cherry-picks:
    skill), then `python3 po/generate.py`.
 4. If anything was stale, land it as **its own PR against `main`** and wait
    for it to merge. Cut the branch only after that — never in parallel.
+   The files this PR touches (`README.md`, `docs/guide/*.md`,
+   `docs/releases.md`, `po/generate.py`) are pre-fork and carry GPL
+   modification notices — bump their dates (the
+   `gpl-modified-file-notices` skill).
 
 ## Cut new Release Branch
 
@@ -107,7 +111,11 @@ Create 2 PRs (as drafts, per repo convention):
     - `docs/releases.md`: add a new `### v<NEXT_VERSION> — UNRELEASED` section
       atop the changelog.
     - Finalize the outgoing `v<VERSION>` in **all four changelogs** (see
-      Changelogs above): the `docs/releases.md` section gets its ship date
+      Changelogs above), reusing the merged-PR list from "Docs and
+      translations first" rather than auditing again — the
+      `docs/releases.md` notes should already be complete from that step,
+      so this is dates and the other three records: the `docs/releases.md`
+      section gets its ship date
       (`### v<VERSION> — YYYY-MM-DD`) and complete notes; the `debian/changelog`
       `<VERSION>` entry gets a bullet per headline change, not just the
       packaging ones; the metainfo gets a `<release version="<VERSION>"

@@ -56,7 +56,10 @@ must start from a `main` that is already fresh.
   refresh for v<VERSION>`), watch its CI to green, and **wait for it to
   merge**. Only then continue to step 1. Do not start the branch or the
   version-bump PRs while it is open — they must be based on the merged
-  result.
+  result. The files it touches (`README.md`, `docs/guide/*.md`,
+  `docs/releases.md`, `po/generate.py`, the pot) are pre-fork and carry GPL
+  modification notices — load `gpl-modified-file-notices` and bump their
+  dates in the same commit.
 - If everything is already current, say so and move on.
 
 ### 1. Pre-check
