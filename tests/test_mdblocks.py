@@ -633,6 +633,9 @@ def test_table_costs_count_image_cells():
     (table,) = parse_blocks(f"| a | b |\n|---|---|\n| {cell} | {cell} |\n| x | y |\n| x | y |")
     assert mdblocks.line_cost(table) == 3 + 4
     assert mdblocks.line_cost(table, image_lines=2) == 3 + 2
+    # A header row of pictures costs what an image row does, not one line.
+    (headed,) = parse_blocks(f"| {cell} | {cell} |\n|---|---|\n| x | y |")
+    assert mdblocks.line_cost(headed) == 1 + 4
     cut = mdblocks.cut_block(table, None, 1 + 1)
     assert cut is not None and cut.rows == table.rows[:1]
     shown, more_rows, more_columns = mdblocks.cap_table(table)

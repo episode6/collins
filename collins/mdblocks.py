@@ -326,8 +326,11 @@ def line_cost(block: Block, image_lines: int = 4) -> int:
     if isinstance(block, CodeBlock):
         return min(block.text.count("\n") + 1, 8)
     if isinstance(block, Table):
-        pictured = sum(1 for row in block.rows if any(isinstance(c, ImageCell) for c in row))
-        return min(len(block.rows) - pictured + 1, 6) + pictured * image_lines
+        # The header row counts like any other: a row of pictures costs
+        # what an image row does, a row of words one line.
+        rows = (block.header, *block.rows)
+        pictured = sum(1 for row in rows if any(isinstance(c, ImageCell) for c in row))
+        return min(len(rows) - pictured, 6) + pictured * image_lines
     if isinstance(block, Quote):
         return sum(line_cost(child, image_lines) for child in block.children) or 1
     if isinstance(block, ListBlock):
