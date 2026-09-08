@@ -60,15 +60,36 @@ into one source is a future project; until then, every step below that says
 
 Mismatched versions are caught by CI (`scripts/verify_versions.py`), but
 nothing checks that the notes themselves are complete — before finalizing,
-list the PRs merged since the last release (`gh pr list --state merged
---search "merged:>YYYY-MM-DD"`) and check each one is reflected in all four.
+check each PR on the merged-since-last-release list (made once, in "Docs
+and translations first" below) is reflected in all four.
+
+## Docs and translations first
+
+Before cutting anything, make sure `main` is already fresh — every cut so
+far has found drift here, and catching up inside the version-bump PRs makes
+them large and leaves the release branch needing cherry-picks:
+
+1. List the PRs merged since the last release (`gh pr list --state merged
+   --search "merged:>YYYY-MM-DD"`).
+2. Check each is reflected in the README feature list, `docs/guide/*.md`,
+   and the UNRELEASED section of `docs/releases.md`.
+3. Regenerate `po/collins.pot` and bring every language in `po/generate.py`
+   to full coverage (recipe in the `collins-preferences-keybindings-i18n`
+   skill), then `python3 po/generate.py`.
+4. If anything was stale, land it as **its own PR against `main`** and wait
+   for it to merge. Cut the branch only after that — never in parallel.
+   The files this PR touches (`README.md`, `docs/guide/*.md`,
+   `docs/releases.md`, `po/generate.py`) are pre-fork and carry GPL
+   modification notices — bump their dates (the
+   `gpl-modified-file-notices` skill).
 
 ## Cut new Release Branch
 
-1. Ensure the `main` branch is green (every CI job, e2e included).
-2. `<VERSION>` = the current `version` in `pyproject.toml` on `main`.
-3. `git checkout -b release/v<VERSION>`
-4. Push/track the empty branch: `git push -u origin release/v<VERSION>`
+1. The docs/translations refresh above has merged (or nothing needed it).
+2. Ensure the `main` branch is green (every CI job, e2e included).
+3. `<VERSION>` = the current `version` in `pyproject.toml` on `main`.
+4. `git checkout -b release/v<VERSION>`
+5. Push/track the empty branch: `git push -u origin release/v<VERSION>`
 
 CI (e2e included) runs on pushes to `release/**`, so the branch stays
 verified while it hardens.
@@ -90,7 +111,11 @@ Create 2 PRs (as drafts, per repo convention):
     - `docs/releases.md`: add a new `### v<NEXT_VERSION> — UNRELEASED` section
       atop the changelog.
     - Finalize the outgoing `v<VERSION>` in **all four changelogs** (see
-      Changelogs above): the `docs/releases.md` section gets its ship date
+      Changelogs above), reusing the merged-PR list from "Docs and
+      translations first" rather than auditing again — the
+      `docs/releases.md` notes should already be complete from that step,
+      so this is dates and the other three records: the `docs/releases.md`
+      section gets its ship date
       (`### v<VERSION> — YYYY-MM-DD`) and complete notes; the `debian/changelog`
       `<VERSION>` entry gets a bullet per headline change, not just the
       packaging ones; the metainfo gets a `<release version="<VERSION>"

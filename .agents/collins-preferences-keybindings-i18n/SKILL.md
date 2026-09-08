@@ -120,10 +120,12 @@ labels in catalogues). Languages: en, hu, de, es, fr. Translations are
 emits only `msgid`/`msgstr` — **no plurals**, so `i18n.ngettext` always falls
 back to English; write count strings as one `_()` form ("… ({n} new)").
 Changing an existing msgid means changing that key in all four dicts.
-`po/collins.pot` is regenerated only at release cuts (`xgettext
+`po/collins.pot` is regenerated only ahead of a release cut (`xgettext
 --language=Python --from-code=UTF-8 -k_ -kN_ -kngettext:1,2` over
-`collins/**/*.py`) together with a full translation refresh; between cuts new
-strings falling back to English is expected and accepted. The desktop entry's
+`collins/**/*.py`) together with a full translation refresh, landed as its
+own PR on `main` before the branch is cut (the `release-branch-skill`'s step
+0); between cuts new strings falling back to English is expected and
+accepted. The desktop entry's
 `GenericName[xx]` / `Comment[xx]` / `Keywords[xx]` and the metainfo's
 `<summary xml:lang>` are translated by hand and invisible to xgettext. Agent-
 facing strings (MCP tool descriptions and errors, `show_diff` reply text) are
