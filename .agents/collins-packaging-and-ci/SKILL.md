@@ -100,7 +100,10 @@ on its own; bump the `refreshed:` date to pick up package updates. The
 package is public — no credentials to pull. The other workflows: `docs.yml`
 (VitePress → GitHub Pages), `claude.yml` / `claude-code-review.yml` (the
 review bot; it reads CI through `gh run` and needs `actions: read` in both
-`permissions:` and `additional_permissions:`), `release.yml` (on `v*` tags,
+`permissions:` and `additional_permissions:`; both pin the action to a commit
+rather than `@v1` since v1.0.218's Claude Code 2.1.265 installer leaves no
+launcher on ubuntu-latest, see anthropics/claude-code-action issue 1817 —
+move the pin forward once a later release works), `release.yml` (on `v*` tags,
 also `workflow_dispatch` with a `tag` input to re-drive a shipped tag from a
 branch carrying a fix — a tag's run is frozen on the workflow file as it was).
 
