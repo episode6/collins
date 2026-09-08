@@ -533,17 +533,30 @@ a card's heading and the editor's split can't disagree),
 `add_highlights(files, specs)` land a batch **whole or not at all**
 (`MAX_NOTES` / `MAX_HIGHLIGHTS` per page, `MAX_*_PER_BATCH`), `edit`,
 `remove`, `clear(path, notes, highlights, include_user)`, and the reload
-rule: **a mark survives by the stable key of the hunk it was placed in** —
-`prune(files)` drops a mark whose file the load shows without that hunk
-and parks one whose file the load doesn't show at all (Ctrl+2 and back
-keeps them); `placed_notes` / `placed_highlights(files)` is what the view
-draws. **The key holds the spans, so "untouched" means the line numbers
-too**: staging a range out of hunk 0 (or an edit above that adds or
-removes lines) shifts every later hunk's start, and each of them rebuilds
-— widget, selection and notes gone. The e2e's survivals put the change in
-the *last* hunk on purpose. A key without the spans (the body digest plus
-an ordinal among equal bodies) would keep them; it is a follow-up (the
-spec's "Later" list), not part of the five-PR stack.
+rule: **a mark survives by the stable key of the hunk it was placed in
+and its line's index into that hunk** (`line_index`) — `prune(files)`
+drops a mark whose file the load shows without that hunk, renumbers one
+whose hunk is there at other numbers (`mark.line` follows the line at its
+index), and parks one whose file the load doesn't show at all (Ctrl+2 and
+back keeps them); `placed_notes` / `placed_highlights(files)` is what the
+view draws. **The key holds no line numbers**: `diffmodel.stable_key(file,
+hunk)` is the file's path, a digest of the hunk's body (every line's kind
+and text, context lines included — the buffer *is* the body, so a changed
+context line is a changed hunk) and, among the file's hunks with that
+same body, its ordinal in patch order and their count (`0/1`, `1/3`;
+`stable_keys(file)` is the one-pass form the loops use). So staging a
+range out of hunk 0, or an edit above that adds or removes lines, moves
+every later hunk's numbers and none of their keys: `_FileSection.update`
+keeps the widget and calls `_HunkSection.rebase(file, hunk)`, which
+re-words the header and renumbers the gutters in place
+(`_HunkView.renumber`, the buffer and so the selection, cursor and tags
+untouched; a row mismatch draws afresh), and `gitpatch.rebind_selection`
+follows the hunk by the same key. The count in the key is deliberate:
+when one of two identical hunks changes or leaves, the bodies cannot say
+which survived, so both are matched afresh and their marks dropped rather
+than landed on the wrong twin. The e2e's mutation check stages hunk 0
+out from under a selection and a note in hunk 1 and reads the gutters
+back through `gutter_numbers(path, hunk)`.
 
 The widgets: `DiffView` owns one `MarkStore` (`_store`), `_apply_marks`
 hands each `_HunkSection` its share (`set_marks(notes, highlights)`:

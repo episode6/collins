@@ -10,9 +10,11 @@ view's own editor, AGENT for the ones the `annotate_diff` tool lands. A
 TONES. Both live in a `MarkStore` for the tab's life (decision 8:
 nothing is written to state.json), keyed to survive a reload: every mark
 remembers the stable key of the hunk it sits in (diffmodel.stable_key —
-the hunk's ranges and content), so a reload that leaves that hunk alone
-keeps the mark, one that changes or drops the hunk drops it, and a load
-that doesn't show the file at all parks it until one does.
+the hunk's body, never its line numbers) and its line's index into that
+hunk, so a reload that leaves the hunk's lines alone keeps the mark — with
+its line number moved when the lines above it shifted (`prune` renumbers
+it) — one that changes or drops the hunk drops it, and a load that doesn't
+show the file at all parks it until one does.
 
 Everything that arrives is foreign content — an agent's summary as much
 as a branch name: `bound_text` caps every string at NOTE_MAX_CHARS (a
@@ -61,7 +63,9 @@ MAX_HIGHLIGHTS_PER_BATCH = 500
 @dataclass(frozen=True)
 class Note:
     """One note: where it sits (*path*, *side*, 1-based *line*), what it
-    says, who said it, and the key of the hunk it was placed in."""
+    says, who said it, the key of the hunk it was placed in and the index
+    of its line in that hunk's lines — what it is found by again after a
+    reload that moved the hunk's numbers (*line* then follows)."""
 
     id: str
     source: str
@@ -72,6 +76,7 @@ class Note:
     rationale: str | None
     author: str | None
     hunk_key: str
+    line_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,7 @@ class Highlight:
     end: int
     tone: str
     hunk_key: str
+    line_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -297,6 +303,7 @@ class MarkStore:
                 rationale,
                 author,
                 anchor.key,
+                anchor.line_index,
             )
             self._notes[note.id] = note
             added.append(note)
@@ -335,7 +342,15 @@ class MarkStore:
         added: list[Highlight] = []
         for anchor, start, end, tone in resolved:
             mark = Highlight(
-                self._mint("h"), anchor.file.path, anchor.side, anchor.line, start, end, tone, anchor.key
+                self._mint("h"),
+                anchor.file.path,
+                anchor.side,
+                anchor.line,
+                start,
+                end,
+                tone,
+                anchor.key,
+                anchor.line_index,
             )
             self._highlights[mark.id] = mark
             added.append(mark)
@@ -393,20 +408,30 @@ class MarkStore:
 
     def prune(self, files: Sequence[diffmodel.File]) -> int:
         """A load landed: drop every mark whose file *files* shows without
-        the hunk it was placed in (the hunk changed, moved or went); a mark
-        on a file the load doesn't show stays parked. Returns how many
-        went."""
+        the hunk it was placed in (the hunk's lines changed or went), and
+        renumber one whose hunk is there with its lines but at other
+        numbers (a range staged out above it, an edit above); a mark on a
+        file the load doesn't show stays parked. Returns how many went or
+        moved."""
         shown = {file.path: file for file in files}
-        gone = 0
+        keys = {file.path: diffmodel.stable_keys(file) for file in files}
+        changed = 0
         for table in (self._notes, self._highlights):
             for mark in list(table.values()):
                 file = shown.get(mark.path)
                 if file is None:
                     continue
-                if _place(files, file, mark) is None:
+                where = _place(file, keys[file.path], mark)
+                if where is None:
                     del table[mark.id]
-                    gone += 1
-        return gone
+                    changed += 1
+                    continue
+                entry = file.hunks[where[0]].lines[where[1]]
+                number = entry.new if mark.side == diffmodel.NEW else entry.old
+                if number is not None and number != mark.line:
+                    table[mark.id] = replace(mark, line=number)
+                    changed += 1
+        return changed
 
     def placed_notes(self, files: Sequence[diffmodel.File]) -> dict[tuple[str, int], list[tuple[Note, int]]]:
         """The notes *files* shows, by (path, hunk index) → [(note, line
@@ -420,28 +445,34 @@ class MarkStore:
 
 
 def _place(
-    files: Sequence[diffmodel.File], file: diffmodel.File, mark: Note | Highlight
+    file: diffmodel.File, keys: Sequence[str], mark: Note | Highlight
 ) -> tuple[int, int] | None:
-    """(hunk index, line index) of *mark* in *file*, when the hunk it was
-    placed in is still there under its key and carries the line."""
-    for hunk in file.hunks:
-        if diffmodel.stable_key(file, hunk) != mark.hunk_key:
+    """(hunk index, line index) of *mark* in *file* — *keys* its hunks'
+    stable keys — when the hunk it was placed in is still there under its
+    key and has a line on the mark's side at the mark's index (an equal
+    body always does: the key holds every line's kind)."""
+    for hunk, key in zip(file.hunks, keys, strict=True):
+        if key != mark.hunk_key:
             continue
-        for index, entry in enumerate(hunk.lines):
-            number = entry.new if mark.side == diffmodel.NEW else entry.old
-            if number == mark.line:
-                return hunk.index, index
+        if not 0 <= mark.line_index < len(hunk.lines):
+            return None
+        entry = hunk.lines[mark.line_index]
+        number = entry.new if mark.side == diffmodel.NEW else entry.old
+        return (hunk.index, mark.line_index) if number is not None else None
     return None
 
 
 def _placed(files: Sequence[diffmodel.File], marks: Iterable) -> dict:
     shown = {file.path: file for file in files}
+    keys: dict[str, tuple[str, ...]] = {}
     out: dict[tuple[str, int], list] = {}
     for mark in marks:
         file = shown.get(mark.path)
         if file is None:
             continue
-        where = _place(files, file, mark)
+        if file.path not in keys:
+            keys[file.path] = diffmodel.stable_keys(file)
+        where = _place(file, keys[file.path], mark)
         if where is None:
             continue
         out.setdefault((file.path, where[0]), []).append((mark, where[1]))

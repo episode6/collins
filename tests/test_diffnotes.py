@@ -6,6 +6,8 @@ survives a reload (the hunk's stable key)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from collins import diffmodel, diffnotes
@@ -35,7 +37,7 @@ diff --git a/README.md b/README.md
 index 3b18e51..a1b2c3d 100644
 --- a/README.md
 +++ b/README.md
-@@ -1,2 +1,2 @@
+@@ -1,1 +1,1 @@
 -old title
 +new title
  body
@@ -58,8 +60,8 @@ index 3b18e51..a1b2c3d 100644
 """
 
 MODIFIED_HUNK_2_CHANGED = MODIFIED.replace("+        return 2", "+        return 3")
-# The first hunk grown by a line: every later line number shifts, so the
-# second hunk's key moves too (its new_start is part of it).
+# The first hunk grown by a line: every later line number shifts, but the
+# second hunk's lines do not, so its key holds (the spans are not in it).
 MODIFIED_HUNK_1_GROWN = (
     MODIFIED.replace("+import json\n", "+import json\n+import re\n")
     .replace("@@ -1,4 +1,5 @@", "@@ -1,4 +1,6 @@")
@@ -377,7 +379,7 @@ def test_prune_keeps_marks_on_an_untouched_hunk_and_drops_the_changed_ones():
     assert store.placed_highlights(reloaded) == {("src/app.py", 0): [(store.highlights()[0], 3)]}
 
 
-def test_prune_drops_a_mark_whose_hunk_moved_and_parks_one_whose_file_is_absent():
+def test_prune_renumbers_a_mark_whose_hunk_only_moved_and_parks_one_whose_file_is_absent():
     store = MarkStore()
     loaded = files(MODIFIED, OTHER)
     store.add_notes(
@@ -385,16 +387,90 @@ def test_prune_drops_a_mark_whose_hunk_moved_and_parks_one_whose_file_is_absent(
         [NoteSpec("src/app.py", "on hunk 2", line=22), NoteSpec("README.md", "readme", line=1)],
         diffnotes.AGENT,
     )
-    # The first hunk grew: hunk 2's lines are unchanged but its numbers shifted.
-    assert store.prune(files(MODIFIED_HUNK_1_GROWN)) == 1
-    assert [n.summary for n in store.notes()] == ["readme"]
+    store.add_highlights(
+        loaded, [HighlightSpec("src/app.py", 22, 0, 6), HighlightSpec("src/app.py", 21, 0, 3, side="old")]
+    )
+    note = store.notes()[0]
+    assert (note.line, note.line_index) == (22, 2)
+    # The first hunk grew: hunk 2's lines are unchanged but its numbers
+    # shifted by one. The marks stay, renumbered; the old side's did not move.
+    grown = files(MODIFIED_HUNK_1_GROWN)
+    assert store.prune(grown) == 2
+    moved = store.notes()[0]
+    assert (moved.id, moved.line, moved.line_index, moved.hunk_key) == (note.id, 23, 2, note.hunk_key)
+    assert [n.summary for n in store.notes()] == ["on hunk 2", "readme"]
+    assert [(h.side, h.line) for h in store.highlights()] == [("new", 23), ("old", 21)]
+    placed = store.placed_notes(grown)
+    assert [(n.summary, index) for n, index in placed[("src/app.py", 1)]] == [("on hunk 2", 2)]
+    assert [(h.line, index) for h, index in store.placed_highlights(grown)[("src/app.py", 1)]] == [
+        (23, 2),
+        (21, 1),
+    ]
+    assert grown[0].hunks[1].lines[2].new == 23
+    # Back to the original: renumbered back (two marks moved, none went).
+    assert store.prune(files(MODIFIED)) == 2
+    assert store.notes()[0].line == 22
     # A load without README.md keeps its note, unplaced; the next load
     # that shows it unchanged places it again.
     assert store.prune(files(MODIFIED)) == 0
-    assert store.placed_notes(files(MODIFIED)) == {}
+    assert list(store.placed_notes(files(MODIFIED))) == [("src/app.py", 1)]
     assert list(store.placed_notes(files(OTHER))) == [("README.md", 0)]
     assert store.prune(files(OTHER.replace("+new title", "+newer title"))) == 1
-    assert store.notes() == []
+    assert [n.summary for n in store.notes()] == ["on hunk 2"]
+
+
+TWINS = """\
+diff --git a/twins.txt b/twins.txt
+index 3b18e51..a1b2c3d 100644
+--- a/twins.txt
++++ b/twins.txt
+@@ -1,1 +1,1 @@
+-a
++b
+@@ -10,1 +10,1 @@
+-a
++b
+"""
+
+
+def test_marks_on_equal_hunks_stay_on_their_own_across_a_shift():
+    store = MarkStore()
+    loaded = files(TWINS)
+    store.add_notes(
+        loaded,
+        [NoteSpec("twins.txt", "first", line=1), NoteSpec("twins.txt", "second", line=10)],
+        diffnotes.USER,
+    )
+    first, second = store.notes()
+    assert first.hunk_key != second.hunk_key
+    # Both twins shifted by an edit above them: each note stays on its own.
+    shifted = files(
+        TWINS.replace("@@ -1,1 +1,1 @@", "@@ -3,1 +5,1 @@").replace("@@ -10,1 +10,1 @@", "@@ -12,1 +14,1 @@")
+    )
+    assert store.prune(shifted) == 2
+    assert [(n.summary, n.line, n.hunk_key) for n in store.notes()] == [
+        ("first", 5, first.hunk_key),
+        ("second", 14, second.hunk_key),
+    ]
+    assert store.prune(loaded) == 2 and [n.line for n in store.notes()] == [1, 10]
+    # The first twin changes: the bodies no longer say which hunk the
+    # second note was on, so both are dropped rather than one landing on
+    # the wrong twin.
+    changed = files(
+        TWINS.replace("@@ -1,1 +1,1 @@\n-a\n+b\n", "@@ -1,1 +1,3 @@\n-a\n+b\n+x\n+y\n").replace(
+            "@@ -10,1 +10,1 @@", "@@ -10,1 +12,1 @@"
+        )
+    )
+    assert store.prune(changed) == 2 and store.notes() == []
+
+
+def test_a_mark_whose_line_index_is_off_the_hunk_is_dropped():
+    store = MarkStore()
+    loaded = files(MODIFIED)
+    store.add_notes(loaded, [NoteSpec("src/app.py", "x", line=3)], diffnotes.USER)
+    note = store.notes()[0]
+    store._notes[note.id] = replace(note, line_index=99)
+    assert store.prune(loaded) == 1 and store.notes() == []
 
 
 def test_placed_notes_follow_insertion_order_within_a_hunk():

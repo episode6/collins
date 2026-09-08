@@ -20,8 +20,9 @@ around each hunk by position (`before:<i>` / `trailing:<i>`),
 a paired deletion/addition (difflib over word tokens, ratio ≥ 0.5),
 `palette` blends a style scheme's diff colours into its text background
 (0.18 for a row, 0.40 for the emphasis), `locate` finds the hunk and line a
-(path, side, line) address names, and `stable_key` is what a reload matches
-old widgets to new hunks by.
+(path, side, line) address names, and `stable_key` (`stable_keys` for a whole
+file) is what a reload matches old widgets, selections and marks to new hunks
+by: the file's path and the hunk's body, never its line numbers.
 
 Nothing here imports GTK or runs git: gitops runs git and hands the text
 here; diffview draws what comes back (tests/test_diffmodel.py). Everything
@@ -899,16 +900,58 @@ def display_text(text: str) -> str:
     return text.translate(_DISPLAY_TABLE)
 
 
+def hunk_digest(hunk: Hunk) -> str:
+    """A digest of *hunk*'s body — every line's kind and text, context
+    included, the spans and the `@@` header left out."""
+    return _digest("\n".join(f"{line.kind}{line.text}" for line in hunk.lines))
+
+
+def stable_keys(file: File) -> tuple[str, ...]:
+    """`stable_key(file, hunk)` for every hunk of *file*, in order — one
+    pass, for the callers that walk a file's hunks."""
+    head = _key_head(file)
+    digests = [hunk_digest(hunk) for hunk in file.hunks]
+    totals: dict[str, int] = {}
+    for digest in digests:
+        totals[digest] = totals.get(digest, 0) + 1
+    seen: dict[str, int] = {}
+    keys: list[str] = []
+    for digest in digests:
+        ordinal = seen.get(digest, 0)
+        seen[digest] = ordinal + 1
+        keys.append(f"{head}\x00{digest}\x00{ordinal}/{totals[digest]}")
+    return tuple(keys)
+
+
 def stable_key(file: File, hunk: Hunk | None = None) -> str:
-    """What a reload matches widgets by: the file's path (with its old name
-    for a rename), and for a hunk its old and new spans plus a digest of its
-    lines — so an untouched hunk keeps its widget, selection and notes
-    across a reload, and a hunk that moved or changed gets a fresh one."""
-    head = file.path if file.previous_path is None else f"{file.previous_path}\x00{file.path}"
+    """What a reload matches widgets, selections and marks by.
+
+    For a file: its path (with its old name for a rename), its kind and
+    the digest of its whole patch. For a hunk: the file's path and a
+    digest of the hunk's body — its lines' kinds and text, context lines
+    included — plus, among the file's hunks with that same body, its
+    ordinal in patch order and their count. The spans are left out on
+    purpose: a range staged out of an earlier hunk, or an edit above that
+    adds or removes lines, moves every later hunk's numbers without
+    touching its lines, and such a hunk keeps its widget, its selection
+    and its marks (the widget renumbers its gutters, the store its marks).
+    A changed context line changes the body and so the key — the widget's
+    buffer *is* the body, and a mark on that line would point at other
+    words.
+
+    Two hunks with the same body in one file are told apart by the
+    ordinal, so on a reload that keeps both each keeps its own; when one
+    of them changes or leaves, the count moves and every one of them is
+    matched afresh — the bodies alone cannot say which survived, so their
+    marks are dropped rather than landed on the wrong twin."""
+    head = _key_head(file)
     if hunk is None:
         return f"{head}\x00{file.kind}\x00{file.patch_hash}"
-    body = "\n".join(f"{line.kind}{line.text}" for line in hunk.lines)
-    return (
-        f"{head}\x00{hunk.old_start},{hunk.old_count}\x00{hunk.new_start},{hunk.new_count}"
-        f"\x00{_digest(body)}"
-    )
+    digest = hunk_digest(hunk)
+    digests = [hunk_digest(earlier) for earlier in file.hunks]
+    ordinal = sum(1 for earlier in digests[: hunk.index] if earlier == digest)
+    return f"{head}\x00{digest}\x00{ordinal}/{digests.count(digest)}"
+
+
+def _key_head(file: File) -> str:
+    return file.path if file.previous_path is None else f"{file.previous_path}\x00{file.path}"

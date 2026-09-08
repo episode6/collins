@@ -38,6 +38,18 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **A hunk that only moved keeps its widget, its selection and its notes.**
+  The git page matched hunks across a reload by their line numbers as
+  well as their lines, so staging or discarding a range out of an early
+  hunk, or an edit above that added or removed lines, made every later
+  hunk look new — rebuilt, its line selection, its note cards and its
+  highlights gone though nothing in it had changed. A hunk is now matched
+  by its lines alone (context lines included; two hunks with the same
+  lines in one file are told apart by their order): a hunk whose numbers
+  shifted keeps its widget, re-words its header and gutters, and its
+  notes and highlights follow it, their line numbers moved with the
+  lines they sit on. If one of two identical hunks changes, the marks on
+  both are dropped rather than one landing on the wrong twin.
 - **A finished run is counted off the transcript.** The CLI repaints part
   of its idle screen every so often after a turn, and each repaint read as
   output landed as another finish: the row flagged again, the pull requests

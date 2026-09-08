@@ -571,6 +571,24 @@ class _HunkView:
         # the top, and the current-line highlight (while focused) with them.
         buffer.place_cursor(buffer.get_start_iter())
 
+    def renumber(self, rows: Sequence[_Row]) -> bool:
+        """The hunk moved without changing: give every row of the buffer
+        the numbers *rows* carry, the text and tags left alone. False —
+        nothing changed — when *rows* are not this buffer's rows (another
+        count, kind or patch line at any index), which a caller answers by
+        drawing afresh."""
+        if len(rows) != len(self.rows):
+            return False
+        if any((a.kind, a.line) != (b.kind, b.line) for a, b in zip(rows, self.rows, strict=True)):
+            return False
+        self.rows = [
+            _Row(old.kind, old.text, new.old, new.new, old.line)
+            for old, new in zip(self.rows, rows, strict=True)
+        ]
+        for side, renderer in zip(self._number_sides, self._numbers, strict=True):
+            renderer.set_numbers([row.old if side == diffmodel.OLD else row.new for row in self.rows])
+        return True
+
     def _paragraph(self, index: int) -> tuple[Gtk.TextIter, Gtk.TextIter]:
         """The whole paragraph *index* — its newline included, so an empty
         line still has a character to hang a tag on."""
@@ -1231,16 +1249,17 @@ class _HunkSection(Gtk.Box):
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("git-hunk-header")
         ranges = Gtk.Label(xalign=0.0)
-        ranges.set_text(f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@")
         ranges.add_css_class("git-hunk-ranges")
         header.append(ranges)
+        self._ranges = ranges
         context = Gtk.Label(xalign=0.0, hexpand=True)
-        context.set_text(hunk.context)
         context.set_ellipsize(Pango.EllipsizeMode.END)
         context.set_single_line_mode(True)
         context.add_css_class("dim-label")
         context.add_css_class("git-hunk-context")
         header.append(context)
+        self._context = context
+        self._sync_header()
         # The buttons: the stage / unstage / revert one, and discard on
         # the unstaged load (sync_actions words them).
         self.actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -1423,14 +1442,33 @@ class _HunkSection(Gtk.Box):
         for view in self.views:
             view.clear_selection()
 
-    def _build_body(self) -> None:
-        if self._body is not None:
-            self.remove(self._body)
-            self._body = None
-            self._pane = None
-        self.views = []
+    def _sync_header(self) -> None:
         hunk = self.hunk
-        emphasis = diffmodel.word_emphasis(hunk) if self._options.word_diff else []
+        self._ranges.set_text(f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@")
+        self._context.set_text(hunk.context)
+
+    def rebase(self, file: diffmodel.File, hunk: diffmodel.Hunk) -> None:
+        """A reload kept this section for *hunk* of *file* — the same lines
+        under the same key (diffmodel.stable_key leaves the spans and the
+        index out), maybe at other numbers or another index: re-point it,
+        re-word the header, and renumber the views' gutters in place — the
+        buffers, and with them the selection, the cursor and the marks,
+        stay as they are."""
+        moved = (hunk.old_start, hunk.new_start) != (self.hunk.old_start, self.hunk.new_start)
+        self.file = file
+        self.hunk = hunk
+        self._sync_header()
+        if not moved:
+            return
+        rows = self._layout_rows(hunk)
+        if len(rows) != len(self.views) or not all(
+            view.renumber(view_rows) for view, view_rows in zip(self.views, rows, strict=True)
+        ):
+            self._build_body()  # the rows no longer line up (they must): draw afresh
+
+    def _layout_rows(self, hunk: diffmodel.Hunk) -> list[list[_Row]]:
+        """The rows each view of the current layout draws for *hunk*: the
+        old and the new side's in split, the one list in stack."""
         if self._options.split:
             rows = diffmodel.split_rows(hunk)
             line_index = {id(line): i for i, line in enumerate(hunk.lines)}
@@ -1446,6 +1484,22 @@ class _HunkSection(Gtk.Box):
                 else _Row(PAD, "", None, None)
                 for r in rows
             ]
+            return [old_rows, new_rows]
+        return [
+            [_Row(line.kind, line.text, line.old, line.new, index) for index, line in enumerate(hunk.lines)]
+        ]
+
+    def _build_body(self) -> None:
+        if self._body is not None:
+            self.remove(self._body)
+            self._body = None
+            self._pane = None
+        self.views = []
+        hunk = self.hunk
+        emphasis = diffmodel.word_emphasis(hunk) if self._options.word_diff else []
+        if self._options.split:
+            rows = diffmodel.split_rows(hunk)
+            old_rows, new_rows = self._layout_rows(hunk)
             # Emphasis speaks in hunk line indexes; the buffers in row indexes.
             old_index = {id(r.old): i for i, r in enumerate(rows) if r.old is not None}
             new_index = {id(r.new): i for i, r in enumerate(rows) if r.new is not None}
@@ -1467,9 +1521,7 @@ class _HunkSection(Gtk.Box):
             self._pane = pane
             self._body = pane
         else:
-            rows = [
-                _Row(line.kind, line.text, line.old, line.new, index) for index, line in enumerate(hunk.lines)
-            ]
+            (rows,) = self._layout_rows(hunk)
             by_line = {entry.line_index: entry.spans for entry in emphasis}
             view = self._make_view((diffmodel.OLD, diffmodel.NEW))
             view.set_rows(rows, by_line)
@@ -2076,6 +2128,7 @@ class _FileSection(Gtk.Box):
         )
         items: list[tuple[object, object, Callable[[], Gtk.Widget]]] = []
         gaps = {(gap.position, gap.hunk_index): gap for gap in diffmodel.gaps(file)}
+        keys = diffmodel.stable_keys(file)
         for hunk in file.hunks:
             gap = gaps.get((diffmodel.BEFORE, hunk.index))
             if gap is not None:
@@ -2088,8 +2141,8 @@ class _FileSection(Gtk.Box):
                 )
             items.append(
                 (
-                    diffmodel.stable_key(file, hunk),
-                    None,  # the key says it all: equal key, equal hunk
+                    keys[hunk.index],
+                    None,  # the key says it all: equal key, equal lines
                     lambda h=hunk, lang=language: self._make_hunk(h, lang),
                 )
             )
@@ -2108,14 +2161,16 @@ class _FileSection(Gtk.Box):
         self.hunks = [w for w in plan.widgets if isinstance(w, _HunkSection)]
         self.gaps = [w for w in plan.widgets if isinstance(w, _GapRow)]
         # A kept section still holds the Hunk of the load it was built for:
-        # the key leaves the index out on purpose (a hunk above going away
-        # must not rebuild the ones below), so re-point every section at
-        # this read's Hunk — the items list yields one section per
-        # file.hunks entry, in order — or `]`, `z`, reveal and the sidebar
-        # would keep speaking the old indexes.
+        # the key leaves the index and the spans out on purpose (a hunk
+        # above going away, or a range staged out of it, must not rebuild
+        # the ones below), so re-point every section at this read's Hunk —
+        # the items list yields one section per file.hunks entry, in order
+        # — or `]`, `z`, reveal and the sidebar would keep speaking the old
+        # indexes, and the gutters the old numbers (`rebase` renumbers).
         for section, hunk in zip(self.hunks, file.hunks, strict=True):
-            section.hunk = hunk
-            section.file = file
+            if section in plan.built:
+                continue
+            section.rebase(file, hunk)
         for gap in self.gaps:  # a kept gap likewise: its file is this read's
             gap.file = file
         self.sync_actions()
@@ -3244,6 +3299,20 @@ class DiffView(Gtk.Box):
         hunks kept theirs (and hold no reference to a widget for it)."""
         section = self._section_for(path, diffmodel.NEW)
         return [h.serial for h in section.hunks] if section is not None else []
+
+    def gutter_numbers(self, path: str, hunk: int) -> dict[str, list[int | None]]:
+        """Probe: the numbers the gutters of *path*'s hunk *hunk* draw, per
+        side (`old` / `new`, as the renderers hold them — one view carrying
+        both in stack, one per side in split)."""
+        section = self._section_for(path, diffmodel.NEW)
+        target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
+        if target is None:
+            return {}
+        return {
+            side: list(renderer._numbers)
+            for view in target.views
+            for side, renderer in zip(view._number_sides, view._numbers, strict=True)
+        }
 
     def hunk_indexes(self, path: str) -> list[int]:
         """The `hunk.index` each hunk section of *path* speaks for, in
