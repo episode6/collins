@@ -74,16 +74,47 @@ NOT_ON_ANY_REMOTE: tuple[str, ...] = ("--not", "--remotes")
 # under the current group.
 MAX_STACK_WALK = 10_000
 
+# The operations git can leave half-finished, waiting on the user, by the
+# kind in_progress names them by: the git subcommand that owns the
+# operation (its `--continue` / `--abort`), and the words the page's bar
+# and the commit gate call it. `am` is `git am` — its markers are a
+# rebase's (rebase-apply), and `git rebase --continue` refuses while one
+# is in progress ("It looks like 'git am' is in progress"), so it is
+# named apart.
+OPERATION_KINDS: tuple[str, ...] = ("rebase", "am", "merge", "cherry-pick", "revert")
+_OPERATION_WORDS: dict[str, str] = {
+    "rebase": "rebase",
+    "am": "git am",
+    "merge": "merge",
+    "cherry-pick": "cherry-pick",
+    "revert": "revert",
+}
 # The markers git leaves in its directory while an operation waits on the
 # user, in the order they are checked (a rebase beats a merge beats a
-# cherry-pick), and the words the commit gate names them by.
+# cherry-pick), and the kind each names. `sequencer` alone — a multi-commit
+# cherry-pick or revert between two of its steps, the stopped step already
+# committed by hand — is read from its todo (see in_progress).
 _IN_PROGRESS_MARKERS: tuple[tuple[str, str], ...] = (
     ("rebase-merge", "rebase"),
     ("rebase-apply", "rebase"),
     ("MERGE_HEAD", "merge"),
     ("CHERRY_PICK_HEAD", "cherry-pick"),
     ("REVERT_HEAD", "revert"),
+    ("sequencer", "cherry-pick"),
 )
+# The sequencer's todo is read this far to tell a revert's from a
+# cherry-pick's: its first line is `pick <sha> …` or `revert <sha> …`.
+_SEQUENCER_TODO_BYTES = 4096
+
+
+@dataclass(frozen=True)
+class InProgress:
+    """What in_progress found: the *kind* (one of OPERATION_KINDS, what
+    continue_argv / abort_argv take) and the translated *label* the words
+    name it by ("rebase", "merge", "cherry-pick", "revert", "git am")."""
+
+    kind: str
+    label: str
 
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
@@ -161,16 +192,24 @@ def first_line(text: str | None) -> str:
 
 
 def run_git(
-    cwd: str | Path | None, argv: Sequence[str], run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+    cwd: str | Path | None,
+    argv: Sequence[str],
+    run=subprocess.run,
+    timeout: float = GIT_TIMEOUT_S,
+    env: dict[str, str] | None = None,
 ) -> GitResult:
     """`git *argv` in *cwd*, both streams captured as text, as a GitResult.
-    Never raises: no cwd, no git on PATH, a timeout and any other
-    SubprocessError come back ok=False with the exception's text as
-    stderr."""
+    *env* replaces the environment when given (the continue runners' one
+    without an editor). Never raises: no cwd, no git on PATH, a timeout
+    and any other SubprocessError come back ok=False with the exception's
+    text as stderr."""
     if not cwd:
         return GitResult(False, "", "no working directory")
+    kwargs = {"env": env} if env is not None else {}
     try:
-        result = run(["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=timeout)
+        result = run(
+            ["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=timeout, **kwargs
+        )
     except (OSError, subprocess.SubprocessError) as err:
         return GitResult(False, "", str(err) or err.__class__.__name__)
     return GitResult(
@@ -336,6 +375,36 @@ def revert_argv(sha: str, commit: bool) -> list[str]:
     if commit:
         return ["revert", "--no-edit", sha]
     return ["revert", "--no-commit", sha]
+
+
+def continue_argv(kind: str) -> list[str]:
+    """[<kind>, "--continue"] — `git rebase --continue`, `git merge
+    --continue`, `git cherry-pick --continue`, `git revert --continue`,
+    `git am --continue`. ValueError for a kind git has no operation for."""
+    if kind not in OPERATION_KINDS:
+        raise ValueError(f"not an operation: {kind!r}")
+    return [kind, "--continue"]
+
+
+def abort_argv(kind: str) -> list[str]:
+    """[<kind>, "--abort"]: the operation forgotten and the tree put back
+    where it was before it started. ValueError for a kind git has no
+    operation for."""
+    if kind not in OPERATION_KINDS:
+        raise ValueError(f"not an operation: {kind!r}")
+    return [kind, "--abort"]
+
+
+def no_editor_env(environ: dict[str, str] | None = None) -> dict[str, str]:
+    """The environment a `--continue` runs in: the caller's (os.environ by
+    default) with GIT_EDITOR set to `true`, so the commit message git
+    would open an editor on — a rebase's or cherry-pick's resolved step,
+    a merge's — is taken as it is. The runs happen on a worker thread
+    with no terminal to open an editor in; without this git would wait
+    on `vi` against a pipe until the timeout."""
+    env = dict(os.environ if environ is None else environ)
+    env["GIT_EDITOR"] = "true"
+    return env
 
 
 def rev_parse_argv(rev: str) -> list[str]:
@@ -710,24 +779,88 @@ def staged_paths(cwd: str | Path | None, run=subprocess.run, timeout: float = GI
     return [path for path in result.stdout.split("\0") if path]
 
 
-def in_progress_operation(git_dir: str | Path | None) -> str | None:
+def in_progress(git_dir: str | Path | None) -> InProgress | None:
     """What is half-finished in the repository whose git directory is
-    *git_dir* (gitinfo.git_dir: a worktree's own, not the common one) —
-    _("rebase"), _("merge"), _("cherry-pick") or _("revert") — or None
-    when nothing is, or there is no directory to look in. File checks
-    only, no git: a commit made while one of these waits would be that
-    operation's next step, not the user's, so the commit buttons ask this
-    before they ask for a message."""
+    *git_dir* (gitinfo.git_dir: a worktree's own, not the common one) — a
+    rebase, a `git am` (rebase-apply with an `applying` file in it), a
+    merge, a cherry-pick or a revert (a lone `sequencer` is one of the
+    last two between two steps of a multi-commit run; its todo's first
+    word says which) — or None when nothing is, or there is no directory
+    to look in. File checks only, no git: a commit made while one of these
+    waits would be that operation's next step, not the user's, so the
+    commit buttons ask this before they ask for a message, and the page's
+    bar offers the step (`--continue`) and the way out (`--abort`)."""
     if not git_dir:
         return None
     base = Path(git_dir)
-    for marker, name in _IN_PROGRESS_MARKERS:
+    for marker, kind in _IN_PROGRESS_MARKERS:
         try:
-            if (base / marker).exists():
-                return _(name)
+            if not (base / marker).exists():
+                continue
+            if marker == "rebase-apply" and (base / marker / "applying").exists():
+                kind = "am"
+            elif marker == "sequencer" and _sequencer_reverts(base / marker / "todo"):
+                kind = "revert"
         except OSError:
             continue
+        return InProgress(kind, _(_OPERATION_WORDS[kind]))
     return None
+
+
+def _sequencer_reverts(todo: Path) -> bool:
+    """Whether the sequencer's *todo* names reverts: its first
+    non-comment line starts with `revert` (a cherry-pick's with `pick`).
+    A todo that can't be read is a cherry-pick's — the likelier of the
+    two, and the words are all that ride on it."""
+    try:
+        with todo.open("rb") as handle:
+            text = handle.read(_SEQUENCER_TODO_BYTES).decode("utf-8", "replace")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        word = line.strip().split(" ", 1)[0]
+        if not word or word.startswith("#"):
+            continue
+        return word == "revert"
+    return False
+
+
+def in_progress_operation(git_dir: str | Path | None) -> str | None:
+    """in_progress's label alone — _("rebase"), _("merge"),
+    _("cherry-pick"), _("revert") or _("git am") — or None: what the
+    commit and revert gates' words take."""
+    found = in_progress(git_dir)
+    return found.label if found is not None else None
+
+
+def continue_operation(
+    cwd: str | Path | None,
+    kind: str,
+    run=subprocess.run,
+    timeout: float = COMMIT_TIMEOUT_S,
+    env: dict[str, str] | None = None,
+) -> GitResult:
+    """`git <kind> --continue` with no editor (no_editor_env): the step
+    git stopped on — conflicts resolved and staged, a rebase's `edit` —
+    committed with the message it already has, and the operation carried
+    on to its next stop or its end. The commit timeout: hooks and signing
+    run for every commit made. Git's own refusal when the tree isn't
+    ready ("unmerged files", "needs merge") comes back as stderr. A
+    *kind* git has no operation for is refused without a call."""
+    if kind not in OPERATION_KINDS:
+        return GitResult(False, "", f"not an operation: {kind!r}")
+    return run_git(cwd, continue_argv(kind), run=run, timeout=timeout, env=no_editor_env(env))
+
+
+def abort_operation(
+    cwd: str | Path | None, kind: str, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> GitResult:
+    """`git <kind> --abort`: the operation forgotten and the tree put back
+    where it stood before it started, the resolutions made since lost. A
+    *kind* git has no operation for is refused without a call."""
+    if kind not in OPERATION_KINDS:
+        return GitResult(False, "", f"not an operation: {kind!r}")
+    return run_git(cwd, abort_argv(kind), run=run, timeout=timeout)
 
 
 def is_root_commit(

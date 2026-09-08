@@ -127,6 +127,7 @@ from .commitcard import CommitCard  # noqa: E402
 from .diffview import DiffView  # noqa: E402
 from .editor import style_scheme  # noqa: E402
 from .gitmodel import BranchRef  # noqa: E402
+from .gitoperation import OperationBar  # noqa: E402
 from .gitsidebar import GitSidebar  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -395,10 +396,16 @@ class GitPage(Adw.Bin):
         self._diffview.connect("mutation-requested", self._on_mutation_requested)
         self._diffview.connect("editing-changed", self._on_note_editing_changed)
         self._diffview.apply_keybindings(keybindings.current())
-        # The view column: the commit card (empty but for a commit load,
-        # commitcard.py) over the diff.
+        # The view column: the in-progress bar (a half-finished rebase /
+        # merge / cherry-pick / revert over a working-tree load,
+        # gitoperation.py), the commit card (empty but for a commit load,
+        # commitcard.py), over the diff.
+        self.operation_bar = OperationBar()
+        self.operation_bar.connect("continue-requested", lambda _b: self._on_continue_requested())
+        self.operation_bar.connect("abort-requested", lambda _b: self._on_abort_requested())
         self.commit_card = CommitCard()
         view_column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
+        view_column.append(self.operation_bar)
         view_column.append(self.commit_card)
         view_column.append(self._diffview)
         self._stack.add_named(view_column, _VIEW)
@@ -640,6 +647,8 @@ class GitPage(Adw.Bin):
             # The new load's read fills the card; a stale message over a
             # new diff is worse than none.
             self.commit_card.clear()
+            if loaded not in ("unstaged", "staged"):
+                self.operation_bar.clear()  # the bar is the working tree's
         self._loaded = dict(loaded) if isinstance(loaded, dict) else loaded
         self._subject = None
         self._resolved_sha = None
@@ -1071,6 +1080,7 @@ class GitPage(Adw.Bin):
         self._drop_monitors()
         self._diffview.load((), None, None)
         self.commit_card.clear()
+        self.operation_bar.clear()
         self._sync_search_label()
 
     def _reopen(self) -> None:
@@ -1112,6 +1122,9 @@ class GitPage(Adw.Bin):
             # reload by key, harmless) instead of one the watch never sees.
             state = gitops.tree_state_signature(cwd) if working else None
             read = gitops.read_diff(cwd, loaded, parent_target, untracked)
+            # A half-finished rebase / merge / cherry-pick / revert is the
+            # working tree's business: the bar over the diff names it.
+            operation = gitops.in_progress(gitinfo.git_dir(cwd)) if working else None
             # One `git log -1` names the commit for the breadcrumb, the
             # sidebar's ▸ and the commit card alike.
             message = gitloads.commit_message(cwd, show_ref) if show_ref else None
@@ -1129,6 +1142,7 @@ class GitPage(Adw.Bin):
                 (message, github_url),
                 base,
                 state,
+                operation,
                 priority=GLib.PRIORITY_DEFAULT,
             )
 
@@ -1142,6 +1156,7 @@ class GitPage(Adw.Bin):
         named: tuple[gitloads.CommitMessage | None, str | None],
         base: str | None,
         state: str | None,
+        operation: gitops.InProgress | None,
     ) -> bool:
         if gen != self._gen or self._closing or not self._opened:
             return GLib.SOURCE_REMOVE
@@ -1166,6 +1181,10 @@ class GitPage(Adw.Bin):
             self.commit_card.show(message, github_url, self._scheme())
         else:
             self.commit_card.clear()
+        if operation is not None:
+            self.operation_bar.show(operation, gitmodel.unmerged_count(read.status))
+        else:
+            self.operation_bar.clear()
         self._sync_header()
         self.emit("title-changed")
         if not read.ok:
@@ -1417,6 +1436,78 @@ class GitPage(Adw.Bin):
         self._refresh_branch_stack()
         if self._opened:
             self._read_diff(self._loaded)
+
+    # -- the in-progress bar --
+
+    def _on_continue_requested(self) -> None:
+        """The bar's Continue: `git <kind> --continue` with no editor
+        (gitops.continue_operation) on the sidebar's mutation thread, the
+        toast saying whether the operation finished or stopped again, and
+        the tree treated as moved (`mutated`) either way — a refused
+        continue ("unmerged files") changes nothing, but the words are
+        git's and the reload is cheap."""
+        operation = self.operation_bar.operation
+        if operation is None:
+            return
+        self._run_operation(operation, abort=False)
+
+    def _on_abort_requested(self) -> None:
+        """The bar's Abort…: ask first — the resolutions made since the
+        stop are lost — then `git <kind> --abort` the same way."""
+        operation = self.operation_bar.operation
+        if operation is None:
+            return
+        cwd = self._cwd_provider() or "?"
+        dialogs.confirm_dialog(
+            self,
+            gitmodel.abort_heading(operation.label),
+            gitmodel.abort_body(operation.kind, operation.label, str(cwd)),
+            _("Abort"),
+            lambda: self._run_operation(operation, abort=True),
+        )
+
+    def _run_operation(self, operation: gitops.InProgress, abort: bool) -> None:
+        """Run the continue or abort of *operation* behind the sidebar's
+        busy (the bar's buttons greyed), toast the outcome and reload."""
+        if self._closing or not self._opened:
+            return
+        if self.operation_bar.operation != operation:
+            self._toast(_("The view changed since the request: nothing was done"))
+            return
+        cwd = self._cwd_provider()
+        kind = operation.kind
+
+        def work() -> tuple:
+            # Never None: run_mutation drops a None answer without calling
+            # done, and the bar would stay greyed. gitops never raises
+            # today; the catch keeps that a toast rather than a stuck bar.
+            try:
+                if abort:
+                    result = gitops.abort_operation(cwd, kind)
+                else:
+                    result = gitops.continue_operation(cwd, kind)
+                still = gitops.in_progress(gitinfo.git_dir(cwd)) if result.ok else None
+            except Exception as err:  # the worker's last line of defence
+                return gitops.GitResult(False, "", str(err) or err.__class__.__name__), None
+            return result, still
+
+        def done(answer: object) -> None:
+            self.operation_bar.set_busy(False)
+            if not isinstance(answer, tuple):
+                self._toast(_("git failed"))
+                return
+            result, still = answer
+            if not result.ok:
+                self._toast(gitmodel.operation_failed(kind, gitops.first_line(result.stderr), abort))
+            elif abort:
+                self._toast(gitmodel.abort_done(operation.label))
+            else:
+                self._toast(gitmodel.continue_done(operation.label, still.label if still else None))
+            self.sidebar.emit("mutated")
+
+        self.operation_bar.set_busy(True)
+        if not self.sidebar.run_mutation(work, done):
+            self.operation_bar.set_busy(False)
 
     def _toast(self, text: str) -> None:
         toast = Adw.Toast(title=text, timeout=4)

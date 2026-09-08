@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from collins import diffmodel, gitinfo, gitops
+from collins import diffmodel, gitinfo, gitmodel, gitops
 from collins.gitmodel import LOG_FORMAT, BranchRef, Commit, Status, StatusRow
 
 SHA_A = "bdda3818b622d8af5190c55f25c15356d76c7806"
@@ -350,6 +350,68 @@ def test_in_progress_operation_reads_the_markers_in_order(tmp_path):
     (tmp_path / "CHERRY_PICK_HEAD").unlink()
     (tmp_path / "REVERT_HEAD").write_text(SHA_A)
     assert gitops.in_progress_operation(tmp_path) == "revert"
+
+
+def test_in_progress_tells_am_and_the_sequencer_apart(tmp_path):
+    assert gitops.in_progress(tmp_path) is None
+    (tmp_path / "rebase-apply").mkdir()
+    assert gitops.in_progress(tmp_path) == gitops.InProgress("rebase", "rebase")
+    (tmp_path / "rebase-apply" / "applying").write_text("")
+    assert gitops.in_progress(tmp_path) == gitops.InProgress("am", "git am")
+    assert gitops.in_progress_operation(tmp_path) == "git am"
+    (tmp_path / "rebase-apply" / "applying").unlink()
+    (tmp_path / "rebase-apply").rmdir()
+    # A lone sequencer (a multi-commit run between two steps): its todo
+    # says whether it picks or reverts; an unreadable one is a cherry-pick.
+    sequencer = tmp_path / "sequencer"
+    sequencer.mkdir()
+    assert gitops.in_progress(tmp_path) == gitops.InProgress("cherry-pick", "cherry-pick")
+    (sequencer / "todo").write_text(f"# a comment\nrevert {SHA_A} second\n")
+    assert gitops.in_progress(tmp_path) == gitops.InProgress("revert", "revert")
+    (sequencer / "todo").write_text(f"pick {SHA_A} second\nrevert {SHA_A} third\n")
+    assert gitops.in_progress(tmp_path).kind == "cherry-pick"
+    # A CHERRY_PICK_HEAD beside it wins, as the markers are ordered.
+    (tmp_path / "REVERT_HEAD").write_text(SHA_A)
+    assert gitops.in_progress(tmp_path).kind == "revert"
+
+
+def test_continue_and_abort_argv_take_only_git_operations():
+    assert gitops.continue_argv("rebase") == ["rebase", "--continue"]
+    assert gitops.abort_argv("cherry-pick") == ["cherry-pick", "--abort"]
+    assert gitops.continue_argv("am") == ["am", "--continue"]
+    for bad in ("push", "", "rebase --abort"):
+        with pytest.raises(ValueError):
+            gitops.continue_argv(bad)
+        with pytest.raises(ValueError):
+            gitops.abort_argv(bad)
+    assert not gitops.continue_operation("/repo", "push", run=fake_runner({})).ok
+    assert not gitops.abort_operation("/repo", "push", run=fake_runner({})).ok
+
+
+def test_no_editor_env_sets_git_editor_to_true():
+    env = gitops.no_editor_env({"PATH": "/bin", "GIT_EDITOR": "vim"})
+    assert env == {"PATH": "/bin", "GIT_EDITOR": "true"}
+    assert gitops.no_editor_env()["GIT_EDITOR"] == "true"
+
+
+def test_continue_operation_runs_without_an_editor():
+    seen = {}
+
+    def run(argv, **kwargs):
+        seen["argv"] = argv
+        seen["env"] = kwargs.get("env")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    assert gitops.continue_operation("/repo", "merge", run=run, env={"HOME": "/h"}).ok
+    assert seen["argv"] == ["git", "merge", "--continue"]
+    assert seen["env"] == {"HOME": "/h", "GIT_EDITOR": "true"}
+
+    def run_abort(argv, **kwargs):
+        seen["abort"] = (argv, "env" in kwargs)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    assert gitops.abort_operation("/repo", "rebase", run=run_abort).ok
+    assert seen["abort"] == (["git", "rebase", "--abort"], False)
 
 
 # -- against a real repository ------------------------------------------------------------
@@ -1407,3 +1469,46 @@ def test_tree_state_signature_moves_with_the_working_tree(repo, tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     assert gitops.tree_state_signature(outside) is None
+
+
+@needs_git
+def test_continue_and_abort_operation_against_a_stopped_revert_and_cherry_pick(repo):
+    (repo / "f.txt").write_text("two\n")
+    _git(repo, "commit", "-qam", "second")
+    second = _git(repo, "rev-parse", "HEAD").strip()
+    (repo / "f.txt").write_text("three\n")
+    _git(repo, "commit", "-qam", "third")
+    third = _git(repo, "rev-parse", "HEAD").strip()
+    git_dir = gitinfo.git_dir(repo)
+
+    # A revert stopped on conflicts: continue is refused while the path
+    # is unmerged (git's words), then lands once it is resolved and
+    # staged — with no editor, the message git prepared stands.
+    assert not gitops.revert(repo, second, True).ok
+    assert gitops.in_progress(git_dir) == gitops.InProgress("revert", "revert")
+    assert gitmodel.unmerged_count(gitops.read_status(repo)) == 1
+    refused = gitops.continue_operation(repo, "revert")
+    assert not refused.ok and refused.stderr
+    assert gitops.in_progress(git_dir).kind == "revert"
+    (repo / "f.txt").write_text("one\n")
+    _git(repo, "add", "f.txt")
+    assert gitops.continue_operation(repo, "revert").ok
+    assert gitops.in_progress(git_dir) is None
+    assert _git(repo, "log", "-1", "--format=%s").startswith('Revert "second"')
+    assert _git(repo, "status", "--porcelain") == ""
+
+    # A cherry-pick stopped on conflicts, aborted: the tree goes back.
+    _git(repo, "checkout", "-q", "-b", "side", "base")
+    (repo / "f.txt").write_text("side\n")
+    _git(repo, "commit", "-qam", "side")
+    pick = subprocess.run(["git", "cherry-pick", third], cwd=repo, capture_output=True, text=True)
+    assert pick.returncode != 0
+    assert gitops.in_progress(git_dir) == gitops.InProgress("cherry-pick", "cherry-pick")
+    assert gitops.abort_operation(repo, "cherry-pick").ok
+    assert gitops.in_progress(git_dir) is None
+    assert (repo / "f.txt").read_text() == "side\n"
+    assert _git(repo, "status", "--porcelain") == ""
+    assert _git(repo, "log", "-1", "--format=%s") == "side\n"
+    # With nothing in progress, both are git's own refusals.
+    assert not gitops.abort_operation(repo, "cherry-pick").ok
+    assert not gitops.continue_operation(repo, "merge").ok

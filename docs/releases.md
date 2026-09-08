@@ -38,6 +38,14 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **Continue or abort a half-finished operation from the git page.** With
+  the working tree loaded and a rebase, merge, cherry-pick, revert or
+  `git am` stopped, a bar over the diff names it, counts the unmerged
+  files and offers *Continue* (`git <op> --continue`, no editor: the
+  step's message stands) and *Abort…* (a confirm, then `--abort`). It
+  follows the repository — an operation started in the terminal shows
+  within a tick, a resolution re-words the hint — and a refused continue
+  toasts git's own words.
 - **Revert a commit from the commits list.** A commit row's right-click
   menu gains *Revert…*, which asks whether to commit the revert (`git
   revert --no-edit`) or to revert into the working tree alone (`git

@@ -1109,6 +1109,11 @@ popover.menu button.open-with-row:hover {
 .git-commit-card {
   margin: 6px 10px 4px 10px;
 }
+/* the in-progress bar over the diff (gitoperation.py): a half-finished
+   rebase / merge / cherry-pick / revert with its Continue and Abort */
+.git-operation-bar {
+  margin: 6px 10px 4px 10px;
+}
 .git-commit-card-scroller > scrollbar {
   margin-right: 2px;
 }
