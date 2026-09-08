@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 
 import json
 
@@ -928,3 +928,133 @@ def test_a_reply_after_a_switch_spells_the_id(tmp_path):
         fh.write(json.dumps(_reply_line("claude-sonnet-5")) + "\n")
     assert m.update() is True
     assert m.model() == "claude-sonnet-5"
+
+
+# -- the finish witnesses: turn ends and replies -----------------------------
+
+
+def _turn_end_line(**extra):
+    """The bare record the CLI appends at the end of every completed turn
+    (measured 2026-09-07 on CLI 2.1.263, present since 2.1.226)."""
+    line = {
+        "type": "system",
+        "subtype": "turn_duration",
+        "durationMs": 1318,
+        "messageCount": 2,
+        "timestamp": "2026-09-08T01:03:36.801Z",
+        "isSidechain": False,
+        "isMeta": False,
+        "version": "2.1.263",
+    }
+    line.update(extra)
+    return line
+
+
+def _plain_reply(**extra):
+    line = {
+        "type": "assistant",
+        "message": {"role": "assistant", "model": "claude-sonnet-5",
+                    "content": [{"type": "text", "text": "ok"}]},
+    }
+    line.update(extra)
+    return line
+
+
+def test_stamp_starts_at_zero_and_unloaded(tmp_path):
+    m = TranscriptModel(tmp_path / "nope.jsonl")
+    assert m.stamp == (0, 0)
+    assert m.loaded is False
+    m.update()
+    assert m.loaded is False  # no file to read yet
+
+
+def test_a_turn_end_and_a_reply_advance_the_stamp(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_plain_reply(), _turn_end_line()])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.loaded is True
+    assert m.stamp == (1, 1)
+
+
+def test_the_stamp_advances_incrementally(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_plain_reply()])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.stamp == (0, 1)
+    with p.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_turn_end_line()) + "\n")
+    m.update()
+    assert m.stamp == (1, 1)
+
+
+def test_an_interrupted_turn_still_moves_the_stamp(tmp_path):
+    # Escape writes no turn_duration; the partial reply is the witness.
+    p = tmp_path / "s.jsonl"
+    _write(p, [_plain_reply(), {"type": "user", "message": {"role": "user",
+               "content": "[Request interrupted by user]"}}])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.stamp == (0, 1)
+
+
+def test_sidechain_and_meta_lines_do_not_count(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [
+        _plain_reply(isSidechain=True),
+        _turn_end_line(isSidechain=True),
+        _plain_reply(isMeta=True),
+        _turn_end_line(isMeta=True),
+    ])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.stamp == (0, 0)
+
+
+def test_other_system_records_are_not_turn_ends(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_turn_end_line(subtype="stop_hook_summary"),
+               {"type": "system", "subtype": "away_summary"}])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.stamp == (0, 0)
+
+
+def test_set_path_zeroes_the_stamp(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_plain_reply(), _turn_end_line()])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.stamp == (1, 1)
+    m.set_path(tmp_path / "other.jsonl")
+    assert m.stamp == (0, 0)
+    assert m.loaded is False
+
+
+def test_relocate_keeps_the_stamp(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_plain_reply(), _turn_end_line()])
+    m = TranscriptModel(p)
+    m.update()
+    moved = tmp_path / "moved.jsonl"
+    p.rename(moved)
+    m.relocate(moved)
+    assert m.stamp == (1, 1)
+    assert m.loaded is True
+    with moved.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(_turn_end_line()) + "\n")
+    m.update()
+    assert m.stamp == (2, 1)
+
+
+def test_truncation_zeroes_the_stamp_then_recounts(tmp_path):
+    p = tmp_path / "s.jsonl"
+    _write(p, [_plain_reply(), _turn_end_line(), _plain_reply(), _turn_end_line()])
+    m = TranscriptModel(p)
+    m.update()
+    assert m.stamp == (2, 2)
+    _write(p, [_plain_reply()])  # shorter: rewritten from scratch
+    m.update()
+    assert m.stamp == (0, 1)
+    assert m.loaded is True

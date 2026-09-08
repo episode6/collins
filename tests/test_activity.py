@@ -1,7 +1,10 @@
 from collins.activity import (
+    FINISH,
+    FINISH_DUPLICATE,
     ActivityTracker,
     BackgroundBusyWatch,
     EchoGate,
+    FinishLedger,
     ProgressWatch,
     SpinnerWatch,
 )
@@ -698,3 +701,79 @@ def test_busy_stays_off_for_a_tab_that_never_spoke():
     watch, _clock = make_progress_watch()
     watch.reading(None)
     assert not watch.busy
+
+
+# -- FinishLedger -----------------------------------------------------------
+
+
+def test_ledger_passes_everything_before_it_is_armed():
+    ledger = FinishLedger()
+    assert not ledger.armed
+    assert ledger.decide((0, 0)) == FINISH
+    assert ledger.decide((0, 0)) == FINISH  # and remembers nothing
+    assert not ledger.armed
+
+
+def test_ledger_drops_an_edge_with_an_unchanged_stamp():
+    ledger = FinishLedger()
+    ledger.arm((3, 5))
+    assert ledger.armed
+    assert ledger.decide((3, 5)) == FINISH_DUPLICATE
+
+
+def test_ledger_passes_an_advanced_stamp_once_then_drops():
+    ledger = FinishLedger()
+    ledger.arm((3, 5))
+    assert ledger.decide((4, 6)) == FINISH
+    assert ledger.decide((4, 6)) == FINISH_DUPLICATE
+    assert ledger.decide((4, 6)) == FINISH_DUPLICATE
+
+
+def test_ledger_passes_a_stamp_going_backwards():
+    # A truncated, re-read transcript: "changed" is the safe direction.
+    ledger = FinishLedger()
+    ledger.arm((3, 5))
+    assert ledger.decide((0, 1)) == FINISH
+    assert ledger.decide((0, 1)) == FINISH_DUPLICATE
+
+
+def test_ledger_passes_a_two_turn_advance_once():
+    # The Workflow shape: two transcript turns under one progress hint.
+    ledger = FinishLedger()
+    ledger.arm((3, 5))
+    assert ledger.decide((5, 7)) == FINISH
+    assert ledger.decide((5, 7)) == FINISH_DUPLICATE
+
+
+def test_ledger_replies_alone_advance_the_stamp():
+    # An interrupted turn writes no turn_duration but does write its reply.
+    ledger = FinishLedger()
+    ledger.arm((3, 5))
+    assert ledger.decide((3, 6)) == FINISH
+
+
+def test_ledger_size_growth_only_counts_on_the_final_verdict():
+    ledger = FinishLedger()
+    ledger.arm((3, 5), size=1000)
+    # At the edge: a grown file with the same stamp is a record not yet
+    # ingested — hold, don't count.
+    assert ledger.decide((3, 5), size=1200) == FINISH_DUPLICATE
+    # The window ran out and the parser still saw nothing: growth the parser
+    # doesn't understand is still growth.
+    assert ledger.decide((3, 5), size=1200, final=True) == FINISH
+    assert ledger.decide((3, 5), size=1200, final=True) == FINISH_DUPLICATE
+
+
+def test_ledger_unchanged_size_and_stamp_is_a_duplicate_even_when_final():
+    ledger = FinishLedger()
+    ledger.arm((3, 5), size=1000)
+    assert ledger.decide((3, 5), size=1000, final=True) == FINISH_DUPLICATE
+    assert ledger.decide((3, 5), size=None, final=True) == FINISH_DUPLICATE
+
+
+def test_ledger_a_counted_finish_moves_the_size_baseline():
+    ledger = FinishLedger()
+    ledger.arm((3, 5), size=1000)
+    assert ledger.decide((4, 6), size=1500) == FINISH
+    assert ledger.decide((4, 6), size=1500, final=True) == FINISH_DUPLICATE
+    assert ledger.decide((4, 6), size=1600, final=True) == FINISH

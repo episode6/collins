@@ -38,6 +38,16 @@ downloads of each version, see the
 
 ### v0.1.3 — UNRELEASED
 
+- **A finished run is counted off the transcript.** The CLI repaints part
+  of its idle screen every so often after a turn, and each repaint read as
+  output landed as another finish: the row flagged again, the pull requests
+  re-asked, and with *Announce finished runs* on, another notification and
+  chime minutes after the real one. A finish now counts only when the
+  session's transcript has moved since the last one that counted — the CLI
+  records every turn's end there before it clears its progress report — and
+  an edge that finds it unchanged is held a few seconds for the record to be
+  parsed, then dropped. A standing flag that a repaint's two-second busy
+  blip hid and showed again no longer announces itself either.
 - **Continue or abort a half-finished operation from the git page.** With
   the working tree loaded and a rebase, merge, cherry-pick, revert or
   `git am` stopped, a bar over the diff names it, counts the unmerged

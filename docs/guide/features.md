@@ -703,7 +703,9 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   where the project ships one. Nothing is
   guessed from a quiet terminal: a notification means the agent asked for
   you — unless you turn on *Announce finished runs*, which notifies on
-  every finish too.
+  every finish too. A finish is announced only when the session's own
+  transcript records a turn ending; the CLI's idle repaints, which it
+  draws every so often after a turn, are not finishes and announce nothing.
 - **Bells from other sessions** ring the same way: a terminal bell (`\a`,
   from the agent or from a `make` in a session's panel shell) in a session
   you aren't looking at is a card in Collins, a desktop notification

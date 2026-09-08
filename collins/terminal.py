@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -23,6 +23,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import (  # noqa: E402
+    activity,
     apppicker,
     attachpanel,
     attachrecords,
@@ -1226,6 +1227,11 @@ class TerminalTab(Gtk.Box):
         # an image already on the list that changes nothing about it says
         # nothing.
         "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
+        # Emitted each time a transcript read lands on the main loop (see
+        # _apply_update), so a finish edge the window is holding for the
+        # transcript's word (MainWindow._hold_finish) can be judged the
+        # moment the word arrives rather than when its window runs out.
+        "transcript-updated": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # Emitted when this tab's stashed composer draft changes (str = the
         # draft, "" when it has been taken back or emptied), so the window
         # can save it against the session. See _stash_draft.
@@ -1717,6 +1723,10 @@ class TerminalTab(Gtk.Box):
         self.append(self._build_footer())
 
         self._transcript = TranscriptModel(jsonl_path)
+        # Whether this tab's finish edges are real turns ending, judged off
+        # the transcript above (see activity.FinishLedger); armed by the first
+        # read that lands (_apply_update), asked by the window at each edge.
+        self.finish_ledger = activity.FinishLedger()
 
         # The terminal.* chords — copy, paste, find, newline, zoom — read
         # by hand rather than as GTK shortcuts (see keymap.KeyMatcher).
@@ -4891,6 +4901,28 @@ class TerminalTab(Gtk.Box):
         path = self._transcript.path
         return str(path) if path else None
 
+    def finish_witness(self) -> tuple[tuple[int, int], int | None]:
+        """What the transcript says right now, for the finish ledger: its
+        stamp (turn ends and replies parsed so far) and the file's size on
+        disk (None without a file) — the second witness the ledger's final
+        verdict weighs. A `stat` on the main thread: cheap, and read at the
+        edge itself rather than off the last landing, so growth the parser
+        hasn't seen yet still shows."""
+        size = None
+        path = self._transcript.path
+        if path is not None:
+            try:
+                size = path.stat().st_size
+            except OSError:
+                size = None
+        return self._transcript.stamp, size
+
+    def request_transcript_update(self) -> None:
+        """Re-read the transcript now rather than at the next poll — asked by
+        a finish edge the window is holding for the transcript's word. A read
+        already in flight is enough: its landing is the word."""
+        self._request_update()
+
     def relocate_transcript(self, jsonl_path: str | Path) -> None:
         """Follow this tab's transcript to a new path.
 
@@ -5061,6 +5093,12 @@ class TerminalTab(Gtk.Box):
         """
         self._updating = False
         self._pr_refresh_btn.set_sensitive(True)
+        if not self.finish_ledger.armed and self._transcript.loaded:
+            # The first full read: where finishes are measured from. A tab
+            # whose file never appears (a CLI with transcript saving off, a
+            # fresh spawn before its resolver binds) stays unarmed, and its
+            # edges pass as they always have.
+            self.finish_ledger.arm(*self.finish_witness())
         # Same pane object wherever it lives (in-tab or popped out).
         self._editor.set_agent_files(self._transcript.touched_files())
         self._harvest_attachments()
@@ -5077,6 +5115,7 @@ class TerminalTab(Gtk.Box):
         self._refresh_pr_chips(prs or [])
         if lookup_empty:  # even with PRs still showing: none of them is this branch's
             self._sync_pr_refresh_tooltip(not_found=True)
+        self.emit("transcript-updated")
         return GLib.SOURCE_REMOVE
 
     def _start_transcript_resolver(self, cwd: str | None) -> None:

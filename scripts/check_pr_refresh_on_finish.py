@@ -18,6 +18,13 @@ is stubbed: `prstatus.gh_json` answers a canned ``gh pr view`` (and records
 every call), `prdetail.fetch` records the page's own load, and the CLI the tab
 spawns is a shim that draws an idle prompt and sleeps.
 
+The edge is judged against the transcript first (activity.FinishLedger): a
+finish whose transcript has not moved since the last counted one is the CLI's
+idle repaint, held for FINISH_CONFIRM_S and dropped — no refetch, no unread
+flag, no green row. So every edge here that is meant to count is preceded by
+a ``turn_duration`` record appended to the staged file, the way the CLI ends
+a turn; and one edge is fired with the file untouched to see it dropped.
+
 Run it behind the headless wrapper, or a window opens on the user's screen.
 """
 
@@ -103,6 +110,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import GLib  # noqa: E402
 
 from collins import i18n, prdetail, prstatus, trust  # noqa: E402
+from collins.activity import FINISH_CONFIRM_S  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -180,12 +188,32 @@ tries = 0
 state: dict = {}
 
 
-def finish_edge() -> None:
+def end_a_turn() -> None:
+    """Append the record the CLI writes at the end of every turn, so the
+    next finish edge finds the transcript moved."""
+    with open(f"{_PROJECT}/{SESSION}.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "type": "system", "subtype": "turn_duration", "durationMs": 1200,
+            "messageCount": 2, "timestamp": "2026-08-16T09:02:00Z",
+            "isSidechain": False, "isMeta": False, "sessionId": SESSION,
+        }) + "\n")
+
+
+def finish_edge(*, turn_ended: bool = True) -> None:
     """The tracker's own finish edge for this session — what a turn ending
-    looks like from the window's side."""
+    looks like from the window's side. With *turn_ended* the transcript has
+    recorded a turn end first, as it has by the time a real finish lands;
+    without it the edge is what the CLI's idle repaints produce."""
+    if turn_ended:
+        end_a_turn()
     activity = state["win"]._activity
     activity.mark(SESSION)
     activity.finish(SESSION)
+
+
+def row_unread() -> bool:
+    item = app.store.get_item(SESSION)
+    return bool(item is not None and item.unread)
 
 
 def age_the_throttles() -> None:
@@ -261,6 +289,41 @@ def step_status_refetched() -> bool:
 def step_throttled() -> bool:
     check("a second finish seconds later is throttled", status_fetches() == state["before"],
           f"{state['before']} -> {status_fetches()}")
+    # The gate itself. A finish edge with the transcript untouched since the
+    # last counted one is the CLI repainting its idle screen: it is held for
+    # FINISH_CONFIRM_S while the tab re-reads the file, then dropped —
+    # nothing refetched, no flag, no green row.
+    check("the ledger is armed off the staged transcript", state["tab"].finish_ledger.armed)
+    app.store.set_unread(SESSION, False)
+    age_the_throttles()
+    state["before"] = status_fetches()
+    finish_edge(turn_ended=False)
+    check("an unmoved transcript holds the edge", SESSION in state["win"]._held_finishes)
+    return later(step_repaint_dropped, int(FINISH_CONFIRM_S * 1000) + 1500)
+
+
+def step_repaint_dropped() -> bool:
+    check("a finish with the transcript unchanged refetches nothing",
+          status_fetches() == state["before"], f"{state['before']} -> {status_fetches()}")
+    check("and raises no flag and no green row",
+          not row_unread() and not app.notification_center.is_green(SESSION))
+    check("the held edge was dropped", SESSION not in state["win"]._held_finishes)
+    # And the same edge after the transcript records a turn ending counts:
+    # one refetch, one green.
+    age_the_throttles()
+    state["before"] = status_fetches()
+    finish_edge(turn_ended=True)
+    return later(step_turn_end_counted)
+
+
+def step_turn_end_counted() -> bool:
+    if status_fetches() <= state["before"] and state.setdefault("count_waits", 0) < 20:
+        state["count_waits"] += 1
+        return later(step_turn_end_counted, 500)
+    check("a finish after a recorded turn end refetches once",
+          status_fetches() == state["before"] + 1, f"{state['before']} -> {status_fetches()}")
+    check("and raises the flag and one green row",
+          row_unread() and app.notification_center.is_green(SESSION))
     state["tab"].open_pr_page_url(PR_URL)
     return later(step_page_open)
 
@@ -281,6 +344,11 @@ def step_page_open() -> bool:
 
 
 def step_page_reread() -> bool:
+    # The edge may be confirmed off the transcript's next read rather than
+    # landed on the spot (see _hold_finish), so wait for it — bounded.
+    if not page_loads() and state.setdefault("reread_waits", 0) < 20:
+        state["reread_waits"] += 1
+        return later(step_page_reread, 500)
     check("a finish edge re-reads the open PR page", page_loads() == [PR_URL], page_loads())
     # A detach's parting progress-clear lands here as a finish too, and must
     # spend nothing: the run is being handed on, not completing.

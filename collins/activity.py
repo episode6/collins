@@ -141,6 +141,19 @@ PROGRESS_QUIET_S = IDLE_S
 # itself while the user's eyes are on the row.
 PROGRESS_FINISH_GRACE_S = 3.0
 
+# How long a finish edge the transcript calls a repaint is held before it is
+# dropped, while the tab is asked to re-read its transcript (see FinishLedger
+# and MainWindow._hold_finish). The CLI's turn-end record lands tens of
+# milliseconds before its progress hint clears and three seconds before the
+# finish, but the tab parses the file on a thread and lands on idle, so
+# "unchanged at the edge" can also mean "not ingested yet". A real finish
+# whose record was still in flight is confirmed within the monitor's debounce
+# (a few hundred milliseconds); a repaint's window runs out.
+FINISH_CONFIRM_S = 4.0
+
+FINISH = "finish"
+FINISH_DUPLICATE = "duplicate"
+
 # How often the agent list is asked which background agents are working. It
 # shells out to the CLI (~0.4s of node startup, off the main thread), so the
 # window only runs it while a background agent actually has a tab open — the
@@ -576,6 +589,82 @@ class ProgressWatch:
         """
         self._finished_at = self._clock()
         self._busy = False
+
+
+class FinishLedger:
+    """One tab's "did a turn actually end?" filter, judged off its transcript.
+
+    The CLI repaints part of its idle screen every so often — about 3 s after
+    a turn, then every 30 to 55 s — and the echo gate, armed since the first
+    submit, counts an unprompted repaint as agent output: a two-second pole
+    blip, then a redraw-inferred finish, each one a fresh unread flag, a `gh`
+    refresh and (with *Announce finished runs*) a notification and the sound,
+    minutes after the run ended. Every such extra finish measured
+    (2026-09-07, CLI 2.1.263) had the transcript at exactly the size it had
+    when the real finish landed, so the transcript is the witness: a finish
+    edge counts only if the session's transcript has advanced past where it
+    stood when the last counted finish landed.
+
+    "Advanced" is a `TranscriptModel.stamp` compared, never counted — a
+    Workflow turn is two transcript turns under one progress hint and owes
+    one notification, not two. `arm` takes the stamp of the model's first
+    full read; before that every edge is a finish (a fresh spawn before the
+    resolver binds its transcript, an attach to a background agent whose file
+    is still being read) so today's behaviour is kept rather than a real
+    finish lost. A stamp going backwards (the file truncated and re-read)
+    passes too: "changed" is the safe direction.
+
+    The transcript field is an undocumented CLI internal (rule 4). If the
+    turn-end record vanishes, replies still advance the stamp; if the CLI
+    stops writing the file altogether, the ledger would call every later edge
+    a duplicate — so the file's *size* is a second witness: growth the parser
+    doesn't understand is still growth, and the drop needs both to agree.
+    The size only decides a `final` verdict (the confirmation window ran
+    out): at the edge itself a grown file with an unchanged stamp is more
+    likely a record not yet ingested, and the hold lets the parse land and
+    adopt the stamp — counting it early would leave the parsed stamp ahead
+    of the counted one, and the next repaint would pass as a finish.
+    """
+
+    def __init__(self) -> None:
+        self._counted: tuple[int, int] | None = None  # None: not armed
+        self._size: int | None = None
+
+    @property
+    def armed(self) -> bool:
+        """Whether a transcript has been read and its stamp remembered."""
+        return self._counted is not None
+
+    def arm(self, stamp: tuple[int, int], size: int | None = None) -> None:
+        """The tab's transcript has been read in full for the first time:
+        this is where it stands, and where the next finish is measured from.
+        Idempotent in effect — a later call moves the baseline, which is what
+        `decide` does on a counted finish anyway."""
+        self._counted = tuple(stamp)
+        self._size = size
+
+    def decide(
+        self, stamp: tuple[int, int], size: int | None = None, *, final: bool = False
+    ) -> str:
+        """Judge a finish edge: `FINISH` (and remember *stamp* as the last
+        counted finish) or `FINISH_DUPLICATE` (nothing moved since the last
+        one). Unarmed, every edge is a finish and nothing is remembered.
+
+        *size* is the transcript file's size right now; *final* says the
+        confirmation window has run out, which is when a grown file with an
+        unchanged stamp is promoted to a finish (see the class docstring).
+        """
+        stamp = tuple(stamp)
+        if self._counted is None:
+            return FINISH
+        if stamp == self._counted:
+            grown = final and size is not None and self._size is not None and size > self._size
+            if not grown:
+                return FINISH_DUPLICATE
+        self._counted = stamp
+        if size is not None:
+            self._size = size
+        return FINISH
 
 
 class BackgroundBusyWatch:

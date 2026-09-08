@@ -2070,6 +2070,14 @@ class App(Adw.Application):
         set_green is a no-op when nothing moves, so re-asserting on either is
         free.
 
+        A row coming *back* that way is announced by nobody: the window
+        announces a raised green only while it is raising it for a finish it
+        counted (MainWindow._owing_announcement, checked in its
+        _announce_finished). The CLI's idle repaints blip the pole for a
+        couple of seconds every so often, and a blip's end re-raising a
+        standing flag is not a second finish — the row re-enters the center
+        so the badge and the history keep their meaning, and that is all.
+
         A session the store has no item for is not green: the flag lives on
         the item, so there is nothing left to be on.
 
