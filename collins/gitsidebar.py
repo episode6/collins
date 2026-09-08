@@ -248,15 +248,21 @@ class _FileRow(Gtk.ListBoxRow):
         path.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
         path.set_tooltip_text(file.path)
         box.append(path)
-        counts = Gtk.Label(xalign=1)
-        counts.add_css_class("dim-label")
+        # The counts in the diff view's colours (its file headers use the
+        # same two classes): green for the added lines, red for the removed.
+        counts = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         counts.add_css_class("git-file-counts")
         if file.binary:
-            counts.set_text(_("bin"))
+            binary = Gtk.Label(label=_("bin"))
+            binary.add_css_class("dim-label")
+            counts.append(binary)
         elif file.live and file.additions is not None and file.deletions is not None:
-            counts.set_text(f"+{file.additions} −{file.deletions}")
-        else:
-            counts.set_text("")
+            added = Gtk.Label(label=f"+{file.additions}")
+            added.add_css_class("pr-checks-passed")
+            counts.append(added)
+            removed = Gtk.Label(label=f"−{file.deletions}")
+            removed.add_css_class("pr-checks-failed")
+            counts.append(removed)
         box.append(counts)
         self.set_child(box)
 

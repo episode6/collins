@@ -1133,6 +1133,11 @@ popover.menu button.open-with-row:hover {
 .git-file-counts {
   font-size: 90%;
 }
+/* the files filter: a margin keeps the entry off the paned handle above
+   it and the list below, so the divider stays visible and grabbable */
+.git-files-filter {
+  margin: 6px 6px 4px 6px;
+}
 .git-row-loaded,
 .git-file-selected {
   background-color: alpha(@accent_bg_color, 0.18);
