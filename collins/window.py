@@ -1,16 +1,18 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
 import subprocess
 import threading
 import time
+import weakref
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -52,6 +54,8 @@ from . import (
 from .activity import (
     BACKGROUND_IDLE_S,
     BACKGROUND_POLL_MS,
+    FINISH,
+    FINISH_CONFIRM_S,
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
     PROGRESS_FINISH_GRACE_S,
@@ -398,6 +402,22 @@ class MainWindow(Adw.ApplicationWindow):
         # placeholder → real-row handoff (see _reraise_green): a finish
         # already announced under the placeholder's key, not a new one.
         self._reraised_greens: set[str] = set()
+        # Session (or placeholder) keys whose green is coming up *because a
+        # finish was counted* — or because `notify_user` forced the flag
+        # (_flag_unread) — set for exactly the synchronous set_unread that
+        # raises it (see _owing_announcement). A green that comes back for
+        # any other reason (a busy blip ending, see App._sync_green) finds no
+        # mark and announces nothing; it still re-enters the center, so the
+        # badge and the history keep meaning "waiting for you".
+        self._announce_owed: set[str] = set()
+        # Finish edges the transcript called repaints, held for
+        # FINISH_CONFIRM_S while the tab re-reads its file: session id →
+        # the timeout that drops them (see _hold_finish).
+        self._held_finishes: dict[str, int] = {}
+        # Tabs whose finishes have been logged as passing ungated (no
+        # transcript read yet) — once each, so COLLINS_LOG explains the
+        # difference without repeating itself every turn.
+        self._ungated_logged: weakref.WeakSet = weakref.WeakSet()
         self._placeholder_seq = 0
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
@@ -2479,6 +2499,7 @@ class MainWindow(Adw.ApplicationWindow):
         watch(tab, "editor-pop-out-requested", self._pop_out_editor)
         watch(tab, "bell", self._on_bell)
         watch(tab, "attachments-changed", self._on_tab_attachments_changed)
+        watch(tab, "transcript-updated", self._on_tab_transcript_updated)
         watch(tab, "draft-changed", self._on_tab_draft_changed)
         watch(tab, "new-chat-changed", self._on_new_chat_changed, page)
         watch(tab, "new-chat-send", self._on_new_chat_send, page)
@@ -4020,6 +4041,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_activity_changed(self, session_id: str, busy: bool) -> None:
         log.debug("activity: %s -> %s", session_id, "busy" if busy else "idle")
+        if busy:
+            # A real new turn: a finish held for the transcript's word is
+            # moot, and the new turn's own end will be judged on its own
+            # stamp.
+            self._drop_held_finish(session_id)
         self._sync_working_pole()
         self._notify_tray()  # the item's menu marks a working session
         if self.sidebar.has_placeholder(session_id):
@@ -4047,11 +4073,115 @@ class MainWindow(Adw.ApplicationWindow):
         the tab's business (see TerminalTab.note_run_finished), and a run that
         is only being handed to the background — or whose conversation is
         still going under another of its ids — is skipped here exactly as its
-        flag is below.
+        flag is (see _land_finish).
+
+        Not every edge is a run ending, though. The CLI repaints part of its
+        idle screen every so often, and a repaint read as output lands here
+        as a finish minutes after the real one — so the edge is judged first
+        against the session's transcript (_judge_finish, activity.
+        FinishLedger): only one whose transcript has moved since the last
+        counted finish counts; one that finds it unchanged is held for the
+        transcript's word (_hold_finish) and dropped when none comes.
         """
         if self.sidebar.has_placeholder(session_id):
-            self._set_placeholder_unread(session_id, True)
+            # No bound transcript yet to judge by: the edge passes as it
+            # always has.
+            with self._owing_announcement(session_id):
+                self._set_placeholder_unread(session_id, True)
             return
+        if session_id in self._held_finishes:
+            return  # one held edge per session; a second inside the window is absorbed
+        if self._judge_finish(session_id) == FINISH:
+            self._land_finish(session_id)
+        else:
+            self._hold_finish(session_id)
+
+    def _finish_tab(self, session_id: str) -> TerminalTab | None:
+        """The tab whose transcript judges *session_id*'s finishes, if any."""
+        page = self._page_for(session_id)
+        tab = page.get_child() if page is not None else None
+        return tab if isinstance(tab, TerminalTab) else None
+
+    def _judge_finish(self, session_id: str, *, final: bool = False) -> str:
+        """Ask the session's tab whether its transcript has moved since the
+        last finish that counted (activity.FinishLedger): `FINISH` or
+        `FINISH_DUPLICATE`. A session with no tab passes — a bare row never
+        gets a finish edge anyway; finishes come from tabs — and so does a
+        tab whose transcript hasn't been read yet (a fresh spawn before the
+        resolver binds it, an attach to a live background agent, a CLI with
+        transcript saving off), which keeps today's behaviour rather than
+        losing a real finish."""
+        tab = self._finish_tab(session_id)
+        if tab is None:
+            return FINISH
+        if not tab.finish_ledger.armed:
+            if tab not in self._ungated_logged:
+                self._ungated_logged.add(tab)
+                log.info("activity: %s finishes pass ungated (no transcript read yet)", session_id)
+            return FINISH
+        stamp, size = tab.finish_witness()
+        return tab.finish_ledger.decide(stamp, size, final=final)
+
+    def _hold_finish(self, session_id: str) -> None:
+        """The transcript hasn't moved since the last counted finish — but it
+        is parsed on a thread and lands on idle, so "unchanged at the edge"
+        can also mean "not ingested yet". Ask the tab to re-read it and hold
+        the edge for FINISH_CONFIRM_S: the read landing with the stamp
+        advanced delivers it (_on_tab_transcript_updated); the window running
+        out drops it (_on_hold_expired); the session going busy again
+        meanwhile drops it too (_on_activity_changed)."""
+        log.debug("activity: %s finish held (awaiting transcript)", session_id)
+        tab = self._finish_tab(session_id)
+        if tab is not None:
+            tab.request_transcript_update()
+        self._held_finishes[session_id] = GLib.timeout_add(
+            int(FINISH_CONFIRM_S * 1000), self._on_hold_expired, session_id
+        )
+
+    def _on_hold_expired(self, session_id: str) -> bool:
+        self._held_finishes.pop(session_id, None)
+        if self._finish_tab(session_id) is None:
+            return GLib.SOURCE_REMOVE  # the tab went away under the hold
+        if self._judge_finish(session_id, final=True) == FINISH:
+            log.debug("activity: %s finish confirmed", session_id)
+            self._land_finish(session_id)
+        else:
+            log.debug("activity: %s finish ignored (transcript unchanged)", session_id)
+        return GLib.SOURCE_REMOVE
+
+    def _on_tab_transcript_updated(self, tab: TerminalTab) -> None:
+        """A transcript read landed: any finish held for this tab's word is
+        judged again now, and delivered the moment the stamp has moved."""
+        for session_id in list(self._held_finishes):
+            if self._finish_tab(session_id) is not tab:
+                continue
+            if self._judge_finish(session_id) != FINISH:
+                continue
+            self._drop_held_finish(session_id)
+            log.debug("activity: %s finish confirmed", session_id)
+            self._land_finish(session_id)
+
+    def _drop_held_finish(self, session_id: str) -> None:
+        source = self._held_finishes.pop(session_id, None)
+        if source is not None:
+            GLib.source_remove(source)
+
+    @contextlib.contextmanager
+    def _owing_announcement(self, key: str):
+        """Mark *key*'s green, should it come up inside the block, as owed an
+        announcement (see _announce_finished). Scoped to the block because
+        the raise is synchronous — set_unread emits, the app's listener puts
+        the row up, the announcement runs — and a mark that outlived it would
+        be spent by the next re-raise a busy blip causes."""
+        self._announce_owed.add(key)
+        try:
+            yield
+        finally:
+            self._announce_owed.discard(key)
+
+    def _land_finish(self, session_id: str) -> None:
+        """A finish that counts: refresh the session's pull requests and flag
+        its rows, the way _on_session_finished always has."""
         self._refresh_prs_after_run(session_id)
         for row_id in self.store.rows_representing(session_id):
             # A row whose conversation still runs under another of its ids —
@@ -4070,7 +4200,8 @@ class MainWindow(Adw.ApplicationWindow):
             # finishes are as real as any spawned tab's.
             if self._is_detached(row_id) and self._page_for(row_id) is None:
                 continue
-            self.store.set_unread(row_id, True)
+            with self._owing_announcement(row_id):
+                self.store.set_unread(row_id, True)
 
     def announce_finished(self, session_id: str) -> bool:
         """A synthetic row just came up under *session_id* (App._sync_green
@@ -4106,6 +4237,13 @@ class MainWindow(Adw.ApplicationWindow):
         this one has the tab behind it — never a second card or chime.
         """
         if not self.state.get_setting("announce_finished_runs"):
+            return
+        if key not in self._announce_owed and key not in self._reraised_greens:
+            # The green came back for some other reason than a finish being
+            # counted — a busy blip hid it and the blip ended (App._sync_green
+            # never shows unread *and* working). The finish it stands for was
+            # announced when it was counted; the row re-enters the center so
+            # the badge and the history keep their meaning, and that is all.
             return
         row = self.notify_center.get(notifycenter.green_id(key))
         if row is None:
@@ -4169,11 +4307,13 @@ class MainWindow(Adw.ApplicationWindow):
         if placeholder_id is not None:
             # A placeholder's flag lives in the sidebar, not the store, so the
             # store's unread-changed signal never speaks for it.
-            self._set_placeholder_unread(placeholder_id, True)
+            with self._owing_announcement(placeholder_id):
+                self._set_placeholder_unread(placeholder_id, True)
         session_id = self._session_id_of(page)
         if session_id:
             for row_id in self.store.rows_representing(session_id):
-                self.store.set_unread(row_id, True)
+                with self._owing_announcement(row_id):
+                    self.store.set_unread(row_id, True)
 
     def _clear_unread(self, page: Adw.TabPage) -> None:
         """The user is at this tab (selected it, or typed into it): whatever

@@ -26,6 +26,37 @@ flag one-for-one), `update` (a newer Collins; no session). Focus states from
 `selected`, `elsewhere` (in Collins, another tab), `unfocused` (no Collins
 window active — hidden windows are never active).
 
+**What a finish is.** The tracker's busy→idle edge
+(`MainWindow._on_session_finished`) is not trusted on its own: the CLI
+repaints part of its idle screen ~3 s after a turn and then every 30–55 s,
+the echo gate reads an unprompted repaint as output, and each one landed a
+redraw-inferred finish with the transcript unchanged (measured 2026-09-07).
+So the edge is judged first against the tab's transcript: `TranscriptModel.
+stamp` is `(turns_ended, replies)` — main-chain `system/turn_duration`
+records (the CLI writes one at the end of every completed turn, ~20 ms before
+the progress hint clears; an interrupted turn writes none but its partial
+`assistant` lines count) — and `activity.FinishLedger` on the tab
+(`tab.finish_ledger`, armed by the first transcript read that lands) says
+`FINISH` when the stamp moved since the last counted finish, `FINISH_DUPLICATE`
+when not. Compared, never counted: a Workflow turn is two transcript turns
+under one hint and owes one notification. A duplicate is **held** for
+`FINISH_CONFIRM_S` (4 s) while the tab re-reads the file (`_hold_finish`;
+the tab's `transcript-updated` signal confirms it early, a new busy edge
+drops it, the window running out drops it with `finish ignored (transcript
+unchanged)` in the debug log). The final verdict also takes the file's size
+as a second witness: growth the parser didn't understand still counts, so a
+CLI that stops writing the record can't silence a session. Unarmed tabs
+(fresh spawn before the resolver binds, an attach whose file is still
+loading, transcript saving off) pass every edge, logged once at INFO;
+placeholders and tabless rows pass through. Only a counted finish (or
+`_flag_unread`) *announces*: `_owing_announcement` marks the key for the
+synchronous `set_unread` that raises the green, and `_announce_finished`
+stays silent for a green that merely came back because a busy blip ended.
+`scripts/check_pr_refresh_on_finish.py` drives all of it (its counting edges
+append a `turn_duration` line first; one edge fires with the file untouched);
+`check_notifications.py`'s tab has no transcript path, so its ledger never
+arms and its static-transcript finishes pass.
+
 `delivery(kind, focus, announce_finished_runs)` returns a frozenset of
 `card`, `sound` (beside a card or a desktop notification — GNOME never sounds a Gio.Notification, it has no sound hint to carry),
 `row`, `row-read`, `flag` (sidebar unread), `flash`, `desktop`, `beep`.

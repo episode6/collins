@@ -139,7 +139,12 @@ tabs attached to a background agent the `claude agents --json` busy status
 speaks no progress). Ungated sources are held on fresh spawns until the gate
 arms (`MainWindow._startup_held`). The busy→idle edge is
 `MainWindow._on_session_finished`: it flags unread, refreshes PRs, and is the
-edge any "do this when the session is done" feature should ride. A progress
+edge any "do this when the session is done" feature should ride — but it is
+judged against the tab's transcript first (`activity.FinishLedger` over
+`TranscriptModel.stamp`; the CLI's idle repaints land redraw-inferred edges
+with the transcript unchanged, and those are held, then dropped — see
+`collins-notifications-and-tray`), so ride `_land_finish`'s callers' verdict,
+never the raw tracker edge. A progress
 termprop clear (and a background agent's idle reading) does not land that
 edge at once: the CLI (2.1.261) also clears the hint for a beat between tool
 calls, so `finish(grace_s=PROGRESS_FINISH_GRACE_S)` arms the finish for 3 s

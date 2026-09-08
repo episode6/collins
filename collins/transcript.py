@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-04. Full change history: git log for this file.
+# fork. Last modified: 2026-09-07. Full change history: git log for this file.
 
 """Read what a session is doing by tailing its JSONL transcript.
 
@@ -76,6 +76,10 @@ class TranscriptModel:
         self._pending_switch: tuple[str, str] | None = None
         self._permission_mode: str | None = None  # last mode the CLI recorded
         self._images: dict[str, Attachment] = {}  # images named in the messages
+        # The finish witnesses (see `stamp`): main-chain turn ends and replies.
+        self._turns_ended = 0
+        self._replies = 0
+        self._loaded = False  # the file has been read at least once
         self._offset = 0
         self._buf = b""
 
@@ -89,6 +93,9 @@ class TranscriptModel:
         self._pending_switch = None
         self._permission_mode = None
         self._images = {}
+        self._turns_ended = 0
+        self._replies = 0
+        self._loaded = False
         self._offset = 0
         self._buf = b""
 
@@ -123,6 +130,10 @@ class TranscriptModel:
             self._pending_switch = None
             self._permission_mode = None
             self._images = {}
+            # Zeroed rather than kept: a stamp that goes backwards reads as
+            # "changed" to the finish ledger, the safe direction.
+            self._turns_ended = 0
+            self._replies = 0
             self._offset, self._buf = 0, b""
         if size <= self._offset:
             return False
@@ -133,6 +144,7 @@ class TranscriptModel:
                 self._offset = fh.tell()
         except OSError:
             return False
+        self._loaded = True
 
         self._buf += data
         parts = self._buf.split(b"\n")
@@ -158,6 +170,7 @@ class TranscriptModel:
         mode = entry.get("permissionMode")
         if isinstance(mode, str) and mode:
             self._permission_mode = mode
+        self._count_turns(entry)
         if entry.get("type") == "pr-link":  # bare metadata record, no message
             pr = parse_pr_link(entry)
             if pr is None or pr.url in self._prs:
@@ -184,6 +197,30 @@ class TranscriptModel:
                 if isinstance(path, str) and path.strip() and self._record_touch(path.strip()):
                     changed = True
         return changed
+
+    def _count_turns(self, entry: dict) -> None:
+        """Advance the finish witnesses for a main-chain line.
+
+        The CLI appends a bare ``system`` record with subtype
+        ``turn_duration`` at the end of every completed turn (verified
+        2026-09-07 across CLI 2.1.226 through 2.1.263), tens of
+        milliseconds before it clears its progress hint — so by the time the
+        window calls a turn over, the transcript has already said so. An
+        interrupted turn writes no such record, but its partial ``assistant``
+        lines are there, which is why replies are counted too: the row the
+        user interrupted still flags once. Subagent turns (``isSidechain``)
+        and injected context (``isMeta``) are written into the same file and
+        are nobody's turn ending. Not a "change": nothing drawn reads these;
+        the finish ledger (activity.FinishLedger) does.
+        """
+        if entry.get("isSidechain") or entry.get("isMeta"):
+            return
+        kind = entry.get("type")
+        if kind == "system":
+            if entry.get("subtype") == "turn_duration":
+                self._turns_ended += 1
+        elif kind == "assistant":
+            self._replies += 1
 
     def _record_model(self, entry: dict, message: dict) -> bool:
         """Remember which model wrote this reply. False when it isn't one, or
@@ -332,6 +369,23 @@ class TranscriptModel:
         self._touched.insert(0, path)
         del self._touched[_MAX_TOUCHED:]
         return True
+
+    @property
+    def stamp(self) -> tuple[int, int]:
+        """Where the transcript stands as a witness to turns ending: the
+        count of ``turn_duration`` records and of replies on the main chain
+        (see `_count_turns`). Compared, never counted, by the finish ledger —
+        a Workflow turn is two transcript turns under one progress hint, and
+        an equal stamp is the one thing that says "nothing happened"."""
+        return (self._turns_ended, self._replies)
+
+    @property
+    def loaded(self) -> bool:
+        """Whether the file at `path` has been read at least once — the
+        stamp is meaningless before then (a fresh spawn whose transcript
+        the CLI hasn't written yet). `set_path` takes it back; `relocate`
+        and a truncation keep it, the same file still being tailed."""
+        return self._loaded
 
     def touched_files(self) -> list[str]:
         """Files the agent has written (Edit/Write/NotebookEdit), most recent

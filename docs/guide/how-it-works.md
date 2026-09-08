@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-06. Full change history: git log for this file.
+fork. Last modified: 2026-09-07. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -245,8 +245,16 @@ ours: GNOME only plays a sound for a notification that names one, and the
 `Gio.Notification` Collins sends can't). A message to the tab you're already looking at
 lands in the history as an already-read row and nothing more; a bell from
 the selected tab keeps the compositor's beep. A finished run is a history
-row only, unless *Announce finished runs* is on. Message, bell and update
-rows survive a restart; the finished-run rows don't. The sound itself
+row only, unless *Announce finished runs* is on. A run counts as finished
+only when the session's transcript has moved since the last finish that
+counted — the CLI appends a turn-end record (`turn_duration`) to the JSONL
+at the end of every turn, tens of milliseconds before it clears its
+progress report — so the repaints the CLI draws on an idle screen every so
+often, which look like output, flag nothing and announce nothing. An edge
+that finds the transcript unchanged is held for a few seconds while the
+file is re-read, in case the record is still being parsed, then dropped.
+Message, bell and update rows survive a restart; the finished-run rows
+don't. The sound itself
 plays through GStreamer when its typelibs are installed, and falls back to
 the desktop's beep otherwise.
 
@@ -323,7 +331,7 @@ formats nobody promised would stay put:
 | Session list, titles, status, the footer's model, PR detection, the attachments scan, a spawned sibling's inherited model and permission mode | The JSONL transcript format under `~/.claude/projects/` and its fields (`cwd`, `permissionMode`, `message.model`, `bridge-session`, …) | Rows go blank or misreport; nothing is written, so nothing is lost |
 | Re-attaching to backgrounded sessions | `claude agents --json` and `claude attach` | Opening a detached session resumes a copy instead of reconnecting |
 | Folder trust asked up front | The trust entries the CLI keeps in `~/.claude.json` | The CLI asks its own question at launch, as it would without Collins |
-| Busy / idle detection | The CLI's OSC 9;4 progress reports and the on-screen shape of its prompt | The sidebar's working indicator and the composer's "empty prompt" gate misjudge |
+| Busy / idle detection, finished-run notifications | The CLI's OSC 9;4 progress reports, the on-screen shape of its prompt, and the `turn_duration` record it appends to the transcript at the end of a turn | The sidebar's working indicator and the composer's "empty prompt" gate misjudge; a finish is still counted whenever the transcript file grows, so at worst the idle repaints announce again |
 | Model switching, prompts sent from PR chips | The CLI's `/model` command and the layout of its input box | A switch or a sent prompt lands as typed text instead of taking effect |
 
 ## Architecture
