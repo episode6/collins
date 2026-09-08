@@ -63,12 +63,29 @@ nothing checks that the notes themselves are complete — before finalizing,
 list the PRs merged since the last release (`gh pr list --state merged
 --search "merged:>YYYY-MM-DD"`) and check each one is reflected in all four.
 
+## Docs and translations first
+
+Before cutting anything, make sure `main` is already fresh — every cut so
+far has found drift here, and catching up inside the version-bump PRs makes
+them large and leaves the release branch needing cherry-picks:
+
+1. List the PRs merged since the last release (`gh pr list --state merged
+   --search "merged:>YYYY-MM-DD"`).
+2. Check each is reflected in the README feature list, `docs/guide/*.md`,
+   and the UNRELEASED section of `docs/releases.md`.
+3. Regenerate `po/collins.pot` and bring every language in `po/generate.py`
+   to full coverage (recipe in the `collins-preferences-keybindings-i18n`
+   skill), then `python3 po/generate.py`.
+4. If anything was stale, land it as **its own PR against `main`** and wait
+   for it to merge. Cut the branch only after that — never in parallel.
+
 ## Cut new Release Branch
 
-1. Ensure the `main` branch is green (every CI job, e2e included).
-2. `<VERSION>` = the current `version` in `pyproject.toml` on `main`.
-3. `git checkout -b release/v<VERSION>`
-4. Push/track the empty branch: `git push -u origin release/v<VERSION>`
+1. The docs/translations refresh above has merged (or nothing needed it).
+2. Ensure the `main` branch is green (every CI job, e2e included).
+3. `<VERSION>` = the current `version` in `pyproject.toml` on `main`.
+4. `git checkout -b release/v<VERSION>`
+5. Push/track the empty branch: `git push -u origin release/v<VERSION>`
 
 CI (e2e included) runs on pushes to `release/**`, so the branch stays
 verified while it hardens.
