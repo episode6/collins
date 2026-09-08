@@ -4,7 +4,8 @@
 The PR page renders bodies through mdblocks (markdown-it-py) and mdwidgets:
 headings as sized labels, lists as glyph-plus-content rows with task-list
 glyphs, quotes behind a bar, rules as separators, tables as grids of cell
-labels in a sideways-only scroller (capped, with a link to the rest), code
+labels in a sideways-only scroller (capped, with a link to the rest; a cell
+of pictures a picture scaled to its column), code
 blocks as read-only GtkSource views highlighted for the fence's language
 and wearing the page's style scheme, GitHub references (#123,
 owner/repo#123, @user, a commit's hex) and relative links as links into
@@ -31,6 +32,7 @@ import re
 import sys
 import tempfile
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 E2E = tempfile.mkdtemp(prefix="collins-prblocks-")
@@ -51,9 +53,10 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
-from collins import i18n, mdblocks, mdwidgets, prdetail, prview  # noqa: E402
+from collins import i18n, mdblocks, mdwidgets, pictures, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
 from collins.editor import GtkSource  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
@@ -845,7 +848,63 @@ def step_code_cap() -> bool:
         (link.get_text(), link.get_label()) if link else None,
     )
     check("…the copy still the whole fence", code.text == content)
+    # A table of pictures: the screenshot skill's before/after pair, one
+    # <img> per cell, and one wider than the picture cap beside it. The
+    # pictures are staged into the fetch cache, so no download runs.
+    pngs = {}
+    for name, rgb in (("before", 0xCC3333FF), ("after", 0x33AA33FF)):
+        pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 800, 500)
+        pixbuf.fill(rgb)
+        pngs[name] = f"{E2E}/{name}.png"
+        pixbuf.savev(pngs[name], "png", [], [])
+        pictures._files[f"https://x.example/{name}.png"] = Path(pngs[name])
+    cell = "![i](https://x.example/before.png)"
+    wide = "| a | b | c | d |\n|---|---|---|---|\n" + "|" + f" {cell} |" * 4
+    return land(replace(STAGED["detail"], body=IMAGE_TABLE + "\n\n" + wide), step_image_table)
+
+
+def step_image_table() -> bool:
+    page = state["page"]
+    full = description_card(page)
+    grids = findall(full, lambda w: isinstance(w, Gtk.Grid))
+    check("the image table and the wide one render as grids", len(grids) == 2, len(grids))
+    if len(grids) != 2:
+        return done()
+    grid, wide = grids
+    shots = findall(grid, lambda w: isinstance(w, pictures.BoundedPicture))
+    check("the before/after cells are pictures, not links", len(shots) == 2, len(shots))
+    cells = findall(grid, lambda w: has_class(w, "pr-md-image-cell"))
+    check("…in cells wearing the table's own padding class",
+          len(cells) == 2 and all(has_class(c, "pr-md-td") for c in cells))
+    scroller = grid.get_parent().get_parent()
+    width = scroller.get_width()
+    hadj = scroller.get_hadjustment()
+    widths = [s.get_width() for s in shots]
+    check(
+        "…each picture scaled to its column: no wider than asked, both fitting the panel side by side",
+        len(widths) == 2 and all(0 < w <= 300 for w in widths) and abs(widths[0] - widths[1]) <= 1
+        and sum(widths) <= width,
+        (widths, width),
+    )
+    check(
+        "…the grid filling the panel rather than scrolling sideways",
+        grid.get_width() == width and round(hadj.get_upper()) == round(hadj.get_page_size()),
+        (grid.get_width(), width, hadj.get_upper()),
+    )
+    check("…and the header labels still labels", [c.get_text() for c in labels(grid)] == ["Before", "After"],
+          [c.get_text() for c in labels(grid)])
+    check("a table wider than the picture cap keeps its images as alt-text links",
+          not findall(wide, lambda w: isinstance(w, pictures.BoundedPicture))
+          and [c.get_text() for c in labels(wide)][4:] == ["i"] * 4,
+          [c.get_text() for c in labels(wide)])
     return done()
+
+
+IMAGE_TABLE = (
+    "| Before | After |\n| --- | --- |\n"
+    '| <img src="https://x.example/before.png" width="300" alt="before" /> '
+    '| <img src="https://x.example/after.png" width="300" alt="after" /> |'
+)
 
 
 def done() -> bool:

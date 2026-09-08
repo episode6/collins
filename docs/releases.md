@@ -46,6 +46,14 @@ downloads of each version, see the
   follows the repository — an operation started in the terminal shows
   within a tick, a resolution re-words the hint — and a refused continue
   toasts git's own words.
+- **Screenshots in a PR body's table show as pictures.** A table cell
+  that is nothing but images — the before/after pair most PR descriptions
+  carry, one `<img>` per column — rendered as an alt-text link, since the
+  grid took labels alone. Such a cell is now the picture, and a table
+  holding one fits the panel's width instead of scrolling sideways: the
+  pictures shrink to share it, never wider than their `width=` asks, so
+  the pair sits side by side however narrow the panel. A table wider than
+  three columns, or a cell of more than three images, keeps the links.
 - **Revert a commit from the commits list.** A commit row's right-click
   menu gains *Revert…*, which asks whether to commit the revert (`git
   revert --no-edit`) or to revert into the working tree alone (`git

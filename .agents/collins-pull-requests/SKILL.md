@@ -206,7 +206,27 @@ page body never scrolls sideways; `mdblocks.cap_table` squares the rows to
 the header and trims to `TABLE_MAX_ROWS` (50) × `TABLE_MAX_COLUMNS` (8),
 and what it cut (plus what the widget budget stopped — a row spends one
 leaf) is a dim "N more rows on GitHub" link to `page_url`
-(`mdwidgets._link_label`).
+(`mdwidgets._link_label`). **A cell that is nothing but images is an
+`mdblocks.ImageCell`** (`images`, plus the `markup` of its alt-text
+anchors, what `cell_markup` answers and what a preview cut or a page
+without pictures shows): the folder's `_cell` makes one under the same
+`_only_images` rule an `ImageRow` paragraph uses, only in a table of at
+most `TABLE_IMAGE_MAX_COLUMNS` (3) columns, for at most
+`TABLE_IMAGE_MAX_PER_CELL` (3) images, and only within the body's
+`MAX_BODY_IMAGES` budget — past any of those the cell is its anchors, as
+every image in a cell was before. `mdwidgets._table` takes the page's
+`image_row` builder and puts the slot it returns in a `.pr-md-image-cell`
+box wearing `.pr-md-td`; a table with one (`mdblocks.table_has_images`)
+is a **fit** table: the grid is `halign FILL`, the viewport keeps its
+default `hscroll-policy` MINIMUM so the grid takes the panel's width (the
+`BoundedPicture`s' minimum is 0 and they scale to their columns, text
+cells wrap), and `_TableScroller(fit=True)` measures the grid's height at
+the width the parent offers rather than the grid's natural width — the
+scroller answers `HEIGHT_FOR_WIDTH` so the parent column offers one. A
+picture never grows past its `<img width=>` or `pictures.MAX_HEIGHT`, so a
+wide panel leaves a before/after pair at its asked size. Measured
+headless: a 500 px window draws a 300-wide pair at 238 px each, a 1000 px
+one at 300 each.
 
 A `CodeBlock` is `mdwidgets.CodeBlockView`, a `Gtk.Overlay` holding a
 read-only `GtkSource.View` (`.view`, `.pr-md-code`) in its own
