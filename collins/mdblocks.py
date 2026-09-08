@@ -64,6 +64,13 @@ ALERT_KINDS = ("note", "tip", "important", "warning", "caution")
 # labels a grid builds, which is layout the main loop pays for.
 TABLE_MAX_ROWS = 50
 TABLE_MAX_COLUMNS = 8
+# A cell that is nothing but images draws them as pictures scaled to its
+# column (`ImageCell`) — but only in a table narrow enough that the
+# columns share the panel's width readably, and only for a cell holding
+# few enough of them; past either cap the images degrade to their alt-text
+# anchors, as every image in a cell once did.
+TABLE_IMAGE_MAX_COLUMNS = 3
+TABLE_IMAGE_MAX_PER_CELL = 3
 # A <summary> is one label's text; past this it is cut with an ellipsis.
 SUMMARY_MAX = 300
 # GitHub's username alphabet (it also bans leading/trailing/double hyphens,
@@ -144,15 +151,41 @@ class CodeBlock:
 
 
 @dataclass(frozen=True)
+class ImageCell:
+    """A table cell that is nothing but images (a before/after pair's
+    halves): drawn as pictures scaled to fit the cell's column, `markup`
+    the alt-text anchors it degrades to wherever a picture can't go (a
+    preview cut, a page without pictures)."""
+
+    images: tuple[BodyImage, ...]
+    markup: str
+
+
+Cell = str | ImageCell
+
+
+@dataclass(frozen=True)
 class Table:
-    """Cells are inline Pango markup; `aligns` per column is ``left``,
-    ``center``, ``right`` or None. Cells are inline-only, as GitHub's are:
-    an image in a cell degrades to its alt-text anchor."""
+    """Cells are inline Pango markup — or an `ImageCell` for a cell that is
+    only images, in a table of at most `TABLE_IMAGE_MAX_COLUMNS` columns;
+    `aligns` per column is ``left``, ``center``, ``right`` or None. Every
+    other image in a cell degrades to its alt-text anchor, as GitHub's
+    inline-only cells would have it."""
 
     aligns: tuple[str | None, ...]
-    header: tuple[str, ...]
-    rows: tuple[tuple[str, ...], ...]
+    header: tuple[Cell, ...]
+    rows: tuple[tuple[Cell, ...], ...]
     source: str
+
+
+def cell_markup(cell: Cell) -> str:
+    """*cell* as inline Pango markup — an `ImageCell`'s anchors."""
+    return cell.markup if isinstance(cell, ImageCell) else cell
+
+
+def table_has_images(table: Table) -> bool:
+    """Whether any cell of *table* draws pictures."""
+    return any(isinstance(cell, ImageCell) for row in (table.header, *table.rows) for cell in row)
 
 
 @dataclass(frozen=True)
@@ -293,7 +326,8 @@ def line_cost(block: Block, image_lines: int = 4) -> int:
     if isinstance(block, CodeBlock):
         return min(block.text.count("\n") + 1, 8)
     if isinstance(block, Table):
-        return min(len(block.rows) + 1, 6)
+        pictured = sum(1 for row in block.rows if any(isinstance(c, ImageCell) for c in row))
+        return min(len(block.rows) - pictured + 1, 6) + pictured * image_lines
     if isinstance(block, Quote):
         return sum(line_cost(child, image_lines) for child in block.children) or 1
     if isinstance(block, ListBlock):
@@ -328,8 +362,8 @@ def cut_block(block: Block, chars: int | None, lines: int | None) -> Block | Non
     if isinstance(block, Table):
         if lines is not None and lines <= 1:
             return None
-        costs = [(sum(len(cell) for cell in row), 1) for row in block.rows]
-        head_chars = sum(len(cell) for cell in block.header)
+        costs = [(sum(len(cell_markup(cell)) for cell in row), 1) for row in block.rows]
+        head_chars = sum(len(cell_markup(cell)) for cell in block.header)
         chars = None if chars is None else chars - head_chars
         kept = _prefix(costs, chars, None if lines is None else lines - 1)
         if not 0 < kept < len(block.rows):
@@ -547,10 +581,13 @@ class _Folder:
 
     def _table(self, tokens: list, source: str) -> Table:
         aligns: list[str | None] = []
-        header: list[str] = []
-        rows: list[tuple[str, ...]] = []
-        row: list[str] | None = None
+        header: list[Cell] = []
+        rows: list[tuple[Cell, ...]] = []
+        row: list[Cell] | None = None
         in_head = False
+        # The header row's cells say how wide the table is — before any
+        # cell is folded, since whether one may draw pictures depends on it.
+        pictures = self._images and sum(1 for t in tokens if t.type == "th_open") <= TABLE_IMAGE_MAX_COLUMNS
         for token in tokens:
             kind = token.type
             if kind == "thead_open":
@@ -567,7 +604,7 @@ class _Folder:
                 if kind == "th_open":
                     aligns.append(_align(token))
             elif kind == "inline" and row is not None:
-                cell = self._inline(token.children or [])
+                cell = self._cell(token.children or [], pictures)
                 if in_head:
                     header.append(cell)
                 else:
@@ -575,6 +612,28 @@ class _Folder:
         if not aligns:
             aligns = [None] * len(header)
         return Table(tuple(aligns), tuple(header), tuple(rows), source)
+
+    def _cell(self, children: list, pictures: bool) -> Cell:
+        """One table cell: inline markup, or an `ImageCell` when *pictures*
+        may be drawn and the cell is nothing but images — at most
+        `TABLE_IMAGE_MAX_PER_CELL`, and only those the body's image budget
+        still admits; a cell any of that leaves out is the anchors, whole
+        (a cell half pictures, half links would read as two cells)."""
+        markup = self._inline(children)
+        if not pictures or not _only_images(children):
+            return markup
+        images: list[BodyImage] = []
+        for token in children:
+            if token.type in ("text", "softbreak", "link_open", "link_close"):
+                continue
+            image = _image_of(token)
+            if image is None:
+                return markup
+            images.append(image)
+        if not images or len(images) > TABLE_IMAGE_MAX_PER_CELL or len(images) > self._image_budget:
+            return markup
+        self._image_budget -= len(images)
+        return ImageCell(tuple(images), markup)
 
     def _html_block(
         self, tokens: list, i: int, depth: int, close: int | None

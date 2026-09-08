@@ -178,7 +178,10 @@ Enter opens, Esc closes.
   aligned as the delimiter row asks, cells selectable — that scroll
   sideways within their own band rather than widening the page; past 50
   rows or 8 columns, that much shows and a link leads to the rest on
-  GitHub. **Code** is a read-only source view highlighted for the fence's
+  GitHub. A cell that is nothing but images (a before/after pair, one
+  screenshot per column) shows the pictures, scaled to share the panel's
+  width; a table wider than three columns, or a cell of more than three
+  pictures, keeps them as alt-text links. **Code** is a read-only source view highlighted for the fence's
   language (`python`, `bash`, `json`, `diff`, `rust`… and any other name
   GtkSourceView knows), wearing the editor's style scheme like the Files
   view's diffs, a long line scrolling sideways within the block; a

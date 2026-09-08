@@ -145,7 +145,7 @@ def build_one(
     if isinstance(block, mdblocks.Quote):
         return _quote(block, budget, image_row, depth, page_url, scheme)
     if isinstance(block, mdblocks.Table):
-        return _table(block, budget, page_url)
+        return _table(block, budget, page_url, image_row)
     if isinstance(block, mdblocks.CodeBlock):
         budget.take()
         return code_view(block, scheme, page_url)
@@ -471,7 +471,12 @@ def _quote(
     return column
 
 
-def _table(block: mdblocks.Table, budget: Budget, page_url: str = "") -> Gtk.Widget:
+def _table(
+    block: mdblocks.Table,
+    budget: Budget,
+    page_url: str = "",
+    image_row: Callable[[tuple], Gtk.Widget] | None = None,
+) -> Gtk.Widget:
     """A grid of cell labels — the header row bold, each column's text
     aligned as the delimiter row asked — inside a scroller that scrolls
     sideways only and takes its natural height (the pattern the Files
@@ -481,19 +486,26 @@ def _table(block: mdblocks.Table, budget: Budget, page_url: str = "") -> Gtk.Wid
     budget, which each row spends one leaf of (the columns are capped at
     eight, a constant factor, the way a list item's glyph rides along
     with its label) — are a dim link to the rest on GitHub, under the
-    grid. Cells are inline-only markup (mdblocks degrades an image in one
-    to its alt-text anchor), each wrapping past `_CELL_WRAP_CHARS` so one
-    long cell can't make the grid a mile wide."""
+    grid. Cells are inline-only markup, each wrapping past
+    `_CELL_WRAP_CHARS` so one long cell can't make the grid a mile wide —
+    except an `mdblocks.ImageCell`, which is the page's own image slot
+    (*image_row*, the builder every `ImageRow` goes through); a table
+    holding one **fits the panel's width** instead of scrolling: its
+    pictures measure height-for-width and shrink to their columns, and
+    its text cells wrap, so a before/after pair sits side by side however
+    narrow the panel (`_TableScroller(fit=True)`). Without *image_row* an
+    image cell is its anchors."""
     shown, more_rows, more_columns = mdblocks.cap_table(block)
+    fit = image_row is not None and mdblocks.table_has_images(shown)
     grid = Gtk.Grid(column_spacing=0, row_spacing=0)
     grid.add_css_class("pr-md-table")
-    grid.set_halign(Gtk.Align.START)
+    grid.set_halign(Gtk.Align.FILL if fit else Gtk.Align.START)
     budget.take()
     for column, cell in enumerate(shown.header):
         # Bold comes from `.pr-md-th` in app.py's CSS — the one place.
-        label = _cell(cell, shown.aligns[column])
-        label.add_css_class("pr-md-th")
-        grid.attach(label, column, 0, 1, 1)
+        widget = _cell_widget(cell, shown.aligns[column], image_row)
+        widget.add_css_class("pr-md-th")
+        grid.attach(widget, column, 0, 1, 1)
     for index, row in enumerate(shown.rows):
         if not budget.take():
             # The budget bounds rows too, not only the caps: what is left
@@ -501,17 +513,22 @@ def _table(block: mdblocks.Table, budget: Budget, page_url: str = "") -> Gtk.Wid
             more_rows += len(shown.rows) - index
             break
         for column, cell in enumerate(row):
-            label = _cell(cell, shown.aligns[column])
-            label.add_css_class("pr-md-td")
-            grid.attach(label, column, index + 1, 1, 1)
-    scroller = _TableScroller(child=grid, hexpand=True)
+            widget = _cell_widget(cell, shown.aligns[column], image_row)
+            widget.add_css_class("pr-md-td")
+            grid.attach(widget, column, index + 1, 1, 1)
+    scroller = _TableScroller(child=grid, hexpand=True, fit=fit)
     scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
     scroller.set_propagate_natural_height(True)
     # The viewport gives its child its *minimum* width by default, which
     # for wrapping labels is a character or two: the grid would squeeze
     # every column to a sliver and never scroll. Natural policy starts the
-    # scrolling where the grid's natural width overruns the panel's.
-    scroller.get_child().set_hscroll_policy(Gtk.ScrollablePolicy.NATURAL)
+    # scrolling where the grid's natural width overruns the panel's. A
+    # table of pictures keeps the default: its pictures' minimum width is
+    # zero and their natural the full screenshot, and the panel's width is
+    # what they should scale to — the grid fills it and scrolls only past
+    # the words' own minimum.
+    if not fit:
+        scroller.get_child().set_hscroll_policy(Gtk.ScrollablePolicy.NATURAL)
     scroller.add_css_class("pr-md-table-scroller")
     if not more_rows and not more_columns:
         return scroller
@@ -521,20 +538,54 @@ def _table(block: mdblocks.Table, budget: Budget, page_url: str = "") -> Gtk.Wid
     return box
 
 
+def _cell_widget(
+    cell: mdblocks.Cell, align: str | None, image_row: Callable[[tuple], Gtk.Widget] | None
+) -> Gtk.Widget:
+    """The widget for one cell: a label, or for an `ImageCell` with a
+    builder to hand it to, the page's image slot in a box that takes the
+    column's width (the pictures inside shrink to it) — wearing
+    `.pr-md-image-cell` beside the cell class the caller adds, so the
+    table's padding applies and a probe can tell it from a label."""
+    if isinstance(cell, mdblocks.ImageCell) and image_row is not None:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, hexpand=True)
+        box.add_css_class("pr-md-image-cell")
+        box.set_halign(Gtk.Align.FILL)
+        box.append(image_row(cell.images))
+        return box
+    return _cell(mdblocks.cell_markup(cell), align)
+
+
 class _TableScroller(Gtk.ScrolledWindow):
-    """The table's scroller, measured as tall as its grid is at the grid's
-    natural width. A Gtk.ScrolledWindow asks its child for a height at
-    width -1, which a height-for-width grid of wrapping labels answers
-    with its height at its *minimum* width — every cell wrapped a word
-    per line, a two-row table four thousand pixels tall. The grid is
-    allocated its natural width whatever the panel's (halign START inside
-    a viewport that scrolls where that overruns), so the height at that
-    width is the height it will draw."""
+    """The table's scroller, measured as tall as its grid is at the width
+    the grid will draw at. A Gtk.ScrolledWindow asks its child for a
+    height at width -1, which a height-for-width grid of wrapping labels
+    answers with its height at its *minimum* width — every cell wrapped a
+    word per line, a two-row table four thousand pixels tall. A text
+    table's grid is allocated its natural width whatever the panel's
+    (halign START inside a viewport that scrolls where that overruns), so
+    the height at that width is the height it will draw. A *fit* table
+    (one with pictures in it) is allocated the panel's width instead — the
+    width the parent measures this scroller for, floored at the grid's
+    minimum — and its pictures are as tall as that width makes them."""
+
+    def __init__(self, fit: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._fit = fit
+
+    def do_get_request_mode(self) -> Gtk.SizeRequestMode:
+        # Height-for-width, so the parent column hands `do_measure` the
+        # width it will allocate; a scrolled window's own answer is its
+        # child's, which for a grid of pictures is the same, but a grid of
+        # labels alone can answer constant-size and the fit table needs
+        # the width either way.
+        return Gtk.SizeRequestMode.HEIGHT_FOR_WIDTH
 
     def do_measure(self, orientation: Gtk.Orientation, for_size: int) -> tuple[int, int, int, int]:
         grid = self.get_child().get_child() if self.get_child() is not None else None
         if orientation == Gtk.Orientation.VERTICAL and grid is not None:
-            _, width, _, _ = grid.measure(Gtk.Orientation.HORIZONTAL, -1)
+            floor, width, _, _ = grid.measure(Gtk.Orientation.HORIZONTAL, -1)
+            if self._fit and for_size >= 0:
+                width = max(floor, for_size)
             minimum, natural, _, _ = grid.measure(Gtk.Orientation.VERTICAL, width)
             return minimum, natural, -1, -1
         # Chaining up hands back whatever the C vfunc left in its baseline

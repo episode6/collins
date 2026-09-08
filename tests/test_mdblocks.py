@@ -18,6 +18,7 @@ from collins.mdblocks import (
     CodeBlock,
     Details,
     Heading,
+    ImageCell,
     ImageRow,
     ListBlock,
     ListItem,
@@ -557,15 +558,85 @@ def test_table_rows_are_squared_to_the_header():
     assert table.rows == (("1", "", ""), ("1", "2", "3"))
 
 
-def test_table_cells_are_inline_only():
+def test_table_image_cell_is_pictures_with_its_anchors_behind():
     (table,) = parse_blocks("| a |\n|---|\n| ![alt](https://x.example/i.png) |")
-    assert table.rows == (('<a href="https://x.example/i.png">alt</a>',),)
+    (cell,) = table.rows[0]
+    assert cell == ImageCell(
+        (BodyImage(url="https://x.example/i.png", alt="alt"),),
+        '<a href="https://x.example/i.png">alt</a>',
+    )
+    assert mdblocks.cell_markup(cell) == '<a href="https://x.example/i.png">alt</a>'
+    assert mdblocks.table_has_images(table)
     blocks = parse_blocks("| a |\n|---|\n| ![p](https://x.example/i.png) |\n")
     assert not any(isinstance(b, ImageRow) for b in blocks)
+    # An <img> tag, the way the screenshot tables are written, with its width.
+    (html,) = parse_blocks(
+        "| Before | After |\n|---|---|\n"
+        '| <img src="https://x.example/b.png" width="300" alt="b"> '
+        '| <img src="https://x.example/a.png" width="300" alt="a"> |'
+    )
+    assert html.header == ("Before", "After")
+    assert [c.images for c in html.rows[0]] == [
+        (BodyImage(url="https://x.example/b.png", alt="b", width=300),),
+        (BodyImage(url="https://x.example/a.png", alt="a", width=300),),
+    ]
+    # A linked image: the picture, the link dropped as an image row's is.
+    (linked,) = parse_blocks("| a |\n|---|\n| [![alt](https://x.example/i.png)](https://x.example/) |")
+    assert linked.rows[0][0].images == (BodyImage(url="https://x.example/i.png", alt="alt"),)
+    # Two images on one cell: one cell, both pictures.
+    (pair,) = parse_blocks("| a |\n|---|\n| ![1](https://x.example/1.png) ![2](https://x.example/2.png) |")
+    assert [i.alt for i in pair.rows[0][0].images] == ["1", "2"]
+
+
+def test_table_cell_with_words_beside_an_image_stays_inline():
     (html,) = parse_blocks('| a |\n|---|\n| <b>x</b> & <img src="https://x.example/i.png" alt="pic"> |')
-    assert html.rows == (('&lt;b&gt;x&lt;/b&gt; &amp; <a href="https://x.example/i.png">pic</a>',),)
+    assert html.rows == (
+        ('&lt;b&gt;x&lt;/b&gt; &amp; <a href="https://x.example/i.png">pic</a>',),
+    )
+    assert not mdblocks.table_has_images(html)
     (piped,) = parse_blocks("| a |\n|---|\n| x \\| y |")
     assert piped.rows == (("x | y",),)
+    # An image whose source isn't fetchable is its escaped text, no cell of pictures.
+    (rel,) = parse_blocks("| a |\n|---|\n| ![alt](docs/i.png) |")
+    assert rel.rows == (("alt",),)
+
+
+def test_table_images_degrade_past_the_caps():
+    cell = "![i](https://x.example/i.png)"
+    anchor = '<a href="https://x.example/i.png">i</a>'
+
+    def table_of(columns: int) -> mdblocks.Table:
+        head = "|" + " h |" * columns
+        rule = "|" + "---|" * columns
+        (table,) = parse_blocks(f"{head}\n{rule}\n|{(' ' + cell + ' |') * columns}")
+        return table
+
+    wide = table_of(mdblocks.TABLE_IMAGE_MAX_COLUMNS + 1)
+    assert wide.rows == ((anchor,) * (mdblocks.TABLE_IMAGE_MAX_COLUMNS + 1),)
+    narrow = table_of(mdblocks.TABLE_IMAGE_MAX_COLUMNS)
+    assert all(isinstance(c, ImageCell) for c in narrow.rows[0])
+    crowd = " ".join([cell] * (mdblocks.TABLE_IMAGE_MAX_PER_CELL + 1))
+    (crowded,) = parse_blocks(f"| a |\n|---|\n| {crowd} |")
+    assert crowded.rows == ((" ".join([anchor] * (mdblocks.TABLE_IMAGE_MAX_PER_CELL + 1)),),)
+    # The body's image budget counts a cell's pictures: past it, anchors.
+    rows = "\n".join(f"| {cell} |" for _ in range(MAX_BODY_IMAGES + 1))
+    (budgeted,) = parse_blocks(f"| a |\n|---|\n{rows}")
+    kinds = [type(row[0]) for row in budgeted.rows]
+    assert kinds == [ImageCell] * MAX_BODY_IMAGES + [str]
+    # Without pictures at all (the setting), every cell is its anchors.
+    (plain,) = parse_blocks(f"| a |\n|---|\n| {cell} |", images=False)
+    assert plain.rows == ((anchor,),)
+
+
+def test_table_costs_count_image_cells():
+    cell = "![i](https://x.example/i.png)"
+    (table,) = parse_blocks(f"| a | b |\n|---|---|\n| {cell} | {cell} |\n| x | y |\n| x | y |")
+    assert mdblocks.line_cost(table) == 3 + 4
+    assert mdblocks.line_cost(table, image_lines=2) == 3 + 2
+    cut = mdblocks.cut_block(table, None, 1 + 1)
+    assert cut is not None and cut.rows == table.rows[:1]
+    shown, more_rows, more_columns = mdblocks.cap_table(table)
+    assert shown == table
 
 
 def test_table_header_only_and_nested():
