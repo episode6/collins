@@ -1466,11 +1466,15 @@ class _HunkSection(Gtk.Box):
         ):
             self._build_body()  # the rows no longer line up (they must): draw afresh
 
-    def _layout_rows(self, hunk: diffmodel.Hunk) -> list[list[_Row]]:
+    def _layout_rows(
+        self, hunk: diffmodel.Hunk, split: Sequence[diffmodel.SplitRow] | None = None
+    ) -> list[list[_Row]]:
         """The rows each view of the current layout draws for *hunk*: the
-        old and the new side's in split, the one list in stack."""
+        old and the new side's in split (over *split*, the hunk's
+        `diffmodel.split_rows`, computed here when not handed in), the
+        one list in stack."""
         if self._options.split:
-            rows = diffmodel.split_rows(hunk)
+            rows = diffmodel.split_rows(hunk) if split is None else split
             line_index = {id(line): i for i, line in enumerate(hunk.lines)}
             old_rows = [
                 _Row(r.old.kind, r.old.text, r.old.old, None, line_index.get(id(r.old)))
@@ -1499,7 +1503,7 @@ class _HunkSection(Gtk.Box):
         emphasis = diffmodel.word_emphasis(hunk) if self._options.word_diff else []
         if self._options.split:
             rows = diffmodel.split_rows(hunk)
-            old_rows, new_rows = self._layout_rows(hunk)
+            old_rows, new_rows = self._layout_rows(hunk, rows)
             # Emphasis speaks in hunk line indexes; the buffers in row indexes.
             old_index = {id(r.old): i for i, r in enumerate(rows) if r.old is not None}
             new_index = {id(r.new): i for i, r in enumerate(rows) if r.new is not None}
@@ -2167,10 +2171,10 @@ class _FileSection(Gtk.Box):
         # the items list yields one section per file.hunks entry, in order
         # — or `]`, `z`, reveal and the sidebar would keep speaking the old
         # indexes, and the gutters the old numbers (`rebase` renumbers).
+        built = set(plan.built)
         for section, hunk in zip(self.hunks, file.hunks, strict=True):
-            if section in plan.built:
-                continue
-            section.rebase(file, hunk)
+            if section not in built:
+                section.rebase(file, hunk)
         for gap in self.gaps:  # a kept gap likewise: its file is this read's
             gap.file = file
         self.sync_actions()

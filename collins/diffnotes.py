@@ -139,6 +139,20 @@ class Anchor:
         return diffmodel.stable_key(self.file, self.hunk)
 
 
+class _Keys:
+    """The stable keys of the files a batch lands on, computed once per
+    file (`Anchor.key` alone walks the file's hunks for every mark)."""
+
+    def __init__(self) -> None:
+        self._by_path: dict[str, tuple[str, ...]] = {}
+
+    def of(self, anchor: Anchor) -> str:
+        keys = self._by_path.get(anchor.file.path)
+        if keys is None:
+            keys = self._by_path[anchor.file.path] = diffmodel.stable_keys(anchor.file)
+        return keys[anchor.hunk_index]
+
+
 # -- text ---------------------------------------------------------------------
 
 
@@ -292,6 +306,7 @@ class MarkStore:
             rationale = bound_text(spec.rationale) or None
             resolved.append((anchor, summary, rationale, _author(spec.author)))
         added: list[Note] = []
+        keys = _Keys()
         for anchor, summary, rationale, author in resolved:
             note = Note(
                 self._mint("n"),
@@ -302,7 +317,7 @@ class MarkStore:
                 summary,
                 rationale,
                 author,
-                anchor.key,
+                keys.of(anchor),
                 anchor.line_index,
             )
             self._notes[note.id] = note
@@ -340,6 +355,7 @@ class MarkStore:
                 )
             resolved.append((anchor, start, end, tone))
         added: list[Highlight] = []
+        keys = _Keys()
         for anchor, start, end, tone in resolved:
             mark = Highlight(
                 self._mint("h"),
@@ -349,7 +365,7 @@ class MarkStore:
                 start,
                 end,
                 tone,
-                anchor.key,
+                keys.of(anchor),
                 anchor.line_index,
             )
             self._highlights[mark.id] = mark
