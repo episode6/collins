@@ -244,7 +244,15 @@ imports `gitpage`; the page feeds it and listens:
   plus `unpushed_shas`, landed behind a generation; group ids are
   `current`, `stack:<name>`, `default`, and `_pages` is keyed by them),
   `refresh_files(files, loaded, untracked, status=)` (the page calls it on
-  every read: the status comes with the read, so no extra `git status`),
+  every read: the status comes with the read, so no extra `git status`;
+  `gitmodel.files_sections` lifts the status's `U` rows out of the
+  unstaged side into `FileSections.conflicts`, drawn as a **CONFLICTS**
+  heading — `.git-section-conflicts`, warning-coloured — above UNSTAGED
+  whenever it is non-empty: on the unstaged load the diff's own live row
+  per clash, a status row standing in for one the read didn't carry, on
+  the staged load status rows; all are unstaged-side rows, keyed
+  `("unstaged", path)`, so `click_section("unstaged")` finds the CONFLICTS
+  heading first while one is up),
   `set_selection(path, hunk)` (the view's `current-changed`),
   `set_options` (page size → re-page; untracked → redraw),
   `set_filter_text` / `focus_filter` / `filter_text`.
@@ -345,7 +353,14 @@ a `numstat_argv` pre-pass whose over-cap paths are excluded
 (`:(exclude,literal)`) and stood in as `KIND_TOO_LARGE` placeholders,
 `git status` for the working-tree loads, and the untracked files
 synthesized one `untracked_diff_argv` (`diff --no-index -- /dev/null
-path`, exit 1 is the answer) at a time, at most `MAX_UNTRACKED_DIFFS`;
+path`, exit 1 is the answer) at a time, at most `MAX_UNTRACKED_DIFFS`,
+**and on the unstaged load the status's unmerged (`U`) paths read again
+as one `conflict_diff_argv` (`diff --ours -- paths`, at most
+`MAX_CONFLICT_DIFFS`) with `diffmodel.parse(..., conflict=True)`** — a
+bare `git diff` writes an unmerged path as a `diff --cc` stanza, which
+the parser leaves out, and `--staged` lists it as `* Unmerged path` with
+no patch, so without this read a stopped rebase's clashes had no diff at
+all; `File.conflict` is what the view and the planners key on;
 `file_patch` (the re-read every mutation starts from), `file_at(cwd, ref,
 path)` → bytes (`side_ref` names the ref per load and side: `INDEX_REF`
 `""` is `:path`, `None` is the disk), `merge_base`, `apply_patch(cwd,
@@ -704,7 +719,14 @@ change leaving `page_state` alone, re-parent vs. unparent, and a page
 restored into a commit / a commit git no longer has), and
 `check_outside_a_repo`. Kinds to expect: an untracked file's badge is
 `new`, an untracked *picture* reads `binary` with the badge `new ·
-binary`, a pure rename has no hunk, a mode change no hunk and no counts.
+binary`, a pure rename has no hunk, a mode change no hunk and no counts;
+an unmerged file (`File.conflict`) is badged `conflict`, its marker rows
+wear the `git-conflict` tag (`conflict_rows(path, hunk)` probes them —
+the in-progress part of `check_sidebar` reads the three markers off the
+stopped revert), its hunk `actions` box is hidden and its file header
+offers *Stage file* alone (`gitpatch` refuses every partial plan and the
+discard on it with "is unmerged", and `MutationRequest.needs_patch` is
+False, since the file's bare `git diff` is a `diff --cc`).
 `check_native`'s window is an **`Adw.Window`** (`set_content`), so the
 page's real `Adw.AlertDialog` is reachable through
 `window.get_visible_dialog()` — presented over a bare `Gtk.Window`, an

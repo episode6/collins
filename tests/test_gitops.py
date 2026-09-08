@@ -980,6 +980,73 @@ def test_read_diff_without_untracked_and_on_the_other_loads(monkeypatch):
         assert _calls_of(chosen, "status") == []
 
 
+CONFLICT_STATUS = (
+    "1 .M N... 100644 100644 100644 5626abf f719edf f.txt\0"
+    "u UU N... 100644 100644 100644 100644 de98044 af70335 f794161 c.txt\0"
+    "u UU N... 100644 100644 100644 100644 de98044 af70335 f794161 d.txt\0"
+)
+PATCH_C = (
+    "* Unmerged path c.txt\n"
+    "diff --git a/c.txt b/c.txt\n"
+    "index af70335..14b52fc 100644\n"
+    "--- a/c.txt\n"
+    "+++ b/c.txt\n"
+    "@@ -1,3 +1,7 @@\n"
+    " a\n"
+    "+<<<<<<< HEAD\n"
+    " MAIN\n"
+    "+=======\n"
+    "+SIDE\n"
+    "+>>>>>>> 40991be (side)\n"
+    " c\n"
+)
+
+
+def test_read_diff_reads_the_unmerged_paths_as_diff_ours_on_the_unstaged_load(monkeypatch):
+    """A half-finished operation's `U` rows: the bare diff writes them as
+    `diff --cc` (which the parser leaves out), so the unstaged load reads
+    them again as one `diff --ours` and flags each File conflict; one
+    over the byte cap on disk stands in as a placeholder without a read;
+    the staged load reads none (they are unstaged-side rows)."""
+    sizes = {"/repo/c.txt": 4, "/repo/d.txt": diffmodel.TOO_LARGE_BYTES + 1}
+    monkeypatch.setattr(gitops, "_file_size", lambda path: sizes.get(path))
+
+    def diff(argv, _stdin):
+        if "--numstat" in argv:
+            return _BytesResult(0, b"1\t1\tf.txt\x00")
+        if "--ours" in argv:
+            assert argv[-1] == ":(literal)c.txt" and ":(literal)d.txt" not in argv, argv
+            return _BytesResult(0, PATCH_C.encode())
+        return _BytesResult(0, PATCH_F.encode())
+
+    run = bytes_runner({"diff": diff, "status": ok(CONFLICT_STATUS)})
+    read = gitops.read_diff("/repo", "unstaged", run=run)
+    assert read.ok
+    assert [(f.path, f.kind, f.conflict) for f in read.files] == [
+        ("c.txt", diffmodel.KIND_CHANGE, True),
+        ("d.txt", diffmodel.KIND_TOO_LARGE, True),
+        ("f.txt", diffmodel.KIND_CHANGE, False),
+    ]
+    assert read.files[0].additions == 4
+    ours = [argv for argv in _calls_of(run, "diff") if "--ours" in argv]
+    assert ours == [gitops.conflict_diff_argv(["c.txt"])]
+    assert ours[0] == [*PREFIX, "diff", *DIFF, "--ours", "--", ":(literal)c.txt"]
+    # The staged side: no `--ours` read; a failed one drops the rows, not the read.
+    run = bytes_runner({"diff": diff, "status": ok(CONFLICT_STATUS)})
+    read = gitops.read_diff("/repo", "staged", run=run)
+    assert read.ok and [f.path for f in read.files] == ["f.txt"]
+    assert not any("--ours" in argv for argv in _calls_of(run, "diff"))
+
+    def refused(argv, _stdin):
+        if "--ours" in argv:
+            return _BytesResult(128, b"", b"fatal: bad\n")
+        return diff(argv, _stdin)
+
+    run = bytes_runner({"diff": refused, "status": ok(CONFLICT_STATUS)})
+    read = gitops.read_diff("/repo", "unstaged", run=run)
+    assert read.ok and [f.path for f in read.files] == ["d.txt", "f.txt"]
+
+
 def test_read_diff_reports_a_failed_read_and_survives_a_failed_status():
     run = bytes_runner({"diff": lambda argv, _s: _BytesResult(128, b"", b"fatal: not a git repository\n")})
     read = gitops.read_diff("/repo", "unstaged", run=run)

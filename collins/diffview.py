@@ -461,6 +461,14 @@ class _HunkView:
             diffmodel.ADD: buffer.create_tag("git-emph-add", background=palette.added_emphasis_bg),
             diffmodel.DEL: buffer.create_tag("git-emph-del", background=palette.removed_emphasis_bg),
         }
+        # A conflict marker row of an unmerged file (set_rows with
+        # conflict on): made after the row tags, so it outranks them.
+        self._conflict_tag = buffer.create_tag(
+            "git-conflict",
+            paragraph_background=palette.conflict_bg,
+            foreground=palette.conflict_fg,
+            weight=Pango.Weight.BOLD,
+        )
         gutter = view.get_gutter(Gtk.TextWindowType.LEFT)
         position = 0
         self._numbers: list[_NumberRenderer] = []
@@ -525,10 +533,16 @@ class _HunkView:
     # -- content --
 
     def set_rows(
-        self, rows: Sequence[_Row], emphasis: dict[int, tuple[tuple[int, int], ...]] | None = None
+        self,
+        rows: Sequence[_Row],
+        emphasis: dict[int, tuple[tuple[int, int], ...]] | None = None,
+        conflict: bool = False,
     ) -> None:
         """Fill the buffer with *rows* and tag them; *emphasis* maps a row
-        index to the character spans of its text to emphasise.
+        index to the character spans of its text to emphasise. With
+        *conflict* (an unmerged file's hunk) every conflict marker row
+        (diffmodel.is_conflict_marker) wears the conflict tag over its
+        own.
 
         The rows kept are what the buffer shows: a patch line's text put
         through diffmodel.display_text (a trailing CR dropped, a lone CR
@@ -551,6 +565,9 @@ class _HunkView:
             if tag is not None:
                 start, end = self._paragraph(index)
                 buffer.apply_tag(tag, start, end)
+            if conflict and row.kind != PAD and diffmodel.is_conflict_marker(row.text):
+                start, end = self._paragraph(index)
+                buffer.apply_tag(self._conflict_tag, start, end)
             spans = emphasis.get(index) if emphasis else None
             emphasis_tag = self._emphasis.get(row.kind)
             if spans and emphasis_tag is not None:
@@ -589,6 +606,8 @@ class _HunkView:
         self._tags[PAD].set_property("paragraph-background", palette.padding_bg)
         self._emphasis[diffmodel.ADD].set_property("background", palette.added_emphasis_bg)
         self._emphasis[diffmodel.DEL].set_property("background", palette.removed_emphasis_bg)
+        self._conflict_tag.set_property("paragraph-background", palette.conflict_bg)
+        self._conflict_tag.set_property("foreground", palette.conflict_fg)
         if self._sign is not None:
             self._sign.set_palette(palette)
 
@@ -1388,7 +1407,10 @@ class _HunkSection(Gtk.Box):
         if discard is not None:
             self.discard_button.set_text(discard)
             self.discard_button.set_tooltip_text(keybindings.with_hint(discard, "git.discard"))
-        self.actions.set_visible(self._owner.loaded is not None)
+        # An unmerged file takes no partial patch (gitpatch refuses the
+        # keys too): its hunks carry no buttons, the file header's Stage
+        # file marks it resolved.
+        self.actions.set_visible(self._owner.loaded is not None and not self.file.conflict)
 
     def button(self, discard: bool) -> _ActionButton:
         return self.discard_button if discard else self.primary_button
@@ -1459,8 +1481,8 @@ class _HunkSection(Gtk.Box):
                     new_emphasis[new_index[id(line)]] = entry.spans
             old_view = self._make_view((diffmodel.OLD,))
             new_view = self._make_view((diffmodel.NEW,))
-            old_view.set_rows(old_rows, old_emphasis)
-            new_view.set_rows(new_rows, new_emphasis)
+            old_view.set_rows(old_rows, old_emphasis, conflict=self.file.conflict)
+            new_view.set_rows(new_rows, new_emphasis, conflict=self.file.conflict)
             self.views = [old_view, new_view]
             pane = _SplitPane(old_view.scroller, new_view.scroller, self._align_rows)
             pane.add_css_class("git-hunk-split")
@@ -1472,7 +1494,7 @@ class _HunkSection(Gtk.Box):
             ]
             by_line = {entry.line_index: entry.spans for entry in emphasis}
             view = self._make_view((diffmodel.OLD, diffmodel.NEW))
-            view.set_rows(rows, by_line)
+            view.set_rows(rows, by_line, conflict=self.file.conflict)
             self.views = [view]
             self._body = view.scroller
         # Between the header and the note cards (a rebuilt body must not
@@ -2031,6 +2053,10 @@ class _FileSection(Gtk.Box):
     @staticmethod
     def _badge_text(file: diffmodel.File) -> str:
         words: list[str] = []
+        if file.conflict:
+            # An unmerged path of a half-finished operation: the diff is
+            # the working tree, markers and all, against our side.
+            words.append(_("conflict"))
         if file.untracked or file.kind == diffmodel.KIND_NEW:
             # An untracked file reads `new` too (the files list's `?` row
             # already says it is not in the index).
@@ -2124,6 +2150,9 @@ class _FileSection(Gtk.Box):
         """Word the file buttons for the load (gitpatch.action_labels), and
         every hunk's after them."""
         primary, discard = gitpatch.action_labels(self._owner.loaded, gitpatch.FILE)
+        if self.file.conflict:
+            # `git checkout -- path` refuses an unmerged path: no discard.
+            discard = None
         self.primary_button.set_text(primary)
         self.primary_button.set_tooltip_text(keybindings.with_hint(primary, "git.stage-file"))
         self.discard_button.set_visible(discard is not None)
@@ -3237,6 +3266,22 @@ class DiffView(Gtk.Box):
         """The hunk headers of *path*'s section, in order."""
         section = self._section_for(path, diffmodel.NEW)
         return [h.hunk.header for h in section.hunks] if section is not None else []
+
+    def conflict_rows(self, path: str, hunk: int) -> list[str]:
+        """Probe: the text of every row of hunk *hunk* of *path* wearing
+        the conflict marker tag, in row order across the hunk's views."""
+        section = self._section_for(path, diffmodel.NEW)
+        target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
+        if target is None:
+            return []
+        rows: list[str] = []
+        for view in target.views:
+            tag = view.buffer.get_tag_table().lookup("git-conflict")
+            for index, row in enumerate(view.rows):
+                _ok, start = view.buffer.get_iter_at_line(index)
+                if tag is not None and start.has_tag(tag):
+                    rows.append(row.text)
+        return rows
 
     def hunk_serials(self, path: str) -> list[int]:
         """The serial of each hunk section of *path*, in order — a number

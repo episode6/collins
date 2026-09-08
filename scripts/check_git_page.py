@@ -474,6 +474,21 @@ def check_sidebar(repo: str) -> None:
     check("naming the revert", bar.operation is not None and bar.operation.kind == "revert" and bar.title_text() == "Revert in progress", bar.title_text())
     check("and counting the unmerged file", bar.hint_text().startswith("Unmerged files: 1."), bar.hint_text())
     check("with its buttons live", bar.buttons_sensitive())
+    # The clash is listed under CONFLICTS the moment the operation stops,
+    # whichever side is loaded; on the unstaged load its diff is the
+    # working tree against our side, the markers painted, the file
+    # header offering Stage file alone.
+    files = sidebar.file_rows()
+    check("the clash is listed under CONFLICTS at once", [r.path for r in files.conflicts] == ["a.txt"] and all(r.path != "a.txt" for r in files.unstaged), files)
+    if page.loaded != "unstaged":
+        sidebar.click_file_row("a.txt", "unstaged")
+    landed = wait_for(lambda: page.settled() and page.loaded == "unstaged" and ("a.txt", "change", True) in page.diff_view.file_rows())
+    check("and its diff shows on the unstaged load", landed, (page.loaded, page.diff_view.file_rows()))
+    check("as a live row with counts", landed and sidebar.file_rows().conflicts[0].live and sidebar.file_rows().conflicts[0].additions, sidebar.file_rows().conflicts)
+    check("wearing the conflict badge", any(p == "a.txt" and "conflict" in b for p, b, _ in page.diff_view.badge_rows()), page.diff_view.badge_rows())
+    markers = page.diff_view.conflict_rows("a.txt", 0)
+    check("with the three markers painted", [m.split(" ")[0] for m in markers] == ["<<<<<<<", "=======", ">>>>>>>"], markers)
+    check("and the file header offering Stage file alone", page.diff_view.file_action_labels("a.txt") == ("Stage file", None), page.diff_view.file_action_labels("a.txt"))
     # Abort… asks first (the resolutions made since are lost); confirmed,
     # the tree goes back and the bar goes down with the reload.
     asked: list[tuple[str, str]] = []

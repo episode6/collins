@@ -982,11 +982,20 @@ class GitSidebar(Gtk.Box):
         self._file_widgets = {}
         sections = self._sections
         if sections.mode == "split":
-            for side, title, rows in (
-                ("unstaged", _("UNSTAGED"), sections.unstaged),
-                ("staged", _("STAGED"), sections.staged),
-            ):
-                self._file_list.append(_SectionRow(title, len(rows), side))
+            # The unmerged paths of a half-finished operation first, as a
+            # section of their own: they are unstaged-side rows (a click
+            # reveals on the unstaged load, reloads there from the staged
+            # one), so their key is the unstaged side's.
+            listed: list[tuple[str, str, tuple[FileRow, ...], bool]] = []
+            if sections.conflicts:
+                listed.append(("unstaged", _("CONFLICTS"), sections.conflicts, True))
+            listed.append(("unstaged", _("UNSTAGED"), sections.unstaged, False))
+            listed.append(("staged", _("STAGED"), sections.staged, False))
+            for side, title, rows, conflicts in listed:
+                heading = _SectionRow(title, len(rows), side)
+                if conflicts:
+                    heading.add_css_class("git-section-conflicts")
+                self._file_list.append(heading)
                 for file in rows:
                     widget = _FileRow(file, side)
                     self._file_list.append(widget)

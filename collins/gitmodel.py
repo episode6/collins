@@ -184,13 +184,17 @@ class FileRow:
 class FileSections:
     """What the files list draws: one flat list (*flat*, any load but the
     working tree), or the two working-tree sides with *live* naming the one
-    the page has loaded ("unstaged" | "staged")."""
+    the page has loaded ("unstaged" | "staged") — and, while an operation
+    is half-finished, its unmerged paths in *conflicts* of their own,
+    above the two sides (they are unstaged-side rows: live on the unstaged
+    load, a reload there from the staged one)."""
 
     mode: str
     live: str | None = None
     unstaged: tuple[FileRow, ...] = ()
     staged: tuple[FileRow, ...] = ()
     flat: tuple[FileRow, ...] = ()
+    conflicts: tuple[FileRow, ...] = ()
 
 
 # -- parsers ------------------------------------------------------------------------
@@ -523,21 +527,38 @@ def files_sections(
     no status — is one flat list of the diff's files. With *untracked* off
     the status's `?` rows are dropped: the diff read already leaves
     untracked files out, and a `?` row on the other side would be a file
-    a click could never load."""
+    a click could never load. The status's unmerged (`U`) rows leave the
+    unstaged side for *conflicts*: on the unstaged load the diff's own
+    row for each (gitops read them as `diff --ours`), or a status row for
+    one the read didn't carry, so the list names every clash the moment
+    the operation stops."""
     files = [file for file in session_files if _path_ok(file.path)][:MAX_ROWS]
     if loaded not in ("unstaged", "staged") or status is None:
         return FileSections(mode="flat", flat=tuple(_live_row(file, {}) for file in files))
     if not untracked:
         status = without_untracked(status)
+    unmerged = tuple(row for row in status.unstaged if row.code == "U")
+    unmerged_paths = {row.path for row in unmerged}
     side = status.unstaged if loaded == "unstaged" else status.staged
     codes = {row.path: row for row in side}
     live = tuple(_live_row(file, codes) for file in files)
     if loaded == "unstaged":
+        conflicts = tuple(row for row in live if row.path in unmerged_paths)
+        carried = {row.path for row in conflicts}
+        conflicts += tuple(_status_row(row) for row in unmerged if row.path not in carried)
         return FileSections(
-            mode="split", live="unstaged", unstaged=live, staged=tuple(map(_status_row, status.staged))
+            mode="split",
+            live="unstaged",
+            unstaged=tuple(row for row in live if row.path not in unmerged_paths),
+            staged=tuple(map(_status_row, status.staged)),
+            conflicts=conflicts,
         )
     return FileSections(
-        mode="split", live="staged", unstaged=tuple(map(_status_row, status.unstaged)), staged=live
+        mode="split",
+        live="staged",
+        unstaged=tuple(_status_row(row) for row in status.unstaged if row.code != "U"),
+        staged=live,
+        conflicts=tuple(map(_status_row, unmerged)),
     )
 
 

@@ -97,6 +97,17 @@ _WORD_TOKENS = re.compile(r"\w+|\s+|[^\w\s]", re.UNICODE)
 _HEX_COLOR = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 _ESCAPES = {"\\": "\\", '"': '"', "a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v"}
 _OCTAL = frozenset("01234567")
+# A conflict marker line as git writes it: seven `<`, `=`, `>` or `|`
+# (diff3's base marker) at the start, then the end of the line or a space
+# and a label (`<<<<<<< HEAD`, `>>>>>>> a1b2c3d (subject)`).
+_CONFLICT_MARKER = re.compile(r"^(<{7}|={7}|>{7}|\|{7})( |$)")
+# How far a conflict marker row's background is pushed toward the
+# palette's conflict tone.
+CONFLICT_BLEND = 0.30
+# The conflict tone itself, one orange for every scheme (no scheme names
+# one): the marker rows' foreground, and what their background blends
+# toward.
+CONFLICT_TONE = "#e5a50a"
 
 
 @dataclass(frozen=True)
@@ -142,7 +153,10 @@ class File:
     know yet, synthesized by gitops from `diff --no-index`. *patch* is the
     whole stanza verbatim — what `git apply` and gitpatch's writers read —
     and *patch_hash* its digest, the key marks and highlights survive a
-    reload by.
+    reload by. *conflict* marks an unmerged path of a half-finished merge,
+    rebase, cherry-pick or revert, synthesized by gitops from `diff --ours`
+    (the working tree, conflict markers and all, against our side): the
+    view paints the marker rows and offers no partial staging on it.
     """
 
     path: str
@@ -157,6 +171,14 @@ class File:
     deletions: int
     patch: str
     patch_hash: str
+    conflict: bool = False
+
+
+def is_conflict_marker(text: object) -> bool:
+    """Whether a patch line's *text* (without its sign) is one of git's
+    conflict markers — `<<<<<<<`, `=======`, `>>>>>>>` or diff3's
+    `|||||||` — alone or followed by a space and a label."""
+    return isinstance(text, str) and _CONFLICT_MARKER.match(text) is not None
 
 
 @dataclass(frozen=True)
@@ -206,12 +228,17 @@ class DiffPalette:
     padding_bg: str
     added_fg: str
     removed_fg: str
+    # A conflict marker row of an unmerged file: its background (the text
+    # background pushed CONFLICT_BLEND toward CONFLICT_TONE) and the
+    # marker's own foreground.
+    conflict_bg: str = CONFLICT_TONE
+    conflict_fg: str = CONFLICT_TONE
 
 
 # -- parsing the stream -------------------------------------------------------
 
 
-def parse(text: object, untracked: bool = False) -> list[File]:
+def parse(text: object, untracked: bool = False, conflict: bool = False) -> list[File]:
     """A `git diff` / `git show --format=` stream as Files, in git's order.
 
     Stanzas start at `diff --git`; anything before the first (a commit
@@ -223,7 +250,9 @@ def parse(text: object, untracked: bool = False) -> list[File]:
     stanza's hunks (the text so far is kept, the raw stanza always is). A
     stream over MAX_PATCH_CHARS loses its last, possibly cut, stanza and
     everything after; never more than MAX_FILES come back. *untracked*
-    marks every file the way gitops does for a synthesized new-file diff.
+    marks every file the way gitops does for a synthesized new-file diff;
+    *conflict* marks every file as an unmerged path (gitops's `diff
+    --ours` read of a half-finished operation's clashes).
     """
     if not isinstance(text, str) or not text:
         return []
@@ -245,7 +274,7 @@ def parse(text: object, untracked: bool = False) -> list[File]:
     for lines in stanzas:
         if not lines[0].startswith("diff --git "):
             continue
-        parsed = _parse_stanza(lines, untracked)
+        parsed = _parse_stanza(lines, untracked, conflict)
         if parsed is not None:
             files.append(parsed)
             if len(files) >= MAX_FILES:
@@ -270,7 +299,7 @@ class _Header:
         self.body_start = 0
 
 
-def _parse_stanza(lines: list[str], untracked: bool) -> File | None:
+def _parse_stanza(lines: list[str], untracked: bool, conflict: bool = False) -> File | None:
     header = _parse_header(lines)
     hunks, additions, deletions = _parse_hunks(lines, header.body_start)
     path, previous_path = _resolve_paths(header)
@@ -299,6 +328,7 @@ def _parse_stanza(lines: list[str], untracked: bool) -> File | None:
         deletions=deletions,
         patch=patch,
         patch_hash=_digest(patch),
+        conflict=conflict,
     )
 
 
@@ -796,6 +826,8 @@ def palette(text_bg: object, added_fg: object, removed_fg: object, dark: bool = 
         padding_bg=_hex(blend(bg, toward, PADDING_BLEND)),
         added_fg=_hex(added),
         removed_fg=_hex(removed),
+        conflict_bg=_hex(blend(bg, _rgb(CONFLICT_TONE) or (229, 165, 10), CONFLICT_BLEND)),
+        conflict_fg=CONFLICT_TONE,
     )
 
 

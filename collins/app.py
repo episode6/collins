@@ -1128,6 +1128,11 @@ popover.menu button.open-with-row:hover {
 .git-sidebar .git-section {
   padding: 6px 8px 2px 8px;
 }
+/* The CONFLICTS heading of a half-finished operation's unmerged paths. */
+.git-sidebar .git-section-conflicts label {
+  color: @warning_color;
+  opacity: 1;
+}
 .git-commit-abbrev,
 .git-file-code,
 .git-file-counts,
