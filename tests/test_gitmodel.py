@@ -515,3 +515,33 @@ def test_fixup_options_and_autosquash_command():
 def test_status_codes_are_the_letters_the_files_list_colours(code):
     assert code in "MADRTCU?"
     assert len(gitmodel.STATUS_CODES) == 8
+
+
+def test_unmerged_count_counts_the_status_u_rows():
+    assert gitmodel.unmerged_count(None) == 0
+    status = gitmodel.Status(
+        unstaged=(gitmodel.StatusRow("a", "U"), gitmodel.StatusRow("b", "M"), gitmodel.StatusRow("c", "U")),
+        staged=(gitmodel.StatusRow("d", "A"),),
+    )
+    assert gitmodel.unmerged_count(status) == 2
+
+
+def test_operation_words_name_the_kind_and_its_commands():
+    assert gitmodel.operation_title("rebase") == "Rebase in progress"
+    assert gitmodel.operation_title("am") == "git am in progress"
+    assert gitmodel.operation_title("nosuch") == "Operation in progress"
+    with_conflicts = gitmodel.operation_hint("rebase", 2)
+    assert "Unmerged files: 2" in with_conflicts
+    assert "`git rebase --continue`" in with_conflicts and "`git rebase --abort`" in with_conflicts
+    clean = gitmodel.operation_hint("cherry-pick", 0)
+    assert "Nothing is left unmerged" in clean and "`git cherry-pick --continue`" in clean
+    assert gitmodel.abort_heading("merge") == "Abort the merge?"
+    body = gitmodel.abort_body("merge", "merge", "/repo")
+    assert body.startswith("`git merge --abort` in /repo") and "lost" in body
+    assert gitmodel.abort_done("rebase") == "Aborted the rebase — the tree is back where it stood"
+    assert gitmodel.continue_done("rebase", None) == "Finished the rebase"
+    stopped = gitmodel.continue_done("rebase", "rebase")
+    assert stopped == "Continued the rebase — it stopped again on the next step"
+    assert gitmodel.operation_failed("rebase", "error: unmerged", False) == "error: unmerged"
+    assert gitmodel.operation_failed("rebase", "", False) == "`git rebase --continue` failed"
+    assert gitmodel.operation_failed("merge", "", True) == "`git merge --abort` failed"

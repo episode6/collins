@@ -408,13 +408,49 @@ def base_ref(cwd: str | Path | None, base: str | None) -> str | None:
     return resolved[1] if resolved else None
 
 
+# The files and directories git leaves in the git directory while an
+# operation waits on the user: a rebase (either backend; rebase-apply is
+# `git am`'s too), a merge, a cherry-pick or a revert, and the sequencer
+# a multi-commit cherry-pick / revert keeps between its steps. What
+# operation_markers reports and gitops.in_progress reads.
+OPERATION_MARKERS: tuple[str, ...] = (
+    "rebase-merge",
+    "rebase-apply",
+    "MERGE_HEAD",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "sequencer",
+)
+
+
+def operation_markers(cwd: str | Path | None) -> tuple[str, ...]:
+    """Which of OPERATION_MARKERS exist in the repository's own git
+    directory (a worktree's, where git keeps them) — empty outside a
+    repository or with nothing half-finished. Stats only, no git: part
+    of tree_signature, so the page notices `git merge --quit` and its
+    kin, which forget an operation without moving the index or HEAD."""
+    git_dir = _git_dir(cwd)
+    if git_dir is None:
+        return ()
+    found = []
+    for marker in OPERATION_MARKERS:
+        try:
+            if (git_dir / marker).exists():
+                found.append(marker)
+        except OSError:
+            continue
+    return tuple(found)
+
+
 def tree_signature(cwd: str | Path | None, base: str | None) -> tuple | None:
-    """(index_mtime(cwd), head_sha(cwd), base_ref(cwd, base)) — what the git
-    page compares on the footer's 2 s poll; any element moving means the
-    loaded diff is stale. None outside a repository."""
+    """(index_mtime(cwd), head_sha(cwd), base_ref(cwd, base),
+    operation_markers(cwd)) — what the git page compares on the footer's
+    2 s poll; any element moving means the loaded diff is stale (the
+    markers: an operation started, finished, aborted or quit, which the
+    page's in-progress bar follows). None outside a repository."""
     if _git_dir(cwd) is None:
         return None
-    return index_mtime(cwd), head_sha(cwd), base_ref(cwd, base)
+    return index_mtime(cwd), head_sha(cwd), base_ref(cwd, base), operation_markers(cwd)
 
 
 def git_dir(cwd: str | Path | None) -> Path | None:

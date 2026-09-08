@@ -175,6 +175,52 @@ state across the rebuild like `PrViewPage._description_card`. Probes:
 (empty while folded), `message`. `check_git_page.py`'s sidebar check
 gives its `second` commit `COMMIT_BODY` for this.
 
+## The in-progress bar (`gitoperation.py`)
+
+`GitPage.operation_bar` is an `OperationBar` — a horizontal `Gtk.Box`
+wearing `.pr-card.git-operation-bar` — at the very top of the `_VIEW`
+column, above the commit card. It names a half-finished rebase / `git
+am` / merge / cherry-pick / revert over a **working-tree load only**
+(unstaged, staged): the read worker asks `gitops.in_progress(gitinfo.
+git_dir(cwd))` beside `read_diff` and `_diff_read` calls `show(operation,
+gitmodel.unmerged_count(read.status))` or `clear()`; `load()` clears it
+the moment the load leaves the working tree, `_close_view` too. The
+words are `gitmodel`'s: `operation_title(kind)` ("Rebase in progress"),
+`operation_hint(kind, unmerged)` (the count of `U` rows and the two
+commands), `abort_heading` / `abort_body`, `abort_done`, `continue_done
+(label, still)` — *still* is what `in_progress` finds after a landed
+continue, a rebase's next conflicting commit — and `operation_failed`
+(git's first stderr line: "You must edit all merge conflicts…").
+
+**Detection is GTK-free and file-only.** `gitops.in_progress(git_dir)`
+→ `InProgress(kind, label)` walks `_IN_PROGRESS_MARKERS` in order
+(rebase beats merge beats cherry-pick beats revert; `sequencer` last)
+with two refinements: `rebase-apply/applying` is `git am` (kind `am`,
+label "git am" — `git rebase --continue` refuses while one is in
+progress, so it is named apart), and a lone `sequencer` (a
+multi-commit cherry-pick or revert whose stopped step was committed by
+hand) reads its `todo`'s first word — `revert` or `pick` — at most
+`_SEQUENCER_TODO_BYTES`. `in_progress_operation` (the commit and revert
+gates) is `in_progress(...).label`. **The markers are part of
+`gitinfo.tree_signature`** (`operation_markers`, its fourth element):
+an operation started or finished from a shell moves the index or HEAD
+anyway, but `git merge --quit` and its kin forget one without touching
+either, and the tick has to take the bar down for those too.
+
+**The runs.** `gitops.continue_operation(cwd, kind)` is `git <kind>
+--continue` under `no_editor_env()` — `GIT_EDITOR=true`, so the message
+git prepared for the step stands; without it git waits on `vi` against
+a pipe until `COMMIT_TIMEOUT_S` — and `abort_operation` is `git <kind>
+--abort` (the argv from `continue_argv` / `abort_argv`, which refuse a
+kind outside `OPERATION_KINDS`). `run_git` grew an `env=` for this. The
+page runs both through `_run_operation` behind the sidebar's
+`run_mutation` (the bar's `set_busy` greys its buttons meanwhile), gated
+on the bar still naming the same operation, and emits `mutated` either
+way; Continue goes straight in (a refused one changes nothing), Abort…
+asks through `dialogs.confirm_dialog` first — the resolutions made since
+the stop are lost. Probes: `operation`, `title_text()`, `hint_text()`,
+`buttons_sensitive()`, `click_continue()`, `click_abort()`.
+
 ## The native sidebar (`gitsidebar.py`)
 
 `GitSidebar(Gtk.Box)`: a vertical `Gtk.Paned` of two `Gtk.ListBox`es
@@ -638,6 +684,9 @@ viewer's) are popped from a loaded `state.json` by `AppState._load`.
 persistence, the commits list, a commit / header / working-tree row
 loading, the split files list and the other side's click, stage_all and
 commit reloading exactly once — counted by wrapping `page._read_diff` —
+the in-progress bar (a native revert stopped on a clash brings it up,
+Abort… asks and takes it down; a cherry-pick stopped from a shell comes
+up on the tick, the resolution re-words the hint, Continue finishes it)
 and the page size), `check_native(repo)` (stages every section kind in
 the tmp repository with `stage_native_fixture` — two unstaged hunks with
 gaps around them, a staged edit, a staged rename, a modified binary, an

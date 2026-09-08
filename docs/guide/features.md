@@ -518,6 +518,17 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   staged. Every outcome is a toast in the page (*Committed a1b2c3d "…" —
   undo with `git reset --soft HEAD~1`*, or git's first error line), and
   the diff reloads on the spot.
+- **A half-finished operation has a bar.** With the working tree loaded
+  and a rebase, merge, cherry-pick, revert or `git am` stopped — on
+  conflicts, or on an interactive rebase's `edit` — a bar over the diff
+  names it (*Rebase in progress*), counts the unmerged files, and offers
+  the two ways on: **Continue** runs `git rebase --continue` (or the
+  operation's own) with no editor, so the step's message stands as git
+  prepared it, and **Abort…** asks first, then runs `--abort` and puts
+  the tree back. The bar follows the repository, not the page: an
+  operation started from the terminal shows within a tick, a resolved
+  conflict re-words the hint, and a `--quit` from a shell takes it down.
+  A refused continue (files still unmerged) toasts git's own words.
 - **Staging, in the diff itself.** The buttons sit on the headers
   (SourceTree's placement, Sublime Merge's words), always there and
   lifted while the pointer is over the file or hunk:

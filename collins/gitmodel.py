@@ -605,6 +605,91 @@ def revert_failed(abbrev: str, stderr_line: str, conflicts: bool) -> str:
     return stderr_line or _("git revert failed")
 
 
+# -- the in-progress bar (gitoperation.py) -----------------------------------------
+# The words for a half-finished rebase / merge / cherry-pick / revert /
+# `git am` (gitops.in_progress) the page's bar shows over a working-tree
+# load: a title per kind, a hint that names the two buttons' commands, the
+# abort confirm, and the toasts. *kind* is one of gitops.OPERATION_KINDS;
+# *label* its translated name ("rebase", "git am", …).
+
+_OPERATION_TITLES: dict[str, str] = {
+    "rebase": "Rebase in progress",
+    "am": "git am in progress",
+    "merge": "Merge in progress",
+    "cherry-pick": "Cherry-pick in progress",
+    "revert": "Revert in progress",
+}
+
+
+def unmerged_count(status: Status | None) -> int:
+    """How many paths *status* (gitops.read_status) lists as unmerged —
+    the `U` rows of `git status --porcelain=v2` — what stands in a
+    half-finished operation's way; 0 without a status."""
+    if status is None:
+        return 0
+    return sum(1 for row in status.unstaged if row.code == "U")
+
+
+def operation_title(kind: str) -> str:
+    """The bar's heading: "Rebase in progress", "Merge in progress", …"""
+    return _(_OPERATION_TITLES.get(kind, "Operation in progress"))
+
+
+def operation_hint(kind: str, unmerged: int) -> str:
+    """The bar's one-line hint under the heading: what stands in the way
+    (*unmerged* paths, `git status`'s `U` rows) and what the two buttons
+    run — Continue is `git <kind> --continue` with the step's message
+    taken as it is, Abort is `git <kind> --abort`."""
+    if unmerged > 0:
+        return _(
+            "Unmerged files: {count}. Resolve and stage them, then Continue"
+            " (`git {kind} --continue`) — or Abort (`git {kind} --abort`) to put the tree back."
+        ).format(count=unmerged, kind=kind)
+    return _(
+        "Nothing is left unmerged. Continue (`git {kind} --continue`) commits the step with"
+        " the message it has and carries on — or Abort (`git {kind} --abort`) puts the tree back."
+    ).format(kind=kind)
+
+
+def abort_heading(label: str) -> str:
+    """The abort confirm's heading: "Abort the rebase?"."""
+    return _("Abort the {operation}?").format(operation=label)
+
+
+def abort_body(kind: str, label: str, cwd: str) -> str:
+    """The abort confirm's body: the command, where it runs, and what
+    is lost — the resolutions made since the operation stopped."""
+    return _(
+        "`git {kind} --abort` in {cwd}: the {operation} is forgotten and the tree goes back"
+        " to where it stood before it started. Conflict resolutions made since are lost."
+    ).format(kind=kind, cwd=cwd, operation=label)
+
+
+def abort_done(label: str) -> str:
+    """The toast after an abort landed."""
+    return _("Aborted the {operation} — the tree is back where it stood").format(operation=label)
+
+
+def continue_done(label: str, still: str | None) -> str:
+    """The toast after a continue landed: the operation finished, or it
+    stopped again (*still*: the label of what is now in progress — a
+    rebase's next conflicting commit, the sequencer's next pick)."""
+    if still:
+        return _("Continued the {operation} — it stopped again on the next step").format(
+            operation=still
+        )
+    return _("Finished the {operation}").format(operation=label)
+
+
+def operation_failed(kind: str, stderr_line: str, abort: bool) -> str:
+    """The toast after a continue or abort failed: git's own first line
+    (the usual: "You must edit all merge conflicts and then mark them as
+    resolved using git add"), else the command's name."""
+    return stderr_line or _("`git {kind} {flag}` failed").format(
+        kind=kind, flag="--abort" if abort else "--continue"
+    )
+
+
 def autosquash_command(abbrev: str, is_root: bool) -> str:
     """The fold-in command the fixup confirm names (never runs): `git
     rebase -i --autosquash --autostash <abbrev>^`, `--root` for a root

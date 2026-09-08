@@ -20,6 +20,7 @@ from collins.gitinfo import (
     head_sha,
     ignored_names,
     index_mtime,
+    operation_markers,
     parent_branch,
     refs_signature,
     remote_branch_name,
@@ -776,7 +777,7 @@ def test_tree_signature_moves_with_index_head_and_base(tmp_path):
     index.write_bytes(b"1")
     os.utime(index, ns=(1_000, 1_000))
     first = tree_signature(repo, "main")
-    assert first == (1_000, SHA_A, "0123456789abcdef0123456789abcdef01234567")
+    assert first == (1_000, SHA_A, "0123456789abcdef0123456789abcdef01234567", ())
     assert tree_signature(repo, "main") == first  # stable while nothing moves
 
     os.utime(index, ns=(2_000, 2_000))
@@ -788,12 +789,29 @@ def test_tree_signature_moves_with_index_head_and_base(tmp_path):
     assert third != second
 
     (repo / ".git" / "refs" / "heads" / "main").write_text(f"{SHA_C}\n")
-    assert tree_signature(repo, "main") != third
+    fourth = tree_signature(repo, "main")
+    assert fourth != third
+
+    # An operation's marker moves it too (`git merge --quit` forgets a
+    # merge without touching the index or HEAD).
+    (repo / ".git" / "MERGE_HEAD").write_text(f"{SHA_B}\n")
+    assert tree_signature(repo, "main") != fourth
+    assert tree_signature(repo, "main")[3] == ("MERGE_HEAD",)
+
+
+def test_operation_markers_reports_what_exists_in_order(tmp_path):
+    assert operation_markers(tmp_path) == ()
+    repo = make_repo(tmp_path / "repo", head=f"{SHA_A}\n")
+    assert operation_markers(repo) == ()
+    (repo / ".git" / "REVERT_HEAD").write_text(f"{SHA_A}\n")
+    (repo / ".git" / "rebase-merge").mkdir()
+    (repo / ".git" / "sequencer").mkdir()
+    assert operation_markers(repo) == ("rebase-merge", "REVERT_HEAD", "sequencer")
 
 
 def test_tree_signature_without_a_base(tmp_path):
     repo = make_repo(tmp_path / "repo", head=f"{SHA_A}\n")
-    assert tree_signature(repo, None) == (None, SHA_A, None)
+    assert tree_signature(repo, None) == (None, SHA_A, None, ())
 
 
 # -- git_dir ------------------------------------------------------------------

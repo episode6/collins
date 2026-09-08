@@ -459,6 +459,61 @@ def check_sidebar(repo: str) -> None:
     wait_for(page.settled)
     check("the tree is clean again for what follows", wait_for(lambda: not sidebar.file_rows().staged and not sidebar.file_rows().unstaged), sidebar.file_rows())
 
+    # -- a half-finished operation: the bar over the diff, Abort… and Continue -------------
+    # A commit that rewrites a.txt whole, then the native revert of the
+    # commit that last touched it: the revert stops on a conflict and the
+    # bar comes up over the working-tree diff.
+    bar = page.operation_bar
+    check("nothing half-finished: the bar is hidden", not bar.get_visible() and bar.operation is None, bar.operation)
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("clash\n")
+    git(repo, "commit", "-qam", "clash")
+    sidebar.revert(native_sha, True)
+    landed = wait_for(lambda: not sidebar.busy and page.settled() and bar.operation is not None)
+    check("a revert that stops on conflicts brings the bar up", landed and bar.get_visible(), (landed, bar.get_visible(), bar.operation))
+    check("naming the revert", bar.operation is not None and bar.operation.kind == "revert" and bar.title_text() == "Revert in progress", bar.title_text())
+    check("and counting the unmerged file", bar.hint_text().startswith("Unmerged files: 1."), bar.hint_text())
+    check("with its buttons live", bar.buttons_sensitive())
+    # Abort… asks first (the resolutions made since are lost); confirmed,
+    # the tree goes back and the bar goes down with the reload.
+    asked: list[tuple[str, str]] = []
+    real_confirm = gitpage.dialogs.confirm_dialog
+
+    def confirm_abort(parent, heading, body, confirm_label, on_confirm, *args, **kwargs):
+        asked.append((heading, confirm_label))
+        on_confirm()
+
+    gitpage.dialogs.confirm_dialog = confirm_abort
+    try:
+        reads_before = len(reads)
+        bar.click_abort()
+        landed = wait_for(lambda: not sidebar.busy and page.settled() and bar.operation is None)
+    finally:
+        gitpage.dialogs.confirm_dialog = real_confirm
+    check("Abort… asked: Abort the revert?", asked == [("Abort the revert?", "Abort")], asked)
+    check("and the confirmed abort took the bar down", landed and not bar.get_visible(), (landed, bar.get_visible()))
+    check("with the tree back where it stood", git_out(repo, "status", "--porcelain") == "" and gitops.in_progress(os.path.join(repo, ".git")) is None, git_out(repo, "status", "--porcelain"))
+    check("and the view reloaded once", len(reads) == reads_before + 1, len(reads) - reads_before)
+    # A cherry-pick stopped from a shell: the tick's signature (the marker
+    # is part of it) brings the bar up; the conflict resolved and staged,
+    # the next tick re-words the hint; Continue finishes it with no editor.
+    picked = subprocess.run([GIT, "-c", "user.email=t@example.com", "-c", "user.name=Test", "cherry-pick", native_sha], cwd=repo, capture_output=True, text=True)
+    check("a cherry-pick of the same commit stops on the clash", picked.returncode != 0, picked.stderr)
+    page.poll_tick()
+    landed = wait_for(lambda: page.settled() and bar.operation is not None and bar.operation.kind == "cherry-pick")
+    check("the tick brings the bar up for a cherry-pick started elsewhere", landed and bar.title_text() == "Cherry-pick in progress", (landed, bar.get_visible(), bar.title_text()))
+    with open(os.path.join(repo, "a.txt"), "w") as fh:
+        fh.write("resolved\n")
+    git(repo, "add", "a.txt")
+    page.poll_tick()
+    landed = wait_for(lambda: page.settled() and bar.hint_text().startswith("Nothing is left unmerged"))
+    check("resolved and staged, the hint says so", landed, bar.hint_text())
+    bar.click_continue()
+    landed = wait_for(lambda: not sidebar.busy and page.settled() and bar.operation is None)
+    check("Continue finishes the cherry-pick and takes the bar down", landed and not bar.get_visible(), (landed, bar.get_visible()))
+    check("with the commit made and no editor asked", git_out(repo, "log", "-1", "--format=%s").strip() == "native commit" and git_out(repo, "status", "--porcelain") == "", git_out(repo, "log", "-1", "--format=%s"))
+    check("and nothing half-finished", gitops.in_progress(os.path.join(repo, ".git")) is None, gitops.in_progress(os.path.join(repo, ".git")))
+
     # -- an ask that lands while a read is out re-reads --------------------------------------
     # The read runs at once but lands late (gated), so it carries the tree
     # before the `git add`; the tick meanwhile sees the index move and asks
