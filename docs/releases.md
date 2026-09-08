@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-07. Full change history: git log for this file.
+fork. Last modified: 2026-09-08. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -106,6 +106,10 @@ downloads of each version, see the
   headers over the hunks. The files filter box gains a margin, so the
   divider between the commits and files lists stays visible and grabbable
   instead of hiding against the entry's edge.
+- **The PR page's headings sit nearer GitHub's size.** `##` drops from
+  140% to 128% of the reading size and `###` from 120% to 112%, so a
+  description's sections read as sections rather than banners. A commit's
+  message card on the git page follows, sharing the renderer.
 - **Files in the diff view stand apart.** A file boundary and a hunk
   boundary in the git page's scroll looked alike at a glance. Each file
   card now wears a border and the cards sit 16 px apart, twice what they

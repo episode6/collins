@@ -2201,14 +2201,8 @@ msgstr "GitHub beim Start einmal nach den Pull-Requests jeder gelisteten Sitzung
 msgid "Git"
 msgstr "Git"
 
-msgid "The git page: hunk's layout and theme, and what the commits panel loads"
-msgstr "Die Git-Seite: Layout und Thema von hunk, und was das Commit-Panel lädt"
-
 msgid "Layout"
 msgstr "Layout"
-
-msgid "How hunk lays a diff out: side by side, stacked, or whichever fits the width"
-msgstr "Wie hunk einen Diff anordnet: nebeneinander, untereinander, oder was in die Breite passt"
 
 msgid "Automatic"
 msgstr "Automatisch"
@@ -2218,12 +2212,6 @@ msgstr "Geteilt"
 
 msgid "Stacked"
 msgstr "Untereinander"
-
-msgid "Theme"
-msgstr "Thema"
-
-msgid "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default"
-msgstr "Leer: hunks eigener Standard. Jedes Thema, das hunk kennt — nord, dracula, catppuccin-mocha, github-light-default, auto (folgt dem Terminalhintergrund) — oder eines aus hunks Konfiguration; ein Name, den hunk nicht kennt, fällt auf den Standard zurück"
 
 msgid "Show untracked files"
 msgstr "Unversionierte Dateien anzeigen"
@@ -2240,8 +2228,8 @@ msgstr "Wie viele Commits jede Gruppe des Commit-Panels vor ihrer Zeile „mehr 
 msgid "Default parent branch"
 msgstr "Standard-Elternbranch"
 
-msgid "Empty: automatic. The page measures the branch against the attached pull request's base first, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch; Set parent branch… in the page still overrides it"
-msgstr "Leer: automatisch. Die Seite misst den Branch zuerst an der Basis des angehängten Pull-Requests, dann an diesem Branch, wenn das Repository ihn hat (develop, oder origin/develop für einen, den nur das Remote hat), dann am Standardbranch; „Elternbranch festlegen…“ auf der Seite hat weiterhin Vorrang"
+msgid "Empty: automatic. The page measures the branch against the local branch it stacks on when git shows one, else the attached pull request's base, then this branch when the repository has it (develop, or origin/develop for one only the remote has), then the default branch"
+msgstr "Leer: automatisch. Die Seite misst den Branch an dem lokalen Branch, auf dem er laut git aufsetzt, wenn es einen gibt, sonst an der Basis des angehängten Pull-Requests, dann an diesem Branch, wenn das Repository ihn hat (develop, oder origin/develop für einen, den nur das Remote hat), dann am Standardbranch"
 
 msgid "Caffeine Mode"
 msgstr "Caffeine Mode"
@@ -2764,4 +2752,895 @@ msgstr "{p} geleerte(s) Projekt(e) in der Seitenleiste behalten"
 
 msgid "Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic."
 msgstr "Verwalten Sie Ihre KI-Coding-Agent-Sitzungen und setzen Sie sie fort.\n\nInoffizielles Community-Tool — weder mit Anthropic verbunden noch von Anthropic gebilligt."
+
+msgid "(no subject)"
+msgstr "(kein Betreff)"
+
+msgid "1 line"
+msgstr "1 Zeile"
+
+msgid "A {operation} is half-finished here — finish or abort it first"
+msgstr "Hier ist ein {operation} halb fertig — erst abschließen oder abbrechen"
+
+msgid "Abort"
+msgstr "Abbrechen"
+
+msgid "Abort the {operation}?"
+msgstr "{operation} abbrechen?"
+
+msgid "Aborted the {operation} — the tree is back where it stood"
+msgstr "{operation} abgebrochen — der Baum ist wieder, wo er stand"
+
+msgid "Abort…"
+msgstr "Abbrechen…"
+
+msgid "Add a note"
+msgstr "Notiz hinzufügen"
+
+msgid "Add note"
+msgstr "Notiz hinzufügen"
+
+msgid "Agent notes"
+msgstr "Agenten-Notizen"
+
+msgid "Always Trash"
+msgstr "Immer in den Papierkorb"
+
+msgid "Annotate the git page"
+msgstr "Die Git-Seite annotieren"
+
+msgid "Another git operation is still running"
+msgstr "Eine andere git-Operation läuft noch"
+
+msgid "Body (optional)"
+msgstr "Text (optional)"
+
+msgid "CONFLICTS"
+msgstr "KONFLIKTE"
+
+msgid "Caution"
+msgstr "Vorsicht"
+
+msgid "Check again"
+msgstr "Erneut prüfen"
+
+msgid "Choose"
+msgstr "Wählen"
+
+msgid "Clear its marks in the git page"
+msgstr "Seine Markierungen auf der Git-Seite entfernen"
+
+msgid "Click to open the git page"
+msgstr "Klicken, um die Git-Seite zu öffnen"
+
+msgid "Close the git page"
+msgstr "Die Git-Seite schließen"
+
+msgid "Commit"
+msgstr "Commit"
+
+msgid "Commit fixup"
+msgstr "Fixup committen"
+
+msgid "Commit revert"
+msgstr "Revert committen"
+
+msgid "Commit with body"
+msgstr "Mit Text committen"
+
+msgid "Commit with body…"
+msgstr "Mit Text committen…"
+
+msgid "Committed a fixup for {sha} — fold it in with `{command}`"
+msgstr "Fixup für {sha} committet — mit `{command}` einfalten"
+
+msgid "Committed {sha} “{summary}” — undo with `git reset --soft HEAD~1`"
+msgstr "{sha} „{summary}“ committet — rückgängig mit `git reset --soft HEAD~1`"
+
+msgid "Commit…"
+msgstr "Commit…"
+
+msgid "Continued the {operation} — it stopped again on the next step"
+msgstr "{operation} fortgesetzt — beim nächsten Schritt wieder angehalten"
+
+msgid "Copy sha"
+msgstr "SHA kopieren"
+
+msgid "Couldn't read the diff: {error}"
+msgstr "Diff konnte nicht gelesen werden: {error}"
+
+msgid "Ctrl+Enter saves · Esc cancels"
+msgstr "Ctrl+Enter speichert · Esc bricht ab"
+
+msgid "Cursor down a line"
+msgstr "Cursor eine Zeile nach unten"
+
+msgid "Cursor up a line"
+msgstr "Cursor eine Zeile nach oben"
+
+msgid "Delete"
+msgstr "Löschen"
+
+msgid "Delete archived sessions after"
+msgstr "Archivierte Sitzungen löschen nach"
+
+msgid "Details"
+msgstr "Details"
+
+msgid "Diff view options"
+msgstr "Optionen der Diff-Ansicht"
+
+msgid "Discard file"
+msgstr "Datei verwerfen"
+
+msgid "Discard hunk {n} in {path}? This cannot be undone."
+msgstr "Hunk {n} in {path} verwerfen? Dies kann nicht rückgängig gemacht werden."
+
+msgid "Discard or revert the hunk or the selected lines"
+msgstr "Den Hunk oder die ausgewählten Zeilen verwerfen oder reverten"
+
+msgid "Discard the changes to {path}? This cannot be undone."
+msgstr "Die Änderungen an {path} verwerfen? Dies kann nicht rückgängig gemacht werden."
+
+msgid "Discard the changes?"
+msgstr "Die Änderungen verwerfen?"
+
+msgid "Discard works on the working tree: load the Unstaged view"
+msgstr "Verwerfen wirkt auf den Arbeitsbaum: die Ansicht „Nicht gestaged“ laden"
+
+msgid "Discard {lines} in {path}? This cannot be undone."
+msgstr "{lines} in {path} verwerfen? Dies kann nicht rückgängig gemacht werden."
+
+msgid "Discard {what}"
+msgstr "{what} verwerfen"
+
+msgid "Discarded hunk {n} of {path}"
+msgstr "Hunk {n} von {path} verworfen"
+
+msgid "Discarded the changes to {path}"
+msgstr "Die Änderungen an {path} verworfen"
+
+msgid "Discarded {lines} of {path}"
+msgstr "{lines} von {path} verworfen"
+
+msgid "Edit"
+msgstr "Bearbeiten"
+
+msgid "Edit the hunk's first note"
+msgstr "Die erste Notiz des Hunks bearbeiten"
+
+msgid "Emphasise what moved within a changed line"
+msgstr "Hervorheben, was sich innerhalb einer geänderten Zeile bewegt hat"
+
+msgid "Expand context"
+msgstr "Kontext ausklappen"
+
+msgid "Expand every unchanged line"
+msgstr "Jede unveränderte Zeile ausklappen"
+
+msgid "Expand the unchanged lines above the hunk"
+msgstr "Die unveränderten Zeilen über dem Hunk ausklappen"
+
+msgid "Expand {n} lines down"
+msgstr "{n} Zeilen nach unten ausklappen"
+
+msgid "Expand {n} lines up"
+msgstr "{n} Zeilen nach oben ausklappen"
+
+msgid "FILES"
+msgstr "DATEIEN"
+
+msgid "Filter files"
+msgstr "Dateien filtern"
+
+msgid "Filter the files list"
+msgstr "Die Dateiliste filtern"
+
+msgid "Find in the diff"
+msgstr "Im Diff suchen"
+
+msgid "Finished the {operation}"
+msgstr "{operation} abgeschlossen"
+
+msgid "Fix up which commit?"
+msgstr "Welchen Commit fixen?"
+
+msgid "Fix up {sha}?"
+msgstr "{sha} fixen?"
+
+msgid "Fix up…"
+msgstr "Fixup…"
+
+msgid "Fold or unfold the branch"
+msgstr "Den Branch ein- oder ausklappen"
+
+msgid "Fold this file"
+msgstr "Diese Datei einklappen"
+
+msgid "Git page"
+msgstr "Git-Seite"
+
+msgid "Git · staged"
+msgstr "Git · gestaged"
+
+msgid "Git · unstaged"
+msgstr "Git · nicht gestaged"
+
+msgid "Git · vs {parent}"
+msgstr "Git · vs. {parent}"
+
+msgid "Git · {ref}"
+msgstr "Git · {ref}"
+
+msgid "Hide the commits and files panels"
+msgstr "Die Commit- und Dateipanels ausblenden"
+
+msgid "Highlight changed words"
+msgstr "Geänderte Wörter hervorheben"
+
+msgid "Highlight in the git page"
+msgstr "Auf der Git-Seite hervorheben"
+
+msgid "Important"
+msgstr "Wichtig"
+
+msgid "In the diff."
+msgstr "Im Diff."
+
+msgid "In the diff; a card under the focused hunk, anchored to the cursor line."
+msgstr "Im Diff; eine Karte unter dem fokussierten Hunk, an der Cursorzeile verankert."
+
+msgid "In the diff; a hunk with a note or highlight on it."
+msgstr "Im Diff; ein Hunk mit einer Notiz oder Hervorhebung."
+
+msgid "In the diff; after a confirmation."
+msgstr "Im Diff; nach einer Bestätigung."
+
+msgid "In the diff; at the line under the cursor."
+msgstr "Im Diff; an der Zeile unter dem Cursor."
+
+msgid "In the diff; past the hunk's first line, into the previous hunk."
+msgstr "Im Diff; über die erste Zeile des Hunks hinaus in den vorherigen Hunk."
+
+msgid "In the diff; past the hunk's last line, into the next hunk."
+msgstr "Im Diff; über die letzte Zeile des Hunks hinaus in den nächsten Hunk."
+
+msgid "In the diff; the first note you wrote on the focused hunk."
+msgstr "Im Diff; die erste Notiz, die Sie am fokussierten Hunk geschrieben haben."
+
+msgid "In the diff; the focused hunk's file."
+msgstr "Im Diff; die Datei des fokussierten Hunks."
+
+msgid "In the diff; the selected lines when there are any, else the focused hunk."
+msgstr "Im Diff; die ausgewählten Zeilen, wenn es welche gibt, sonst der fokussierte Hunk."
+
+msgid "Keep Worktree"
+msgstr "Worktree behalten"
+
+msgid "Keyboard shortcuts"
+msgstr "Tastenkürzel"
+
+msgid "Layout: automatic"
+msgstr "Layout: automatisch"
+
+msgid "Layout: split"
+msgstr "Layout: geteilt"
+
+msgid "Layout: stacked"
+msgstr "Layout: untereinander"
+
+msgid "Line numbers"
+msgstr "Zeilennummern"
+
+msgid "Move a session's transcript to the trash once it has been archived this long; 0 keeps them forever. Checked once a day"
+msgstr "Das Transkript einer Sitzung in den Papierkorb verschieben, sobald sie so lange archiviert ist; 0 behält sie für immer. Einmal am Tag geprüft"
+
+msgid "Move to the trash?"
+msgstr "In den Papierkorb verschieben?"
+
+msgid "Move to trash"
+msgstr "In den Papierkorb"
+
+msgid "Move {path} to the trash?"
+msgstr "{path} in den Papierkorb verschieben?"
+
+msgid "Moved worktree {name} to the trash"
+msgstr "Worktree {name} in den Papierkorb verschoben"
+
+msgid "Moved {path} to the trash"
+msgstr "{path} in den Papierkorb verschoben"
+
+msgid "Moving the worktree to the trash failed"
+msgstr "Der Worktree konnte nicht in den Papierkorb verschoben werden"
+
+msgid "Never Trash"
+msgstr "Nie in den Papierkorb"
+
+msgid "Next annotated hunk"
+msgstr "Nächster annotierter Hunk"
+
+msgid "Next file"
+msgstr "Nächste Datei"
+
+msgid "Next hunk"
+msgstr "Nächster Hunk"
+
+msgid "Next match (Enter)"
+msgstr "Nächster Treffer (Enter)"
+
+msgid "No changes"
+msgstr "Keine Änderungen"
+
+msgid "No matches"
+msgstr "Keine Treffer"
+
+msgid "No such file on this side."
+msgstr "Auf dieser Seite gibt es die Datei nicht."
+
+msgid "No unpushed commit to fix up — commit first"
+msgstr "Kein ungepushter Commit zum Fixen — erst committen"
+
+msgid "Not a git repository"
+msgstr "Kein git-Repository"
+
+msgid "Note"
+msgstr "Notiz"
+
+msgid "Nothing is left unmerged. Continue (`git {kind} --continue`) commits the step with the message it has and carries on — or Abort (`git {kind} --abort`) puts the tree back."
+msgstr "Nichts ist mehr ungemergt. Weiter (`git {kind} --continue`) committet den Schritt mit der vorhandenen Nachricht und macht weiter — oder Abbrechen (`git {kind} --abort`) setzt den Baum zurück."
+
+msgid "Nothing staged — stage a hunk or file first"
+msgstr "Nichts gestaged — erst einen Hunk oder eine Datei stagen"
+
+msgid "Nothing to stage"
+msgstr "Nichts zu stagen"
+
+msgid "Nothing to unstage"
+msgstr "Nichts zu unstagen"
+
+msgid "Open in editor"
+msgstr "Im Editor öffnen"
+
+msgid "Open the file in the editor"
+msgstr "Die Datei im Editor öffnen"
+
+msgid "Previous annotated hunk"
+msgstr "Vorheriger annotierter Hunk"
+
+msgid "Previous file"
+msgstr "Vorherige Datei"
+
+msgid "Previous hunk"
+msgstr "Vorheriger Hunk"
+
+msgid "Previous match (Shift+Enter)"
+msgstr "Vorheriger Treffer (Shift+Enter)"
+
+msgid "Read the git page"
+msgstr "Die Git-Seite lesen"
+
+msgid "Reload the diff"
+msgstr "Den Diff neu laden"
+
+msgid "Restore"
+msgstr "Wiederherstellen"
+
+msgid "Restore the file?"
+msgstr "Die Datei wiederherstellen?"
+
+msgid "Restore {path} from the index?"
+msgstr "{path} aus dem Index wiederherstellen?"
+
+msgid "Restored worktree {name}"
+msgstr "Worktree {name} wiederhergestellt"
+
+msgid "Restored {path}"
+msgstr "{path} wiederhergestellt"
+
+msgid "Restoring the worktree failed"
+msgstr "Der Worktree konnte nicht wiederhergestellt werden"
+
+msgid "Revert"
+msgstr "Revert"
+
+msgid "Revert file"
+msgstr "Datei reverten"
+
+msgid "Revert in working tree"
+msgstr "Im Arbeitsbaum reverten"
+
+msgid "Revert into the working tree?"
+msgstr "In den Arbeitsbaum reverten?"
+
+msgid "Revert {sha}?"
+msgstr "{sha} reverten?"
+
+msgid "Revert {what}"
+msgstr "{what} reverten"
+
+msgid "Reverted hunk {n} of {path}"
+msgstr "Hunk {n} von {path} revertet"
+
+msgid "Reverted into the working tree, but git could not forget the revert ({error}) — run `git revert --quit` by hand"
+msgstr "In den Arbeitsbaum revertet, aber git konnte den Revert nicht vergessen ({error}) — `git revert --quit` von Hand ausführen"
+
+msgid "Reverted {lines} of {path}"
+msgstr "{lines} von {path} revertet"
+
+msgid "Reverted {path}"
+msgstr "{path} revertet"
+
+msgid "Reverted {sha} as {head} — undo with `git reset --keep HEAD~1`"
+msgstr "{sha} als {head} revertet — rückgängig mit `git reset --keep HEAD~1`"
+
+msgid "Reverted {sha} into the working tree — staged, nothing committed"
+msgstr "{sha} in den Arbeitsbaum revertet — gestaged, nichts committet"
+
+msgid "Reverting {sha} left conflicts — resolve them, then `git revert --continue`, or `git revert --abort`"
+msgstr "Das Reverten von {sha} hat Konflikte hinterlassen — auflösen, dann `git revert --continue`, oder `git revert --abort`"
+
+msgid "Revert…"
+msgstr "Revert…"
+
+msgid "Right-click to copy"
+msgstr "Rechtsklick zum Kopieren"
+
+msgid "STAGED"
+msgstr "GESTAGED"
+
+msgid "Show diffs in the git page"
+msgstr "Diffs auf der Git-Seite anzeigen"
+
+msgid "Show the commits and files panels"
+msgstr "Die Commit- und Dateipanels anzeigen"
+
+msgid "Show/hide agent notes"
+msgstr "Agenten-Notizen ein-/ausblenden"
+
+msgid "Show/hide line numbers"
+msgstr "Zeilennummern ein-/ausblenden"
+
+msgid "Show/hide the git page"
+msgstr "Git-Seite ein-/ausblenden"
+
+msgid "Side by side, stacked, or whichever fits the width"
+msgstr "Nebeneinander, untereinander, oder was in die Breite passt"
+
+msgid "Stage all"
+msgstr "Alles stagen"
+
+msgid "Stage all {n} {noun}?"
+msgstr "Alle {n} {noun} stagen?"
+
+msgid "Stage every change (git add -A)"
+msgstr "Jede Änderung stagen (git add -A)"
+
+msgid "Stage file"
+msgstr "Datei stagen"
+
+msgid "Stage {what}"
+msgstr "{what} stagen"
+
+msgid "Stage, unstage or revert the file"
+msgstr "Die Datei stagen, unstagen oder reverten"
+
+msgid "Stage, unstage or revert the hunk or the selected lines"
+msgstr "Den Hunk oder die ausgewählten Zeilen stagen, unstagen oder reverten"
+
+msgid "Staged hunk {n} of {path}"
+msgstr "Hunk {n} von {path} gestaged"
+
+msgid "Staged {lines} of {path}"
+msgstr "{lines} von {path} gestaged"
+
+msgid "Staged {n} {noun}"
+msgstr "{n} {noun} gestaged"
+
+msgid "Staged {path}"
+msgstr "{path} gestaged"
+
+msgid "Summary"
+msgstr "Zusammenfassung"
+
+msgid "The git page: how the diff is drawn and what the commits panel loads"
+msgstr "Die Git-Seite: wie der Diff gezeichnet wird und was das Commit-Panel lädt"
+
+msgid "The index is committed as `fixup! {sha}` for “{subject}”. Fold it in afterwards with `{command}` — named here, never run."
+msgstr "Der Index wird als `fixup! {sha}` für „{subject}“ committet. Danach mit `{command}` einfalten — hier nur genannt, nie ausgeführt."
+
+msgid "The old and new line-number columns beside each hunk"
+msgstr "Die alte und die neue Zeilennummernspalte neben jedem Hunk"
+
+msgid "The session's working directory has no repository to show. Check again once it does."
+msgstr "Das Arbeitsverzeichnis der Sitzung hat kein Repository zum Anzeigen. Erneut prüfen, sobald es eines hat."
+
+msgid "The three-way revert of {path} left conflict markers"
+msgstr "Der Drei-Wege-Revert von {path} hat Konfliktmarker hinterlassen"
+
+msgid "The view changed since the request: nothing was done"
+msgstr "Die Ansicht hat sich seit der Anfrage geändert: nichts wurde getan"
+
+msgid "The view is behind the page: reloading"
+msgstr "Die Ansicht hinkt der Seite hinterher: wird neu geladen"
+
+msgid "This session isn't in a git repository"
+msgstr "Diese Sitzung ist in keinem git-Repository"
+
+msgid "Tip"
+msgstr "Tipp"
+
+msgid "Trash Worktree"
+msgstr "Worktree in den Papierkorb"
+
+msgid "Trash the session's worktree?"
+msgstr "Den Worktree der Sitzung in den Papierkorb verschieben?"
+
+msgid "UNSTAGED"
+msgstr "NICHT GESTAGED"
+
+msgid "Unfold this file"
+msgstr "Diese Datei ausklappen"
+
+msgid "Unmerged files: {count}. Resolve and stage them, then Continue (`git {kind} --continue`) — or Abort (`git {kind} --abort`) to put the tree back."
+msgstr "Ungemergte Dateien: {count}. Auflösen und stagen, dann Weiter (`git {kind} --continue`) — oder Abbrechen (`git {kind} --abort`), um den Baum zurückzusetzen."
+
+msgid "Unpushed commits of this branch, newest first."
+msgstr "Ungepushte Commits dieses Branches, neueste zuerst."
+
+msgid "Unstage all"
+msgstr "Alles unstagen"
+
+msgid "Unstage all {n} {noun}?"
+msgstr "Alle {n} {noun} unstagen?"
+
+msgid "Unstage every change (git reset)"
+msgstr "Jede Änderung unstagen (git reset)"
+
+msgid "Unstage file"
+msgstr "Datei unstagen"
+
+msgid "Unstage {what}"
+msgstr "{what} unstagen"
+
+msgid "Unstaged hunk {n} of {path}"
+msgstr "Hunk {n} von {path} unstaged"
+
+msgid "Unstaged {lines} of {path}"
+msgstr "{lines} von {path} unstaged"
+
+msgid "Unstaged {n} {noun}"
+msgstr "{n} {noun} unstaged"
+
+msgid "Unstaged {path}"
+msgstr "{path} unstaged"
+
+msgid "Warning"
+msgstr "Warnung"
+
+msgid "When archiving a session in a git worktree"
+msgstr "Beim Archivieren einer Sitzung in einem Git-Worktree"
+
+msgid "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session"
+msgstr "Ob der Worktree der Sitzung in den Papierkorb verschoben wird, sobald sie beendet ist; Rückgängig holt ihn mit der Sitzung zurück"
+
+msgid "Widen the page to show the panels"
+msgstr "Die Seite verbreitern, um die Panels zu zeigen"
+
+msgid "Wrap instead of scrolling each hunk sideways"
+msgstr "Umbrechen, statt jeden Hunk seitwärts zu scrollen"
+
+msgid "Wrap long lines"
+msgstr "Lange Zeilen umbrechen"
+
+msgid "`git add -A` in {cwd}"
+msgstr "`git add -A` in {cwd}"
+
+msgid "`git reset` in {cwd}"
+msgstr "`git reset` in {cwd}"
+
+msgid "`git {kind} --abort` in {cwd}: the {operation} is forgotten and the tree goes back to where it stood before it started. Conflict resolutions made since are lost."
+msgstr "`git {kind} --abort` in {cwd}: der {operation} wird vergessen und der Baum geht dorthin zurück, wo er vor dem Start stand. Seitdem gemachte Konfliktauflösungen gehen verloren."
+
+msgid "`git {kind} {flag}` failed"
+msgstr "`git {kind} {flag}` ist fehlgeschlagen"
+
+msgid "a directory"
+msgstr "ein Verzeichnis"
+
+msgid "a removal"
+msgstr "eine Entfernung"
+
+msgid "a submodule"
+msgstr "ein Submodul"
+
+msgid "a symbolic link"
+msgstr "ein symbolischer Link"
+
+msgid "all"
+msgstr "alle"
+
+msgid "an addition"
+msgstr "eine Hinzufügung"
+
+msgid "annotate_diff — note cards under a hunk, anchored to a line of the diff"
+msgstr "annotate_diff — Notizkarten unter einem Hunk, an einer Zeile des Diffs verankert"
+
+msgid "bin"
+msgstr "bin"
+
+msgid "binary"
+msgstr "binär"
+
+msgid "cannot read the patch for {path}: {why}"
+msgstr "der Patch für {path} kann nicht gelesen werden: {why}"
+
+msgid "cannot read the view's patch for {path}: {why}"
+msgstr "der Patch der Ansicht für {path} kann nicht gelesen werden: {why}"
+
+msgid "cannot {action} {path} by hunk: {why}"
+msgstr "{path} lässt sich nicht hunkweise {action}: {why}"
+
+msgid "change"
+msgstr "Änderung"
+
+msgid "changes"
+msgstr "Änderungen"
+
+msgid "clear_diff_marks — remove the notes and highlights it put on the page"
+msgstr "clear_diff_marks — die Notizen und Hervorhebungen entfernen, die es auf die Seite gesetzt hat"
+
+msgid "commit {ref}"
+msgstr "Commit {ref}"
+
+msgid "conflict"
+msgstr "Konflikt"
+
+msgid "context"
+msgstr "Kontext"
+
+msgid "deleted"
+msgstr "gelöscht"
+
+msgid "diff_context — what the page shows: the diff, the hunk and lines you are on, the files, the notes"
+msgstr "diff_context — was die Seite zeigt: der Diff, der Hunk und die Zeilen, auf denen Sie sind, die Dateien, die Notizen"
+
+msgid "discard"
+msgstr "verwerfen"
+
+msgid "discard reverts changes inside a modified file: use git from a shell for a new or renamed file"
+msgstr "Verwerfen nimmt Änderungen in einer geänderten Datei zurück: für eine neue oder umbenannte Datei git aus einer Shell verwenden"
+
+msgid "file"
+msgstr "Datei"
+
+msgid "git commit failed"
+msgstr "git commit ist fehlgeschlagen"
+
+msgid "git failed"
+msgstr "git ist fehlgeschlagen"
+
+msgid "git revert failed"
+msgstr "git revert ist fehlgeschlagen"
+
+msgid "highlight_diff — attention marks on character ranges of the diff's lines"
+msgstr "highlight_diff — Aufmerksamkeitsmarken auf Zeichenbereichen der Diff-Zeilen"
+
+msgid "hunk"
+msgstr "Hunk"
+
+msgid "hunk {n} could not be read"
+msgstr "Hunk {n} konnte nicht gelesen werden"
+
+msgid "hunk {n} differs: line {line} is `{shown}` in the view but `{actual}` on disk"
+msgstr "Hunk {n} weicht ab: Zeile {line} ist `{shown}` in der Ansicht, aber `{actual}` auf der Platte"
+
+msgid "hunk {n} differs: line {line} is {shown} in the view but {actual} on disk"
+msgstr "Hunk {n} weicht ab: Zeile {line} ist {shown} in der Ansicht, aber {actual} auf der Platte"
+
+msgid "hunk {n} has {shown} lines in the view but {actual} on disk"
+msgstr "Hunk {n} hat {shown} Zeilen in der Ansicht, aber {actual} auf der Platte"
+
+msgid "hunk {n} spans lines {start}-{end} in the patch but {shown_start}-{shown_end} in the view"
+msgstr "Hunk {n} umfasst die Zeilen {start}-{end} im Patch, aber {shown_start}-{shown_end} in der Ansicht"
+
+msgid "it carries a control character"
+msgstr "er enthält ein Steuerzeichen"
+
+msgid "it has an unrecognised file mode ({mode})"
+msgstr "er hat einen unbekannten Dateimodus ({mode})"
+
+msgid "it is a rename now"
+msgstr "er ist inzwischen eine Umbenennung"
+
+msgid "it is an absolute path"
+msgstr "er ist ein absoluter Pfad"
+
+msgid "it is {what}, which hunks cannot describe"
+msgstr "er ist {what}, was Hunks nicht beschreiben können"
+
+msgid "it points outside the repository with a `..` segment"
+msgstr "er zeigt mit einem `..`-Segment aus dem Repository hinaus"
+
+msgid "it starts with a dash"
+msgstr "er beginnt mit einem Bindestrich"
+
+msgid "lines"
+msgstr "Zeilen"
+
+msgid "load more…"
+msgstr "mehr laden…"
+
+msgid "mode {a} → {b}"
+msgstr "Modus {a} → {b}"
+
+msgid "new"
+msgstr "neu"
+
+msgid "new line {n}"
+msgstr "neue Zeile {n}"
+
+msgid "no changes in the selection"
+msgstr "keine Änderungen in der Auswahl"
+
+msgid "no hunk {n} in {path}"
+msgstr "kein Hunk {n} in {path}"
+
+msgid "no stanza for it"
+msgstr "kein Abschnitt dafür"
+
+msgid "nothing selected"
+msgstr "nichts ausgewählt"
+
+msgid "nothing to discard in hunk {n} of {path}"
+msgstr "nichts zu verwerfen in Hunk {n} von {path}"
+
+msgid "nothing to revert in hunk {n} of {path}"
+msgstr "nichts zu reverten in Hunk {n} von {path}"
+
+msgid "nothing to {action} in {path}"
+msgstr "nichts zu {action} in {path}"
+
+msgid "nothing to {action} in {path}: reloading"
+msgstr "nichts zu {action} in {path}: wird neu geladen"
+
+msgid "old line {n}"
+msgstr "alte Zeile {n}"
+
+msgid "refusing {path}: {why}"
+msgstr "{path} wird abgelehnt: {why}"
+
+msgid "renamed"
+msgstr "umbenannt"
+
+msgid "renamed {n}%"
+msgstr "umbenannt {n} %"
+
+msgid "renames {action} whole: use {button}"
+msgstr "Umbenennungen lassen sich nur ganz {action}: {button} verwenden"
+
+msgid "revert"
+msgstr "reverten"
+
+msgid "select a hunk: Discard hunk takes a hunk, Discard lines a selection"
+msgstr "einen Hunk auswählen: „Hunk verwerfen“ braucht einen Hunk, „Zeilen verwerfen“ eine Auswahl"
+
+msgid "select a hunk: Revert hunk takes a hunk, Revert lines a selection"
+msgstr "einen Hunk auswählen: „Hunk reverten“ braucht einen Hunk, „Zeilen reverten“ eine Auswahl"
+
+msgid "select the whole end-of-file change"
+msgstr "die ganze Änderung am Dateiende auswählen"
+
+msgid "show_diff — open the git page on a working-tree, branch or commit diff, at a file, line or hunk"
+msgstr "show_diff — die Git-Seite auf einem Arbeitsbaum-, Branch- oder Commit-Diff öffnen, an einer Datei, Zeile oder einem Hunk"
+
+msgid "stage"
+msgstr "stagen"
+
+msgid "the patch does not name a file"
+msgstr "der Patch nennt keine Datei"
+
+msgid "the patch names {other}"
+msgstr "der Patch nennt {other}"
+
+msgid "the selection is not inside hunk {n} of {path}"
+msgstr "die Auswahl liegt nicht in Hunk {n} von {path}"
+
+msgid "the view shows {shown} hunk(s) but the disk has {actual}"
+msgstr "die Ansicht zeigt {shown} Hunk(s), aber die Platte hat {actual}"
+
+msgid "the view shows {shown} hunk(s) where the patch has {actual}"
+msgstr "die Ansicht zeigt {shown} Hunk(s), wo der Patch {actual} hat"
+
+msgid "too large: {n} changed lines"
+msgstr "zu groß: {n} geänderte Zeilen"
+
+msgid "trash failed"
+msgstr "Papierkorb fehlgeschlagen"
+
+msgid "unstage"
+msgstr "unstagen"
+
+msgid "working tree"
+msgstr "Arbeitsbaum"
+
+msgid "working tree · staged"
+msgstr "Arbeitsbaum · gestaged"
+
+msgid "working tree · unstaged"
+msgstr "Arbeitsbaum · nicht gestaged"
+
+msgid "{branch} vs {parent}"
+msgstr "{branch} vs. {parent}"
+
+msgid "{done} — merged three-way (the result is staged)"
+msgstr "{done} — dreiseitig gemergt (das Ergebnis ist gestaged)"
+
+msgid "{error}\n\nWhatever the trash still holds of {path} can be restored from there by hand."
+msgstr "{error}\n\nWas der Papierkorb noch von {path} enthält, lässt sich von dort von Hand wiederherstellen."
+
+msgid "{n} lines"
+msgstr "{n} Zeilen"
+
+msgid "{n} more columns on GitHub"
+msgstr "{n} weitere Spalten auf GitHub"
+
+msgid "{n} more lines on GitHub"
+msgstr "{n} weitere Zeilen auf GitHub"
+
+msgid "{n} more rows on GitHub"
+msgstr "{n} weitere Zeilen auf GitHub"
+
+msgid "{n} of {m}"
+msgstr "{n} von {m}"
+
+msgid "{path}\n\nArchiving the session leaves its worktree behind unless it is moved to the trash with it. The trash keeps the worktree whole, uncommitted changes included, and Undo brings it back with the session; its branch stays. Cancel leaves the session where it is."
+msgstr "{path}\n\nDas Archivieren der Sitzung lässt ihren Worktree zurück, wenn er nicht mit ihr in den Papierkorb verschoben wird. Der Papierkorb bewahrt den Worktree ganz, nicht committete Änderungen eingeschlossen, und Rückgängig holt ihn mit der Sitzung zurück; sein Branch bleibt. Abbrechen lässt die Sitzung, wo sie ist."
+
+msgid "{path} changed since it was loaded, reloading ({detail})"
+msgstr "{path} hat sich seit dem Laden geändert, wird neu geladen ({detail})"
+
+msgid "{path} is a new or deleted file: use {button}"
+msgstr "{path} ist eine neue oder gelöschte Datei: {button} verwenden"
+
+msgid "{path} is binary: use git from a shell"
+msgstr "{path} ist binär: git aus einer Shell verwenden"
+
+msgid "{path} is binary: use {button}"
+msgstr "{path} ist binär: {button} verwenden"
+
+msgid "{path} is deleted: Discard file restores it whole"
+msgstr "{path} ist gelöscht: „Datei verwerfen“ stellt sie ganz wieder her"
+
+msgid "{path} is not in the view: reloading"
+msgstr "{path} ist nicht in der Ansicht: wird neu geladen"
+
+msgid "{path} is too large to discard by hunk: use git from a shell"
+msgstr "{path} ist zu groß, um hunkweise verworfen zu werden: git aus einer Shell verwenden"
+
+msgid "{path} is too large to revert: use git from a shell"
+msgstr "{path} ist zu groß zum Reverten: git aus einer Shell verwenden"
+
+msgid "{path} is too large to {action} by hunk: use {button}"
+msgstr "{path} ist zu groß, um hunkweise zu {action}: {button} verwenden"
+
+msgid "{path} is unmerged: resolve the conflict, then use {button}"
+msgstr "{path} ist ungemergt: den Konflikt auflösen, dann {button} verwenden"
+
+msgid "{path} is unmerged: use git checkout --ours or --theirs from a shell"
+msgstr "{path} ist ungemergt: git checkout --ours oder --theirs aus einer Shell verwenden"
+
+msgid "{path} is untracked: Discard file moves it to the trash"
+msgstr "{path} ist unversioniert: „Datei verwerfen“ verschiebt sie in den Papierkorb"
+
+msgid "{path} is untracked: use {button}"
+msgstr "{path} ist unversioniert: {button} verwenden"
+
+msgid "{path} isn't in this diff"
+msgstr "{path} ist nicht in diesem Diff"
+
+msgid "“{subject}” is applied in reverse. Commit the revert as `git revert` would, or leave the reverse change staged in the working tree (`--no-commit`) to edit and commit yourself."
+msgstr "„{subject}“ wird umgekehrt angewendet. Den Revert committen, wie `git revert` es täte, oder die umgekehrte Änderung gestaged im Arbeitsbaum lassen (`--no-commit`), um sie selbst zu bearbeiten und zu committen."
+
+msgid "⋯ {n} unchanged lines"
+msgstr "⋯ {n} unveränderte Zeilen"
 
