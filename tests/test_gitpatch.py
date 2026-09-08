@@ -1282,9 +1282,10 @@ def test_rebind_drops_the_selection_when_the_hunk_changed_the_file_is_gone_or_an
     assert selection is not None
     edited = parse_one(THREE_HUNKS_TEXT.replace(" l\n", " l!\n"))
     assert gitpatch.rebind_selection(selection, [edited], UNSTAGED) is None
-    # A hunk that moved keeps its lines but not its spans: a new selection is needed.
+    # A hunk that only moved (lines above it added or staged) keeps its lines
+    # and so its key: the selection follows it.
     shifted = parse_one(THREE_HUNKS_TEXT.replace("@@ -10,3 +11,3 @@", "@@ -10,3 +12,3 @@"))
-    assert gitpatch.rebind_selection(selection, [shifted], UNSTAGED) is None
+    assert gitpatch.rebind_selection(selection, [shifted], UNSTAGED) == selection
     gone = parse_one(THREE_HUNKS_TEXT.replace("f.txt", "g.txt"))
     assert gitpatch.rebind_selection(selection, [gone], UNSTAGED) is None
     assert gitpatch.rebind_selection(selection, [THREE_HUNKS], STAGED) is None

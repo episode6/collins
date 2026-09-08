@@ -1201,14 +1201,15 @@ def select(file: File, hunk_index: int, first: int, last: int, load: object) -> 
 def rebind_selection(selection: Selection, files: Iterable[File], load: object) -> Selection | None:
     """After a reload: the selection re-pointed at its hunk's new index when
     the same load shows a file with its path whose hunk still has the very
-    same lines (its stable key — the spans and a digest of the lines), else
-    None: a hunk that moved or changed, a file that is gone, another load."""
+    same lines (its stable key — a digest of the lines, the spans left
+    out, so a hunk that only moved keeps it), else None: a hunk whose
+    lines changed, a file that is gone, another load."""
     if load != selection.load:
         return None
     file = diffmodel.find_file(files, selection.path)
     if file is None:
         return None
-    for hunk in file.hunks:
-        if diffmodel.stable_key(file, hunk) == selection.hunk_key:
+    for hunk, key in zip(file.hunks, diffmodel.stable_keys(file), strict=True):
+        if key == selection.hunk_key:
             return replace(selection, hunk_index=hunk.index)
     return None

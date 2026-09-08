@@ -1381,6 +1381,33 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("with lines selected the menu reads lines and keeps the selection", view.select_lines("text.txt", 1, 3, 4) and view.context_menu_labels("text.txt", 1, 0) == ["Stage lines", "Discard lines", "Copy", "Open in editor", "Add note", "Expand context"] and view.selection() == ("text.txt", 1, 3, 4), view.selection())
         view.clear_selection()
 
+        # -- a hunk above shifting the ones below: the later hunk keeps everything, renumbered --
+        # A line added inside hunk 0 moves hunk 1's new numbers; staging hunk
+        # 0 then moves its old numbers (and its index). Neither touches hunk
+        # 1's lines, so it keeps its widget, its selection and its note
+        # through both — the header, the gutters and the note's line moved.
+        # (Row 4 of hunk 1 is the addition, row 3 the deletion.)
+        serials = view.hunk_serials("text.txt")
+        later = view.add_notes([NoteSpec("text.txt", "on the later hunk", line=45)])
+        check("a note on hunk 1's new line 45 and a selection in it", isinstance(later, list) and view.select_lines("text.txt", 1, 3, 4) and view.selection() == ("text.txt", 1, 3, 4), (later, view.selection()))
+        check("hunk 1 stands at 42 on both sides", view.hunk_rows("text.txt")[1].startswith("@@ -42,7 +42,7 @@") and view.gutter_numbers("text.txt", 1)["new"][4] == 45, (view.hunk_rows("text.txt"), view.gutter_numbers("text.txt", 1)))
+        write_file(repo, "text.txt", "".join(lines[:5] + ["line 5b\n"] + lines[5:]))
+        check("a line added in hunk 0 reloads: hunk 0 rebuilt, hunk 1 kept", wait_for(lambda: view.hunk_serials("text.txt")[:1] != serials[:1] and page.settled(), timeout=2.0) and view.hunk_serials("text.txt")[1:] == serials[1:], (serials, view.hunk_serials("text.txt")))
+        check("hunk 1's header and gutters moved with its new side", view.hunk_rows("text.txt")[1].startswith("@@ -42,7 +43,7 @@") and view.gutter_numbers("text.txt", 1)["new"][4] == 46 and view.gutter_numbers("text.txt", 1)["old"][3] == 45, (view.hunk_rows("text.txt"), view.gutter_numbers("text.txt", 1)))
+        check("its selection held", view.selection() == ("text.txt", 1, 3, 4) and view.hunk_action_labels("text.txt", 1) == ("Stage lines", "Discard lines"), view.selection())
+        check("its note held, renumbered to new line 46", [(n.summary, n.line) for n in view.notes()] == [("on the later hunk", 46)] and view.note_rows("text.txt", 1) == [(later[0], "agent", "new", 46, "on the later hunk", True)], (view.notes(), view.note_rows("text.txt", 1)))
+        check("Stage hunk on hunk 0 (the selection stays hunk 1's: one selection in the stream)", view.hunk_action_labels("text.txt", 0) == ("Stage hunk", "Discard hunk") and view.click_hunk_action("text.txt", 0), view.hunk_action_labels("text.txt", 0))
+        check("hunk 0 lands in the index", wait_for(idle, timeout=5.0) and wait_for(lambda: "text.txt" in index_paths() and page.settled(), timeout=5.0) and "+line 5b" in git_out(repo, "diff", "--cached", "--", "text.txt") and "line 45" not in git_out(repo, "diff", "--cached", "--", "text.txt"), git_out(repo, "diff", "--cached", "--", "text.txt"))
+        check("the reload kept the later hunk's widget, now at index 0 with its old side moved", wait_for(lambda: len(view.hunk_rows("text.txt")) == 1 and view.hunk_rows("text.txt")[0].startswith("@@ -43,7 +43,7 @@") and page.settled(), timeout=5.0) and view.hunk_serials("text.txt") == serials[1:] and view.gutter_numbers("text.txt", 0)["old"][3] == 46 and view.gutter_numbers("text.txt", 0)["new"][4] == 46, (view.hunk_rows("text.txt"), view.hunk_serials("text.txt"), view.gutter_numbers("text.txt", 0)))
+        check("the selection rode the staging of the hunk above, re-indexed", view.selection() == ("text.txt", 0, 3, 4) and view.hunk_action_labels("text.txt", 0) == ("Stage lines", "Discard lines"), (view.selection(), view.hunk_action_labels("text.txt", 0)))
+        check("and so did its note", view.note_rows("text.txt", 0) == [(later[0], "agent", "new", 46, "on the later hunk", True)], view.note_rows("text.txt", 0))
+        # Back to the fixture: the index reset for text.txt, the line taken out.
+        git(repo, "reset", "-q", "--", "text.txt")
+        write_file(repo, "text.txt", "".join(lines))
+        check("the fixture's two hunks are back", wait_for(lambda: view.hunk_rows("text.txt")[:1] and view.hunk_rows("text.txt")[-1].startswith("@@ -42,7 +42,7 @@") and page.settled(), timeout=5.0) and len(view.hunk_rows("text.txt")) == 2 and "text.txt" not in index_paths(), (view.hunk_rows("text.txt"), index_paths()))
+        check("the note followed hunk 1 back to line 45", view.note_rows("text.txt", 1) == [(later[0], "agent", "new", 45, "on the later hunk", True)] and view.delete_note(later[0]) and view.notes() == [], view.note_rows("text.txt", 1))
+        view.clear_selection()
+
         # -- stage lines: the partial patch lands in the index, the view reloads by key --------
         serials = view.hunk_serials("text.txt")
         check("select the change of hunk 1 again", view.select_lines("text.txt", 1, 3, 4))

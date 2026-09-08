@@ -645,8 +645,9 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
 - **It keeps itself fresh.** The loaded files' directories are watched:
   an edit re-reads the diff a third of a second later — any edit, one
   that only rewrites an already-changed line included — an untouched
-  hunk keeps its widget, its selection and the keyboard, and the scroll
-  stays put. Every two seconds the page also compares the index, `HEAD`
+  hunk keeps its widget, its selection, its notes and the keyboard, even
+  when a change above it moved its line numbers, and the scroll stays
+  put. Every two seconds the page also compares the index, `HEAD`
   and the parent branch against what it last loaded, and reloads when
   any of them moved — an agent staging, committing or rebasing shows up
   without a keypress, and a session that finishes a turn is checked on

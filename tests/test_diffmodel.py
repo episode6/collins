@@ -738,7 +738,7 @@ def test_display_text_keeps_a_buffer_paragraph_per_patch_line():
     assert diffmodel.display_text("\r") == ""
 
 
-def test_stable_key_survives_an_untouched_hunk_and_changes_with_a_moved_one():
+def test_stable_key_survives_an_untouched_hunk_and_one_that_only_moved():
     before = only(MODIFIED)
     after = only(
         MODIFIED.replace("+1,5 @@", "+1,6 @@")
@@ -746,12 +746,65 @@ def test_stable_key_survives_an_untouched_hunk_and_changes_with_a_moved_one():
         .replace("@@ -20,3 +21,3 @@", "@@ -20,3 +22,3 @@")
     )
     assert stable_key(before, before.hunks[0]) != stable_key(after, after.hunks[0])  # the first hunk changed
-    assert stable_key(before, before.hunks[1]) != stable_key(after, after.hunks[1])  # the second moved
+    # The second only moved (its numbers shifted, its lines did not): the same key.
+    assert stable_key(before, before.hunks[1]) == stable_key(after, after.hunks[1])
     same = only(MODIFIED)
     assert stable_key(before, before.hunks[1]) == stable_key(same, same.hunks[1])
     assert stable_key(before) == stable_key(same)
     assert stable_key(before) != stable_key(after)
     assert stable_key(before).startswith("src/app.py\x00")
+    assert diffmodel.stable_keys(before) == tuple(stable_key(before, h) for h in before.hunks)
+    assert diffmodel.stable_keys(after) == tuple(stable_key(after, h) for h in after.hunks)
+
+
+def test_stable_key_reads_the_whole_body_and_leaves_the_header_out():
+    before = only(MODIFIED)
+    # A context line rewritten changes the body the widget shows: a new key.
+    context = only(MODIFIED.replace("     # end\n", "     # the end\n"))
+    assert stable_key(before, before.hunks[1]) != stable_key(context, context.hunks[1])
+    # The function name after the `@@` is the header's, not the body's.
+    renamed = only(MODIFIED.replace("@@ class App:", "@@ class Application:"))
+    assert stable_key(before, before.hunks[1]) == stable_key(renamed, renamed.hunks[1])
+    # A hunk that moved to another index keeps its key: the index is not in it.
+    ahead = only(MODIFIED.replace("@@ -1,4 +1,5 @@", "@@ -0,0 +1 @@\n+top\n@@ -1,4 +2,5 @@"))
+    assert len(ahead.hunks) == 3
+    assert stable_key(before, before.hunks[1]) == stable_key(ahead, ahead.hunks[2])
+
+
+TWIN_HUNKS = """\
+diff --git a/twins.txt b/twins.txt
+index 3b18e51..a1b2c3d 100644
+--- a/twins.txt
++++ b/twins.txt
+@@ -1,1 +1,1 @@
+-a
++b
+@@ -10,1 +10,1 @@
+-a
++b
+@@ -20,1 +20,1 @@
+-a
++b
+"""
+
+
+def test_stable_key_tells_equal_bodies_apart_by_their_turn_in_patch_order():
+    twins = only(TWIN_HUNKS)
+    keys = diffmodel.stable_keys(twins)
+    assert len(set(keys)) == 3 and keys == tuple(stable_key(twins, h) for h in twins.hunks)
+    assert [k.rsplit("\x00", 1)[1] for k in keys] == ["0/3", "1/3", "2/3"]
+    assert len({k.rsplit("\x00", 1)[0] for k in keys}) == 1  # one body digest
+    # Both sides of a reload count the same way, so each keeps its own.
+    shifted = only(TWIN_HUNKS.replace("@@ -10,1 +10,1 @@", "@@ -10,1 +11,1 @@").replace("+20,1", "+21,1"))
+    assert diffmodel.stable_keys(shifted) == keys
+    # One of the three leaving: the bodies cannot say which, so none of
+    # the survivors keeps its key (their count is in it).
+    two = only(TWIN_HUNKS.replace("@@ -1,1 +1,1 @@\n-a\n+b\n", ""))
+    assert not set(diffmodel.stable_keys(two)) & set(keys)
+    assert [k.rsplit("\x00", 1)[1] for k in diffmodel.stable_keys(two)] == ["0/2", "1/2"]
+    # A hunk from another file never matches, whatever its body.
+    other = only(TWIN_HUNKS.replace("twins.txt", "other.txt"))
+    assert not set(diffmodel.stable_keys(other)) & set(keys)
 
 
 def test_stable_key_tells_files_of_the_same_content_apart_by_path_and_rename():
