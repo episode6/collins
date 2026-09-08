@@ -1478,11 +1478,17 @@ class GitPage(Adw.Bin):
         kind = operation.kind
 
         def work() -> tuple:
-            if abort:
-                result = gitops.abort_operation(cwd, kind)
-            else:
-                result = gitops.continue_operation(cwd, kind)
-            still = gitops.in_progress(gitinfo.git_dir(cwd)) if result.ok else None
+            # Never None: run_mutation drops a None answer without calling
+            # done, and the bar would stay greyed. gitops never raises
+            # today; the catch keeps that a toast rather than a stuck bar.
+            try:
+                if abort:
+                    result = gitops.abort_operation(cwd, kind)
+                else:
+                    result = gitops.continue_operation(cwd, kind)
+                still = gitops.in_progress(gitinfo.git_dir(cwd)) if result.ok else None
+            except Exception as err:  # the worker's last line of defence
+                return gitops.GitResult(False, "", str(err) or err.__class__.__name__), None
             return result, still
 
         def done(answer: object) -> None:

@@ -639,7 +639,9 @@ def operation_hint(kind: str, unmerged: int) -> str:
     """The bar's one-line hint under the heading: what stands in the way
     (*unmerged* paths, `git status`'s `U` rows) and what the two buttons
     run — Continue is `git <kind> --continue` with the step's message
-    taken as it is, Abort is `git <kind> --abort`."""
+    taken as it is, Abort is `git <kind> --abort`. *kind* goes into the
+    command snippets raw on purpose: it is the literal git subcommand
+    (`am`, not the translated label "git am"), and must stay so."""
     if unmerged > 0:
         return _(
             "Unmerged files: {count}. Resolve and stage them, then Continue"
