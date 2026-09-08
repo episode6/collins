@@ -253,14 +253,14 @@ class _FileRow(Gtk.ListBoxRow):
         counts = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         counts.add_css_class("git-file-counts")
         if file.binary:
-            binary = Gtk.Label(label=_("bin"), xalign=1)
+            binary = Gtk.Label(label=_("bin"))
             binary.add_css_class("dim-label")
             counts.append(binary)
         elif file.live and file.additions is not None and file.deletions is not None:
-            added = Gtk.Label(label=f"+{file.additions}", xalign=1)
+            added = Gtk.Label(label=f"+{file.additions}")
             added.add_css_class("pr-checks-passed")
             counts.append(added)
-            removed = Gtk.Label(label=f"−{file.deletions}", xalign=1)
+            removed = Gtk.Label(label=f"−{file.deletions}")
             removed.add_css_class("pr-checks-failed")
             counts.append(removed)
         box.append(counts)
