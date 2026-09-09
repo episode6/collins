@@ -224,6 +224,9 @@ def check_sidebar(repo: str) -> None:
           page._sidebar_toggle.get_sensitive() and not page._sidebar_toggle.get_active()
           and page._sidebar_toggle.get_tooltip_text() == "Show the commits and files panels",
           (page._sidebar_toggle.get_sensitive(), page._sidebar_toggle.get_tooltip_text()))
+    check("the toggle wears the back arrow there", page._sidebar_toggle.get_icon_name() == "go-previous-symbolic")
+    check("and sits first among the header's buttons",
+          page._sidebar_toggle_box.get_next_sibling() is page._find_toggle)
     check("the toggle's word still reads shown (it persists)", page.sidebar_wanted and "sidebar" not in page.page_state())
     page._sidebar_toggle.set_active(True)  # the header press
     check("pressed, the panels stand in for the diff", page.sidebar_shown and not page.diff_shown)
@@ -260,6 +263,7 @@ def check_sidebar(repo: str) -> None:
     page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
     wide = wait_for(lambda: not page.narrow and page.sidebar_shown)
     check("a 900 px page shows the sidebar beside the diff again", wide and page.diff_shown, (page.narrow, page.sidebar_shown))
+    check("the toggle wears the sidebar glyph again", page._sidebar_toggle.get_icon_name() == "sidebar-show-symbolic")
     check("the toggle reads the word there", page._sidebar_toggle.get_active()
           and page._sidebar_toggle.get_tooltip_text() == "Hide the commits and files panels")
     check(

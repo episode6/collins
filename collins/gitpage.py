@@ -152,6 +152,11 @@ _BIN_MIN_HEIGHT = 120
 # Below this width the sidebar hides regardless of the toggle: one pixel
 # under _MIN_PAGE_WIDTH, so a page at the floor shows both.
 _NARROW_MAX_WIDTH = _MIN_PAGE_WIDTH - 1
+# The panel toggle's glyph: the sidebar's on a wide page, a back arrow on
+# a narrow one (there it is the way between the diff and the panels, the
+# editor's narrow-mode back button).
+_SIDEBAR_ICON = "sidebar-show-symbolic"
+_BACK_ICON = "go-previous-symbolic"
 # Where the paned's divider starts: the sidebar a little wider than its
 # request, the rest the view's.
 _SIDEBAR_POSITION = 240
@@ -340,7 +345,7 @@ class GitPage(Adw.Bin):
         # The sidebar toggle, in a box of its own so its tooltip reaches
         # the pointer while the button is insensitive (the not-a-repo
         # card): an insensitive widget is out of pick, its box isn't.
-        self._sidebar_toggle = Gtk.ToggleButton(icon_name="sidebar-show-symbolic")
+        self._sidebar_toggle = Gtk.ToggleButton(icon_name=_SIDEBAR_ICON)
         self._sidebar_toggle.set_active(self._sidebar_wanted)
         self._sidebar_toggle.add_css_class("flat")
         self._sidebar_toggle.connect("toggled", self._on_sidebar_toggled)
@@ -352,8 +357,8 @@ class GitPage(Adw.Bin):
         self._menu_button = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=self._build_menu())
         self._menu_button.add_css_class("flat")
         self._menu_button.set_tooltip_text(_("Diff view options"))
+        header.append(self._sidebar_toggle_box)  # first: the way to the panels, narrow or wide
         header.append(self._find_toggle)
-        header.append(self._sidebar_toggle_box)
         header.append(self._menu_button)
         header.append(refresh)
         self._refresh_button = refresh
@@ -1415,6 +1420,7 @@ class GitPage(Adw.Bin):
             tooltip = (
                 _("Hide the commits and files panels") if panels else _("Show the commits and files panels")
             )
+        self._sidebar_toggle.set_icon_name(_BACK_ICON if self._narrow else _SIDEBAR_ICON)
         self._sidebar_toggle.set_sensitive(not card_hides)
         self._syncing_toggle = True
         try:

@@ -35,8 +35,9 @@ the sidebar + `diffview.DiffView` in a `Gtk.Paned` inside an
 stops being a repository; `_show_card` takes the id alone). There is no
 terminal in it and no external program: every load is one
 `gitops.read_diff` and the view draws it. The header is one row: the branch
-(`_BRANCH_MAX_CHARS`), a breadcrumb of what is loaded, the find toggle, the
-sidebar toggle, the view's menu (layout, line numbers, wrap, agent notes,
+(`_BRANCH_MAX_CHARS`), a breadcrumb of what is loaded, the sidebar toggle
+(`_SIDEBAR_ICON`, or `_BACK_ICON` on a narrow page), the find toggle, the
+view's menu (layout, line numbers, wrap, agent notes,
 reload, keyboard shortcuts) and refresh; the tab's X closes. The
 `BreakpointBin` (`max-width: 679px` → one column at a time, the editor's
 narrow mode: the diff by default, the toggle swaps the panels in for it —

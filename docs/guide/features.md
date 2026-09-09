@@ -646,9 +646,9 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   the divider can be dragged down to the diff alone.
 - **One column when narrow.** Below about 680 px the page shows the diff
   and the panels one at a time, like the editor's narrow mode: the diff
-  by default, so it keeps its columns, and the header's panel button
-  swaps the commits and files panels in for it (*Back to the diff* takes
-  them out again). Picking a row, `Ctrl+1` / `2` / `3`, a `/` filter
+  by default, so it keeps its columns, and the header's panel button,
+  first in its row and wearing a back arrow there, swaps the commits and
+  files panels in for it (*Back to the diff* takes them out again). Picking a row, `Ctrl+1` / `2` / `3`, a `/` filter
   escaped or an agent's `show_diff` all drop back to the diff. Widen the
   page and the two sit side by side again, the panels as the button's
   remembered word left them.
