@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-07. Full change history: git log for this file.
+# fork. Last modified: 2026-09-09. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1271,9 +1271,11 @@ popover.menu button.open-with-row:hover {
   padding: 0px 8px;
   min-height: 22px;
 }
+/* the gap's one button, a flat icon on the left. */
 .git-gap-button {
   padding: 0px 6px;
   min-height: 20px;
+  min-width: 20px;
 }
 .git-pinned-header {
   padding: 4px 12px;

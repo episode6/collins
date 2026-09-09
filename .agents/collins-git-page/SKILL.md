@@ -444,7 +444,14 @@ the GTK-free half alike import it directly.
 picture for an image; the gap rows and `_HunkSection`s), the pinned file
 header over the top. Every hunk is its own `GtkSource.View` (decision 2:
 the header is a plain `Gtk.Box` carrying the buttons, the selection is
-hunk-scoped, gaps expand between them); split is two views per hunk
+hunk-scoped, gaps expand between them — a `_GapRow` before each hunk that
+has one and a trailing one after the last, each one `⇕` button on the
+left (`unfold-symbolic`, bundled) whose click draws the whole gap, up to
+`MAX_EXPAND_ALL` lines a click; the trailing row drawn as a bare `⋯`
+until `measure_trailing_gaps` (the scroll settle, for the rows in sight)
+or its click reads the file's length through `_measured`, then worded or
+folded like the rest — probes `gap_rows`, `expand_gap`, `gap_row_shown`,
+`gap_measured`); split is two views per hunk
 (`_SplitPane`) over `diffmodel.split_rows` with a padding pass; the
 language is the file's, the scheme and font the editor's
 (`editor.style_scheme`, `editor_font`, decision 3 — there is no diff

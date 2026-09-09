@@ -47,6 +47,17 @@ downloads of each version, see the
   pops up one main-loop turn later, at its full height — and the Caffeine
   button's right-click menu, kept flat to dodge the same bug, puts *Keep
   screen on* under a separator of its own.
+- **The diff's gaps expand with one button, GitHub-style.** The git
+  page's *⋯ n unchanged lines* rows used to carry *▲ 20* / *▼ 20* /
+  *all* buttons on the right, and the stretch after a file's last hunk
+  had no row at all: its size is only known once the file is read, and
+  the row waited for that read before showing, which nothing could start.
+  Every gap now has one ⇕ button on the left, where the line numbers
+  are, and a click draws the whole gap — above the first hunk, between
+  hunks, and below the last one, that row shown as a bare *⋯* from the
+  start, measured when it scrolls into sight and left out when the hunk
+  already reaches the end of the file. Any file can be brought into view
+  piece by piece, top to bottom.
 - **The git page's panels reach a narrow page.** Below about 680 px the
   page used to hide the commits and files panels and grey the header's
   panel button, leaving no way to pick another commit or file without
