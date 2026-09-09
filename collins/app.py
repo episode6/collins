@@ -1271,16 +1271,11 @@ popover.menu button.open-with-row:hover {
   padding: 0px 8px;
   min-height: 22px;
 }
-/* the gap's expander: flat icon buttons on the left; the two arrows of a
-   gap between hunks stack in a column, each a half-height button. */
+/* the gap's one button, a flat icon on the left. */
 .git-gap-button {
   padding: 0px 6px;
   min-height: 20px;
   min-width: 20px;
-}
-.git-gap-arrows .git-gap-button {
-  padding: 0px 6px;
-  min-height: 12px;
 }
 .git-pinned-header {
   padding: 4px 12px;

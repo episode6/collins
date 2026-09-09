@@ -131,7 +131,7 @@ def main() -> int:
         current: list[tuple[str, int]] = []
         view.connect("current-changed", lambda _v, path, hunk: current.append((path, hunk)))
         contexts: list[tuple[str, str, int]] = []
-        view.connect("context-requested", lambda _v, path, gap, count: contexts.append((path, gap, count)))
+        view.connect("context-requested", lambda _v, path, gap: contexts.append((path, gap)))
         win = Gtk.ApplicationWindow(application=app, default_width=args.width, default_height=args.height)
         win.set_child(view)
         win.present()
@@ -278,7 +278,7 @@ def main() -> int:
             print("gap rows:", gaps)
             leading = [g for g in gaps if g[0].startswith("before:")]
             if leading:
-                ok("expand_gap down", view.expand_gap(first_text.path, leading[0][0], diffview.DOWN, 5))
+                ok("expand_gap", view.expand_gap(first_text.path, leading[0][0]))
                 GLib.timeout_add(700, lambda: step_gap(leading[0][0]))
             else:
                 GLib.timeout_add(50, step_filter)
@@ -287,10 +287,10 @@ def main() -> int:
         def step_gap(address: str) -> bool:
             gaps = dict((g[0], g) for g in view.gap_rows(first_text.path))
             print("gap after expand:", gaps.get(address), "context-requested:", contexts[-1:])
-            ok("gap shows 5 lines", address in gaps and gaps[address][2] == 5, repr(gaps.get(address)))
+            ok("gap drawn whole", address in gaps and gaps[address][1] == 0 and gaps[address][2] > 0, repr(gaps.get(address)))
             trailing = [g for g in view.gap_rows(first_text.path) if g[0].startswith("trailing")]
             if trailing:
-                view.expand_gap(first_text.path, trailing[0][0], diffview.ALL, 0)
+                view.expand_gap(first_text.path, trailing[0][0])
                 GLib.timeout_add(700, step_trailing)
             else:
                 GLib.timeout_add(50, step_filter)
