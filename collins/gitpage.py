@@ -74,10 +74,13 @@ read that moves the parent reloads a branch diff that now has another
 base. There is no picker and no persisted parent: the layout slot is
 gitloads.encode_state(loaded, sidebar).
 
-The sidebar hides below the Adw.BreakpointBin's breakpoint
-(_NARROW_MAX_WIDTH) whatever the header's toggle says, and the toggle's
-state — persisted in page_state's "sidebar" — rules above it; the
-not-a-repo card hides it too (nothing to list). Page-local toasts (commit
+Below the Adw.BreakpointBin's breakpoint (_NARROW_MAX_WIDTH) the page is
+one column at a time, the editor's narrow mode: the diff by default, and
+the header's panel button swaps the commits and files panels in for it
+(_panels_requested, forgotten when the page widens) — a row picked, a
+chord or the host's load drops back to the diff. Above it the toggle's
+word — persisted in page_state's "sidebar" — rules, both columns side by
+side; the not-a-repo card hides the panels either way (nothing to list). Page-local toasts (commit
 results, git's refusals, a reveal that missed) float in an
 Adw.ToastOverlay over the page. Preferences → Git reaches the page as the
 whole settings dict (apply_settings, on every change the dialog makes),
@@ -149,6 +152,11 @@ _BIN_MIN_HEIGHT = 120
 # Below this width the sidebar hides regardless of the toggle: one pixel
 # under _MIN_PAGE_WIDTH, so a page at the floor shows both.
 _NARROW_MAX_WIDTH = _MIN_PAGE_WIDTH - 1
+# The panel toggle's glyph: the sidebar's on a wide page, a back arrow on
+# a narrow one (there it is the way between the diff and the panels, the
+# editor's narrow-mode back button).
+_SIDEBAR_ICON = "sidebar-show-symbolic"
+_BACK_ICON = "go-previous-symbolic"
 # Where the paned's divider starts: the sidebar a little wider than its
 # request, the rest the view's.
 _SIDEBAR_POSITION = 240
@@ -276,6 +284,13 @@ class GitPage(Adw.Bin):
         # the page is above the breakpoint and no card hides it.
         self._sidebar_wanted = bool(sidebar)
         self._narrow = False
+        # Narrow page: the panels alone instead of the diff, until a row
+        # is picked or the page widens (the editor's _picker_requested).
+        # Not persisted.
+        self._panels_requested = False
+        # _sync_sidebar sets the toggle to what the width shows; the
+        # handler must not read that back as the user's word.
+        self._syncing_toggle = False
         # A reveal waiting for a working-tree side to load first: (path, side).
         self._pending_navigate: tuple[str, str] | None = None
 
@@ -328,9 +343,9 @@ class GitPage(Adw.Bin):
         refresh.set_tooltip_text(_("Reload the diff"))
         refresh.connect("clicked", lambda *_a: self.refresh())
         # The sidebar toggle, in a box of its own so its tooltip reaches
-        # the pointer while the button is insensitive (a narrow page): an
-        # insensitive widget is out of pick, its box isn't.
-        self._sidebar_toggle = Gtk.ToggleButton(icon_name="sidebar-show-symbolic")
+        # the pointer while the button is insensitive (the not-a-repo
+        # card): an insensitive widget is out of pick, its box isn't.
+        self._sidebar_toggle = Gtk.ToggleButton(icon_name=_SIDEBAR_ICON)
         self._sidebar_toggle.set_active(self._sidebar_wanted)
         self._sidebar_toggle.add_css_class("flat")
         self._sidebar_toggle.connect("toggled", self._on_sidebar_toggled)
@@ -342,8 +357,8 @@ class GitPage(Adw.Bin):
         self._menu_button = Gtk.MenuButton(icon_name="view-more-symbolic", menu_model=self._build_menu())
         self._menu_button.add_css_class("flat")
         self._menu_button.set_tooltip_text(_("Diff view options"))
+        header.append(self._sidebar_toggle_box)  # first: the way to the panels, narrow or wide
         header.append(self._find_toggle)
-        header.append(self._sidebar_toggle_box)
         header.append(self._menu_button)
         header.append(refresh)
         self._refresh_button = refresh
@@ -429,7 +444,7 @@ class GitPage(Adw.Bin):
         self.sidebar.connect("open-with-requested", self._on_open_with_requested)
         self.sidebar.connect("mutated", self._on_mutated)
         self.sidebar.connect("filter-changed", lambda _s, text: self._on_filter_changed(text))
-        self.sidebar.connect("filter-escaped", lambda _s: self._diffview.grab_focus())
+        self.sidebar.connect("filter-escaped", lambda _s: self._on_filter_escaped())
         self._paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._paned.set_start_child(self.sidebar)
         self._paned.set_resize_start_child(False)
@@ -601,9 +616,21 @@ class GitPage(Adw.Bin):
 
     @property
     def sidebar_shown(self) -> bool:
-        """Whether the sidebar is on screen: the toggle says so, the page
-        is above the breakpoint, and no card hides it."""
+        """Whether the sidebar is on screen: above the breakpoint the toggle
+        says so; under it the panels were asked for; and no card hides
+        it."""
         return self.sidebar.get_visible()
+
+    @property
+    def diff_shown(self) -> bool:
+        """Whether the diff's column is on screen — False only on a narrow
+        page showing the panels alone."""
+        return self._stack.get_visible()
+
+    @property
+    def narrow(self) -> bool:
+        """Whether the page is under the breakpoint: one column at a time."""
+        return self._narrow
 
     @property
     def sidebar_wanted(self) -> bool:
@@ -612,8 +639,24 @@ class GitPage(Adw.Bin):
         return self._sidebar_wanted
 
     def set_sidebar_wanted(self, wanted: bool) -> None:
-        """Flip the header's toggle: show or hide the panels."""
-        self._sidebar_toggle.set_active(bool(wanted))
+        """The header toggle's persisted word: show or hide the panels
+        beside the diff. On a narrow page it changes nothing on screen
+        until the page widens (there the toggle is the column switch)."""
+        self._sidebar_wanted = bool(wanted)
+        self._sync_sidebar()
+
+    def show_panels(self, shown: bool = True) -> None:
+        """Narrow page: the commits and files panels instead of the diff
+        (*shown*), or the diff again — the header toggle's press there.
+        A no-op above the breakpoint, where both are up."""
+        if not self._narrow or shown == self._panels_requested:
+            return
+        self._panels_requested = shown
+        self._sync_sidebar()
+        if shown:
+            self.sidebar.child_focus(Gtk.DirectionType.TAB_FORWARD)
+        else:
+            self._diffview.grab_focus()
 
     def settled(self) -> bool:
         """Whether the view is up with nothing in flight: no read out or
@@ -644,6 +687,7 @@ class GitPage(Adw.Bin):
             raise ValueError(f"unknown git page load: {loaded!r}")
         self._pending_navigate = None
         self._diffview.solo(None)  # a new load is the whole stream (a row click re-solos)
+        self._show_diff_column()  # a load is an ask to see the diff
         if loaded == "branch" and self._resolve_parent() is None:
             self._sync_header()
             return
@@ -1357,27 +1401,57 @@ class GitPage(Adw.Bin):
         )
 
     def _sync_sidebar(self) -> None:
-        """Show or hide the sidebar: the toggle's word, unless the page is
-        narrow (the toggle goes insensitive and its box's tooltip says
-        what would help) or a card with nothing to list is up."""
+        """Show the columns the width has room for. Wide: the diff, and
+        the sidebar beside it when the toggle's word says so. Narrow: one
+        of the two — the panels alone while they were asked for, else the
+        diff — and the toggle reads which (its box's tooltip says what a
+        press does). A card with nothing to list hides the panels and
+        greys the toggle either way."""
         card_hides = self._card == _NOT_A_REPO
-        self.sidebar.set_visible(self._sidebar_wanted and not self._narrow and not card_hides)
-        self._sidebar_toggle.set_sensitive(not self._narrow)
         if self._narrow:
-            tooltip = _("Widen the page to show the panels")
-        elif self._sidebar_wanted:
-            tooltip = _("Hide the commits and files panels")
+            panels = self._panels_requested and not card_hides
+            self.sidebar.set_visible(panels)
+            self._stack.set_visible(not panels)
+            tooltip = _("Back to the diff") if panels else _("Show the commits and files panels")
         else:
-            tooltip = _("Show the commits and files panels")
+            panels = self._sidebar_wanted and not card_hides
+            self.sidebar.set_visible(panels)
+            self._stack.set_visible(True)
+            tooltip = (
+                _("Hide the commits and files panels") if panels else _("Show the commits and files panels")
+            )
+        self._sidebar_toggle.set_icon_name(_BACK_ICON if self._narrow else _SIDEBAR_ICON)
+        self._sidebar_toggle.set_sensitive(not card_hides)
+        self._syncing_toggle = True
+        try:
+            self._sidebar_toggle.set_active(panels)
+        finally:
+            self._syncing_toggle = False
         self._sidebar_toggle_box.set_tooltip_text(tooltip)
-        self._sidebar_toggle.set_tooltip_text(None if self._narrow else tooltip)
+        self._sidebar_toggle.set_tooltip_text(None if card_hides else tooltip)
 
     def _on_sidebar_toggled(self, button: Gtk.ToggleButton) -> None:
-        self._sidebar_wanted = button.get_active()
-        self._sync_sidebar()
+        if self._syncing_toggle:
+            return
+        if self._narrow:
+            self.show_panels(button.get_active())
+        else:
+            self._sidebar_wanted = button.get_active()
+            self._sync_sidebar()
+
+    def _show_diff_column(self) -> None:
+        """A narrow page showing the panels alone: back to the diff — the
+        row picked, the chord pressed or the host's load asked for it."""
+        if self._narrow and self._panels_requested:
+            self._panels_requested = False
+            self._sync_sidebar()
 
     def _on_narrow(self, narrow: bool) -> None:
         self._narrow = narrow
+        if not narrow:
+            # Widened with the panels up: the next narrowing starts on the
+            # diff again, as the first did.
+            self._panels_requested = False
         self._sync_sidebar()
 
     def _on_navigate_requested(self, _sidebar: GitSidebar, path: str, side: str) -> None:
@@ -1563,6 +1637,7 @@ class GitPage(Adw.Bin):
         (_show_all) brings the whole stream back."""
         if self._closing or not self._opened:
             return
+        self._show_diff_column()
         if not self._diffview.solo(path) or not self._diffview.reveal(path):
             self._toast(_("{path} isn't in this diff").format(path=path))
             return
@@ -1573,6 +1648,7 @@ class GitPage(Adw.Bin):
         (the files filter's word still applies)."""
         if self._closing or not self._opened:
             return
+        self._show_diff_column()
         self._diffview.solo(None)
         self._sync_search_label()
 
@@ -1964,9 +2040,17 @@ class GitPage(Adw.Bin):
         self.apply_settings({**self._settings, key: value})
 
     def _focus_filter(self) -> None:
-        """`/`: the files filter, when the sidebar is on screen."""
+        """`/`: the files filter, when the sidebar is on screen — a narrow
+        page brings the panels up for it."""
+        self.show_panels(True)
         if self.sidebar.get_visible():
             self.sidebar.focus_filter()
+
+    def _on_filter_escaped(self) -> None:
+        """Escape in the files filter: the keyboard back in the view — on
+        a narrow page that is the diff column again."""
+        self._show_diff_column()
+        self._diffview.grab_focus()
 
 
 def _trash_paths(root: str, paths: Sequence[str]) -> gitops.GitResult:

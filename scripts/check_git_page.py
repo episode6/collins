@@ -211,24 +211,61 @@ def check_sidebar(repo: str) -> None:
     )
     page.apply_settings(SETTINGS)
     sidebar = page.sidebar
-    # A 500 px window first: under the breakpoint the sidebar hides
-    # whatever the toggle says, and the toggle goes insensitive.
+    # A 500 px window first: under the breakpoint the page is one column
+    # at a time — the diff, until the toggle swaps the panels in for it.
     window = Gtk.Window(title="sidebar", default_width=500, default_height=600)
     window.set_child(page)
     window.present()
     check("sidebar: the view is up", wait_for(page.settled))
-    narrow = wait_for(lambda: page._narrow)
+    narrow = wait_for(lambda: page.narrow)
     check("a 500 px window is under the breakpoint", narrow)
-    check("the sidebar is hidden there", not page.sidebar_shown)
-    check("the toggle is insensitive and its box says why",
-          not page._sidebar_toggle.get_sensitive()
-          and page._sidebar_toggle_box.get_tooltip_text() == "Widen the page to show the panels",
-          (page._sidebar_toggle.get_sensitive(), page._sidebar_toggle_box.get_tooltip_text()))
-    check("the toggle still reads shown (its word persists)", page.sidebar_wanted and "sidebar" not in page.page_state())
+    check("the sidebar is hidden there, the diff shown", not page.sidebar_shown and page.diff_shown)
+    check("the toggle is sensitive, off, and offers the panels",
+          page._sidebar_toggle.get_sensitive() and not page._sidebar_toggle.get_active()
+          and page._sidebar_toggle.get_tooltip_text() == "Show the commits and files panels",
+          (page._sidebar_toggle.get_sensitive(), page._sidebar_toggle.get_tooltip_text()))
+    check("the toggle wears the back arrow there", page._sidebar_toggle.get_icon_name() == "go-previous-symbolic")
+    check("and sits first among the header's buttons",
+          page._sidebar_toggle_box.get_next_sibling() is page._find_toggle)
+    check("the toggle's word still reads shown (it persists)", page.sidebar_wanted and "sidebar" not in page.page_state())
+    page._sidebar_toggle.set_active(True)  # the header press
+    check("pressed, the panels stand in for the diff", page.sidebar_shown and not page.diff_shown)
+    check("the toggle then reads Back to the diff", page._sidebar_toggle.get_tooltip_text() == "Back to the diff")
+    check("the word is untouched by the swap", page.sidebar_wanted and "sidebar" not in page.page_state())
+    narrow_rows = wait_for(lambda: sidebar.click_commit_row("worktree"))
+    check("a row picked from the panels drops back to the diff",
+          narrow_rows and page.diff_shown and not page.sidebar_shown and not page._sidebar_toggle.get_active(),
+          (page.diff_shown, page.sidebar_shown))
+    page.show_panels(True)
+    page.sidebar.set_filter_text("a")
+    page.sidebar.emit("filter-escaped")
+    check("Escape in the filter drops back to the diff too", page.diff_shown and not page.sidebar_shown)
+    page.show_panels(True)
+    page.load("staged")
+    check("a load (Ctrl+2, the host, the tool) drops back to the diff", page.diff_shown and not page.sidebar_shown)
+    check("sidebar: the staged load landed", wait_for(page.settled))
+    page.load("unstaged")
+    check("sidebar: the unstaged load landed", wait_for(page.settled))
+    # The word off: the narrow switch works the same, and never writes it.
+    page.set_sidebar_wanted(False)
+    check("with the word off a narrow page still shows the diff, the toggle off",
+          page.diff_shown and not page.sidebar_shown and not page._sidebar_toggle.get_active()
+          and page._sidebar_toggle.get_sensitive(), (page.diff_shown, page.sidebar_shown))
+    page._sidebar_toggle.set_active(True)
+    check("and its press brings the panels up", page.sidebar_shown and not page.diff_shown)
+    check("without touching the word", not page.sidebar_wanted and page.page_state().get("sidebar") is False)
     page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
-    wide = wait_for(lambda: not page._narrow and page.sidebar_shown)
-    check("a 900 px page shows the sidebar again", wide, (page._narrow, page.sidebar_shown))
-    check("the toggle is sensitive again", page._sidebar_toggle.get_sensitive())
+    check("widened, the word rules: the sidebar stays hidden", wait_for(lambda: not page.narrow)
+          and wait_for(lambda: not page.sidebar_shown and page.diff_shown), (page.sidebar_shown, page.diff_shown))
+    check("and the toggle reads it off", not page._sidebar_toggle.get_active())
+    check("widening forgot the panels ask: the next narrowing starts on the diff", not page._panels_requested)
+    page.set_sidebar_wanted(True)
+    page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
+    wide = wait_for(lambda: not page.narrow and page.sidebar_shown)
+    check("a 900 px page shows the sidebar beside the diff again", wide and page.diff_shown, (page.narrow, page.sidebar_shown))
+    check("the toggle wears the sidebar glyph again", page._sidebar_toggle.get_icon_name() == "sidebar-show-symbolic")
+    check("the toggle reads the word there", page._sidebar_toggle.get_active()
+          and page._sidebar_toggle.get_tooltip_text() == "Hide the commits and files panels")
     check(
         "the view keeps its width beside the sidebar",
         wait_for(lambda: page.diff_view.get_width() >= 400),
