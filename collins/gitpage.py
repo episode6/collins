@@ -114,6 +114,7 @@ from . import (  # noqa: E402
     diffmodel,
     diffnotes,
     diffview,
+    footerapps,
     gitinfo,
     gitloads,
     gitmodel,
@@ -423,6 +424,9 @@ class GitPage(Adw.Bin):
         self.sidebar.connect("navigate-requested", self._on_navigate_requested)
         self.sidebar.connect("show-all-requested", lambda _s: self._show_all())
         self.sidebar.connect("revert-requested", self._on_revert_requested)
+        self.sidebar.connect("file-action-requested", self._on_file_action_requested)
+        self.sidebar.connect("open-requested", self._on_file_open_requested)
+        self.sidebar.connect("open-with-requested", self._on_open_with_requested)
         self.sidebar.connect("mutated", self._on_mutated)
         self.sidebar.connect("filter-changed", lambda _s, text: self._on_filter_changed(text))
         self.sidebar.connect("filter-escaped", lambda _s: self._diffview.grab_focus())
@@ -1334,6 +1338,7 @@ class GitPage(Adw.Bin):
         commits for it (the groups changed)."""
         cwd = self._cwd_provider()
         parent, default = gitops.resolve_group_branches(cwd, self._parent_name, gitinfo.default_branch(cwd))
+        operation = self.operation_bar.operation
         if parent is not None:
             # The stack read knows the parent's twins; the .git resolve doesn't.
             twins = next((ref.twins for ref in self._branch_stack if ref.name == parent.name), ())
@@ -1347,6 +1352,8 @@ class GitPage(Adw.Bin):
             loaded=self._loaded,
             resolved_sha=self._resolved_sha,
             live=self._loaded in ("unstaged", "staged"),
+            operation_kind=operation.kind if operation is not None else None,
+            repo_root=str(self._repo_root) if self._repo_root is not None else None,
         )
 
     def _sync_sidebar(self) -> None:
@@ -1397,6 +1404,150 @@ class GitPage(Adw.Bin):
         if not self._diffview.request_file_at(path):
             self._toast(_("{path} is not in the view: reloading").format(path=path))
             self._read_diff(self._loaded)
+
+    # -- the file rows' context menu on the working tree --
+
+    def _on_file_action_requested(self, _sidebar: GitSidebar, path: str, side: str, action: str) -> None:
+        """A file row's Stage / Unstage / Discard… / Resolve with ours /
+        theirs (gitsidebar's "file-action-requested", one of gitmodel's
+        MENU_* ids): one git run on the path from the sidebar's mutation
+        thread, the view's own planners left out — they want the file's
+        diff, which the other side's rows, a status-only conflict row and
+        an untracked row hidden by the switch don't have. The busy gate
+        first, with its toast, as _on_revert_requested: nothing greys a
+        menu item. A discard asks (gitmodel.discard_words: the trash for
+        an untracked file, a restore for a deleted one); a resolution
+        reads the index's stages first so its question can say what the
+        side means and whether picking it removes the file."""
+        if self._closing or not self._opened:
+            return
+        if self.sidebar.busy or self._diffview.busy():
+            self._toast(_("Another git operation is still running"))
+            return
+        if not gitops.safe_path(path) or side not in ("unstaged", "staged"):
+            return
+        cwd = self._cwd_provider()
+        row = self.sidebar.file_row(path, side)
+        code = row.code if row is not None else None
+        paths = [path]
+        if row is not None and row.previous_path and gitops.safe_path(row.previous_path):
+            paths.append(row.previous_path)  # a rename stages / unstages as one R
+        resolve = gitmodel.resolve_side(action)
+        if resolve is not None:
+            self._ask_resolve(cwd, path, resolve)
+        elif action == gitmodel.MENU_DISCARD:
+            heading, body, button = gitmodel.discard_words(path, code)
+            dialogs.confirm_dialog(
+                self, heading, body, button, lambda: self._run_file_action(cwd, path, action, code, paths)
+            )
+        elif action in (gitmodel.MENU_STAGE, gitmodel.MENU_UNSTAGE):
+            self._run_file_action(cwd, path, action, code, paths)
+
+    def _run_file_action(
+        self, cwd: str | None, path: str, action: str, code: str | None, paths: Sequence[str]
+    ) -> None:
+        """Stage (`add -A`), unstage (`reset`) or discard — the trash for an
+        untracked file (_trash_paths, never an unlink), else `checkout`
+        — behind the sidebar's busy; the toast, and `mutated` when it
+        landed."""
+        root = str(self._repo_root or cwd or "")
+        stage = action == gitmodel.MENU_STAGE
+
+        def work() -> gitops.GitResult:
+            try:
+                if action == gitmodel.MENU_STAGE:
+                    return gitops.stage_paths(cwd, paths)
+                if action == gitmodel.MENU_UNSTAGE:
+                    return gitops.unstage_paths(cwd, paths)
+                if code == "?":
+                    return _trash_paths(root, [path])
+                return gitops.checkout_paths(cwd, [path])
+            except Exception as err:  # the worker's last line of defence
+                return gitops.GitResult(False, "", str(err) or err.__class__.__name__)
+
+        def done(answer: object) -> None:
+            if not isinstance(answer, gitops.GitResult):
+                self._toast(_("git failed"))
+                return
+            if not answer.ok:
+                self._toast(gitops.first_line(answer.stderr) or _("git failed"))
+                return
+            if action == gitmodel.MENU_DISCARD:
+                self._toast(gitmodel.discard_done(path, code))
+            else:
+                self._toast(gitmodel.stage_done(path, stage))
+            self.sidebar.emit("mutated")
+
+        self.sidebar.run_mutation(work, done)
+
+    def _ask_resolve(self, cwd: str | None, path: str, side: str) -> None:
+        """Read the unmerged path's index stages on the mutation thread,
+        then ask (gitmodel.resolve_words) — what ours and theirs mean
+        under the operation in progress, and whether *side* removes the
+        file (it has no stage) — and run the resolution on a yes."""
+        operation = self.operation_bar.operation
+        kind = operation.kind if operation is not None else None
+
+        def work() -> tuple:
+            return (gitops.read_unmerged_stages(cwd, path),)
+
+        def done(answer: object) -> None:
+            stages = answer[0] if isinstance(answer, tuple) else None
+            if stages is None:
+                self._toast(_("Couldn't read the index for {path}").format(path=path))
+                return
+            if not stages:
+                self._toast(_("{path} is not unmerged: reloading").format(path=path))
+                self._read_diff(self._loaded)
+                return
+            deletes = gitops.resolution_deletes(side, stages)
+            heading, body, button = gitmodel.resolve_words(path, side, kind, deletes)
+            dialogs.confirm_dialog(self, heading, body, button, lambda: self._run_resolve(cwd, path, side))
+
+        self.sidebar.run_mutation(work, done)
+
+    def _run_resolve(self, cwd: str | None, path: str, side: str) -> None:
+        """`checkout --<side>` + `add`, or `rm` (gitops.resolve_path, which
+        re-reads the stages), behind the sidebar's busy."""
+        if self._closing or not self._opened:
+            return
+
+        def work() -> gitops.Resolution:
+            try:
+                return gitops.resolve_path(cwd, path, side)
+            except Exception as err:  # the worker's last line of defence
+                return gitops.Resolution(gitops.GitResult(False, "", str(err) or err.__class__.__name__))
+
+        def done(answer: object) -> None:
+            if not isinstance(answer, gitops.Resolution):
+                self._toast(_("git failed"))
+                return
+            if not answer.result.ok:
+                self._toast(gitops.first_line(answer.result.stderr) or _("git failed"))
+                return
+            self._toast(gitmodel.resolve_done(path, side, answer.deleted))
+            self.sidebar.emit("mutated")
+
+        self.sidebar.run_mutation(work, done)
+
+    def _on_file_open_requested(self, _sidebar: GitSidebar, path: str) -> None:
+        """A file row's *Open in editor*: the diff's own door (`e`), with
+        no cursor line."""
+        self._on_open_requested(self._diffview, path, 0)
+
+    def _on_open_with_requested(self, _sidebar: GitSidebar, path: str, app_id: str) -> None:
+        """A file row's "Open In…" pick: the file, under the repository
+        root, handed to the configured app (footerapps.launch_app_file —
+        only apps that take a file are listed)."""
+        root = self._repo_root
+        if root is None or not gitops.safe_path(path):
+            return
+        info = footerapps.resolve_app(app_id)
+        if info is None:
+            self._toast(_("{app} is not installed").format(app=app_id))
+            return
+        if not footerapps.launch_app_file(info, os.path.join(str(root), path)):
+            self._toast(_("Couldn't open {path} with {app}").format(path=path, app=info.get_display_name()))
 
     def _run_pending_navigate(self) -> None:
         pending, self._pending_navigate = self._pending_navigate, None

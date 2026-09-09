@@ -41,6 +41,17 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
         ({"git_line_numbers": 0}, gitloads.Options(line_numbers=False)),
         ({"git_wrap_lines": 1}, gitloads.Options(wrap=True)),
         ({"git_word_diff": False}, gitloads.Options(word_diff=False)),
+        # Footer apps: the str entries of a list, in order; garbage is none.
+        (
+            {"footer_apps": ["a.desktop", "b.desktop"]},
+            gitloads.Options(footer_apps=("a.desktop", "b.desktop")),
+        ),
+        ({"footer_apps": ("a.desktop", 3, "", None)}, gitloads.Options(footer_apps=("a.desktop",))),
+        ({"footer_apps": "a.desktop"}, gitloads.Options()),
+        ({"footer_apps": None}, gitloads.Options()),
+        ({"footer_apps": [f"{n}.desktop" for n in range(40)]}, gitloads.Options(
+            footer_apps=tuple(f"{n}.desktop" for n in range(gitloads.MAX_FOOTER_APPS))
+        )),
     ],
 )
 def test_options_from_settings_normalises_each_key(settings, expected):

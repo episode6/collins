@@ -656,6 +656,69 @@ def reset_paths_argv(paths: Sequence[str]) -> list[str]:
     return ["reset", "-q", "--", *_pathspecs(paths)]
 
 
+# -- argv builders: resolving an unmerged path ------------------------------------------
+# The index holds up to three stages for an unmerged path (`git ls-files
+# -u`): the merge base (1), ours (2, HEAD's side) and theirs (3, the side
+# being brought in). A modify/delete clash has only one of 2 and 3, and
+# `checkout --ours` / `--theirs` refuses outright when the stage it names
+# is missing ("does not have their version") — so a resolution reads the
+# stages first and, for a missing side, is a `git rm` instead.
+RESOLVE_SIDES: tuple[str, ...] = ("ours", "theirs")
+STAGE_BASE = 1
+STAGE_OURS = 2
+STAGE_THEIRS = 3
+_SIDE_STAGES: dict[str, int] = {"ours": STAGE_OURS, "theirs": STAGE_THEIRS}
+
+
+def unmerged_stages_argv(path: str) -> list[str]:
+    """["ls-files", "-u", "-z", "--", literal path]: the index's stages
+    for *path* — nothing at all when it isn't unmerged."""
+    return ["ls-files", "-u", "-z", "--", literal_pathspec(path)]
+
+
+def checkout_side_argv(side: str, paths: Sequence[str]) -> list[str]:
+    """["checkout", "-q", "--ours" | "--theirs", "--", *literal paths]:
+    the working-tree copy of each path from that stage of the index; the
+    index stays unmerged until the path is added. Refused (ValueError)
+    for a side outside RESOLVE_SIDES — the flag goes on an argv."""
+    if side not in RESOLVE_SIDES:
+        raise ValueError(f"not a side: {side!r}")
+    return ["checkout", "-q", f"--{side}", "--", *_pathspecs(paths)]
+
+
+def remove_paths_argv(paths: Sequence[str]) -> list[str]:
+    """["rm", "-q", "--", *literal paths]: the paths out of the index and
+    the working tree — how a modify/delete clash resolves to the side
+    that has no version of the file. Works on an unmerged path without
+    `-f` (measured, git 2.4x)."""
+    return ["rm", "-q", "--", *_pathspecs(paths)]
+
+
+def parse_unmerged_stages(text: str) -> frozenset[int]:
+    """The stage numbers in `ls-files -u -z` output (`mode sha stage\\tpath`
+    records, NUL-separated); anything malformed is skipped."""
+    stages: set[int] = set()
+    for record in text.split("\0"):
+        head, _tab, _path = record.partition("\t")
+        parts = head.split()
+        if len(parts) != 3:
+            continue
+        try:
+            stage = int(parts[2])
+        except ValueError:
+            continue
+        if stage in (STAGE_BASE, STAGE_OURS, STAGE_THEIRS):
+            stages.add(stage)
+    return frozenset(stages)
+
+
+def resolution_deletes(side: str, stages: Iterable[int]) -> bool:
+    """Whether resolving with *side* removes the file: that side has no
+    stage in the index (a modify/delete clash, seen from the deleting
+    side)."""
+    return _SIDE_STAGES.get(side) not in set(stages)
+
+
 def safe_path(path: object) -> bool:
     """Whether *path* can go on a git argv as a repository-relative path
     without being read as something else: a non-empty str within
@@ -1359,6 +1422,63 @@ def checkout_paths(
     repository root — destructive: the caller has confirmed. Refused
     without a call when a path isn't safe_path."""
     return _paths_mutation(cwd, paths, checkout_paths_argv, run, timeout)
+
+
+def remove_paths(
+    cwd: str | Path | None, paths: Sequence[str], run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> GitResult:
+    """`git rm -q -- <paths>` (remove_paths_argv) from the repository
+    root — destructive: the caller has confirmed. Refused without a call
+    when a path isn't safe_path."""
+    return _paths_mutation(cwd, paths, remove_paths_argv, run, timeout)
+
+
+def read_unmerged_stages(
+    cwd: str | Path | None, path: str, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> frozenset[int] | None:
+    """The index stages of *path* (unmerged_stages_argv, parsed by
+    parse_unmerged_stages): empty when the path isn't unmerged, None
+    when git failed or the path isn't safe_path."""
+    if not safe_path(path):
+        return None
+    result = run_git(_root(cwd), unmerged_stages_argv(path), run=run, timeout=timeout)
+    if not result.ok:
+        return None
+    return parse_unmerged_stages(result.stdout)
+
+
+@dataclass(frozen=True)
+class Resolution:
+    """What resolve_path did: git's *result*, and whether the file was
+    *deleted* (the picked side had no stage) rather than checked out."""
+
+    result: GitResult
+    deleted: bool = False
+
+
+def resolve_path(
+    cwd: str | Path | None, path: str, side: str, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+) -> Resolution:
+    """Resolve the unmerged *path* with *side* ("ours" | "theirs"): the
+    stages are read afresh (the confirm's words came from an earlier
+    read); with the side's stage there it is `checkout --<side>` then
+    `add` (which marks the path resolved), without it `rm`. Refused
+    without a call for a side outside RESOLVE_SIDES, an unsafe path, or a
+    path that is no longer unmerged."""
+    if side not in RESOLVE_SIDES or not safe_path(path):
+        return Resolution(GitResult(False, "", "no safe path or side"))
+    stages = read_unmerged_stages(cwd, path, run=run, timeout=timeout)
+    if stages is None:
+        return Resolution(GitResult(False, "", f"couldn't read the index for {path}"))
+    if not stages:
+        return Resolution(GitResult(False, "", f"{path} is not unmerged"))
+    if resolution_deletes(side, stages):
+        return Resolution(remove_paths(cwd, [path], run=run, timeout=timeout), deleted=True)
+    root = _root(cwd)
+    result = run_git(root, checkout_side_argv(side, [path]), run=run, timeout=timeout)
+    if not result.ok:
+        return Resolution(result)
+    return Resolution(stage_paths(cwd, [path], run=run, timeout=timeout))
 
 
 Trash = Callable[[str, Sequence[str]], GitResult]
