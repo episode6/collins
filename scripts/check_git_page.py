@@ -243,7 +243,19 @@ def check_sidebar(repo: str) -> None:
     check("sidebar: the staged load landed", wait_for(page.settled))
     page.load("unstaged")
     check("sidebar: the unstaged load landed", wait_for(page.settled))
-    page.show_panels(True)
+    # The word off: the narrow switch works the same, and never writes it.
+    page.set_sidebar_wanted(False)
+    check("with the word off a narrow page still shows the diff, the toggle off",
+          page.diff_shown and not page.sidebar_shown and not page._sidebar_toggle.get_active()
+          and page._sidebar_toggle.get_sensitive(), (page.diff_shown, page.sidebar_shown))
+    page._sidebar_toggle.set_active(True)
+    check("and its press brings the panels up", page.sidebar_shown and not page.diff_shown)
+    check("without touching the word", not page.sidebar_wanted and page.page_state().get("sidebar") is False)
+    page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
+    check("widened, the word rules: the sidebar stays hidden", wait_for(lambda: not page.narrow)
+          and wait_for(lambda: not page.sidebar_shown and page.diff_shown), (page.sidebar_shown, page.diff_shown))
+    check("and the toggle reads it off", not page._sidebar_toggle.get_active())
+    page.set_sidebar_wanted(True)
     page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
     wide = wait_for(lambda: not page.narrow and page.sidebar_shown)
     check("a 900 px page shows the sidebar beside the diff again", wide and page.diff_shown, (page.narrow, page.sidebar_shown))
