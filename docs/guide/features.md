@@ -454,7 +454,12 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   gap, so a file can be brought into view piece by piece, top to bottom
   (`z` and the hunk menu's *Expand context* draw the gap above the
   focused hunk); the header of the file you are scrolled into stays
-  pinned at the top.
+  pinned at the top. While any of a file's gaps is drawn, its header
+  (and the pinned copy) shows a fold button — the same two carets
+  pointing at each other — that takes every expanded stretch back and
+  scrolls the file's header into view. Expanded context lines and the
+  hunks' own share one gutter width per file, so the code lines up
+  across them.
 - **A commit's message sits over its diff.** Loading a commit puts a
   card above the files: the subject, the author, the age (the full
   stamp in a tooltip) and the short sha — a link to the commit on GitHub

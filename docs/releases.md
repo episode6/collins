@@ -47,6 +47,16 @@ downloads of each version, see the
   pops up one main-loop turn later, at its full height — and the Caffeine
   button's right-click menu, kept flat to dodge the same bug, puts *Keep
   screen on* under a separator of its own.
+- **Expanded gaps fold back up.** Once a gap of the diff was drawn there
+  was no way back to the condensed file. The file header — and its pinned
+  copy at the top of the scroll — now carries a fold button (the unfold
+  glyph turned inward) while any of the file's gaps is expanded; a click
+  takes every drawn stretch back and puts the file's header in view. The
+  drawn context also lines up with the hunks now: every view of a file
+  reserves the file's widest line number, the context gets the hunks'
+  blank sign column, and it sits in from the hunk rail's width — before,
+  each hunk sized its gutter to its own numbers and the code jogged at
+  every seam.
 - **The diff's gaps expand with one button, GitHub-style.** The git
   page's *⋯ n unchanged lines* rows used to carry *▲ 20* / *▼ 20* /
   *all* buttons on the right, and the stretch after a file's last hunk

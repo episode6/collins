@@ -451,7 +451,23 @@ left (`unfold-symbolic`, bundled) whose click draws the whole gap, up to
 until `measure_trailing_gaps` (the scroll settle, for the rows in sight)
 or its click reads the file's length through `_measured`, then worded or
 folded like the rest — probes `gap_rows`, `expand_gap`, `gap_row_shown`,
-`gap_measured`); split is two views per hunk
+`gap_measured`). **The way back is the file header's fold button**
+(`_collapse_button`, `fold-symbolic`, bundled: the unfold glyph turned
+inward), shown by `_FileSection.sync_gaps` only while a gap of the file
+is expanded (`gaps_expanded`), with a copy on the pinned header acting
+on `_pinned_section`; `collapse_gaps` calls every `_GapRow.collapse`
+(the context view dropped, `shown` back to 0, a measured trailing gap
+keeping its count) and `DiffView.on_gaps_collapsed` scrolls the file's
+header into view — the lines the viewport sat in are gone. `sync_gaps`
+also **levels the gutters**: every view of the file (the hunks' and the
+gaps' context views, which carry a blank sign column for the width) gets
+`set_number_floor` of the file's widest line number, so the code starts
+at one x across seams, and `.git-gap-context` puts the context in by the
+hunk rail's 3 px; it runs after `update`, `apply_options` (a layout
+change rebuilds the views) and every expand. Probes `gaps_expanded`,
+`collapse_gaps`, `pinned_collapse_shown`, `click_pinned_collapse` (the copy hides
+at once on its click, ahead of the scroll settle that re-syncs the pinned
+header); split is two views per hunk
 (`_SplitPane`) over `diffmodel.split_rows` with a padding pass; the
 language is the file's, the scheme and font the editor's
 (`editor.style_scheme`, `editor_font`, decision 3 — there is no diff

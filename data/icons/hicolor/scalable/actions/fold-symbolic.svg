@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Drawn for Collins: the diff view's file header button that folds every
+     expanded gap of the file back up, the unfold glyph turned inward - a
+     down and an up caret pointing at each other. Filled paths only (GTK's
+     symbolic parser drops strokes). Licensed with the rest of Collins
+     (GPL-3.0-or-later). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><path d="M8 7 3.5 2h9Zm0 2 4.5 5h-9Z"/></svg>
