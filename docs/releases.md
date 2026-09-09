@@ -36,7 +36,11 @@ downloads of each version, see the
 
 ## Changelog
 
-### v0.1.3 — UNRELEASED
+### v0.1.4 — UNRELEASED
+
+_Nothing yet._
+
+### v0.1.3 — 2026-09-08
 
 - **A hunk that only moved keeps its widget, its selection and its notes.**
   The git page matched hunks across a reload by their line numbers as

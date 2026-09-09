@@ -1,24 +1,58 @@
+collins (0.1.4) UNRELEASED; urgency=medium
+
+  * Next release.
+
+ -- Geoff Hackett <ghackett@episode6.com>  Tue, 08 Sep 2026 20:00:00 -0400
+
 collins (0.1.3) UNRELEASED; urgency=medium
 
-  * A git page (F6) shows the session's diffs in a diff view of Collins'
-    own — syntax-highlighted, split or stacked, with a commits panel and a
-    files panel beside it — and stages, unstages, discards and reverts
-    files, hunks and selected lines from its headers and keys, with
-    confirmations, notes on the diff, a find bar, and commit / fixup of the
-    index. It needs git alone.
-  * Preferences gains a Git group: the diff layout, line numbers, wrapping
-    and word emphasis, untracked files on or off, commits per page in the
-    commits panel, and a default parent branch for the git page.
-  * A ninth session tool, show_diff, lets the agent open the git page on a
-    working-tree, branch or commit diff and move it to a file and line.
-  * A git page too narrow for its sidebar folds it away, and the header's
-    panel button shows and hides it, remembered with the page.
+  * New dependencies python3-markdown-it and python3-linkify-it: pull
+    request bodies, comments and reviews render as real GitHub-flavored
+    markdown (headings, nested and task lists, tables as grids, fenced
+    code in highlighted source views, issue / mention / commit links,
+    details expanders, alerts, images in table cells).
   * Each GitHub release now attaches a binary noarch .rpm next to the .deb.
   * The AppStream metainfo is store-ready (screenshot, branding colours,
-    translated summaries) and appstreamcli-validated by every package build;
-    the desktop entry is translated too.
+    translated summaries) and appstreamcli-validated by every package
+    build; the desktop entry is translated too.
+  * A git page (F6, the footer's git button, or the branch label) shows
+    the session's diffs in a diff view of Collins' own — syntax-
+    highlighted, split or stacked, notes and highlights, a find bar — with
+    a commits and files sidebar beside it, and stages, unstages, discards
+    and reverts files, hunks and selected lines from its headers and keys;
+    commit, commit with body and fixup from the action row; a commit's
+    message over its diff; Revert… on a commit row; a bar with Continue and
+    Abort over a half-finished rebase, merge, cherry-pick or revert, and
+    the unmerged files under a Conflicts section with their diff. It needs
+    git alone.
+  * Preferences gains a Git group: layout, line numbers, wrapping, word
+    emphasis, untracked files, commits per page, and a default parent
+    branch.
+  * Five session tools for the git page: show_diff opens it on a diff at a
+    file, line or hunk; diff_context reads what it shows; annotate_diff,
+    highlight_diff and clear_diff_marks put note cards and highlights on
+    it and take them off. start_session takes an effort level.
+  * Archiving a session in a git worktree offers to move the worktree to
+    the trash (Undo brings it back), with an Always / Never preference;
+    archived sessions can delete themselves after a set time.
+  * A finished run is counted off the transcript, and a progress-hint clear
+    waits three seconds, so a run's tool gaps and idle repaints no longer
+    flag, notify or chime as extra finishes.
+  * Desktop notifications make a sound; archiving a session marks its
+    notifications read; the selected session's bell flashes its terminal;
+    the status icon's glass stands empty when nothing runs and nothing is
+    unread; a PR page's tab wears the PR's status mark.
+  * The new-chat effort picker reads the model's own default and follows a
+    model pick; the footer and composer pickers reflect a /model or /effort
+    switch as soon as the CLI confirms it.
+  * Defaults: Claude's own session names are followed, Caffeine Mode arms
+    at launch until idle, a new pull request opens its page; the Composer
+    in new sessions preference is gone. A first prompt attaches only the
+    pull requests it links by URL.
+  * The usage panel shows the endpoint's error and retries sooner, polling
+    every 10 minutes.
 
- -- Geoff Hackett <ghackett@episode6.com>  Sun, 30 Aug 2026 15:45:45 -0400
+ -- Geoff Hackett <ghackett@episode6.com>  Tue, 08 Sep 2026 20:00:00 -0400
 
 collins (0.1.2) UNRELEASED; urgency=medium
 

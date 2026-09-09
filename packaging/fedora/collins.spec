@@ -15,7 +15,7 @@
 # build bumps it to 2, and the next version bump resets it.
 
 Name:           collins
-Version:        0.1.3
+Version:        0.1.4
 Release:        1%{?dist}
 Summary:        Native GTK4 desktop app to manage Claude Code sessions
 License:        GPL-3.0-or-later AND CC0-1.0 AND MIT
@@ -115,8 +115,16 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 # docs/releases.md. Dates are the release branch's cut date, like
 # debian/changelog's.
 %changelog
-* Sun Aug 30 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.3-1
-- A binary noarch RPM is attached to each GitHub release, beside the .deb.
+* Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
+- Next release.
+
+* Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.3-1
+- A native git page beside each session (diffs, staging, notes, commits and
+  files panels, five agent tools), pull request bodies as real markdown
+  (new python3-markdown-it-py and python3-linkify-it-py requires), worktree
+  trash on archive, sound on desktop notifications, and finished runs
+  counted off the transcript. A binary noarch RPM is attached to each
+  GitHub release, beside the .deb.
 
 * Sat Aug 22 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.2-1
 - Collins is now published to the episode6/stable COPR, for every maintained
