@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-07. Full change history: git log for this file.
+# fork. Last modified: 2026-09-09. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from . import (
     __version__,
     buildinfo,
     chats,
+    contextmenu,
     desktopentry,
     dialogs,
     footerapps,
@@ -3174,17 +3175,18 @@ class MainWindow(Adw.ApplicationWindow):
                 menu.append(duration_label(key), "win.caffeine-until-idle")
             else:
                 menu.append(duration_label(key), f"win.caffeine-timer::{key}")
-        # Flat, not a section of its own: a separator would push the menu past
-        # the height a popup gets allocated (see the file-tree menu).
-        menu.append(_("Keep screen on"), "win.caffeine-screen")
+        # The screen switch under a separator: a different question from how
+        # long. (The menu used to be flat to dodge the separator sizing bug
+        # contextmenu.popup_from now sidesteps.)
+        screen = Gio.Menu()
+        screen.append(_("Keep screen on"), "win.caffeine-screen")
+        menu.append_section(None, screen)
         self._caffeine_screen_action.set_state(
             GLib.Variant.new_boolean(bool(self.state.get_setting("caffeine_keep_screen_on")))
         )
         self._sync_caffeine_menu_state()
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(self.caffeine_btn)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_from(popover, self.caffeine_btn)
 
     def _on_caffeine_screen(self, action: Gio.SimpleAction, _param) -> None:
         """The menu's checkbox: same setting Preferences writes, and it lands

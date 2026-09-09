@@ -67,6 +67,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
+    contextmenu,
     dialogs,
     filetypes,
     footerapps,
@@ -1047,14 +1048,7 @@ class GitSidebar(Gtk.Box):
             menu.append_item(item)
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(self._commit_list)
-        popover.set_has_arrow(False)
-        popover.set_halign(Gtk.Align.START)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_at(popover, self._commit_list, x, y, halign=Gtk.Align.START)
 
     def _copy_text(self, text: str) -> None:
         display = self.get_display()
@@ -1266,14 +1260,7 @@ class GitSidebar(Gtk.Box):
             menu.append_section(None, section)
         popover = Gtk.PopoverMenu.new_from_model(menu)
         openwithrows.slot_them(popover, rows)
-        popover.set_parent(self._file_list)
-        popover.set_has_arrow(False)
-        popover.set_halign(Gtk.Align.START)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_at(popover, self._file_list, x, y, halign=Gtk.Align.START)
 
     def file_menu_labels(self, path: str, side: str = "") -> list[str] | None:
         """The labels a right-click on the row of *path* offers, top to

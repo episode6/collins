@@ -30,7 +30,17 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import claudemodels, desktopentry, footerapps, newchat, openwith, openwithrows, pkgrepos, prmenu
+from . import (
+    claudemodels,
+    contextmenu,
+    desktopentry,
+    footerapps,
+    newchat,
+    openwith,
+    openwithrows,
+    pkgrepos,
+    prmenu,
+)
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
@@ -2895,13 +2905,7 @@ class SessionSidebar(Gtk.Box):
     ) -> None:
         popover = Gtk.PopoverMenu.new_from_model(menu)
         openwithrows.slot_them(popover, list(custom_rows or ()))
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_at(popover, row, x, y)
 
     # -- selection mode ------------------------------------------------------------
 

@@ -49,7 +49,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import editorfiles, pictures, scrolling  # noqa: E402
+from . import contextmenu, editorfiles, pictures, scrolling  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -422,13 +422,7 @@ class AttachmentsView(Gtk.Box):
         menu.append_section(None, removal)
 
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_at(popover, row, x, y)
 
     def _on_open_with(self, _action, target: GLib.Variant) -> None:
         one = self._records.get(target.get_string())

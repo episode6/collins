@@ -79,6 +79,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
+    contextmenu,
     diffmodel,
     diffnotes,
     editorfiles,
@@ -1353,17 +1354,8 @@ class _HunkSection(Gtk.Box):
             it, _top = view.view.get_line_at_y(by)  # (target_iter, line_top): no boolean first
             view.place_cursor(min(it.get_line(), max(0, len(view.rows) - 1)))
         popover = Gtk.PopoverMenu.new_from_model(self.context_menu(selected))
-        popover.set_parent(view.view)
-        popover.set_has_arrow(False)
-        popover.set_halign(Gtk.Align.START)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        # Unparent from the main loop, not the idle: under a busy frame
-        # clock (CI's Xvfb) a default-idle callback never runs.
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent, priority=GLib.PRIORITY_DEFAULT))
         self._menu_popover = popover
-        popover.popup()
+        contextmenu.popup_at(popover, view.view, x, y, halign=Gtk.Align.START)
 
     def context_menu(self, selected: bool) -> Gio.Menu:
         """The right-click menu's model: the hunk's two actions worded for

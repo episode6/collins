@@ -31,6 +31,7 @@ except (ValueError, ImportError):
 
 from . import (  # noqa: E402
     animatedimage,
+    contextmenu,
     dialogs,
     editorfiles,
     fileclipboard,
@@ -691,13 +692,7 @@ class EditorPane(Gtk.Box):
         menu = Gio.Menu()
         menu.append(_("Add to chat"), "editor.add-file-to-chat")
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(row)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_at(popover, row, x, y)
 
     def _on_agent_row(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         path = getattr(row, "file_path", None)

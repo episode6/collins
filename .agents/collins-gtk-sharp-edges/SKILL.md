@@ -106,6 +106,15 @@ Feature-specific traps live in the feature skills; these are the general ones.
 - `Gio.Menu` items have no enabled flag; per-item sensitivity is the
   action's. A `Gtk.PopoverMenu` filled on `show` must live in a
   `Gtk.MenuButton` (hand-parented popovers measure once, empty).
+- The same once-only measure bites a sectioned menu built and popped in one
+  dispatch: GtkMenuSectionBox adds the separators from a `PRIORITY_DEFAULT`
+  idle, so a `popup()` in the same iteration sizes the surface without them
+  and the menu scrolls by exactly their height (a three-item menu with a
+  scrollbar). Pop hand-built menus through `contextmenu.popup_at` (at the
+  pointer) or `popup_from` (off a button), which defer the popup one
+  main-loop turn (a zero timeout, never a default idle: CI's Xvfb starves
+  those). `check_git_page.py` pops the files menu and asserts its allocated
+  height covers its natural one.
 - `dialog.emit("response", id)` runs the handler but doesn't close an
   `Adw.AlertDialog`; `force_close()` after. An open Adw dialog swallows a
   window close.
