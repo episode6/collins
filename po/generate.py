@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-09-08. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -1175,22 +1175,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Induláskor egyszer megkérdezi a GitHubot minden listázott munkamenet pull requestjeiről, hogy az oldalsáv jelölései frissen induljanak, ne úgy, ahogy maradtak',
         'Git':
             'Git',
-        "The git page: hunk's layout and theme, and what the commits panel loads":
-            'A git oldal: a hunk elrendezése és témája, és amit a commit-panel betölt',
         'Layout':
             'Elrendezés',
-        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
-            'Hogyan rendezi el a hunk a diffet: egymás mellett, egymás alatt, vagy ahogy a szélességbe belefér',
         'Automatic':
             'Automatikus',
         'Split':
             'Osztott',
         'Stacked':
             'Egymás alatt',
-        'Theme':
-            'Téma',
-        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
-            'Üresen: a hunk saját alapértelmezése. Bármely téma, amit a hunk ismer — nord, dracula, catppuccin-mocha, github-light-default, auto (a terminál hátteréhez igazodik) — vagy egy a hunk konfigurációjából; az ismeretlen nevet az alapértelmezés váltja',
         'Show untracked files':
             'Nem követett fájlok mutatása',
         "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
@@ -1551,6 +1543,600 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'A(z) {p} kiürült projekt megtartása az oldalsávban',
         'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
             'Kezelje és folytassa AI kódolóügynök-munkameneteit.\n\nNem hivatalos közösségi eszköz — nem áll kapcsolatban az Anthropickal, és az nem is támogatja.',
+        '(no subject)':
+            '(nincs tárgy)',
+        '1 line':
+            '1 sor',
+        'A {operation} is half-finished here — finish or abort it first':
+            'Egy {operation} félbemaradt itt — előbb fejezze be vagy szakítsa meg',
+        'Abort':
+            'Megszakítás',
+        'Abort the {operation}?':
+            'Megszakítja a műveletet ({operation})?',
+        'Aborted the {operation} — the tree is back where it stood':
+            'A művelet ({operation}) megszakítva — a fa oda állt vissza, ahol volt',
+        'Abort…':
+            'Megszakítás…',
+        'Add a note':
+            'Jegyzet hozzáadása',
+        'Add note':
+            'Jegyzet hozzáadása',
+        'Agent notes':
+            'Ügynökjegyzetek',
+        'Always Trash':
+            'Mindig kukába',
+        'Annotate the git page':
+            'A git oldal jegyzetelése',
+        'Another git operation is still running':
+            'Egy másik git művelet még fut',
+        'Body (optional)':
+            'Törzs (nem kötelező)',
+        'CONFLICTS':
+            'KONFLIKTUSOK',
+        'Caution':
+            'Vigyázat',
+        'Check again':
+            'Ellenőrzés újra',
+        'Choose':
+            'Kiválasztás',
+        'Clear its marks in the git page':
+            'A jelöléseinek törlése a git oldalon',
+        'Click to open the git page':
+            'Kattintson a git oldal megnyitásához',
+        'Close the git page':
+            'Git oldal bezárása',
+        'Commit':
+            'Commit',
+        'Commit fixup':
+            'Fixup commit',
+        'Commit revert':
+            'Revert commit',
+        'Commit with body':
+            'Commit törzzsel',
+        'Commit with body…':
+            'Commit törzzsel…',
+        'Committed a fixup for {sha} — fold it in with `{command}`':
+            'Fixup commitolva ehhez: {sha} — beolvasztás: `{command}`',
+        'Committed {sha} “{summary}” — undo with `git reset --soft HEAD~1`':
+            'Commitolva: {sha} „{summary}” — visszavonás: `git reset --soft HEAD~1`',
+        'Commit…':
+            'Commit…',
+        'Continued the {operation} — it stopped again on the next step':
+            'A művelet ({operation}) folytatva — a következő lépésnél újra megállt',
+        'Copy sha':
+            'Sha másolása',
+        "Couldn't read the diff: {error}":
+            'A diff nem olvasható: {error}',
+        'Ctrl+Enter saves · Esc cancels':
+            'Ctrl+Enter ment · Esc mégse',
+        'Cursor down a line':
+            'Kurzor egy sorral lejjebb',
+        'Cursor up a line':
+            'Kurzor egy sorral feljebb',
+        'Delete':
+            'Törlés',
+        'Delete archived sessions after':
+            'Archivált munkamenetek törlése ennyi után',
+        'Details':
+            'Részletek',
+        'Diff view options':
+            'Diffnézet beállításai',
+        'Discard file':
+            'Fájl elvetése',
+        'Discard hunk {n} in {path}? This cannot be undone.':
+            'Elveti a(z) {n}. hunkot itt: {path}? Ez nem vonható vissza.',
+        'Discard or revert the hunk or the selected lines':
+            'A hunk vagy a kijelölt sorok elvetése vagy revertálása',
+        'Discard the changes to {path}? This cannot be undone.':
+            'Elveti a(z) {path} módosításait? Ez nem vonható vissza.',
+        'Discard the changes?':
+            'Elveti a módosításokat?',
+        'Discard works on the working tree: load the Unstaged view':
+            'Az elvetés a munkafán dolgozik: töltse be a Nem stage-elt nézetet',
+        'Discard {lines} in {path}? This cannot be undone.':
+            'Elvet {lines} itt: {path}? Ez nem vonható vissza.',
+        'Discard {what}':
+            '{what} elvetése',
+        'Discarded hunk {n} of {path}':
+            'A(z) {path} {n}. hunkja elvetve',
+        'Discarded the changes to {path}':
+            'A(z) {path} módosításai elvetve',
+        'Discarded {lines} of {path}':
+            'A(z) {path} {lines} elvetve',
+        'Edit':
+            'Szerkesztés',
+        "Edit the hunk's first note":
+            'A hunk első jegyzetének szerkesztése',
+        'Emphasise what moved within a changed line':
+            'Kiemeli, mi változott egy módosult soron belül',
+        'Expand context':
+            'Kontextus kibontása',
+        'Expand every unchanged line':
+            'Minden változatlan sor kibontása',
+        'Expand the unchanged lines above the hunk':
+            'A hunk feletti változatlan sorok kibontása',
+        'Expand {n} lines down':
+            '{n} sor kibontása lefelé',
+        'Expand {n} lines up':
+            '{n} sor kibontása felfelé',
+        'FILES':
+            'FÁJLOK',
+        'Filter files':
+            'Fájlok szűrése',
+        'Filter the files list':
+            'A fájllista szűrése',
+        'Find in the diff':
+            'Keresés a diffben',
+        'Finished the {operation}':
+            'A művelet ({operation}) befejezve',
+        'Fix up which commit?':
+            'Melyik commitot javítja (fixup)?',
+        'Fix up {sha}?':
+            'Fixup ehhez: {sha}?',
+        'Fix up…':
+            'Fixup…',
+        'Fold or unfold the branch':
+            'Az ág összecsukása vagy kibontása',
+        'Fold this file':
+            'Fájl összecsukása',
+        'Git page':
+            'Git oldal',
+        'Git · staged':
+            'Git · stage-elt',
+        'Git · unstaged':
+            'Git · nem stage-elt',
+        'Git · vs {parent}':
+            'Git · vs {parent}',
+        'Git · {ref}':
+            'Git · {ref}',
+        'Hide the commits and files panels':
+            'A commit- és fájlpanel elrejtése',
+        'Highlight changed words':
+            'Módosult szavak kiemelése',
+        'Highlight in the git page':
+            'Kiemelés a git oldalon',
+        'Important':
+            'Fontos',
+        'In the diff.':
+            'A diffben.',
+        'In the diff; a card under the focused hunk, anchored to the cursor line.':
+            'A diffben; kártya a fókuszált hunk alatt, a kurzor sorához rögzítve.',
+        'In the diff; a hunk with a note or highlight on it.':
+            'A diffben; egy jegyzettel vagy kiemeléssel ellátott hunk.',
+        'In the diff; after a confirmation.':
+            'A diffben; megerősítés után.',
+        'In the diff; at the line under the cursor.':
+            'A diffben; a kurzor alatti sornál.',
+        "In the diff; past the hunk's first line, into the previous hunk.":
+            'A diffben; a hunk első során túl, az előző hunkba.',
+        "In the diff; past the hunk's last line, into the next hunk.":
+            'A diffben; a hunk utolsó során túl, a következő hunkba.',
+        'In the diff; the first note you wrote on the focused hunk.':
+            'A diffben; az első jegyzet, amelyet a fókuszált hunkra írt.',
+        "In the diff; the focused hunk's file.":
+            'A diffben; a fókuszált hunk fájlja.',
+        'In the diff; the selected lines when there are any, else the focused hunk.':
+            'A diffben; a kijelölt sorok, ha vannak, különben a fókuszált hunk.',
+        'Keep Worktree':
+            'Munkafa megtartása',
+        'Keyboard shortcuts':
+            'Gyorsbillentyűk',
+        'Layout: automatic':
+            'Elrendezés: automatikus',
+        'Layout: split':
+            'Elrendezés: osztott',
+        'Layout: stacked':
+            'Elrendezés: egymás alatt',
+        'Line numbers':
+            'Sorszámok',
+        "Move a session's transcript to the trash once it has been archived this long; 0 keeps them forever. Checked once a day":
+            'A munkamenet átirata a kukába kerül, ha ennyi ideje archiválva van; 0 örökre megtartja őket. Naponta egyszer ellenőrzi',
+        'Move to the trash?':
+            'Kukába helyezi?',
+        'Move to trash':
+            'Kukába helyezés',
+        'Move {path} to the trash?':
+            'A(z) {path} kukába helyezése?',
+        'Moved worktree {name} to the trash':
+            'A(z) {name} munkafa a kukába került',
+        'Moved {path} to the trash':
+            'A(z) {path} a kukába került',
+        'Moving the worktree to the trash failed':
+            'A munkafa kukába helyezése sikertelen',
+        'Never Trash':
+            'Soha ne kerüljön kukába',
+        'Next annotated hunk':
+            'Következő jegyzetelt hunk',
+        'Next file':
+            'Következő fájl',
+        'Next hunk':
+            'Következő hunk',
+        'Next match (Enter)':
+            'Következő találat (Enter)',
+        'No changes':
+            'Nincs módosítás',
+        'No matches':
+            'Nincs találat',
+        'No such file on this side.':
+            'Ezen az oldalon nincs ilyen fájl.',
+        'No unpushed commit to fix up — commit first':
+            'Nincs fixupolható, még nem pusholt commit — előbb commitoljon',
+        'Not a git repository':
+            'Nem git tároló',
+        'Note':
+            'Jegyzet',
+        'Nothing is left unmerged. Continue (`git {kind} --continue`) commits the step with the message it has and carries on — or Abort (`git {kind} --abort`) puts the tree back.':
+            'Nem maradt egyesítetlen fájl. A Folytatás (`git {kind} --continue`) a meglévő üzenettel commitolja a lépést és halad tovább — a Megszakítás (`git {kind} --abort`) pedig visszaállítja a fát.',
+        'Nothing staged — stage a hunk or file first':
+            'Semmi sincs stage-elve — előbb stage-eljen egy hunkot vagy fájlt',
+        'Nothing to stage':
+            'Nincs mit stage-elni',
+        'Nothing to unstage':
+            'Nincs mit unstage-elni',
+        'Open in editor':
+            'Megnyitás a szerkesztőben',
+        'Open the file in the editor':
+            'A fájl megnyitása a szerkesztőben',
+        'Previous annotated hunk':
+            'Előző jegyzetelt hunk',
+        'Previous file':
+            'Előző fájl',
+        'Previous hunk':
+            'Előző hunk',
+        'Previous match (Shift+Enter)':
+            'Előző találat (Shift+Enter)',
+        'Read the git page':
+            'A git oldal olvasása',
+        'Reload the diff':
+            'Diff újratöltése',
+        'Restore':
+            'Visszaállítás',
+        'Restore the file?':
+            'Visszaállítja a fájlt?',
+        'Restore {path} from the index?':
+            'Visszaállítja a(z) {path} fájlt az indexből?',
+        'Restored worktree {name}':
+            'A(z) {name} munkafa visszaállítva',
+        'Restored {path}':
+            'A(z) {path} visszaállítva',
+        'Restoring the worktree failed':
+            'A munkafa visszaállítása sikertelen',
+        'Revert':
+            'Revert',
+        'Revert file':
+            'Fájl revertálása',
+        'Revert in working tree':
+            'Revert a munkafában',
+        'Revert into the working tree?':
+            'Revertálja a munkafába?',
+        'Revert {sha}?':
+            'Revertálja ezt: {sha}?',
+        'Revert {what}':
+            '{what} revertálása',
+        'Reverted hunk {n} of {path}':
+            'A(z) {path} {n}. hunkja revertálva',
+        'Reverted into the working tree, but git could not forget the revert ({error}) — run `git revert --quit` by hand':
+            'Revertálva a munkafába, de a git nem tudta elfelejteni a revertet ({error}) — futtassa kézzel: `git revert --quit`',
+        'Reverted {lines} of {path}':
+            'A(z) {path} {lines} revertálva',
+        'Reverted {path}':
+            'A(z) {path} revertálva',
+        'Reverted {sha} as {head} — undo with `git reset --keep HEAD~1`':
+            '{sha} revertálva mint {head} — visszavonás: `git reset --keep HEAD~1`',
+        'Reverted {sha} into the working tree — staged, nothing committed':
+            '{sha} revertálva a munkafába — stage-elve, semmi sincs commitolva',
+        'Reverting {sha} left conflicts — resolve them, then `git revert --continue`, or `git revert --abort`':
+            '{sha} revertálása konfliktusokat hagyott — oldja fel őket, majd `git revert --continue`, vagy `git revert --abort`',
+        'Revert…':
+            'Revert…',
+        'Right-click to copy':
+            'Jobb kattintás a másoláshoz',
+        'STAGED':
+            'STAGE-ELT',
+        'Show diffs in the git page':
+            'Diffek megjelenítése a git oldalon',
+        'Show the commits and files panels':
+            'A commit- és fájlpanel megjelenítése',
+        'Show/hide agent notes':
+            'Ügynökjegyzetek megjelenítése/elrejtése',
+        'Show/hide line numbers':
+            'Sorszámok megjelenítése/elrejtése',
+        'Show/hide the git page':
+            'Git oldal megjelenítése/elrejtése',
+        'Side by side, stacked, or whichever fits the width':
+            'Egymás mellett, egymás alatt, vagy ahogy a szélességbe belefér',
+        'Stage all':
+            'Összes stage-elése',
+        'Stage all {n} {noun}?':
+            'Stage-eli mind a(z) {n} {noun}?',
+        'Stage every change (git add -A)':
+            'Minden módosítás stage-elése (git add -A)',
+        'Stage file':
+            'Fájl stage-elése',
+        'Stage {what}':
+            '{what} stage-elése',
+        'Stage, unstage or revert the file':
+            'A fájl stage-elése, unstage-elése vagy revertálása',
+        'Stage, unstage or revert the hunk or the selected lines':
+            'A hunk vagy a kijelölt sorok stage-elése, unstage-elése vagy revertálása',
+        'Staged hunk {n} of {path}':
+            'A(z) {path} {n}. hunkja stage-elve',
+        'Staged {lines} of {path}':
+            'A(z) {path} {lines} stage-elve',
+        'Staged {n} {noun}':
+            '{n} {noun} stage-elve',
+        'Staged {path}':
+            'A(z) {path} stage-elve',
+        'Summary':
+            'Összefoglaló',
+        'The git page: how the diff is drawn and what the commits panel loads':
+            'A git oldal: hogyan rajzolódik a diff, és amit a commit-panel betölt',
+        'The index is committed as `fixup! {sha}` for “{subject}”. Fold it in afterwards with `{command}` — named here, never run.':
+            'Az index `fixup! {sha}` commitként kerül be a(z) „{subject}” commithoz. Utána ezzel olvasztható be: `{command}` — itt csak megnevezve, sosem fut le.',
+        'The old and new line-number columns beside each hunk':
+            'A régi és az új sorszámoszlop minden hunk mellett',
+        "The session's working directory has no repository to show. Check again once it does.":
+            'A munkamenet munkakönyvtárában nincs megjeleníthető tároló. Ellenőrizze újra, ha már lesz.',
+        'The three-way revert of {path} left conflict markers':
+            'A(z) {path} háromutas revertálása konfliktusjelölőket hagyott',
+        'The view changed since the request: nothing was done':
+            'A nézet megváltozott a kérés óta: semmi sem történt',
+        'The view is behind the page: reloading':
+            'A nézet elmaradt az oldaltól: újratöltés',
+        "This session isn't in a git repository":
+            'Ez a munkamenet nincs git tárolóban',
+        'Tip':
+            'Tipp',
+        'Trash Worktree':
+            'Munkafa kukába',
+        "Trash the session's worktree?":
+            'Kukába helyezi a munkamenet munkafáját?',
+        'UNSTAGED':
+            'NEM STAGE-ELT',
+        'Unfold this file':
+            'Fájl kibontása',
+        'Unmerged files: {count}. Resolve and stage them, then Continue (`git {kind} --continue`) — or Abort (`git {kind} --abort`) to put the tree back.':
+            'Egyesítetlen fájlok: {count}. Oldja fel és stage-elje őket, majd Folytatás (`git {kind} --continue`) — vagy Megszakítás (`git {kind} --abort`) a fa visszaállításához.',
+        'Unpushed commits of this branch, newest first.':
+            'Az ág még nem pusholt commitjai, a legújabb elöl.',
+        'Unstage all':
+            'Összes unstage-elése',
+        'Unstage all {n} {noun}?':
+            'Unstage-eli mind a(z) {n} {noun}?',
+        'Unstage every change (git reset)':
+            'Minden módosítás unstage-elése (git reset)',
+        'Unstage file':
+            'Fájl unstage-elése',
+        'Unstage {what}':
+            '{what} unstage-elése',
+        'Unstaged hunk {n} of {path}':
+            'A(z) {path} {n}. hunkja unstage-elve',
+        'Unstaged {lines} of {path}':
+            'A(z) {path} {lines} unstage-elve',
+        'Unstaged {n} {noun}':
+            '{n} {noun} unstage-elve',
+        'Unstaged {path}':
+            'A(z) {path} unstage-elve',
+        'Warning':
+            'Figyelmeztetés',
+        'When archiving a session in a git worktree':
+            'Git munkafában lévő munkamenet archiválásakor',
+        "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
+            'Kerüljön-e a munkamenet munkafája a kukába, miután leállt; a Visszavonás a munkamenettel együtt hozza vissza',
+        'Widen the page to show the panels':
+            'Szélesítse az oldalt a panelek megjelenítéséhez',
+        'Wrap instead of scrolling each hunk sideways':
+            'Sortörés az egyes hunkok oldalirányú görgetése helyett',
+        'Wrap long lines':
+            'Hosszú sorok tördelése',
+        '`git add -A` in {cwd}':
+            '`git add -A` itt: {cwd}',
+        '`git reset` in {cwd}':
+            '`git reset` itt: {cwd}',
+        '`git {kind} --abort` in {cwd}: the {operation} is forgotten and the tree goes back to where it stood before it started. Conflict resolutions made since are lost.':
+            '`git {kind} --abort` itt: {cwd}: a művelet ({operation}) feledésbe merül, és a fa oda áll vissza, ahol az indulása előtt állt. Az azóta végzett konfliktusfeloldások elvesznek.',
+        '`git {kind} {flag}` failed':
+            'A `git {kind} {flag}` sikertelen',
+        'a directory':
+            'könyvtár',
+        'a removal':
+            'eltávolítás',
+        'a submodule':
+            'almodul',
+        'a symbolic link':
+            'szimbolikus link',
+        'all':
+            'mind',
+        'an addition':
+            'hozzáadás',
+        'annotate_diff — note cards under a hunk, anchored to a line of the diff':
+            'annotate_diff — jegyzetkártyák egy hunk alatt, a diff egy sorához rögzítve',
+        'bin':
+            'bin',
+        'binary':
+            'bináris',
+        'cannot read the patch for {path}: {why}':
+            'a(z) {path} patche nem olvasható: {why}',
+        "cannot read the view's patch for {path}: {why}":
+            'a nézet patche nem olvasható ehhez: {path}: {why}',
+        'cannot {action} {path} by hunk: {why}':
+            'a(z) {path} nem {action} hunkonként: {why}',
+        'change':
+            'módosítás',
+        'changes':
+            'módosítás',
+        'clear_diff_marks — remove the notes and highlights it put on the page':
+            'clear_diff_marks — az oldalra tett jegyzetek és kiemelések eltávolítása',
+        'commit {ref}':
+            'commit {ref}',
+        'conflict':
+            'konfliktus',
+        'context':
+            'kontextus',
+        'deleted':
+            'törölve',
+        'diff_context — what the page shows: the diff, the hunk and lines you are on, the files, the notes':
+            'diff_context — amit az oldal mutat: a diff, a hunk és a sorok, ahol áll, a fájlok, a jegyzetek',
+        'discard':
+            'elvetés',
+        'discard reverts changes inside a modified file: use git from a shell for a new or renamed file':
+            'az elvetés egy módosított fájl belső változásait vonja vissza: új vagy átnevezett fájlhoz használja a gitet egy shellből',
+        'file':
+            'fájl',
+        'git commit failed':
+            'A git commit sikertelen',
+        'git failed':
+            'A git sikertelen',
+        'git revert failed':
+            'A git revert sikertelen',
+        "highlight_diff — attention marks on character ranges of the diff's lines":
+            'highlight_diff — figyelemjelölések a diff sorainak karaktertartományain',
+        'hunk':
+            'hunk',
+        'hunk {n} could not be read':
+            'a(z) {n}. hunk nem olvasható',
+        'hunk {n} differs: line {line} is `{shown}` in the view but `{actual}` on disk':
+            'a(z) {n}. hunk eltér: a(z) {line}. sor a nézetben `{shown}`, a lemezen viszont `{actual}`',
+        'hunk {n} differs: line {line} is {shown} in the view but {actual} on disk':
+            'a(z) {n}. hunk eltér: a(z) {line}. sor a nézetben {shown}, a lemezen viszont {actual}',
+        'hunk {n} has {shown} lines in the view but {actual} on disk':
+            'a(z) {n}. hunk a nézetben {shown} soros, a lemezen viszont {actual}',
+        'hunk {n} spans lines {start}-{end} in the patch but {shown_start}-{shown_end} in the view':
+            'a(z) {n}. hunk a patchben a(z) {start}-{end} sorokat fedi, a nézetben viszont a(z) {shown_start}-{shown_end} sorokat',
+        'it carries a control character':
+            'vezérlőkaraktert tartalmaz',
+        'it has an unrecognised file mode ({mode})':
+            'ismeretlen fájlmódja van ({mode})',
+        'it is a rename now':
+            'már átnevezés',
+        'it is an absolute path':
+            'abszolút elérési út',
+        'it is {what}, which hunks cannot describe':
+            'ez {what}, amit hunkok nem tudnak leírni',
+        'it points outside the repository with a `..` segment':
+            'egy `..` szegmenssel a tárolón kívülre mutat',
+        'it starts with a dash':
+            'kötőjellel kezdődik',
+        'lines':
+            'sor',
+        'load more…':
+            'további betöltése…',
+        'mode {a} → {b}':
+            'mód {a} → {b}',
+        'new':
+            'új',
+        'new line {n}':
+            'új {n}. sor',
+        'no changes in the selection':
+            'nincs módosítás a kijelölésben',
+        'no hunk {n} in {path}':
+            'nincs {n}. hunk itt: {path}',
+        'no stanza for it':
+            'nincs hozzá szakasz',
+        'nothing selected':
+            'nincs kijelölés',
+        'nothing to discard in hunk {n} of {path}':
+            'nincs mit elvetni a(z) {path} {n}. hunkjában',
+        'nothing to revert in hunk {n} of {path}':
+            'nincs mit revertálni a(z) {path} {n}. hunkjában',
+        'nothing to {action} in {path}':
+            'nincs mit {action} itt: {path}',
+        'nothing to {action} in {path}: reloading':
+            'nincs mit {action} itt: {path}: újratöltés',
+        'old line {n}':
+            'régi {n}. sor',
+        'refusing {path}: {why}':
+            'a(z) {path} elutasítva: {why}',
+        'renamed':
+            'átnevezve',
+        'renamed {n}%':
+            'átnevezve {n}%',
+        'renames {action} whole: use {button}':
+            'az átnevezések csak egészben {action}: használja ezt: {button}',
+        'revert':
+            'revertálás',
+        'select a hunk: Discard hunk takes a hunk, Discard lines a selection':
+            'válasszon hunkot: a Hunk elvetése hunkot vár, a Sorok elvetése kijelölést',
+        'select a hunk: Revert hunk takes a hunk, Revert lines a selection':
+            'válasszon hunkot: a Hunk revertálása hunkot vár, a Sorok revertálása kijelölést',
+        'select the whole end-of-file change':
+            'jelölje ki a teljes fájlvégi módosítást',
+        'show_diff — open the git page on a working-tree, branch or commit diff, at a file, line or hunk':
+            'show_diff — a git oldal megnyitása egy munkafa-, ág- vagy commit-diffen, egy fájlnál, sornál vagy hunknál',
+        'stage':
+            'stage-elés',
+        'the patch does not name a file':
+            'a patch nem nevez meg fájlt',
+        'the patch names {other}':
+            'a patch ezt nevezi meg: {other}',
+        'the selection is not inside hunk {n} of {path}':
+            'a kijelölés nincs a(z) {path} {n}. hunkjában',
+        'the view shows {shown} hunk(s) but the disk has {actual}':
+            'a nézet {shown} hunkot mutat, a lemezen viszont {actual} van',
+        'the view shows {shown} hunk(s) where the patch has {actual}':
+            'a nézet {shown} hunkot mutat, ahol a patchben {actual} van',
+        'too large: {n} changed lines':
+            'túl nagy: {n} módosult sor',
+        'trash failed':
+            'a kukába helyezés sikertelen',
+        'unstage':
+            'unstage-elés',
+        'working tree':
+            'munkafa',
+        'working tree · staged':
+            'munkafa · stage-elt',
+        'working tree · unstaged':
+            'munkafa · nem stage-elt',
+        '{branch} vs {parent}':
+            '{branch} vs {parent}',
+        '{done} — merged three-way (the result is staged)':
+            '{done} — háromutas egyesítéssel (az eredmény stage-elve)',
+        '{error}\n\nWhatever the trash still holds of {path} can be restored from there by hand.':
+            '{error}\n\nAmi a(z) {path} fájlból még a kukában van, onnan kézzel visszaállítható.',
+        '{n} lines':
+            '{n} sor',
+        '{n} more columns on GitHub':
+            'további {n} oszlop a GitHubon',
+        '{n} more lines on GitHub':
+            'további {n} sor a GitHubon',
+        '{n} more rows on GitHub':
+            'további {n} sor a GitHubon',
+        '{n} of {m}':
+            '{n} / {m}',
+        '{path}\n\nArchiving the session leaves its worktree behind unless it is moved to the trash with it. The trash keeps the worktree whole, uncommitted changes included, and Undo brings it back with the session; its branch stays. Cancel leaves the session where it is.':
+            '{path}\n\nA munkamenet archiválása hátrahagyja a munkafáját, hacsak nem kerül vele együtt a kukába. A kuka egészben őrzi meg a munkafát, a nem véglegesített módosításokkal együtt, és a Visszavonás a munkamenettel együtt hozza vissza; az ága megmarad. A Mégse ott hagyja a munkamenetet, ahol van.',
+        '{path} changed since it was loaded, reloading ({detail})':
+            'a(z) {path} megváltozott a betöltése óta, újratöltés ({detail})',
+        '{path} is a new or deleted file: use {button}':
+            'a(z) {path} új vagy törölt fájl: használja ezt: {button}',
+        '{path} is binary: use git from a shell':
+            'a(z) {path} bináris: használja a gitet egy shellből',
+        '{path} is binary: use {button}':
+            'a(z) {path} bináris: használja ezt: {button}',
+        '{path} is deleted: Discard file restores it whole':
+            'a(z) {path} törölve: a Fájl elvetése egészben visszaállítja',
+        '{path} is not in the view: reloading':
+            'a(z) {path} nincs a nézetben: újratöltés',
+        '{path} is too large to discard by hunk: use git from a shell':
+            'a(z) {path} túl nagy a hunkonkénti elvetéshez: használja a gitet egy shellből',
+        '{path} is too large to revert: use git from a shell':
+            'a(z) {path} túl nagy a revertáláshoz: használja a gitet egy shellből',
+        '{path} is too large to {action} by hunk: use {button}':
+            'a(z) {path} túl nagy ahhoz, hogy hunkonként {action}: használja ezt: {button}',
+        '{path} is unmerged: resolve the conflict, then use {button}':
+            'a(z) {path} egyesítetlen: oldja fel a konfliktust, majd használja ezt: {button}',
+        '{path} is unmerged: use git checkout --ours or --theirs from a shell':
+            'a(z) {path} egyesítetlen: használja a git checkout --ours vagy --theirs parancsot egy shellből',
+        '{path} is untracked: Discard file moves it to the trash':
+            'a(z) {path} nem követett: a Fájl elvetése a kukába helyezi',
+        '{path} is untracked: use {button}':
+            'a(z) {path} nem követett: használja ezt: {button}',
+        "{path} isn't in this diff":
+            'a(z) {path} nincs ebben a diffben',
+        '“{subject}” is applied in reverse. Commit the revert as `git revert` would, or leave the reverse change staged in the working tree (`--no-commit`) to edit and commit yourself.':
+            'A(z) „{subject}” fordítva kerül alkalmazásra. Commitolja a revertet úgy, ahogy a `git revert` tenné, vagy hagyja a fordított módosítást stage-elve a munkafában (`--no-commit`), hogy Ön szerkessze és commitolja.',
+        '⋯ {n} unchanged lines':
+            '⋯ {n} változatlan sor',
     },
     "de": {
         'Before you start':
@@ -2718,22 +3304,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'GitHub beim Start einmal nach den Pull-Requests jeder gelisteten Sitzung fragen, damit die Markierungen in der Seitenleiste aktuell starten statt so, wie sie zurückblieben',
         'Git':
             'Git',
-        "The git page: hunk's layout and theme, and what the commits panel loads":
-            'Die Git-Seite: Layout und Thema von hunk, und was das Commit-Panel lädt',
         'Layout':
             'Layout',
-        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
-            'Wie hunk einen Diff anordnet: nebeneinander, untereinander, oder was in die Breite passt',
         'Automatic':
             'Automatisch',
         'Split':
             'Geteilt',
         'Stacked':
             'Untereinander',
-        'Theme':
-            'Thema',
-        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
-            'Leer: hunks eigener Standard. Jedes Thema, das hunk kennt — nord, dracula, catppuccin-mocha, github-light-default, auto (folgt dem Terminalhintergrund) — oder eines aus hunks Konfiguration; ein Name, den hunk nicht kennt, fällt auf den Standard zurück',
         'Show untracked files':
             'Unversionierte Dateien anzeigen',
         "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
@@ -3094,6 +3672,600 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             '{p} geleerte(s) Projekt(e) in der Seitenleiste behalten',
         'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
             'Verwalten Sie Ihre KI-Coding-Agent-Sitzungen und setzen Sie sie fort.\n\nInoffizielles Community-Tool — weder mit Anthropic verbunden noch von Anthropic gebilligt.',
+        '(no subject)':
+            '(kein Betreff)',
+        '1 line':
+            '1 Zeile',
+        'A {operation} is half-finished here — finish or abort it first':
+            'Hier ist ein {operation} halb fertig — erst abschließen oder abbrechen',
+        'Abort':
+            'Abbrechen',
+        'Abort the {operation}?':
+            '{operation} abbrechen?',
+        'Aborted the {operation} — the tree is back where it stood':
+            '{operation} abgebrochen — der Baum ist wieder, wo er stand',
+        'Abort…':
+            'Abbrechen…',
+        'Add a note':
+            'Notiz hinzufügen',
+        'Add note':
+            'Notiz hinzufügen',
+        'Agent notes':
+            'Agenten-Notizen',
+        'Always Trash':
+            'Immer in den Papierkorb',
+        'Annotate the git page':
+            'Die Git-Seite annotieren',
+        'Another git operation is still running':
+            'Eine andere git-Operation läuft noch',
+        'Body (optional)':
+            'Text (optional)',
+        'CONFLICTS':
+            'KONFLIKTE',
+        'Caution':
+            'Vorsicht',
+        'Check again':
+            'Erneut prüfen',
+        'Choose':
+            'Wählen',
+        'Clear its marks in the git page':
+            'Seine Markierungen auf der Git-Seite entfernen',
+        'Click to open the git page':
+            'Klicken, um die Git-Seite zu öffnen',
+        'Close the git page':
+            'Die Git-Seite schließen',
+        'Commit':
+            'Commit',
+        'Commit fixup':
+            'Fixup committen',
+        'Commit revert':
+            'Revert committen',
+        'Commit with body':
+            'Mit Text committen',
+        'Commit with body…':
+            'Mit Text committen…',
+        'Committed a fixup for {sha} — fold it in with `{command}`':
+            'Fixup für {sha} committet — mit `{command}` einfalten',
+        'Committed {sha} “{summary}” — undo with `git reset --soft HEAD~1`':
+            '{sha} „{summary}“ committet — rückgängig mit `git reset --soft HEAD~1`',
+        'Commit…':
+            'Commit…',
+        'Continued the {operation} — it stopped again on the next step':
+            '{operation} fortgesetzt — beim nächsten Schritt wieder angehalten',
+        'Copy sha':
+            'SHA kopieren',
+        "Couldn't read the diff: {error}":
+            'Diff konnte nicht gelesen werden: {error}',
+        'Ctrl+Enter saves · Esc cancels':
+            'Ctrl+Enter speichert · Esc bricht ab',
+        'Cursor down a line':
+            'Cursor eine Zeile nach unten',
+        'Cursor up a line':
+            'Cursor eine Zeile nach oben',
+        'Delete':
+            'Löschen',
+        'Delete archived sessions after':
+            'Archivierte Sitzungen löschen nach',
+        'Details':
+            'Details',
+        'Diff view options':
+            'Optionen der Diff-Ansicht',
+        'Discard file':
+            'Datei verwerfen',
+        'Discard hunk {n} in {path}? This cannot be undone.':
+            'Hunk {n} in {path} verwerfen? Dies kann nicht rückgängig gemacht werden.',
+        'Discard or revert the hunk or the selected lines':
+            'Den Hunk oder die ausgewählten Zeilen verwerfen oder reverten',
+        'Discard the changes to {path}? This cannot be undone.':
+            'Die Änderungen an {path} verwerfen? Dies kann nicht rückgängig gemacht werden.',
+        'Discard the changes?':
+            'Die Änderungen verwerfen?',
+        'Discard works on the working tree: load the Unstaged view':
+            'Verwerfen wirkt auf den Arbeitsbaum: die Ansicht „Nicht gestaged“ laden',
+        'Discard {lines} in {path}? This cannot be undone.':
+            '{lines} in {path} verwerfen? Dies kann nicht rückgängig gemacht werden.',
+        'Discard {what}':
+            '{what} verwerfen',
+        'Discarded hunk {n} of {path}':
+            'Hunk {n} von {path} verworfen',
+        'Discarded the changes to {path}':
+            'Die Änderungen an {path} verworfen',
+        'Discarded {lines} of {path}':
+            '{lines} von {path} verworfen',
+        'Edit':
+            'Bearbeiten',
+        "Edit the hunk's first note":
+            'Die erste Notiz des Hunks bearbeiten',
+        'Emphasise what moved within a changed line':
+            'Hervorheben, was sich innerhalb einer geänderten Zeile bewegt hat',
+        'Expand context':
+            'Kontext ausklappen',
+        'Expand every unchanged line':
+            'Jede unveränderte Zeile ausklappen',
+        'Expand the unchanged lines above the hunk':
+            'Die unveränderten Zeilen über dem Hunk ausklappen',
+        'Expand {n} lines down':
+            '{n} Zeilen nach unten ausklappen',
+        'Expand {n} lines up':
+            '{n} Zeilen nach oben ausklappen',
+        'FILES':
+            'DATEIEN',
+        'Filter files':
+            'Dateien filtern',
+        'Filter the files list':
+            'Die Dateiliste filtern',
+        'Find in the diff':
+            'Im Diff suchen',
+        'Finished the {operation}':
+            '{operation} abgeschlossen',
+        'Fix up which commit?':
+            'Welchen Commit fixen?',
+        'Fix up {sha}?':
+            '{sha} fixen?',
+        'Fix up…':
+            'Fixup…',
+        'Fold or unfold the branch':
+            'Den Branch ein- oder ausklappen',
+        'Fold this file':
+            'Diese Datei einklappen',
+        'Git page':
+            'Git-Seite',
+        'Git · staged':
+            'Git · gestaged',
+        'Git · unstaged':
+            'Git · nicht gestaged',
+        'Git · vs {parent}':
+            'Git · vs. {parent}',
+        'Git · {ref}':
+            'Git · {ref}',
+        'Hide the commits and files panels':
+            'Die Commit- und Dateipanels ausblenden',
+        'Highlight changed words':
+            'Geänderte Wörter hervorheben',
+        'Highlight in the git page':
+            'Auf der Git-Seite hervorheben',
+        'Important':
+            'Wichtig',
+        'In the diff.':
+            'Im Diff.',
+        'In the diff; a card under the focused hunk, anchored to the cursor line.':
+            'Im Diff; eine Karte unter dem fokussierten Hunk, an der Cursorzeile verankert.',
+        'In the diff; a hunk with a note or highlight on it.':
+            'Im Diff; ein Hunk mit einer Notiz oder Hervorhebung.',
+        'In the diff; after a confirmation.':
+            'Im Diff; nach einer Bestätigung.',
+        'In the diff; at the line under the cursor.':
+            'Im Diff; an der Zeile unter dem Cursor.',
+        "In the diff; past the hunk's first line, into the previous hunk.":
+            'Im Diff; über die erste Zeile des Hunks hinaus in den vorherigen Hunk.',
+        "In the diff; past the hunk's last line, into the next hunk.":
+            'Im Diff; über die letzte Zeile des Hunks hinaus in den nächsten Hunk.',
+        'In the diff; the first note you wrote on the focused hunk.':
+            'Im Diff; die erste Notiz, die Sie am fokussierten Hunk geschrieben haben.',
+        "In the diff; the focused hunk's file.":
+            'Im Diff; die Datei des fokussierten Hunks.',
+        'In the diff; the selected lines when there are any, else the focused hunk.':
+            'Im Diff; die ausgewählten Zeilen, wenn es welche gibt, sonst der fokussierte Hunk.',
+        'Keep Worktree':
+            'Worktree behalten',
+        'Keyboard shortcuts':
+            'Tastenkürzel',
+        'Layout: automatic':
+            'Layout: automatisch',
+        'Layout: split':
+            'Layout: geteilt',
+        'Layout: stacked':
+            'Layout: untereinander',
+        'Line numbers':
+            'Zeilennummern',
+        "Move a session's transcript to the trash once it has been archived this long; 0 keeps them forever. Checked once a day":
+            'Das Transkript einer Sitzung in den Papierkorb verschieben, sobald sie so lange archiviert ist; 0 behält sie für immer. Einmal am Tag geprüft',
+        'Move to the trash?':
+            'In den Papierkorb verschieben?',
+        'Move to trash':
+            'In den Papierkorb',
+        'Move {path} to the trash?':
+            '{path} in den Papierkorb verschieben?',
+        'Moved worktree {name} to the trash':
+            'Worktree {name} in den Papierkorb verschoben',
+        'Moved {path} to the trash':
+            '{path} in den Papierkorb verschoben',
+        'Moving the worktree to the trash failed':
+            'Der Worktree konnte nicht in den Papierkorb verschoben werden',
+        'Never Trash':
+            'Nie in den Papierkorb',
+        'Next annotated hunk':
+            'Nächster annotierter Hunk',
+        'Next file':
+            'Nächste Datei',
+        'Next hunk':
+            'Nächster Hunk',
+        'Next match (Enter)':
+            'Nächster Treffer (Enter)',
+        'No changes':
+            'Keine Änderungen',
+        'No matches':
+            'Keine Treffer',
+        'No such file on this side.':
+            'Auf dieser Seite gibt es die Datei nicht.',
+        'No unpushed commit to fix up — commit first':
+            'Kein ungepushter Commit zum Fixen — erst committen',
+        'Not a git repository':
+            'Kein git-Repository',
+        'Note':
+            'Notiz',
+        'Nothing is left unmerged. Continue (`git {kind} --continue`) commits the step with the message it has and carries on — or Abort (`git {kind} --abort`) puts the tree back.':
+            'Nichts ist mehr ungemergt. Weiter (`git {kind} --continue`) committet den Schritt mit der vorhandenen Nachricht und macht weiter — oder Abbrechen (`git {kind} --abort`) setzt den Baum zurück.',
+        'Nothing staged — stage a hunk or file first':
+            'Nichts gestaged — erst einen Hunk oder eine Datei stagen',
+        'Nothing to stage':
+            'Nichts zu stagen',
+        'Nothing to unstage':
+            'Nichts zu unstagen',
+        'Open in editor':
+            'Im Editor öffnen',
+        'Open the file in the editor':
+            'Die Datei im Editor öffnen',
+        'Previous annotated hunk':
+            'Vorheriger annotierter Hunk',
+        'Previous file':
+            'Vorherige Datei',
+        'Previous hunk':
+            'Vorheriger Hunk',
+        'Previous match (Shift+Enter)':
+            'Vorheriger Treffer (Shift+Enter)',
+        'Read the git page':
+            'Die Git-Seite lesen',
+        'Reload the diff':
+            'Den Diff neu laden',
+        'Restore':
+            'Wiederherstellen',
+        'Restore the file?':
+            'Die Datei wiederherstellen?',
+        'Restore {path} from the index?':
+            '{path} aus dem Index wiederherstellen?',
+        'Restored worktree {name}':
+            'Worktree {name} wiederhergestellt',
+        'Restored {path}':
+            '{path} wiederhergestellt',
+        'Restoring the worktree failed':
+            'Der Worktree konnte nicht wiederhergestellt werden',
+        'Revert':
+            'Revert',
+        'Revert file':
+            'Datei reverten',
+        'Revert in working tree':
+            'Im Arbeitsbaum reverten',
+        'Revert into the working tree?':
+            'In den Arbeitsbaum reverten?',
+        'Revert {sha}?':
+            '{sha} reverten?',
+        'Revert {what}':
+            '{what} reverten',
+        'Reverted hunk {n} of {path}':
+            'Hunk {n} von {path} revertet',
+        'Reverted into the working tree, but git could not forget the revert ({error}) — run `git revert --quit` by hand':
+            'In den Arbeitsbaum revertet, aber git konnte den Revert nicht vergessen ({error}) — `git revert --quit` von Hand ausführen',
+        'Reverted {lines} of {path}':
+            '{lines} von {path} revertet',
+        'Reverted {path}':
+            '{path} revertet',
+        'Reverted {sha} as {head} — undo with `git reset --keep HEAD~1`':
+            '{sha} als {head} revertet — rückgängig mit `git reset --keep HEAD~1`',
+        'Reverted {sha} into the working tree — staged, nothing committed':
+            '{sha} in den Arbeitsbaum revertet — gestaged, nichts committet',
+        'Reverting {sha} left conflicts — resolve them, then `git revert --continue`, or `git revert --abort`':
+            'Das Reverten von {sha} hat Konflikte hinterlassen — auflösen, dann `git revert --continue`, oder `git revert --abort`',
+        'Revert…':
+            'Revert…',
+        'Right-click to copy':
+            'Rechtsklick zum Kopieren',
+        'STAGED':
+            'GESTAGED',
+        'Show diffs in the git page':
+            'Diffs auf der Git-Seite anzeigen',
+        'Show the commits and files panels':
+            'Die Commit- und Dateipanels anzeigen',
+        'Show/hide agent notes':
+            'Agenten-Notizen ein-/ausblenden',
+        'Show/hide line numbers':
+            'Zeilennummern ein-/ausblenden',
+        'Show/hide the git page':
+            'Git-Seite ein-/ausblenden',
+        'Side by side, stacked, or whichever fits the width':
+            'Nebeneinander, untereinander, oder was in die Breite passt',
+        'Stage all':
+            'Alles stagen',
+        'Stage all {n} {noun}?':
+            'Alle {n} {noun} stagen?',
+        'Stage every change (git add -A)':
+            'Jede Änderung stagen (git add -A)',
+        'Stage file':
+            'Datei stagen',
+        'Stage {what}':
+            '{what} stagen',
+        'Stage, unstage or revert the file':
+            'Die Datei stagen, unstagen oder reverten',
+        'Stage, unstage or revert the hunk or the selected lines':
+            'Den Hunk oder die ausgewählten Zeilen stagen, unstagen oder reverten',
+        'Staged hunk {n} of {path}':
+            'Hunk {n} von {path} gestaged',
+        'Staged {lines} of {path}':
+            '{lines} von {path} gestaged',
+        'Staged {n} {noun}':
+            '{n} {noun} gestaged',
+        'Staged {path}':
+            '{path} gestaged',
+        'Summary':
+            'Zusammenfassung',
+        'The git page: how the diff is drawn and what the commits panel loads':
+            'Die Git-Seite: wie der Diff gezeichnet wird und was das Commit-Panel lädt',
+        'The index is committed as `fixup! {sha}` for “{subject}”. Fold it in afterwards with `{command}` — named here, never run.':
+            'Der Index wird als `fixup! {sha}` für „{subject}“ committet. Danach mit `{command}` einfalten — hier nur genannt, nie ausgeführt.',
+        'The old and new line-number columns beside each hunk':
+            'Die alte und die neue Zeilennummernspalte neben jedem Hunk',
+        "The session's working directory has no repository to show. Check again once it does.":
+            'Das Arbeitsverzeichnis der Sitzung hat kein Repository zum Anzeigen. Erneut prüfen, sobald es eines hat.',
+        'The three-way revert of {path} left conflict markers':
+            'Der Drei-Wege-Revert von {path} hat Konfliktmarker hinterlassen',
+        'The view changed since the request: nothing was done':
+            'Die Ansicht hat sich seit der Anfrage geändert: nichts wurde getan',
+        'The view is behind the page: reloading':
+            'Die Ansicht hinkt der Seite hinterher: wird neu geladen',
+        "This session isn't in a git repository":
+            'Diese Sitzung ist in keinem git-Repository',
+        'Tip':
+            'Tipp',
+        'Trash Worktree':
+            'Worktree in den Papierkorb',
+        "Trash the session's worktree?":
+            'Den Worktree der Sitzung in den Papierkorb verschieben?',
+        'UNSTAGED':
+            'NICHT GESTAGED',
+        'Unfold this file':
+            'Diese Datei ausklappen',
+        'Unmerged files: {count}. Resolve and stage them, then Continue (`git {kind} --continue`) — or Abort (`git {kind} --abort`) to put the tree back.':
+            'Ungemergte Dateien: {count}. Auflösen und stagen, dann Weiter (`git {kind} --continue`) — oder Abbrechen (`git {kind} --abort`), um den Baum zurückzusetzen.',
+        'Unpushed commits of this branch, newest first.':
+            'Ungepushte Commits dieses Branches, neueste zuerst.',
+        'Unstage all':
+            'Alles unstagen',
+        'Unstage all {n} {noun}?':
+            'Alle {n} {noun} unstagen?',
+        'Unstage every change (git reset)':
+            'Jede Änderung unstagen (git reset)',
+        'Unstage file':
+            'Datei unstagen',
+        'Unstage {what}':
+            '{what} unstagen',
+        'Unstaged hunk {n} of {path}':
+            'Hunk {n} von {path} unstaged',
+        'Unstaged {lines} of {path}':
+            '{lines} von {path} unstaged',
+        'Unstaged {n} {noun}':
+            '{n} {noun} unstaged',
+        'Unstaged {path}':
+            '{path} unstaged',
+        'Warning':
+            'Warnung',
+        'When archiving a session in a git worktree':
+            'Beim Archivieren einer Sitzung in einem Git-Worktree',
+        "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
+            'Ob der Worktree der Sitzung in den Papierkorb verschoben wird, sobald sie beendet ist; Rückgängig holt ihn mit der Sitzung zurück',
+        'Widen the page to show the panels':
+            'Die Seite verbreitern, um die Panels zu zeigen',
+        'Wrap instead of scrolling each hunk sideways':
+            'Umbrechen, statt jeden Hunk seitwärts zu scrollen',
+        'Wrap long lines':
+            'Lange Zeilen umbrechen',
+        '`git add -A` in {cwd}':
+            '`git add -A` in {cwd}',
+        '`git reset` in {cwd}':
+            '`git reset` in {cwd}',
+        '`git {kind} --abort` in {cwd}: the {operation} is forgotten and the tree goes back to where it stood before it started. Conflict resolutions made since are lost.':
+            '`git {kind} --abort` in {cwd}: der {operation} wird vergessen und der Baum geht dorthin zurück, wo er vor dem Start stand. Seitdem gemachte Konfliktauflösungen gehen verloren.',
+        '`git {kind} {flag}` failed':
+            '`git {kind} {flag}` ist fehlgeschlagen',
+        'a directory':
+            'ein Verzeichnis',
+        'a removal':
+            'eine Entfernung',
+        'a submodule':
+            'ein Submodul',
+        'a symbolic link':
+            'ein symbolischer Link',
+        'all':
+            'alle',
+        'an addition':
+            'eine Hinzufügung',
+        'annotate_diff — note cards under a hunk, anchored to a line of the diff':
+            'annotate_diff — Notizkarten unter einem Hunk, an einer Zeile des Diffs verankert',
+        'bin':
+            'bin',
+        'binary':
+            'binär',
+        'cannot read the patch for {path}: {why}':
+            'der Patch für {path} kann nicht gelesen werden: {why}',
+        "cannot read the view's patch for {path}: {why}":
+            'der Patch der Ansicht für {path} kann nicht gelesen werden: {why}',
+        'cannot {action} {path} by hunk: {why}':
+            '{path} lässt sich nicht hunkweise {action}: {why}',
+        'change':
+            'Änderung',
+        'changes':
+            'Änderungen',
+        'clear_diff_marks — remove the notes and highlights it put on the page':
+            'clear_diff_marks — die Notizen und Hervorhebungen entfernen, die es auf die Seite gesetzt hat',
+        'commit {ref}':
+            'Commit {ref}',
+        'conflict':
+            'Konflikt',
+        'context':
+            'Kontext',
+        'deleted':
+            'gelöscht',
+        'diff_context — what the page shows: the diff, the hunk and lines you are on, the files, the notes':
+            'diff_context — was die Seite zeigt: der Diff, der Hunk und die Zeilen, auf denen Sie sind, die Dateien, die Notizen',
+        'discard':
+            'verwerfen',
+        'discard reverts changes inside a modified file: use git from a shell for a new or renamed file':
+            'Verwerfen nimmt Änderungen in einer geänderten Datei zurück: für eine neue oder umbenannte Datei git aus einer Shell verwenden',
+        'file':
+            'Datei',
+        'git commit failed':
+            'git commit ist fehlgeschlagen',
+        'git failed':
+            'git ist fehlgeschlagen',
+        'git revert failed':
+            'git revert ist fehlgeschlagen',
+        "highlight_diff — attention marks on character ranges of the diff's lines":
+            'highlight_diff — Aufmerksamkeitsmarken auf Zeichenbereichen der Diff-Zeilen',
+        'hunk':
+            'Hunk',
+        'hunk {n} could not be read':
+            'Hunk {n} konnte nicht gelesen werden',
+        'hunk {n} differs: line {line} is `{shown}` in the view but `{actual}` on disk':
+            'Hunk {n} weicht ab: Zeile {line} ist `{shown}` in der Ansicht, aber `{actual}` auf der Platte',
+        'hunk {n} differs: line {line} is {shown} in the view but {actual} on disk':
+            'Hunk {n} weicht ab: Zeile {line} ist {shown} in der Ansicht, aber {actual} auf der Platte',
+        'hunk {n} has {shown} lines in the view but {actual} on disk':
+            'Hunk {n} hat {shown} Zeilen in der Ansicht, aber {actual} auf der Platte',
+        'hunk {n} spans lines {start}-{end} in the patch but {shown_start}-{shown_end} in the view':
+            'Hunk {n} umfasst die Zeilen {start}-{end} im Patch, aber {shown_start}-{shown_end} in der Ansicht',
+        'it carries a control character':
+            'er enthält ein Steuerzeichen',
+        'it has an unrecognised file mode ({mode})':
+            'er hat einen unbekannten Dateimodus ({mode})',
+        'it is a rename now':
+            'er ist inzwischen eine Umbenennung',
+        'it is an absolute path':
+            'er ist ein absoluter Pfad',
+        'it is {what}, which hunks cannot describe':
+            'er ist {what}, was Hunks nicht beschreiben können',
+        'it points outside the repository with a `..` segment':
+            'er zeigt mit einem `..`-Segment aus dem Repository hinaus',
+        'it starts with a dash':
+            'er beginnt mit einem Bindestrich',
+        'lines':
+            'Zeilen',
+        'load more…':
+            'mehr laden…',
+        'mode {a} → {b}':
+            'Modus {a} → {b}',
+        'new':
+            'neu',
+        'new line {n}':
+            'neue Zeile {n}',
+        'no changes in the selection':
+            'keine Änderungen in der Auswahl',
+        'no hunk {n} in {path}':
+            'kein Hunk {n} in {path}',
+        'no stanza for it':
+            'kein Abschnitt dafür',
+        'nothing selected':
+            'nichts ausgewählt',
+        'nothing to discard in hunk {n} of {path}':
+            'nichts zu verwerfen in Hunk {n} von {path}',
+        'nothing to revert in hunk {n} of {path}':
+            'nichts zu reverten in Hunk {n} von {path}',
+        'nothing to {action} in {path}':
+            'nichts zu {action} in {path}',
+        'nothing to {action} in {path}: reloading':
+            'nichts zu {action} in {path}: wird neu geladen',
+        'old line {n}':
+            'alte Zeile {n}',
+        'refusing {path}: {why}':
+            '{path} wird abgelehnt: {why}',
+        'renamed':
+            'umbenannt',
+        'renamed {n}%':
+            'umbenannt {n} %',
+        'renames {action} whole: use {button}':
+            'Umbenennungen lassen sich nur ganz {action}: {button} verwenden',
+        'revert':
+            'reverten',
+        'select a hunk: Discard hunk takes a hunk, Discard lines a selection':
+            'einen Hunk auswählen: „Hunk verwerfen“ braucht einen Hunk, „Zeilen verwerfen“ eine Auswahl',
+        'select a hunk: Revert hunk takes a hunk, Revert lines a selection':
+            'einen Hunk auswählen: „Hunk reverten“ braucht einen Hunk, „Zeilen reverten“ eine Auswahl',
+        'select the whole end-of-file change':
+            'die ganze Änderung am Dateiende auswählen',
+        'show_diff — open the git page on a working-tree, branch or commit diff, at a file, line or hunk':
+            'show_diff — die Git-Seite auf einem Arbeitsbaum-, Branch- oder Commit-Diff öffnen, an einer Datei, Zeile oder einem Hunk',
+        'stage':
+            'stagen',
+        'the patch does not name a file':
+            'der Patch nennt keine Datei',
+        'the patch names {other}':
+            'der Patch nennt {other}',
+        'the selection is not inside hunk {n} of {path}':
+            'die Auswahl liegt nicht in Hunk {n} von {path}',
+        'the view shows {shown} hunk(s) but the disk has {actual}':
+            'die Ansicht zeigt {shown} Hunk(s), aber die Platte hat {actual}',
+        'the view shows {shown} hunk(s) where the patch has {actual}':
+            'die Ansicht zeigt {shown} Hunk(s), wo der Patch {actual} hat',
+        'too large: {n} changed lines':
+            'zu groß: {n} geänderte Zeilen',
+        'trash failed':
+            'Papierkorb fehlgeschlagen',
+        'unstage':
+            'unstagen',
+        'working tree':
+            'Arbeitsbaum',
+        'working tree · staged':
+            'Arbeitsbaum · gestaged',
+        'working tree · unstaged':
+            'Arbeitsbaum · nicht gestaged',
+        '{branch} vs {parent}':
+            '{branch} vs. {parent}',
+        '{done} — merged three-way (the result is staged)':
+            '{done} — dreiseitig gemergt (das Ergebnis ist gestaged)',
+        '{error}\n\nWhatever the trash still holds of {path} can be restored from there by hand.':
+            '{error}\n\nWas der Papierkorb noch von {path} enthält, lässt sich von dort von Hand wiederherstellen.',
+        '{n} lines':
+            '{n} Zeilen',
+        '{n} more columns on GitHub':
+            '{n} weitere Spalten auf GitHub',
+        '{n} more lines on GitHub':
+            '{n} weitere Zeilen auf GitHub',
+        '{n} more rows on GitHub':
+            '{n} weitere Zeilen auf GitHub',
+        '{n} of {m}':
+            '{n} von {m}',
+        '{path}\n\nArchiving the session leaves its worktree behind unless it is moved to the trash with it. The trash keeps the worktree whole, uncommitted changes included, and Undo brings it back with the session; its branch stays. Cancel leaves the session where it is.':
+            '{path}\n\nDas Archivieren der Sitzung lässt ihren Worktree zurück, wenn er nicht mit ihr in den Papierkorb verschoben wird. Der Papierkorb bewahrt den Worktree ganz, nicht committete Änderungen eingeschlossen, und Rückgängig holt ihn mit der Sitzung zurück; sein Branch bleibt. Abbrechen lässt die Sitzung, wo sie ist.',
+        '{path} changed since it was loaded, reloading ({detail})':
+            '{path} hat sich seit dem Laden geändert, wird neu geladen ({detail})',
+        '{path} is a new or deleted file: use {button}':
+            '{path} ist eine neue oder gelöschte Datei: {button} verwenden',
+        '{path} is binary: use git from a shell':
+            '{path} ist binär: git aus einer Shell verwenden',
+        '{path} is binary: use {button}':
+            '{path} ist binär: {button} verwenden',
+        '{path} is deleted: Discard file restores it whole':
+            '{path} ist gelöscht: „Datei verwerfen“ stellt sie ganz wieder her',
+        '{path} is not in the view: reloading':
+            '{path} ist nicht in der Ansicht: wird neu geladen',
+        '{path} is too large to discard by hunk: use git from a shell':
+            '{path} ist zu groß, um hunkweise verworfen zu werden: git aus einer Shell verwenden',
+        '{path} is too large to revert: use git from a shell':
+            '{path} ist zu groß zum Reverten: git aus einer Shell verwenden',
+        '{path} is too large to {action} by hunk: use {button}':
+            '{path} ist zu groß, um hunkweise zu {action}: {button} verwenden',
+        '{path} is unmerged: resolve the conflict, then use {button}':
+            '{path} ist ungemergt: den Konflikt auflösen, dann {button} verwenden',
+        '{path} is unmerged: use git checkout --ours or --theirs from a shell':
+            '{path} ist ungemergt: git checkout --ours oder --theirs aus einer Shell verwenden',
+        '{path} is untracked: Discard file moves it to the trash':
+            '{path} ist unversioniert: „Datei verwerfen“ verschiebt sie in den Papierkorb',
+        '{path} is untracked: use {button}':
+            '{path} ist unversioniert: {button} verwenden',
+        "{path} isn't in this diff":
+            '{path} ist nicht in diesem Diff',
+        '“{subject}” is applied in reverse. Commit the revert as `git revert` would, or leave the reverse change staged in the working tree (`--no-commit`) to edit and commit yourself.':
+            '„{subject}“ wird umgekehrt angewendet. Den Revert committen, wie `git revert` es täte, oder die umgekehrte Änderung gestaged im Arbeitsbaum lassen (`--no-commit`), um sie selbst zu bearbeiten und zu committen.',
+        '⋯ {n} unchanged lines':
+            '⋯ {n} unveränderte Zeilen',
     },
     "es": {
         'Before you start':
@@ -4258,22 +5430,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Preguntar a GitHub por los pull requests de cada sesión listada una vez al inicio, para que las marcas de la barra lateral empiecen al día en lugar de como quedaron',
         'Git':
             'Git',
-        "The git page: hunk's layout and theme, and what the commits panel loads":
-            'La página de git: la disposición y el tema de hunk, y lo que carga el panel de commits',
         'Layout':
             'Disposición',
-        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
-            'Cómo dispone hunk un diff: lado a lado, apilado, o lo que quepa en el ancho',
         'Automatic':
             'Automática',
         'Split':
             'Dividida',
         'Stacked':
             'Apilada',
-        'Theme':
-            'Tema',
-        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
-            'Vacío: el predeterminado de hunk. Cualquier tema que hunk conozca — nord, dracula, catppuccin-mocha, github-light-default, auto (sigue el fondo del terminal) — o uno de la configuración de hunk; un nombre que hunk no conoce vuelve al predeterminado',
         'Show untracked files':
             'Mostrar archivos sin seguimiento',
         "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
@@ -4634,6 +5798,600 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Mantener en la barra lateral los {p} proyecto(s) vaciados',
         'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
             'Gestiona y reanuda tus sesiones de agente de programación con IA.\n\nHerramienta comunitaria no oficial — sin afiliación ni respaldo de Anthropic.',
+        '(no subject)':
+            '(sin asunto)',
+        '1 line':
+            '1 línea',
+        'A {operation} is half-finished here — finish or abort it first':
+            'Hay un {operation} a medias aquí — termínalo o abórtalo primero',
+        'Abort':
+            'Abortar',
+        'Abort the {operation}?':
+            '¿Abortar el {operation}?',
+        'Aborted the {operation} — the tree is back where it stood':
+            '{operation} abortado — el árbol vuelve a estar donde estaba',
+        'Abort…':
+            'Abortar…',
+        'Add a note':
+            'Añadir una nota',
+        'Add note':
+            'Añadir nota',
+        'Agent notes':
+            'Notas del agente',
+        'Always Trash':
+            'Enviar siempre a la papelera',
+        'Annotate the git page':
+            'Anotar la página de git',
+        'Another git operation is still running':
+            'Otra operación de git sigue en ejecución',
+        'Body (optional)':
+            'Cuerpo (opcional)',
+        'CONFLICTS':
+            'CONFLICTOS',
+        'Caution':
+            'Precaución',
+        'Check again':
+            'Comprobar de nuevo',
+        'Choose':
+            'Elegir',
+        'Clear its marks in the git page':
+            'Borrar sus marcas en la página de git',
+        'Click to open the git page':
+            'Haz clic para abrir la página de git',
+        'Close the git page':
+            'Cerrar la página de git',
+        'Commit':
+            'Commit',
+        'Commit fixup':
+            'Commit de fixup',
+        'Commit revert':
+            'Commit de reversión',
+        'Commit with body':
+            'Commit con cuerpo',
+        'Commit with body…':
+            'Commit con cuerpo…',
+        'Committed a fixup for {sha} — fold it in with `{command}`':
+            'Fixup de {sha} confirmado — intégralo con `{command}`',
+        'Committed {sha} “{summary}” — undo with `git reset --soft HEAD~1`':
+            'Commit {sha} «{summary}» creado — deshazlo con `git reset --soft HEAD~1`',
+        'Commit…':
+            'Commit…',
+        'Continued the {operation} — it stopped again on the next step':
+            '{operation} continuado — se detuvo de nuevo en el siguiente paso',
+        'Copy sha':
+            'Copiar sha',
+        "Couldn't read the diff: {error}":
+            'No se pudo leer el diff: {error}',
+        'Ctrl+Enter saves · Esc cancels':
+            'Ctrl+Enter guarda · Esc cancela',
+        'Cursor down a line':
+            'Cursor una línea abajo',
+        'Cursor up a line':
+            'Cursor una línea arriba',
+        'Delete':
+            'Eliminar',
+        'Delete archived sessions after':
+            'Eliminar las sesiones archivadas después de',
+        'Details':
+            'Detalles',
+        'Diff view options':
+            'Opciones de la vista de diff',
+        'Discard file':
+            'Descartar archivo',
+        'Discard hunk {n} in {path}? This cannot be undone.':
+            '¿Descartar el hunk {n} de {path}? Esto no se puede deshacer.',
+        'Discard or revert the hunk or the selected lines':
+            'Descartar o revertir el hunk o las líneas seleccionadas',
+        'Discard the changes to {path}? This cannot be undone.':
+            '¿Descartar los cambios de {path}? Esto no se puede deshacer.',
+        'Discard the changes?':
+            '¿Descartar los cambios?',
+        'Discard works on the working tree: load the Unstaged view':
+            'Descartar actúa sobre el árbol de trabajo: carga la vista Sin preparar',
+        'Discard {lines} in {path}? This cannot be undone.':
+            '¿Descartar {lines} de {path}? Esto no se puede deshacer.',
+        'Discard {what}':
+            'Descartar {what}',
+        'Discarded hunk {n} of {path}':
+            'Hunk {n} de {path} descartado',
+        'Discarded the changes to {path}':
+            'Cambios de {path} descartados',
+        'Discarded {lines} of {path}':
+            '{lines} de {path} descartadas',
+        'Edit':
+            'Editar',
+        "Edit the hunk's first note":
+            'Editar la primera nota del hunk',
+        'Emphasise what moved within a changed line':
+            'Resaltar lo que cambió dentro de una línea modificada',
+        'Expand context':
+            'Expandir el contexto',
+        'Expand every unchanged line':
+            'Expandir todas las líneas sin cambios',
+        'Expand the unchanged lines above the hunk':
+            'Expandir las líneas sin cambios encima del hunk',
+        'Expand {n} lines down':
+            'Expandir {n} líneas hacia abajo',
+        'Expand {n} lines up':
+            'Expandir {n} líneas hacia arriba',
+        'FILES':
+            'ARCHIVOS',
+        'Filter files':
+            'Filtrar archivos',
+        'Filter the files list':
+            'Filtrar la lista de archivos',
+        'Find in the diff':
+            'Buscar en el diff',
+        'Finished the {operation}':
+            '{operation} terminado',
+        'Fix up which commit?':
+            '¿A qué commit aplicar el fixup?',
+        'Fix up {sha}?':
+            '¿Aplicar fixup a {sha}?',
+        'Fix up…':
+            'Fixup…',
+        'Fold or unfold the branch':
+            'Plegar o desplegar la rama',
+        'Fold this file':
+            'Plegar este archivo',
+        'Git page':
+            'Página de git',
+        'Git · staged':
+            'Git · preparados',
+        'Git · unstaged':
+            'Git · sin preparar',
+        'Git · vs {parent}':
+            'Git · vs {parent}',
+        'Git · {ref}':
+            'Git · {ref}',
+        'Hide the commits and files panels':
+            'Ocultar los paneles de commits y archivos',
+        'Highlight changed words':
+            'Resaltar las palabras cambiadas',
+        'Highlight in the git page':
+            'Resaltar en la página de git',
+        'Important':
+            'Importante',
+        'In the diff.':
+            'En el diff.',
+        'In the diff; a card under the focused hunk, anchored to the cursor line.':
+            'En el diff; una tarjeta bajo el hunk enfocado, anclada a la línea del cursor.',
+        'In the diff; a hunk with a note or highlight on it.':
+            'En el diff; un hunk con una nota o un resaltado.',
+        'In the diff; after a confirmation.':
+            'En el diff; tras una confirmación.',
+        'In the diff; at the line under the cursor.':
+            'En el diff; en la línea bajo el cursor.',
+        "In the diff; past the hunk's first line, into the previous hunk.":
+            'En el diff; más allá de la primera línea del hunk, hacia el hunk anterior.',
+        "In the diff; past the hunk's last line, into the next hunk.":
+            'En el diff; más allá de la última línea del hunk, hacia el hunk siguiente.',
+        'In the diff; the first note you wrote on the focused hunk.':
+            'En el diff; la primera nota que escribiste en el hunk enfocado.',
+        "In the diff; the focused hunk's file.":
+            'En el diff; el archivo del hunk enfocado.',
+        'In the diff; the selected lines when there are any, else the focused hunk.':
+            'En el diff; las líneas seleccionadas si las hay; si no, el hunk enfocado.',
+        'Keep Worktree':
+            'Conservar el worktree',
+        'Keyboard shortcuts':
+            'Atajos de teclado',
+        'Layout: automatic':
+            'Disposición: automática',
+        'Layout: split':
+            'Disposición: dividida',
+        'Layout: stacked':
+            'Disposición: apilada',
+        'Line numbers':
+            'Números de línea',
+        "Move a session's transcript to the trash once it has been archived this long; 0 keeps them forever. Checked once a day":
+            'Mover la transcripción de una sesión a la papelera cuando lleve este tiempo archivada; 0 las conserva para siempre. Se comprueba una vez al día',
+        'Move to the trash?':
+            '¿Mover a la papelera?',
+        'Move to trash':
+            'Mover a la papelera',
+        'Move {path} to the trash?':
+            '¿Mover {path} a la papelera?',
+        'Moved worktree {name} to the trash':
+            'Worktree {name} movido a la papelera',
+        'Moved {path} to the trash':
+            '{path} movido a la papelera',
+        'Moving the worktree to the trash failed':
+            'No se pudo mover el worktree a la papelera',
+        'Never Trash':
+            'No enviar nunca a la papelera',
+        'Next annotated hunk':
+            'Siguiente hunk anotado',
+        'Next file':
+            'Archivo siguiente',
+        'Next hunk':
+            'Hunk siguiente',
+        'Next match (Enter)':
+            'Coincidencia siguiente (Enter)',
+        'No changes':
+            'Sin cambios',
+        'No matches':
+            'Sin coincidencias',
+        'No such file on this side.':
+            'No existe ese archivo en este lado.',
+        'No unpushed commit to fix up — commit first':
+            'No hay ningún commit sin subir al que aplicar fixup — haz commit primero',
+        'Not a git repository':
+            'No es un repositorio de git',
+        'Note':
+            'Nota',
+        'Nothing is left unmerged. Continue (`git {kind} --continue`) commits the step with the message it has and carries on — or Abort (`git {kind} --abort`) puts the tree back.':
+            'No queda nada sin fusionar. Continuar (`git {kind} --continue`) confirma el paso con el mensaje que tiene y sigue adelante — o Abortar (`git {kind} --abort`) devuelve el árbol a su estado.',
+        'Nothing staged — stage a hunk or file first':
+            'No hay nada preparado — prepara un hunk o un archivo primero',
+        'Nothing to stage':
+            'Nada que preparar',
+        'Nothing to unstage':
+            'Nada que quitar de preparados',
+        'Open in editor':
+            'Abrir en el editor',
+        'Open the file in the editor':
+            'Abrir el archivo en el editor',
+        'Previous annotated hunk':
+            'Hunk anotado anterior',
+        'Previous file':
+            'Archivo anterior',
+        'Previous hunk':
+            'Hunk anterior',
+        'Previous match (Shift+Enter)':
+            'Coincidencia anterior (Shift+Enter)',
+        'Read the git page':
+            'Leer la página de git',
+        'Reload the diff':
+            'Recargar el diff',
+        'Restore':
+            'Restaurar',
+        'Restore the file?':
+            '¿Restaurar el archivo?',
+        'Restore {path} from the index?':
+            '¿Restaurar {path} desde el índice?',
+        'Restored worktree {name}':
+            'Worktree {name} restaurado',
+        'Restored {path}':
+            '{path} restaurado',
+        'Restoring the worktree failed':
+            'No se pudo restaurar el worktree',
+        'Revert':
+            'Revertir',
+        'Revert file':
+            'Revertir archivo',
+        'Revert in working tree':
+            'Revertir en el árbol de trabajo',
+        'Revert into the working tree?':
+            '¿Revertir en el árbol de trabajo?',
+        'Revert {sha}?':
+            '¿Revertir {sha}?',
+        'Revert {what}':
+            'Revertir {what}',
+        'Reverted hunk {n} of {path}':
+            'Hunk {n} de {path} revertido',
+        'Reverted into the working tree, but git could not forget the revert ({error}) — run `git revert --quit` by hand':
+            'Revertido en el árbol de trabajo, pero git no pudo olvidar la reversión ({error}) — ejecuta `git revert --quit` a mano',
+        'Reverted {lines} of {path}':
+            '{lines} de {path} revertidas',
+        'Reverted {path}':
+            '{path} revertido',
+        'Reverted {sha} as {head} — undo with `git reset --keep HEAD~1`':
+            '{sha} revertido como {head} — deshazlo con `git reset --keep HEAD~1`',
+        'Reverted {sha} into the working tree — staged, nothing committed':
+            '{sha} revertido en el árbol de trabajo — preparado, sin commit',
+        'Reverting {sha} left conflicts — resolve them, then `git revert --continue`, or `git revert --abort`':
+            'Revertir {sha} dejó conflictos — resuélvelos y luego `git revert --continue`, o `git revert --abort`',
+        'Revert…':
+            'Revertir…',
+        'Right-click to copy':
+            'Haz clic derecho para copiar',
+        'STAGED':
+            'PREPARADOS',
+        'Show diffs in the git page':
+            'Mostrar diffs en la página de git',
+        'Show the commits and files panels':
+            'Mostrar los paneles de commits y archivos',
+        'Show/hide agent notes':
+            'Mostrar/ocultar las notas del agente',
+        'Show/hide line numbers':
+            'Mostrar/ocultar los números de línea',
+        'Show/hide the git page':
+            'Mostrar/ocultar la página de git',
+        'Side by side, stacked, or whichever fits the width':
+            'Lado a lado, apilado, o lo que quepa en el ancho',
+        'Stage all':
+            'Preparar todo',
+        'Stage all {n} {noun}?':
+            '¿Preparar los {n} {noun}?',
+        'Stage every change (git add -A)':
+            'Preparar todos los cambios (git add -A)',
+        'Stage file':
+            'Preparar archivo',
+        'Stage {what}':
+            'Preparar {what}',
+        'Stage, unstage or revert the file':
+            'Preparar, quitar de preparados o revertir el archivo',
+        'Stage, unstage or revert the hunk or the selected lines':
+            'Preparar, quitar de preparados o revertir el hunk o las líneas seleccionadas',
+        'Staged hunk {n} of {path}':
+            'Hunk {n} de {path} preparado',
+        'Staged {lines} of {path}':
+            '{lines} de {path} preparadas',
+        'Staged {n} {noun}':
+            '{n} {noun} preparados',
+        'Staged {path}':
+            '{path} preparado',
+        'Summary':
+            'Resumen',
+        'The git page: how the diff is drawn and what the commits panel loads':
+            'La página de git: cómo se dibuja el diff y lo que carga el panel de commits',
+        'The index is committed as `fixup! {sha}` for “{subject}”. Fold it in afterwards with `{command}` — named here, never run.':
+            'El índice se confirma como `fixup! {sha}` para «{subject}». Intégralo después con `{command}` — aquí solo se nombra, nunca se ejecuta.',
+        'The old and new line-number columns beside each hunk':
+            'Las columnas de números de línea antiguos y nuevos junto a cada hunk',
+        "The session's working directory has no repository to show. Check again once it does.":
+            'El directorio de trabajo de la sesión no tiene ningún repositorio que mostrar. Vuelve a comprobarlo cuando lo tenga.',
+        'The three-way revert of {path} left conflict markers':
+            'La reversión a tres bandas de {path} dejó marcadores de conflicto',
+        'The view changed since the request: nothing was done':
+            'La vista cambió desde la solicitud: no se hizo nada',
+        'The view is behind the page: reloading':
+            'La vista va por detrás de la página: recargando',
+        "This session isn't in a git repository":
+            'Esta sesión no está en un repositorio de git',
+        'Tip':
+            'Consejo',
+        'Trash Worktree':
+            'Enviar el worktree a la papelera',
+        "Trash the session's worktree?":
+            '¿Enviar el worktree de la sesión a la papelera?',
+        'UNSTAGED':
+            'SIN PREPARAR',
+        'Unfold this file':
+            'Desplegar este archivo',
+        'Unmerged files: {count}. Resolve and stage them, then Continue (`git {kind} --continue`) — or Abort (`git {kind} --abort`) to put the tree back.':
+            'Archivos sin fusionar: {count}. Resuélvelos y prepáralos, luego Continuar (`git {kind} --continue`) — o Abortar (`git {kind} --abort`) para devolver el árbol a su estado.',
+        'Unpushed commits of this branch, newest first.':
+            'Commits sin subir de esta rama, los más recientes primero.',
+        'Unstage all':
+            'Quitar todo de preparados',
+        'Unstage all {n} {noun}?':
+            '¿Quitar los {n} {noun} de preparados?',
+        'Unstage every change (git reset)':
+            'Quitar todos los cambios de preparados (git reset)',
+        'Unstage file':
+            'Quitar archivo de preparados',
+        'Unstage {what}':
+            'Quitar {what} de preparados',
+        'Unstaged hunk {n} of {path}':
+            'Hunk {n} de {path} quitado de preparados',
+        'Unstaged {lines} of {path}':
+            '{lines} de {path} quitadas de preparados',
+        'Unstaged {n} {noun}':
+            '{n} {noun} quitados de preparados',
+        'Unstaged {path}':
+            '{path} quitado de preparados',
+        'Warning':
+            'Advertencia',
+        'When archiving a session in a git worktree':
+            'Al archivar una sesión en un worktree de git',
+        "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
+            'Si mover el worktree de la sesión a la papelera cuando se haya detenido; Deshacer lo recupera junto con la sesión',
+        'Widen the page to show the panels':
+            'Ensancha la página para mostrar los paneles',
+        'Wrap instead of scrolling each hunk sideways':
+            'Ajustar las líneas en lugar de desplazar cada hunk lateralmente',
+        'Wrap long lines':
+            'Ajustar líneas largas',
+        '`git add -A` in {cwd}':
+            '`git add -A` en {cwd}',
+        '`git reset` in {cwd}':
+            '`git reset` en {cwd}',
+        '`git {kind} --abort` in {cwd}: the {operation} is forgotten and the tree goes back to where it stood before it started. Conflict resolutions made since are lost.':
+            '`git {kind} --abort` en {cwd}: el {operation} se olvida y el árbol vuelve a donde estaba antes de empezar. Las resoluciones de conflictos hechas desde entonces se pierden.',
+        '`git {kind} {flag}` failed':
+            '`git {kind} {flag}` falló',
+        'a directory':
+            'un directorio',
+        'a removal':
+            'una eliminación',
+        'a submodule':
+            'un submódulo',
+        'a symbolic link':
+            'un enlace simbólico',
+        'all':
+            'todo',
+        'an addition':
+            'una adición',
+        'annotate_diff — note cards under a hunk, anchored to a line of the diff':
+            'annotate_diff — tarjetas de notas bajo un hunk, ancladas a una línea del diff',
+        'bin':
+            'bin',
+        'binary':
+            'binario',
+        'cannot read the patch for {path}: {why}':
+            'no se puede leer el parche de {path}: {why}',
+        "cannot read the view's patch for {path}: {why}":
+            'no se puede leer el parche de la vista de {path}: {why}',
+        'cannot {action} {path} by hunk: {why}':
+            'no se puede {action} {path} por hunk: {why}',
+        'change':
+            'cambio',
+        'changes':
+            'cambios',
+        'clear_diff_marks — remove the notes and highlights it put on the page':
+            'clear_diff_marks — quita las notas y los resaltados que puso en la página',
+        'commit {ref}':
+            'commit {ref}',
+        'conflict':
+            'conflicto',
+        'context':
+            'contexto',
+        'deleted':
+            'eliminado',
+        'diff_context — what the page shows: the diff, the hunk and lines you are on, the files, the notes':
+            'diff_context — lo que muestra la página: el diff, el hunk y las líneas en que estás, los archivos, las notas',
+        'discard':
+            'descartar',
+        'discard reverts changes inside a modified file: use git from a shell for a new or renamed file':
+            'descartar revierte cambios dentro de un archivo modificado: usa git desde una shell para un archivo nuevo o renombrado',
+        'file':
+            'archivo',
+        'git commit failed':
+            'git commit falló',
+        'git failed':
+            'git falló',
+        'git revert failed':
+            'git revert falló',
+        "highlight_diff — attention marks on character ranges of the diff's lines":
+            'highlight_diff — marcas de atención sobre rangos de caracteres de las líneas del diff',
+        'hunk':
+            'hunk',
+        'hunk {n} could not be read':
+            'no se pudo leer el hunk {n}',
+        'hunk {n} differs: line {line} is `{shown}` in the view but `{actual}` on disk':
+            'el hunk {n} difiere: la línea {line} es `{shown}` en la vista pero `{actual}` en disco',
+        'hunk {n} differs: line {line} is {shown} in the view but {actual} on disk':
+            'el hunk {n} difiere: la línea {line} es {shown} en la vista pero {actual} en disco',
+        'hunk {n} has {shown} lines in the view but {actual} on disk':
+            'el hunk {n} tiene {shown} líneas en la vista pero {actual} en disco',
+        'hunk {n} spans lines {start}-{end} in the patch but {shown_start}-{shown_end} in the view':
+            'el hunk {n} abarca las líneas {start}-{end} en el parche pero {shown_start}-{shown_end} en la vista',
+        'it carries a control character':
+            'contiene un carácter de control',
+        'it has an unrecognised file mode ({mode})':
+            'tiene un modo de archivo desconocido ({mode})',
+        'it is a rename now':
+            'ahora es un renombrado',
+        'it is an absolute path':
+            'es una ruta absoluta',
+        'it is {what}, which hunks cannot describe':
+            'es {what}, que los hunks no pueden describir',
+        'it points outside the repository with a `..` segment':
+            'apunta fuera del repositorio con un segmento `..`',
+        'it starts with a dash':
+            'empieza por un guion',
+        'lines':
+            'líneas',
+        'load more…':
+            'cargar más…',
+        'mode {a} → {b}':
+            'modo {a} → {b}',
+        'new':
+            'nuevo',
+        'new line {n}':
+            'línea nueva {n}',
+        'no changes in the selection':
+            'no hay cambios en la selección',
+        'no hunk {n} in {path}':
+            'no hay hunk {n} en {path}',
+        'no stanza for it':
+            'no hay ninguna sección para él',
+        'nothing selected':
+            'nada seleccionado',
+        'nothing to discard in hunk {n} of {path}':
+            'nada que descartar en el hunk {n} de {path}',
+        'nothing to revert in hunk {n} of {path}':
+            'nada que revertir en el hunk {n} de {path}',
+        'nothing to {action} in {path}':
+            'nada que {action} en {path}',
+        'nothing to {action} in {path}: reloading':
+            'nada que {action} en {path}: recargando',
+        'old line {n}':
+            'línea antigua {n}',
+        'refusing {path}: {why}':
+            'se rechaza {path}: {why}',
+        'renamed':
+            'renombrado',
+        'renamed {n}%':
+            'renombrado {n}%',
+        'renames {action} whole: use {button}':
+            'los renombrados solo se pueden {action} enteros: usa {button}',
+        'revert':
+            'revertir',
+        'select a hunk: Discard hunk takes a hunk, Discard lines a selection':
+            'selecciona un hunk: Descartar hunk toma un hunk, Descartar líneas una selección',
+        'select a hunk: Revert hunk takes a hunk, Revert lines a selection':
+            'selecciona un hunk: Revertir hunk toma un hunk, Revertir líneas una selección',
+        'select the whole end-of-file change':
+            'selecciona todo el cambio de fin de archivo',
+        'show_diff — open the git page on a working-tree, branch or commit diff, at a file, line or hunk':
+            'show_diff — abre la página de git en un diff del árbol de trabajo, de una rama o de un commit, en un archivo, línea o hunk',
+        'stage':
+            'preparar',
+        'the patch does not name a file':
+            'el parche no nombra ningún archivo',
+        'the patch names {other}':
+            'el parche nombra {other}',
+        'the selection is not inside hunk {n} of {path}':
+            'la selección no está dentro del hunk {n} de {path}',
+        'the view shows {shown} hunk(s) but the disk has {actual}':
+            'la vista muestra {shown} hunk(s) pero el disco tiene {actual}',
+        'the view shows {shown} hunk(s) where the patch has {actual}':
+            'la vista muestra {shown} hunk(s) donde el parche tiene {actual}',
+        'too large: {n} changed lines':
+            'demasiado grande: {n} líneas cambiadas',
+        'trash failed':
+            'no se pudo enviar a la papelera',
+        'unstage':
+            'quitar de preparados',
+        'working tree':
+            'árbol de trabajo',
+        'working tree · staged':
+            'árbol de trabajo · preparados',
+        'working tree · unstaged':
+            'árbol de trabajo · sin preparar',
+        '{branch} vs {parent}':
+            '{branch} vs {parent}',
+        '{done} — merged three-way (the result is staged)':
+            '{done} — fusionado a tres bandas (el resultado queda preparado)',
+        '{error}\n\nWhatever the trash still holds of {path} can be restored from there by hand.':
+            '{error}\n\nLo que la papelera aún conserve de {path} se puede restaurar desde ahí a mano.',
+        '{n} lines':
+            '{n} líneas',
+        '{n} more columns on GitHub':
+            '{n} columnas más en GitHub',
+        '{n} more lines on GitHub':
+            '{n} líneas más en GitHub',
+        '{n} more rows on GitHub':
+            '{n} filas más en GitHub',
+        '{n} of {m}':
+            '{n} de {m}',
+        '{path}\n\nArchiving the session leaves its worktree behind unless it is moved to the trash with it. The trash keeps the worktree whole, uncommitted changes included, and Undo brings it back with the session; its branch stays. Cancel leaves the session where it is.':
+            '{path}\n\nArchivar la sesión deja atrás su worktree a menos que se mueva a la papelera con ella. La papelera conserva el worktree entero, cambios sin confirmar incluidos, y Deshacer lo recupera junto con la sesión; su rama se mantiene. Cancelar deja la sesión donde está.',
+        '{path} changed since it was loaded, reloading ({detail})':
+            '{path} cambió desde que se cargó, recargando ({detail})',
+        '{path} is a new or deleted file: use {button}':
+            '{path} es un archivo nuevo o eliminado: usa {button}',
+        '{path} is binary: use git from a shell':
+            '{path} es binario: usa git desde una shell',
+        '{path} is binary: use {button}':
+            '{path} es binario: usa {button}',
+        '{path} is deleted: Discard file restores it whole':
+            '{path} está eliminado: Descartar archivo lo restaura entero',
+        '{path} is not in the view: reloading':
+            '{path} no está en la vista: recargando',
+        '{path} is too large to discard by hunk: use git from a shell':
+            '{path} es demasiado grande para descartar por hunk: usa git desde una shell',
+        '{path} is too large to revert: use git from a shell':
+            '{path} es demasiado grande para revertir: usa git desde una shell',
+        '{path} is too large to {action} by hunk: use {button}':
+            '{path} es demasiado grande para {action} por hunk: usa {button}',
+        '{path} is unmerged: resolve the conflict, then use {button}':
+            '{path} está sin fusionar: resuelve el conflicto y luego usa {button}',
+        '{path} is unmerged: use git checkout --ours or --theirs from a shell':
+            '{path} está sin fusionar: usa git checkout --ours o --theirs desde una shell',
+        '{path} is untracked: Discard file moves it to the trash':
+            '{path} no tiene seguimiento: Descartar archivo lo mueve a la papelera',
+        '{path} is untracked: use {button}':
+            '{path} no tiene seguimiento: usa {button}',
+        "{path} isn't in this diff":
+            '{path} no está en este diff',
+        '“{subject}” is applied in reverse. Commit the revert as `git revert` would, or leave the reverse change staged in the working tree (`--no-commit`) to edit and commit yourself.':
+            '«{subject}» se aplica a la inversa. Haz commit de la reversión como lo haría `git revert`, o deja el cambio inverso preparado en el árbol de trabajo (`--no-commit`) para editarlo y hacer commit tú mismo.',
+        '⋯ {n} unchanged lines':
+            '⋯ {n} líneas sin cambios',
     },
     "fr": {
         'Before you start':
@@ -5799,22 +7557,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "Interroger GitHub une fois au démarrage sur les pull requests de chaque session listée, pour que les marques de la barre latérale démarrent à jour plutôt que telles qu'elles ont été laissées",
         'Git':
             'Git',
-        "The git page: hunk's layout and theme, and what the commits panel loads":
-            'La page git : la disposition et le thème de hunk, et ce que charge le panneau des commits',
         'Layout':
             'Disposition',
-        'How hunk lays a diff out: side by side, stacked, or whichever fits the width':
-            'Comment hunk dispose un diff : côte à côte, empilé, ou ce qui tient dans la largeur',
         'Automatic':
             'Automatique',
         'Split':
             'Côte à côte',
         'Stacked':
             'Empilé',
-        'Theme':
-            'Thème',
-        "Empty: hunk's own default. Any theme hunk knows — nord, dracula, catppuccin-mocha, github-light-default, auto (follows the terminal background) — or one from hunk's config; a name hunk doesn't know falls back to its default":
-            'Vide : le thème par défaut de hunk. Tout thème que hunk connaît — nord, dracula, catppuccin-mocha, github-light-default, auto (suit le fond du terminal) — ou un de la configuration de hunk ; un nom que hunk ne connaît pas retombe sur son thème par défaut',
         'Show untracked files':
             'Afficher les fichiers non suivis',
         "List files git doesn't track yet in working-tree reviews. Off, the page and the files panel show only tracked changes":
@@ -6175,13 +7925,607 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Garder les {p} projet(s) vidé(s) dans la barre latérale',
         'Manage and resume your AI coding agent sessions.\n\nUnofficial community tool — not affiliated with or endorsed by Anthropic.':
             "Gérez et reprenez vos sessions d'agent de codage IA.\n\nOutil communautaire non officiel — sans affiliation ni approbation d'Anthropic.",
+        '(no subject)':
+            '(sans objet)',
+        '1 line':
+            '1 ligne',
+        'A {operation} is half-finished here — finish or abort it first':
+            "Un {operation} est à moitié fait ici — terminez-le ou abandonnez-le d'abord",
+        'Abort':
+            'Abandonner',
+        'Abort the {operation}?':
+            'Abandonner le {operation} ?',
+        'Aborted the {operation} — the tree is back where it stood':
+            "{operation} abandonné — l'arbre est revenu là où il était",
+        'Abort…':
+            'Abandonner…',
+        'Add a note':
+            'Ajouter une note',
+        'Add note':
+            'Ajouter une note',
+        'Agent notes':
+            "Notes de l'agent",
+        'Always Trash':
+            'Toujours mettre à la corbeille',
+        'Annotate the git page':
+            'Annoter la page git',
+        'Another git operation is still running':
+            'Une autre opération git est encore en cours',
+        'Body (optional)':
+            'Corps (facultatif)',
+        'CONFLICTS':
+            'CONFLITS',
+        'Caution':
+            'Prudence',
+        'Check again':
+            'Vérifier à nouveau',
+        'Choose':
+            'Choisir',
+        'Clear its marks in the git page':
+            'Effacer ses marques dans la page git',
+        'Click to open the git page':
+            'Cliquer pour ouvrir la page git',
+        'Close the git page':
+            'Fermer la page git',
+        'Commit':
+            'Valider',
+        'Commit fixup':
+            'Valider le fixup',
+        'Commit revert':
+            'Valider le rétablissement',
+        'Commit with body':
+            'Valider avec un corps',
+        'Commit with body…':
+            'Valider avec un corps…',
+        'Committed a fixup for {sha} — fold it in with `{command}`':
+            'Fixup validé pour {sha} — intégrez-le avec `{command}`',
+        'Committed {sha} “{summary}” — undo with `git reset --soft HEAD~1`':
+            '{sha} « {summary} » validé — annulez avec `git reset --soft HEAD~1`',
+        'Commit…':
+            'Valider…',
+        'Continued the {operation} — it stopped again on the next step':
+            "{operation} poursuivi — il s'est de nouveau arrêté à l'étape suivante",
+        'Copy sha':
+            'Copier le sha',
+        "Couldn't read the diff: {error}":
+            'Impossible de lire le diff : {error}',
+        'Ctrl+Enter saves · Esc cancels':
+            'Ctrl+Entrée enregistre · Échap annule',
+        'Cursor down a line':
+            'Curseur une ligne plus bas',
+        'Cursor up a line':
+            'Curseur une ligne plus haut',
+        'Delete':
+            'Supprimer',
+        'Delete archived sessions after':
+            'Supprimer les sessions archivées après',
+        'Details':
+            'Détails',
+        'Diff view options':
+            'Options de la vue du diff',
+        'Discard file':
+            'Abandonner le fichier',
+        'Discard hunk {n} in {path}? This cannot be undone.':
+            'Abandonner le hunk {n} de {path} ? Cette action est irréversible.',
+        'Discard or revert the hunk or the selected lines':
+            'Abandonner ou rétablir le hunk ou les lignes sélectionnées',
+        'Discard the changes to {path}? This cannot be undone.':
+            'Abandonner les modifications de {path} ? Cette action est irréversible.',
+        'Discard the changes?':
+            'Abandonner les modifications ?',
+        'Discard works on the working tree: load the Unstaged view':
+            "Abandonner agit sur l'arbre de travail : chargez la vue Non indexé",
+        'Discard {lines} in {path}? This cannot be undone.':
+            'Abandonner {lines} de {path} ? Cette action est irréversible.',
+        'Discard {what}':
+            'Abandonner {what}',
+        'Discarded hunk {n} of {path}':
+            'Hunk {n} de {path} abandonné',
+        'Discarded the changes to {path}':
+            'Modifications de {path} abandonnées',
+        'Discarded {lines} of {path}':
+            '{lines} de {path} abandonnées',
+        'Edit':
+            'Modifier',
+        "Edit the hunk's first note":
+            'Modifier la première note du hunk',
+        'Emphasise what moved within a changed line':
+            'Mettre en évidence ce qui a bougé dans une ligne modifiée',
+        'Expand context':
+            'Développer le contexte',
+        'Expand every unchanged line':
+            'Développer toutes les lignes inchangées',
+        'Expand the unchanged lines above the hunk':
+            'Développer les lignes inchangées au-dessus du hunk',
+        'Expand {n} lines down':
+            'Développer {n} lignes vers le bas',
+        'Expand {n} lines up':
+            'Développer {n} lignes vers le haut',
+        'FILES':
+            'FICHIERS',
+        'Filter files':
+            'Filtrer les fichiers',
+        'Filter the files list':
+            'Filtrer la liste des fichiers',
+        'Find in the diff':
+            'Rechercher dans le diff',
+        'Finished the {operation}':
+            '{operation} terminé',
+        'Fix up which commit?':
+            'Fixup de quel commit ?',
+        'Fix up {sha}?':
+            'Fixup de {sha} ?',
+        'Fix up…':
+            'Fixup…',
+        'Fold or unfold the branch':
+            'Replier ou déplier la branche',
+        'Fold this file':
+            'Replier ce fichier',
+        'Git page':
+            'Page git',
+        'Git · staged':
+            'Git · indexé',
+        'Git · unstaged':
+            'Git · non indexé',
+        'Git · vs {parent}':
+            'Git · vs {parent}',
+        'Git · {ref}':
+            'Git · {ref}',
+        'Hide the commits and files panels':
+            'Masquer les panneaux des commits et des fichiers',
+        'Highlight changed words':
+            'Surligner les mots modifiés',
+        'Highlight in the git page':
+            'Surligner dans la page git',
+        'Important':
+            'Important',
+        'In the diff.':
+            'Dans le diff.',
+        'In the diff; a card under the focused hunk, anchored to the cursor line.':
+            'Dans le diff ; une carte sous le hunk actif, ancrée à la ligne du curseur.',
+        'In the diff; a hunk with a note or highlight on it.':
+            'Dans le diff ; un hunk portant une note ou un surlignage.',
+        'In the diff; after a confirmation.':
+            'Dans le diff ; après confirmation.',
+        'In the diff; at the line under the cursor.':
+            'Dans le diff ; à la ligne sous le curseur.',
+        "In the diff; past the hunk's first line, into the previous hunk.":
+            'Dans le diff ; au-delà de la première ligne du hunk, dans le hunk précédent.',
+        "In the diff; past the hunk's last line, into the next hunk.":
+            'Dans le diff ; au-delà de la dernière ligne du hunk, dans le hunk suivant.',
+        'In the diff; the first note you wrote on the focused hunk.':
+            'Dans le diff ; la première note que vous avez écrite sur le hunk actif.',
+        "In the diff; the focused hunk's file.":
+            'Dans le diff ; le fichier du hunk actif.',
+        'In the diff; the selected lines when there are any, else the focused hunk.':
+            "Dans le diff ; les lignes sélectionnées s'il y en a, sinon le hunk actif.",
+        'Keep Worktree':
+            'Garder le worktree',
+        'Keyboard shortcuts':
+            'Raccourcis clavier',
+        'Layout: automatic':
+            'Disposition : automatique',
+        'Layout: split':
+            'Disposition : côte à côte',
+        'Layout: stacked':
+            'Disposition : empilé',
+        'Line numbers':
+            'Numéros de ligne',
+        "Move a session's transcript to the trash once it has been archived this long; 0 keeps them forever. Checked once a day":
+            "Mettre la transcription d'une session à la corbeille une fois archivée depuis ce délai ; 0 les garde pour toujours. Vérifié une fois par jour",
+        'Move to the trash?':
+            'Mettre à la corbeille ?',
+        'Move to trash':
+            'Mettre à la corbeille',
+        'Move {path} to the trash?':
+            'Mettre {path} à la corbeille ?',
+        'Moved worktree {name} to the trash':
+            'Worktree {name} mis à la corbeille',
+        'Moved {path} to the trash':
+            '{path} mis à la corbeille',
+        'Moving the worktree to the trash failed':
+            'La mise à la corbeille du worktree a échoué',
+        'Never Trash':
+            'Ne jamais mettre à la corbeille',
+        'Next annotated hunk':
+            'Hunk annoté suivant',
+        'Next file':
+            'Fichier suivant',
+        'Next hunk':
+            'Hunk suivant',
+        'Next match (Enter)':
+            'Occurrence suivante (Entrée)',
+        'No changes':
+            'Aucune modification',
+        'No matches':
+            'Aucune occurrence',
+        'No such file on this side.':
+            'Pas de tel fichier de ce côté.',
+        'No unpushed commit to fix up — commit first':
+            "Aucun commit non poussé à corriger — validez d'abord",
+        'Not a git repository':
+            'Pas un dépôt git',
+        'Note':
+            'Note',
+        'Nothing is left unmerged. Continue (`git {kind} --continue`) commits the step with the message it has and carries on — or Abort (`git {kind} --abort`) puts the tree back.':
+            "Plus rien n'est en conflit. Continuer (`git {kind} --continue`) valide l'étape avec le message qu'elle a et poursuit — ou Abandonner (`git {kind} --abort`) remet l'arbre en place.",
+        'Nothing staged — stage a hunk or file first':
+            "Rien d'indexé — indexez d'abord un hunk ou un fichier",
+        'Nothing to stage':
+            'Rien à indexer',
+        'Nothing to unstage':
+            'Rien à désindexer',
+        'Open in editor':
+            "Ouvrir dans l'éditeur",
+        'Open the file in the editor':
+            "Ouvrir le fichier dans l'éditeur",
+        'Previous annotated hunk':
+            'Hunk annoté précédent',
+        'Previous file':
+            'Fichier précédent',
+        'Previous hunk':
+            'Hunk précédent',
+        'Previous match (Shift+Enter)':
+            'Occurrence précédente (Maj+Entrée)',
+        'Read the git page':
+            'Lire la page git',
+        'Reload the diff':
+            'Recharger le diff',
+        'Restore':
+            'Restaurer',
+        'Restore the file?':
+            'Restaurer le fichier ?',
+        'Restore {path} from the index?':
+            "Restaurer {path} depuis l'index ?",
+        'Restored worktree {name}':
+            'Worktree {name} restauré',
+        'Restored {path}':
+            '{path} restauré',
+        'Restoring the worktree failed':
+            'La restauration du worktree a échoué',
+        'Revert':
+            'Rétablir',
+        'Revert file':
+            'Rétablir le fichier',
+        'Revert in working tree':
+            "Rétablir dans l'arbre de travail",
+        'Revert into the working tree?':
+            "Rétablir dans l'arbre de travail ?",
+        'Revert {sha}?':
+            'Rétablir {sha} ?',
+        'Revert {what}':
+            'Rétablir {what}',
+        'Reverted hunk {n} of {path}':
+            'Hunk {n} de {path} rétabli',
+        'Reverted into the working tree, but git could not forget the revert ({error}) — run `git revert --quit` by hand':
+            "Rétabli dans l'arbre de travail, mais git n'a pas pu oublier le revert ({error}) — lancez `git revert --quit` à la main",
+        'Reverted {lines} of {path}':
+            '{lines} de {path} rétablies',
+        'Reverted {path}':
+            '{path} rétabli',
+        'Reverted {sha} as {head} — undo with `git reset --keep HEAD~1`':
+            '{sha} rétabli en {head} — annulez avec `git reset --keep HEAD~1`',
+        'Reverted {sha} into the working tree — staged, nothing committed':
+            "{sha} rétabli dans l'arbre de travail — indexé, rien de validé",
+        'Reverting {sha} left conflicts — resolve them, then `git revert --continue`, or `git revert --abort`':
+            'Le rétablissement de {sha} a laissé des conflits — résolvez-les, puis `git revert --continue`, ou `git revert --abort`',
+        'Revert…':
+            'Rétablir…',
+        'Right-click to copy':
+            'Clic droit pour copier',
+        'STAGED':
+            'INDEXÉ',
+        'Show diffs in the git page':
+            'Afficher des diffs dans la page git',
+        'Show the commits and files panels':
+            'Afficher les panneaux des commits et des fichiers',
+        'Show/hide agent notes':
+            "Afficher/masquer les notes de l'agent",
+        'Show/hide line numbers':
+            'Afficher/masquer les numéros de ligne',
+        'Show/hide the git page':
+            'Afficher/masquer la page git',
+        'Side by side, stacked, or whichever fits the width':
+            'Côte à côte, empilé, ou ce qui tient dans la largeur',
+        'Stage all':
+            'Tout indexer',
+        'Stage all {n} {noun}?':
+            'Indexer les {n} {noun} ?',
+        'Stage every change (git add -A)':
+            'Indexer toutes les modifications (git add -A)',
+        'Stage file':
+            'Indexer le fichier',
+        'Stage {what}':
+            'Indexer {what}',
+        'Stage, unstage or revert the file':
+            'Indexer, désindexer ou rétablir le fichier',
+        'Stage, unstage or revert the hunk or the selected lines':
+            'Indexer, désindexer ou rétablir le hunk ou les lignes sélectionnées',
+        'Staged hunk {n} of {path}':
+            'Hunk {n} de {path} indexé',
+        'Staged {lines} of {path}':
+            '{lines} de {path} indexées',
+        'Staged {n} {noun}':
+            '{n} {noun} indexé(s)',
+        'Staged {path}':
+            '{path} indexé',
+        'Summary':
+            'Résumé',
+        'The git page: how the diff is drawn and what the commits panel loads':
+            'La page git : comment le diff est dessiné et ce que charge le panneau des commits',
+        'The index is committed as `fixup! {sha}` for “{subject}”. Fold it in afterwards with `{command}` — named here, never run.':
+            "L'index est validé comme `fixup! {sha}` pour « {subject} ». Intégrez-le ensuite avec `{command}` — nommée ici, jamais exécutée.",
+        'The old and new line-number columns beside each hunk':
+            'Les colonnes des anciens et nouveaux numéros de ligne à côté de chaque hunk',
+        "The session's working directory has no repository to show. Check again once it does.":
+            "Le répertoire de travail de la session n'a pas de dépôt à afficher. Vérifiez à nouveau quand il en aura un.",
+        'The three-way revert of {path} left conflict markers':
+            'Le rétablissement à trois voies de {path} a laissé des marqueurs de conflit',
+        'The view changed since the request: nothing was done':
+            "La vue a changé depuis la demande : rien n'a été fait",
+        'The view is behind the page: reloading':
+            'La vue est en retard sur la page : rechargement',
+        "This session isn't in a git repository":
+            "Cette session n'est pas dans un dépôt git",
+        'Tip':
+            'Astuce',
+        'Trash Worktree':
+            'Mettre le worktree à la corbeille',
+        "Trash the session's worktree?":
+            'Mettre le worktree de la session à la corbeille ?',
+        'UNSTAGED':
+            'NON INDEXÉ',
+        'Unfold this file':
+            'Déplier ce fichier',
+        'Unmerged files: {count}. Resolve and stage them, then Continue (`git {kind} --continue`) — or Abort (`git {kind} --abort`) to put the tree back.':
+            "Fichiers en conflit : {count}. Résolvez-les et indexez-les, puis Continuer (`git {kind} --continue`) — ou Abandonner (`git {kind} --abort`) pour remettre l'arbre en place.",
+        'Unpushed commits of this branch, newest first.':
+            "Commits non poussés de cette branche, les plus récents d'abord.",
+        'Unstage all':
+            'Tout désindexer',
+        'Unstage all {n} {noun}?':
+            'Désindexer les {n} {noun} ?',
+        'Unstage every change (git reset)':
+            'Désindexer toutes les modifications (git reset)',
+        'Unstage file':
+            'Désindexer le fichier',
+        'Unstage {what}':
+            'Désindexer {what}',
+        'Unstaged hunk {n} of {path}':
+            'Hunk {n} de {path} désindexé',
+        'Unstaged {lines} of {path}':
+            '{lines} de {path} désindexées',
+        'Unstaged {n} {noun}':
+            '{n} {noun} désindexé(s)',
+        'Unstaged {path}':
+            '{path} désindexé',
+        'Warning':
+            'Avertissement',
+        'When archiving a session in a git worktree':
+            "À l'archivage d'une session dans un worktree git",
+        "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
+            "Mettre ou non le worktree de la session à la corbeille une fois qu'elle s'est arrêtée ; Annuler le ramène avec la session",
+        'Widen the page to show the panels':
+            'Élargir la page pour afficher les panneaux',
+        'Wrap instead of scrolling each hunk sideways':
+            'Renvoyer à la ligne au lieu de faire défiler chaque hunk latéralement',
+        'Wrap long lines':
+            'Renvoyer les longues lignes',
+        '`git add -A` in {cwd}':
+            '`git add -A` dans {cwd}',
+        '`git reset` in {cwd}':
+            '`git reset` dans {cwd}',
+        '`git {kind} --abort` in {cwd}: the {operation} is forgotten and the tree goes back to where it stood before it started. Conflict resolutions made since are lost.':
+            "`git {kind} --abort` dans {cwd} : le {operation} est oublié et l'arbre revient là où il était avant son début. Les résolutions de conflits faites depuis sont perdues.",
+        '`git {kind} {flag}` failed':
+            '`git {kind} {flag}` a échoué',
+        'a directory':
+            'un répertoire',
+        'a removal':
+            'une suppression',
+        'a submodule':
+            'un sous-module',
+        'a symbolic link':
+            'un lien symbolique',
+        'all':
+            'tout',
+        'an addition':
+            'un ajout',
+        'annotate_diff — note cards under a hunk, anchored to a line of the diff':
+            'annotate_diff — des cartes de notes sous un hunk, ancrées à une ligne du diff',
+        'bin':
+            'bin',
+        'binary':
+            'binaire',
+        'cannot read the patch for {path}: {why}':
+            'impossible de lire le patch de {path} : {why}',
+        "cannot read the view's patch for {path}: {why}":
+            'impossible de lire le patch de la vue pour {path} : {why}',
+        'cannot {action} {path} by hunk: {why}':
+            'impossible de {action} {path} par hunk : {why}',
+        'change':
+            'modification',
+        'changes':
+            'modifications',
+        'clear_diff_marks — remove the notes and highlights it put on the page':
+            "clear_diff_marks — retire les notes et surlignages qu'il a mis sur la page",
+        'commit {ref}':
+            'commit {ref}',
+        'conflict':
+            'conflit',
+        'context':
+            'contexte',
+        'deleted':
+            'supprimé',
+        'diff_context — what the page shows: the diff, the hunk and lines you are on, the files, the notes':
+            'diff_context — ce que la page affiche : le diff, le hunk et les lignes où vous êtes, les fichiers, les notes',
+        'discard':
+            'abandonner',
+        'discard reverts changes inside a modified file: use git from a shell for a new or renamed file':
+            "abandonner rétablit les modifications à l'intérieur d'un fichier modifié : utilisez git depuis un shell pour un fichier nouveau ou renommé",
+        'file':
+            'fichier',
+        'git commit failed':
+            'git commit a échoué',
+        'git failed':
+            'git a échoué',
+        'git revert failed':
+            'git revert a échoué',
+        "highlight_diff — attention marks on character ranges of the diff's lines":
+            "highlight_diff — des marques d'attention sur des plages de caractères des lignes du diff",
+        'hunk':
+            'hunk',
+        'hunk {n} could not be read':
+            "le hunk {n} n'a pas pu être lu",
+        'hunk {n} differs: line {line} is `{shown}` in the view but `{actual}` on disk':
+            'le hunk {n} diffère : la ligne {line} est `{shown}` dans la vue mais `{actual}` sur le disque',
+        'hunk {n} differs: line {line} is {shown} in the view but {actual} on disk':
+            'le hunk {n} diffère : la ligne {line} est {shown} dans la vue mais {actual} sur le disque',
+        'hunk {n} has {shown} lines in the view but {actual} on disk':
+            'le hunk {n} a {shown} lignes dans la vue mais {actual} sur le disque',
+        'hunk {n} spans lines {start}-{end} in the patch but {shown_start}-{shown_end} in the view':
+            'le hunk {n} couvre les lignes {start}-{end} dans le patch mais {shown_start}-{shown_end} dans la vue',
+        'it carries a control character':
+            'il contient un caractère de contrôle',
+        'it has an unrecognised file mode ({mode})':
+            'il a un mode de fichier non reconnu ({mode})',
+        'it is a rename now':
+            "c'est maintenant un renommage",
+        'it is an absolute path':
+            "c'est un chemin absolu",
+        'it is {what}, which hunks cannot describe':
+            "c'est {what}, ce que les hunks ne peuvent pas décrire",
+        'it points outside the repository with a `..` segment':
+            'il pointe hors du dépôt avec un segment `..`',
+        'it starts with a dash':
+            'il commence par un tiret',
+        'lines':
+            'lignes',
+        'load more…':
+            'charger plus…',
+        'mode {a} → {b}':
+            'mode {a} → {b}',
+        'new':
+            'nouveau',
+        'new line {n}':
+            'nouvelle ligne {n}',
+        'no changes in the selection':
+            'aucune modification dans la sélection',
+        'no hunk {n} in {path}':
+            'pas de hunk {n} dans {path}',
+        'no stanza for it':
+            'pas de section pour lui',
+        'nothing selected':
+            'rien de sélectionné',
+        'nothing to discard in hunk {n} of {path}':
+            'rien à abandonner dans le hunk {n} de {path}',
+        'nothing to revert in hunk {n} of {path}':
+            'rien à rétablir dans le hunk {n} de {path}',
+        'nothing to {action} in {path}':
+            'rien à {action} dans {path}',
+        'nothing to {action} in {path}: reloading':
+            'rien à {action} dans {path} : rechargement',
+        'old line {n}':
+            'ancienne ligne {n}',
+        'refusing {path}: {why}':
+            '{path} refusé : {why}',
+        'renamed':
+            'renommé',
+        'renamed {n}%':
+            'renommé {n} %',
+        'renames {action} whole: use {button}':
+            'un renommage se traite en entier ({action}) : utilisez {button}',
+        'revert':
+            'rétablir',
+        'select a hunk: Discard hunk takes a hunk, Discard lines a selection':
+            'sélectionnez un hunk : Abandonner le hunk prend un hunk, Abandonner les lignes une sélection',
+        'select a hunk: Revert hunk takes a hunk, Revert lines a selection':
+            'sélectionnez un hunk : Rétablir le hunk prend un hunk, Rétablir les lignes une sélection',
+        'select the whole end-of-file change':
+            'sélectionnez toute la modification de fin de fichier',
+        'show_diff — open the git page on a working-tree, branch or commit diff, at a file, line or hunk':
+            "show_diff — ouvre la page git sur un diff de l'arbre de travail, d'une branche ou d'un commit, à un fichier, une ligne ou un hunk",
+        'stage':
+            'indexer',
+        'the patch does not name a file':
+            'le patch ne nomme aucun fichier',
+        'the patch names {other}':
+            'le patch nomme {other}',
+        'the selection is not inside hunk {n} of {path}':
+            "la sélection n'est pas dans le hunk {n} de {path}",
+        'the view shows {shown} hunk(s) but the disk has {actual}':
+            'la vue affiche {shown} hunk(s) mais le disque en a {actual}',
+        'the view shows {shown} hunk(s) where the patch has {actual}':
+            'la vue affiche {shown} hunk(s) là où le patch en a {actual}',
+        'too large: {n} changed lines':
+            'trop volumineux : {n} lignes modifiées',
+        'trash failed':
+            'la mise à la corbeille a échoué',
+        'unstage':
+            'désindexer',
+        'working tree':
+            'arbre de travail',
+        'working tree · staged':
+            'arbre de travail · indexé',
+        'working tree · unstaged':
+            'arbre de travail · non indexé',
+        '{branch} vs {parent}':
+            '{branch} vs {parent}',
+        '{done} — merged three-way (the result is staged)':
+            '{done} — fusionné à trois voies (le résultat est indexé)',
+        '{error}\n\nWhatever the trash still holds of {path} can be restored from there by hand.':
+            '{error}\n\nCe que la corbeille contient encore de {path} peut être restauré depuis là à la main.',
+        '{n} lines':
+            '{n} lignes',
+        '{n} more columns on GitHub':
+            '{n} colonnes de plus sur GitHub',
+        '{n} more lines on GitHub':
+            '{n} lignes de plus sur GitHub',
+        '{n} more rows on GitHub':
+            '{n} rangées de plus sur GitHub',
+        '{n} of {m}':
+            '{n} sur {m}',
+        '{path}\n\nArchiving the session leaves its worktree behind unless it is moved to the trash with it. The trash keeps the worktree whole, uncommitted changes included, and Undo brings it back with the session; its branch stays. Cancel leaves the session where it is.':
+            "{path}\n\nArchiver la session laisse son worktree derrière elle, sauf s'il est mis à la corbeille avec elle. La corbeille garde le worktree entier, modifications non validées comprises, et Annuler le ramène avec la session ; sa branche reste. Annuler l'action laisse la session où elle est.",
+        '{path} changed since it was loaded, reloading ({detail})':
+            '{path} a changé depuis son chargement, rechargement ({detail})',
+        '{path} is a new or deleted file: use {button}':
+            '{path} est un fichier nouveau ou supprimé : utilisez {button}',
+        '{path} is binary: use git from a shell':
+            '{path} est binaire : utilisez git depuis un shell',
+        '{path} is binary: use {button}':
+            '{path} est binaire : utilisez {button}',
+        '{path} is deleted: Discard file restores it whole':
+            '{path} est supprimé : Abandonner le fichier le restaure en entier',
+        '{path} is not in the view: reloading':
+            "{path} n'est pas dans la vue : rechargement",
+        '{path} is too large to discard by hunk: use git from a shell':
+            '{path} est trop volumineux pour être abandonné par hunk : utilisez git depuis un shell',
+        '{path} is too large to revert: use git from a shell':
+            '{path} est trop volumineux pour être rétabli : utilisez git depuis un shell',
+        '{path} is too large to {action} by hunk: use {button}':
+            '{path} est trop volumineux pour {action} par hunk : utilisez {button}',
+        '{path} is unmerged: resolve the conflict, then use {button}':
+            '{path} est en conflit : résolvez le conflit, puis utilisez {button}',
+        '{path} is unmerged: use git checkout --ours or --theirs from a shell':
+            '{path} est en conflit : utilisez git checkout --ours ou --theirs depuis un shell',
+        '{path} is untracked: Discard file moves it to the trash':
+            "{path} n'est pas suivi : Abandonner le fichier le met à la corbeille",
+        '{path} is untracked: use {button}':
+            "{path} n'est pas suivi : utilisez {button}",
+        "{path} isn't in this diff":
+            "{path} n'est pas dans ce diff",
+        '“{subject}” is applied in reverse. Commit the revert as `git revert` would, or leave the reverse change staged in the working tree (`--no-commit`) to edit and commit yourself.':
+            "« {subject} » est appliqué à l'envers. Validez le rétablissement comme `git revert` le ferait, ou laissez la modification inverse indexée dans l'arbre de travail (`--no-commit`) pour la modifier et la valider vous-même.",
+        '⋯ {n} unchanged lines':
+            '⋯ {n} lignes inchangées',
     },
 }
 
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-09-05. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-09-08. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'

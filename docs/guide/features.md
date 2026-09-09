@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-07. Full change history: git log for this file.
+fork. Last modified: 2026-09-08. Full change history: git log for this file.
 -->
 
 # Features
@@ -492,7 +492,8 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
 - **The files list splits on the working tree.** With *working tree*
   loaded it shows **UNSTAGED · n** and **STAGED · n** sections; the page
   holds one of the two at a time, so that side is live — the diff's own
-  files with their `+` / `−` counts (`bin` for a binary) — and the other
+  files with their `+` / `−` counts, green and red as the diff's file
+  headers wear them (`bin` for a binary) — and the other
   is navigation off `git status`: clicking a file there (or the section's
   heading) loads that side and reveals the file. Any other load (a
   commit, a branch, a range) is one flat **FILES · n** list, and a
@@ -590,10 +591,12 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   line. While an editor is open the diff's letter keys type into it,
   nothing else. Notes live in the page for the tab's life — nothing is
   written to disk — and follow a reload: a note on a hunk the edit left
-  alone keeps its card, one on a hunk that changed — or whose line
-  numbers shifted, because lines were staged or added above it — is
-  dropped, one on a file the current load doesn't show waits for a load
-  that does. Highlights (attention marks on a range of a line, in six
+  alone keeps its card, and one on a hunk whose lines only moved —
+  because lines were staged, discarded or added above it — follows it,
+  its card naming the line's new number. A note on a hunk whose own
+  lines changed is dropped, as are the notes on two identical hunks in
+  one file when either changes; one on a file the current load doesn't
+  show waits for a load that does. Highlights (attention marks on a range of a line, in six
   tones) share the same store and rules; the agent lands them with
   `highlight_diff`, its notes with `annotate_diff`, and clears both with
   `clear_diff_marks` (your own notes stay unless it asks for them too).

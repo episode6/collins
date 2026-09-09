@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-07. Full change history: git log for this file.
+fork. Last modified: 2026-09-08. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -360,6 +360,8 @@ collins/
 ├── prview.py         # the in-app pull request page
 ├── gitpage.py        # the git page: the diff view under its header, the sidebar, loads and freshness
 ├── diffview.py       # the diff view: a view per hunk, split or stacked, gaps, find, selection, buttons, notes
+├── commitcard.py     # the card a loaded commit's message shows over its diff
+├── gitoperation.py   # the bar over a half-finished rebase / merge / cherry-pick / revert
 ├── gitloads.py       # what the git page can load: modes, commits, ranges, their names, the layout slot
 ├── diffmodel.py      # a parsed diff stream: files, hunks, gaps, split rows, word emphasis
 ├── gitpatch.py       # the staging arithmetic: partial patches and their plans
@@ -378,7 +380,7 @@ collins/
 ├── tokensettings.py  # the Token use rows: what runs Claude for you
 ├── welcome.py        # the first-launch dialog: those rows, and where claude is
 ├── gitinfo.py        # git branch, trunk and freshness for the footer and the git page
-├── transcript.py     # tail transcripts for touched files and PR links
+├── transcript.py     # tail transcripts for touched files, PR links and turn ends
 ├── dialogs.py        # rename / emoji / confirm / details / MCP dialogs
 ├── prefs.py          # preferences dialog
 └── …                 # panels, docking, theming, i18n, and the rest
