@@ -38,9 +38,15 @@ terminal in it and no external program: every load is one
 (`_BRANCH_MAX_CHARS`), a breadcrumb of what is loaded, the find toggle, the
 sidebar toggle, the view's menu (layout, line numbers, wrap, agent notes,
 reload, keyboard shortcuts) and refresh; the tab's X closes. The
-`BreakpointBin` (`max-width: 679px` → the sidebar hides and the toggle goes
-insensitive; the bin's 460 px request is the page's real minimum,
-`column_floor` / `column_seed` 680 and ~700 are what the dock opens it at).
+`BreakpointBin` (`max-width: 679px` → one column at a time, the editor's
+narrow mode: the diff by default, the toggle swaps the panels in for it —
+`_panels_requested`, not persisted, `show_panels(bool)` / `diff_shown` /
+`narrow` probe it — and `load()`, `_navigate`, `_show_all` and the
+filter's Escape call `_show_diff_column` to drop back; `_sync_sidebar`
+sets the toggle to what the width shows behind `_syncing_toggle`, so
+only a wide press writes `_sidebar_wanted`; the bin's 460 px request is
+the page's real minimum, `column_floor` / `column_seed` 680 and ~700 are
+what the dock opens it at).
 The whole page sits in an `Adw.ToastOverlay` for its own toasts. The tab's
 glyph is `gitpage.ICON` (`git-merge-symbolic`), public because the footer
 button wears it too. The diff needs `git` alone — a machine without it
@@ -744,8 +750,9 @@ viewer's) are popped from a loaded `state.json` by `AppState._load`.
 ## E2E
 
 `scripts/check_git_page.py` runs on a PATH holding `git` alone:
-`check_sidebar(repo)` (the 500 / 900 px collapse, the toggle and its
-persistence, the commits list, a commit / header / working-tree row
+`check_sidebar(repo)` (the 500 / 900 px narrow mode — the toggle swapping
+the panels in, a row, the filter's Escape and a load dropping back — the
+toggle and its persistence, the commits list, a commit / header / working-tree row
 loading, the split files list and the other side's click, stage_all and
 commit reloading exactly once — counted by wrapping `page._read_diff` —
 the in-progress bar (a native revert stopped on a clash brings it up,

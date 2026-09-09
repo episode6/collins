@@ -38,6 +38,14 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **The git page's panels reach a narrow page.** Below about 680 px the
+  page used to hide the commits and files panels and grey the header's
+  panel button, leaving no way to pick another commit or file without
+  widening it. It now shows the diff and the panels one at a time, like
+  the editor's narrow mode: the button swaps the panels in for the diff
+  (*Back to the diff* swaps them out), and a row picked, `Ctrl+1` / `2`
+  / `3`, a `/` filter escaped or an agent's `show_diff` drop back to the
+  diff.
 - **The git page's files list has a context menu on the working tree.**
   Right-click an unstaged row for *Stage file* and *Discard file…*, a
   staged row for *Unstage file* — whichever side the page has loaded —

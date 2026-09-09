@@ -642,10 +642,16 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   **branch against its parent** (`main...HEAD`) from anywhere in the page
   — the three most common rows, as chords.
 - **The sidebar folds.** The header's panel button hides and shows it,
-  remembered with the page; below about 680 px the page hides it
-  regardless (the button greys with *Widen the page to show the panels*)
-  so the diff keeps its columns — a fresh page opens wide enough for
-  both, and the divider can be dragged down to the diff alone.
+  remembered with the page — a fresh page opens wide enough for both, and
+  the divider can be dragged down to the diff alone.
+- **One column when narrow.** Below about 680 px the page shows the diff
+  and the panels one at a time, like the editor's narrow mode: the diff
+  by default, so it keeps its columns, and the header's panel button
+  swaps the commits and files panels in for it (*Back to the diff* takes
+  them out again). Picking a row, `Ctrl+1` / `2` / `3`, a `/` filter
+  escaped or an agent's `show_diff` all drop back to the diff. Widen the
+  page and the two sit side by side again, the panels as the button's
+  remembered word left them.
 - **The parent branch is git's word.** The page reads the stack off the
   repository: every local branch whose tip lies on the current branch's
   history since the default branch, nearest first. The nearest one is
