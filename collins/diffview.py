@@ -124,6 +124,7 @@ _PAD_TEXT = " "
 # The gap row's one button, the ⇕ glyph (bundled: the theme has no unfold
 # icon), and the size it draws at.
 _UNFOLD_ICON = "unfold-symbolic"
+_FOLD_ICON = "fold-symbolic"  # the file header's "fold the expanded gaps" button
 _GAP_ICON_PX = 12
 # The action group each hunk section inserts on itself for its context
 # menu (the popover finds it from its parent view, up the tree).
@@ -299,14 +300,33 @@ class _NumberRenderer(_TextRenderer):
     def __init__(self) -> None:
         super().__init__()
         self._numbers: list[int | None] = []
+        self._own = ""  # the widest of this view's own numbers
+        self._floor = ""  # the file's widest (set_floor): every view of a file shares one gutter width
         self._cursor_bold = False
         self.set_xalign(1.0)
 
     def set_numbers(self, numbers: Sequence[int | None]) -> None:
         self._numbers = list(numbers)
         widest = max((n for n in self._numbers if n is not None), default=0)
-        self.set_widest(str(widest) if widest else "")
+        self._own = str(widest) if widest else ""
+        self._resize()
         self.queue_draw()
+
+    @property
+    def widest_number(self) -> int:
+        return max((n for n in self._numbers if n is not None), default=0)
+
+    def set_floor(self, floor: str) -> None:
+        """Size the column for *floor* at least: the file section hands
+        every view the file's widest number, so a hunk's code lines up
+        with the expanded context above and below it whatever numbers
+        each view holds."""
+        if floor != self._floor:
+            self._floor = floor
+            self._resize()
+
+    def _resize(self) -> None:
+        self.set_widest(self._floor if len(self._floor) > len(self._own) else self._own)
 
     def set_cursor_bold(self, bold: bool) -> None:
         """Whether the cursor line's number is drawn bold (GtkSourceView's
@@ -632,6 +652,16 @@ class _HunkView:
     def set_scheme(self, scheme: GtkSource.StyleScheme | None) -> None:
         if scheme is not None:
             self.buffer.set_style_scheme(scheme)
+
+    @property
+    def widest_number(self) -> int:
+        """The largest line number this view's gutters draw."""
+        return max((r.widest_number for r in self._numbers), default=0)
+
+    def set_number_floor(self, floor: str) -> None:
+        """Width every number column reserves at least (the file's widest)."""
+        for renderer in self._numbers:
+            renderer.set_floor(floor)
 
     def set_line_numbers(self, shown: bool) -> None:
         for renderer in self._numbers:
@@ -1950,17 +1980,34 @@ class _GapRow(Gtk.Box):
         self._view.set_rows(self._lines)
         self._sync()
 
+    @property
+    def expanded(self) -> bool:
+        """Whether any of the gap's lines are drawn."""
+        return self.shown > 0
+
+    def collapse(self) -> None:
+        """Take every drawn line back: the context view goes, the row
+        returns worded for the whole gap (a measured trailing gap keeps
+        its count)."""
+        if self._view is not None:
+            self.remove(self._view.scroller)
+            self._view = None
+        self._lines = []
+        self.shown = 0
+        self._sync()
+
     def _context_view(self) -> _HunkView:
         view = _HunkView(
             self._language,
             self._scheme,
             self._palette,
             (diffmodel.OLD, diffmodel.NEW),
-            sign=False,
+            sign=True,  # blank on context rows, but the width keeps the code in line with the hunks'
             line_numbers=self._options.line_numbers,
             wrap=self._options.wrap,
         )
         view.view.add_css_class("git-gap-text")
+        view.scroller.add_css_class("git-gap-context")  # the hunk rail's width as a margin
         view.view.set_can_focus(False)
         return view
 
@@ -1980,6 +2027,21 @@ class _GapRow(Gtk.Box):
         for view in self.views:
             view.set_scheme(scheme)
             view.set_palette(palette)
+
+
+def _collapse_button(on_click: Callable[[], None]) -> Gtk.Button:
+    """The file header's fold-the-gaps button: the unfold glyph turned
+    inward, flat, hidden until a gap of the file is expanded."""
+    button = Gtk.Button()
+    image = Gtk.Image.new_from_icon_name(_FOLD_ICON)
+    image.set_pixel_size(_GAP_ICON_PX)
+    button.set_child(image)
+    button.add_css_class("flat")
+    button.add_css_class("git-gap-button")
+    button.set_tooltip_text(_("Fold the unchanged lines back up"))
+    button.connect("clicked", lambda _b: on_click())
+    button.set_visible(False)
+    return button
 
 
 class _FileSection(Gtk.Box):
@@ -2030,6 +2092,12 @@ class _FileSection(Gtk.Box):
         self._badge.add_css_class("dim-label")
         self._badge.add_css_class("git-file-badge")
         header.append(self._badge)
+        # The way back from an expanded gap: one button that folds every
+        # drawn stretch of the file up again, shown only while one is out
+        # (the pinned header carries a copy, since the gap rows scroll off
+        # under it).
+        self.collapse_button = _collapse_button(self.collapse_gaps)
+        header.append(self.collapse_button)
         # Stage file / Discard file (Unstage file; Revert file), worded by
         # sync_actions for the load.
         self.actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
@@ -2178,6 +2246,37 @@ class _FileSection(Gtk.Box):
         for gap in self.gaps:  # a kept gap likewise: its file is this read's
             gap.file = file
         self.sync_actions()
+        self.sync_gaps()
+
+    @property
+    def gaps_expanded(self) -> bool:
+        """Whether any gap of the file has lines drawn."""
+        return any(gap.expanded for gap in self.gaps)
+
+    def sync_gaps(self) -> None:
+        """Show the fold button while a gap is expanded (the pinned header
+        reads the same flag), and level the gutters: every view of the
+        file — the hunks' and the expanded context's — reserves the file's
+        widest line number, so the code starts at one x across them."""
+        self.collapse_button.set_visible(self.gaps_expanded)
+        views = [view for hunk in self.hunks for view in hunk.views]
+        views += [view for gap in self.gaps for view in gap.views]
+        widest = max((view.widest_number for view in views), default=0)
+        floor = str(widest) if widest else ""
+        for view in views:
+            view.set_number_floor(floor)
+
+    def collapse_gaps(self) -> None:
+        """Fold every expanded gap of the file back up (the header's and the
+        pinned header's button), and put the file's header in view: the
+        drawn lines the viewport sat in are gone, and the stream would
+        otherwise land wherever the shrink left it."""
+        if not self.gaps_expanded:
+            return
+        for gap in self.gaps:
+            gap.collapse()
+        self.sync_gaps()
+        self._owner.on_gaps_collapsed(self)
 
     def sync_actions(self) -> None:
         """Word the file buttons for the load (gitpatch.action_labels), and
@@ -2251,6 +2350,7 @@ class _FileSection(Gtk.Box):
             section.apply_options(options)
         for gap in self.gaps:
             gap.apply_options(options)
+        self.sync_gaps()  # a layout change rebuilt the hunk views: level the gutters again
 
     def set_scheme(self, scheme: GtkSource.StyleScheme | None, palette: diffmodel.DiffPalette) -> None:
         for section in self.hunks:
@@ -2418,6 +2518,8 @@ class DiffView(Gtk.Box):
         pinned.append(self._pinned_badge)
         # The pinned header carries the file's buttons too (spec): they
         # act on the section pinned at the time of the click.
+        self._pinned_collapse = _collapse_button(self._collapse_pinned)
+        pinned.append(self._pinned_collapse)
         pinned_actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         pinned_actions.add_css_class("git-file-actions")
         self._pinned_primary = _ActionButton(lambda: self._request_pinned(False))
@@ -2719,6 +2821,17 @@ class DiffView(Gtk.Box):
             return False
         self.request_file(section, False)
         return True
+
+    def _collapse_pinned(self) -> None:
+        section = self._pinned_section
+        if section is not None and section.get_parent() is not None:
+            section.collapse_gaps()
+
+    def on_gaps_collapsed(self, section: _FileSection) -> None:
+        """A file's gaps folded up: scroll its header into view (the lines
+        under the viewport went away) and re-sync the pinned header."""
+        keyedslots.scroll_to(self._scroller, section)
+        self._schedule_scroll_sync()
 
     def _request_pinned(self, discard: bool) -> None:
         section = self._pinned_section
@@ -3391,6 +3504,26 @@ class DiffView(Gtk.Box):
         self.on_gap_expand(gap)
         return True
 
+    def gaps_expanded(self, path: str) -> bool | None:
+        """Whether *path*'s header shows the fold button (a gap is drawn);
+        None with no such file."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return None
+        return section.collapse_button.get_visible()
+
+    def collapse_gaps(self, path: str) -> bool:
+        """Fold *path*'s expanded gaps as its header's button would."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return False
+        section.collapse_gaps()
+        return True
+
+    def pinned_collapse_shown(self) -> bool:
+        """Whether the pinned header's fold button is up."""
+        return self._pinned.get_visible() and self._pinned_collapse.get_visible()
+
     def is_split(self) -> bool:
         return self.options.split
 
@@ -3636,6 +3769,11 @@ class DiffView(Gtk.Box):
                 return
             self._measured(gap, side, lines)
             gap.expand(lines)
+            section = self._section_of(gap)
+            if section is not None:
+                section.sync_gaps()
+                if section is self._pinned_section:
+                    self._pinned_collapse.set_visible(section.gaps_expanded)
 
         gap.measuring = True
         self._read_context(file, side, landed)
@@ -3666,6 +3804,14 @@ class DiffView(Gtk.Box):
                         None if gap.get_parent() is None else self._measured(gap, side, lines)
                     ),
                 )
+
+    @staticmethod
+    def _section_of(gap: _GapRow) -> _FileSection | None:
+        """The file section a gap row sits in (its body's parent)."""
+        widget = gap.get_parent()
+        while widget is not None and not isinstance(widget, _FileSection):
+            widget = widget.get_parent()
+        return widget
 
     def _measured(self, gap: _GapRow, side: str, lines: list[str] | None) -> None:
         """A trailing gap's file landed: size the gap off its length."""
@@ -3838,6 +3984,7 @@ class DiffView(Gtk.Box):
             self._pinned_icon.set_from_icon_name(icon_name)
             self._pinned_icon.set_css_classes([colour] if colour else [])
             self._pinned_section = top
+            self._pinned_collapse.set_visible(top.gaps_expanded)
             self._pinned_primary.set_text(top.primary_button.text())
             self._pinned_primary.set_tooltip_text(top.primary_button.get_tooltip_text())
             self._pinned_discard.set_visible(top.discard_button.get_visible())

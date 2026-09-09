@@ -1241,6 +1241,11 @@ popover.menu button.open-with-row:hover {
 .git-gap-text {
   padding: 2px 0px;
 }
+/* an expanded gap's context sits outside the hunk's rail: the rail's width
+   as a margin, so its code starts where the hunks' does. */
+.git-gap-context {
+  margin-left: 3px;
+}
 /* the note cards under a hunk: a soft card per note, the agent's with
    the accent rail, the editor a framed text box. */
 .git-hunk-notes {
