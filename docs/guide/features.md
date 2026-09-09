@@ -514,7 +514,12 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   that side out and stages the file as resolved (`git checkout --ours` /
   `--theirs`, then `git add`); when the side you pick has no version of
   the file (a modify/delete clash, `UD` / `DU`) the question says so and
-  the resolution is `git rm`. Every row also offers *Open in editor* and
+  the resolution is `git rm`. While the section is up, the action row at
+  the bottom grows a **Resolve all conflicts** menu with the same two
+  items (*Resolve with ours (upstream)* / *Resolve with theirs (your
+  commit)* in a rebase): one question for every unmerged file, naming
+  the sides the same way and listing the files the pick removes, then
+  each is resolved in turn, stopping at the first git refuses. Every row also offers *Open in editor* and
   an **Open In…** submenu of your *Footer apps* that take a file, when
   the file exists on disk. Any other load (a
   commit, a branch, a range) is one flat **FILES · n** list, and a

@@ -47,6 +47,13 @@ downloads of each version, see the
   (*Back to the diff* swaps them out), and a row picked, `Ctrl+1` / `2`
   / `3`, a `/` filter escaped or an agent's `show_diff` drop back to the
   diff.
+- **Resolve every conflict at once.** While a rebase, merge, cherry-pick,
+  revert or `git am` is stopped on conflicts, the git page's action row
+  offers a **Resolve all conflicts** menu with the conflict rows' own two
+  items — *Resolve with ours (HEAD)* / *Resolve with theirs (the pick)*,
+  turned around in a rebase — that asks once for every unmerged file
+  (what the sides mean, which files the pick removes) and resolves them
+  one after the other.
 - **The git page's files list has a context menu on the working tree.**
   Right-click an unstaged row for *Stage file* and *Discard file…*, a
   staged row for *Unstage file* — whichever side the page has loaded —

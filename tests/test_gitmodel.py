@@ -656,6 +656,51 @@ def test_resolve_words_say_what_each_side_is_and_whether_the_file_goes():
     assert gitmodel.resolve_done("g.txt", "theirs", True) == "Resolved g.txt with theirs: removed"
 
 
+def test_resolve_all_words_count_the_paths_and_name_the_removed_ones():
+    heading, body, button = gitmodel.resolve_all_words(("a.txt", "b.txt"), "theirs", "revert", ())
+    assert heading == "Resolve all 2 conflicts with theirs?"
+    assert body.startswith(
+        "Ours is HEAD, what the branch has now."
+        " Theirs is what the revert restores: the reverted commit's parent."
+    )
+    assert "replaced with the theirs version and staged as resolved" in body
+    assert "`git checkout --theirs` then `git add`" in body
+    assert "Edits made to the conflict markers are lost." in body
+    assert "`git rm`" not in body
+    assert button == "Resolve all"
+    heading, body, _button = gitmodel.resolve_all_words(("g.txt",), "ours", "rebase", ("g.txt",))
+    assert heading == "Resolve the conflict with ours?"
+    assert "Ours is the upstream the branch is being rebased onto." in body
+    assert "Ours has no version of g.txt: resolving removes it from the working tree" in body
+    many = tuple(f"f{i}.txt" for i in range(10))
+    _heading, body, _button = gitmodel.resolve_all_words(many, "theirs", None, many)
+    assert "Theirs has no version of f0.txt, f1.txt, f2.txt, f3.txt, f4.txt, f5.txt, f6.txt, f7.txt, …" in body  # noqa: E501
+    assert "removes them from the working tree" in body
+    # The action row's two items are the rows' own labels.
+    assert [gitmodel.file_menu_label(a, "rebase") for a in gitmodel.RESOLVE_ALL_ACTIONS] == [
+        "Resolve with ours (upstream)",
+        "Resolve with theirs (your commit)",
+    ]
+    assert [gitmodel.resolve_side(a) for a in gitmodel.RESOLVE_ALL_ACTIONS] == ["ours", "theirs"]
+    assert gitmodel.resolve_all_done(3, 0, "ours") == "Resolved 3 conflicts with ours: staged"
+    assert gitmodel.resolve_all_done(0, 2, "theirs") == "Resolved 2 conflicts with theirs: removed"
+    mixed = gitmodel.resolve_all_done(2, 1, "theirs")
+    assert mixed == "Resolved 3 conflicts with theirs: 2 staged, 1 removed"
+    stopped = gitmodel.resolve_all_failed("b.txt", "error: nope", 1)
+    assert stopped == "Stopped at b.txt after 1 resolved: error: nope"
+    assert gitmodel.resolve_all_failed("a.txt", "", 0) == "Couldn't resolve a.txt: git failed"
+
+
+def test_unmerged_paths_are_the_status_u_rows_in_order():
+    status = gitmodel.parse_status_v2(
+        "1 .M N... 100644 100644 100644 aaaa bbbb x.txt\0"
+        "u UU N... 100644 100644 100644 100644 aaaa bbbb cccc b.txt\0"
+        "u DU N... 100644 100644 100644 100644 aaaa bbbb cccc a.txt\0"
+    )
+    assert gitmodel.unmerged_paths(status) == ("b.txt", "a.txt")
+    assert gitmodel.unmerged_paths(None) == ()
+
+
 def test_discard_and_stage_words_follow_the_status_code():
     trash = ("Move to the trash?", "Move n.txt to the trash?", "Move to trash")
     assert gitmodel.discard_words("n.txt", "?") == trash

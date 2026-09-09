@@ -39,7 +39,10 @@ was picked on a commit, the branch or a range — the page hands it to the
 view's file button), "file-action-requested" (a path, its side and one
 of gitmodel's MENU_* ids: a working-tree row's Stage / Unstage / Discard…
 or an unmerged row's Resolve with ours / theirs — the page runs the git
-call and asks first where it must), "open-requested" (a path for the
+call and asks first where it must), "resolve-all-requested" (a side, from
+the action row's *Resolve all conflicts* menu, shown while the CONFLICTS
+section is up — the page reads the unmerged paths, asks, runs them all),
+"open-requested" (a path for the
 session's editor) and "open-with-requested" (a path and the desktop-file
 id of a configured app), "mutated" (a git mutation landed — the page re-seeds
 its freshness signature and reloads the view). Every thread reply lands with
@@ -306,6 +309,9 @@ class GitSidebar(Gtk.Box):
         # A file row's context menu on the working tree: (path, side, a
         # gitmodel MENU_* id); the two opens carry the path (and the app).
         "file-action-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str)),
+        # The action row's Resolve all conflicts menu: "ours" | "theirs";
+        # the page reads the unmerged paths, asks, and runs it.
+        "resolve-all-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "open-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         "open-with-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -441,6 +447,28 @@ class GitSidebar(Gtk.Box):
             self._action_children[widget] = child
 
         self._action_children: dict[Gtk.Widget, Gtk.FlowBoxChild] = {}
+        # Resolve all conflicts ▾ on a row of its own above the three (a
+        # FlowBox gives every child in a line the widest one's width, and
+        # this label would push the others onto lines of their own): only
+        # while the files list has a CONFLICTS section (a stopped
+        # operation's unmerged paths); its two items are the conflict rows'
+        # own resolve labels, rebuilt when the operation changes
+        # (_sync_resolve_all).
+        self._resolve_all_menu = Gio.Menu()
+        self._resolve_all_button = Gtk.MenuButton(menu_model=self._resolve_all_menu)
+        self._resolve_all_button.add_css_class("flat")
+        self._resolve_all_button.set_always_show_arrow(True)
+        self._resolve_all_button.set_label(_("Resolve all conflicts"))
+        self._resolve_all_button.set_tooltip_text(
+            _("Resolve every unmerged file with one side and stage it as resolved")
+        )
+        self._resolve_all_button.set_halign(Gtk.Align.CENTER)
+        self._resolve_all_kind: object = ()  # the kind the menu was built for; () = never
+        self._resolve_all_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, halign=Gtk.Align.CENTER)
+        self._resolve_all_row.add_css_class("git-actions")
+        self._resolve_all_row.append(self._resolve_all_button)
+        self._resolve_all_row.set_visible(False)
+        self.append(self._resolve_all_row)
         self._stage_all_button = self._flat_button(_("Stage all"), lambda: self._on_all_clicked(True))
         add(self._stage_all_button)
         self._unstage_all_button = self._flat_button(
@@ -498,6 +526,9 @@ class GitSidebar(Gtk.Box):
             action = Gio.SimpleAction.new(f"file-{menu_action}", GLib.VariantType.new("(ss)"))
             action.connect("activate", self._on_file_action, menu_action)
             group.add_action(action)
+        resolve_all = Gio.SimpleAction.new("resolve-all", GLib.VariantType.new("s"))
+        resolve_all.connect("activate", lambda _a, param: self._on_resolve_all(param.get_string()))
+        group.add_action(resolve_all)
         open_editor = Gio.SimpleAction.new("open-editor", GLib.VariantType.new("s"))
         open_editor.connect("activate", lambda _a, param: self.emit("open-requested", param.get_string()))
         group.add_action(open_editor)
@@ -1065,6 +1096,7 @@ class GitSidebar(Gtk.Box):
                 self._file_widgets[("", file.path)] = widget
         self._mark_selected_file()
         self._apply_filter()
+        self._sync_resolve_all()
         if value > 0:
             GLib.idle_add(_restore_scroll, adjustment, value)
 
@@ -1157,6 +1189,55 @@ class GitSidebar(Gtk.Box):
         side, path = param.unpack()
         self.emit("file-action-requested", path, side, menu_action)
 
+    # -- Resolve all conflicts ---------------------------------------------------------
+
+    def _sync_resolve_all(self) -> None:
+        """Show the action row's Resolve all conflicts button while the
+        files list has a CONFLICTS section, its menu re-worded for the
+        operation in progress (the rows' own labels, gitmodel.
+        file_menu_label — a rebase turns ours and theirs around)."""
+        shown = bool(self._sections.conflicts)
+        self._resolve_all_row.set_visible(shown)
+        if not shown:
+            return
+        if self._resolve_all_kind != self._operation_kind:
+            self._resolve_all_kind = self._operation_kind
+            self._resolve_all_menu.remove_all()
+            for menu_action in gitmodel.RESOLVE_ALL_ACTIONS:
+                side = gitmodel.resolve_side(menu_action)
+                item = Gio.MenuItem.new(gitmodel.file_menu_label(menu_action, self._operation_kind), None)
+                item.set_action_and_target_value(f"{_ACTIONS}.resolve-all", GLib.Variant("s", side))
+                self._resolve_all_menu.append_item(item)
+        self._resolve_all_button.set_sensitive(self._live and not self._busy)
+
+    def _on_resolve_all(self, side: str) -> None:
+        if side not in gitops.RESOLVE_SIDES or not self._sections.conflicts or self._busy:
+            return
+        self.emit("resolve-all-requested", side)
+
+    def resolve_all_labels(self) -> list[str] | None:
+        """The labels the Resolve all conflicts menu offers (for the e2e);
+        None while the button is hidden."""
+        if not self._resolve_all_row.get_visible():
+            return None
+        menu = self._resolve_all_menu
+        return [
+            str(menu.get_item_attribute_value(i, "label", GLib.VariantType.new("s")).get_string())
+            for i in range(menu.get_n_items())
+        ]
+
+    def activate_resolve_all(self, label: str) -> bool:
+        """Pick *label* from the Resolve all conflicts menu as a click
+        would (for the e2e)."""
+        labels = self.resolve_all_labels() or []
+        for i, name in enumerate(labels):
+            if name == label:
+                menu = self._resolve_all_menu
+                target = menu.get_item_attribute_value(i, "target", GLib.VariantType.new("s"))
+                self._actions_group.activate_action("resolve-all", target)
+                return True
+        return False
+
     def _on_files_secondary_click(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
         row = self._file_list.get_row_at_y(int(y))
         if not isinstance(row, _FileRow):
@@ -1244,6 +1325,7 @@ class GitSidebar(Gtk.Box):
             button.set_sensitive(live and not self._busy)
         self._commit_button.set_sensitive(live and not self._busy)
         self._commit_stack.set_visible_child_name("spinner" if self._busy else "label")
+        self._sync_resolve_all()
         self._stage_all_button.set_tooltip_text(_("Stage every change (git add -A)"))
         self._unstage_all_button.set_tooltip_text(_("Unstage every change (git reset)"))
 

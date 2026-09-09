@@ -1668,6 +1668,52 @@ def test_resolve_path_checks_out_the_side_and_stages_or_removes(repo):
     assert answer.result.ok and answer.deleted and not (repo / "g.txt").exists()
     answer = gitops.resolve_path(repo, "h.txt", "theirs")
     assert answer.result.ok and not answer.deleted and (repo / "h.txt").read_text() == "side\n"
+
+
+def test_resolve_paths_refuses_without_a_call_and_stops_at_the_first_refusal():
+    calls: list[list[str]] = []
+
+    def run(argv, **_kw):
+        calls.append(argv)
+        return ok("")
+
+    assert not gitops.resolve_paths("/repo", ["f.txt"], "mine", run=run).ok
+    assert not gitops.resolve_paths("/repo", [], "ours", run=run).ok
+    assert not gitops.resolve_paths("/repo", ["f.txt", "-g.txt"], "ours", run=run).ok
+    assert calls == []
+    # f.txt is no longer unmerged: refused there, nothing after it touched.
+    answer = gitops.resolve_paths("/repo", ["f.txt", "g.txt"], "ours", run=run)
+    assert not answer.ok and answer.failed == "f.txt" and "not unmerged" in answer.result.stderr
+    assert answer.resolved == () and answer.deleted == ()
+    assert [argv[1] for argv in calls] == ["ls-files"]
+
+
+@needs_git
+def test_resolve_paths_resolves_every_clash_with_one_side(repo):
+    (repo / "g.txt").write_text("base\n")
+    (repo / "h.txt").write_text("base\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base files")
+    _git(repo, "checkout", "-qb", "side")
+    (repo / "f.txt").write_text("side\n")
+    _git(repo, "rm", "-q", "g.txt")
+    (repo / "h.txt").write_text("side\n")
+    _git(repo, "commit", "-qam", "side")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "f.txt").write_text("main\n")
+    (repo / "g.txt").write_text("main\n")
+    _git(repo, "rm", "-q", "h.txt")
+    _git(repo, "commit", "-qam", "main")
+    assert subprocess.run(["git", "merge", "side"], cwd=repo, capture_output=True).returncode != 0
+    paths = gitmodel.unmerged_paths(gitops.read_status(repo))
+    assert paths == ("f.txt", "g.txt", "h.txt")
+    answer = gitops.resolve_paths(repo, paths, "theirs")
+    assert answer.ok and answer.failed is None
+    assert answer.resolved == ("f.txt", "h.txt") and answer.deleted == ("g.txt",)
+    assert (repo / "f.txt").read_text() == "side\n" and not (repo / "g.txt").exists()
+    assert gitmodel.unmerged_paths(gitops.read_status(repo)) == ()
+    staged = {row.path: row.code for row in gitops.read_status(repo).staged}
+    assert staged == {"f.txt": "M", "g.txt": "D", "h.txt": "A"}
     status = gitops.read_status(repo)
     assert [row.code for row in status.unstaged] == []
     assert {row.path: row.code for row in status.staged} == {"f.txt": "M", "g.txt": "D", "h.txt": "A"}

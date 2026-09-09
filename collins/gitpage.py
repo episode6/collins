@@ -440,6 +440,7 @@ class GitPage(Adw.Bin):
         self.sidebar.connect("show-all-requested", lambda _s: self._show_all())
         self.sidebar.connect("revert-requested", self._on_revert_requested)
         self.sidebar.connect("file-action-requested", self._on_file_action_requested)
+        self.sidebar.connect("resolve-all-requested", lambda _s, side: self._on_resolve_all_requested(side))
         self.sidebar.connect("open-requested", self._on_file_open_requested)
         self.sidebar.connect("open-with-requested", self._on_open_with_requested)
         self.sidebar.connect("mutated", self._on_mutated)
@@ -1601,6 +1602,80 @@ class GitPage(Adw.Bin):
                 return
             self._toast(gitmodel.resolve_done(path, side, answer.deleted))
             self.sidebar.emit("mutated")
+
+        self.sidebar.run_mutation(work, done)
+
+    def _on_resolve_all_requested(self, side: str) -> None:
+        """The action row's *Resolve all conflicts* → ours / theirs: read
+        the unmerged paths afresh (`git status`) and each one's index
+        stages on the mutation thread, ask once (gitmodel.
+        resolve_all_words: what the two sides mean under the operation,
+        which paths the pick removes), then resolve them one after the
+        other (gitops.resolve_paths), stopping at the first refusal."""
+        if self._closing or not self._opened or side not in gitops.RESOLVE_SIDES:
+            return
+        if self.sidebar.busy or self._diffview.busy():
+            self._toast(_("Another git operation is still running"))
+            return
+        cwd = self._cwd_provider()
+        operation = self.operation_bar.operation
+        kind = operation.kind if operation is not None else None
+
+        def work() -> tuple:
+            paths = gitmodel.unmerged_paths(gitops.read_status(cwd))
+            deleting: list[str] = []
+            for path in paths:
+                stages = gitops.read_unmerged_stages(cwd, path)
+                if stages is None:
+                    return (None, path)
+                if gitops.resolution_deletes(side, stages):
+                    deleting.append(path)
+            return (paths, tuple(deleting))
+
+        def done(answer: object) -> None:
+            if not isinstance(answer, tuple) or answer[0] is None:
+                path = answer[1] if isinstance(answer, tuple) else "?"
+                self._toast(_("Couldn't read the index for {path}").format(path=path))
+                return
+            paths, deleting = answer
+            if not paths:
+                self._toast(_("Nothing is unmerged: reloading"))
+                self._read_diff(self._loaded)
+                return
+            heading, body, button = gitmodel.resolve_all_words(paths, side, kind, deleting)
+            dialogs.confirm_dialog(
+                self, heading, body, button, lambda: self._run_resolve_all(cwd, paths, side)
+            )
+
+        self.sidebar.run_mutation(work, done)
+
+    def _run_resolve_all(self, cwd: str | None, paths: Sequence[str], side: str) -> None:
+        """gitops.resolve_paths behind the sidebar's busy: the toast counts
+        what landed (or names where it stopped), and `mutated` follows
+        whenever anything changed."""
+        if self._closing or not self._opened:
+            return
+
+        def work() -> gitops.BulkResolution:
+            try:
+                return gitops.resolve_paths(cwd, paths, side)
+            except Exception as err:  # the worker's last line of defence
+                return gitops.BulkResolution(
+                    failed="?", result=gitops.GitResult(False, "", str(err) or err.__class__.__name__)
+                )
+
+        def done(answer: object) -> None:
+            if not isinstance(answer, gitops.BulkResolution):
+                self._toast(_("git failed"))
+                return
+            landed = len(answer.resolved) + len(answer.deleted)
+            if answer.ok:
+                self._toast(gitmodel.resolve_all_done(len(answer.resolved), len(answer.deleted), side))
+            else:
+                reason = gitops.first_line(answer.result.stderr)
+                self._toast(gitmodel.resolve_all_failed(answer.failed or "?", reason, landed))
+            if landed or answer.ok:
+                self.sidebar.emit("mutated")
 
         self.sidebar.run_mutation(work, done)
 
