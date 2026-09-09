@@ -12,12 +12,13 @@ sync). A popup() that runs before that idle sizes the surface without
 the separators, and the menu scrolls by exactly their height — a
 three-item menu with a scrollbar (the git page's files list, 2026-09-09).
 
-popup_at parents and points the popover, then pops it from a zero timeout:
-one iteration later, after the separator sync (both run at
-GLib.PRIORITY_DEFAULT; the sync was queued first, so it dispatches first),
-and never starved under CI's Xvfb the way a default-idle callback is.
-The delay is a single main-loop turn — nothing a hand can notice. It also
-unparents the popover once closed, from the main loop for the same reason.
+popup_at (a menu at the pointer) and popup_from (a menu hanging off a
+button) parent the popover, then pop it from a zero timeout: one iteration
+later, after the separator sync (both run at GLib.PRIORITY_DEFAULT; the
+sync was queued first, so it dispatches first), and never starved under
+CI's Xvfb the way a default-idle callback is. The delay is a single
+main-loop turn — nothing a hand can notice. Both unparent the popover once
+closed, from the main loop for the same reason.
 """
 
 from __future__ import annotations
@@ -47,6 +48,18 @@ def popup_at(
     rect = Gdk.Rectangle()
     rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
     popover.set_pointing_to(rect)
+    _pop_next_turn(popover)
+
+
+def popup_from(popover: Gtk.Popover, parent: Gtk.Widget) -> None:
+    """Parent *popover* on *parent* and pop it up from the widget itself —
+    arrow and all, the way a MenuButton's menu hangs off its button — on
+    the next main-loop turn. The popover unparents itself once closed."""
+    popover.set_parent(parent)
+    _pop_next_turn(popover)
+
+
+def _pop_next_turn(popover: Gtk.Popover) -> None:
     popover.connect("closed", lambda p: GLib.idle_add(p.unparent, priority=GLib.PRIORITY_DEFAULT))
 
     def pop() -> bool:

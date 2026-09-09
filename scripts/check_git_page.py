@@ -1619,6 +1619,38 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("an untracked file arrives with the watch", wait_for(lambda: idle() and "menu.txt" in shown_paths(), timeout=5.0), shown_paths())
         labels = sidebar.file_menu_labels("menu.txt", "unstaged")
         check("an unstaged row's menu offers Stage file, Discard file… and the editor", labels == ["Stage file", "Discard file…", "Open in editor"], labels)
+        # The menu popped for real, at its full height: its sections'
+        # separators land from an idle after the items, and a popover
+        # popped in the same turn it was built sized itself without them
+        # and scrolled a three-item menu (contextmenu.popup_at's reason).
+        menu_row = next((w for w in _descendants(sidebar._file_list) if type(w).__name__ == "_FileRow" and w.file.path == "menu.txt" and w.side == "unstaged"), None)
+        check("the unstaged row is a widget", menu_row is not None)
+        if menu_row is not None:
+            _ok, row_bounds = menu_row.compute_bounds(sidebar._file_list)
+            sidebar._on_files_secondary_click(Gtk.GestureClick(button=3), 1, row_bounds.origin.x + 10, row_bounds.origin.y + 5)
+
+            def files_popover() -> Gtk.Popover | None:
+                child = sidebar._file_list.get_first_child()
+                while child is not None:
+                    if isinstance(child, Gtk.Popover) and child.get_visible():
+                        return child
+                    child = child.get_next_sibling()
+                return None
+
+            check("a right-click pops the row's menu", wait_for(lambda: files_popover() is not None))
+            popover = files_popover()
+            if popover is not None:
+                # A GtkPopoverMenu's items live under a ScrolledWindow; the
+                # menu scrolls exactly when its adjustment's content outruns
+                # the page (before the fix: 153 px of items on a 140 px page).
+                scroller = next((w for w in _descendants(popover) if isinstance(w, Gtk.ScrolledWindow)), None)
+                check("the menu's items sit in a scrolled window", scroller is not None)
+                if scroller is not None:
+                    vadj = scroller.get_vadjustment()
+                    wait_for(lambda: vadj.get_page_size() > 0)
+                    check("the menu shows all three items without scrolling", vadj.get_upper() <= vadj.get_page_size(), (vadj.get_upper(), vadj.get_page_size()))
+                popover.popdown()
+                wait_for(lambda: files_popover() is None)
         check("Stage file from the row's menu", sidebar.activate_file_menu("menu.txt", "Stage file", "unstaged"))
         check("stages it, with the toast", wait_for(idle, timeout=5.0) and wait_for(lambda: "menu.txt" in index_paths(), timeout=5.0) and toasts[-1:] == ["Staged menu.txt"], (index_paths(), toasts[-1:]))
         check("the row moved to STAGED", wait_for(lambda: idle() and sidebar.file_menu_labels("menu.txt", "staged") == ["Unstage file", "Open in editor"], timeout=5.0), sidebar.file_rows())
