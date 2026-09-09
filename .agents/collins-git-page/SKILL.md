@@ -277,6 +277,19 @@ imports `gitpage`; the page feeds it and listens:
   `gitmodel.MENU_*`, the labels `file_menu_label(action, kind)` with the
   operation's hint — through the `gitsb.file-<action> ((ss))` actions,
   target `(side, path)`) → `GitPage._on_file_action_requested`, below;
+  `resolve-all-requested(side)` (the action row's *Resolve all
+  conflicts* `Gtk.MenuButton`, shown by `_sync_resolve_all` only while
+  `FileSections.conflicts` is non-empty, its two items the rows' own
+  `file_menu_label(gitmodel.RESOLVE_ALL_ACTIONS, kind)` rebuilt when the
+  operation's kind changes — `gitsb.resolve-all (s)`) →
+  `GitPage._on_resolve_all_requested`: the unmerged paths re-read off
+  `git status` (`gitmodel.unmerged_paths`) and each one's stages on the
+  mutation thread, one `gitmodel.resolve_all_words(paths, side, kind,
+  deleting)` confirm, then `gitops.resolve_paths` → `BulkResolution`
+  (one `resolve_path` after the other, stopped at the first refusal;
+  `resolve_all_done` / `resolve_all_failed` word the toast). Probes:
+  `resolve_all_labels()` (None while hidden), `activate_resolve_all
+  (label)`;
   `open-requested(path)` (*Open in editor*, `gitsb.open-editor (s)`) →
   the diff's `e` door with no line; `open-with-requested(path, app_id)`
   (the *Open In…* submenu — `openwithrows` icon rows, one per

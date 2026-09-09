@@ -1481,6 +1481,47 @@ def resolve_path(
     return Resolution(stage_paths(cwd, [path], run=run, timeout=timeout))
 
 
+@dataclass(frozen=True)
+class BulkResolution:
+    """What resolve_paths did: the paths *resolved* (checked out and
+    staged) and *deleted* (the picked side had no stage), in order; and,
+    when a path refused, *failed* naming it with git's *result* — the
+    paths before it stand resolved, the ones after were not touched."""
+
+    resolved: tuple[str, ...] = ()
+    deleted: tuple[str, ...] = ()
+    failed: str | None = None
+    result: GitResult = GitResult(True, "", "")
+
+    @property
+    def ok(self) -> bool:
+        return self.failed is None
+
+
+def resolve_paths(
+    cwd: str | Path | None,
+    paths: Sequence[str],
+    side: str,
+    run=subprocess.run,
+    timeout: float = GIT_TIMEOUT_S,
+) -> BulkResolution:
+    """Resolve every unmerged path in *paths* with *side* through
+    resolve_path, one after the other, stopping at the first refusal
+    (the sidebar's *Resolve all conflicts*). Refused without a call for
+    a side outside RESOLVE_SIDES, an empty list or an unsafe path."""
+    listed = _safe_paths(paths)
+    if side not in RESOLVE_SIDES or listed is None:
+        return BulkResolution(failed="?", result=GitResult(False, "", "no safe paths or side"))
+    resolved: list[str] = []
+    deleted: list[str] = []
+    for path in listed:
+        answer = resolve_path(cwd, path, side, run=run, timeout=timeout)
+        if not answer.result.ok:
+            return BulkResolution(tuple(resolved), tuple(deleted), path, answer.result)
+        (deleted if answer.deleted else resolved).append(path)
+    return BulkResolution(tuple(resolved), tuple(deleted))
+
+
 Trash = Callable[[str, Sequence[str]], GitResult]
 _APPLY_OPS = (gitpatch.OP_APPLY_CACHED, gitpatch.OP_APPLY_CACHED_REVERSE, gitpatch.OP_APPLY_WORKTREE_REVERSE)
 

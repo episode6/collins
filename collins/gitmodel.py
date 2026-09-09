@@ -654,6 +654,11 @@ MENU_ACTIONS: tuple[str, ...] = (
     MENU_OPEN_WITH,
 )
 _RESOLVE_SIDE_OF: dict[str, str] = {MENU_RESOLVE_OURS: "ours", MENU_RESOLVE_THEIRS: "theirs"}
+# The action row's Resolve all conflicts button: its two menu items are
+# the conflict rows' own resolve labels (file_menu_label, hint and all).
+RESOLVE_ALL_ACTIONS: tuple[str, ...] = (MENU_RESOLVE_OURS, MENU_RESOLVE_THEIRS)
+# How many of the paths a Resolve all removes its confirm names by path.
+_RESOLVE_ALL_LISTED = 8
 
 
 def file_menu_actions(side: str, code: str | None, on_disk: bool) -> tuple[tuple[str, ...], ...]:
@@ -774,6 +779,78 @@ def resolve_done(path: str, side: str, deleted: bool) -> str:
     if deleted:
         return _("Resolved {path} with {side}: removed").format(path=path, side=side)
     return _("Resolved {path} with {side}: staged").format(path=path, side=side)
+
+
+def resolve_all_words(
+    paths: Sequence[str], side: str, kind: str | None, deleting: Sequence[str]
+) -> tuple[str, str, str]:
+    """(heading, body, button) of the *Resolve all conflicts* confirm:
+    resolve_words' meanings of ours and theirs under *kind*, what the
+    resolution does to every path (checked out from that side and staged
+    as resolved, edits to the markers lost) and, when *deleting* names
+    some of them (that side has no version of the file), which are
+    removed instead — at most _RESOLVE_ALL_LISTED by path."""
+    count = len(paths)
+    ours = side_meaning(kind, "ours")
+    theirs = side_meaning(kind, "theirs")
+    side_word = _("ours") if side == "ours" else _("theirs")
+    if count == 1:
+        heading = _("Resolve the conflict with {side}?").format(side=side_word)
+    else:
+        heading = _("Resolve all {count} conflicts with {side}?").format(count=count, side=side_word)
+    meanings = _("Ours is {ours}. Theirs is {theirs}.").format(ours=ours, theirs=theirs)
+    what = _(
+        "Every unmerged file is replaced with the {side} version and staged as resolved"
+        " (`git checkout --{side}` then `git add`, one file at a time). Edits made to the"
+        " conflict markers are lost."
+    ).format(side=side)
+    parts = [meanings, what]
+    if deleting:
+        listed = ", ".join(deleting[:_RESOLVE_ALL_LISTED])
+        if len(deleting) > _RESOLVE_ALL_LISTED:
+            listed += ", …"
+        if len(deleting) == 1:
+            removal = _(
+                "{side} has no version of {listed}: resolving removes it from the working tree"
+                " and the index (`git rm`)."
+            )
+        else:
+            removal = _(
+                "{side} has no version of {listed}: resolving removes them from the working"
+                " tree and the index (`git rm`)."
+            )
+        parts.append(removal.format(side=_("Ours") if side == "ours" else _("Theirs"), listed=listed))
+    return heading, "\n\n".join(parts), _("Resolve all")
+
+
+def resolve_all_done(resolved: int, deleted: int, side: str) -> str:
+    """The toast after every conflict resolved with *side* landed."""
+    if deleted and resolved:
+        return _("Resolved {count} conflicts with {side}: {staged} staged, {removed} removed").format(
+            count=resolved + deleted, side=side, staged=resolved, removed=deleted
+        )
+    if deleted:
+        return _("Resolved {count} conflicts with {side}: removed").format(count=deleted, side=side)
+    return _("Resolved {count} conflicts with {side}: staged").format(count=resolved, side=side)
+
+
+def resolve_all_failed(path: str, stderr_line: str, done: int) -> str:
+    """The toast when the bulk resolution stopped on *path* after *done*
+    files: git's own first line, and how many stand resolved before it."""
+    reason = stderr_line or _("git failed")
+    if done:
+        return _("Stopped at {path} after {done} resolved: {reason}").format(
+            path=path, done=done, reason=reason
+        )
+    return _("Couldn't resolve {path}: {reason}").format(path=path, reason=reason)
+
+
+def unmerged_paths(status: Status | None) -> tuple[str, ...]:
+    """The paths *status* lists as unmerged (its `U` rows), in order —
+    what *Resolve all conflicts* acts on."""
+    if status is None:
+        return ()
+    return tuple(row.path for row in status.unstaged if row.code == "U")
 
 
 def discard_words(path: str, code: str | None) -> tuple[str, str, str]:

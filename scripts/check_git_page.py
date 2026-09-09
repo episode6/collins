@@ -502,6 +502,7 @@ def check_sidebar(repo: str) -> None:
     # bar comes up over the working-tree diff.
     bar = page.operation_bar
     check("nothing half-finished: the bar is hidden", not bar.get_visible() and bar.operation is None, bar.operation)
+    check("and the action row offers no Resolve all", sidebar.resolve_all_labels() is None, sidebar.resolve_all_labels())
     with open(os.path.join(repo, "a.txt"), "w") as fh:
         fh.write("clash\n")
     git(repo, "commit", "-qam", "clash")
@@ -579,12 +580,24 @@ def check_sidebar(repo: str) -> None:
     page.poll_tick()
     landed = wait_for(lambda: page.settled() and bar.operation is not None and bar.operation.kind == "cherry-pick")
     check("the tick brings the bar up for a cherry-pick started elsewhere", landed and bar.title_text() == "Cherry-pick in progress", (landed, bar.get_visible(), bar.title_text()))
-    with open(os.path.join(repo, "a.txt"), "w") as fh:
-        fh.write("resolved\n")
-    git(repo, "add", "a.txt")
-    page.poll_tick()
+    # The action row's Resolve all conflicts ▾ comes up with the CONFLICTS
+    # section, its two items worded for the pick; theirs asks once (the
+    # sides named, the button Resolve all), then checks the pick's copy
+    # out and stages it, and the hint follows.
+    landed = wait_for(lambda: sidebar.resolve_all_labels() is not None)
+    check("Resolve all conflicts is offered while CONFLICTS is up", landed and sidebar.resolve_all_labels() == ["Resolve with ours (HEAD)", "Resolve with theirs (the pick)"], sidebar.resolve_all_labels())
+    resolve_asked.clear()
+    gitpage.dialogs.confirm_dialog = confirm_resolve
+    try:
+        check("Resolve with theirs from the Resolve all menu", sidebar.activate_resolve_all("Resolve with theirs (the pick)"))
+        landed = wait_for(lambda: not sidebar.busy and page.settled() and git_out(repo, "ls-files", "-u", "--", "a.txt") == "")
+    finally:
+        gitpage.dialogs.confirm_dialog = real_confirm
+    check("it asked once, for the one conflict, naming the pick's sides", len(resolve_asked) == 1 and resolve_asked[0][0] == "Resolve the conflict with theirs?" and resolve_asked[0][2] == "Resolve all" and "Ours is HEAD, the branch you are on. Theirs is the commit being picked." in resolve_asked[0][1], resolve_asked)
+    check("and the pick's copy is checked out and staged as resolved", landed and open(os.path.join(repo, "a.txt")).read() != "clash\n" and git_out(repo, "status", "--porcelain").split("\n")[0] == "M  a.txt", (landed, git_out(repo, "status", "--porcelain")))
     landed = wait_for(lambda: page.settled() and bar.hint_text().startswith("Nothing is left unmerged"))
     check("resolved and staged, the hint says so", landed, bar.hint_text())
+    check("and the Resolve all button is gone with the section", wait_for(lambda: sidebar.resolve_all_labels() is None), sidebar.resolve_all_labels())
     bar.click_continue()
     landed = wait_for(lambda: not sidebar.busy and page.settled() and bar.operation is None)
     check("Continue finishes the cherry-pick and takes the bar down", landed and not bar.get_visible(), (landed, bar.get_visible()))
