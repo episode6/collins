@@ -1674,7 +1674,7 @@ class GitPage(Adw.Bin):
             else:
                 reason = gitops.first_line(answer.result.stderr)
                 self._toast(gitmodel.resolve_all_failed(answer.failed or "?", reason, landed))
-            if landed or answer.ok:
+            if landed:
                 self.sidebar.emit("mutated")
 
         self.sidebar.run_mutation(work, done)

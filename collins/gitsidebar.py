@@ -1211,7 +1211,9 @@ class GitSidebar(Gtk.Box):
         self._resolve_all_button.set_sensitive(self._live and not self._busy)
 
     def _on_resolve_all(self, side: str) -> None:
-        if side not in gitops.RESOLVE_SIDES or not self._sections.conflicts or self._busy:
+        if side not in gitops.RESOLVE_SIDES or not self._sections.conflicts:
+            return
+        if not self._working_live() or self._busy:
             return
         self.emit("resolve-all-requested", side)
 
