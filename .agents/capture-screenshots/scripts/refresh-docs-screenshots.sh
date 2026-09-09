@@ -5,7 +5,8 @@
 # Usage: refresh-docs-screenshots.sh <repo-root> [scene ...]
 #
 # With no scene named, every scene is shot and the PNGs land in
-# docs/public/img/ (plus data/screenshot.png for the README). Name scenes to
+# docs/public/img/ (plus data/screenshot.png for the README; the site's
+# hero.png is a copy of the new-chat shot). Name scenes to
 # redo only those. Each scene is its own app launch on a fresh headless
 # display; the staged data tree is shared so the shots stay comparable.
 set -e
@@ -62,15 +63,18 @@ run_scene() {
   want "${SCENES[@]}" || return 0
   case "$SCENE" in
     main-window)    shoot main-window "$IMG/main-window.png" --size 1280x860 ;;
-    hero)           shoot hero "$IMG/hero.png" --size 1280x860
-                    cp "$IMG/hero.png" "$ROOT/data/screenshot.png"
-                    crop_sidebar "$IMG/hero.png" "$IMG/sidebar.png" ;;
+    # The hero scene (a session open on a project) is the README's shot and
+    # the source of the sidebar crop; the docs site's hero.png is the
+    # new-chat shot, copied below.
+    hero)           shoot hero "$ROOT/data/screenshot.png" --size 1280x860
+                    crop_sidebar "$ROOT/data/screenshot.png" "$IMG/sidebar.png" ;;
     quick-switcher) shoot quick-switcher "$IMG/quick-switcher.png" --size 1280x860 ;;
     session-details) shoot session-details "$IMG/session-details.png" --size 1280x860 ;;
     mcp-servers)    shoot mcp-servers "$IMG/mcp-servers.png" --size 1280x860 ;;
     preferences)    shoot preferences "$IMG/preferences.png" --size 1280x860 ;;
     terminal-panel) shoot terminal-panel "$IMG/terminal-panel.png" --size 1280x860 ;;
-    new-chat)       shoot new-chat "$IMG/new-chat.png" --size 1280x860 --set welcome_seen=true ;;
+    new-chat)       shoot new-chat "$IMG/new-chat.png" --size 1280x860 --set welcome_seen=true
+                    cp "$IMG/new-chat.png" "$IMG/hero.png" ;;
     composer)       shoot composer "$IMG/composer.png" --size 1280x860 ;;
     pr-page)        shoot pr-page "$IMG/pr-page.png" --size 1700x950 \
                       --set page_panel_size_right=700 --settle-ms 6000 ;;
