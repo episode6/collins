@@ -91,3 +91,58 @@ def test_launch_app_can_refuse_to_pass_the_directory(tmp_path, monkeypatch):
     footerapps.launch_app(_FileTakingAppInfo("myterm %u"), str(tmp_path), pass_directory=False)
     assert calls[0][0] == (["myterm"],)
     assert calls[0][1]["cwd"] == str(tmp_path)
+
+
+# -- a file to an app (the git page's files-list "Open In…") -------------------------------
+
+
+class _FileEditorAppInfo(_FakeAppInfo):
+    """An app that takes a file (%f): what the git page's "Open In…" lists.
+    *fail* makes its launch raise the GLib.Error a broken entry would."""
+
+    def __init__(self, commandline: str = "edit %f", fail: bool = False) -> None:
+        super().__init__(commandline)
+        self.launched: list = []
+        self._fail = fail
+
+    def supports_files(self) -> bool:
+        return True
+
+    def launch(self, files, context) -> None:
+        if self._fail:
+            raise footerapps.GLib.Error("no display")
+        self.launched.append([f.get_path() for f in files])
+
+
+def test_accepts_files_reads_the_exec_placeholders():
+    assert not footerapps.accepts_files(_FakeAppInfo("myterm"))
+    assert footerapps.accepts_files(_FileTakingAppInfo("myterm %u"))
+    assert footerapps.accepts_files(_FileEditorAppInfo())
+
+
+def test_launch_app_file_hands_the_file_over(tmp_path):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    app = _FileEditorAppInfo()
+    assert footerapps.launch_app_file(app, str(path))
+    assert app.launched == [[str(path)]]
+
+
+def test_launch_app_file_refuses_without_a_launch(tmp_path):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    # An app with no file placeholder: GLib would drop the argument.
+    assert not footerapps.launch_app_file(_FakeAppInfo("myterm"), str(path))
+    # A path that isn't a file — missing, or a directory.
+    app = _FileEditorAppInfo()
+    assert not footerapps.launch_app_file(app, str(tmp_path / "nosuch.txt"))
+    assert not footerapps.launch_app_file(app, str(tmp_path))
+    assert not footerapps.launch_app_file(app, "")
+    assert app.launched == []
+
+
+def test_launch_app_file_swallows_a_launch_failure(tmp_path, capsys):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    assert not footerapps.launch_app_file(_FileEditorAppInfo(fail=True), str(path))
+    assert "footer app launch failed (fake.desktop)" in capsys.readouterr().err

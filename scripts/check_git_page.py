@@ -1584,6 +1584,48 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("Open in editor from the row's menu", sidebar.activate_file_menu("menu.txt", "Open in editor", "unstaged"))
         check("activates the window's open-in-editor with the full path and no line", opened_paths == [(os.path.join(repo, "menu.txt"), 0, 0)], opened_paths)
         window.insert_action_group("win", None)
+        # Open In…: two footer apps configured, one that takes a file and a
+        # terminal that doesn't — the submenu lists the first alone, and a
+        # pick reaches footerapps.launch_app_file with the file's full path.
+        # The desktop's app registry is stubbed: CI has no .desktop entries.
+
+        class FakeApp:
+            def __init__(self, app_id: str, name: str, files: bool) -> None:
+                self.app_id, self.name, self.files = app_id, name, files
+
+            def get_id(self) -> str:
+                return self.app_id
+
+            def get_display_name(self) -> str:
+                return self.name
+
+            def get_icon(self):
+                return None
+
+            def supports_files(self) -> bool:
+                return self.files
+
+            def supports_uris(self) -> bool:
+                return False
+
+        apps = {"editor.desktop": FakeApp("editor.desktop", "Fake Editor", True), "term.desktop": FakeApp("term.desktop", "Fake Terminal", False)}
+        launched: list[tuple[str, str]] = []
+        footerapps = gitpage.footerapps
+        real_apps = (footerapps.resolve_apps, footerapps.resolve_app, footerapps.launch_app_file)
+        footerapps.resolve_apps = lambda ids: [(i, apps[i]) for i in ids if i in apps]
+        footerapps.resolve_app = lambda app_id: apps.get(app_id)
+        footerapps.launch_app_file = lambda info, path: launched.append((info.get_id(), path)) or True
+        try:
+            page.apply_settings({**SETTINGS, "footer_apps": ["editor.desktop", "term.desktop", "gone.desktop"]})
+            check("with footer apps configured the row's menu grows Open In…", sidebar.file_menu_labels("menu.txt", "unstaged") == ["Stage file", "Discard file…", "Open in editor", "Open In…"], sidebar.file_menu_labels("menu.txt", "unstaged"))
+            check("listing the app that takes a file alone", sidebar.file_open_with_labels("menu.txt", "unstaged") == ["Fake Editor"], sidebar.file_open_with_labels("menu.txt", "unstaged"))
+            check("a pick from the submenu", sidebar.activate_file_menu("menu.txt", "Open In…", "unstaged", app_id="editor.desktop"))
+            check("hands the file's full path to the app", launched == [("editor.desktop", os.path.join(repo, "menu.txt"))], launched)
+            check("an app the submenu doesn't list can't be picked", not sidebar.activate_file_menu("menu.txt", "Open In…", "unstaged", app_id="term.desktop") and len(launched) == 1, launched)
+        finally:
+            footerapps.resolve_apps, footerapps.resolve_app, footerapps.launch_app_file = real_apps
+            page.apply_settings(SETTINGS)
+        check("with the apps gone the submenu is gone", sidebar.file_open_with_labels("menu.txt", "unstaged") == [], sidebar.file_open_with_labels("menu.txt", "unstaged"))
         asks = len(asked)
         answers.append(False)
         check("Discard file… from the row's menu, cancelled", sidebar.activate_file_menu("menu.txt", "Discard file…", "unstaged"))

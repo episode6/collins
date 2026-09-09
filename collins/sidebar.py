@@ -131,6 +131,7 @@ _ARRIVE_MS = 250
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
 _HEADER_ICON_OFFSET = 18
 
+
 def _session_child_indent(icon_size: int) -> int:
     """Left margin for a session row, so its card starts right where the icon
     of the project header above it ends.
