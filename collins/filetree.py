@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import editorfiles, fileclipboard, filetypes, gitinfo
+from . import contextmenu, editorfiles, fileclipboard, filetypes, gitinfo
 from .i18n import _
 
 # How long after the last change in an expanded directory its row list is
@@ -420,13 +420,7 @@ class FileTree(Gtk.Box):
         # carries it opens through this.
         self._paste_action.set_enabled(fileclipboard.has_files(self.get_clipboard()))
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        popover.set_parent(self._list_view)
-        popover.set_has_arrow(False)
-        rect = Gdk.Rectangle()
-        rect.x, rect.y, rect.width, rect.height = int(x), int(y), 1, 1
-        popover.set_pointing_to(rect)
-        popover.connect("closed", lambda p: GLib.idle_add(p.unparent))
-        popover.popup()
+        contextmenu.popup_at(popover, self._list_view, x, y)
 
     def _on_add_to_chat(self, _action: Gio.SimpleAction, _param) -> None:
         if self._menu_path:

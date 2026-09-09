@@ -38,6 +38,13 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **Right-click menus stop scrolling.** The git page's files menu — three
+  or four items — opened with a scrollbar and a row cut off, and every
+  other right-click menu with a separator in it (the diff view's, the
+  sidebar's, the editor's, the attachments panel's) was a few pixels short
+  the same way: GTK adds a sectioned menu's separators a moment after the
+  popover has already measured itself. Every hand-built context menu now
+  pops up one main-loop turn later, at its full height.
 - **The git page's panels reach a narrow page.** Below about 680 px the
   page used to hide the commits and files panels and grey the header's
   panel button, leaving no way to pick another commit or file without
