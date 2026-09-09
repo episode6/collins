@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-29. Full change history: git log for this file.
+# fork. Last modified: 2026-09-09. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -30,7 +30,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
-from . import claudemodels, desktopentry, footerapps, newchat, openwith, pkgrepos, prmenu
+from . import claudemodels, desktopentry, footerapps, newchat, openwith, openwithrows, pkgrepos, prmenu
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
 from .formatting import format_size
@@ -131,16 +131,6 @@ _ARRIVE_MS = 250
 # theme's sidebar-row padding (8px in Adwaita) plus .group-header's own 10px.
 _HEADER_ICON_OFFSET = 18
 
-# App icons in a project's "open in…" menu rows: symbolic-icon sized, so a row
-# is no taller than the plain menu items above and below it.
-_OPEN_WITH_ICON_PX = 16
-
-# Gap between that icon and its label. Not a round number because it is what
-# lands the label on the text column Adwaita's own menu items use: the GitHub
-# row sits among plain items (see show_group_menu), and a label two pixels off
-# the ones above and below it is the sort of thing you see without seeing why.
-_OPEN_WITH_ICON_GAP = 8
-
 
 def _session_child_indent(icon_size: int) -> int:
     """Left margin for a session row, so its card starts right where the icon
@@ -151,55 +141,6 @@ def _session_child_indent(icon_size: int) -> int:
     header's icon offset plus the icon's width has to be matched.
     """
     return _HEADER_ICON_OFFSET + icon_size
-
-
-def _open_with_row(icon: Gio.Icon | None, label: str, action: str, target: GLib.Variant) -> Gtk.Widget:
-    """A menu row that shows an app's icon beside its name.
-
-    A menu model can't do this: GtkModelButton takes an "icon" attribute but
-    only draws it when the item has no text, so a plain Gio.MenuItem would
-    silently drop the icon. Custom widgets slotted into the popover (the same
-    trick prmenu.py's list is built from) can show both.
-    """
-    image = Gtk.Image.new_from_gicon(icon or Gio.ThemedIcon.new("application-x-executable"))
-    image.set_pixel_size(_OPEN_WITH_ICON_PX)
-    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=_OPEN_WITH_ICON_GAP)
-    box.append(image)
-    box.append(Gtk.Label(label=label, xalign=0.0, hexpand=True))
-
-    button = Gtk.Button(child=box)
-    button.add_css_class("flat")
-    button.add_css_class("open-with-row")  # menu-sized, and lit under the pointer
-    button.connect("clicked", _on_open_with_clicked, action, target)
-    return button
-
-
-def _add_icon_row(
-    section: Gio.Menu,
-    rows: list[Gtk.Widget],
-    icon: Gio.Icon | None,
-    label: str,
-    action: str,
-    target: GLib.Variant,
-) -> None:
-    """Append an item to *section* that is drawn as an icon beside its label.
-
-    The item is an empty placeholder naming a slot, and the widget filling
-    that slot goes on *rows* for _popup_menu to add to the popover under the
-    same name — so the two are built together here, and every caller sharing
-    one popover shares one *rows* list to keep the numbering straight.
-    """
-    item = Gio.MenuItem.new(None, None)
-    item.set_attribute_value("custom", GLib.Variant("s", f"open-with-{len(rows)}"))
-    section.append_item(item)
-    rows.append(_open_with_row(icon, label, action, target))
-
-
-def _on_open_with_clicked(button: Gtk.Button, action: str, target: GLib.Variant) -> None:
-    button.activate_action(action, target)
-    popover = button.get_ancestor(Gtk.Popover)
-    if popover is not None:
-        popover.popdown()
 
 
 def _abbreviate_path(path: str | None) -> str:
@@ -2853,7 +2794,7 @@ class SessionSidebar(Gtk.Box):
             # rather than one that would go nowhere. GitHub's own mark on it,
             # the way the PR menu's row of the same name carries it.
             if github_url(row.cwd):
-                _add_icon_row(
+                openwithrows.add_icon_row(
                     open_section,
                     rows,
                     Gio.ThemedIcon.new("github-symbolic"),
@@ -2909,14 +2850,14 @@ class SessionSidebar(Gtk.Box):
         manager and terminal the desktop hands out. Each entry is just the
         app's name; the submenu label already says what picking one does.
 
-        Each is a custom widget rather than a menu item — see _open_with_row —
+        Each is a custom widget rather than a menu item — see openwithrows —
         so it can show the app's own icon; the built widgets are appended to
         *rows* for _popup_menu to slot into the popover, in order.
         """
         section = Gio.Menu()
 
         def add(icon: Gio.Icon | None, label: str, action: str, target: GLib.Variant) -> None:
-            _add_icon_row(section, rows, icon, label, action, target)
+            openwithrows.add_icon_row(section, rows, icon, label, action, target)
 
         configured = set()
         for app_id, info in footerapps.resolve_apps(
@@ -2953,8 +2894,7 @@ class SessionSidebar(Gtk.Box):
         custom_rows: list[Gtk.Widget] | None = None,
     ) -> None:
         popover = Gtk.PopoverMenu.new_from_model(menu)
-        for index, widget in enumerate(custom_rows or ()):
-            popover.add_child(widget, f"open-with-{index}")
+        openwithrows.slot_them(popover, list(custom_rows or ()))
         popover.set_parent(row)
         popover.set_has_arrow(False)
         rect = Gdk.Rectangle()

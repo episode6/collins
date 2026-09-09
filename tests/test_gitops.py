@@ -1579,3 +1579,105 @@ def test_continue_and_abort_operation_against_a_stopped_revert_and_cherry_pick(r
     # With nothing in progress, both are git's own refusals.
     assert not gitops.abort_operation(repo, "cherry-pick").ok
     assert not gitops.continue_operation(repo, "merge").ok
+
+
+# -- resolving an unmerged path -----------------------------------------------------------
+
+
+def test_resolve_builders_and_the_stages_parser():
+    assert gitops.unmerged_stages_argv("a b.txt") == ["ls-files", "-u", "-z", "--", ":(literal)a b.txt"]
+    ours = ["checkout", "-q", "--ours", "--", ":(literal)f.txt"]
+    assert gitops.checkout_side_argv("ours", ["f.txt"]) == ours
+    theirs = ["checkout", "-q", "--theirs", "--", ":(literal)f.txt"]
+    assert gitops.checkout_side_argv("theirs", ["f.txt"]) == theirs
+    with pytest.raises(ValueError):
+        gitops.checkout_side_argv("--force", ["f.txt"])
+    removed = ["rm", "-q", "--", ":(literal)f.txt", ":(literal)g.txt"]
+    assert gitops.remove_paths_argv(["f.txt", "g.txt"]) == removed
+    text = "100644 aaaa 1\tf.txt\x00100644 bbbb 2\tf.txt\x00100644 cccc 3\tf.txt\x00"
+    assert gitops.parse_unmerged_stages(text) == frozenset({1, 2, 3})
+    two = "100644 aaaa 1\tg.txt\x00100644 bbbb 2\tg.txt\x00"
+    assert gitops.parse_unmerged_stages(two) == frozenset({1, 2})
+    assert gitops.parse_unmerged_stages("") == frozenset()
+    assert gitops.parse_unmerged_stages("garbage\x00100644 x 9\tf\x00100644 x y\tf\x00") == frozenset()
+    # Which side a resolution deletes with: the one with no stage.
+    assert not gitops.resolution_deletes("ours", {1, 2, 3})
+    assert gitops.resolution_deletes("theirs", {1, 2})
+    assert gitops.resolution_deletes("ours", {1, 3})
+    assert gitops.resolution_deletes("nonsense", {1, 2, 3})
+
+
+def test_read_unmerged_stages_refuses_an_unsafe_path_and_is_none_when_git_fails():
+    run = fake_runner({"ls-files": ok("100644 aaaa 1\tf.txt\x00100644 bbbb 3\tf.txt\x00")})
+    assert gitops.read_unmerged_stages("/repo", "f.txt", run=run) == frozenset({1, 3})
+    assert gitops.read_unmerged_stages("/repo", "../f.txt", run=run) is None
+    failing = fake_runner({"ls-files": failed("fatal")})
+    assert gitops.read_unmerged_stages("/repo", "f.txt", run=failing) is None
+
+
+def test_resolve_path_refuses_without_a_call_what_it_cannot_name():
+    calls: list[list[str]] = []
+
+    def run(argv, **_kw):
+        calls.append(argv)
+        return ok("")
+
+    assert not gitops.resolve_path("/repo", "f.txt", "mine", run=run).result.ok
+    assert not gitops.resolve_path("/repo", "-f.txt", "ours", run=run).result.ok
+    assert calls == []
+    # No longer unmerged: refused after the one read.
+    answer = gitops.resolve_path("/repo", "f.txt", "ours", run=run)
+    assert not answer.result.ok and "not unmerged" in answer.result.stderr
+    assert [argv[1] for argv in calls] == ["ls-files"]
+
+
+@needs_git
+def test_resolve_path_checks_out_the_side_and_stages_or_removes(repo):
+    # main and side both touch f.txt; side deletes g.txt which main edits;
+    # main deletes h.txt which side edits — the three shapes of a clash.
+    (repo / "g.txt").write_text("base\n")
+    (repo / "h.txt").write_text("base\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base files")
+    _git(repo, "checkout", "-qb", "side")
+    (repo / "f.txt").write_text("side\n")
+    _git(repo, "rm", "-q", "g.txt")
+    (repo / "h.txt").write_text("side\n")
+    _git(repo, "commit", "-qam", "side")
+    _git(repo, "checkout", "-q", "main")
+    (repo / "f.txt").write_text("main\n")
+    (repo / "g.txt").write_text("main\n")
+    _git(repo, "rm", "-q", "h.txt")
+    _git(repo, "commit", "-qam", "main")
+    assert subprocess.run(["git", "merge", "side"], cwd=repo, capture_output=True).returncode != 0
+    assert {row.path: row.code for row in gitops.read_status(repo).unstaged} == {
+        "f.txt": "U", "g.txt": "U", "h.txt": "U",
+    }
+    assert gitops.read_unmerged_stages(repo, "f.txt") == frozenset({1, 2, 3})
+    assert gitops.read_unmerged_stages(repo, "g.txt") == frozenset({1, 2})
+    assert gitops.read_unmerged_stages(repo, "h.txt") == frozenset({1, 3})
+    assert gitops.read_unmerged_stages(repo, "nosuch.txt") == frozenset()
+
+    # Both sides present: the side's copy, staged as resolved.
+    answer = gitops.resolve_path(repo, "f.txt", "theirs")
+    assert answer.result.ok and not answer.deleted
+    assert (repo / "f.txt").read_text() == "side\n"
+    # Theirs deleted g.txt: resolving with theirs removes it; theirs
+    # edited h.txt, which ours deleted: resolving with theirs adds it.
+    answer = gitops.resolve_path(repo, "g.txt", "theirs")
+    assert answer.result.ok and answer.deleted and not (repo / "g.txt").exists()
+    answer = gitops.resolve_path(repo, "h.txt", "theirs")
+    assert answer.result.ok and not answer.deleted and (repo / "h.txt").read_text() == "side\n"
+    status = gitops.read_status(repo)
+    assert [row.code for row in status.unstaged] == []
+    assert {row.path: row.code for row in status.staged} == {"f.txt": "M", "g.txt": "D", "h.txt": "A"}
+    # Resolved already: refused, nothing run.
+    assert "not unmerged" in gitops.resolve_path(repo, "f.txt", "ours").result.stderr
+    # From a subdirectory the path is still the repository's.
+    _git(repo, "merge", "--abort")
+    assert subprocess.run(["git", "merge", "side"], cwd=repo, capture_output=True).returncode != 0
+    (repo / "sub").mkdir()
+    answer = gitops.resolve_path(repo / "sub", "f.txt", "ours")
+    assert answer.result.ok and (repo / "f.txt").read_text() == "main\n"
+    assert gitops.remove_paths(repo, ["g.txt"]).ok and not (repo / "g.txt").exists()
+    assert not gitops.remove_paths(repo, ["../g.txt"]).ok

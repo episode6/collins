@@ -36,7 +36,12 @@ every git call is gitops'. The widget only draws, threads and emits:
 "load-requested" (a gitloads.Loaded), "navigate-requested" (a path and the
 side it sits on), "revert-requested" (a path whose row's *Revert file*
 was picked on a commit, the branch or a range — the page hands it to the
-view's file button), "mutated" (a git mutation landed — the page re-seeds
+view's file button), "file-action-requested" (a path, its side and one
+of gitmodel's MENU_* ids: a working-tree row's Stage / Unstage / Discard…
+or an unmerged row's Resolve with ours / theirs — the page runs the git
+call and asks first where it must), "open-requested" (a path for the
+session's editor) and "open-with-requested" (a path and the desktop-file
+id of a configured app), "mutated" (a git mutation landed — the page re-seeds
 its freshness signature and reloads the view). Every thread reply lands with
 GLib.idle_add at default priority behind a generation counter, so a stale
 reply never overwrites a newer one; every subject, path and branch name
@@ -49,7 +54,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 import gi
 
@@ -58,7 +63,17 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import dialogs, filetypes, gitinfo, gitloads, gitmodel, gitops, gitpatch  # noqa: E402
+from . import (  # noqa: E402
+    dialogs,
+    filetypes,
+    footerapps,
+    gitinfo,
+    gitloads,
+    gitmodel,
+    gitops,
+    gitpatch,
+    openwithrows,
+)
 from .gitmodel import BranchRef, FileRow, FileSections, Row  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -71,6 +86,10 @@ WIDTH_REQUEST = 220
 # The action group the context menu and the Commit menu's items act on,
 # inserted on the widget under this prefix.
 _ACTIONS = "gitsb"
+# One item of a file row's context menu (_file_menu_items): the label, the
+# gitsb action, its target (None for a submenu) and, for the "Open In…"
+# submenu, its rows — (icon, app name, target) per app.
+_MenuItem = tuple[str, str, GLib.Variant | None, list[tuple[Gio.Icon | None, str, GLib.Variant]] | None]
 # The status letter's colour, as a CSS class on the code label (an entry
 # of None is the default text colour).
 _CODE_CLASSES: dict[str, str | None] = {
@@ -284,6 +303,11 @@ class GitSidebar(Gtk.Box):
         "navigate-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
         "show-all-requested": (GObject.SignalFlags.RUN_FIRST, None, ()),
         "revert-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A file row's context menu on the working tree: (path, side, a
+        # gitmodel MENU_* id); the two opens carry the path (and the app).
+        "file-action-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str, str)),
+        "open-requested": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        "open-with-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
         "mutated": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # The files filter's text changed (the view hides the sections
         # that don't match); Escape in the filter cleared it and wants the
@@ -312,6 +336,11 @@ class GitSidebar(Gtk.Box):
         # Whether a working-tree side is loaded: what the action row's
         # buttons act on (stage all, commit).
         self._live = False
+        # The operation in progress (its gitops.OPERATION_KINDS kind, or
+        # None) — what the resolve items' hints name — and the repository
+        # root, which the file rows' opens need to know a path exists.
+        self._operation_kind: str | None = None
+        self._repo_root: str | None = None
 
         # -- the commits list ---------------------------------------------------
         # How many pages each group shows, by group id (absent: one).
@@ -460,6 +489,21 @@ class GitSidebar(Gtk.Box):
         revert_commit = Gio.SimpleAction.new("revert-commit", GLib.VariantType.new("s"))
         revert_commit.connect("activate", lambda _a, param: self._on_revert_clicked(param.get_string()))
         group.add_action(revert_commit)
+        # The file rows' working-tree items: one action per MENU_* id, the
+        # target (side, path) — the row's side, since a path can sit on
+        # both sides at once; the page runs them.
+        for menu_action in gitmodel.MENU_ACTIONS:
+            if menu_action in (gitmodel.MENU_REVERT, gitmodel.MENU_OPEN, gitmodel.MENU_OPEN_WITH):
+                continue
+            action = Gio.SimpleAction.new(f"file-{menu_action}", GLib.VariantType.new("(ss)"))
+            action.connect("activate", self._on_file_action, menu_action)
+            group.add_action(action)
+        open_editor = Gio.SimpleAction.new("open-editor", GLib.VariantType.new("s"))
+        open_editor.connect("activate", lambda _a, param: self.emit("open-requested", param.get_string()))
+        group.add_action(open_editor)
+        open_with = Gio.SimpleAction.new("open-with", GLib.VariantType.new("(ss)"))
+        open_with.connect("activate", lambda _a, param: self.emit("open-with-requested", *param.unpack()))
+        group.add_action(open_with)
         self._actions_group = group
         self.insert_action_group(_ACTIONS, group)
 
@@ -488,6 +532,13 @@ class GitSidebar(Gtk.Box):
     def file_rows(self) -> FileSections:
         """What the files list draws (for the e2e)."""
         return self._sections
+
+    def file_row(self, path: str, side: str = "") -> FileRow | None:
+        """The row drawn for *path* on *side* ("unstaged" | "staged" | ""
+        for a flat list), or None — what the page reads a menu action's
+        status code and rename source off."""
+        widget = self._file_widgets.get((side, path))
+        return widget.file if widget is not None else None
 
     def collapsed_groups(self) -> set[str]:
         """The group ids folded under their header (for the e2e)."""
@@ -534,6 +585,8 @@ class GitSidebar(Gtk.Box):
         live: bool,
         stack: Sequence[BranchRef] = (),
         twins: Sequence[str] = (),
+        operation_kind: str | None = None,
+        repo_root: str | None = None,
     ) -> bool:
         """What the page knows: the checked-out *branch* (and its *twins*,
         the other local branches at HEAD, which share its header), the *parent* and
@@ -542,8 +595,10 @@ class GitSidebar(Gtk.Box):
         branches under the parent, nearest first, as gitops.stack_branches
         lists them — the page reads it off git), what the page has
         *loaded* (a gitloads.Loaded) and, for a commit load, the sha it
-        *resolved* to; and whether a working-tree side is *live* (the
-        action row's buttons act on it). A change of branch, parent, stack
+        *resolved* to; whether a working-tree side is *live* (the
+        action row's buttons act on it); the kind of the *operation* in
+        progress (the resolve items' hints) and the *repo_root* (the
+        file rows' opens check the path exists). A change of branch, parent, stack
         or default refreshes the commits list; the loaded mark and the
         buttons follow every call. Returns whether the groups changed (and
         so the list was re-read here) — the page refreshes it itself
@@ -560,6 +615,8 @@ class GitSidebar(Gtk.Box):
         self._loaded = loaded
         self._resolved_sha = resolved_sha
         self._live = bool(live)
+        self._operation_kind = operation_kind
+        self._repo_root = repo_root
         if groups_changed:
             self._pages = {}
             self.refresh_commits()
@@ -1050,30 +1107,82 @@ class GitSidebar(Gtk.Box):
         if isinstance(widget, _FileRow):
             self.emit("navigate-requested", widget.file.path, widget.side)
 
-    def _file_menu_items(self, widget: _FileRow) -> list[tuple[str, str, str]]:
-        """(label, action, target) for a file row's context menu: *Revert
-        file* on a read-only load — the same reverse apply into the
-        working tree as the diff's file header button, nothing committed
-        — and nothing on the working-tree loads, whose rows' actions are
-        the headers' own."""
-        if gitpatch.working_side(self._loaded) is not None:
-            return []
-        return [(_("Revert file"), "revert-file", widget.file.path)]
+    def _file_menu_items(self, widget: _FileRow) -> list[list[_MenuItem]]:
+        """The sections of a file row's context menu, each a list of
+        (label, action, target, apps) — *apps* the "Open In…" submenu's
+        rows, (icon, name, target) per configured app that takes a file,
+        and None for a plain item. gitmodel.file_menu_actions is the
+        rule: the working-tree sides' Stage / Unstage / Discard…, an
+        unmerged row's Stage and the two resolutions (their hints the
+        operation's), *Revert file* on a read-only load — the same
+        reverse apply into the working tree as the diff's file header
+        button, nothing committed — and, for a path on disk, the editor
+        and the apps. A flat list over the working tree (no status to
+        split on) gets the opens alone: the view's file buttons are the
+        rows' actions there."""
+        file = widget.file
+        side = widget.side
+        path = file.path
+        on_disk = False
+        if self._repo_root is not None and gitops.safe_path(path):
+            on_disk = Path(self._repo_root, path).is_file()
+        sections = list(gitmodel.file_menu_actions(side, file.code, on_disk))
+        if side == "" and gitpatch.working_side(self._loaded) is not None:
+            sections = sections[1:]
+        apps: list[tuple[Gio.Icon | None, str, GLib.Variant]] = []
+        if any(gitmodel.MENU_OPEN_WITH in section for section in sections):
+            for app_id, info in footerapps.resolve_apps(list(self._options.footer_apps)):
+                if footerapps.accepts_files(info):
+                    target = GLib.Variant("(ss)", (path, app_id))
+                    apps.append((info.get_icon(), info.get_display_name(), target))
+        built: list[list[_MenuItem]] = []
+        for section in sections:
+            items: list[_MenuItem] = []
+            for action in section:
+                label = gitmodel.file_menu_label(action, self._operation_kind)
+                if action == gitmodel.MENU_REVERT:
+                    items.append((label, "revert-file", GLib.Variant("s", path), None))
+                elif action == gitmodel.MENU_OPEN:
+                    items.append((label, "open-editor", GLib.Variant("s", path), None))
+                elif action == gitmodel.MENU_OPEN_WITH:
+                    if apps:
+                        items.append((label, "open-with", None, apps))
+                else:
+                    items.append((label, f"file-{action}", GLib.Variant("(ss)", (side, path)), None))
+            if items:
+                built.append(items)
+        return built
+
+    def _on_file_action(self, _action: Gio.SimpleAction, param: GLib.Variant, menu_action: str) -> None:
+        side, path = param.unpack()
+        self.emit("file-action-requested", path, side, menu_action)
 
     def _on_files_secondary_click(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
         row = self._file_list.get_row_at_y(int(y))
         if not isinstance(row, _FileRow):
             return
-        items = self._file_menu_items(row)
-        if not items:
+        sections = self._file_menu_items(row)
+        if not sections:
             return
         gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         menu = Gio.Menu()
-        for label, action, target in items:
-            item = Gio.MenuItem.new(label, None)
-            item.set_action_and_target_value(f"{_ACTIONS}.{action}", GLib.Variant("s", target))
-            menu.append_item(item)
+        rows: list[Gtk.Widget] = []
+        for items in sections:
+            section = Gio.Menu()
+            for label, action, target, apps in items:
+                if apps is not None:
+                    submenu = Gio.Menu()
+                    open_with = f"{_ACTIONS}.open-with"
+                    for icon, name, app_target in apps:
+                        openwithrows.add_icon_row(submenu, rows, icon, name, open_with, app_target)
+                    section.append_submenu(label, submenu)
+                    continue
+                item = Gio.MenuItem.new(label, None)
+                item.set_action_and_target_value(f"{_ACTIONS}.{action}", target)
+                section.append_item(item)
+            menu.append_section(None, section)
         popover = Gtk.PopoverMenu.new_from_model(menu)
+        openwithrows.slot_them(popover, rows)
         popover.set_parent(self._file_list)
         popover.set_has_arrow(False)
         popover.set_halign(Gtk.Align.START)
@@ -1084,23 +1193,44 @@ class GitSidebar(Gtk.Box):
         popover.popup()
 
     def file_menu_labels(self, path: str, side: str = "") -> list[str] | None:
-        """The labels a right-click on the row of *path* offers (for the
-        e2e); None when there is no such row."""
+        """The labels a right-click on the row of *path* offers, top to
+        bottom across the sections (for the e2e); None when there is no
+        such row."""
         widget = self._file_widgets.get((side, path))
         if widget is None:
             return None
-        return [label for label, _action, _target in self._file_menu_items(widget)]
+        return [label for items in self._file_menu_items(widget) for label, _a, _t, _apps in items]
 
-    def activate_file_menu(self, path: str, label: str, side: str = "") -> bool:
+    def file_open_with_labels(self, path: str, side: str = "") -> list[str] | None:
+        """The app names the row's "Open In…" submenu lists (for the e2e);
+        None when there is no such row, [] when the submenu isn't offered."""
+        widget = self._file_widgets.get((side, path))
+        if widget is None:
+            return None
+        for items in self._file_menu_items(widget):
+            for _label, _action, _target, apps in items:
+                if apps is not None:
+                    return [name for _icon, name, _t in apps]
+        return []
+
+    def activate_file_menu(self, path: str, label: str, side: str = "", app_id: str | None = None) -> bool:
         """Pick *label* from the row's context menu as a click would (for
-        the e2e)."""
+        the e2e); for the "Open In…" submenu, the row of *app_id*."""
         widget = self._file_widgets.get((side, path))
         if widget is None:
             return False
-        for name, action, target in self._file_menu_items(widget):
-            if name == label:
-                self._actions_group.activate_action(action, GLib.Variant("s", target))
-                return True
+        for items in self._file_menu_items(widget):
+            for name, action, target, apps in items:
+                if name != label:
+                    continue
+                if apps is None:
+                    self._actions_group.activate_action(action, target)
+                    return True
+                for _icon, _name, app_target in apps:
+                    if app_target.unpack()[1] == app_id:
+                        self._actions_group.activate_action(action, app_target)
+                        return True
+                return False
         return False
 
     # -- the action row ----------------------------------------------------------------------

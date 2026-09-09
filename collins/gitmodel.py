@@ -626,6 +626,189 @@ def revert_failed(abbrev: str, stderr_line: str, conflicts: bool) -> str:
     return stderr_line or _("git revert failed")
 
 
+# -- the files list's context menu (gitsidebar.py) ----------------------------------
+# A right-click on a file row offers what the row's side allows: the
+# working-tree sides' whole-file actions (stage, unstage, a confirmed
+# discard), an unmerged path's two resolutions, a read-only load's revert,
+# and — for a path that exists on disk — the editor and the configured
+# apps. file_menu_actions is the one rule; the sidebar words and wires the
+# ids it returns. Every action here is one git run on the path from the
+# page (the view's planners want a diff the other side's rows don't have).
+
+MENU_STAGE = "stage"
+MENU_UNSTAGE = "unstage"
+MENU_DISCARD = "discard"
+MENU_RESOLVE_OURS = "resolve-ours"
+MENU_RESOLVE_THEIRS = "resolve-theirs"
+MENU_REVERT = "revert"
+MENU_OPEN = "open"
+MENU_OPEN_WITH = "open-with"
+MENU_ACTIONS: tuple[str, ...] = (
+    MENU_STAGE,
+    MENU_UNSTAGE,
+    MENU_DISCARD,
+    MENU_RESOLVE_OURS,
+    MENU_RESOLVE_THEIRS,
+    MENU_REVERT,
+    MENU_OPEN,
+    MENU_OPEN_WITH,
+)
+_RESOLVE_SIDE_OF: dict[str, str] = {MENU_RESOLVE_OURS: "ours", MENU_RESOLVE_THEIRS: "theirs"}
+
+
+def file_menu_actions(side: str, code: str | None, on_disk: bool) -> tuple[tuple[str, ...], ...]:
+    """The sections of a file row's context menu, each a tuple of MENU_*
+    ids, for a row on *side* ("unstaged" | "staged" | "" for a flat load)
+    with the status *code* (a STATUS_CODES letter, None for a live row
+    the status didn't name) whose file is (*on_disk*) or is not in the
+    working tree. An unmerged row (`U`, always an unstaged-side row) gets
+    Stage — the same `add` the header button runs, for a conflict
+    resolved by hand — and the two resolutions; an unstaged row Stage and
+    Discard; a staged row Unstage; a flat row Revert. The opens follow
+    when there is a file to open."""
+    if side == "":
+        first: tuple[str, ...] = (MENU_REVERT,)
+    elif code == "U":
+        first = (MENU_STAGE, MENU_RESOLVE_OURS, MENU_RESOLVE_THEIRS)
+    elif side == "staged":
+        first = (MENU_UNSTAGE,)
+    else:
+        first = (MENU_STAGE, MENU_DISCARD)
+    if not on_disk:
+        return (first,)
+    return (first, (MENU_OPEN, MENU_OPEN_WITH))
+
+
+def resolve_side(action: str) -> str | None:
+    """"ours" / "theirs" for the two resolve actions, None for the rest."""
+    return _RESOLVE_SIDE_OF.get(action)
+
+
+# What ours and theirs mean, per operation in progress (gitops.in_progress
+# kinds; None for a clash with no operation behind it — a merge that was
+# `--quit`, a stash pop). Stage 2 is ours, stage 3 theirs, whatever the
+# words: git's own naming, which a rebase turns on its head — there HEAD
+# is the upstream the branch is replayed onto, and "theirs" is the user's
+# own commit. Each entry is (ours, theirs).
+_SIDE_MEANINGS: dict[str | None, tuple[str, str]] = {
+    "merge": ("HEAD, the branch you are on", "the branch being merged in"),
+    "cherry-pick": ("HEAD, the branch you are on", "the commit being picked"),
+    "revert": ("HEAD, what the branch has now", "what the revert restores: the reverted commit's parent"),
+    "rebase": ("the upstream the branch is being rebased onto", "your own commit, being replayed"),
+    "am": ("the branch the patches land on", "the patch being applied"),
+    None: ("the index's ours side (stage 2)", "the index's theirs side (stage 3)"),
+}
+# The short hint a menu label carries after "ours" / "theirs", per kind.
+_SIDE_HINTS: dict[str | None, tuple[str, str]] = {
+    "merge": ("HEAD", "the merge"),
+    "cherry-pick": ("HEAD", "the pick"),
+    "revert": ("HEAD", "the revert"),
+    "rebase": ("upstream", "your commit"),
+    "am": ("HEAD", "the patch"),
+    None: ("", ""),
+}
+
+
+def side_meaning(kind: str | None, side: str) -> str:
+    """What *side* ("ours" | "theirs") is under *kind* (a gitops
+    OPERATION_KINDS entry, or None), translated."""
+    ours, theirs = _SIDE_MEANINGS.get(kind, _SIDE_MEANINGS[None])
+    return _(ours if side == "ours" else theirs)
+
+
+def file_menu_label(action: str, kind: str | None = None) -> str:
+    """The words of a menu item: "Stage file", "Unstage file", "Discard
+    file…" (it asks), "Resolve with ours (HEAD)" / "Resolve with theirs
+    (the revert)" — the hint per *kind*, none without an operation —
+    "Revert file", "Open in editor", "Open In…" (a submenu)."""
+    if action == MENU_STAGE:
+        return _("Stage file")
+    if action == MENU_UNSTAGE:
+        return _("Unstage file")
+    if action == MENU_DISCARD:
+        return _("Discard file…")
+    if action in _RESOLVE_SIDE_OF:
+        side = _RESOLVE_SIDE_OF[action]
+        ours, theirs = _SIDE_HINTS.get(kind, _SIDE_HINTS[None])
+        hint = ours if side == "ours" else theirs
+        base = _("Resolve with ours") if side == "ours" else _("Resolve with theirs")
+        return f"{base} ({_(hint)})" if hint else base
+    if action == MENU_REVERT:
+        return _("Revert file")
+    if action == MENU_OPEN:
+        return _("Open in editor")
+    if action == MENU_OPEN_WITH:
+        return _("Open In…")
+    return action
+
+
+def resolve_words(path: str, side: str, kind: str | None, deletes: bool) -> tuple[str, str, str]:
+    """(heading, body, button) of the resolve confirm: what ours and
+    theirs mean under *kind*, and what the resolution does — the file
+    replaced with that side's version and staged as resolved (edits made
+    to the marker file are lost), or, when *deletes* (that side has no
+    version of the file), removed from the tree and the index."""
+    ours = side_meaning(kind, "ours")
+    theirs = side_meaning(kind, "theirs")
+    if side == "ours":
+        heading = _("Resolve {path} with ours?").format(path=path)
+    else:
+        heading = _("Resolve {path} with theirs?").format(path=path)
+    meanings = _("Ours is {ours}. Theirs is {theirs}.").format(ours=ours, theirs=theirs)
+    if deletes:
+        what = _(
+            "{side} has no version of this file: resolving with it removes {path} from the working"
+            " tree and the index (`git rm -- {path}`)."
+        ).format(side=_("Ours") if side == "ours" else _("Theirs"), path=path)
+    else:
+        what = _(
+            "{path} is replaced with the {side} version and staged as resolved"
+            " (`git checkout --{side} -- {path} && git add -- {path}`). Edits made to the"
+            " conflict markers are lost."
+        ).format(path=path, side=side)
+    return heading, f"{meanings}\n\n{what}", _("Resolve")
+
+
+def resolve_done(path: str, side: str, deleted: bool) -> str:
+    """The toast after a resolution landed."""
+    if deleted:
+        return _("Resolved {path} with {side}: removed").format(path=path, side=side)
+    return _("Resolved {path} with {side}: staged").format(path=path, side=side)
+
+
+def discard_words(path: str, code: str | None) -> tuple[str, str, str]:
+    """(heading, body, button) of a file row's Discard confirm — the
+    words of the view's file button (gitpatch.plan_file): an untracked
+    file (`?`) goes to the trash, a file deleted in the working tree
+    (`D`) is restored from the index, anything else has its changes
+    discarded."""
+    if code == "?":
+        return _("Move to the trash?"), _("Move {path} to the trash?").format(path=path), _("Move to trash")
+    if code == "D":
+        return _("Restore the file?"), _("Restore {path} from the index?").format(path=path), _("Restore")
+    return (
+        _("Discard the changes?"),
+        _("Discard the changes to {path}? This cannot be undone.").format(path=path),
+        _("Discard"),
+    )
+
+
+def discard_done(path: str, code: str | None) -> str:
+    """The toast after a file row's discard landed (the view's words)."""
+    if code == "?":
+        return _("Moved {path} to the trash").format(path=path)
+    if code == "D":
+        return _("Restored {path}").format(path=path)
+    return _("Discarded the changes to {path}").format(path=path)
+
+
+def stage_done(path: str, stage: bool) -> str:
+    """The toast after a file row's Stage / Unstage landed."""
+    if stage:
+        return _("Staged {path}").format(path=path)
+    return _("Unstaged {path}").format(path=path)
+
+
 # -- the in-progress bar (gitoperation.py) -----------------------------------------
 # The words for a half-finished rebase / merge / cherry-pick / revert /
 # `git am` (gitops.in_progress) the page's bar shows over a working-tree

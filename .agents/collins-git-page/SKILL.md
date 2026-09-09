@@ -263,6 +263,25 @@ imports `gitpage`; the page feeds it and listens:
   (the files list's right-click *Revert file*, offered only on a
   read-only load — `gitpatch.working_side` is None — through the
   `gitsb.revert-file (s)` action) → the view's file button;
+  `file-action-requested(path, side, action)` (the working-tree rows'
+  *Stage file* / *Unstage file* / *Discard file…* and a conflict row's
+  *Resolve with ours* / *theirs* — `gitmodel.file_menu_actions(side,
+  code, on_disk)` is the one rule for which row gets what, the ids are
+  `gitmodel.MENU_*`, the labels `file_menu_label(action, kind)` with the
+  operation's hint — through the `gitsb.file-<action> ((ss))` actions,
+  target `(side, path)`) → `GitPage._on_file_action_requested`, below;
+  `open-requested(path)` (*Open in editor*, `gitsb.open-editor (s)`) →
+  the diff's `e` door with no line; `open-with-requested(path, app_id)`
+  (the *Open In…* submenu — `openwithrows` icon rows, one per
+  `Options.footer_apps` entry that `footerapps.accepts_files`, the
+  submenu left out with none — `gitsb.open-with ((ss))`, target `(path,
+  app_id)`) → `footerapps.launch_app_file` under the repository root.
+  The two opens are offered only when the path exists on disk
+  (`set_context(repo_root=)`); a flat list over the working tree (no
+  status to split on) gets the opens alone. Probes: `file_menu_labels`
+  (top to bottom across the sections), `file_open_with_labels`,
+  `activate_file_menu(path, label, side, app_id=)`, `file_row(path,
+  side)`;
   `navigate-requested(path, side)` → `_navigate` (→ `DiffView.solo(path)`
   — the file's section shown alone, the others hidden by the same
   `set_visible` the filter uses, `soloed` says which; a reload keeps it
@@ -619,7 +638,24 @@ then `_mutation_planned` calls `request.plan(fresh)`. The sidebar's
 request_file_at(path)`) presses the view's file button for the path, so
 it is the same request from here on — the page meets it with the same
 busy gate and toast first, since nothing greys a menu item while a
-mutation runs and `request_file` drops a press made while busy. A `Refusal` is a toast and, when
+mutation runs and `request_file` drops a press made while busy. **The
+working-tree rows' menu does not go through the view**
+(`_on_file_action_requested`): the planners want the file's diff, which
+the other side's rows, a status-only conflict row and an untracked row
+hidden by the switch don't have, so each item is one path-level git run
+on `sidebar.run_mutation` — `gitops.stage_paths` / `unstage_paths`
+(`_run_file_action`; a rename's `previous_path` rides along so it stays
+one `R`), a discard asking `gitmodel.discard_words(path, code)` first
+(`?` → `gitpage._trash_paths`, else `checkout_paths`), and a resolution
+(`_ask_resolve`) that reads `gitops.read_unmerged_stages` on the
+mutation thread, asks `gitmodel.resolve_words(path, side, kind,
+deletes)` — *kind* the operation bar's, `deletes` =
+`gitops.resolution_deletes(side, stages)`: the picked side has no stage
+(a modify/delete clash) — and runs `gitops.resolve_path` (`_run_resolve`:
+the stages re-read, `checkout --ours|--theirs` + `add`, or `rm`; refused
+once the path is no longer unmerged). Stage 2 is ours and 3 theirs
+whatever the words; the words are `gitmodel._SIDE_MEANINGS` per kind,
+turned around for a rebase / `am`. A `Refusal` is a toast and, when
 `stale`, a `_read_diff` (the reload the words promise). A plan with
 `confirm` (a discard's; a revert never asks) asks
 through `dialogs.confirm_dialog` (heading and button from `request.

@@ -72,6 +72,9 @@ DEFAULT_LAYOUT = LAYOUTS[0]
 LOG_PAGE = 20
 MIN_LOG_PAGE = 5
 MAX_LOG_PAGE = 500
+# The most footer apps the files list's "Open In…" submenu lists (the
+# setting is the user's own, but a menu longer than this helps nobody).
+MAX_FOOTER_APPS = 32
 # The show_diff session tool's whole budget — under the CLI's own MCP
 # timeout (the shim's 15 s) — and how often it polls the page for its
 # load to land (app._ShowDiff).
@@ -125,6 +128,9 @@ class Options:
     line_numbers: bool = True
     wrap: bool = False
     word_diff: bool = True
+    # Preferences → Footer apps, not Git: the desktop-file ids the files
+    # list's "Open In…" submenu offers (gitsidebar resolves them live).
+    footer_apps: tuple[str, ...] = ()
 
     @classmethod
     def from_settings(cls, settings: Mapping) -> Options:
@@ -133,7 +139,8 @@ class Options:
         git_untracked as a bool (absent: on); git_log_page as an int
         clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE);
         git_line_numbers, git_wrap_lines and git_word_diff as bools
-        (absent: on, off, on)."""
+        (absent: on, off, on); footer_apps as the str entries of a list,
+        at most MAX_FOOTER_APPS (anything else: none)."""
         layout = settings.get("git_layout")
         if layout not in LAYOUTS:
             layout = DEFAULT_LAYOUT
@@ -143,6 +150,12 @@ class Options:
         except (TypeError, ValueError):
             log_page = LOG_PAGE
         log_page = max(MIN_LOG_PAGE, min(MAX_LOG_PAGE, log_page))
+        apps = settings.get("footer_apps")
+        if not isinstance(apps, list | tuple):
+            apps = ()
+        footer_apps = tuple(
+            app for app in apps if isinstance(app, str) and 0 < len(app) <= MAX_PATH_CHARS
+        )[:MAX_FOOTER_APPS]
         return cls(
             layout=layout,
             untracked=bool(untracked),
@@ -150,6 +163,7 @@ class Options:
             line_numbers=bool(settings.get("git_line_numbers", True)),
             wrap=bool(settings.get("git_wrap_lines", False)),
             word_diff=bool(settings.get("git_word_diff", True)),
+            footer_apps=footer_apps,
         )
 
 

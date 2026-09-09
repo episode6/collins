@@ -576,3 +576,97 @@ def test_operation_words_name_the_kind_and_its_commands():
     assert gitmodel.operation_failed("rebase", "error: unmerged", False) == "error: unmerged"
     assert gitmodel.operation_failed("rebase", "", False) == "`git rebase --continue` failed"
     assert gitmodel.operation_failed("merge", "", True) == "`git merge --abort` failed"
+
+
+# -- the files list's context menu --------------------------------------------------
+
+
+def test_file_menu_actions_per_side_code_and_disk():
+    opens = ("open", "open-with")
+    assert gitmodel.file_menu_actions("unstaged", "M", True) == (("stage", "discard"), opens)
+    assert gitmodel.file_menu_actions("unstaged", "?", True) == (("stage", "discard"), opens)
+    assert gitmodel.file_menu_actions("unstaged", None, True) == (("stage", "discard"), opens)
+    # A deleted file: nothing on disk to open.
+    assert gitmodel.file_menu_actions("unstaged", "D", False) == (("stage", "discard"),)
+    assert gitmodel.file_menu_actions("staged", "A", True) == (("unstage",), opens)
+    assert gitmodel.file_menu_actions("staged", "D", False) == (("unstage",),)
+    # An unmerged row (always unstaged-side): stage marks it resolved, and
+    # the two resolutions; never a discard.
+    resolve = ("stage", "resolve-ours", "resolve-theirs")
+    assert gitmodel.file_menu_actions("unstaged", "U", True) == (resolve, opens)
+    assert gitmodel.file_menu_actions("unstaged", "U", False) == (resolve,)
+    # A flat list (a commit, the branch, a range): revert.
+    assert gitmodel.file_menu_actions("", "M", True) == (("revert",), opens)
+    assert gitmodel.file_menu_actions("", None, False) == (("revert",),)
+    assert gitmodel.resolve_side("resolve-ours") == "ours"
+    assert gitmodel.resolve_side("resolve-theirs") == "theirs"
+    assert gitmodel.resolve_side("stage") is None
+    assert set(gitmodel.MENU_ACTIONS) == {
+        "stage", "unstage", "discard", "resolve-ours", "resolve-theirs", "revert", "open", "open-with",
+    }
+
+
+def test_file_menu_labels_carry_the_operations_hint():
+    assert gitmodel.file_menu_label("stage") == "Stage file"
+    assert gitmodel.file_menu_label("unstage") == "Unstage file"
+    assert gitmodel.file_menu_label("discard") == "Discard file…"
+    assert gitmodel.file_menu_label("revert") == "Revert file"
+    assert gitmodel.file_menu_label("open") == "Open in editor"
+    assert gitmodel.file_menu_label("open-with") == "Open In…"
+    assert gitmodel.file_menu_label("resolve-ours") == "Resolve with ours"
+    assert gitmodel.file_menu_label("resolve-theirs") == "Resolve with theirs"
+    assert gitmodel.file_menu_label("resolve-ours", "revert") == "Resolve with ours (HEAD)"
+    assert gitmodel.file_menu_label("resolve-theirs", "revert") == "Resolve with theirs (the revert)"
+    assert gitmodel.file_menu_label("resolve-theirs", "merge") == "Resolve with theirs (the merge)"
+    assert gitmodel.file_menu_label("resolve-theirs", "cherry-pick") == "Resolve with theirs (the pick)"
+    # A rebase turns the words around: HEAD is the upstream, theirs is the
+    # user's own commit.
+    assert gitmodel.file_menu_label("resolve-ours", "rebase") == "Resolve with ours (upstream)"
+    assert gitmodel.file_menu_label("resolve-theirs", "rebase") == "Resolve with theirs (your commit)"
+    assert gitmodel.file_menu_label("resolve-theirs", "am") == "Resolve with theirs (the patch)"
+    assert gitmodel.file_menu_label("resolve-ours", "bogus") == "Resolve with ours"
+    assert gitmodel.file_menu_label("bogus") == "bogus"
+
+
+def test_resolve_words_say_what_each_side_is_and_whether_the_file_goes():
+    heading, body, button = gitmodel.resolve_words("f.txt", "theirs", "revert", False)
+    assert heading == "Resolve f.txt with theirs?"
+    assert body.startswith(
+        "Ours is HEAD, what the branch has now."
+        " Theirs is what the revert restores: the reverted commit's parent."
+    )
+    assert "`git checkout --theirs -- f.txt && git add -- f.txt`" in body
+    assert "Edits made to the conflict markers are lost." in body
+    assert button == "Resolve"
+    heading, body, _button = gitmodel.resolve_words("g.txt", "ours", "rebase", True)
+    assert heading == "Resolve g.txt with ours?"
+    assert (
+        "Ours is the upstream the branch is being rebased onto. Theirs is your own commit, being replayed."
+        in body
+    )
+    assert "Ours has no version of this file: resolving with it removes g.txt" in body
+    assert "`git rm -- g.txt`" in body
+    _heading, body, _button = gitmodel.resolve_words("h.txt", "theirs", None, True)
+    assert "Ours is the index's ours side (stage 2). Theirs is the index's theirs side (stage 3)." in body
+    assert "Theirs has no version of this file" in body
+    assert gitmodel.side_meaning("merge", "theirs") == "the branch being merged in"
+    assert gitmodel.side_meaning("cherry-pick", "ours") == "HEAD, the branch you are on"
+    assert gitmodel.side_meaning("am", "theirs") == "the patch being applied"
+    assert gitmodel.resolve_done("f.txt", "ours", False) == "Resolved f.txt with ours: staged"
+    assert gitmodel.resolve_done("g.txt", "theirs", True) == "Resolved g.txt with theirs: removed"
+
+
+def test_discard_and_stage_words_follow_the_status_code():
+    trash = ("Move to the trash?", "Move n.txt to the trash?", "Move to trash")
+    assert gitmodel.discard_words("n.txt", "?") == trash
+    restore = ("Restore the file?", "Restore d.txt from the index?", "Restore")
+    assert gitmodel.discard_words("d.txt", "D") == restore
+    assert gitmodel.discard_words("f.txt", "M") == (
+        "Discard the changes?", "Discard the changes to f.txt? This cannot be undone.", "Discard",
+    )
+    assert gitmodel.discard_words("f.txt", None)[0] == "Discard the changes?"
+    assert gitmodel.discard_done("n.txt", "?") == "Moved n.txt to the trash"
+    assert gitmodel.discard_done("d.txt", "D") == "Restored d.txt"
+    assert gitmodel.discard_done("f.txt", "M") == "Discarded the changes to f.txt"
+    assert gitmodel.stage_done("f.txt", True) == "Staged f.txt"
+    assert gitmodel.stage_done("f.txt", False) == "Unstaged f.txt"

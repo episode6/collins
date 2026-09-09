@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-08. Full change history: git log for this file.
+fork. Last modified: 2026-09-09. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,7 +38,17 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
-_Nothing yet._
+- **The git page's files list has a context menu on the working tree.**
+  Right-click an unstaged row for *Stage file* and *Discard file…*, a
+  staged row for *Unstage file* — whichever side the page has loaded —
+  and a row under **CONFLICTS** for *Stage file*, **Resolve with ours**
+  and **Resolve with theirs**. The resolutions ask first, and the question
+  spells out what ours and theirs are for the operation that stopped
+  (`HEAD` against the merge, pick or revert; turned around in a rebase,
+  where theirs is your own commit) and says when the side you picked has
+  no version of the file, so the resolution removes it. Every row, on any
+  load, also offers *Open in editor* and an **Open In…** submenu of the
+  *Footer apps* that take a file.
 
 ### v0.1.3 — 2026-09-08
 

@@ -58,7 +58,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
@@ -489,10 +489,35 @@ def check_sidebar(repo: str) -> None:
     markers = page.diff_view.conflict_rows("a.txt", 0)
     check("with the three markers painted", [m.split(" ")[0] for m in markers] == ["<<<<<<<", "=======", ">>>>>>>"], markers)
     check("and the file header offering Stage file alone", page.diff_view.file_action_labels("a.txt") == ("Stage file", None), page.diff_view.file_action_labels("a.txt"))
+    # The conflict row's context menu: Stage, the two resolutions with the
+    # revert's hints, and the editor (no footer app is configured, so no
+    # Open In…). Resolve with ours asks — the body says what each side is
+    # — then checks the revert's copy out and stages it as resolved
+    # (ours would be HEAD's own bytes: nothing to stage, a clean tree).
+    labels = sidebar.file_menu_labels("a.txt", "unstaged")
+    check("the conflict row's menu offers Stage, the two resolutions and the editor", labels == ["Stage file", "Resolve with ours (HEAD)", "Resolve with theirs (the revert)", "Open in editor"], labels)
+    check("with no Open In… while no footer app is configured", sidebar.file_open_with_labels("a.txt", "unstaged") == [], sidebar.file_open_with_labels("a.txt", "unstaged"))
+    resolve_asked: list[tuple[str, str, str]] = []
+    real_confirm = gitpage.dialogs.confirm_dialog
+
+    def confirm_resolve(parent, heading, body, confirm_label, on_confirm, *args, **kwargs):
+        resolve_asked.append((heading, body, confirm_label))
+        on_confirm()
+
+    gitpage.dialogs.confirm_dialog = confirm_resolve
+    try:
+        check("Resolve with theirs from the row's menu", sidebar.activate_file_menu("a.txt", "Resolve with theirs (the revert)", "unstaged"))
+        landed = wait_for(lambda: not sidebar.busy and page.settled() and git_out(repo, "ls-files", "-u", "--", "a.txt") == "")
+    finally:
+        gitpage.dialogs.confirm_dialog = real_confirm
+    check("it asked, naming both sides for a revert", len(resolve_asked) == 1 and resolve_asked[0][0] == "Resolve a.txt with theirs?" and resolve_asked[0][2] == "Resolve" and "Ours is HEAD, what the branch has now. Theirs is what the revert restores" in resolve_asked[0][1], resolve_asked)
+    check("and the revert's copy is checked out and staged as resolved", landed and open(os.path.join(repo, "a.txt")).read() != "clash\n" and git_out(repo, "status", "--porcelain").split("\n")[0] == "M  a.txt", (landed, git_out(repo, "status", "--porcelain")))
+    landed = wait_for(lambda: page.settled() and bar.hint_text().startswith("Nothing is left unmerged"))
+    check("the bar's hint follows the resolution", landed, bar.hint_text())
+    check("and the CONFLICTS section is gone", not sidebar.file_rows().conflicts and [r.path for r in sidebar.file_rows().staged] == ["a.txt"], sidebar.file_rows())
     # Abort… asks first (the resolutions made since are lost); confirmed,
     # the tree goes back and the bar goes down with the reload.
     asked: list[tuple[str, str]] = []
-    real_confirm = gitpage.dialogs.confirm_dialog
 
     def confirm_abort(parent, heading, body, confirm_label, on_confirm, *args, **kwargs):
         asked.append((heading, confirm_label))
@@ -1532,7 +1557,87 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("its question said restore", asked[-1][0] == "Restore the file?" and asked[-1][2] == "Restore", asked[-1])
 
         # -- revert from a commit: no question, and the sidebar's Revert file -------------------------------
-        check("a file row on the working tree has no context menu", sidebar.file_menu_labels("staged.txt", "staged") == [], sidebar.file_menu_labels("staged.txt", "staged"))
+        # -- the file rows' context menu on the working tree ------------------------------------
+        # A staged row offers Unstage and the editor; an unstaged one Stage,
+        # Discard… and the editor. Stage / Unstage run at once with the
+        # row's toast; Discard… asks the header button's words; Open in
+        # editor is the window's open-in-editor action with no line.
+        labels = sidebar.file_menu_labels("staged.txt", "staged")
+        check("a staged row's menu offers Unstage file and the editor", labels == ["Unstage file", "Open in editor"], labels)
+        with open(os.path.join(repo, "menu.txt"), "w") as fh:
+            fh.write("menu\n")
+        check("an untracked file arrives with the watch", wait_for(lambda: idle() and "menu.txt" in shown_paths(), timeout=5.0), shown_paths())
+        labels = sidebar.file_menu_labels("menu.txt", "unstaged")
+        check("an unstaged row's menu offers Stage file, Discard file… and the editor", labels == ["Stage file", "Discard file…", "Open in editor"], labels)
+        check("Stage file from the row's menu", sidebar.activate_file_menu("menu.txt", "Stage file", "unstaged"))
+        check("stages it, with the toast", wait_for(idle, timeout=5.0) and wait_for(lambda: "menu.txt" in index_paths(), timeout=5.0) and toasts[-1:] == ["Staged menu.txt"], (index_paths(), toasts[-1:]))
+        check("the row moved to STAGED", wait_for(lambda: idle() and sidebar.file_menu_labels("menu.txt", "staged") == ["Unstage file", "Open in editor"], timeout=5.0), sidebar.file_rows())
+        check("Unstage file from the row's menu", sidebar.activate_file_menu("menu.txt", "Unstage file", "staged"))
+        check("unstages it, with the toast", wait_for(idle, timeout=5.0) and wait_for(lambda: "menu.txt" not in index_paths(), timeout=5.0) and toasts[-1:] == ["Unstaged menu.txt"], (index_paths(), toasts[-1:]))
+        check("the row is back under UNSTAGED", wait_for(lambda: idle() and sidebar.file_menu_labels("menu.txt", "unstaged") is not None, timeout=5.0), sidebar.file_rows())
+        opened_paths: list[tuple[str, int, int]] = []
+        win_group = Gio.SimpleActionGroup()
+        open_action = Gio.SimpleAction.new("open-in-editor", GLib.VariantType.new("(sii)"))
+        open_action.connect("activate", lambda _a, param: opened_paths.append(param.unpack()))
+        win_group.add_action(open_action)
+        window.insert_action_group("win", win_group)
+        check("Open in editor from the row's menu", sidebar.activate_file_menu("menu.txt", "Open in editor", "unstaged"))
+        check("activates the window's open-in-editor with the full path and no line", opened_paths == [(os.path.join(repo, "menu.txt"), 0, 0)], opened_paths)
+        window.insert_action_group("win", None)
+        # Open In…: two footer apps configured, one that takes a file and a
+        # terminal that doesn't — the submenu lists the first alone, and a
+        # pick reaches footerapps.launch_app_file with the file's full path.
+        # The desktop's app registry is stubbed: CI has no .desktop entries.
+
+        class FakeApp:
+            def __init__(self, app_id: str, name: str, files: bool) -> None:
+                self.app_id, self.name, self.files = app_id, name, files
+
+            def get_id(self) -> str:
+                return self.app_id
+
+            def get_display_name(self) -> str:
+                return self.name
+
+            def get_icon(self):
+                return None
+
+            def supports_files(self) -> bool:
+                return self.files
+
+            def supports_uris(self) -> bool:
+                return False
+
+        apps = {"editor.desktop": FakeApp("editor.desktop", "Fake Editor", True), "term.desktop": FakeApp("term.desktop", "Fake Terminal", False)}
+        launched: list[tuple[str, str]] = []
+        footerapps = gitpage.footerapps
+        real_apps = (footerapps.resolve_apps, footerapps.resolve_app, footerapps.launch_app_file)
+        footerapps.resolve_apps = lambda ids: [(i, apps[i]) for i in ids if i in apps]
+        footerapps.resolve_app = lambda app_id: apps.get(app_id)
+        footerapps.launch_app_file = lambda info, path: launched.append((info.get_id(), path)) or True
+        try:
+            page.apply_settings({**SETTINGS, "footer_apps": ["editor.desktop", "term.desktop", "gone.desktop"]})
+            check("with footer apps configured the row's menu grows Open In…", sidebar.file_menu_labels("menu.txt", "unstaged") == ["Stage file", "Discard file…", "Open in editor", "Open In…"], sidebar.file_menu_labels("menu.txt", "unstaged"))
+            check("listing the app that takes a file alone", sidebar.file_open_with_labels("menu.txt", "unstaged") == ["Fake Editor"], sidebar.file_open_with_labels("menu.txt", "unstaged"))
+            check("a pick from the submenu", sidebar.activate_file_menu("menu.txt", "Open In…", "unstaged", app_id="editor.desktop"))
+            check("hands the file's full path to the app", launched == [("editor.desktop", os.path.join(repo, "menu.txt"))], launched)
+            check("an app the submenu doesn't list can't be picked", not sidebar.activate_file_menu("menu.txt", "Open In…", "unstaged", app_id="term.desktop") and len(launched) == 1, launched)
+        finally:
+            footerapps.resolve_apps, footerapps.resolve_app, footerapps.launch_app_file = real_apps
+            page.apply_settings(SETTINGS)
+        check("with the apps gone the submenu is gone", sidebar.file_open_with_labels("menu.txt", "unstaged") == [], sidebar.file_open_with_labels("menu.txt", "unstaged"))
+        asks = len(asked)
+        answers.append(False)
+        check("Discard file… from the row's menu, cancelled", sidebar.activate_file_menu("menu.txt", "Discard file…", "unstaged"))
+        check("asked the trash question and left the file", wait_for(idle, timeout=5.0) and asked[asks:] == [("Move to the trash?", "Move menu.txt to the trash?", "Move to trash")] and os.path.exists(os.path.join(repo, "menu.txt")), asked[asks:])
+        check("Discard file… from the row's menu, confirmed", sidebar.activate_file_menu("menu.txt", "Discard file…", "unstaged"))
+        check("moves it to the trash, with the toast", wait_for(idle, timeout=5.0) and wait_for(lambda: not os.path.exists(os.path.join(repo, "menu.txt")), timeout=5.0) and trashed[-1] == (repo, ("menu.txt",)) and toasts[-1:] == ["Moved menu.txt to the trash"], (trashed[-1:], toasts[-1:]))
+        check("and the row left the list", wait_for(lambda: idle() and sidebar.file_menu_labels("menu.txt", "unstaged") is None, timeout=5.0), sidebar.file_rows())
+        view.set_busy(True)
+        before = len(toasts)
+        check("Unstage file from the menu while the view is busy", sidebar.activate_file_menu("staged.txt", "Unstage file", "staged"))
+        check("is refused with the busy toast", toasts[before:] == ["Another git operation is still running"] and "staged.txt" in index_paths(), toasts[before:])
+        view.set_busy(False)
         git(repo, "commit", "-qm", "staged edit")
         edit_sha = head_sha(repo)
         page.poll_tick()
@@ -1548,7 +1653,7 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("the toast", toasts[-1:] == ["Reverted hunk 1 of staged.txt"], toasts[-1:])
         check("the commit's view is unchanged by a revert into the tree", view.hunk_rows("staged.txt") != [] and page.shows({"show": edit_sha}))
         git(repo, "checkout", "-q", "--", "staged.txt")
-        check("the file row's context menu on a commit offers Revert file", sidebar.file_menu_labels("staged.txt") == ["Revert file"], sidebar.file_menu_labels("staged.txt"))
+        check("the file row's context menu on a commit offers Revert file and the editor", sidebar.file_menu_labels("staged.txt") == ["Revert file", "Open in editor"], sidebar.file_menu_labels("staged.txt"))
         loaded_row = next(r for r in sidebar.commit_rows() if r.sha == edit_sha)
         check("a commit row's menu still offers Revert… while that commit is loaded", sidebar.commit_menu_labels(loaded_row.id) == ["Copy sha", "Revert…", "Reload"], sidebar.commit_menu_labels(loaded_row.id))
         check("Revert file from the sidebar", sidebar.activate_file_menu("staged.txt", "Revert file"))

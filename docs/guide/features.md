@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-08. Full change history: git log for this file.
+fork. Last modified: 2026-09-09. Full change history: git log for this file.
 -->
 
 # Features
@@ -125,6 +125,8 @@ Enter opens, Esc closes.
   *Footer apps* and every session's footer grows a button that opens the
   session's live directory in it — your editor, a file manager, a git GUI.
   They're stored as desktop-file IDs, so names and icons follow the app.
+  The ones that take a file also line up under the git page's files-list
+  **Open In…** menu, to open one changed file in them.
 - A **tab bar** under the header is there for anyone who wants it — the
   header's pages button toggles it, off by default, since the sidebar and
   the window title are how Collins expects you to move between sessions.
@@ -495,11 +497,31 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   files with their `+` / `−` counts, green and red as the diff's file
   headers wear them (`bin` for a binary) — and the other
   is navigation off `git status`: clicking a file there (or the section's
-  heading) loads that side and reveals the file. Any other load (a
+  heading) loads that side and reveals the file. **Right-click a row**
+  for what its side allows: an unstaged row offers *Stage file* and
+  *Discard file…* (the header button's question — an untracked file
+  goes to the trash, a deleted one is restored from the index), a staged
+  row *Unstage file*, and both run at once whichever side the page has
+  loaded. A row under **CONFLICTS** offers *Stage file* (mark it resolved
+  by hand) and **Resolve with ours** / **Resolve with theirs**: each asks
+  first, and the question says what the two words mean for the operation
+  that stopped — in a merge, cherry-pick or revert *ours* is `HEAD`, the
+  branch you are on, and *theirs* is what is being brought in (the branch
+  merged, the commit picked, the state the revert restores); in a
+  **rebase** git turns them around, *ours* is the upstream the branch is
+  being replayed onto and *theirs* is your own commit. The menu labels
+  carry the short form (*Resolve with theirs (the revert)*). A yes checks
+  that side out and stages the file as resolved (`git checkout --ours` /
+  `--theirs`, then `git add`); when the side you pick has no version of
+  the file (a modify/delete clash, `UD` / `DU`) the question says so and
+  the resolution is `git rm`. Every row also offers *Open in editor* and
+  an **Open In…** submenu of your *Footer apps* that take a file, when
+  the file exists on disk. Any other load (a
   commit, a branch, a range) is one flat **FILES · n** list, and a
   right-click on one of its rows offers *Revert file* — the diff's own
   file button: that commit's changes to the file applied in reverse to
-  the working tree, unstaged, nothing committed. The status
+  the working tree, unstaged, nothing committed — beside the same
+  *Open in editor* and *Open In…*. The status
   letter colours each row (added green, deleted red, renamed blue,
   untracked dim), and each row carries the file-type icon the editor's
   tree shows for the name. The list **follows the view** — the file at

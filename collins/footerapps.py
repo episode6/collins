@@ -63,6 +63,28 @@ def _launch_context() -> Gio.AppLaunchContext | None:
     return display.get_app_launch_context() if display is not None else None
 
 
+def accepts_files(app_info: Gio.AppInfo) -> bool:
+    """Whether the app's Exec line takes a file or URI argument (%f/%u and
+    their plurals) — the apps a *file* can be handed to. A terminal or
+    an IDE with a placeholder-less entry can only be started somewhere,
+    which launch_app does for a directory; a file would be dropped."""
+    return bool(app_info.supports_files() or app_info.supports_uris())
+
+
+def launch_app_file(app_info: Gio.AppInfo, path: str) -> bool:
+    """Open the file at *path* with the app (accepts_files must hold;
+    False without a launch otherwise). Failures are logged, never
+    raised; True when the launch was handed to GLib."""
+    if not accepts_files(app_info) or not path or not Path(path).is_file():
+        return False
+    try:
+        app_info.launch([Gio.File.new_for_path(path)], _launch_context())
+    except GLib.Error as exc:
+        print(f"footer app launch failed ({app_info.get_id()}): {exc}", file=sys.stderr)
+        return False
+    return True
+
+
 def launch_app(app_info: Gio.AppInfo, cwd: str | None, *, pass_directory: bool = True) -> None:
     """Open ``cwd`` with the app; failures are logged, never raised.
 
