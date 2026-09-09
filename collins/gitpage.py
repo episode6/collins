@@ -77,7 +77,7 @@ gitloads.encode_state(loaded, sidebar).
 Below the Adw.BreakpointBin's breakpoint (_NARROW_MAX_WIDTH) the page is
 one column at a time, the editor's narrow mode: the diff by default, and
 the header's panel button swaps the commits and files panels in for it
-(_panels_requested, the page's for the tab's life) — a row picked, a
+(_panels_requested, forgotten when the page widens) — a row picked, a
 chord or the host's load drops back to the diff. Above it the toggle's
 word — persisted in page_state's "sidebar" — rules, both columns side by
 side; the not-a-repo card hides the panels either way (nothing to list). Page-local toasts (commit
@@ -280,7 +280,8 @@ class GitPage(Adw.Bin):
         self._sidebar_wanted = bool(sidebar)
         self._narrow = False
         # Narrow page: the panels alone instead of the diff, until a row
-        # is picked (the editor's _picker_requested). Not persisted.
+        # is picked or the page widens (the editor's _picker_requested).
+        # Not persisted.
         self._panels_requested = False
         # _sync_sidebar sets the toggle to what the width shows; the
         # handler must not read that back as the user's word.
@@ -1441,6 +1442,10 @@ class GitPage(Adw.Bin):
 
     def _on_narrow(self, narrow: bool) -> None:
         self._narrow = narrow
+        if not narrow:
+            # Widened with the panels up: the next narrowing starts on the
+            # diff again, as the first did.
+            self._panels_requested = False
         self._sync_sidebar()
 
     def _on_navigate_requested(self, _sidebar: GitSidebar, path: str, side: str) -> None:

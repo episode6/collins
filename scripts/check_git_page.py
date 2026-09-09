@@ -255,6 +255,7 @@ def check_sidebar(repo: str) -> None:
     check("widened, the word rules: the sidebar stays hidden", wait_for(lambda: not page.narrow)
           and wait_for(lambda: not page.sidebar_shown and page.diff_shown), (page.sidebar_shown, page.diff_shown))
     check("and the toggle reads it off", not page._sidebar_toggle.get_active())
+    check("widening forgot the panels ask: the next narrowing starts on the diff", not page._panels_requested)
     page.set_sidebar_wanted(True)
     page.set_size_request(900, -1)  # the toplevel grows to its child's minimum
     wide = wait_for(lambda: not page.narrow and page.sidebar_shown)

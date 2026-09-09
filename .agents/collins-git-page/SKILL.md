@@ -40,7 +40,7 @@ sidebar toggle, the view's menu (layout, line numbers, wrap, agent notes,
 reload, keyboard shortcuts) and refresh; the tab's X closes. The
 `BreakpointBin` (`max-width: 679px` → one column at a time, the editor's
 narrow mode: the diff by default, the toggle swaps the panels in for it —
-`_panels_requested`, not persisted, `show_panels(bool)` / `diff_shown` /
+`_panels_requested`, not persisted and reset when the page widens, `show_panels(bool)` / `diff_shown` /
 `narrow` probe it — and `load()`, `_navigate`, `_show_all` and the
 filter's Escape call `_show_diff_column` to drop back; `_sync_sidebar`
 sets the toggle to what the width shows behind `_syncing_toggle`, so
