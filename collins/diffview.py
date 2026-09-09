@@ -2826,6 +2826,9 @@ class DiffView(Gtk.Box):
         section = self._pinned_section
         if section is not None and section.get_parent() is not None:
             section.collapse_gaps()
+        # The copy follows at once, not on the scroll settle that re-syncs
+        # the pinned header a beat later: nothing is left to fold.
+        self._pinned_collapse.set_visible(False)
 
     def on_gaps_collapsed(self, section: _FileSection) -> None:
         """A file's gaps folded up: scroll its header into view (the lines
@@ -3523,6 +3526,13 @@ class DiffView(Gtk.Box):
     def pinned_collapse_shown(self) -> bool:
         """Whether the pinned header's fold button is up."""
         return self._pinned.get_visible() and self._pinned_collapse.get_visible()
+
+    def click_pinned_collapse(self) -> bool:
+        """Press the pinned header's fold button; False while it is not up."""
+        if not self.pinned_collapse_shown():
+            return False
+        self._pinned_collapse.emit("clicked")
+        return True
 
     def is_split(self) -> bool:
         return self.options.split

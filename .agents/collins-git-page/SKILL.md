@@ -465,7 +465,9 @@ gaps' context views, which carry a blank sign column for the width) gets
 at one x across seams, and `.git-gap-context` puts the context in by the
 hunk rail's 3 px; it runs after `update`, `apply_options` (a layout
 change rebuilds the views) and every expand. Probes `gaps_expanded`,
-`collapse_gaps`, `pinned_collapse_shown`; split is two views per hunk
+`collapse_gaps`, `pinned_collapse_shown`, `click_pinned_collapse` (the copy hides
+at once on its click, ahead of the scroll settle that re-syncs the pinned
+header); split is two views per hunk
 (`_SplitPane`) over `diffmodel.split_rows` with a padding pass; the
 language is the file's, the scheme and font the editor's
 (`editor.style_scheme`, `editor_font`, decision 3 — there is no diff

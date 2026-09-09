@@ -1076,6 +1076,24 @@ def check_native(repo: str) -> None:
         and view.gap_row_shown("untracked.txt", "trailing:0") is False,
         (view.gap_measured("untracked.txt", "trailing:0"), view.gap_row_shown("untracked.txt", "trailing:0")),
     )
+    # The pinned header's copy of the fold button: up while the file
+    # scrolled into has a gap drawn (text.txt's, from above), and its
+    # click folds them, drops the copy at once and puts the file's own
+    # header in view — so the pinned header goes with it.
+    check("the pinned header carries the fold button for the expanded file", view.pinned_collapse_shown())
+    check("its click folds the file's gaps", view.click_pinned_collapse())
+    check(
+        "every gap of the file is folded and the copy is gone",
+        view.gaps_expanded("text.txt") is False
+        and all(s == 0 for _a, _r, s in view.gap_rows("text.txt"))
+        and not view.pinned_collapse_shown(),
+        (view.gap_rows("text.txt"), view.pinned_collapse_shown()),
+    )
+    check(
+        "the file's header scrolled into view, so nothing is pinned",
+        wait_for(lambda: view.pinned_header_text() is None),
+        view.pinned_header_text(),
+    )
     view.set_scroll(0.0)
     check("scrolled back, the first file again", wait_for(lambda: page.sidebar.selected_path == order[0]), page.sidebar.selected_path)
 
