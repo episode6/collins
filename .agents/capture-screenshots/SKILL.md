@@ -197,8 +197,10 @@ then runs `scripts/capture-docs.py <repo-root> <out.png> --scene NAME` once
 per scene behind the headless wrapper, with the isolation env from above
 **plus** `COLLINS_USAGE_FIXTURE=<dir>/usage-fixture.json`, `HOME=<dir>` (so
 paths render as `~/dev/...`) and `PATH=<dir>/bin:$PATH` (so the typed command
-is the shim). Scenes: `main-window`, `hero` (also `data/screenshot.png`, and
-cropped to its sidebar column as `sidebar.png`), `quick-switcher`,
+is the shim). Scenes: `main-window`, `hero` (the README's
+`data/screenshot.png`, also cropped to its sidebar column as `sidebar.png` —
+not the docs site's `hero.png`, which is a copy of the `new-chat` shot),
+`quick-switcher`,
 `session-details`, `mcp-servers`, `preferences`, `terminal-panel`,
 `composer`, `pr-page` (a fabricated `prdetail.fetch` reply — nothing reaches
 GitHub), `editor-panel`, `editor-picker` (a PR shot: the editor with nothing
@@ -221,7 +223,8 @@ group), `welcome` and `welcome-cli`
 (the first-launch dialog with the CLI found, and with it not found — the
 shot runs with `welcome_seen` set back to false, and the not-found one
 hides `claude` from clisetup and seeds `~/.local/bin/claude` for the
-prefill), and `new-chat`. Name scenes to redo only those. `capture-docs.py` takes `--size WxH` and `--set KEY=JSON`,
+prefill), and `new-chat` (also copied to `hero.png`, the docs site's hero).
+Name scenes to redo only those. `capture-docs.py` takes `--size WxH` and `--set KEY=JSON`,
 which edit the staged `state.json`'s settings before launch — that is how one
 staged tree serves every window size and panel width.
 
