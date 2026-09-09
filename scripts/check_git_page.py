@@ -876,17 +876,37 @@ def check_native(repo: str) -> None:
         gaps.get("before:0") == (1, 0) and gaps.get("before:1") == (33, 0) and "trailing:1" in gaps,
         gaps,
     )
-    check("▼ 20 on the gap between the hunks", view.expand_gap("text.txt", "before:1", "down", 20))
+    # The expander is GitHub's: ⇕ when the rest fits in a step, ▲ alone
+    # above the first hunk, ▲ ▼ stacked between hunks, ▼ alone below the
+    # last — the trailing row drawn, unmeasured, so it can be clicked.
+    buttons = {a: view.gap_buttons("text.txt", a) for a in ("before:0", "before:1", "trailing:1")}
+    check(
+        "a one-line gap above the first hunk offers ⇕, the 33-line gap between the hunks ▲ ▼",
+        buttons == {"before:0": ["all"], "before:1": ["up", "down"], "trailing:1": ["down"]},
+        buttons,
+    )
+    check(
+        "the trailing gap's row is drawn before it is measured, so it can be clicked",
+        view.gap_row_shown("text.txt", "trailing:1") is True and view.gap_measured("text.txt", "trailing:1") is False,
+        (view.gap_row_shown("text.txt", "trailing:1"), view.gap_measured("text.txt", "trailing:1")),
+    )
+    check("▼ on the gap between the hunks", view.expand_gap("text.txt", "before:1", "down", 20))
     check(
         "twenty lines of context are drawn, thirteen remain",
         wait_for(lambda: dict((a, (r, s)) for a, r, s in view.gap_rows("text.txt")).get("before:1") == (13, 20)),
         view.gap_rows("text.txt"),
     )
-    check("`all` on the trailing gap", view.expand_gap("text.txt", "trailing:1", "all", 0))
     check(
-        "the trailing gap is measured off the file and drawn whole",
-        wait_for(lambda: dict((a, (r, s)) for a, r, s in view.gap_rows("text.txt")).get("trailing:1") == (0, 12)),
-        view.gap_rows("text.txt"),
+        "thirteen fit in a step: the arrows give way to ⇕",
+        view.gap_buttons("text.txt", "before:1") == ["all"],
+        view.gap_buttons("text.txt", "before:1"),
+    )
+    check("▼ on the trailing gap", view.expand_gap("text.txt", "trailing:1", "down", 20))
+    check(
+        "the trailing gap is measured off the file (12 lines), drawn whole and its row folds away",
+        wait_for(lambda: dict((a, (r, s)) for a, r, s in view.gap_rows("text.txt")).get("trailing:1") == (0, 12))
+        and view.gap_row_shown("text.txt", "trailing:1") is False,
+        (view.gap_rows("text.txt"), view.gap_row_shown("text.txt", "trailing:1")),
     )
 
     # -- a files-list click reveals and focuses ------------------------------------------
@@ -1036,6 +1056,14 @@ def check_native(repo: str) -> None:
         "the pinned header names the file scrolled into",
         wait_for(lambda: view.pinned_header_text() == "text.txt"),
         view.pinned_header_text(),
+    )
+    # The untracked file's trailing gap is in sight now: the settle reads
+    # the file, finds the hunk reaches its end, and the row folds away.
+    check(
+        "a trailing gap scrolled into sight measures itself off the file",
+        wait_for(lambda: view.gap_measured("untracked.txt", "trailing:0") is True)
+        and view.gap_row_shown("untracked.txt", "trailing:0") is False,
+        (view.gap_measured("untracked.txt", "trailing:0"), view.gap_row_shown("untracked.txt", "trailing:0")),
     )
     view.set_scroll(0.0)
     check("scrolled back, the first file again", wait_for(lambda: page.sidebar.selected_path == order[0]), page.sidebar.selected_path)

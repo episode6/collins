@@ -124,8 +124,14 @@ PAD = "pad"
 _PAD_TEXT = " "
 # What a gap row's arrows say. Up expands from the bottom of the gap (the
 # lines just above the next hunk), down from the top (the lines just below
-# the previous one).
+# the previous one); all draws what is left (the ⇕ button, shown when that
+# fits in a step; `z` and the context menu whatever the size).
 UP, DOWN, ALL = "up", "down", "all"
+# The ⇕ glyph (bundled: the theme has no unfold icon) and the size the
+# expander's icons draw at — small enough that two stacked arrows keep the
+# row near a line of text.
+_UNFOLD_ICON = "unfold-symbolic"
+_GAP_ICON_PX = 12
 # The action group each hunk section inserts on itself for its context
 # menu (the popover finds it from its parent view, up the tree).
 _HUNK_ACTIONS = "hunk"
@@ -1821,13 +1827,20 @@ class _HunkSection(Gtk.Box):
 
 
 class _GapRow(Gtk.Box):
-    """An unchanged stretch between (or around) hunks: the `⋯ n unchanged
-    lines` row with its ▲ 20 / ▼ 20 / all buttons, and the context views
-    the expansions grow above and below it. Up reveals the lines just above
-    the next hunk, down the lines just below the previous one; when nothing
-    is left the row hides and the context stands in its place. A trailing
-    gap (`gap` None) is asked about on first click: its size needs the
-    file's length, which only the context read knows."""
+    """An unchanged stretch between (or around) hunks: the expander on the
+    left, where the line numbers are, then the `⋯ n unchanged lines`
+    words, and the context views the expansions grow above and below the
+    row. The expander is GitHub's: one ⇕ button when what is left fits in
+    a step (it draws the whole gap), else the arrows — ▲ alone above the
+    first hunk, ▼ alone below the last, both stacked between hunks. Up
+    reveals the lines just above the next hunk, down the lines just below
+    the previous one; when nothing is left the row hides and the context
+    stands in its place. A trailing gap (`gap` None) is drawn as a bare
+    `⋯` with ▼ until it is measured — by the view when the row scrolls
+    into sight, or by the click: its size needs the file's length, which
+    only the context read knows — and folds away when the last hunk
+    reaches the end of the file. `z` and the context menu's *Expand
+    context* still draw a gap whole whatever its size."""
 
     def __init__(
         self,
@@ -1858,40 +1871,52 @@ class _GapRow(Gtk.Box):
         self.shown_top = 0
         self.shown_bottom = 0
         self.known = gap is not None  # a trailing gap's count is read lazily
+        self.measuring = False  # a trailing gap's read is out
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.add_css_class("git-gap")
+        # The expander first, on the left: the stacked arrows in a column
+        # of their own (one of them alone above the first hunk and below
+        # the last) beside the one-step ⇕; _sync shows what the gap needs.
+        up_words = _("Expand {n} lines up").format(n=EXPAND_STEP)
+        down_words = _("Expand {n} lines down").format(n=EXPAND_STEP)
+        self._up = self._button("pan-up-symbolic", up_words, UP, EXPAND_STEP)
+        self._down = self._button("pan-down-symbolic", down_words, DOWN, EXPAND_STEP)
+        self._all = self._button(_UNFOLD_ICON, _("Expand every unchanged line"), ALL, 0)
+        arrows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        arrows.add_css_class("git-gap-arrows")
+        arrows.append(self._up)
+        arrows.append(self._down)
+        self._arrows = arrows
+        row.append(arrows)
+        row.append(self._all)
         self._label = Gtk.Label(xalign=0.0, hexpand=True)
         self._label.add_css_class("dim-label")
         self._label.add_css_class("caption")
         row.append(self._label)
-        self._up = self._button("pan-up-symbolic", _("Expand {n} lines up").format(n=EXPAND_STEP), UP)
-        self._down = self._button("pan-down-symbolic", _("Expand {n} lines down").format(n=EXPAND_STEP), DOWN)
-        self._all = Gtk.Button(label=_("all"))
-        self._all.add_css_class("flat")
-        self._all.add_css_class("git-gap-button")
-        self._all.set_tooltip_text(_("Expand every unchanged line"))
-        self._all.connect("clicked", lambda _b: self._on_expand(self, ALL, 0))
-        if position == diffmodel.TRAILING:
-            self._up.set_visible(False)
-        row.append(self._up)
-        row.append(self._down)
-        row.append(self._all)
         self._row = row
         self.append(row)
-        self._sync_label()
+        self._sync()
 
-    def _button(self, icon: str, tooltip: str, direction: str) -> Gtk.Button:
+    def _button(self, icon: str, tooltip: str, direction: str, count: int) -> Gtk.Button:
         button = Gtk.Button()
-        button.set_child(Gtk.Box(spacing=2))
-        child = button.get_child()
-        child.append(Gtk.Image.new_from_icon_name(icon))
-        child.append(Gtk.Label(label=str(EXPAND_STEP)))
+        image = Gtk.Image.new_from_icon_name(icon)
+        image.set_pixel_size(_GAP_ICON_PX)
+        button.set_child(image)
         button.add_css_class("flat")
         button.add_css_class("git-gap-button")
         button.set_tooltip_text(tooltip)
-        button.connect("clicked", lambda _b: self._on_expand(self, direction, EXPAND_STEP))
+        button.connect("clicked", lambda _b: self._on_expand(self, direction, count))
         return button
+
+    def buttons(self) -> list[str]:
+        """The expander's visible buttons, top to bottom: UP, DOWN, ALL."""
+        shown = []
+        if self._arrows.get_visible():
+            shown += [d for d, b in ((UP, self._up), (DOWN, self._down)) if b.get_visible()]
+        if self._all.get_visible():
+            shown.append(ALL)
+        return shown
 
     @property
     def key(self) -> str:
@@ -1904,19 +1929,42 @@ class _GapRow(Gtk.Box):
             return 0
         return max(0, self.gap.count - self.shown_top - self.shown_bottom)
 
-    def _sync_label(self) -> None:
+    def _sync(self) -> None:
+        """Word the row and pick the expander for what is left."""
+        up = down = whole = False
         if self.gap is None:
+            # An unmeasured trailing gap: a bare ellipsis and ▼ — the click
+            # measures it. Measured to nothing, it folds away.
             self._label.set_text("⋯" if not self.known else "")
+            down = not self.known
         else:
-            self._label.set_text(_("⋯ {n} unchanged lines").format(n=self.remaining))
+            remaining = self.remaining
+            self._label.set_text(_("⋯ {n} unchanged lines").format(n=remaining))
+            if remaining <= EXPAND_STEP:
+                whole = remaining > 0
+            elif self.position == diffmodel.TRAILING:
+                down = True
+            elif self.hunk_index == 0:
+                up = True  # nothing above the first hunk to grow down from
+            else:
+                up = down = True
+        self._up.set_visible(up)
+        self._down.set_visible(down)
+        self._arrows.set_visible(up or down)
+        self._all.set_visible(whole)
         # A row with nothing left to show, or with no gap at all, folds away.
-        self._row.set_visible(self.gap is not None and self.remaining > 0)
+        self._row.set_visible(up or down or whole)
+
+    @property
+    def row_shown(self) -> bool:
+        """Whether the `⋯` row with the expander is drawn."""
+        return self._row.get_visible()
 
     def set_gap(self, gap: diffmodel.Gap | None) -> None:
         """The trailing gap's answer, once the file's length is known."""
         self.gap = gap
         self.known = True
-        self._sync_label()
+        self._sync()
 
     def expand(self, lines: Sequence[str] | None, direction: str, count: int) -> None:
         """Draw *count* more lines (`all`: everything left, up to
@@ -1966,7 +2014,7 @@ class _GapRow(Gtk.Box):
                 self._bottom = self._context_view()
                 self.append(self._bottom.scroller)
             self._bottom.set_rows(self._bottom_lines)
-        self._sync_label()
+        self._sync()
 
     def _context_view(self) -> _HunkView:
         view = _HunkView(
@@ -3382,6 +3430,31 @@ class DiffView(Gtk.Box):
             return []
         return [(g.key, g.remaining, g.shown_top + g.shown_bottom) for g in section.gaps]
 
+    def gap_row_shown(self, path: str, address: str) -> bool | None:
+        """Whether *path*'s gap *address* draws its `⋯` row with the expander
+        (an unmeasured trailing gap does; a spent one folds); None for no
+        such gap."""
+        gap = self._gap_at(path, address)
+        return gap.row_shown if gap is not None else None
+
+    def gap_buttons(self, path: str, address: str) -> list[str] | None:
+        """The expander buttons *path*'s gap *address* shows, top to bottom
+        (`up`, `down`, `all`); None for no such gap."""
+        gap = self._gap_at(path, address)
+        return gap.buttons() if gap is not None else None
+
+    def gap_measured(self, path: str, address: str) -> bool | None:
+        """Whether *path*'s gap *address* knows its size (a trailing gap
+        learns it when it scrolls into sight, or on its click)."""
+        gap = self._gap_at(path, address)
+        return gap.known if gap is not None else None
+
+    def _gap_at(self, path: str, address: str) -> _GapRow | None:
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None:
+            return None
+        return next((gap for gap in section.gaps if gap.key == address), None)
+
     def expand_gap(self, path: str, address: str, direction: str = DOWN, count: int = EXPAND_STEP) -> bool:
         """Expand *path*'s gap *address* as a click on its button would."""
         section = self._section_for(path, diffmodel.NEW)
@@ -3636,17 +3709,49 @@ class DiffView(Gtk.Box):
         def landed(lines: list[str] | None) -> None:
             if gap.get_parent() is None:
                 return
-            if gap.position == diffmodel.TRAILING and not gap.known:
-                length = len(lines) if lines is not None else None
-                old_len = length if side == diffmodel.OLD else None
-                new_len = length if side == diffmodel.NEW else None
-                trailing = [
-                    g for g in diffmodel.gaps(file, old_len, new_len) if g.position == diffmodel.TRAILING
-                ]
-                gap.set_gap(trailing[0] if trailing else None)
+            self._measured(gap, side, lines)
             gap.expand(lines, direction, count)
 
+        gap.measuring = True
         self._read_context(file, side, landed)
+
+    def measure_trailing_gaps(self) -> None:
+        """Measure the unmeasured trailing gap of every file on screen (the
+        scroll settled, or a load landed): the file on the gap's side is
+        read on a thread and the row then says how many lines are left
+        below the last hunk, or folds away when there are none. Reading
+        every file at load would cost a subprocess per file; the rows in
+        sight are few, and the read is cached for the click."""
+        for section in self._sections():
+            if not section.get_visible():
+                continue
+            for gap in section.gaps:
+                if gap.known or gap.measuring or gap.position != diffmodel.TRAILING:
+                    continue
+                if not self._in_view(gap):
+                    continue
+                side = self._gap_side(gap)
+                if side is None:
+                    continue
+                gap.measuring = True
+                self._read_context(
+                    gap.file,
+                    side,
+                    lambda lines, gap=gap, side=side: (
+                        None if gap.get_parent() is None else self._measured(gap, side, lines)
+                    ),
+                )
+
+    def _measured(self, gap: _GapRow, side: str, lines: list[str] | None) -> None:
+        """A trailing gap's file landed: size the gap off its length."""
+        gap.measuring = False
+        if gap.position != diffmodel.TRAILING or gap.known:
+            return
+        length = len(lines) if lines is not None else None
+        old_len = length if side == diffmodel.OLD else None
+        new_len = length if side == diffmodel.NEW else None
+        trailing = [g for g in diffmodel.gaps(gap.file, old_len, new_len) if g.position == diffmodel.TRAILING]
+        gap.set_gap(trailing[0] if trailing else None)
 
     def park_focus(self, going: Sequence[Gtk.Widget]) -> None:
         """Move the keyboard off widgets about to be removed, so GTK does
@@ -3766,6 +3871,7 @@ class DiffView(Gtk.Box):
                 top, top_y = section, bounds.get_y()
                 break
         self._sync_pinned(top, top_y)
+        self.measure_trailing_gaps()
         if top is None:
             self._set_current("", -1)
             return GLib.SOURCE_REMOVE

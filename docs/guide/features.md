@@ -445,10 +445,18 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   **stacked** is one column; *automatic* splits when the page is wide
   enough. Changed words within a changed line are emphasised. Images
   show before and after, side by side; a binary or a file too large to
-  draw is a placeholder with its counts. Unchanged stretches between
-  hunks fold into *⋯ n unchanged lines* rows with *▲ 20* / *▼ 20* /
-  *all* buttons (`z` draws everything above the focused hunk); the
-  header of the file you are scrolled into stays pinned at the top.
+  draw is a placeholder with its counts. Unchanged stretches fold into
+  *⋯ n unchanged lines* rows with GitHub's expander on the left: a
+  single ⇕ button when what is left fits in one step of 20 lines (it
+  draws the whole gap), otherwise arrows — ▲ alone above the first hunk,
+  ▲ over ▼ between hunks (up reveals the lines just above the next hunk,
+  down the lines just below the previous one), ▼ alone below the last
+  hunk, where the row starts as a bare *⋯* (the file's length is read
+  when the row scrolls into sight, or on the click) and folds away once
+  the hunk reaches the end of the file — so a file can be brought into
+  view a step at a time, top to bottom (`z` and the hunk menu's *Expand
+  context* draw everything above the focused hunk at once); the header
+  of the file you are scrolled into stays pinned at the top.
 - **A commit's message sits over its diff.** Loading a commit puts a
   card above the files: the subject, the author, the age (the full
   stamp in a tooltip) and the short sha — a link to the commit on GitHub
