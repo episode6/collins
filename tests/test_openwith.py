@@ -267,3 +267,131 @@ def test_launch_terminal_falls_back_to_home_for_a_missing_directory(monkeypatch,
     openwith.launch_terminal(ptyxis, str(tmp_path / "gone"))
     assert spawned["cwd"] == str(openwith.Path.home())
     assert spawned["argv"][-1] == str(openwith.Path.home())
+
+
+# -- a file's "Open In…" rows -------------------------------------------------
+
+
+class _FileApp(_FakeAppInfo):
+    """A configured footer app; *files* says whether its Exec line takes one."""
+
+    def __init__(self, app_id: str, name: str, files: bool = True) -> None:
+        super().__init__(app_id, name=name, commandline=f"{name} %f" if files else name)
+        self._files = files
+        self.launched: list = []
+
+    def supports_files(self) -> bool:
+        return self._files
+
+    def supports_uris(self) -> bool:
+        return False
+
+    def get_icon(self):
+        return None
+
+    def launch(self, files, context) -> None:
+        self.launched.append([f.get_path() for f in files])
+
+
+def _stub_apps(monkeypatch, apps: dict[str, _FileApp]) -> None:
+    footerapps = openwith.footerapps
+    monkeypatch.setattr(footerapps, "resolve_app", lambda app_id: apps.get(app_id))
+    monkeypatch.setattr(
+        footerapps, "resolve_apps", lambda ids: [(i, apps[i]) for i in ids if i in apps]
+    )
+
+
+def test_file_open_with_entries_lists_the_file_taking_apps_then_the_default(monkeypatch, tmp_path):
+    apps = {
+        "editor.desktop": _FileApp("editor.desktop", "Fake Editor"),
+        "term.desktop": _FileApp("term.desktop", "Fake Terminal", files=False),
+    }
+    _stub_apps(monkeypatch, apps)
+    monkeypatch.setattr(openwith, "default_file_app", lambda path: None)
+    ids = ["editor.desktop", "term.desktop", "gone.desktop"]
+    entries = openwith.file_open_with_entries(ids, str(tmp_path / "f.txt"))
+    assert [(app_id, label) for app_id, _icon, label in entries] == [
+        ("editor.desktop", "Fake Editor"),
+        (openwith.DEFAULT_APP_ID, "Default app"),
+    ]
+    # The default row carries an icon even when no handler is known.
+    assert entries[-1][1] is not None
+
+
+def test_file_open_with_entries_is_never_empty(monkeypatch, tmp_path):
+    _stub_apps(monkeypatch, {})
+    monkeypatch.setattr(openwith, "default_file_app", lambda path: None)
+    entries = openwith.file_open_with_entries([], str(tmp_path / "f.txt"))
+    assert [app_id for app_id, _icon, _label in entries] == [openwith.DEFAULT_APP_ID]
+
+
+def test_file_open_with_entries_skips_the_default_when_it_is_configured(monkeypatch, tmp_path):
+    editor = _FileApp("editor.desktop", "Fake Editor")
+    _stub_apps(monkeypatch, {"editor.desktop": editor})
+    monkeypatch.setattr(openwith, "default_file_app", lambda path: editor)
+    entries = openwith.file_open_with_entries(["editor.desktop"], str(tmp_path / "f.txt"))
+    assert [app_id for app_id, _icon, _label in entries] == ["editor.desktop"]
+
+
+def test_open_file_default_goes_through_xdg_open(monkeypatch, tmp_path):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    spawned = {}
+    monkeypatch.setattr(
+        openwith.shutil, "which", lambda name: "/usr/bin/xdg-open" if name == "xdg-open" else None
+    )
+    monkeypatch.setattr(
+        openwith.subprocess,
+        "Popen",
+        lambda argv, **kwargs: spawned.update(argv=argv, cwd=kwargs.get("cwd")),
+    )
+    assert openwith.open_file_default(str(path))
+    assert spawned == {"argv": ["/usr/bin/xdg-open", str(path)], "cwd": str(tmp_path)}
+
+
+def test_open_file_default_refuses_what_is_not_a_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(openwith.subprocess, "Popen", lambda *a, **k: pytest.fail("spawned"))
+    assert not openwith.open_file_default(str(tmp_path / "gone.txt"))
+    assert not openwith.open_file_default(str(tmp_path))
+    assert not openwith.open_file_default("")
+
+
+def test_open_file_default_swallows_a_spawn_failure(monkeypatch, tmp_path, capsys):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    monkeypatch.setattr(openwith.shutil, "which", lambda name: "/usr/bin/xdg-open")
+
+    def boom(*args, **kwargs):
+        raise OSError("no exec")
+
+    monkeypatch.setattr(openwith.subprocess, "Popen", boom)
+    assert not openwith.open_file_default(str(path))
+    assert "xdg-open failed" in capsys.readouterr().err
+
+
+def test_open_file_with_dispatches_to_the_default_or_the_app(monkeypatch, tmp_path):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    editor = _FileApp("editor.desktop", "Fake Editor")
+    _stub_apps(monkeypatch, {"editor.desktop": editor})
+    opened = []
+    monkeypatch.setattr(openwith, "open_file_default", lambda p: opened.append(p) or True)
+
+    assert openwith.open_file_with(openwith.DEFAULT_APP_ID, str(path)) is None
+    assert opened == [str(path)]
+    assert openwith.open_file_with("editor.desktop", str(path)) is None
+    assert editor.launched == [[str(path)]]
+
+
+def test_open_file_with_says_what_went_wrong(monkeypatch, tmp_path):
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    _stub_apps(monkeypatch, {"term.desktop": _FileApp("term.desktop", "Fake Terminal", files=False)})
+    monkeypatch.setattr(openwith, "open_file_default", lambda p: False)
+
+    assert openwith.open_file_with(openwith.DEFAULT_APP_ID, str(path)) == (
+        "Couldn't open f.txt with the default app"
+    )
+    assert openwith.open_file_with("gone.desktop", str(path)) == "gone.desktop is not installed"
+    # An app that can't take a file (its Exec line has no placeholder).
+    assert openwith.open_file_with("term.desktop", str(path)) == "Couldn't open f.txt with Fake Terminal"

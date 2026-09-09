@@ -17,7 +17,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import contextmenu, editorfiles, fileclipboard, filetypes, gitinfo
+from . import contextmenu, editorfiles, fileclipboard, filetypes, gitinfo, openwith, openwithrows
 from .i18n import _
 
 # How long after the last change in an expanded directory its row list is
@@ -86,12 +86,20 @@ class FileTree(Gtk.Box):
         # files, and a moved file that is open has to keep its tab, which
         # again only the pane knows about (see EditorPane._paste_into).
         "paste-request": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A file row's "Open In…" submenu picked an app. Payload is (absolute
+        # path, the app id — a footer app's desktop-file id or
+        # openwith.DEFAULT_APP_ID). The launch, and saying when it failed,
+        # belong to the pane (see EditorPane._open_file_with).
+        "open-with-request": (GObject.SignalFlags.RUN_FIRST, None, (str, str)),
     }
 
     def __init__(self, root: str | Path, show_hidden: bool = False) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, vexpand=True, hexpand=True)
         self._root = Path(root)
         self._show_hidden = show_hidden
+        # The footer_apps setting, for the file rows' "Open In…" submenu
+        # (set_footer_apps — the pane relays it from apply_settings).
+        self._footer_apps: list[str] = []
         # path -> monitor, for every directory this tree has ever expanded.
         # Not torn down on collapse (a modest, tab-lifetime cost) — see
         # module docstring; only ever grows across directories actually
@@ -148,6 +156,9 @@ class FileTree(Gtk.Box):
         self._paste_action = Gio.SimpleAction.new("paste", None)
         self._paste_action.connect("activate", self._on_paste)
         actions.add_action(self._paste_action)
+        open_with = Gio.SimpleAction.new("open-with", GLib.VariantType.new("s"))
+        open_with.connect("activate", self._on_open_with)
+        actions.add_action(open_with)
         self.insert_action_group("tree", actions)
 
         scrolled = Gtk.ScrolledWindow(child=self._list_view, vexpand=True, hexpand=True)
@@ -413,14 +424,44 @@ class FileTree(Gtk.Box):
         if node.is_dir:
             items.append((_("Paste"), "tree.paste"))
         items.append((_("Rename…"), "tree.rename"))
-        self._popup_menu(_menu(*items), x, y)
+        menu = _menu(*items)
+        rows: list[Gtk.Widget] = []
+        if not node.is_dir:
+            # The same submenu the diff page's files list offers: the footer
+            # apps that take a file, then the desktop's default app.
+            submenu = openwithrows.file_open_with_menu(
+                rows, self._footer_apps, str(node.path), "tree.open-with"
+            )
+            menu.append_submenu(_("Open In…"), submenu)
+        self._popup_menu(menu, x, y, rows)
 
-    def _popup_menu(self, menu: Gio.Menu, x: float, y: float) -> None:
+    def _popup_menu(self, menu: Gio.Menu, x: float, y: float, rows: list[Gtk.Widget] | None = None) -> None:
         # Paste's state is settled here rather than per menu: every menu that
         # carries it opens through this.
         self._paste_action.set_enabled(fileclipboard.has_files(self.get_clipboard()))
         popover = Gtk.PopoverMenu.new_from_model(menu)
+        openwithrows.slot_them(popover, list(rows or ()))
         contextmenu.popup_at(popover, self._list_view, x, y)
+
+    def set_footer_apps(self, app_ids: list[str]) -> None:
+        """The footer_apps setting's ids, listed (those that take a file) in
+        the file rows' "Open In…" submenu."""
+        self._footer_apps = list(app_ids)
+
+    def open_with_labels(self, path: str) -> list[str]:
+        """The labels a file row's "Open In…" submenu would list for *path*
+        (for the e2e)."""
+        return [label for _id, _icon, label in openwith.file_open_with_entries(self._footer_apps, path)]
+
+    def activate_open_with(self, path: str, app_id: str) -> None:
+        """Pick *app_id* from the row of *path*'s "Open In…" submenu as a
+        click would (for the e2e)."""
+        self._menu_path, self._menu_is_dir = path, False
+        self.activate_action("tree.open-with", GLib.Variant("s", app_id))
+
+    def _on_open_with(self, _action: Gio.SimpleAction, param: GLib.Variant) -> None:
+        if self._menu_path and not self._menu_is_dir:
+            self.emit("open-with-request", self._menu_path, param.get_string())
 
     def _on_add_to_chat(self, _action: Gio.SimpleAction, _param) -> None:
         if self._menu_path:
