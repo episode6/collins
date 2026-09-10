@@ -369,6 +369,29 @@ def test_open_file_default_swallows_a_spawn_failure(monkeypatch, tmp_path, capsy
     assert "xdg-open failed" in capsys.readouterr().err
 
 
+def test_open_file_default_falls_back_to_glib_without_xdg_open(monkeypatch, tmp_path, capsys):
+    """No xdg-open on PATH: GLib's own resolution of the mime tables takes
+    the file's URI — and its refusal (a GLib.Error, or a plain False) is a
+    False here, never a raise."""
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    monkeypatch.setattr(openwith.shutil, "which", lambda name: None)
+    monkeypatch.setattr(openwith.subprocess, "Popen", lambda *a, **k: pytest.fail("spawned"))
+    launched = []
+    monkeypatch.setattr(
+        openwith.Gio.AppInfo, "launch_default_for_uri", lambda uri, ctx: launched.append(uri) or True
+    )
+    assert openwith.open_file_default(str(path))
+    assert launched == [path.as_uri()]
+
+    def refuse(uri, ctx):
+        raise openwith.GLib.Error("no handler")
+
+    monkeypatch.setattr(openwith.Gio.AppInfo, "launch_default_for_uri", refuse)
+    assert not openwith.open_file_default(str(path))
+    assert "default app launch failed" in capsys.readouterr().err
+
+
 def test_open_file_with_dispatches_to_the_default_or_the_app(monkeypatch, tmp_path):
     path = tmp_path / "f.txt"
     path.write_text("x\n")

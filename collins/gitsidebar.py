@@ -1150,15 +1150,16 @@ class GitSidebar(Gtk.Box):
         file = widget.file
         side = widget.side
         path = file.path
-        on_disk = False
+        full_path = ""  # under the repository root; "" when there is no such file to open
         if self._repo_root is not None and gitops.safe_path(path):
-            on_disk = Path(self._repo_root, path).is_file()
-        sections = list(gitmodel.file_menu_actions(side, file.code, on_disk))
+            candidate = Path(self._repo_root, path)
+            if candidate.is_file():
+                full_path = str(candidate)
+        sections = list(gitmodel.file_menu_actions(side, file.code, bool(full_path)))
         if side == "" and gitpatch.working_side(self._loaded) is not None:
             sections = sections[1:]
         apps: list[tuple[Gio.Icon | None, str, GLib.Variant]] = []
-        if any(gitmodel.MENU_OPEN_WITH in section for section in sections):
-            full_path = str(Path(self._repo_root, path)) if self._repo_root is not None else path
+        if full_path and any(gitmodel.MENU_OPEN_WITH in section for section in sections):
             footer_apps = list(self._options.footer_apps)
             for app_id, icon, name in openwith.file_open_with_entries(footer_apps, full_path):
                 apps.append((icon, name, GLib.Variant("(ss)", (path, app_id))))
