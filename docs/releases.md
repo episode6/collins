@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-09. Full change history: git log for this file.
+fork. Last modified: 2026-09-10. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,14 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **Notes on lines outside the diff.** The git page's *Add note* only
+  reached the lines a hunk showed; an expanded gap's context had no
+  menu at all. A right-click on the drawn context now offers *Copy*,
+  *Open in editor* and *Add note*, and a note placed there sits under the
+  gap's row — folded or drawn — anchored to its line number, since there
+  is no hunk to follow; it keeps that number across reloads and moves into
+  a hunk if a later load's hunk comes to hold the line. The agent reads
+  it back through `diff_context` like any other note.
 - **Open In… reaches the default app, and the editor.** The git page's
   files-list menu listed only your footer apps under *Open In…*, and
   vanished when none took a file. It now always ends in a *Default app*

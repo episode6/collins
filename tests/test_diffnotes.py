@@ -483,3 +483,82 @@ def test_placed_notes_follow_insertion_order_within_a_hunk():
     )
     placed = store.placed_notes(loaded)[("src/app.py", 0)]
     assert [(n.summary, index) for n, index in placed] == [("later line", 4), ("earlier line", 2)]
+
+
+# -- outside every hunk ----------------------------------------------------------
+
+
+def test_gap_address_names_the_gap_row_a_line_falls_in():
+    file = files(MODIFIED)[0]
+    # MODIFIED's hunks span new 1-5 and 21-23 (old 1-4 and 20-22).
+    assert diffnotes.gap_address(file, "new", 10) == "before:1"
+    assert diffnotes.gap_address(file, "old", 19) == "before:1"
+    assert diffnotes.gap_address(file, "new", 30) == "trailing:1"
+    assert diffnotes.gap_address(file, "new", 3) is None  # a hunk's
+    assert diffnotes.gap_address(file, "new", 0) is None
+    assert diffnotes.gap_address(file, "new", True) is None
+    assert diffnotes.gap_address(file, "left", 10) is None
+    new_file = replace(file, kind=diffmodel.KIND_NEW)
+    assert diffnotes.gap_address(new_file, "old", 10) is None
+    deleted = replace(file, kind=diffmodel.KIND_DELETED)
+    assert diffnotes.gap_address(deleted, "new", 10) is None
+    assert diffnotes.gap_address(replace(file, hunks=()), "new", 10) is None
+
+
+def test_resolve_anchor_outside_a_hunk_only_when_asked():
+    loaded = files(MODIFIED)
+    refused = resolve_anchor(loaded, "src/app.py", line=10)
+    assert isinstance(refused, str) and "is not in a hunk" in refused
+    anchor = resolve_anchor(loaded, "src/app.py", line=10, outside=True)
+    assert not isinstance(anchor, str)
+    assert anchor.outside and anchor.hunk_index is None and anchor.line_index == -1
+    assert (anchor.side, anchor.line, anchor.key) == (diffmodel.NEW, 10, diffnotes.CONTEXT_KEY)
+    with pytest.raises(ValueError):
+        _ = anchor.hunk
+    # A line a hunk holds resolves into the hunk, outside or not.
+    inside = resolve_anchor(loaded, "src/app.py", line=3, outside=True)
+    assert not isinstance(inside, str) and inside.hunk_index == 0
+    # Nowhere a gap could draw it: a bad number, a side the file lacks.
+    assert isinstance(resolve_anchor(loaded, "src/app.py", line=0, outside=True), str)
+    new_only = [replace(loaded[0], kind=diffmodel.KIND_NEW)]
+    assert isinstance(resolve_anchor(new_only, "src/app.py", side="old", line=10, outside=True), str)
+
+
+def test_a_note_outside_every_hunk_lands_under_its_gap_and_keeps_its_number():
+    store = MarkStore()
+    loaded = files(MODIFIED)
+    refused = store.add_notes(loaded, [NoteSpec("src/app.py", "gap", line=10)], diffnotes.USER)
+    assert isinstance(refused, str)
+    added = store.add_notes(
+        loaded,
+        [NoteSpec("src/app.py", "in the gap", line=10), NoteSpec("src/app.py", "past the end", line=24)],
+        diffnotes.USER,
+        outside=True,
+    )
+    assert not isinstance(added, str)
+    gap, tail = added
+    assert (gap.hunk_key, gap.line_index, gap.side, gap.line) == (diffnotes.CONTEXT_KEY, -1, "new", 10)
+    assert store.placed_notes(loaded) == {}
+    assert store.placed_outside_notes(loaded) == {
+        ("src/app.py", "before:1"): [gap],
+        ("src/app.py", "trailing:1"): [tail],
+    }
+    # A reload that changes hunk 2 leaves a number-anchored note alone.
+    assert store.prune(files(MODIFIED_HUNK_2_CHANGED)) == 0
+    assert [n.line for n in store.notes()] == [10, 24]
+    # Hunk 1 grown by a line: hunk 2 now spans new 22-24, so the note past
+    # the end is a hunk's now (line index 3, `# end`) and the gap's stays.
+    grown = files(MODIFIED_HUNK_1_GROWN)
+    assert store.prune(grown) == 0
+    assert store.placed_outside_notes(grown) == {("src/app.py", "before:1"): [gap]}
+    placed = store.placed_notes(grown)
+    assert [(n.id, index) for n, index in placed[("src/app.py", 1)]] == [(tail.id, 3)]
+    assert grown[0].hunks[1].lines[3].text == "    # end"
+    # A load without the file parks both.
+    other = files(OTHER)
+    assert store.prune(other) == 0
+    assert store.placed_outside_notes(other) == {} and store.placed_notes(other) == {}
+    assert len(store.notes()) == 2
+    # Edit and remove work on them as on any note.
+    assert store.edit(gap.id, "re-worded").summary == "re-worded"
+    assert store.remove(gap.id) and [n.id for n in store.notes()] == [tail.id]

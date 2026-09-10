@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-09. Full change history: git log for this file.
+fork. Last modified: 2026-09-10. Full change history: git log for this file.
 -->
 
 # Features
@@ -464,7 +464,9 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   pointing at each other — that takes every expanded stretch back and
   scrolls the file's header into view. Expanded context lines and the
   hunks' own share one gutter width per file, so the code lines up
-  across them.
+  across them. A right-click on the drawn context offers *Copy*, *Open
+  in editor* and *Add note*, so a note can sit on a line no hunk
+  carries (below).
 - **A commit's message sits over its diff.** Loading a commit puts a
   card above the files: the subject, the author, the age (the full
   stamp in a tooltip) and the short sha — a link to the commit on GitHub
@@ -640,7 +642,11 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   its card naming the line's new number. A note on a hunk whose own
   lines changed is dropped, as are the notes on two identical hunks in
   one file when either changes; one on a file the current load doesn't
-  show waits for a load that does. Highlights (attention marks on a range of a line, in six
+  show waits for a load that does. A note added from an expanded gap's
+  menu — a line outside every hunk — has no hunk to follow: it is
+  anchored to its line number, its card sits under the gap's row
+  (drawn or folded back up), and it stays at that number across
+  reloads, moving into a hunk if one comes to hold the line. Highlights (attention marks on a range of a line, in six
   tones) share the same store and rules; the agent lands them with
   `highlight_diff`, its notes with `annotate_diff`, and clears both with
   `clear_diff_marks` (your own notes stay unless it asks for them too).

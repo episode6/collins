@@ -16,6 +16,13 @@ its line number moved when the lines above it shifted (`prune` renumbers
 it) — one that changes or drops the hunk drops it, and a load that doesn't
 show the file at all parks it until one does.
 
+A note can also sit on a line no hunk carries — an unchanged stretch the
+view draws as a gap, expanded or not (the right-click menu on the
+expanded context): its key is CONTEXT_KEY and its anchor is the line
+number itself, since there is no hunk body to key on. Such a note stays
+at its number across reloads (`gap_address` says which gap row draws it)
+and moves into a hunk when a later load's hunk comes to hold that line.
+
 Everything that arrives is foreign content — an agent's summary as much
 as a branch name: `bound_text` caps every string at NOTE_MAX_CHARS (a
 name at MAX_AUTHOR_CHARS), the widgets show them through `set_text`, and
@@ -45,6 +52,13 @@ TONE_WARNING = "warning"
 TONE_ERROR = "error"
 TONE_DIM = "dim"
 TONES: tuple[str, ...] = (TONE_MATCH, TONE_CURRENT, TONE_INFO, TONE_WARNING, TONE_ERROR, TONE_DIM)
+
+# The hunk key of a note placed on a line outside every hunk (an unchanged
+# stretch): anchored by its number alone, never renumbered.
+CONTEXT_KEY = "context"
+# What `_place` answers for such a mark when no hunk holds its line: drawn
+# under the gap `gap_address` names, or parked when none does.
+_OUTSIDE = "outside"
 
 # The most characters a summary, a rationale or the editor's text may hold
 # (the spec's cap); an author's name is shorter. Beyond either, the text is
@@ -122,20 +136,30 @@ class HighlightSpec:
 @dataclass(frozen=True)
 class Anchor:
     """A resolved address: the File, the hunk (its index in file.hunks),
-    the Line (its index in hunk.lines), and the side + number it sits at."""
+    the Line (its index in hunk.lines), and the side + number it sits at.
+    An address outside every hunk (resolve_anchor's *outside*) has no
+    hunk: *hunk_index* None, *line_index* -1, the key CONTEXT_KEY."""
 
     file: diffmodel.File
-    hunk_index: int
+    hunk_index: int | None
     line_index: int
     side: str
     line: int
 
     @property
+    def outside(self) -> bool:
+        return self.hunk_index is None
+
+    @property
     def hunk(self) -> diffmodel.Hunk:
+        if self.hunk_index is None:
+            raise ValueError("an anchor outside every hunk names no hunk")
         return self.file.hunks[self.hunk_index]
 
     @property
     def key(self) -> str:
+        if self.hunk_index is None:
+            return CONTEXT_KEY
         return diffmodel.stable_key(self.file, self.hunk)
 
 
@@ -147,6 +171,8 @@ class _Keys:
         self._by_path: dict[str, tuple[str, ...]] = {}
 
     def of(self, anchor: Anchor) -> str:
+        if anchor.hunk_index is None:
+            return CONTEXT_KEY
         keys = self._by_path.get(anchor.file.path)
         if keys is None:
             keys = self._by_path[anchor.file.path] = diffmodel.stable_keys(anchor.file)
@@ -212,12 +238,16 @@ def resolve_anchor(
     side: object = None,
     line: object = None,
     hunk: object = None,
+    outside: bool = False,
 ) -> Anchor | str:
     """Where (*path*, *side*, *line* | *hunk*) lands in *files* — or the
     reason it doesn't, as one line naming the offender. *side* defaults to
     the new side; exactly one of *line* (1-based on that side) and *hunk*
     (1-based) is given; a hunk address anchors on the hunk's first line
-    that has a number on the side."""
+    that has a number on the side. With *outside*, a line no hunk carries
+    is accepted too when a gap of the file can hold it (`gap_address`):
+    the anchor then names no hunk (the view's right-click on expanded
+    context; the number is the caller's word that the line exists)."""
     if not isinstance(path, str) or not path:
         return "a note needs a file path"
     side = diffmodel.NEW if side is None else side
@@ -239,9 +269,43 @@ def resolve_anchor(
         return f"hunk {hunk} of {path} has no lines on the {side} side"
     located = diffmodel.locate(files, path, side, line)
     if located is None:
+        if outside and gap_address(file, side, line) is not None:
+            return Anchor(file, None, -1, side, int(line))  # type: ignore[arg-type]
         return f"line {line!r} ({side}) of {path} is not in a hunk of the loaded diff"
     _file, hunk_index, line_index = located
     return Anchor(file, hunk_index, line_index, side, int(line))  # type: ignore[arg-type]
+
+
+def gap_address(file: diffmodel.File, side: object, line: object) -> str | None:
+    """The gap row of *file* that draws 1-based *line* on *side* — the
+    view's address, `before:<hunk index>` for the stretch above a hunk or
+    `trailing:<last hunk index>` past the last one — or None: a line a
+    hunk carries, a side the file has no lines on (a new file's old side,
+    a deleted file's new), a placeholder file, or a bad number. The
+    trailing gap's length is not known here (it needs the file read), so
+    every line past the last hunk is its."""
+    if not isinstance(side, str) or side not in diffmodel.SIDES:
+        return None
+    if not isinstance(line, int) or isinstance(line, bool) or line < 1:
+        return None
+    if not file.hunks or file.kind in (diffmodel.KIND_BINARY, diffmodel.KIND_TOO_LARGE):
+        return None
+    if side == diffmodel.OLD and (file.kind == diffmodel.KIND_NEW or file.untracked):
+        return None
+    if side == diffmodel.NEW and file.kind == diffmodel.KIND_DELETED:
+        return None
+    for gap in diffmodel.gaps(file):
+        span = gap.new_range if side == diffmodel.NEW else gap.old_range
+        if span is not None and span[0] <= line <= span[1]:
+            return f"{gap.position}:{gap.hunk_index}"
+    for hunk in file.hunks:
+        start, end = diffmodel.hunk_range(hunk, side)
+        if start <= line <= end:
+            return None
+    last = file.hunks[-1]
+    if line > diffmodel.hunk_range(last, side)[1]:
+        return f"{diffmodel.TRAILING}:{last.index}"
+    return None
 
 
 def _line_text(anchor: Anchor) -> str:
@@ -281,12 +345,18 @@ class MarkStore:
     # -- adding --
 
     def add_notes(
-        self, files: Sequence[diffmodel.File], specs: Sequence[NoteSpec], source: str
+        self,
+        files: Sequence[diffmodel.File],
+        specs: Sequence[NoteSpec],
+        source: str,
+        outside: bool = False,
     ) -> list[Note] | str:
         """Land *specs* as notes from *source*, all of them or none: the
         batch is resolved against *files* first, and the first address the
         diff doesn't carry (or an empty summary) refuses the whole batch
-        with its reason. Returns the Notes in order."""
+        with its reason. With *outside*, a line no hunk carries lands as a
+        number-anchored note (resolve_anchor). Returns the Notes in
+        order."""
         if source not in SOURCES:
             return f"unknown note source {source!r}"
         if not specs:
@@ -297,7 +367,7 @@ class MarkStore:
             return f"the page holds at most {MAX_NOTES} notes"
         resolved: list[tuple[Anchor, str, str | None, str | None]] = []
         for spec in specs:
-            anchor = resolve_anchor(files, spec.path, spec.side, spec.line, spec.hunk)
+            anchor = resolve_anchor(files, spec.path, spec.side, spec.line, spec.hunk, outside)
             if isinstance(anchor, str):
                 return anchor
             summary = summary_text(spec.summary)
@@ -427,8 +497,9 @@ class MarkStore:
         the hunk it was placed in (the hunk's lines changed or went), and
         renumber one whose hunk is there with its lines but at other
         numbers (a range staged out above it, an edit above); a mark on a
-        file the load doesn't show stays parked. Returns how many went or
-        moved."""
+        file the load doesn't show stays parked. A mark outside every hunk
+        (CONTEXT_KEY) keeps its number whatever the load. Returns how many
+        went or moved."""
         shown = {file.path: file for file in files}
         keys = {file.path: diffmodel.stable_keys(file) for file in files}
         changed = 0
@@ -441,6 +512,8 @@ class MarkStore:
                 if where is None:
                     del table[mark.id]
                     changed += 1
+                    continue
+                if where == _OUTSIDE:
                     continue
                 entry = file.hunks[where[0]].lines[where[1]]
                 number = entry.new if mark.side == diffmodel.NEW else entry.old
@@ -459,14 +532,38 @@ class MarkStore:
     ) -> dict[tuple[str, int], list[tuple[Highlight, int]]]:
         return _placed(files, self._highlights.values())
 
+    def placed_outside_notes(self, files: Sequence[diffmodel.File]) -> dict[tuple[str, str], list[Note]]:
+        """The notes *files* shows on lines no hunk carries, by (path, gap
+        address — `gap_address`) → [note], in insertion order; one whose
+        line a hunk of this load holds is in `placed_notes` instead, and
+        one no gap can hold (the file's shape changed under it) is
+        parked."""
+        shown = {file.path: file for file in files}
+        out: dict[tuple[str, str], list[Note]] = {}
+        for note in self._notes.values():
+            if note.hunk_key != CONTEXT_KEY:
+                continue
+            file = shown.get(note.path)
+            if file is None or diffmodel.locate([file], note.path, note.side, note.line) is not None:
+                continue
+            address = gap_address(file, note.side, note.line)
+            if address is not None:
+                out.setdefault((file.path, address), []).append(note)
+        return out
+
 
 def _place(
     file: diffmodel.File, keys: Sequence[str], mark: Note | Highlight
-) -> tuple[int, int] | None:
+) -> tuple[int, int] | str | None:
     """(hunk index, line index) of *mark* in *file* — *keys* its hunks'
     stable keys — when the hunk it was placed in is still there under its
     key and has a line on the mark's side at the mark's index (an equal
-    body always does: the key holds every line's kind)."""
+    body always does: the key holds every line's kind). A mark outside
+    every hunk is placed by its number: in the hunk that now holds the
+    line, else _OUTSIDE (it is a gap's, or parked; never dropped)."""
+    if mark.hunk_key == CONTEXT_KEY:
+        located = diffmodel.locate([file], mark.path, mark.side, mark.line)
+        return (located[1], located[2]) if located is not None else _OUTSIDE
     for hunk, key in zip(file.hunks, keys, strict=True):
         if key != mark.hunk_key:
             continue
@@ -489,7 +586,7 @@ def _placed(files: Sequence[diffmodel.File], marks: Iterable) -> dict:
         if file.path not in keys:
             keys[file.path] = diffmodel.stable_keys(file)
         where = _place(file, keys[file.path], mark)
-        if where is None:
+        if where is None or where == _OUTSIDE:
             continue
         out.setdefault((file.path, where[0]), []).append((mark, where[1]))
     return out
