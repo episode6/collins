@@ -38,6 +38,13 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **Open In… reaches the default app, and the editor.** The git page's
+  files-list menu listed only your footer apps under *Open In…*, and
+  vanished when none took a file. It now always ends in a *Default app*
+  row — whatever the desktop opens that file type with, through
+  `xdg-open`, with that app's icon when the desktop names one. The
+  editor's file tree and its Agent files rows grow the same submenu on a
+  right-click.
 - **Right-click menus stop scrolling.** The git page's files menu — three
   or four items — opened with a scrollbar and a row cut off, and every
   other right-click menu with a separator in it (the diff view's, the

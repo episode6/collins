@@ -39,7 +39,14 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   menus (new file/folder, rename, copy/cut/paste, trash, reveal) act through
   `editorfiles.rename_target` / `paste_target` / `unique_target` /
   `paste_entries`; the clipboard payloads (`Gdk.FileList`, `text/uri-list`,
-  `x-special/gnome-copied-files` for cut) are `fileclipboard.py`'s.
+  `x-special/gnome-copied-files` for cut) are `fileclipboard.py`'s. A file
+  row (and an Agent files row) also gets the git page's *Open In…* submenu
+  (`openwithrows.file_open_with_menu` over the `footer_apps` setting the
+  pane relays through `set_footer_apps`, plus *Default app* via xdg-open);
+  the tree emits `open-with-request(path, app_id)` and
+  `EditorPane._open_file_with` launches through `openwith.open_file_with`,
+  a failure landing in the banner. Probes: `FileTree.open_with_labels`,
+  `activate_open_with`, `EditorPane.agent_file_open_with_labels`.
 - `quickopen.QuickOpen`: type-ahead over `editorfiles.walk_files` (background
   thread, cached per root, cache dropped by a `Gio.FileMonitor` on the root,
   re-walked on every open anyway), scored by `fuzzy.py` (subsequence; basename

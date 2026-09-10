@@ -125,6 +125,25 @@ def run(root: str) -> int:
         "narrow pane with nothing open shows the picker", columns(pane) == (True, False, False), columns(pane)
     )
 
+    # -- a file row's Open In…: the default app, through xdg-open -------------
+    # No footer app is configured (CI has no .desktop entries anyway), so the
+    # submenu is the desktop's default app alone — the tree's rows and the
+    # Agent files rows list the same — and a pick reaches
+    # openwith.open_file_default with the file's full path.
+    from collins import openwith
+
+    opened: list[str] = []
+    real_open_default = openwith.open_file_default
+    openwith.open_file_default = lambda path: opened.append(path) or True
+    try:
+        check("the tree's Open In… lists the default app alone", pane._tree.open_with_labels(first) == ["Default app"], pane._tree.open_with_labels(first))
+        check("and so does an Agent files row's", pane.agent_file_open_with_labels(first) == ["Default app"], pane.agent_file_open_with_labels(first))
+        pane._tree.activate_open_with(first, openwith.DEFAULT_APP_ID)
+        check("picking it hands the file to xdg-open", opened == [first], opened)
+    finally:
+        openwith.open_file_default = real_open_default
+    check("and raises no banner", not pane._banner.get_revealed())
+
     # -- a file opens: the file column, with the back button -----------------
     pane.open_file(first)
     if not wait_until("file column shows", lambda: pane._editors.get_visible()):

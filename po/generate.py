@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-08. Full change history: git log for this file.
+# fork. Last modified: 2026-09-09. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -246,6 +246,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "Megnyitás ezzel: {name}",
         "Open In…": "Megnyitás ezzel…",
         "File Manager": "Fájlkezelő",
+        "Default app": "Alapértelmezett alkalmazás",
         "Right-click to open this folder in your terminal":
             "Jobb kattintással megnyithatod ezt a mappát a termináljában",
         "Open this folder in your file manager":
@@ -2367,6 +2368,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "In {name} öffnen",
         "Open In…": "Öffnen mit…",
         "File Manager": "Dateimanager",
+        "Default app": "Standard-App",
         "Right-click to open this folder in your terminal":
             "Rechtsklick öffnet diesen Ordner in deinem Terminal",
         "Open this folder in your file manager":
@@ -4497,6 +4499,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "Abrir en {name}",
         "Open In…": "Abrir en…",
         "File Manager": "Gestor de archivos",
+        "Default app": "Aplicación predeterminada",
         "Right-click to open this folder in your terminal":
             "Clic derecho para abrir esta carpeta en tu terminal",
         "Open this folder in your file manager":
@@ -6622,6 +6625,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "Open in {name}": "Ouvrir dans {name}",
         "Open In…": "Ouvrir dans…",
         "File Manager": "Gestionnaire de fichiers",
+        "Default app": "Application par défaut",
         "Right-click to open this folder in your terminal":
             "Clic droit pour ouvrir ce dossier dans votre terminal",
         "Open this folder in your file manager":

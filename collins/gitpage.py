@@ -117,7 +117,6 @@ from . import (  # noqa: E402
     diffmodel,
     diffnotes,
     diffview,
-    footerapps,
     gitinfo,
     gitloads,
     gitmodel,
@@ -125,6 +124,7 @@ from . import (  # noqa: E402
     gitpatch,
     keybindings,
     mcptools,
+    openwith,
     prefslayout,
 )
 from .commitcard import CommitCard  # noqa: E402
@@ -1686,17 +1686,15 @@ class GitPage(Adw.Bin):
 
     def _on_open_with_requested(self, _sidebar: GitSidebar, path: str, app_id: str) -> None:
         """A file row's "Open In…" pick: the file, under the repository
-        root, handed to the configured app (footerapps.launch_app_file —
-        only apps that take a file are listed)."""
+        root, handed to the configured app or the desktop's default one
+        (openwith.open_file_with — only apps that take a file are
+        listed); a refusal is toasted."""
         root = self._repo_root
         if root is None or not gitops.safe_path(path):
             return
-        info = footerapps.resolve_app(app_id)
-        if info is None:
-            self._toast(_("{app} is not installed").format(app=app_id))
-            return
-        if not footerapps.launch_app_file(info, os.path.join(str(root), path)):
-            self._toast(_("Couldn't open {path} with {app}").format(path=path, app=info.get_display_name()))
+        failure = openwith.open_file_with(app_id, os.path.join(str(root), path))
+        if failure:
+            self._toast(failure)
 
     def _run_pending_navigate(self) -> None:
         pending, self._pending_navigate = self._pending_navigate, None

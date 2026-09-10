@@ -37,6 +37,8 @@ from . import (  # noqa: E402
     fileclipboard,
     keybindings,
     keymap,
+    openwith,
+    openwithrows,
     paneldnd,
 )
 from .filetree import FileTree  # noqa: E402
@@ -165,6 +167,10 @@ class EditorPane(Gtk.Box):
         self._tree.connect("add-to-chat", lambda _t, path: self.emit("add-to-chat", path, 0, 0))
         self._tree.connect("rename-request", lambda _t, path, is_dir: self._prompt_rename(path, is_dir))
         self._tree.connect("paste-request", lambda _t, dest: self._paste_into(dest))
+        self._tree.connect("open-with-request", lambda _t, path, app_id: self._open_file_with(path, app_id))
+        # The footer_apps setting (apply_settings), for the Agent files rows'
+        # "Open In…" submenu; the tree keeps its own copy.
+        self._footer_apps: list[str] = []
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         left.append(self._build_agent_files())
         left.append(self._tree)
@@ -309,6 +315,11 @@ class EditorPane(Gtk.Box):
         add_file = Gio.SimpleAction.new("add-file-to-chat", None)
         add_file.connect("activate", lambda *_a: self._add_menu_file_to_chat())
         actions.add_action(add_file)
+        open_file_with = Gio.SimpleAction.new("open-file-with", GLib.VariantType.new("s"))
+        open_file_with.connect(
+            "activate", lambda _a, param: self._open_file_with(self._menu_file_path, param.get_string())
+        )
+        actions.add_action(open_file_with)
         # The tab context menu's bulk closes. Kept to hand so `setup-menu` can
         # grey out the ones that would close nothing for the clicked tab.
         self._tab_actions: dict[str, Gio.SimpleAction] = {}
@@ -680,9 +691,10 @@ class EditorPane(Gtk.Box):
     def _on_agent_row_right_click(
         self, gesture: Gtk.GestureClick, _n_press: int, x: float, y: float, row: Gtk.ListBoxRow
     ) -> None:
-        """Same one-item menu the file tree's rows get (see FileTree
-        `_on_row_right_click`) — these rows are files too, and a right-click
-        working below the separator but not above it would read as broken."""
+        """Add to chat and the "Open In…" submenu the file tree's file rows
+        get (see FileTree `_on_right_click`) — these rows are files too, and
+        a right-click working below the separator but not above it would
+        read as broken."""
         path = getattr(row, "file_path", None)
         if not path:
             return
@@ -691,8 +703,28 @@ class EditorPane(Gtk.Box):
 
         menu = Gio.Menu()
         menu.append(_("Add to chat"), "editor.add-file-to-chat")
+        rows: list[Gtk.Widget] = []
+        submenu = openwithrows.file_open_with_menu(rows, self._footer_apps, path, "editor.open-file-with")
+        menu.append_submenu(_("Open In…"), submenu)
         popover = Gtk.PopoverMenu.new_from_model(menu)
+        openwithrows.slot_them(popover, rows)
         contextmenu.popup_at(popover, row, x, y)
+
+    def _open_file_with(self, path: str, app_id: str) -> None:
+        """An "Open In…" pick from the tree or an Agent files row: the file
+        handed to the footer app, or to the desktop's default app through
+        xdg-open (openwith.open_file_with); a refusal shows in the banner,
+        the pane's one line for saying something."""
+        if not path:
+            return
+        failure = openwith.open_file_with(app_id, path)
+        if failure:
+            self._show_banner(failure, _("Dismiss"), lambda: None)
+
+    def agent_file_open_with_labels(self, path: str) -> list[str]:
+        """The labels an Agent files row's "Open In…" submenu would list for
+        *path* (for the e2e)."""
+        return [label for _id, _icon, label in openwith.file_open_with_entries(self._footer_apps, path)]
 
     def _on_agent_row(self, _list: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         path = getattr(row, "file_path", None)
@@ -1437,6 +1469,9 @@ class EditorPane(Gtk.Box):
         self._show_line_numbers = bool(settings.get("editor_show_line_numbers", True))
         self._font = settings.get("editor_font") or ""
         self._tree.set_show_hidden(bool(settings.get("editor_show_hidden_files", True)))
+        footer_apps = settings.get("footer_apps") or []
+        self._footer_apps = [str(app_id) for app_id in footer_apps if isinstance(app_id, str)]
+        self._tree.set_footer_apps(self._footer_apps)
         try:
             narrow_width = int(settings.get("editor_narrow_width") or 0)
         except (TypeError, ValueError):

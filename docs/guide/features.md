@@ -125,8 +125,10 @@ Enter opens, Esc closes.
   *Footer apps* and every session's footer grows a button that opens the
   session's live directory in it — your editor, a file manager, a git GUI.
   They're stored as desktop-file IDs, so names and icons follow the app.
-  The ones that take a file also line up under the git page's files-list
-  **Open In…** menu, to open one changed file in them.
+  The ones that take a file also line up under the **Open In…** menu of
+  the git page's files list and of the editor's file tree, to open one
+  file in them — above a *Default app* row that hands the file to whatever
+  your desktop opens that type with (`xdg-open`).
 - A **tab bar** under the header is there for anyone who wants it — the
   header's pages button toggles it, off by default, since the sidebar and
   the window title are how Collins expects you to move between sessions.
@@ -410,7 +412,10 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   (`Ctrl+F`), save (`Ctrl+S`), and **180 languages'** worth of syntax
   highlighting via GtkSourceView — the engine behind GNOME Text Editor. The
   tree's right-click menu covers rename, copy, cut and paste, through the
-  system clipboard, so files round-trip with your file manager.
+  system clipboard, so files round-trip with your file manager — and, on a
+  file (an Agent files row too), the same **Open In…** submenu as the git
+  page's files list: your *Footer apps* that take a file, then *Default
+  app* (`xdg-open`).
 - **External changes are the normal case** — the agent is rewriting these
   files while you look at them. A clean buffer reloads silently, cursor and
   scroll preserved; a buffer with your own edits gets a banner instead, so
@@ -531,8 +536,9 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   commit)* in a rebase): one question for every unmerged file, naming
   the sides the same way and listing the files the pick removes, then
   each is resolved in turn, stopping at the first git refuses. Every row also offers *Open in editor* and
-  an **Open In…** submenu of your *Footer apps* that take a file, when
-  the file exists on disk. Any other load (a
+  an **Open In…** submenu — your *Footer apps* that take a file, then
+  *Default app*, whatever the desktop opens that file type with
+  (`xdg-open`) — when the file exists on disk. Any other load (a
   commit, a branch, a range) is one flat **FILES · n** list, and a
   right-click on one of its rows offers *Revert file* — the diff's own
   file button: that commit's changes to the file applied in reverse to

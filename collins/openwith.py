@@ -1,5 +1,6 @@
-"""Resolving — and opening — the apps that can open a project directory: the
-desktop's file manager and terminal emulator.
+"""Resolving — and opening — the apps that can open a project directory (the
+desktop's file manager and terminal emulator) or a single file (the footer
+apps that take one, and the desktop's default handler through xdg-open).
 
 The user's own picks (the ``footer_apps`` setting) are desktop-file IDs the
 app already knows how to resolve and launch — see footerapps.py. These two
@@ -22,7 +23,14 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
+from . import footerapps
 from .footerapps import launch_app, resolve_app, strip_field_codes
+from .i18n import _
+
+# The app id a file's "Open In…" row carries for the desktop's default
+# handler — the one xdg-open would pick. Not a desktop-file id (those end
+# in .desktop), so it can never be confused with a configured footer app.
+DEFAULT_APP_ID = "collins:default"
 
 # Terminals we'd pick between when the desktop hasn't said which it wants
 # (xdg-terminals.list, read below, is where a user who cares says so).
@@ -79,6 +87,91 @@ _TERMINAL_DIR_FLAGS: dict[str, tuple[str, ...]] = {
     # the directory instead — which works, for a terminal that starts a
     # process of its own every time.
 }
+
+
+def default_file_app(path: str) -> Gio.AppInfo | None:
+    """The desktop's handler for the file at *path*, judged by its name and
+    content, or None if nothing claims that type — the row's icon, and a
+    hint the desktop already lists that very app among the footer apps."""
+    try:
+        content_type, _uncertain = Gio.content_type_guess(path, None)
+    except (GLib.Error, TypeError):
+        return None
+    if not content_type or content_type == "application/octet-stream":
+        return None
+    return Gio.AppInfo.get_default_for_type(content_type, False)
+
+
+def file_open_with_entries(
+    footer_app_ids: list[str], path: str
+) -> list[tuple[str, Gio.Icon | None, str]]:
+    """The rows of a file's "Open In…" submenu, (app id, icon, label) each:
+    the configured footer apps that take a file (footerapps.accepts_files
+    — a terminal with no placeholder in its Exec line would drop it), in
+    their configured order, then *Default app* (DEFAULT_APP_ID) — whatever
+    the desktop nominates for the file's type, opened through xdg-open, so
+    a file always has somewhere to go. A role label rather than the app's
+    name for that last row, as the folder menu's *File Manager* and
+    *Terminal*: the icon says which app it is, when one is known. Skipped
+    when the user has added that very app themselves."""
+    entries: list[tuple[str, Gio.Icon | None, str]] = []
+    configured = set()
+    for app_id, info in footerapps.resolve_apps(list(footer_app_ids)):
+        if footerapps.accepts_files(info):
+            configured.add(app_id)
+            entries.append((app_id, info.get_icon(), info.get_display_name()))
+    default = default_file_app(path)
+    if default is None or default.get_id() not in configured:
+        icon = default.get_icon() if default is not None else None
+        icon = icon or Gio.ThemedIcon.new("document-open-symbolic")
+        entries.append((DEFAULT_APP_ID, icon, _("Default app")))
+    return entries
+
+
+def open_file_default(path: str) -> bool:
+    """Open the file at *path* with the desktop's default handler: xdg-open
+    when it is installed (it reads the same mimeapps.list every file
+    manager writes, and knows the desktop's own quirks), else GLib's own
+    resolution of the same tables. False when neither could take it."""
+    if not path or not Path(path).is_file():
+        return False
+    launcher = shutil.which("xdg-open")
+    if launcher is not None:
+        try:
+            subprocess.Popen(
+                [launcher, path],
+                cwd=str(Path(path).parent),
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            print(f"xdg-open failed ({path}): {exc}", file=sys.stderr)
+            return False
+        return True
+    try:
+        return bool(Gio.AppInfo.launch_default_for_uri(Gio.File.new_for_path(path).get_uri(), None))
+    except GLib.Error as exc:
+        print(f"default app launch failed ({path}): {exc}", file=sys.stderr)
+        return False
+
+
+def open_file_with(app_id: str, path: str) -> str | None:
+    """Hand the file at *path* to the "Open In…" pick *app_id* — a footer
+    app's desktop-file id, or DEFAULT_APP_ID — and say what went wrong, or
+    None when the launch was handed off. The message is ready to toast."""
+    name = os.path.basename(path)
+    if app_id == DEFAULT_APP_ID:
+        if open_file_default(path):
+            return None
+        return _("Couldn't open {path} with the default app").format(path=name)
+    info = footerapps.resolve_app(app_id)
+    if info is None:
+        return _("{app} is not installed").format(app=app_id)
+    if footerapps.launch_app_file(info, path):
+        return None
+    return _("Couldn't open {path} with {app}").format(path=name, app=info.get_display_name())
 
 
 def default_file_manager() -> Gio.AppInfo | None:

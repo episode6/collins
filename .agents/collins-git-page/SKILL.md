@@ -292,10 +292,14 @@ imports `gitpage`; the page feeds it and listens:
   (label)`;
   `open-requested(path)` (*Open in editor*, `gitsb.open-editor (s)`) →
   the diff's `e` door with no line; `open-with-requested(path, app_id)`
-  (the *Open In…* submenu — `openwithrows` icon rows, one per
-  `Options.footer_apps` entry that `footerapps.accepts_files`, the
-  submenu left out with none — `gitsb.open-with ((ss))`, target `(path,
-  app_id)`) → `footerapps.launch_app_file` under the repository root.
+  (the *Open In…* submenu — `openwithrows` icon rows from
+  `openwith.file_open_with_entries`: one per `Options.footer_apps` entry
+  that `footerapps.accepts_files`, then *Default app*
+  (`openwith.DEFAULT_APP_ID`, the desktop's handler through xdg-open) so
+  the submenu is never empty — `gitsb.open-with ((ss))`, target `(path,
+  app_id)`) → `openwith.open_file_with` under the repository root, its
+  failure string toasted. The editor's file tree and Agent files rows
+  build the same submenu with `openwithrows.file_open_with_menu`.
   The two opens are offered only when the path exists on disk
   (`set_context(repo_root=)`); a flat list over the working tree (no
   status to split on) gets the opens alone. Probes: `file_menu_labels`

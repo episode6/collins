@@ -1,7 +1,8 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """Menu rows that show an app's icon beside its name — the "Open In…"
-submenus of the session sidebar (a folder to an app) and of the git
-page's files list (a file to an app).
+submenus of the session sidebar (a folder to an app), of the git page's
+files list and of the editor's file tree and Agent files rows (a file to
+an app; file_open_with_menu builds that one whole).
 
 A menu model can't draw these: GtkModelButton takes an "icon" attribute
 but only draws it when the item has no text, so a plain Gio.MenuItem would
@@ -18,6 +19,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk  # noqa: E402
+
+from . import openwith  # noqa: E402
 
 # App icons in an "open in…" menu row: symbolic-icon sized, so a row is no
 # taller than the plain menu items above and below it.
@@ -73,6 +76,20 @@ def add_icon_row(
     item.set_attribute_value("custom", GLib.Variant("s", slot_name(len(rows))))
     section.append_item(item)
     rows.append(open_with_row(icon, label, action, target))
+
+
+def file_open_with_menu(
+    rows: list[Gtk.Widget], footer_app_ids: list[str], path: str, action: str
+) -> Gio.Menu:
+    """The "Open In…" submenu of a file's context menu: one icon row per
+    openwith.file_open_with_entries entry — the footer apps that take a
+    file, then the desktop's default app — each activating *action* with
+    the app id as its "s" target. The widgets land on *rows* for the
+    caller's popover (slot_them)."""
+    submenu = Gio.Menu()
+    for app_id, icon, label in openwith.file_open_with_entries(footer_app_ids, path):
+        add_icon_row(submenu, rows, icon, label, action, GLib.Variant("s", app_id))
+    return submenu
 
 
 def slot_them(popover: Gtk.PopoverMenu, rows: list[Gtk.Widget]) -> None:

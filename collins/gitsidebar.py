@@ -70,12 +70,12 @@ from . import (  # noqa: E402
     contextmenu,
     dialogs,
     filetypes,
-    footerapps,
     gitinfo,
     gitloads,
     gitmodel,
     gitops,
     gitpatch,
+    openwith,
     openwithrows,
 )
 from .gitmodel import BranchRef, FileRow, FileSections, Row  # noqa: E402
@@ -1136,7 +1136,8 @@ class GitSidebar(Gtk.Box):
     def _file_menu_items(self, widget: _FileRow) -> list[list[_MenuItem]]:
         """The sections of a file row's context menu, each a list of
         (label, action, target, apps) — *apps* the "Open In…" submenu's
-        rows, (icon, name, target) per configured app that takes a file,
+        rows, (icon, name, target) per configured app that takes a file
+        and then the desktop's default app (openwith.file_open_with_entries),
         and None for a plain item. gitmodel.file_menu_actions is the
         rule: the working-tree sides' Stage / Unstage / Discard…, an
         unmerged row's Stage and the two resolutions (their hints the
@@ -1149,18 +1150,19 @@ class GitSidebar(Gtk.Box):
         file = widget.file
         side = widget.side
         path = file.path
-        on_disk = False
+        full_path = ""  # under the repository root; "" when there is no such file to open
         if self._repo_root is not None and gitops.safe_path(path):
-            on_disk = Path(self._repo_root, path).is_file()
-        sections = list(gitmodel.file_menu_actions(side, file.code, on_disk))
+            candidate = Path(self._repo_root, path)
+            if candidate.is_file():
+                full_path = str(candidate)
+        sections = list(gitmodel.file_menu_actions(side, file.code, bool(full_path)))
         if side == "" and gitpatch.working_side(self._loaded) is not None:
             sections = sections[1:]
         apps: list[tuple[Gio.Icon | None, str, GLib.Variant]] = []
-        if any(gitmodel.MENU_OPEN_WITH in section for section in sections):
-            for app_id, info in footerapps.resolve_apps(list(self._options.footer_apps)):
-                if footerapps.accepts_files(info):
-                    target = GLib.Variant("(ss)", (path, app_id))
-                    apps.append((info.get_icon(), info.get_display_name(), target))
+        if full_path and any(gitmodel.MENU_OPEN_WITH in section for section in sections):
+            footer_apps = list(self._options.footer_apps)
+            for app_id, icon, name in openwith.file_open_with_entries(footer_apps, full_path):
+                apps.append((icon, name, GLib.Variant("(ss)", (path, app_id))))
         built: list[list[_MenuItem]] = []
         for section in sections:
             items: list[_MenuItem] = []
