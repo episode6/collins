@@ -78,11 +78,14 @@ class PanelStrip(Gtk.Box):
     def __init__(self, shell_factory) -> None:
         """`shell_factory() -> PanelPage` builds the shell page the + button
         appends (numbering lives with the dock, so titles stay unique when
-        pages move between strips)."""
+        pages move between strips); `shell_factory(sandboxed=True)` — when
+        the factory takes it — builds the shell that runs inside the
+        session's sandbox (see set_sandboxed_shell_offer)."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._shell_factory = shell_factory
         self._settings: dict | None = None  # last applied; new pages start from it
         self._cwd_lookup = None  # () -> agent cwd, set by the owning tab
+        self._sandboxed_offer = None  # () -> bool: a sandboxed shell can be opened here
         self._page_mover = None  # the dock's move/split interface, if docked
         self._move_targets: list = []  # (label, strip) stash for menu actions
         self._close_ok: set[Adw.TabPage] = set()  # busy closes the user confirmed
@@ -111,6 +114,12 @@ class PanelStrip(Gtk.Box):
         tab_menu.append_section(None, close_section)
         self._move_section = Gio.Menu()
         tab_menu.append_section(None, self._move_section)
+        # The other kind of shell, offered only while the owning tab's
+        # session runs inside a sandbox (see set_sandboxed_shell_offer);
+        # rebuilt per open like the move section, since a Gio.Menu item
+        # can't be hidden in place.
+        self._sandbox_section = Gio.Menu()
+        tab_menu.append_section(None, self._sandbox_section)
         self._view.set_menu_model(tab_menu)
         self._view.connect("setup-menu", self._on_setup_menu)
         self._tab_actions: dict[str, Gio.SimpleAction] = {}
@@ -118,6 +127,7 @@ class PanelStrip(Gtk.Box):
         for name, handler in (
             ("close-tab", self._close_menu_tab),
             ("close-other-tabs", self._close_other_tabs),
+            ("new-sandboxed-shell", lambda: self.new_shell(sandboxed=True)),
         ):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _a, _p, h=handler: h())
@@ -257,10 +267,20 @@ class PanelStrip(Gtk.Box):
         command running is left alone (see PanelPage.open_shell)."""
         shell.open_shell(self._cwd())
 
-    def new_shell(self, restore_text: str | None = None, select: bool = True):
+    def set_sandboxed_shell_offer(self, offer) -> None:
+        """`offer() -> bool` says whether the tab menu should carry *New
+        sandboxed shell* — true only while the owning tab's session runs
+        inside a sandbox with a plan to build the shell's box from."""
+        self._sandboxed_offer = offer
+
+    def new_shell(
+        self, restore_text: str | None = None, select: bool = True, sandboxed: bool = False
+    ):
         """Append a shell page (its shell spawns right away) and optionally
-        select it. `restore_text` seeds the scrollback (session restore)."""
-        shell = self._shell_factory()
+        select it. `restore_text` seeds the scrollback (session restore).
+        *sandboxed* asks the factory for the shell that runs inside the
+        session's sandbox instead of the user's own."""
+        shell = self._shell_factory(sandboxed=True) if sandboxed else self._shell_factory()
         self.add_page(shell, select=False)
         shell.open_shell(self._cwd(), restore_text)
         if select:
@@ -481,6 +501,9 @@ class PanelStrip(Gtk.Box):
         self._menu_page = page
         self._tab_actions["close-other-tabs"].set_enabled(view.get_n_pages() > 1)
         self._rebuild_move_section()
+        self._sandbox_section.remove_all()
+        if self._sandboxed_offer is not None and self._sandboxed_offer():
+            self._sandbox_section.append(_("New sandboxed shell"), "strip.new-sandboxed-shell")
 
     def _rebuild_move_section(self) -> None:
         """The move/split half of the tab menu, recomputed per open: "Move

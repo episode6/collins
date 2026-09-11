@@ -2572,6 +2572,7 @@ class MainWindow(Adw.ApplicationWindow):
         watch(tab, "process-exited", self._on_process_exited, page)
         watch(tab, "session-resolved", self._on_session_resolved, page)
         watch(tab, "fork-resolved", self._on_fork_resolved)
+        watch(tab, "toast", self._on_tab_toast)
         watch(tab, "panel-size-changed", self._on_panel_size_changed)
         watch(tab, "panel-position-changed", self._on_panel_position_changed)
         watch(tab, "editor-size-changed", self._on_editor_size_changed)
@@ -2790,6 +2791,13 @@ class MainWindow(Adw.ApplicationWindow):
         """A sandboxed fork tab found the id the CLI minted for the forked
         conversation: sticky like its origin, so its own row resumes boxed."""
         self.state.set_sandboxed(forked_id, True)
+
+    def _on_tab_toast(self, _tab: TerminalTab, text: str) -> None:
+        """A tab's short message for the user (the sandbox chip's verdict on
+        a directory), floated over the sessions panel like the archive's
+        Undo. Plain text: toast titles are markup by default, and a path
+        can carry an ampersand."""
+        self.sidebar.toast_overlay.add_toast(Adw.Toast(title=GLib.markup_escape_text(text)))
 
     def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
