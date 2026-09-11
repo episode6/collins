@@ -42,6 +42,7 @@ BLOCK_NOT_SESSION = "not-session"
 BLOCK_UNSUPPORTED = "unsupported"
 BLOCK_UNREGISTERED = "unregistered"
 BLOCK_IN_FLIGHT = "in-flight"
+BLOCK_SANDBOXED = "sandboxed"
 
 
 def background_blocker(
@@ -51,8 +52,16 @@ def background_blocker(
     session_id: str | None,
     has_row: bool,
     detach_in_flight: bool,
+    is_sandboxed: bool = False,
 ) -> str:
     """Why a tab can't be backgrounded right now, or "" when it can.
+
+    A sandboxed session is never handed over: a backgrounded job is
+    respawned by the CLI's daemon, a host process outside any box, and the
+    daemon's job record has no seam a wrapper could ride (measured on
+    2.1.268: respawn flags are an allowlist, isolation is none|worktree).
+    The refusal ranks above registration — it never changes, so it is the
+    reason to show.
 
     A /bg is only safe once the app can name the conversation it is handing
     over. The handoff has to record `old id -> the id the background agent
@@ -77,6 +86,8 @@ def background_blocker(
         return BLOCK_NOT_SESSION
     if not supports_detach:
         return BLOCK_UNSUPPORTED
+    if is_sandboxed:
+        return BLOCK_SANDBOXED
     # A fork tab deliberately shares the original's id and writes nothing under
     # it, so there is no id of its own to record a handoff against.
     if is_fork or not session_id or not has_row:
