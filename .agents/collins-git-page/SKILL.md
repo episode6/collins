@@ -667,7 +667,7 @@ under the `⋯` row (they stay when the gap folds; `collapse` drops only
 the context view) and the glyphs beside the drawn rows that carry them
 (`_apply_view_marks`, re-run by `expand`). The gap row is rebuilt on
 every reload (its slot key holds the patch hash) and `_apply_marks`
-re-hands it its notes. Probes: `gap_note_rows(path, address)`,
+re-hands it its notes; `_reveal_mark` on one draws a folded gap first, so the line and its glyph show. Probes: `gap_note_rows(path, address)`,
 `gap_note_marks`, `gap_context_menu_labels(path, address, row)`,
 `add_gap_note(path, address, row)`; `check_native_notes` walks them
 (the menu's labels, a draft on the gap's third drawn row, the save, the

@@ -3201,11 +3201,14 @@ class DiffView(Gtk.Box):
             return
         located = diffmodel.locate(self._files, section.file.path, mark.side, mark.line)
         if located is None:
-            # A note outside every hunk: its gap row.
+            # A note outside every hunk: its gap row, its context drawn so
+            # the line and its glyph show (the card shows either way).
             address = diffnotes.gap_address(section.file, mark.side, mark.line)
             gap = next((g for g in section.gaps if g.key == address), None)
             if gap is not None:
                 section.set_folded(False)
+                if not gap.expanded and not gap.measuring:
+                    self.on_gap_expand(gap)
                 keyedslots.scroll_to(self._scroller, gap)
             return
         _file, index, _line = located

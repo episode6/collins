@@ -1422,6 +1422,8 @@ def check_native_notes(repo: str, page: GitPage, window: Gtk.Window, lines: list
         check("its card sits under the gap and its glyph beside the drawn row", view.gap_note_rows("text.txt", "before:1") == [(outside_note.id, "user", "new", gap_line, "Outside the hunks", True)] and view.gap_note_marks("text.txt", "before:1") == [2] and view.note_rows("text.txt", 1) == [], (view.gap_note_rows("text.txt", "before:1"), view.gap_note_marks("text.txt", "before:1")))
         check("the keyboard lands in the hunk below the gap", enabled("stage") and view.current()[:2] == ("text.txt", 1), (window.get_focus(), view.current()))
         check("folding the gaps keeps the card, the glyph goes with the lines", view.collapse_gaps("text.txt") and view.gap_note_rows("text.txt", "before:1") == [(outside_note.id, "user", "new", gap_line, "Outside the hunks", True)] and view.gap_note_marks("text.txt", "before:1") == [], view.gap_note_rows("text.txt", "before:1"))
+        view._reveal_mark(outside_note)
+        check("revealing the note draws the gap again, glyph and all", wait_for(lambda: view.gap_note_marks("text.txt", "before:1") == [2]) and view.gaps_expanded("text.txt") is True, (view.gap_rows("text.txt"), view.gap_note_marks("text.txt", "before:1")))
         serials = view.hunk_serials("text.txt")
         lines[44] = "line 45 changed thrice\n"
         write_file(repo, "text.txt", "".join(lines))
