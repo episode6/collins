@@ -17,7 +17,9 @@ on it through the page's own doors (what annotate_diff / highlight_diff
 would), then reveals the annotated file. git-page-commit and
 git-page-commit-folded are PR shots: the page on the branch's first commit
 (the one stage-docs-data.sh gives a body), its commit card brought out or
-folded.
+folded. git-page-gap-note is a PR shot too: the branch's diff with a gap
+of the annotated file expanded and a user note added from the gap's own
+menu on one of the drawn lines — a note outside every hunk.
 
 notifications opens a session, stages a few rows straight through the
 app's notification center (a message, a coalesced bell, a finished run —
@@ -77,6 +79,7 @@ SCENES = (
     "editor-panel", "editor-picker", "attachments-panel", "notifications",
     "notification-card", "preferences-notifications", "welcome", "welcome-cli",
     "git-page", "git-page-notes", "git-page-commit", "git-page-commit-folded",
+    "git-page-gap-note",
 )
 if args.scene not in SCENES:
     parser.error(f"unknown scene {args.scene}")
@@ -370,6 +373,31 @@ def stage(win) -> list[tuple[int, callable]]:
             page.reveal("src/dashboard/spinner.css", line=13, side="new", focus=False)
 
         return [(1500, lambda: tab.open_git_page("branch", focus=False)), (3000, mark_up)]
+    elif scene == "git-page-gap-note":
+        tab = open_tab(win, U1)
+        path = "src/dashboard/spinner.css"
+        state: dict = {}
+
+        def expand() -> None:
+            view = tab.git_page.diff_view
+            rows = view.gap_rows(path)
+            state["gap"] = rows[0][0] if rows else None
+            if state["gap"]:
+                view.expand_gap(path, state["gap"])
+
+        def note() -> None:
+            view = tab.git_page.diff_view
+            address = state.get("gap")
+            if not address:
+                return
+            view.add_gap_note(path, address, 1)
+            view.set_note_editor_text(
+                "Keep this selector as is\nThe dashboard theme overrides it; a rename here breaks the override."
+            )
+            view.commit_note()
+            tab.git_page.reveal(path, hunk=0, focus=False)
+
+        return [(1500, lambda: tab.open_git_page("branch", focus=False)), (3000, expand), (1500, note)]
     elif scene == "notifications":
         open_tab(win, U1)
         return [(1500, stage_notifications), (300, lambda: win.notify_bell.button.set_active(True))]

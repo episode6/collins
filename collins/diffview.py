@@ -129,6 +129,9 @@ _GAP_ICON_PX = 12
 # The action group each hunk section inserts on itself for its context
 # menu (the popover finds it from its parent view, up the tree).
 _HUNK_ACTIONS = "hunk"
+# The same for a gap row's expanded context (Copy / Open in editor / Add
+# note: no staging, nothing to expand).
+_GAP_ACTIONS = "gap"
 # The marker column's glyphs (bundled icons: the theme's may be absent
 # under CI), and what a highlight of each tone paints its range with —
 # Gtk.TextTag properties; `current` is the reverse-video stand-in.
@@ -1058,7 +1061,7 @@ class _NoteCard(Gtk.Box):
 
     def __init__(
         self,
-        section: _HunkSection,
+        section: _NoteHost,
         owner: DiffView,
         note: diffnotes.Note | None,
         side: str,
@@ -1243,7 +1246,114 @@ class _NoteCard(Gtk.Box):
         return False
 
 
-class _HunkSection(Gtk.Box):
+class _NoteHost:
+    """What a widget that carries note cards has in common — a hunk
+    section and a gap row: the `.git-hunk-notes` box under its lines,
+    the cards by note id, the drafts at the end, and the agent-notes
+    fold. The host is what a `_NoteCard.section` is: `file`, `outside`
+    (whether its notes anchor by number, no hunk to key on), `grab()`
+    to put the keyboard back after an editor closes, and the card
+    calls below. `_init_notes` builds the box; the host appends it."""
+
+    outside = False
+    file: diffmodel.File
+    _owner: DiffView
+
+    def _init_notes(self) -> Gtk.Box:
+        self._cards: dict[str, _NoteCard] = {}
+        self._drafts: list[_NoteCard] = []
+        self._agent_notes_shown = True
+        self._notes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._notes_box.add_css_class("git-hunk-notes")
+        self._notes_box.set_visible(False)
+        return self._notes_box
+
+    def grab(self) -> bool:  # pragma: no cover - the hosts override it
+        return False
+
+    def _set_cards(self, notes: Sequence[diffnotes.Note]) -> None:
+        """Show *notes* as this host's cards (kept by note id, so one
+        being edited keeps its editor), in the store's order, drafts
+        last."""
+        wanted = {note.id: note for note in notes}
+        for note_id in list(self._cards):
+            if note_id not in wanted:
+                self._remove_card(self._cards.pop(note_id))
+        for note in notes:
+            card = self._cards.get(note.id)
+            if card is None:
+                card = _NoteCard(self, self._owner, note, note.side, note.line)
+                self._cards[note.id] = card
+            else:
+                card.set_note(note)
+        for child in list(self._cards.values()) + list(self._drafts):
+            if child.get_parent() is self._notes_box:
+                self._notes_box.remove(child)
+        for note in notes:
+            self._notes_box.append(self._cards[note.id])
+        for draft in self._drafts:
+            self._notes_box.append(draft)
+        self._sync_cards_shown()
+
+    def set_agent_notes_shown(self, shown: bool) -> None:
+        """`a`: the agent's cards fold away (their markers stay)."""
+        self._agent_notes_shown = shown
+        self._sync_cards_shown()
+
+    def _sync_cards_shown(self) -> None:
+        any_shown = False
+        for card in self._cards.values():
+            agent = card.note is not None and card.note.source == diffnotes.AGENT
+            visible = self._agent_notes_shown or not agent
+            card.set_visible(visible)
+            any_shown = any_shown or visible
+        self._notes_box.set_visible(any_shown or bool(self._drafts))
+
+    def add_draft(self, side: str, line: int) -> _NoteCard:
+        """A card for a note not yet written, at the end of the notes."""
+        card = _NoteCard(self, self._owner, None, side, line)
+        self._drafts.append(card)
+        self._notes_box.append(card)
+        self._notes_box.set_visible(True)
+        return card
+
+    def drop_draft(self, card: _NoteCard) -> None:
+        if card in self._drafts:
+            self._drafts.remove(card)
+            self._remove_card(card)
+            self._sync_cards_shown()
+
+    def _remove_card(self, card: _NoteCard) -> None:
+        """Take *card* out of the tree: the keyboard moves off it first
+        (the host's view takes it), it hides now, and it is unparented
+        _CARD_REAP_MS later — never in the turn its editor's focus left
+        (see the constant)."""
+        root = self.get_root()
+        focus = root.get_focus() if root is not None else None
+        if focus is not None and (focus is card or focus.is_ancestor(card)):
+            if not self.grab():
+                root.set_focus(None)
+        card.set_visible(False)
+
+        def unparent() -> bool:
+            if card.get_parent() is self._notes_box:
+                self._notes_box.remove(card)
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(_CARD_REAP_MS, unparent)
+
+    def cards(self) -> list[_NoteCard]:
+        """Every card in the box's order, drafts included."""
+        return [c for c in self._cards.values()] + list(self._drafts)
+
+    def first_user_card(self) -> _NoteCard | None:
+        for card in self._cards.values():
+            if card.note is not None and card.note.source == diffnotes.USER:
+                return card
+        return None
+
+
+class _HunkSection(Gtk.Box, _NoteHost):
     """One hunk: its `@@` header row — the ranges, the context, and the
     buttons (*Stage hunk* · *Discard hunk*, whose words follow the load
     and the selection: gitpatch.action_labels) — over its view(s). Wears
@@ -1287,13 +1397,9 @@ class _HunkSection(Gtk.Box):
         self._menu_view: _HunkView | None = None
         self._menu_popover: Gtk.PopoverMenu | None = None
         # The marks placed in this hunk — (mark, line index into
-        # hunk.lines) — and the cards by note id; drafts are cards with no
-        # note yet, kept at the end of the notes box.
+        # hunk.lines); the cards are the note host's (_NoteHost).
         self._placed_notes: list[tuple[diffnotes.Note, int]] = []
         self._placed_highlights: list[tuple[diffnotes.Highlight, int]] = []
-        self._cards: dict[str, _NoteCard] = {}
-        self._drafts: list[_NoteCard] = []
-        self._agent_notes_shown = True
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         header.add_css_class("git-hunk-header")
@@ -1320,10 +1426,7 @@ class _HunkSection(Gtk.Box):
         header.append(self.actions)
         self.header = header
         self.append(header)
-        self._notes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        self._notes_box.add_css_class("git-hunk-notes")
-        self._notes_box.set_visible(False)
-        self.append(self._notes_box)
+        self.append(self._init_notes())
         self._install_actions()
         self._build_body()
         self.sync_actions()
@@ -1592,41 +1695,8 @@ class _HunkSection(Gtk.Box):
         marker glyphs and the highlight tags on the views."""
         self._placed_notes = list(notes)
         self._placed_highlights = list(highlights)
-        wanted = {note.id: note for note, _index in notes}
-        for note_id in list(self._cards):
-            if note_id not in wanted:
-                self._remove_card(self._cards.pop(note_id))
-        for note, _index in notes:
-            card = self._cards.get(note.id)
-            if card is None:
-                card = _NoteCard(self, self._owner, note, note.side, note.line)
-                self._cards[note.id] = card
-            else:
-                card.set_note(note)
-        # Re-order: the store's order, drafts last.
-        for child in list(self._cards.values()) + list(self._drafts):
-            if child.get_parent() is self._notes_box:
-                self._notes_box.remove(child)
-        for note, _index in notes:
-            self._notes_box.append(self._cards[note.id])
-        for draft in self._drafts:
-            self._notes_box.append(draft)
-        self._sync_cards_shown()
+        self._set_cards([note for note, _index in notes])
         self._apply_view_marks()
-
-    def set_agent_notes_shown(self, shown: bool) -> None:
-        """`a`: the agent's cards fold away (their markers stay)."""
-        self._agent_notes_shown = shown
-        self._sync_cards_shown()
-
-    def _sync_cards_shown(self) -> None:
-        any_shown = False
-        for card in self._cards.values():
-            agent = card.note is not None and card.note.source == diffnotes.AGENT
-            visible = self._agent_notes_shown or not agent
-            card.set_visible(visible)
-            any_shown = any_shown or visible
-        self._notes_box.set_visible(any_shown or bool(self._drafts))
 
     def _apply_view_marks(self) -> None:
         """The marker column's glyphs and the highlight tags per view: a
@@ -1667,49 +1737,6 @@ class _HunkSection(Gtk.Box):
             if line.old is not None:
                 return diffmodel.OLD, line.old
         return diffmodel.NEW, 0
-
-    def add_draft(self, side: str, line: int) -> _NoteCard:
-        """A card for a note not yet written, at the end of the notes."""
-        card = _NoteCard(self, self._owner, None, side, line)
-        self._drafts.append(card)
-        self._notes_box.append(card)
-        self._notes_box.set_visible(True)
-        return card
-
-    def drop_draft(self, card: _NoteCard) -> None:
-        if card in self._drafts:
-            self._drafts.remove(card)
-            self._remove_card(card)
-            self._sync_cards_shown()
-
-    def _remove_card(self, card: _NoteCard) -> None:
-        """Take *card* out of the tree: the keyboard moves off it first
-        (the hunk's view takes it), it hides now, and it is unparented
-        _CARD_REAP_MS later — never in the turn its editor's focus left
-        (see the constant)."""
-        root = self.get_root()
-        focus = root.get_focus() if root is not None else None
-        if focus is not None and (focus is card or focus.is_ancestor(card)):
-            if not self.grab():
-                root.set_focus(None)
-        card.set_visible(False)
-
-        def unparent() -> bool:
-            if card.get_parent() is self._notes_box:
-                self._notes_box.remove(card)
-            return GLib.SOURCE_REMOVE
-
-        GLib.timeout_add(_CARD_REAP_MS, unparent)
-
-    def cards(self) -> list[_NoteCard]:
-        """Every card in the box's order, drafts included."""
-        return [c for c in self._cards.values()] + list(self._drafts)
-
-    def first_user_card(self) -> _NoteCard | None:
-        for card in self._cards.values():
-            if card.note is not None and card.note.source == diffnotes.USER:
-                return card
-        return None
 
     @property
     def placed_notes(self) -> list[tuple[diffnotes.Note, int]]:
@@ -1849,7 +1876,7 @@ class _HunkSection(Gtk.Box):
         return None
 
 
-class _GapRow(Gtk.Box):
+class _GapRow(Gtk.Box, _NoteHost):
     """An unchanged stretch between (or around) hunks: one ⇕ button on the
     left, where the line numbers are, the `⋯ n unchanged lines` words
     beside it, and the context view the click grows above the row. A
@@ -1859,7 +1886,12 @@ class _GapRow(Gtk.Box):
     `⋯` until it is measured — by the view when the row scrolls into
     sight, or by the click: its size needs the file's length, which only
     the context read knows — and folds away when the last hunk reaches
-    the end of the file."""
+    the end of the file. A right-click on the drawn context pops Copy /
+    Open in editor / Add note (the `gap.*` group): a note on a line no
+    hunk carries, anchored by its number (diffnotes.CONTEXT_KEY), whose
+    card sits under the row — with the context drawn or folded."""
+
+    outside = True
 
     def __init__(
         self,
@@ -1872,6 +1904,7 @@ class _GapRow(Gtk.Box):
         palette: diffmodel.DiffPalette,
         options: _Options,
         on_expand: Callable[[_GapRow], None],
+        owner: DiffView,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.file = file
@@ -1883,8 +1916,11 @@ class _GapRow(Gtk.Box):
         self._palette = palette
         self._options = options
         self._on_expand = on_expand
+        self._owner: DiffView = owner
         self._view: _HunkView | None = None
         self._lines: list[_Row] = []
+        self._placed_notes: list[diffnotes.Note] = []
+        self._menu_popover: Gtk.PopoverMenu | None = None
         self.shown = 0
         self.known = gap is not None  # a trailing gap's count is read lazily
         self.measuring = False  # a trailing gap's read is out
@@ -1907,12 +1943,118 @@ class _GapRow(Gtk.Box):
         row.append(self._label)
         self._row = row
         self.append(row)
+        self.append(self._init_notes())
+        self._install_actions()
         self._sync()
 
     @property
     def key(self) -> str:
         """The model's address for this gap: `before:<i>` / `trailing:<i>`."""
         return f"{self.position}:{self.hunk_index}"
+
+    # -- the context menu and the notes --
+
+    def _install_actions(self) -> None:
+        group = Gio.SimpleActionGroup()
+        for name, handler in (
+            ("copy", self._copy),
+            ("open", lambda: self._owner.open_from_gap(self)),
+            ("note", lambda: self._owner.request_gap_note(self)),
+        ):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _a, _p, run=handler: run())
+            group.add_action(action)
+        self.insert_action_group(_GAP_ACTIONS, group)
+
+    def _on_secondary_click(self, gesture: Gtk.GestureClick, x: float, y: float) -> None:
+        view = self._view
+        if view is None or not view.rows:
+            return
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        # The menu's items speak of the cursor line: put it under the
+        # pointer (the view takes no focus, but its buffer has a cursor).
+        _bx, by = view.view.window_to_buffer_coords(Gtk.TextWindowType.WIDGET, int(x), int(y))
+        it, _top = view.view.get_line_at_y(by)  # (target_iter, line_top): no boolean first
+        view.place_cursor(min(it.get_line(), len(view.rows) - 1))
+        popover = Gtk.PopoverMenu.new_from_model(self.context_menu())
+        self._menu_popover = popover
+        contextmenu.popup_at(popover, view.view, x, y, halign=Gtk.Align.START)
+
+    @staticmethod
+    def context_menu() -> Gio.Menu:
+        """The right-click menu's model: Copy / Open in editor / Add note
+        over the `gap.*` group (no staging: nothing here is a change)."""
+        menu = Gio.Menu()
+        menu.append(_("Copy"), f"{_GAP_ACTIONS}.copy")
+        menu.append(_("Open in editor"), f"{_GAP_ACTIONS}.open")
+        menu.append(_("Add note"), f"{_GAP_ACTIONS}.note")
+        return menu
+
+    def open_context_menu(self, row: int) -> Gtk.PopoverMenu | None:
+        """Probe: a right-click on *row* of the drawn context, through the
+        gesture's handler; the popover it left up."""
+        view = self._view
+        if view is None or not 0 <= row < len(view.rows):
+            return None
+        _ok, it = view.buffer.get_iter_at_line(row)
+        rect = view.view.get_iter_location(it)
+        if rect.height <= 0:
+            return None
+        middle = rect.y + rect.height // 2
+        x, y = view.view.buffer_to_window_coords(Gtk.TextWindowType.WIDGET, rect.x + 4, middle)
+        self._on_secondary_click(Gtk.GestureClick(), float(x), float(y))
+        return self._menu_popover
+
+    def _copy(self) -> None:
+        view = self._view
+        display = self.get_display()
+        if view is not None and display is not None:
+            display.get_clipboard().set(view.selection_text())
+
+    def cursor_line(self) -> tuple[str, int] | None:
+        """(side, 1-based number) of the cursor row of the drawn context:
+        the new side's number when the row has one, else the old's."""
+        view = self._view
+        if view is None or not view.rows:
+            return None
+        row = view.rows[min(view.cursor_row(), len(view.rows) - 1)]
+        if row.new is not None:
+            return diffmodel.NEW, row.new
+        if row.old is not None:
+            return diffmodel.OLD, row.old
+        return None
+
+    def anchor_at_cursor(self) -> tuple[str, int] | None:
+        """Where a note asked for here would sit: the cursor line."""
+        return self.cursor_line()
+
+    def grab(self) -> bool:
+        """The context takes no keyboard: the hunk the gap sits by does."""
+        return self._owner.grab_after_gap(self)
+
+    def set_notes(self, notes: Sequence[diffnotes.Note]) -> None:
+        """Show *notes* (the store's, on lines of this gap) as cards under
+        the row and as glyphs beside the drawn lines that carry them."""
+        self._placed_notes = list(notes)
+        self._set_cards(notes)
+        self._apply_view_marks()
+
+    def _apply_view_marks(self) -> None:
+        view = self._view
+        if view is None:
+            return
+        icons: dict[int, str] = {}
+        for note in self._placed_notes:
+            for index, row in enumerate(self._lines):
+                number = row.new if note.side == diffmodel.NEW else row.old
+                if number is not None and number == note.line:
+                    icons[index] = _NOTE_ICON
+                    break
+        view.set_marks(icons)
+
+    @property
+    def placed_notes(self) -> list[diffnotes.Note]:
+        return list(self._placed_notes)
 
     @property
     def remaining(self) -> int:
@@ -1978,6 +2120,7 @@ class _GapRow(Gtk.Box):
             self._view = self._context_view()
             self.insert_child_after(self._view.scroller, None)
         self._view.set_rows(self._lines)
+        self._apply_view_marks()
         self._sync()
 
     @property
@@ -2009,6 +2152,10 @@ class _GapRow(Gtk.Box):
         view.view.add_css_class("git-gap-text")
         view.scroller.add_css_class("git-gap-context")  # the hunk rail's width as a margin
         view.view.set_can_focus(False)
+        secondary = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+        secondary.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        secondary.connect("pressed", lambda g, _n, x, y: self._on_secondary_click(g, x, y))
+        view.view.add_controller(secondary)
         return view
 
     @property
@@ -2027,6 +2174,24 @@ class _GapRow(Gtk.Box):
         for view in self.views:
             view.set_scheme(scheme)
             view.set_palette(palette)
+
+
+def _menu_labels(model: Gio.MenuModel | None) -> list[str]:
+    """The item labels of a menu model, its sections walked in order (the
+    items of a sectionless model too)."""
+    labels: list[str] = []
+    for i in range(model.get_n_items() if model is not None else 0):
+        part = model.get_item_link(i, Gio.MENU_LINK_SECTION)
+        if part is None:
+            label = model.get_item_attribute_value(i, Gio.MENU_ATTRIBUTE_LABEL, GLib.VariantType("s"))
+            if label is not None:
+                labels.append(label.get_string())
+            continue
+        for j in range(part.get_n_items()):
+            label = part.get_item_attribute_value(j, Gio.MENU_ATTRIBUTE_LABEL, GLib.VariantType("s"))
+            if label is not None:
+                labels.append(label.get_string())
+    return labels
 
 
 def _collapse_button(on_click: Callable[[], None]) -> Gtk.Button:
@@ -2324,6 +2489,7 @@ class _FileSection(Gtk.Box):
             owner.palette,
             owner.options,
             owner.on_gap_expand,
+            owner,
         )
 
     def _set_preview(self, preview: Gtk.Widget | None) -> None:
@@ -2867,6 +3033,30 @@ class DiffView(Gtk.Box):
         view = section._menu_view if section._menu_view in section.views else None
         self._open_draft(section, section.anchor_at_cursor(view))
 
+    def open_from_gap(self, gap: _GapRow) -> None:
+        """A gap's context menu's *Open in editor*: the file at the line
+        the menu opened on."""
+        where = gap.cursor_line()
+        if where is not None:
+            self.emit("open-requested", gap.file.path, where[1])
+
+    def request_gap_note(self, gap: _GapRow) -> None:
+        """A gap's context menu's *Add note*: a draft card under the gap
+        row, anchored to the drawn line the menu opened on — a line no
+        hunk carries, so the note is number-anchored (diffnotes)."""
+        where = gap.anchor_at_cursor()
+        if where is not None:
+            self._open_draft(gap, where)
+
+    def grab_after_gap(self, gap: _GapRow) -> bool:
+        """The keyboard's home after a gap's note editor closes: the hunk
+        the gap sits by (its context takes no focus)."""
+        section = self._section_of(gap)
+        if section is None:
+            return False
+        target = next((h for h in section.hunks if h.hunk.index == gap.hunk_index), None)
+        return target is not None and target.grab()
+
     # -- notes and highlights --
 
     def notes(self, path: str | None = None) -> list[diffnotes.Note]:
@@ -2964,17 +3154,17 @@ class DiffView(Gtk.Box):
         finds the hunk)."""
         self._agent_notes = bool(shown)
         for section in self._sections():
-            for hunk in section.hunks:
-                hunk.set_agent_notes_shown(self._agent_notes)
+            for host in section.hunks + section.gaps:
+                host.set_agent_notes_shown(self._agent_notes)
 
     def editing(self) -> bool:
         """Whether a note editor is open (the page's letter chords are off
         meanwhile, and Escape is the editor's)."""
         return self._editing is not None and self._editing.get_root() is not None
 
-    def _open_draft(self, section: _HunkSection, where: tuple[str, int]) -> bool:
+    def _open_draft(self, section: _NoteHost, where: tuple[str, int]) -> bool:
         side, line = where
-        anchor = diffnotes.resolve_anchor(self._files, section.file.path, side, line)
+        anchor = diffnotes.resolve_anchor(self._files, section.file.path, side, line, outside=section.outside)
         if isinstance(anchor, str):
             log.info("note refused: %s", anchor)
             return False
@@ -2984,21 +3174,26 @@ class DiffView(Gtk.Box):
 
     def _card_for(self, note_id: object) -> _NoteCard | None:
         for section in self._sections():
-            for hunk in section.hunks:
-                for card in hunk.cards():
+            for host in section.hunks + section.gaps:
+                for card in host.cards():
                     if card.note is not None and card.note.id == note_id:
                         return card
         return None
 
     def _apply_marks(self) -> None:
-        """Hand every hunk section the marks the store places in it."""
+        """Hand every hunk section the marks the store places in it, and
+        every gap row the notes on its lines."""
         notes = self._store.placed_notes(self._files)
         highlights = self._store.placed_highlights(self._files)
+        outside = self._store.placed_outside_notes(self._files)
         for section in self._sections():
             for hunk in section.hunks:
                 key = (section.file.path, hunk.hunk.index)
                 hunk.set_marks(notes.get(key, []), highlights.get(key, []))
                 hunk.set_agent_notes_shown(self._agent_notes)
+            for gap in section.gaps:
+                gap.set_notes(outside.get((section.file.path, gap.key), []))
+                gap.set_agent_notes_shown(self._agent_notes)
 
     def _reveal_mark(self, mark: diffnotes.Note | diffnotes.Highlight) -> None:
         section = self._section_for(mark.path, mark.side)
@@ -3006,6 +3201,15 @@ class DiffView(Gtk.Box):
             return
         located = diffmodel.locate(self._files, section.file.path, mark.side, mark.line)
         if located is None:
+            # A note outside every hunk: its gap row, its context drawn so
+            # the line and its glyph show (the card shows either way).
+            address = diffnotes.gap_address(section.file, mark.side, mark.line)
+            gap = next((g for g in section.gaps if g.key == address), None)
+            if gap is not None:
+                section.set_folded(False)
+                if not gap.expanded and not gap.measuring:
+                    self.on_gap_expand(gap)
+                keyedslots.scroll_to(self._scroller, gap)
             return
         _file, index, _line = located
         target = next((h for h in section.hunks if h.hunk.index == index), None)
@@ -3045,7 +3249,7 @@ class DiffView(Gtk.Box):
         section = card.section
         if card.note is None:
             spec = diffnotes.NoteSpec(section.file.path, summary, rationale, side=card.side, line=card.line)
-            added = self._store.add_notes(self._files, [spec], diffnotes.USER)
+            added = self._store.add_notes(self._files, [spec], diffnotes.USER, outside=section.outside)
             if isinstance(added, str):
                 log.info("note not saved: %s", added)
                 self.on_note_cancelled(card)
@@ -3640,14 +3844,7 @@ class DiffView(Gtk.Box):
         popover = section.open_context_menu(view, row)
         if popover is None:
             return None
-        labels: list[str] = []
-        model = popover.get_menu_model()
-        for i in range(model.get_n_items() if model is not None else 0):
-            part = model.get_item_link(i, Gio.MENU_LINK_SECTION)
-            for j in range(part.get_n_items() if part is not None else 0):
-                label = part.get_item_attribute_value(j, Gio.MENU_ATTRIBUTE_LABEL, GLib.VariantType("s"))
-                if label is not None:
-                    labels.append(label.get_string())
+        labels = _menu_labels(popover.get_menu_model())
         popover.popdown()
         return labels
 
@@ -3656,7 +3853,15 @@ class DiffView(Gtk.Box):
         side, line, summary, shown) — a draft's id is ""."""
         section = self._section_for(path, diffmodel.NEW)
         target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
-        if target is None:
+        return self._card_rows(target)
+
+    def gap_note_rows(self, path: str, address: str) -> list[tuple[str, str, str, int, str, bool]]:
+        """Probe: the cards under *path*'s gap *address*, as note_rows."""
+        return self._card_rows(self._gap_at(path, address))
+
+    @staticmethod
+    def _card_rows(host: _NoteHost | None) -> list[tuple[str, str, str, int, str, bool]]:
+        if host is None:
             return []
         return [
             (
@@ -3667,8 +3872,34 @@ class DiffView(Gtk.Box):
                 card.note.summary if card.note else card.text(),
                 card.get_visible(),
             )
-            for card in target.cards()
+            for card in host.cards()
         ]
+
+    def gap_note_marks(self, path: str, address: str) -> list[int]:
+        """Probe: the row indexes of the drawn context carrying a glyph."""
+        gap = self._gap_at(path, address)
+        return sorted(gap._view.marks) if gap is not None and gap._view is not None else []
+
+    def gap_context_menu_labels(self, path: str, address: str, row: int) -> list[str] | None:
+        """Probe: right-click *row* of the gap's drawn context; the labels
+        of the menu that opened (popped down again), or None."""
+        gap = self._gap_at(path, address)
+        popover = gap.open_context_menu(row) if gap is not None else None
+        if popover is None:
+            return None
+        labels = _menu_labels(popover.get_menu_model())
+        popover.popdown()
+        return labels
+
+    def add_gap_note(self, path: str, address: str, row: int) -> bool:
+        """Probe: the gap menu's *Add note* on *row* of the drawn context
+        (a right-click there, then the item)."""
+        gap = self._gap_at(path, address)
+        popover = gap.open_context_menu(row) if gap is not None else None
+        if popover is None:
+            return False
+        popover.popdown()
+        return gap.activate_action(f"{_GAP_ACTIONS}.note", None)
 
     def note_marks(self, path: str, hunk: int) -> list[int]:
         """Probe: the indexes into the hunk's lines that carry a note."""

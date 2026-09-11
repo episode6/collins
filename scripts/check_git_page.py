@@ -62,7 +62,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import gitloads, gitops, gitpage  # noqa: E402
+from collins import diffnotes, gitloads, gitops, gitpage  # noqa: E402
 from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
 from collins.editor import GtkSource  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
@@ -1406,6 +1406,37 @@ def check_native_notes(repo: str, page: GitPage, window: Gtk.Window, lines: list
         check("Delete drops the user's note and its card", view.delete_note(notes[0].id) and [n.summary for n in view.notes()] == ["Second"] and view.note_rows("text.txt", 0) == [], (view.notes(), view.note_rows("text.txt", 0)))
         check("notes-changed fired for the delete", len(changed) == fired + 1, (fired, len(changed)))
         check("clear with include_user empties the store", view.clear_marks(notes=True, include_user=True) == 1 and view.notes() == [] and view.note_rows("text.txt", 1) == [])
+
+        # -- a note outside every hunk: the gap's right-click menu ---------------------------------------
+        # The 33-line gap between the hunks, expanded; its third drawn row
+        # is a line no hunk carries, so the note anchors by number.
+        check("the gap between the hunks expands", view.expand_gap("text.txt", "before:1") and wait_for(lambda: dict((a, s) for a, _r, s in view.gap_rows("text.txt")).get("before:1", 0) > 2), view.gap_rows("text.txt"))
+        gap = view._gap_at("text.txt", "before:1")
+        gap_line = gap._lines[2].new if gap is not None and len(gap._lines) > 2 else None
+        check("the gap's menu offers Copy, Open in editor and Add note", view.gap_context_menu_labels("text.txt", "before:1", 2) == ["Copy", "Open in editor", "Add note"], view.gap_context_menu_labels("text.txt", "before:1", 2))
+        check("its Add note opens a draft under the gap, anchored to that row", view.add_gap_note("text.txt", "before:1", 2) and view.editing() and page.holds_escape() and view.gap_note_rows("text.txt", "before:1")[-1][:4] == ("", "user", "new", gap_line), (gap_line, view.gap_note_rows("text.txt", "before:1")))
+        check("the chords are off meanwhile", not enabled("stage") and not enabled("close"))
+        view.set_note_editor_text("Outside the hunks")
+        check("Ctrl+Enter saves it as a number-anchored user note", view.commit_note() and not view.editing() and len(view.notes()) == 1 and (view.notes()[0].source, view.notes()[0].side, view.notes()[0].line, view.notes()[0].hunk_key, view.notes()[0].summary) == ("user", "new", gap_line, diffnotes.CONTEXT_KEY, "Outside the hunks"), view.notes())
+        outside_note = view.notes()[0]
+        check("its card sits under the gap and its glyph beside the drawn row", view.gap_note_rows("text.txt", "before:1") == [(outside_note.id, "user", "new", gap_line, "Outside the hunks", True)] and view.gap_note_marks("text.txt", "before:1") == [2] and view.note_rows("text.txt", 1) == [], (view.gap_note_rows("text.txt", "before:1"), view.gap_note_marks("text.txt", "before:1")))
+        check("the keyboard lands in the hunk below the gap", enabled("stage") and view.current()[:2] == ("text.txt", 1), (window.get_focus(), view.current()))
+        check("folding the gaps keeps the card, the glyph goes with the lines", view.collapse_gaps("text.txt") and view.gap_note_rows("text.txt", "before:1") == [(outside_note.id, "user", "new", gap_line, "Outside the hunks", True)] and view.gap_note_marks("text.txt", "before:1") == [], view.gap_note_rows("text.txt", "before:1"))
+        view._reveal_mark(outside_note)
+        check("revealing the note draws the gap again, glyph and all", wait_for(lambda: view.gap_note_marks("text.txt", "before:1") == [2]) and view.gaps_expanded("text.txt") is True, (view.gap_rows("text.txt"), view.gap_note_marks("text.txt", "before:1")))
+        serials = view.hunk_serials("text.txt")
+        lines[44] = "line 45 changed thrice\n"
+        write_file(repo, "text.txt", "".join(lines))
+        check("an edit to hunk 1 reloads the view again", wait_for(lambda: view.hunk_serials("text.txt")[1:] != serials[1:] and page.settled(), timeout=2.0), view.hunk_serials("text.txt"))
+        check("the reload keeps the note at its number, under the rebuilt gap row", [(n.id, n.line) for n in view.notes()] == [(outside_note.id, gap_line)] and view.gap_note_rows("text.txt", "before:1") == [(outside_note.id, "user", "new", gap_line, "Outside the hunks", True)], (view.notes(), view.gap_note_rows("text.txt", "before:1")))
+        check("E opens it from the gap's card", (view._card_for(outside_note.id).start_edit() or True) and view.editing() and view.note_editor_text() == "Outside the hunks", view.note_editor_text())
+        check("Esc drops the edit", view.cancel_note() and not view.editing() and enabled("stage"))
+        check("Delete drops it and its card", view.delete_note(outside_note.id) and view.notes() == [] and view.gap_note_rows("text.txt", "before:1") == [], view.gap_note_rows("text.txt", "before:1"))
+        # The edit put back: the mutations check counts on `changed again`.
+        serials = view.hunk_serials("text.txt")
+        lines[44] = "line 45 changed again\n"
+        write_file(repo, "text.txt", "".join(lines))
+        check("the edit put back reloads once more", wait_for(lambda: view.hunk_serials("text.txt")[1:] != serials[1:] and page.settled(), timeout=2.0))
         check("no editor is left open", not view.editing() and enabled("stage"))
     finally:
         for handler in handlers:

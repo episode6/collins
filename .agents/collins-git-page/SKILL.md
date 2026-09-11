@@ -605,12 +605,12 @@ GTK-free half: `Note` (id, source USER / AGENT, path, side, 1-based line,
 summary, rationale, author, `hunk_key`) and `Highlight` (id, path, side,
 line, `[start, end)` in code points, tone of `TONES`, `hunk_key`),
 `NoteSpec` / `HighlightSpec`, `resolve_anchor(files, path, side, line,
-hunk)` → an `Anchor` or the reason, `bound_text` (CRLF, CR, NEL and the
+hunk, outside=False)` → an `Anchor` or the reason, `bound_text` (CRLF, CR, NEL and the
 Unicode line and paragraph separators folded to newlines, C0 and C1
 controls dropped, cut at `NOTE_MAX_CHARS` 4000; authors at 80),
 `summary_text` (a summary is one line: its newlines read as spaces, so
 a card's heading and the editor's split can't disagree),
-`split_note_text` / `join_note_text`, and `MarkStore`: `add_notes(files, specs, source)` /
+`split_note_text` / `join_note_text`, and `MarkStore`: `add_notes(files, specs, source, outside=False)` /
 `add_highlights(files, specs)` land a batch **whole or not at all**
 (`MAX_NOTES` / `MAX_HIGHLIGHTS` per page, `MAX_*_PER_BATCH`), `edit`,
 `remove`, `clear(path, notes, highlights, include_user)`, and the reload
@@ -638,6 +638,40 @@ which survived, so both are matched afresh and their marks dropped rather
 than landed on the wrong twin. The e2e's mutation check stages hunk 0
 out from under a selection and a note in hunk 1 and reads the gutters
 back through `gutter_numbers(path, hunk)`.
+
+**A note outside every hunk** (the gap's right-click menu — *Copy* /
+*Open in editor* / *Add note* over the `gap.*` group on the `_GapRow`,
+claimed on the expanded context view in the CAPTURE phase like the
+hunk's) has no body to key on: `resolve_anchor(..., outside=True)`
+accepts a line `diffmodel.locate` misses when `diffnotes.gap_address
+(file, side, line)` names a gap row for it (`before:<i>` / `trailing:
+<last>` — the view's `_GapRow.key`; None for a hunk's line, a side the
+file lacks, a placeholder, or a bad number — the trailing gap's length
+isn't known there, so every line past the last hunk is its), and the
+note lands with `hunk_key == CONTEXT_KEY`, `line_index == -1`,
+**anchored by its number**. `prune` never drops or renumbers one;
+`placed_outside_notes(files)` → `{(path, gap address): [note]}` is what
+the gap rows draw (a note whose line a *later* load's hunk holds is
+placed in that hunk by `placed_notes` instead; one no gap can hold is
+parked). Only the user's drafts pass `outside` (`DiffView._open_draft`
+/ `on_note_saved` read it off the host's `outside` flag); the agent's
+`annotate_diff` still refuses a line no hunk carries. The widgets share
+the `_NoteHost` mixin (`_init_notes`, `_set_cards`, `add_draft`,
+`drop_draft`, `_remove_card` with its reap timer, `cards`,
+`first_user_card`, `set_agent_notes_shown`): `_HunkSection` and
+`_GapRow` both are one, and a `_NoteCard.section` is whichever host
+made it. A `_GapRow`'s `grab()` is `DiffView.grab_after_gap` — the
+context takes no focus, so the hunk the gap sits by gets the keyboard
+after an editor closes — and its `set_notes(notes)` draws the cards
+under the `⋯` row (they stay when the gap folds; `collapse` drops only
+the context view) and the glyphs beside the drawn rows that carry them
+(`_apply_view_marks`, re-run by `expand`). The gap row is rebuilt on
+every reload (its slot key holds the patch hash) and `_apply_marks`
+re-hands it its notes; `_reveal_mark` on one draws a folded gap first, so the line and its glyph show. Probes: `gap_note_rows(path, address)`,
+`gap_note_marks`, `gap_context_menu_labels(path, address, row)`,
+`add_gap_note(path, address, row)`; `check_native_notes` walks them
+(the menu's labels, a draft on the gap's third drawn row, the save, the
+fold keeping the card, a reload keeping the number, E, Delete).
 
 The widgets: `DiffView` owns one `MarkStore` (`_store`), `_apply_marks`
 hands each `_HunkSection` its share (`set_marks(notes, highlights)`:
