@@ -141,8 +141,9 @@ class Options:
         git_untracked as a bool (absent: on); git_log_page as an int
         clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE);
         git_line_numbers, git_wrap_lines, git_word_diff and
-        git_hide_whitespace as bools (absent: on, off, on, off); footer_apps as the str entries of a list,
-        at most MAX_FOOTER_APPS (anything else: none)."""
+        git_hide_whitespace as bools (absent: on, off, on, off);
+        footer_apps as the str entries of a list, at most MAX_FOOTER_APPS
+        (anything else: none)."""
         layout = settings.get("git_layout")
         if layout not in LAYOUTS:
             layout = DEFAULT_LAYOUT

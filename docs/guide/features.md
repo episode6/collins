@@ -702,8 +702,9 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   page follows on its next tick.
 - **Preferences → Git** sets the diff's **Layout** (automatic, split or
   stacked), **Line numbers**, **Wrap long lines**, **Highlight changed
-  words** and **Hide whitespace changes**, whether working-tree reviews **show untracked files**, and the
-  commits panel's **Commits per page**. All of them reach a page already
+  words** and **Hide whitespace changes**, whether working-tree reviews
+  **show untracked files**, and the commits panel's **Commits per
+  page**. All of them reach a page already
   open, and the diff follows the editor's style scheme and font from
   Preferences → Editor.
 - **The header says what you're looking at**: the branch, then a
