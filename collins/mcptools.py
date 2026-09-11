@@ -904,7 +904,7 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
 _MODE_TOKEN_RE = re.compile(r"[A-Za-z]{1,32}")
 
 
-def inherited_permission_mode(mode: str | None) -> str:
+def inherited_permission_mode(mode: str | None, sandboxed: bool = False) -> str:
     """The permission mode a start_session spawn inherits when its caller
     didn't pick one: the calling session's own current mode, as its
     transcript recorded it.
@@ -918,10 +918,14 @@ def inherited_permission_mode(mode: str | None) -> str:
     let one unattended session mint others no human ever approved —
     acceptEdits is the strongest mode the tool grants explicitly, so it is
     the strongest one inheritance grants too.
+
+    *sandboxed* lifts the cap: a sibling that will run inside a bubblewrap
+    box (sandboxplan) is exactly the session bypass is meant for — the
+    box, not the prompt, is what bounds it — so bypass passes through.
     """
     if not mode or not _MODE_TOKEN_RE.fullmatch(mode):
         return ""
-    if mode == "bypassPermissions":
+    if mode == "bypassPermissions" and not sandboxed:
         return "acceptEdits"
     return mode
 
@@ -1586,6 +1590,13 @@ def config_path(app_id: str) -> str:
     return os.path.join(config_dir(app_id), "mcp.json")
 
 
+def package_parent() -> str:
+    """The directory the shim imports `collins` from — its PYTHONPATH in
+    the config, and what a sandboxed session's plan binds read-only so the
+    shim resolves inside the box (see sandboxplan)."""
+    return str(Path(__file__).resolve().parent.parent)
+
+
 def _stdio_servers(app_id: str) -> dict:
     """The stdio MCP servers Collins configures, as mcp.json's mcpServers
     value. One definition shared by `write_config` and
@@ -1598,7 +1609,7 @@ def _stdio_servers(app_id: str) -> dict:
             "args": ["-m", "collins.mcp_shim"],
             "env": {
                 "COLLINS_MCP_SOCKET": socket_path(app_id),
-                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+                "PYTHONPATH": package_parent(),
             },
         },
     }
