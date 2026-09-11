@@ -58,9 +58,15 @@ protocol is `hello` (carrying the shim's pid), then `list` and `call`
 correlated by id. Everything runs on the GLib main loop with Gio async
 sockets (no threads); per connection strictly read → reply → read, so a peer
 that stops reading stalls only itself. Every frame is untrusted: a malformed
-hello or broken framing disconnects the peer, and the hello's pid **must
-match `SO_PEERCRED`** or the connection is dropped — the pid is load-bearing
-for authorization. `start()` refuses socket paths over 107 bytes: Gio
+hello or broken framing disconnects the peer, and the pid that authorizes
+the connection is **`SO_PEERCRED`, never the declared one** — the declared
+pid only has to be shaped like a pid. It used to have to match; a shim
+inside a PID namespace (a bubblewrap sandbox, see
+`~/specs/collins/sandboxed-sessions.md` and `scripts/spike_sandbox.py`) can
+only report its namespace-local pid while the kernel translates
+`SO_PEERCRED` into ours, so the two disagree by construction and the
+kernel's answer is the one the `/proc` walk needs. A peer with no
+credentials is still dropped. `start()` refuses socket paths over 107 bytes: Gio
 silently truncates longer ones and listens on the wrong path (bit a scratch
 tree with a long tmpdir prefix).
 

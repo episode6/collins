@@ -163,13 +163,19 @@ class SessionToolService:
         self._send(client, reply)
 
     def _greet(self, client: _Client, message: dict) -> None:
-        """The connection's first frame must be a well-formed, honest hello.
+        """The connection's first frame must be a well-formed hello.
 
-        The declared pid is checked against the peer's real pid as the kernel
-        reports it (SO_PEERCRED): the pid is what authorizes a call to act on
-        a specific tab, and any local process of the user's can open this
-        socket, so a client claiming another process's pid — say, a tab's
-        actual `claude` — must be dropped, not believed.
+        The pid that authorizes a call to act on a specific tab is the peer's
+        real pid as the kernel reports it (SO_PEERCRED), never the declared
+        one: any local process of the user's can open this socket, so a
+        client claiming another process's pid — say, a tab's actual `claude`
+        — is bound to itself, not believed. The declared pid still has to be
+        shaped like one, but it is allowed to differ: a shim inside a
+        sandbox with its own PID namespace (bubblewrap's `--unshare-pid`)
+        can only report its namespace-local pid, while SO_PEERCRED is
+        translated into Collins' namespace — the two disagree by
+        construction, and the kernel's answer is the one the /proc walk in
+        the dispatcher needs.
         """
         pid = message.get("pid")
         if (
@@ -177,11 +183,14 @@ class SessionToolService:
             or not isinstance(pid, int)
             or isinstance(pid, bool)
             or pid <= 0
-            or pid != self._peer_pid(client.connection)
         ):
             self._close(client)
             return
-        client.pid = pid
+        peer = self._peer_pid(client.connection)
+        if peer is None or peer <= 0:
+            self._close(client)
+            return
+        client.pid = peer
         self._read_next(client)
 
     @staticmethod
