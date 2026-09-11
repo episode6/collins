@@ -41,6 +41,7 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
         ({"git_line_numbers": 0}, gitloads.Options(line_numbers=False)),
         ({"git_wrap_lines": 1}, gitloads.Options(wrap=True)),
         ({"git_word_diff": False}, gitloads.Options(word_diff=False)),
+        ({"git_hide_whitespace": 1}, gitloads.Options(hide_whitespace=True)),
         # Footer apps: the str entries of a list, in order; garbage is none.
         (
             {"footer_apps": ["a.desktop", "b.desktop"]},

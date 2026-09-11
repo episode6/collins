@@ -46,6 +46,13 @@ downloads of each version, see the
   is no hunk to follow; it keeps that number across reloads and moves into
   a hunk if a later load's hunk comes to hold the line. The agent reads
   it back through `diff_context` like any other note.
+- **Hide whitespace changes.** The git page's header menu grows a check
+  that draws a changed line differing from its partner only in
+  whitespace — an indent, a trailing space, tabs for spaces — as
+  context: no tint, no sign, no word emphasis, the way GitHub's *Hide
+  whitespace* reads a diff. The lines stay in the diff, so selecting and
+  staging them stages exactly what git sees. It is a preference (Preferences
+  → Git), so every open page follows.
 - **Open In… reaches the default app, and the editor.** The git page's
   files-list menu listed only your footer apps under *Open In…*, and
   vanished when none took a file. It now always ends in a *Default app*

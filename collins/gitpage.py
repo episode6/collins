@@ -185,7 +185,7 @@ _WATCH_SLOW_TICKS = 5
 # page under this prefix (keybindings' `git.*`).
 _ACTIONS = "git"
 # The settings the keys and the menu may write through win.git-option.
-_KEY_SETTINGS = ("git_layout", "git_line_numbers", "git_wrap_lines")
+_KEY_SETTINGS = ("git_layout", "git_line_numbers", "git_wrap_lines", "git_hide_whitespace")
 
 # Which card the stack shows, when it shows one (see _show_card).
 _NOT_A_REPO = "not-a-repo"
@@ -842,7 +842,9 @@ class GitPage(Adw.Bin):
         diffview.apply_font(settings.get("editor_font") or "")
         self._scheme_setting = settings.get("editor_style_scheme") or ""
         self._apply_scheme()
-        self._diffview.set_options(new.layout, new.line_numbers, new.wrap, new.word_diff)
+        self._diffview.set_options(
+            new.layout, new.line_numbers, new.wrap, new.word_diff, new.hide_whitespace
+        )
         self._sync_action_states()
         self.sidebar.set_options(new)
         working = self._loaded in ("unstaged", "staged")
@@ -2003,6 +2005,7 @@ class GitPage(Adw.Bin):
         view = Gio.Menu()
         view.append(_("Line numbers"), f"{_ACTIONS}.line-numbers")
         view.append(_("Wrap long lines"), f"{_ACTIONS}.wrap")
+        view.append(_("Hide whitespace changes"), f"{_ACTIONS}.hide-whitespace")
         view.append(_("Agent notes"), f"{_ACTIONS}.agent-notes")
         menu.append_section(None, view)
         more = Gio.Menu()
@@ -2013,9 +2016,9 @@ class GitPage(Adw.Bin):
 
     def _install_actions(self) -> None:
         """The `git.*` actions the view's chords (keybindings.GROUP_GIT) and
-        the header menu fire. The three stateful ones mirror the settings
-        (layout, line numbers, wrap) and write them back through
-        win.git-option."""
+        the header menu fire. The four stateful ones mirror the settings
+        (layout, line numbers, wrap, hide whitespace) and write them back
+        through win.git-option."""
         group = Gio.SimpleActionGroup()
         plain: dict[str, Callable[[], object]] = {
             "next-hunk": lambda: self._diffview.focus_hunk(1),
@@ -2067,6 +2070,14 @@ class GitPage(Adw.Bin):
             "change-state", lambda _a, value: self._write_option("git_wrap_lines", value.get_boolean())
         )
         group.add_action(self._wrap_action)
+        self._whitespace_action = Gio.SimpleAction.new_stateful(
+            "hide-whitespace", None, GLib.Variant("b", self._options.hide_whitespace)
+        )
+        self._whitespace_action.connect(
+            "change-state",
+            lambda _a, value: self._write_option("git_hide_whitespace", value.get_boolean()),
+        )
+        group.add_action(self._whitespace_action)
         # The agent's note cards shown or folded (`a`, the menu's check):
         # the page's for the tab's life, no setting behind it.
         self._agent_notes_action = Gio.SimpleAction.new_stateful("agent-notes", None, GLib.Variant("b", True))
@@ -2099,6 +2110,8 @@ class GitPage(Adw.Bin):
             self._numbers_action.set_state(GLib.Variant("b", options.line_numbers))
         if self._wrap_action.get_state().get_boolean() != options.wrap:
             self._wrap_action.set_state(GLib.Variant("b", options.wrap))
+        if self._whitespace_action.get_state().get_boolean() != options.hide_whitespace:
+            self._whitespace_action.set_state(GLib.Variant("b", options.hide_whitespace))
 
     def _write_option(self, key: str, value: object) -> None:
         """A key or menu item changed a setting: persist it through the

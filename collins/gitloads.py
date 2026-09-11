@@ -118,9 +118,10 @@ class Options:
     """What Preferences → Git decides about the git page, normalised (see
     from_settings): the layout (one of LAYOUTS), whether working-tree
     reviews include untracked files, the commits-per-group page, and the
-    diff view's three knobs (the line-number columns, wrapping, the word
-    emphasis). The defaults are the shipped settings' — a page that never
-    received settings runs on them."""
+    diff view's four knobs (the line-number columns, wrapping, the word
+    emphasis, whitespace-only changes drawn as context). The defaults are
+    the shipped settings' — a page that never received settings runs on
+    them."""
 
     layout: str = DEFAULT_LAYOUT
     untracked: bool = True
@@ -128,6 +129,7 @@ class Options:
     line_numbers: bool = True
     wrap: bool = False
     word_diff: bool = True
+    hide_whitespace: bool = False
     # Preferences → Footer apps, not Git: the desktop-file ids the files
     # list's "Open In…" submenu offers (gitsidebar resolves them live).
     footer_apps: tuple[str, ...] = ()
@@ -138,9 +140,10 @@ class Options:
         key being missing or wrong: git_layout not in LAYOUTS → "auto";
         git_untracked as a bool (absent: on); git_log_page as an int
         clamped to MIN_LOG_PAGE..MAX_LOG_PAGE (garbage: LOG_PAGE);
-        git_line_numbers, git_wrap_lines and git_word_diff as bools
-        (absent: on, off, on); footer_apps as the str entries of a list,
-        at most MAX_FOOTER_APPS (anything else: none)."""
+        git_line_numbers, git_wrap_lines, git_word_diff and
+        git_hide_whitespace as bools (absent: on, off, on, off);
+        footer_apps as the str entries of a list, at most MAX_FOOTER_APPS
+        (anything else: none)."""
         layout = settings.get("git_layout")
         if layout not in LAYOUTS:
             layout = DEFAULT_LAYOUT
@@ -163,6 +166,7 @@ class Options:
             line_numbers=bool(settings.get("git_line_numbers", True)),
             wrap=bool(settings.get("git_wrap_lines", False)),
             word_diff=bool(settings.get("git_word_diff", True)),
+            hide_whitespace=bool(settings.get("git_hide_whitespace", False)),
             footer_apps=footer_apps,
         )
 

@@ -37,8 +37,8 @@ terminal in it and no external program: every load is one
 `gitops.read_diff` and the view draws it. The header is one row: the branch
 (`_BRANCH_MAX_CHARS`), a breadcrumb of what is loaded, the sidebar toggle
 (`_SIDEBAR_ICON`, or `_BACK_ICON` on a narrow page), the find toggle, the
-view's menu (layout, line numbers, wrap, agent notes,
-reload, keyboard shortcuts) and refresh; the tab's X closes. The
+view's menu (layout, line numbers, wrap, hide whitespace changes, agent
+notes, reload, keyboard shortcuts) and refresh; the tab's X closes. The
 `BreakpointBin` (`max-width: 679px` → one column at a time, the editor's
 narrow mode: the diff by default, the toggle swaps the panels in for it —
 `_panels_requested`, not persisted and reset when the page widens, `show_panels(bool)` / `diff_shown` /
@@ -437,7 +437,8 @@ one `git log -1 --format=%H%x00%an%x00%aI%x00%s%x00%b` into a
 `CommitMessage`, every field bounded, the body at
 `COMMIT_BODY_MAX_CHARS` — and `resolve_commit`, `GIT_TIMEOUT_S`),
 `Options.from_settings` →
-`Options(layout, untracked, log_page, line_numbers, wrap, word_diff)` with
+`Options(layout, untracked, log_page, line_numbers, wrap, word_diff,
+hide_whitespace)` with
 `LAYOUTS`, the `LOG_PAGE` bounds, and `MAX_PATH_CHARS`. The widgets and
 the GTK-free half alike import it directly.
 
@@ -815,8 +816,16 @@ split alignment must re-fire on height changes too.
 
 Preferences → Git (`gitloads.Options.from_settings`, `GitPage.
 apply_settings`): `git_layout` (auto / split / stack, `prefslayout.
-GIT_LAYOUTS`), `git_line_numbers`, `git_wrap_lines`, `git_word_diff` reach
-the view at once (`DiffView.set_options`); `git_untracked` re-reads a
+GIT_LAYOUTS`), `git_line_numbers`, `git_wrap_lines`, `git_word_diff`,
+`git_hide_whitespace` reach the view at once (`DiffView.set_options`;
+the last one is `diffmodel.whitespace_only_lines` — the i-th deletion
+paired with the i-th addition of a change block, equal once every
+whitespace run is dropped, git's `--ignore-all-space` reading — and
+`_HunkView.set_rows(plain=)` draws those rows with no kind tag, no
+emphasis and a blank sign while their `_Row.kind` stays, so the
+selection, the search and the patch are untouched; the header menu's
+check and `git.hide-whitespace` write it through `win.git-option`;
+`tinted_rows(path, hunk)` probes it); `git_untracked` re-reads a
 working-tree load; `git_log_page` re-pages the commits list;
 `git_parent_branch` is the host's rung. The scheme and font are the
 editor's settings. `git_theme` and `git_viewer` (the retired terminal
