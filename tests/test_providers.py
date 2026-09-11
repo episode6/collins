@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 import os
 import shutil
@@ -984,3 +984,19 @@ def test_resume_keeps_the_permission_mode_of_a_sandboxed_session(monkeypatch):
     assert claude.session_flags(None) == ""
     assert claude.resume_command("abc") == "/usr/bin/claude --resume abc"
     assert claude.continue_command(opts) == "/usr/bin/claude --continue"
+
+
+
+def test_sandboxed_shell_argv_runs_the_shell_through_the_launcher():
+    """A sandboxed panel shell is the same launcher a sandboxed session's
+    typed line starts with, around the user's shell: spawned as an argv
+    (no outer shell to type into), the plan first, the shell after `--`."""
+    import sys
+
+    from collins.providers import sandboxed_shell_argv, sandboxrun_path
+
+    argv = sandboxed_shell_argv("/run/user/1/collins/x/sandbox/p q.json", "/bin/zsh")
+    assert argv == [
+        sys.executable, sandboxrun_path(), "/run/user/1/collins/x/sandbox/p q.json", "--", "/bin/zsh"
+    ]
+    assert argv[1].endswith("/collins/sandboxrun.py")

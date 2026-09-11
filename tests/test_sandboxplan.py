@@ -890,5 +890,208 @@ def test_the_plan_runs_a_real_box_when_the_machine_allows(
     assert not (home / "inside").exists()
 
 
+# ---- reading a launched plan back: the chip, a sibling's derivation ----------
+
+
+class _GrantState:
+    """A state with grants keyed the way AppState keys them, saving nothing."""
+
+    def __init__(self, grants=None, **settings):
+        self.grants = dict(grants or {})
+        self._settings = settings
+
+    def get_sandbox_grants(self, workspace):
+        return list(self.grants.get(workspace) or [])
+
+    def set_sandbox_grants(self, workspace, grants):
+        if grants:
+            self.grants[workspace] = list(grants)
+        else:
+            self.grants.pop(workspace, None)
+
+    def get_setting(self, key):
+        return self._settings.get(key, False)
+
+
+def _written(home, tmp_path, **kw):
+    plan = build_plan(_inputs(home, **kw))
+    return plan, sandboxplan.write_plan(plan, str(tmp_path / "plans"))
+
+
+def test_load_plan_reads_back_what_was_written(home, tmp_path):
+    plan, path = _written(home, tmp_path, grants=(str(home / "work" / "lib"),))
+    loaded = sandboxplan.load_plan(path)
+    assert loaded == json.loads(json.dumps(plan))
+    assert loaded["inputs"]["workspace"] == str(home / "work" / "repo")
+    assert sandboxplan.load_plan(None) is None
+    assert sandboxplan.load_plan(str(tmp_path / "missing.json")) is None
+
+
+def test_load_plan_refuses_a_plan_that_lost_its_shape(home, tmp_path):
+    plan, path = _written(home, tmp_path)
+    for broken in (
+        {**plan, "inputs": "nope"},
+        {**plan, "inputs": {**plan["inputs"], "workspace": "relative"}},
+        {**plan, "inputs": {**plan["inputs"], "grants": ["../x"]}},
+        {**plan, "inputs": {**plan["inputs"], "share_gh": "yes"}},
+        {**plan, "workspace": 7},
+        {**plan, "bwrap_args": []},
+    ):
+        with open(path, "w") as fh:
+            json.dump(broken, fh)
+        assert sandboxplan.load_plan(path) is None, broken
+
+
+def test_plan_reaches_holds_a_sibling_to_the_workspace_and_the_grants(home, tmp_path):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    (ws / "sub").mkdir()
+    plan = build_plan(_inputs(home, grants=(str(lib),)))
+    assert sandboxplan.plan_reaches(plan, str(ws)) == ""
+    assert sandboxplan.plan_reaches(plan, str(ws / "sub")) == ""
+    assert sandboxplan.plan_reaches(plan, str(lib)) == ""
+    assert sandboxplan.plan_reaches(plan, str(lib / "deeper")) == ""
+    outside = sandboxplan.plan_reaches(plan, str(home / ".ssh"))
+    assert "outside the sandbox's workspace" in outside and str(ws) in outside
+    assert sandboxplan.plan_reaches(plan, str(home / "work")) != ""  # an ancestor is outside
+    assert sandboxplan.plan_reaches(plan, str(home / "work" / "repository")) != ""  # a prefix
+    assert sandboxplan.plan_reaches(plan, "relative") != ""
+    # A symlink into the workspace resolves to somewhere the box reaches.
+    link = tmp_path / "link"
+    link.symlink_to(ws / "sub")
+    assert sandboxplan.plan_reaches(plan, str(link)) == ""
+
+
+def test_derive_plan_reissues_the_parents_box_for_the_siblings_directory(home):
+    ws = home / "work" / "repo"
+    (ws / "sub").mkdir()
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    parent = build_plan(_inputs(home, grants=(str(lib),), share_gh=True))
+    sibling = sandboxplan.derive_plan(parent, str(ws / "sub"))
+    # The same mounts, shares and grants — only the starting directory moved.
+    assert _binds(sibling, "--bind") == _binds(parent, "--bind")
+    assert _binds(sibling, "--ro-bind-try") == _binds(parent, "--ro-bind-try")
+    assert sibling["inputs"] == parent["inputs"]
+    assert sibling["gh_token"] is True
+    assert sibling["workspace"] == str(ws)
+    assert sibling["cwd"] == str(ws / "sub")
+    args = sibling["bwrap_args"]
+    assert args[args.index("--chdir") + 1] == str(ws / "sub")
+    assert args.count("--chdir") == 1
+    assert any("derived" in note for note in sibling["notes"])
+    # The parent is untouched.
+    assert parent["bwrap_args"][parent["bwrap_args"].index("--chdir") + 1] == str(ws)
+    # A grant is a fine place to start a sibling; ~/.ssh is not.
+    assert sandboxplan.derive_plan(parent, str(lib))["cwd"] == str(lib)
+    with pytest.raises(PlanRefused, match="outside the sandbox"):
+        sandboxplan.derive_plan(parent, str(home / ".ssh"))
+    with pytest.raises(PlanRefused):
+        sandboxplan.derive_plan(parent, str(home / "work"))
+
+
+def _host(monkeypatch, tmp_path, home, state):
+    """A SandboxHost over the fake home, its protected paths under it, a
+    fake bwrap that says yes, and no host claude on PATH."""
+    sandboxplan.reset_probe()
+    monkeypatch.setenv("COLLINS_BWRAP", _fake_bwrap(tmp_path, "exit 0"))
+    monkeypatch.setattr(sandboxplan.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(home / ".local" / "share" / "collins" / "sandbox-home"))
+    monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
+    return sandboxplan.SandboxHost("com.example.App", state)
+
+
+def test_host_allow_and_revoke_hold_grants_to_the_guard(monkeypatch, tmp_path, home, fresh_probe):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    (home / ".ssh").mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    assert host.grants(str(ws)) == []
+    assert host.allow(str(ws), str(lib)) == ""
+    assert host.allow(str(ws), str(lib)) == ""  # twice is once
+    assert host.grants(str(ws)) == [str(lib)]
+    assert state.grants == {str(ws.resolve()): [str(lib)]}
+    # Refusals, each with its reason: a secret, an ancestor of one, $HOME,
+    # /, Collins' own state, the sandbox home, a file, the workspace itself.
+    assert "reaches" in host.allow(str(ws), str(home / ".ssh"))
+    assert host.allow(str(ws), str(home)) == "the home directory itself"
+    assert host.allow(str(ws), "/") == "the whole filesystem"
+    assert "reaches" in host.allow(str(ws), str(home / ".config" / "collins"))
+    assert host.allow(str(ws), str(home / ".local" / "share" / "collins" / "sandbox-home")) == (
+        "reaches the sandbox home"
+    )
+    assert host.allow(str(ws), str(lib / "missing")) == "not a directory"
+    assert host.allow(str(ws), str(ws / "sub")) == "already inside the workspace"
+    assert host.allow(str(ws), "relative/path") == "not an absolute path"
+    assert host.grants(str(ws)) == [str(lib)]
+    host.revoke(str(ws), str(lib))
+    assert host.grants(str(ws)) == []
+    assert state.grants == {}
+    host.revoke(str(ws), str(lib))  # nothing to revoke: no error
+
+
+def test_host_plan_stale_compares_the_launched_policy_with_the_state(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    path = host.prepare_launch(str(ws))
+    assert path is not None
+    assert host.plan_stale(path, str(ws)) is False
+    # A grant added since the launch: the running box doesn't have it.
+    assert host.allow(str(ws), str(lib)) == ""
+    assert host.plan_stale(path, str(ws)) is True
+    host.revoke(str(ws), str(lib))
+    assert host.plan_stale(path, str(ws)) is False
+    # A share flipped since the launch.
+    state._settings["sandbox_share_gh"] = True
+    assert host.plan_stale(path, str(ws)) is True
+    state._settings["sandbox_share_gh"] = False
+    state._settings["sandbox_settings_editable"] = True
+    assert host.plan_stale(path, str(ws)) is True
+    # Nothing to compare against: not stale.
+    assert host.plan_stale(None, str(ws)) is False
+    assert host.plan_stale(str(tmp_path / "gone.json"), str(ws)) is False
+    sandboxplan.release_plan(path)
+
+
+def test_host_derive_writes_the_siblings_plan_beside_the_parents(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    (ws / "sub").mkdir()
+    host = _host(monkeypatch, tmp_path, home, _GrantState())
+    parent_path = host.prepare_launch(str(ws))
+    assert parent_path is not None
+    sibling_path, reason = host.derive(parent_path, str(ws / "sub"))
+    assert reason == "" and sibling_path is not None
+    assert os.path.dirname(sibling_path) == os.path.dirname(parent_path)
+    assert stat.S_IMODE(os.stat(sibling_path).st_mode) == 0o600
+    sibling = sandboxplan.load_plan(sibling_path)
+    assert sibling["cwd"] == str(ws / "sub")
+    assert sibling["inputs"] == sandboxplan.load_plan(parent_path)["inputs"]
+    # Outside the box: no file, the reason instead.
+    refused, reason = host.derive(parent_path, str(home / ".ssh"))
+    assert refused is None and "outside the sandbox" in reason
+    # No parent plan to derive from.
+    refused, reason = host.derive(None, str(ws))
+    assert refused is None and "can't be read" in reason
+    sandboxplan.release_plan(parent_path)
+    sandboxplan.release_plan(sibling_path)
+
+
 def test_the_module_stays_gtk_free():
     assert "gi.repository.Gtk" not in sys.modules
