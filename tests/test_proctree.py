@@ -205,3 +205,17 @@ def test_self_is_an_agent_process_when_the_name_is_in_the_command_line():
     # This test process runs under pytest, so match on something certainly present.
     assert proctree.is_agent_process(os.getpid(), sys.executable.split("/")[-1])
     assert not proctree.is_agent_process(os.getpid(), "definitely-not-in-argv-xyz")
+
+
+def test_a_bubblewrap_wrapper_is_walked_through_to_the_agent(tree):
+    """A sandboxed session runs as `bwrap … -- claude …`: two bwrap
+    processes sit between the shell and the CLI, each carrying the CLI's
+    argv in its own command line. They read as agent processes and the
+    descent continues below them, so the deepest agent is the CLI itself
+    and the two wrappers are never its descendants — nothing joins the
+    plumbing baseline for them (see sandboxplan)."""
+    proc, _parent_dir, child_dir = tree("bwrap --args 5 -- claude --resume x", "claude --resume x")
+    assert proctree.agent_descendant_cwd(proc.pid, "claude") == child_dir
+    assert proctree.agent_descendant_pid(proc.pid, "claude") != proc.pid
+    assert proctree.descendant_cmdlines(proc.pid, "claude") == set()
+    assert not proctree.has_live_descendant(proc.pid, "claude")

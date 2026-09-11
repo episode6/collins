@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-10. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 import json
 import time
@@ -1226,3 +1226,71 @@ def test_notification_settings_round_trip(app_state):
     reloaded = app_state.AppState()
     assert reloaded.get_setting("notification_sound") == "/home/me/chime.ogg"
     assert reloaded.get_setting("announce_finished_runs") is True
+
+
+def test_project_sandbox_override_roundtrip(app_state):
+    state = app_state.AppState()
+    assert state.project_sandbox_override("alpha") is None
+    assert state.sandbox_for_project("alpha") is False  # app default: off
+
+    state.set_setting("sandbox_new_sessions", True)
+    assert state.sandbox_for_project("alpha") is True
+
+    state.set_project_sandbox("alpha", False)
+    state.set_project_sandbox("beta", True)
+    fresh = app_state.AppState()
+    assert fresh.project_sandbox_override("alpha") is False
+    assert fresh.project_sandbox_override("beta") is True
+    assert fresh.project_sandbox_override("gamma") is None
+    assert fresh.sandbox_for_project("alpha") is False
+    assert fresh.sandbox_for_project("beta") is True
+
+
+def test_sandboxed_sessions_are_sticky_and_follow_forwards(app_state):
+    state = app_state.AppState()
+    assert not state.is_sandboxed("a")
+    assert not state.is_sandboxed("")
+    state.set_sandboxed("a", True)
+    state.set_sandboxed("", True)  # no id: nothing recorded
+    fresh = app_state.AppState()
+    assert fresh.is_sandboxed("a")
+    assert fresh.sandboxed_sessions == {"a"}
+    # A /bg fork continues the conversation under a new id: still sandboxed.
+    fresh.forward_session("a", "b")
+    assert fresh.is_sandboxed("b")
+    assert fresh.is_sandboxed("a")
+    fresh.set_sandboxed("a", False)
+    fresh.set_sandboxed("a", False)  # already off: no write, no error
+    again = app_state.AppState()
+    assert again.sandboxed_sessions == {"b"}
+    assert again.is_sandboxed("b")
+    assert again.is_sandboxed("a")  # still answers through its forward
+
+
+def test_sandbox_grants_roundtrip_and_validate(app_state):
+    state = app_state.AppState()
+    assert state.get_sandbox_grants("/ws") == []
+    state.set_sandbox_grants("/ws", ["/home/u/other", "relative", "", "/home/u/more"])
+    state.set_sandbox_grants("", ["/x"])  # no workspace: nothing recorded
+    fresh = app_state.AppState()
+    assert fresh.get_sandbox_grants("/ws") == ["/home/u/other", "/home/u/more"]
+    assert fresh.sandbox_grants == {"/ws": ["/home/u/other", "/home/u/more"]}
+    fresh.set_sandbox_grants("/ws", [])
+    assert app_state.AppState().sandbox_grants == {}
+
+
+def test_sandbox_state_survives_junk_on_disk(app_state):
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "project_sandbox": {"alpha": "yes", "beta": True},
+                "sandboxed_sessions": ["a", 3, "", None],
+                "sandbox_grants": {"/ws": ["/ok", "bad", 7], "/empty": [], "x": "nope"},
+            }
+        )
+    )
+    state = app_state.AppState()
+    assert state.project_sandbox == {"beta": True}
+    assert state.sandboxed_sessions == {"a"}
+    assert state.sandbox_grants == {"/ws": ["/ok"]}

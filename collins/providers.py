@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -16,6 +16,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -223,6 +224,13 @@ class SessionOptions:
     permission_mode: str = ""
     add_dirs: tuple[str, ...] = ()
     worktree: bool = False  # start the session in a fresh git worktree
+    # Run the CLI inside a bubblewrap box (see sandboxplan / sandboxrun).
+    # `sandbox` is the decision; `sandbox_plan` is the plan file the tab
+    # writes at spawn time, and the wrapper is only typed once both are set
+    # — a decision with no plan (bubblewrap missing) launches unsandboxed,
+    # and says so.
+    sandbox: bool = False
+    sandbox_plan: str = ""
 
 
 @dataclass(frozen=True)
@@ -328,33 +336,55 @@ class Provider:
             return f" --mcp-config {shlex.quote(MCP_CONFIG_PATH)}"
         return ""
 
-    def resume_command(self, session_id: str, fork: bool = False) -> str | None:
-        """Shell command to type into the terminal to resume a session."""
+    def sandbox_prefix(self, options) -> str:
+        """What a sandboxed launch's typed line starts with: the host-side
+        launcher that reads the plan and execs bubblewrap around the CLI
+        (`python3 -m collins.sandboxrun <plan> -- `), or "" for an
+        unsandboxed one. The interpreter is this process's, like the shim's
+        in the MCP config: the module has to resolve from wherever Collins
+        is installed, and PATH says nothing about that."""
+        if not options or not options.sandbox or not options.sandbox_plan:
+            return ""
+        return (
+            f"{shlex.quote(sys.executable)} -m collins.sandboxrun "
+            f"{shlex.quote(options.sandbox_plan)} -- "
+        )
+
+    def resume_command(self, session_id: str, fork: bool = False, options=None) -> str | None:
+        """Shell command to type into the terminal to resume a session.
+        *options* carries the sandbox decision for a resumed session (its
+        other fields are a new session's)."""
         cli = shutil.which(self.cli)
         if cli is None:
             return None
         cmd = f"{shlex.quote(cli)} --resume {shlex.quote(session_id)}"
         if fork and self.supports_fork:
             cmd += " --fork-session"
-        return cmd + self._mcp_config_flag()
+        return self.sandbox_prefix(options) + cmd + self._mcp_config_flag()
 
     def new_command(self, options=None) -> str | None:
         """Shell command to start a fresh session, optionally with the
         SessionOptions' CLI flags (model / effort / permission-mode / extra
-        dirs / worktree)."""
+        dirs / worktree), inside a sandbox when the options say so."""
         cli = shutil.which(self.cli)
         if cli is None:
             return None
-        return " ".join([shlex.quote(cli), *self._option_flags(options)]) + self._mcp_config_flag()
+        return (
+            self.sandbox_prefix(options)
+            + " ".join([shlex.quote(cli), *self._option_flags(options)])
+            + self._mcp_config_flag()
+        )
 
     def _option_flags(self, options) -> list[str]:
         """Translate SessionOptions into this agent's CLI flags. Base: none."""
         return []
 
-    def continue_command(self) -> str | None:
+    def continue_command(self, options=None) -> str | None:
         """Shell command to continue the most recent session in the cwd."""
         cli = shutil.which(self.cli)
-        return f"{shlex.quote(cli)} --continue{self._mcp_config_flag()}" if cli else None
+        if cli is None:
+            return None
+        return f"{self.sandbox_prefix(options)}{shlex.quote(cli)} --continue{self._mcp_config_flag()}"
 
     def session_models(self) -> list[tuple[str, str]]:
         """(flag value, label) model aliases this agent's --model takes. Empty
@@ -696,7 +726,7 @@ class ClaudeProvider(Provider):
         family is matched, not just the trust case)."""
         return bool(_WORKTREE_LAUNCH_ERROR_RE.search(screen_text))
 
-    def resume_command(self, session_id: str, fork: bool = False) -> str | None:
+    def resume_command(self, session_id: str, fork: bool = False, options=None) -> str | None:
         # Attach-first: if the session is still running detached (e.g. after
         # /bg), `claude attach` reconnects to the live process instead of
         # starting a new foreground turn over the transcript. Attach only
@@ -711,8 +741,13 @@ class ClaudeProvider(Provider):
         # the daemon lets go of the id, attach is the only door back into the
         # conversation, and it does work on finished jobs (the CLI's own
         # error message recommends it).
-        cmd = super().resume_command(session_id, fork=fork)
-        if cmd is None or fork:
+        #
+        # Never for a sandboxed session: a job the daemon hosts is a host
+        # process outside any box, so a listed id is resumed plainly inside
+        # the box instead — and if the daemon still refuses, it says so on
+        # screen rather than the session quietly escaping its sandbox.
+        cmd = super().resume_command(session_id, fork=fork, options=options)
+        if cmd is None or fork or (options is not None and options.sandbox):
             return cmd
         agent = next(
             (

@@ -308,7 +308,7 @@ def after_the_follow() -> bool:
 
     # Send: the draft is spent, the console appears, the prompt is typed in.
     tab, draft_id = state["tab"], state["draft_id"]
-    tab._new_chat.emit("send-requested", PROMPT, False, MODEL, EFFORT)
+    tab._new_chat.emit("send-requested", PROMPT, False, False, MODEL, EFFORT)
     check("Send leaves the screen", not tab.is_new_chat)
     check(
         "…launching on the picked model",

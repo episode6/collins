@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-07. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -42,6 +42,7 @@ from . import (  # noqa: E402
     panellayout,
     prmenu,
     proctree,
+    sandboxplan,
     themes,
     transcriptlinks,
     vtehtml,
@@ -221,6 +222,14 @@ def _within(root: str, path: str) -> bool:
     """Whether *path* is *root* itself or something under it. Purely lexical."""
     root, path = os.path.normpath(root), os.path.normpath(path)
     return path == root or path.startswith(root + os.sep)
+
+
+# How a sandboxed launch gets its plan: a callable taking the settled launch
+# cwd and returning the plan file's path (sandboxplan.prepare_launch bound to
+# the app id and state), or None when no box can be built. Set by the app at
+# startup, like providers.MCP_CONFIG_PATH; None means every sandboxed
+# decision degrades to an unsandboxed launch that says so.
+SANDBOX_PLANNER: Callable[[str], str | None] | None = None
 
 
 def _agent_tab_environment() -> list[str]:
@@ -1241,12 +1250,12 @@ class TerminalTab(Gtk.Box):
         # the draft's parts moved: text typed, the worktree box toggled, a
         # panel page opened or closed — the window debounces it into a
         # persisted draft. "new-chat-send" is the screen's Send: the prompt,
-        # whether the worktree box is ticked, the model picked ("" for the
-        # CLI's default) and the effort level likewise; the window turns
-        # them into launch options (trust, the flags) and calls
-        # begin_session.
+        # whether the worktree box is ticked, whether the Sandboxed box is,
+        # the model picked ("" for the CLI's default) and the effort level
+        # likewise; the window turns them into launch options (trust, the
+        # flags) and calls begin_session.
         "new-chat-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
-        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str, str)),
+        "new-chat-send": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, bool, str, str)),
         # Emitted (debounced) when the editor panel's divider is moved: the
         # new panel px size, so the window can persist it as the app-wide
         # default. Mirrors panel-size-changed, minus the mode — the editor
@@ -1271,19 +1280,25 @@ class TerminalTab(Gtk.Box):
         initial_size: tuple[int, int] | None = None,
         new_chat: bool = False,
         worktree_default: bool = False,
+        sandbox_default: bool = False,
     ) -> None:
         """*new_chat* opens the tab on the new-chat screen instead of the
         agent's console: nothing is spawned until `begin_session`, which
         the screen's Send (the "new-chat-send" signal, via the window)
         reaches. *worktree_default* is what its worktree checkbox starts
-        on. Only a fresh session (no id, no command override) is ever a
-        new chat."""
+        on, *sandbox_default* what its Sandboxed box starts on. Only a
+        fresh session (no id, no command override) is ever a new chat.
+        *options* carries a resumed session's sandbox decision too (see
+        MainWindow.open_session): the plan is written here, at spawn."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.session_id = session_id
         self.fork = fork
         self.provider = provider or get_provider("claude")
         self._options = options
         self._command_override = command_override
+        # The plan file a sandboxed launch typed (sandboxplan.prepare_launch),
+        # unlinked when the shell exits — the box is gone by then.
+        self._sandbox_plan_path: str | None = None
         # Decided at spawn time, so a toggle mid-session can't half-apply to
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
@@ -1584,12 +1599,14 @@ class TerminalTab(Gtk.Box):
                 pick_model=bool(self.provider.session_models()),
                 effort=(options.effort if options else "") or "",
                 pick_effort=self._can_switch_effort(),
+                sandbox_default=sandbox_default,
+                sandbox_available=sandboxplan.available(),
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
             self._new_chat.connect(
                 "send-requested",
-                lambda _v, text, worktree, model, effort: self.emit(
-                    "new-chat-send", text, worktree, model, effort
+                lambda _v, text, worktree, sandbox, model, effort: self.emit(
+                    "new-chat-send", text, worktree, sandbox, model, effort
                 ),
             )
             self._stage = Gtk.Stack(vexpand=True, hexpand=True)
@@ -1764,6 +1781,12 @@ class TerminalTab(Gtk.Box):
         caller's model and permission mode), or None."""
         return self._options
 
+    @property
+    def sandboxed(self) -> bool:
+        """Whether this tab's agent runs inside a sandbox — as launched, not
+        as the settings now say. What the /bg and attach guards ask."""
+        return bool(self._options and self._options.sandbox)
+
     def new_chat_text(self) -> str:
         return self._new_chat.text() if self._new_chat is not None else ""
 
@@ -1778,6 +1801,11 @@ class TerminalTab(Gtk.Box):
         """The screen's worktree box as the user left it, None while it still
         follows the project's default (see NewChatView.worktree_choice)."""
         return self._new_chat.worktree_choice() if self._new_chat is not None else None
+
+    def new_chat_sandbox_choice(self) -> bool | None:
+        """The screen's Sandboxed box as the user left it, None while it
+        still follows the project's default (see NewChatView.sandbox_choice)."""
+        return self._new_chat.sandbox_choice() if self._new_chat is not None else None
 
     def new_chat_model(self) -> str:
         """The screen's model pick, "" while it stands on the CLI's default
@@ -1804,8 +1832,9 @@ class TerminalTab(Gtk.Box):
         layout: dict | None,
         model: str = "",
         effort: str = "",
+        sandbox: bool | None = None,
     ) -> None:
-        """Put a kept draft back on the screen: its text, its checkbox, its
+        """Put a kept draft back on the screen: its text, its checkboxes, its
         model and effort picks, and the dock the way it was left — shells
         and their scrollback included, which are filed under the draft id
         until the session starts (see _history_id)."""
@@ -1814,6 +1843,7 @@ class TerminalTab(Gtk.Box):
         self._history_key = draft_id
         self._new_chat.set_text(text)
         self._new_chat.set_worktree_choice(worktree)
+        self._new_chat.set_sandbox_choice(sandbox)
         self._new_chat.set_model(model)
         self._new_chat.set_effort(effort)
         if layout:
@@ -1957,10 +1987,16 @@ class TerminalTab(Gtk.Box):
         # so aliases/env apply and the tab drops to a prompt when the agent exits.
         # The tab closes when the *shell* exits.
         self._initial_command: str | None = None
+        if self._options is not None and self._options.sandbox:
+            # The plan is a function of the settled cwd (a recreated worktree
+            # included), so it is written here, at the last moment.
+            self._options = self._sandbox_options(cwd)
         if self._command_override is not None:
-            command = self._command_override
+            command = self.provider.sandbox_prefix(self._options) + self._command_override
         elif session_id is not None:
-            command = self.provider.resume_command(session_id, fork=self.fork)
+            command = self.provider.resume_command(
+                session_id, fork=self.fork, options=self._options
+            )
         else:
             command = self.provider.new_command(self._options)
         if command is None:
@@ -2064,7 +2100,31 @@ class TerminalTab(Gtk.Box):
         self._initial_command = command
         self.terminal.feed_child(f"{command}\n".encode())
 
+    def _sandbox_options(self, cwd: str):
+        """The launch options with the sandbox plan written for *cwd* — or,
+        when no box can be built here (bubblewrap missing, a refused
+        workspace), the same options with the sandbox dropped: an
+        unsandboxed launch that says so on screen, and never one that keeps
+        a bypass mode the box was the justification for."""
+        options = self._options
+        self._release_sandbox_plan()
+        plan = SANDBOX_PLANNER(cwd) if SANDBOX_PLANNER is not None else None
+        if plan:
+            self._sandbox_plan_path = plan
+            return replace(options, sandbox_plan=plan)
+        self.feed_message(
+            _("warning: no sandbox could be built here — starting the session unsandboxed")
+        )
+        mode = "" if options.permission_mode == "bypassPermissions" else options.permission_mode
+        return replace(options, sandbox=False, sandbox_plan="", permission_mode=mode)
+
+    def _release_sandbox_plan(self) -> None:
+        sandboxplan.release_plan(self._sandbox_plan_path)
+        self._sandbox_plan_path = None
+
     def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
+        # The shell is gone, and the box with it (--die-with-parent).
+        self._release_sandbox_plan()
         self.emit("process-exited", status)
 
     # -- copy & paste ------------------------------------------------------
