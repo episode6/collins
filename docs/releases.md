@@ -50,11 +50,29 @@ downloads of each version, see the
   GitHub CLI login*, *Share SSH agent*, *Let sandboxed sessions edit
   ~/.claude/settings.json*, and a status row saying whether bubblewrap is
   usable here) round it out. Sandboxed sessions are never backgrounded or
-  re-attached, since the CLI's daemon would run them outside the box, and
-  the `run_in_terminal`, `read_terminal` and `start_session` tools are
-  refused from inside one until the sandbox policy lands. A port of
-  EricKuck's aibox mount plan (MIT). Directory grants and the footer chip
-  that shows what is inside come next.
+  re-attached, since the CLI's daemon would run them outside the box. A
+  port of EricKuck's aibox mount plan (MIT).
+- **The Sandboxed chip.** A shield chip leads the footer of a sandboxed
+  tab: what the box was launched with (the workspace, whether the GitHub
+  CLI login and the SSH agent went in, whether `~/.claude/settings.json`
+  is protected), the directories allowed to sessions in this workspace —
+  each with a remove button, and *Allow a directory…* through the folder
+  chooser, refused with the reason when it would reach a secret,
+  Collins' own state, your home or `/` — and *Restart to apply* when the
+  box the session runs in no longer matches what the settings would
+  build: the session exits cleanly and resumes in the same tab with the
+  new plan. A *Sandboxed shell* (the chip, or *New sandboxed shell* in a
+  panel tab's menu) opens a terminal inside the same box, titled as one;
+  Ctrl+J still opens your own shell.
+- **What a sandboxed session may ask Collins to do.** From inside a box,
+  `run_in_terminal` and `read_terminal` reach only sandboxed shells —
+  opening one when none is idle — never your own; `start_session`
+  spawns the sibling inside the parent's exact box (its plan re-issued
+  for the sibling's directory, which must lie inside the workspace or an
+  allowed directory, else it is refused), so an unsandboxed sibling from
+  a sandboxed parent is never possible, and `bypassPermissions` is
+  granted to a sibling only when it is sandboxed. Both tools' earlier
+  blanket refusal from a sandboxed session is gone.
 - **Notes on lines outside the diff.** The git page's *Add note* only
   reached the lines a hunk showed; an expanded gap's context had no
   menu at all. A right-click on the drawn context now offers *Copy*,

@@ -128,6 +128,17 @@ the footer-chip rebuild cascade segfaulted GTK's Wayland backend;
 reparented reports `get_width() == 0` until the next layout pass, so two
 opens in one frame make the second join.
 
+**The sandboxed shell is a shell.** `PanelTerminal(number, plan_lookup=…)`
+runs `$SHELL` inside the session's bubblewrap box (see
+`collins-sandboxed-sessions`) with `page_kind` still `"shell"` and a
+`sandboxed` attribute: history, busy checks and layout persistence hold
+(`page_state` adds `"sandboxed": True`, `_restore_node` passes it to
+`strip.new_shell(sandboxed=True)`), the title is *Sandboxed shell N* on
+the dock-wide numbering, and Ctrl+J never binds to one
+(`_on_page_touched`). `open_shell_page(sandboxed=True)` sits one beside
+the last shell page; the strip's tab menu offers *New sandboxed shell*
+while `set_sandboxed_shell_offer` says there is a plan.
+
 ## Adding a page kind
 
 1. Implement the protocol on the widget; give it a `page_kind`.

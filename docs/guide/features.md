@@ -1060,9 +1060,34 @@ flipped the switch is refused if it calls it anyway.
   workspace, and the native installer's `~/.local/bin/claude` symlink sits
   in a shared tree and can be repointed. Inside the box, the session tools
   that show you things (`open_in_editor`, `show_diff`, `show_image`,
-  `notify_user`, …) work as ever; `run_in_terminal`, `read_terminal` and
-  `start_session` — which reach your own shell and directories of the
-  agent's choosing — are refused from a sandboxed session for now. The
+  `notify_user`, …) work as ever; the three that reach the host apply a
+  policy instead: `run_in_terminal` and `read_terminal` see only
+  *sandboxed shells* (below), opening one when none is idle and never your
+  own Ctrl+J shell, and `start_session` spawns the sibling inside the
+  parent's exact box — the same plan re-issued for the sibling's
+  directory, which must lie inside the workspace or an allowed directory
+  (a sibling in `~/.ssh` is refused with the reason); an unsandboxed
+  sibling from a sandboxed parent is never possible, and
+  `bypassPermissions` is granted to a sibling only when it is sandboxed.
+  A **Sandboxed** chip (a shield) leads the footer of a sandboxed tab and
+  is absent everywhere else: it shows what the box was *launched* with —
+  the workspace, whether the GitHub CLI login and the SSH agent went in,
+  whether `~/.claude/settings.json` is protected — and the **allowed
+  directories** for sessions in this workspace, each with a remove
+  button, plus *Allow a directory…* through the folder chooser. A
+  directory is refused with the reason when it is, holds or lies inside a
+  secret (`~/.ssh`, `~/.gnupg`, `~/.config/gh`, …), Collins' own state,
+  your home or `/`, or the sandbox home itself. Grants are per workspace
+  and land in `state.json`; a running box doesn't change (user
+  namespaces are restricted on Ubuntu, so nothing can be mounted into it),
+  so when the plan the settings would build now differs from the launched
+  one the chip offers **Restart to apply**: the session exits cleanly and
+  resumes in the same tab with the new plan. A **Sandboxed shell** — from
+  the chip, or *New sandboxed shell* in a panel tab's right-click menu —
+  is a terminal panel tab running inside the same box (titled *Sandboxed
+  shell N*, its scrollback kept like any shell's): the answer to "what can
+  the agent see?", and the only kind of shell the agent's terminal tools
+  reach. Ctrl+J keeps opening your own shell. The
   CLI's user-level MCP servers and Remote Control run inside the box too,
   and its own *sandbox* setting turns itself off there (the two don't
   stack). Whether a session is sandboxed is remembered per session (a fork
