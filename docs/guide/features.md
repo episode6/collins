@@ -665,7 +665,13 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   the setting, so every page follows), `r` reloads, `e` opens the file
   in the editor at the cursor's line, `?` opens Keyboard Bindings on the
   Git page group, `q` closes the page. The header's menu has the same
-  layout, line-number and wrap switches. `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
+  layout, line-number and wrap switches, plus **Hide whitespace
+  changes**: on, a changed line that differs from its partner only in
+  whitespace (an indent, a trailing space, tabs for spaces) is drawn as
+  context — no tint, no sign, no word emphasis — the way GitHub's
+  *Hide whitespace* reads a diff. The lines are still in the diff, so
+  selecting and staging them stages exactly what git sees; it is a
+  preference, so every page follows. `Ctrl+1` / `Ctrl+2` / `Ctrl+3`
   load the **unstaged** changes, the **staged** changes and the whole
   **branch against its parent** (`main...HEAD`) from anywhere in the page
   — the three most common rows, as chords.
@@ -695,8 +701,8 @@ sidebar to its left. It needs `git` alone, and nothing in it is a terminal.
   remote's. There is nothing to set: create or delete a branch and the
   page follows on its next tick.
 - **Preferences → Git** sets the diff's **Layout** (automatic, split or
-  stacked), **Line numbers**, **Wrap long lines** and **Highlight changed
-  words**, whether working-tree reviews **show untracked files**, and the
+  stacked), **Line numbers**, **Wrap long lines**, **Highlight changed
+  words** and **Hide whitespace changes**, whether working-tree reviews **show untracked files**, and the
   commits panel's **Commits per page**. All of them reach a page already
   open, and the diff follows the editor's style scheme and font from
   Preferences → Editor.
@@ -1171,9 +1177,9 @@ whether a first prompt that links a pull request by URL **attaches it
 to the session** (on; a bare "PR 183" is not enough), whether sessions are **renamed after their pull
 requests** (off), and whether the marks are **refreshed at launch**
 (on) — a **Git** group for the git page — the diff's **Layout** (automatic /
-split / stacked), **Line numbers**, **Wrap long lines** and **Highlight
-changed words**, **Show untracked files**, **Commits per
-page**, and a **Default parent branch** to measure branches against when
+split / stacked), **Line numbers**, **Wrap long lines**, **Highlight
+changed words** and **Hide whitespace changes**, **Show untracked
+files**, **Commits per page**, and a **Default parent branch** to measure branches against when
 git shows no stack and no pull request names one — and the **Footer
 apps** list — reachable from
 the sidebar menu or `Ctrl+,`.

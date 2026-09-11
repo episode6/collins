@@ -6,7 +6,7 @@ in a window nobody sees, rendered to a PNG, and poked.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/probe_diffview.py [--repo DIR] [--ref HEAD | --unstaged | --staged]
-            [--layout auto|split|stack] [--wrap] [--width 1400] [--out out.png]
+            [--layout auto|split|stack] [--wrap] [--hide-whitespace] [--width 1400] [--out out.png]
 
 Not an e2e check (scripts/run_e2e.py only discovers check_*.py): a look at
 the output while the view is built, and the measurements the spec asked
@@ -70,6 +70,7 @@ def main() -> int:
     parser.add_argument("--layout", default="auto")
     parser.add_argument("--wrap", action="store_true")
     parser.add_argument("--no-numbers", action="store_true")
+    parser.add_argument("--hide-whitespace", action="store_true", help="draw whitespace-only changes as context")
     parser.add_argument("--width", type=int, default=1400)
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--dark", action="store_true")
@@ -127,7 +128,7 @@ def main() -> int:
             theme.set_search_path([str(icon_root), *theme.get_search_path()])
         view = diffview.DiffView()
         view.set_scheme(style_scheme("", dark), dark)
-        view.set_options(args.layout, not args.no_numbers, args.wrap, True)
+        view.set_options(args.layout, not args.no_numbers, args.wrap, True, args.hide_whitespace)
         current: list[tuple[str, int]] = []
         view.connect("current-changed", lambda _v, path, hunk: current.append((path, hunk)))
         contexts: list[tuple[str, str, int]] = []
@@ -313,7 +314,7 @@ def main() -> int:
             ok("filter cleared", all(r[2] for r in view.file_rows()))
             # split alignment under wrap
             if view.is_split():
-                view.set_options("split", not args.no_numbers, True, True)
+                view.set_options("split", not args.no_numbers, True, True, args.hide_whitespace)
                 GLib.timeout_add(600, step_align)
             else:
                 GLib.timeout_add(50, step_reload)
@@ -335,7 +336,7 @@ def main() -> int:
                             misaligned += 1
             ok("split rows aligned under wrap", misaligned == 0, f"{misaligned} of {checked} rows differ")
             render(win, args.out.replace(".png", "-wrap.png"))
-            view.set_options(args.layout, not args.no_numbers, args.wrap, True)
+            view.set_options(args.layout, not args.no_numbers, args.wrap, True, args.hide_whitespace)
             GLib.timeout_add(50, step_reload)
             return GLib.SOURCE_REMOVE
 

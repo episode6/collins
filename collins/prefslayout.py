@@ -87,4 +87,5 @@ GIT_SEARCH_TERMS: tuple[str, ...] = (
     "line numbers",
     "wrap",
     "word",
+    "whitespace",
 )

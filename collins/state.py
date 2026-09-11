@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-10. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -312,11 +312,15 @@ DEFAULT_SETTINGS = {
     # The diff view's own knobs (DiffView.set_options, fed from
     # gitpage.apply_settings; the header menu and the `l` / `w` keys flip
     # the first two): the old and new line-number columns, wrapping long
-    # lines instead of scrolling each hunk sideways, and the word-level
-    # emphasis pass within a changed line.
+    # lines instead of scrolling each hunk sideways, the word-level
+    # emphasis pass within a changed line, and whether a changed line that
+    # differs from its partner in whitespace alone is drawn as context
+    # (GitHub's "Hide whitespace"; the header menu's check flips it, and
+    # the patch underneath is untouched).
     "git_line_numbers": True,
     "git_wrap_lines": False,
     "git_word_diff": True,
+    "git_hide_whitespace": False,
     # The branch a session's git page measures its branch against when git
     # shows no local branch under HEAD (the stack, gitops.stack_branches,
     # names the parent first) and no attached pull request names one (see

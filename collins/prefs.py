@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-10. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -968,7 +968,7 @@ class PreferencesDialog(Adw.Dialog):
             "git_layout",
             _GIT_LAYOUTS,
         )
-        # The view's own three (diffview.set_options).
+        # The view's own four (diffview.set_options).
         self._git_line_numbers_row = Adw.SwitchRow(
             title=_("Line numbers"),
             subtitle=_("The old and new line-number columns beside each hunk"),
@@ -992,6 +992,15 @@ class PreferencesDialog(Adw.Dialog):
         self._git_word_diff_row.set_active(bool(state.get_setting("git_word_diff")))
         self._git_word_diff_row.connect("notify::active", self._on_git_switch_changed, "git_word_diff")
         git_group.add(_searchable(self._git_word_diff_row, "word", "emphasis", "inline"))
+        self._git_hide_whitespace_row = Adw.SwitchRow(
+            title=_("Hide whitespace changes"),
+            subtitle=_("Draw lines that differ only in whitespace as unchanged"),
+        )
+        self._git_hide_whitespace_row.set_active(bool(state.get_setting("git_hide_whitespace")))
+        self._git_hide_whitespace_row.connect(
+            "notify::active", self._on_git_switch_changed, "git_hide_whitespace"
+        )
+        git_group.add(_searchable(self._git_hide_whitespace_row, "whitespace", "indent", "ignore"))
 
         self._git_untracked_row = Adw.SwitchRow(
             title=_("Show untracked files"),
@@ -1532,8 +1541,9 @@ class PreferencesDialog(Adw.Dialog):
         self._on_change()
 
     def _on_git_switch_changed(self, row: Adw.SwitchRow, _pspec, key: str) -> None:
-        """The native view's three switches (git_line_numbers, git_wrap_lines,
-        git_word_diff): saved, and fanned out to every open page."""
+        """The native view's four switches (git_line_numbers, git_wrap_lines,
+        git_word_diff, git_hide_whitespace): saved, and fanned out to every
+        open page."""
         self._state.set_setting(key, bool(row.get_active()))
         self._on_change()
 

@@ -65,7 +65,7 @@ import logging
 import re
 import threading
 import weakref
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -441,6 +441,7 @@ class _HunkView:
         self.highlights: list[tuple[int, int, int, str]] = []
         self._highlight_tags: dict[str, Gtk.TextTag] = {}
         self._pads: dict[int, int] = {}
+        self._plain: frozenset[int] = frozenset()
         self._pad_tags: dict[int, Gtk.TextTag] = {}
         # The selection model (decision 4): the buffer's own selection,
         # snapped to whole paragraphs on every move of its two marks —
@@ -560,12 +561,16 @@ class _HunkView:
         rows: Sequence[_Row],
         emphasis: dict[int, tuple[tuple[int, int], ...]] | None = None,
         conflict: bool = False,
+        plain: Collection[int] = (),
     ) -> None:
         """Fill the buffer with *rows* and tag them; *emphasis* maps a row
         index to the character spans of its text to emphasise. With
         *conflict* (an unmerged file's hunk) every conflict marker row
         (diffmodel.is_conflict_marker) wears the conflict tag over its
-        own.
+        own. *plain* names the row indexes drawn as context whatever their
+        kind — no tint, no sign, no emphasis (the whitespace-only lines
+        under Hide whitespace changes); the row itself keeps its kind, so
+        the selection, the search and the patch see it as git does.
 
         The rows kept are what the buffer shows: a patch line's text put
         through diffmodel.display_text (a trailing CR dropped, a lone CR
@@ -581,10 +586,12 @@ class _HunkView:
             for row in rows
         ]
         self._pads = {}
+        self._plain = frozenset(plain)
         buffer = self.buffer
         buffer.set_text("\n".join(_PAD_TEXT if row.kind == PAD else row.text for row in self.rows))
         for index, row in enumerate(self.rows):
-            tag = self._tags.get(row.kind)
+            muted = index in self._plain and row.kind != PAD
+            tag = None if muted else self._tags.get(row.kind)
             if tag is not None:
                 start, end = self._paragraph(index)
                 buffer.apply_tag(tag, start, end)
@@ -592,7 +599,7 @@ class _HunkView:
                 start, end = self._paragraph(index)
                 buffer.apply_tag(self._conflict_tag, start, end)
             spans = emphasis.get(index) if emphasis else None
-            emphasis_tag = self._emphasis.get(row.kind)
+            emphasis_tag = None if muted else self._emphasis.get(row.kind)
             if spans and emphasis_tag is not None:
                 width = len(row.text)
                 for first, last in spans:
@@ -606,7 +613,12 @@ class _HunkView:
         for side, renderer in zip(self._number_sides, self._numbers, strict=True):
             renderer.set_numbers([row.old if side == diffmodel.OLD else row.new for row in self.rows])
         if self._sign is not None:
-            self._sign.set_kinds([row.kind for row in self.rows])
+            self._sign.set_kinds(
+                [
+                    diffmodel.CONTEXT if index in self._plain and row.kind != PAD else row.kind
+                    for index, row in enumerate(self.rows)
+                ]
+            )
         # A fresh buffer's cursor sits at its end; the reader's j/k start at
         # the top, and the current-line highlight (while focused) with them.
         buffer.place_cursor(buffer.get_start_iter())
@@ -1045,6 +1057,7 @@ class _Options:
     line_numbers: bool
     wrap: bool
     word_diff: bool
+    hide_whitespace: bool = False
 
 
 _HUNK_SERIALS = itertools.count(1)
@@ -1647,9 +1660,16 @@ class _HunkSection(Gtk.Box, _NoteHost):
         self.views = []
         hunk = self.hunk
         emphasis = diffmodel.word_emphasis(hunk) if self._options.word_diff else []
+        # The whitespace-only lines drawn as context (Hide whitespace
+        # changes), in hunk line indexes; each view maps them to its rows.
+        plain_lines = (
+            diffmodel.whitespace_only_lines(hunk) if self._options.hide_whitespace else frozenset()
+        )
         if self._options.split:
             rows = diffmodel.split_rows(hunk)
             old_rows, new_rows = self._layout_rows(hunk, rows)
+            old_plain = [i for i, r in enumerate(old_rows) if r.line in plain_lines]
+            new_plain = [i for i, r in enumerate(new_rows) if r.line in plain_lines]
             # Emphasis speaks in hunk line indexes; the buffers in row indexes.
             old_index = {id(r.old): i for i, r in enumerate(rows) if r.old is not None}
             new_index = {id(r.new): i for i, r in enumerate(rows) if r.new is not None}
@@ -1663,8 +1683,8 @@ class _HunkSection(Gtk.Box, _NoteHost):
                     new_emphasis[new_index[id(line)]] = entry.spans
             old_view = self._make_view((diffmodel.OLD,))
             new_view = self._make_view((diffmodel.NEW,))
-            old_view.set_rows(old_rows, old_emphasis, conflict=self.file.conflict)
-            new_view.set_rows(new_rows, new_emphasis, conflict=self.file.conflict)
+            old_view.set_rows(old_rows, old_emphasis, conflict=self.file.conflict, plain=old_plain)
+            new_view.set_rows(new_rows, new_emphasis, conflict=self.file.conflict, plain=new_plain)
             self.views = [old_view, new_view]
             pane = _SplitPane(old_view.scroller, new_view.scroller, self._align_rows)
             pane.add_css_class("git-hunk-split")
@@ -1674,7 +1694,7 @@ class _HunkSection(Gtk.Box, _NoteHost):
             (rows,) = self._layout_rows(hunk)
             by_line = {entry.line_index: entry.spans for entry in emphasis}
             view = self._make_view((diffmodel.OLD, diffmodel.NEW))
-            view.set_rows(rows, by_line, conflict=self.file.conflict)
+            view.set_rows(rows, by_line, conflict=self.file.conflict, plain=plain_lines)
             self.views = [view]
             self._body = view.scroller
         # Between the header and the note cards (a rebuilt body must not
@@ -1747,11 +1767,16 @@ class _HunkSection(Gtk.Box, _NoteHost):
         return list(self._placed_highlights)
 
     def apply_options(self, options: _Options) -> None:
-        """Re-read the options: a layout or word-diff change rebuilds the
-        body, line numbers and wrap are flipped in place."""
+        """Re-read the options: a layout, word-diff or hide-whitespace
+        change rebuilds the body, line numbers and wrap are flipped in
+        place."""
         previous = self._options
         self._options = options
-        if options.split != previous.split or options.word_diff != previous.word_diff:
+        if (
+            options.split != previous.split
+            or options.word_diff != previous.word_diff
+            or options.hide_whitespace != previous.hide_whitespace
+        ):
             self._build_body()
             return
         for view in self.views:
@@ -2591,6 +2616,7 @@ class DiffView(Gtk.Box):
         self._line_numbers = True
         self._wrap = False
         self._word_diff = True
+        self._hide_whitespace = False
         self.options = _Options(split=False, line_numbers=True, wrap=False, word_diff=True)
         self._filter = ""
         # The files list's solo: one file's section shown alone (a row
@@ -2740,15 +2766,24 @@ class DiffView(Gtk.Box):
         for section in self._sections():
             section.set_scheme(scheme, self.palette)
 
-    def set_options(self, layout: str, line_numbers: bool, wrap: bool, word_diff: bool) -> None:
+    def set_options(
+        self,
+        layout: str,
+        line_numbers: bool,
+        wrap: bool,
+        word_diff: bool,
+        hide_whitespace: bool = False,
+    ) -> None:
         """Preferences → Git's words: *layout* one of gitloads.LAYOUTS
         (`auto` resolved by width), the line-number columns, wrap, the word
-        emphasis pass. Applied to every section now and to the ones built
-        later."""
+        emphasis pass, and *hide_whitespace* — a changed line that differs
+        from its partner in whitespace alone drawn as context. Applied to
+        every section now and to the ones built later."""
         self._layout = layout if layout in gitloads.LAYOUTS else LAYOUT_AUTO
         self._line_numbers = bool(line_numbers)
         self._wrap = bool(wrap)
         self._word_diff = bool(word_diff)
+        self._hide_whitespace = bool(hide_whitespace)
         self._sync_options()
 
     def load(
@@ -3636,6 +3671,25 @@ class DiffView(Gtk.Box):
                     rows.append(row.text)
         return rows
 
+    def tinted_rows(self, path: str, hunk: int) -> list[str]:
+        """Probe: the text of every row of hunk *hunk* of *path* wearing
+        an addition or deletion background, in row order across the
+        hunk's views — what Hide whitespace changes takes off a
+        whitespace-only pair."""
+        section = self._section_for(path, diffmodel.NEW)
+        target = next((h for h in (section.hunks if section else []) if h.hunk.index == hunk), None)
+        if target is None:
+            return []
+        rows: list[str] = []
+        for view in target.views:
+            table = view.buffer.get_tag_table()
+            tags = [t for t in (table.lookup("git-add"), table.lookup("git-del")) if t is not None]
+            for index, row in enumerate(view.rows):
+                _ok, start = view.buffer.get_iter_at_line(index)
+                if any(start.has_tag(tag) for tag in tags):
+                    rows.append(row.text)
+        return rows
+
     def hunk_serials(self, path: str) -> list[int]:
         """The serial of each hunk section of *path*, in order — a number
         minted once per widget, so a check can say across a reload which
@@ -4152,7 +4206,11 @@ class DiffView(Gtk.Box):
     def _sync_options(self) -> None:
         split = self._layout == LAYOUT_SPLIT or (self._layout == LAYOUT_AUTO and not self._narrow)
         options = _Options(
-            split=split, line_numbers=self._line_numbers, wrap=self._wrap, word_diff=self._word_diff
+            split=split,
+            line_numbers=self._line_numbers,
+            wrap=self._wrap,
+            word_diff=self._word_diff,
+            hide_whitespace=self._hide_whitespace,
         )
         if options == self.options:
             return

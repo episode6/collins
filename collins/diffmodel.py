@@ -18,6 +18,8 @@ around each hunk by position (`before:<i>` / `trailing:<i>`),
 `split_rows` pairs deletions with additions row by row for the split layout,
 `word_emphasis` marks the words that differ inside
 a paired deletion/addition (difflib over word tokens, ratio ≥ 0.5),
+`whitespace_only_lines` names the paired lines that differ in whitespace
+alone (drawn as context under Hide whitespace changes),
 `palette` blends a style scheme's diff colours into its text background
 (0.18 for a row, 0.40 for the emphasis), `locate` finds the hunk and line a
 (path, side, line) address names, and `stable_key` (`stable_keys` for a whole
@@ -779,6 +781,29 @@ def word_emphasis(hunk: Hunk) -> list[Emphasis]:
             if new_spans:
                 result.append(Emphasis(NEW, new_index, tuple(new_spans)))
     return result
+
+
+_WHITESPACE = re.compile(r"\s+")
+
+
+def whitespace_only_lines(hunk: Hunk) -> frozenset[int]:
+    """The indexes into hunk.lines of the deletions and additions that
+    differ from their partner only in whitespace — paired as split_rows
+    pairs them (the i-th deletion with the i-th addition of a change
+    block), compared with every whitespace run dropped, the way git's
+    `--ignore-all-space` reads a line. The view draws them as context
+    (no tint, no sign, no emphasis) under the Hide whitespace changes
+    option; the model and the patch are untouched, so staging them
+    still stages what git sees."""
+    lines = hunk.lines
+    result: set[int] = set()
+    for dels, adds in _change_blocks(lines):
+        for old_index, new_index in zip(dels, adds, strict=False):
+            old_text, new_text = lines[old_index].text, lines[new_index].text
+            if _WHITESPACE.sub("", old_text) == _WHITESPACE.sub("", new_text):
+                result.add(old_index)
+                result.add(new_index)
+    return frozenset(result)
 
 
 def _offsets(tokens: Sequence[str]) -> list[int]:

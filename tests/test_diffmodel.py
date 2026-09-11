@@ -34,6 +34,7 @@ from collins.diffmodel import (
     split_rows,
     stable_key,
     too_large,
+    whitespace_only_lines,
     word_emphasis,
 )
 
@@ -646,6 +647,35 @@ def test_word_emphasis_skips_unrelated_lines_and_identical_ones():
 def test_word_emphasis_pairs_by_position_inside_a_block_and_leaves_extras_alone():
     hunk = hunk_of("-a = 1", "-b = 2", "+a = 10", "+b = 2", "+c = 3", old=(1, 2), new=(1, 3))
     assert word_emphasis(hunk) == [Emphasis(OLD, 0, ((4, 5),)), Emphasis(NEW, 2, ((4, 6),))]
+
+
+# -- whitespace-only lines ----------------------------------------------------------
+
+
+def test_whitespace_only_lines_names_both_halves_of_a_pair_that_differs_in_whitespace_alone():
+    hunk = hunk_of(
+        " keep",
+        "-\tindented = 1",
+        "-value = 2  ",
+        "+    indented = 1",
+        "+value=2",
+        " keep",
+        old=(1, 4),
+        new=(1, 4),
+    )
+    assert whitespace_only_lines(hunk) == frozenset({1, 2, 3, 4})
+
+
+def test_whitespace_only_lines_leaves_real_changes_and_unpaired_extras_alone():
+    hunk = hunk_of("-a = 1", "-b = 2", "+a = 10", "+b  = 2", "+c = 3", old=(1, 2), new=(1, 3))
+    # a = 1 → a = 10 is a real change; b pairs with b; c has no partner.
+    assert whitespace_only_lines(hunk) == frozenset({1, 3})
+    assert whitespace_only_lines(hunk_of(" only", " context", old=(1, 2), new=(1, 2))) == frozenset()
+
+
+def test_whitespace_only_lines_pairs_inside_each_change_block():
+    hunk = hunk_of("-x  ", "+x", " mid", "-y", "+z", old=(1, 3), new=(1, 3))
+    assert whitespace_only_lines(hunk) == frozenset({0, 1})
 
 
 def test_word_emphasis_gives_up_on_huge_hunks_and_wide_lines(monkeypatch):

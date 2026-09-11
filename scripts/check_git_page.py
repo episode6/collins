@@ -1190,6 +1190,31 @@ def check_native(repo: str) -> None:
     check("the `2` key stacks the layout (applied to the page with no window action)", not view.is_split())
     view.activate_action("git.line-numbers", None)
     check("`l` toggles the line numbers back on", view.options.line_numbers, view.options)
+    # Hide whitespace changes: a whitespace-only edit to the renamed file
+    # (its index side is the rename's) loses its tint under the menu's
+    # check, and keeps it once the check is off again.
+    write_file(repo, "renamed.txt", "".join(f"old {n}\n" for n in range(1, 6)).replace("old 2", "old   2"))
+    check(
+        "a whitespace-only edit reloads as one tinted pair",
+        wait_for(lambda: page.settled() and len(view.hunk_rows("renamed.txt")) == 1, timeout=5.0)
+        and view.tinted_rows("renamed.txt", 0) == ["old 2", "old   2"],
+        (view.hunk_rows("renamed.txt"), view.tinted_rows("renamed.txt", 0)),
+    )
+    view.activate_action("git.hide-whitespace", None)
+    check(
+        "the menu's check takes the tint off the pair (the setting written to the page)",
+        view.options.hide_whitespace and view.tinted_rows("renamed.txt", 0) == [],
+        (view.options, view.tinted_rows("renamed.txt", 0)),
+    )
+    check("the menu's state follows", page._whitespace_action.get_state().get_boolean())
+    page.apply_settings({**SETTINGS, "git_hide_whitespace": False})
+    check(
+        "the setting off puts the tint back",
+        not view.options.hide_whitespace and view.tinted_rows("renamed.txt", 0) == ["old 2", "old   2"],
+        (view.options, view.tinted_rows("renamed.txt", 0)),
+    )
+    write_file(repo, "renamed.txt", "".join(f"old {n}\n" for n in range(1, 6)))
+    check("the edit undone, the rename is pure again", wait_for(lambda: page.settled() and view.hunk_rows("renamed.txt") == [], timeout=5.0), view.hunk_rows("renamed.txt"))
     restored = GitPage(
         cwd_provider=lambda: repo,
         parent_provider=lambda _cwd: "main",

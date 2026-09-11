@@ -3,7 +3,7 @@
 """End-to-end check for the Git preferences group — dev machine.
 
 The git page's knobs sit in a Git group directly under Pull requests: the
-diff view's layout and its three switches, the untracked-files switch, the
+diff view's layout and its four switches, the untracked-files switch, the
 commits panel's page size, and a default parent branch. The free-text row
 keeps a name only when it can stand as one (a half-typed or flag-shaped
 word wears the error style and leaves the stored answer alone), and only
@@ -96,6 +96,7 @@ ROW_TITLES = [
     "Line numbers",
     "Wrap long lines",
     "Highlight changed words",
+    "Hide whitespace changes",
     "Show untracked files",
     "Commits per page",
     "Default parent branch",
@@ -233,20 +234,21 @@ def step_layout() -> bool:
     )
     # The entry carries a title-less reason row beneath it, the way the
     # CLI path row does.
-    check("the group holds its seven rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
+    check("the group holds its eight rows in order", [t for t in titles(git) if t] == ROW_TITLES, titles(git))
     check("the entry has a reason row under it", titles(git)[-1] == "", titles(git))
     check("no viewer switch and no theme row (the diff view is the one viewer)", "Diff viewer" not in titles(git) and "Theme" not in titles(git), titles(git))
-    layout, numbers, wrap, words, untracked, log_page, parent, _r2 = git.rows
+    layout, numbers, wrap, words, whitespace, untracked, log_page, parent, _r2 = git.rows
     model = layout.get_model()
     labels = [model.get_string(i) for i in range(model.get_n_items())]
     check("the Layout row lists the view's three layouts", labels == ["Automatic", "Split", "Stacked"], labels)
     check("and opens on Automatic (the default)", layout.get_selected() == 0, layout.get_selected())
     check(
-        "the view's switches open on their defaults (numbers on, wrap off, words on)",
-        all(isinstance(r, Adw.SwitchRow) for r in (numbers, wrap, words))
+        "the view's switches open on their defaults (numbers on, wrap off, words on, whitespace off)",
+        all(isinstance(r, Adw.SwitchRow) for r in (numbers, wrap, words, whitespace))
         and numbers.get_active()
         and not wrap.get_active()
-        and words.get_active(),
+        and words.get_active()
+        and not whitespace.get_active(),
     )
     state.update(wrap=wrap)
     check("untracked files open shown", isinstance(untracked, Adw.SwitchRow) and untracked.get_active())
