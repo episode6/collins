@@ -93,6 +93,13 @@ question "does this header stand for a folder with nothing in it";
 
 ## AppState (`state.py`)
 
+Sandboxing mirrors the worktree pair exactly: `sandbox_new_sessions` +
+`project_sandbox` overrides (`sandbox_for_project`, the project menu's
+*New sessions are sandboxed* check, shown only when `sandboxplan.
+probe_reason() == ""`), plus the sticky `sandboxed_sessions` set a resume
+reads (`is_sandboxed` follows the forward chain; `forward_session` carries
+it) and `sandbox_grants` per workspace. See `collins-sandboxed-sessions`.
+
 `~/.config/collins/state.json`, written synchronously and atomically on every
 mutation; `DEFAULT_SETTINGS` is the settings catalogue, each key with a
 comment saying what it does and where it is read. `_load` migrates old keys

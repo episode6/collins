@@ -123,13 +123,18 @@ directly. No separate API key exists anywhere.
 | Chats virtual project | `~/.local/share/collins/chats/` |
 | MCP config file | `~/.local/share/collins/<app id>/` |
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
+| Sandbox home (`$HOME` inside a sandboxed session's box) | `~/.local/share/collins/sandbox-home/` |
+| Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits) |
+| Sandbox grants per workspace, the sandboxed-session set, the sandbox switches | `state.json` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
 | Everything of the CLI's | `~/.claude/` — read only |
 
 Every one of these has an environment override used by tests, captures and
 e2e checks: `COLLINS_APP_ID`, `COLLINS_PROJECTS_DIR`, `COLLINS_CLAUDE_CONFIG`,
 `COLLINS_CHATS_DIR`, `COLLINS_CLAUDE_CREDENTIALS`, `COLLINS_USAGE_FIXTURE`,
-`COLLINS_PR_STATUS_CACHE`, plus `XDG_CONFIG_HOME` / `XDG_STATE_HOME`.
+`COLLINS_PR_STATUS_CACHE`, `COLLINS_SANDBOX_HOME`, `COLLINS_BWRAP` (a fake
+bubblewrap, like the fake `claude`), plus `XDG_CONFIG_HOME` /
+`XDG_STATE_HOME` / `XDG_RUNTIME_DIR`.
 Diagnostics: `COLLINS_LOG=INFO`, `COLLINS_SHIM_LOG=<file>`,
 `COLLINS_GIT_DEBUG_LOG=<file>`.
 
@@ -219,6 +224,7 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store, sidebar, state.json, titles, worktrees, background agents, busy detection | `sessions` `providers` `store` `models` `state` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
+| Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group | `sandboxplan` `sandboxrun` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |

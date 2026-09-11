@@ -183,7 +183,11 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   answering with the new session id once `session-resolved` fires (12 s
   deadline, `process-exited` fail-fast, tab kept on failure). Spawns
   **serialize per project root** (`_start_session_chains`) so two siblings
-  can't claim each other's transcript. `bypassPermissions` is refused; the
+  can't claim each other's transcript. The sibling follows the project's
+  sandbox default (`window._sandbox_for_new_session`; the parent's own box
+  is inherited by a later change), and `bypassPermissions` is granted —
+  explicit or inherited — only to a sandboxed sibling
+  (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is refused; the
   trust dialog becomes a refusal.
 - `read_terminal` — dumps the Ctrl+J panel shells' scrollback
   (`capture_contents`, tailed to `lines`, max 2000).

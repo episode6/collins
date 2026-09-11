@@ -92,6 +92,12 @@ chord, Ctrl+Enter the alternate send) is integer-keyval GTK-free code.
 
 ## The new-chat screen (`newchat.py`, `newchatview.py`)
 
+Beside the worktree box sits a **Sandboxed** one on identical terms
+(`sandbox_choice` / `set_sandbox_choice`, `newchat.effective_sandbox`, the
+draft record's `sandbox` slot), visible only when `sandboxplan.available()`;
+`send-requested` and the tab's `new-chat-send` carry it as a second bool
+(`text, worktree, sandbox, model, effort`). See `collins-sandboxed-sessions`.
+
 A hand-started session opens onto a screen, not the console: the project's
 icon and name over the same `ComposerView`, with a **New git worktree**
 checkbox and the model and effort pickers in the Send row. Nothing is spawned

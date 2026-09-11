@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-10. Full change history: git log for this file.
+fork. Last modified: 2026-09-11. Full change history: git log for this file.
 -->
 
 # Collins
@@ -47,6 +47,7 @@ Features:
 - **Select mode** (menu → *Select multiple sessions*) for bulk actions: open, star, archive, or trash many sessions at once.
 - **Archived sessions can delete themselves**: Preferences → *Delete archived sessions after* takes a number and a unit (days / weeks / months / years; 0, the default, never). Once a day, sessions archived at least that long ago have their transcripts moved to the system trash — the same recoverable trash as the manual *Delete archived sessions…*, with running sessions skipped and an emptied project kept as a sidebar header.
 - **New session** (tab icon in the header) starts a fresh agent session (`claude`) in the **visible session's project** — no dialog needed; with no session visible it asks for a folder. Every project header also has a **`+` button** to start a session right there. The tab opens onto a **new-chat screen** — the project's icon and name over the composer, with a *New git worktree* checkbox and, in the composer's Send row, a **model picker** and an **effort picker** (each opening pre-selected on the CLI's own default — the model or level `~/.claude/settings.json` resolves it to, marked in the list and named on the button; a pick here is for this session alone) — and the agent starts when you Send the first prompt, on the model and at the effort level the pickers say (with nothing written, the button reads **Empty Session** and starts the agent with no prompt); a just-started session shows a **"New Thread"** placeholder row until the agent writes its transcript. A screen with text on it (or a terminal open beside it) is kept as a **draft** in the sidebar if you close the tab or quit, and comes back as you left it.
+- **Sandboxed sessions**: a *Sandboxed* checkbox beside *New git worktree* runs the session inside a [bubblewrap](https://github.com/containers/bubblewrap) filesystem sandbox — the project read-write, `~/.claude` and the toolchain caches shared, the system read-only, `~/.ssh`, `~/.config/gh`, the keyring and every other checkout absent — with permission prompts off inside, so a session that can't reach your credentials can be left alone. Remembered per session (a resume rebuilds the box), a per-project default like the worktree one, and Preferences switches to share the GitHub CLI login or the SSH agent into the box. A port of [aibox](https://github.com/EricKuck/dotfiles/tree/main/packages/aibox)'s mount plan.
 - **Quick switcher** (`Ctrl+K`) jumps to any session by type-ahead; the sidebar is **resizable** and its width is remembered.
 - **MCP servers browser** (menu → MCP servers): a read-only view of every MCP server configured in `~/.claude.json`, global and per-project.
 - **Preferences** (menu → Preferences, or `Ctrl+,`): terminal font, scrollback, **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin, Tokyo Night, Monokai, One Dark…), color scheme, **language** (English, Magyar, Deutsch, Español, Français), **easy copy & paste**, plus **Show folder paths in sidebar** and **Show Claude usage** toggles for the sidebar, a **Token use** group directly under General for everything that runs Claude on your behalf — the **Session title model** and **Icon generation model** pickers (each with a **None** option; it is the icon picker's default, under which the Generate Icon dialog waits for a pick and a click instead of running on open), an **Auto-renew the Claude login** switch for the background login repair, and the Model list row, which is free — followed by a switch per **session tool**, a **Git** group for the git page — the diff's **Layout** (automatic / split / stacked), **Line numbers**, **Wrap long lines**, **Highlight changed words** and **Hide whitespace changes**, **Show untracked files**, **Commits per page**, and a **Default parent branch** to measure branches against when no pull request names one — and a **Check for updates** switch for the once-a-day look at GitHub's latest release. A fresh install sees the Token use rows and the tool switches once before anything runs, in a **Before you start** dialog on its first launch — the same dialog that asks where `claude` is when a desktop launch can't find it on its `PATH`.
@@ -250,6 +251,11 @@ by Máté Molnár, which did all the heavy lifting — see the
 [original project's website](https://r4nd3l.github.io/agent-session-manager/)
 for the app Collins grew out of. Released under
 [GPL-3.0-or-later](LICENSE), same as the original.
+
+The sandbox's mount plan (`collins/sandboxplan.py`) is a port of
+[**aibox**](https://github.com/EricKuck/dotfiles/tree/main/packages/aibox)
+by Eric Kuck, MIT-licensed, copied with the author's blessing; the module
+carries its notice.
 
 Everything Collins is built on is disclosed in
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) — the same document the app
