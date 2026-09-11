@@ -792,6 +792,17 @@ def test_inherited_mode_caps_bypass_at_accept_edits():
     assert mcptools.inherited_permission_mode("bypassPermissions") == "acceptEdits"
 
 
+def test_inherited_bypass_passes_through_for_a_sandboxed_sibling():
+    # The box bounds a sandboxed sibling, not the prompt: bypass is exactly
+    # what it runs with. Junk stays junk, and nothing else changes.
+    assert mcptools.inherited_permission_mode("bypassPermissions", sandboxed=True) == (
+        "bypassPermissions"
+    )
+    assert mcptools.inherited_permission_mode("acceptEdits", sandboxed=True) == "acceptEdits"
+    assert mcptools.inherited_permission_mode("rm -rf", sandboxed=True) == ""
+    assert mcptools.inherited_permission_mode("", sandboxed=True) == ""
+
+
 def test_inherited_mode_drops_junk_to_the_default():
     """Whatever isn't a plain mode token never reaches a command line."""
     for junk in (None, "", "rm -rf /", "a b", "mode-1", "x" * 33, "café"):
