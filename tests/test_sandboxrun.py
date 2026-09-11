@@ -177,9 +177,12 @@ def test_host_gh_token_reads_gh(tmp_path, monkeypatch):
     assert sandboxrun.host_gh_token() is None
 
 
-def test_the_module_runs_end_to_end_with_a_fake_bwrap(tmp_path):
-    """`python3 -m collins.sandboxrun` for real, against a bwrap that dumps
-    what it was fed over the fd and then runs the command."""
+@pytest.mark.parametrize("by_file", [True, False])
+def test_the_module_runs_end_to_end_with_a_fake_bwrap(tmp_path, by_file):
+    """The launcher for real — as the bare script the typed line names
+    (providers.sandboxrun_path, no PYTHONPATH at all), and as a module —
+    against a bwrap that dumps what it was fed over the fd and then runs
+    the command."""
     fake = tmp_path / "bwrap"
     fake.write_text(
         "#!/bin/sh\n"
@@ -189,10 +192,18 @@ def test_the_module_runs_end_to_end_with_a_fake_bwrap(tmp_path):
         'exec "$@"\n'
     )
     fake.chmod(0o755)
-    env = dict(os.environ, COLLINS_BWRAP=str(fake), PYTHONPATH=REPO_ROOT)
+    env = dict(os.environ, COLLINS_BWRAP=str(fake))
+    if by_file:
+        env.pop("PYTHONPATH", None)
+        launcher = [sandboxrun.__file__]
+        assert launcher[0] == os.path.join(REPO_ROOT, "collins", "sandboxrun.py")
+    else:
+        env["PYTHONPATH"] = REPO_ROOT
+        launcher = ["-m", "collins.sandboxrun"]
     result = subprocess.run(
-        [sys.executable, "-m", "collins.sandboxrun", _plan(tmp_path), "--", "/bin/echo", "inside"],
+        [sys.executable, *launcher, _plan(tmp_path), "--", "/bin/echo", "inside"],
         env=env,
+        cwd="/",
         capture_output=True,
         text=True,
         timeout=30,

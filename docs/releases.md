@@ -50,9 +50,11 @@ downloads of each version, see the
   GitHub CLI login*, *Share SSH agent*, *Let sandboxed sessions edit
   ~/.claude/settings.json*, and a status row saying whether bubblewrap is
   usable here) round it out. Sandboxed sessions are never backgrounded or
-  re-attached, since the CLI's daemon would run them outside the box. A
-  port of EricKuck's aibox mount plan (MIT). Directory grants and the
-  footer chip that shows what is inside come next.
+  re-attached, since the CLI's daemon would run them outside the box, and
+  the `run_in_terminal`, `read_terminal` and `start_session` tools are
+  refused from inside one until the sandbox policy lands. A port of
+  EricKuck's aibox mount plan (MIT). Directory grants and the footer chip
+  that shows what is inside come next.
 - **Notes on lines outside the diff.** The git page's *Add note* only
   reached the lines a hunk showed; an expanded gap's context had no
   menu at all. A right-click on the drawn context now offers *Copy*,

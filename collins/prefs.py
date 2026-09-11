@@ -650,8 +650,8 @@ class PreferencesDialog(Adw.Dialog):
             "sandbox_share_ssh",
             _("Share SSH agent"),
             _(
-                "The agent inside can sign with your keys — push as you — without "
-                "seeing them"
+                "The agent socket goes in: the agent inside can sign with your keys "
+                "— push as you — without seeing them"
             ),
             "agent", "keys", "push",
         )
@@ -659,8 +659,8 @@ class PreferencesDialog(Adw.Dialog):
             "sandbox_settings_editable",
             _("Let sandboxed sessions edit ~/.claude/settings.json"),
             _(
-                "Needed for /model and /effort to persist inside; a hook written "
-                "there runs in every session"
+                "Needed for /model and /effort to persist inside, and for a "
+                "symlinked settings.json; a hook written there runs in every session"
             ),
             "settings", "hook", "model", "effort",
         )

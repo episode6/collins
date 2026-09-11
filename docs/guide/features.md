@@ -1048,24 +1048,35 @@ flipped the switch is refused if it calls it anyway.
   a session that can't reach your credentials can be left alone. The
   boundary is the filesystem and the unix sockets that live on it, not the
   network: the CLI needs the API, and `~/.claude` is shared and writable
-  (transcripts, the OAuth token, todos), with `~/.claude/settings.json` and
-  `settings.local.json` bound read-only over themselves so an agent inside
-  can't plant a hook that runs in your next unsandboxed session — `/model`
-  and `/effort` then hold for the session only, as the CLI itself says. A
-  project's own `.claude/settings.json` sits inside the workspace and can't
-  be protected. The CLI's user-level MCP servers and Remote Control run
-  inside the box too, and its own *sandbox* setting turns itself off there
-  (the two don't stack). Whether a session is sandboxed is remembered per
-  session, so resuming it rebuilds the same box; a sandboxed session is
-  never backgrounded (`/bg`) or re-attached — the CLI's daemon would run it
-  outside the sandbox. *Sandbox new sessions* (Preferences → Sandbox) and
+  (transcripts, the OAuth token, todos). The box bounds the filesystem, not
+  the hook surface: `~/.claude/settings.json`, `settings.local.json` (when
+  it exists — a missing one can be created), `~/.claude/plugins` and a
+  `claude` launcher that is a real file are bound read-only over themselves
+  so an agent inside can't plant a hook there that runs in your next
+  unsandboxed session — `/model` and `/effort` then hold for the session
+  only, as the CLI itself says, and a symlinked `settings.json` (a dotfiles
+  setup) refuses the box until the edit switch below is on. What can't be
+  protected: a project's own `.claude/settings.json` sits inside the
+  workspace, and the native installer's `~/.local/bin/claude` symlink sits
+  in a shared tree and can be repointed. Inside the box, the session tools
+  that show you things (`open_in_editor`, `show_diff`, `show_image`,
+  `notify_user`, …) work as ever; `run_in_terminal`, `read_terminal` and
+  `start_session` — which reach your own shell and directories of the
+  agent's choosing — are refused from a sandboxed session for now. The
+  CLI's user-level MCP servers and Remote Control run inside the box too,
+  and its own *sandbox* setting turns itself off there (the two don't
+  stack). Whether a session is sandboxed is remembered per session (a fork
+  of one included), so resuming it rebuilds the same box with the same
+  permission mode; a sandboxed session is never backgrounded (`/bg`) or
+  re-attached — the CLI's daemon would run it outside the sandbox. *Sandbox new sessions* (Preferences → Sandbox) and
   *New sessions are sandboxed* in a project header's menu set the default,
   exactly like the worktree pair. Two preferences hand things over: *Share
   GitHub CLI login* (your token goes in as `GH_TOKEN`; without it `gh` is
   logged out and HTTPS pushes fail) and *Share SSH agent* (the agent inside
   can push as you, signing with keys it never sees). The checkbox and the
-  group appear only where bubblewrap is installed and user namespaces work;
-  the group's status row says which is missing.
+  project-menu item appear only where bubblewrap is installed and user
+  namespaces work; the Preferences group is always there, its switches
+  insensitive and its status row saying which is missing.
 - **Folder trust is asked once, up front**: the first launch in a project
   the agent doesn't trust yet asks *Do you trust this folder?* before
   anything starts, and records the answer where the agent reads it, so the

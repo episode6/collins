@@ -35,18 +35,33 @@ path arithmetic over aibox's tables (`RO_HOME`, `RW_HOME`,
 Collins additions: the resolved `claude` binary's directory
 (`resolved_claude`; the native installer's whole `~/.local/share/claude`),
 `sys.prefix` when not under `/usr`, the shim's package parent
-(`mcptools.package_parent()`), the MCP config dir read-only, the socket
-*file* read-write (connect needs write on the inode; only the file, never
-its directory — the plan files live beside it), the workspace and the
-enclosing repository's `.git` and `.claude` (a linked worktree's common git
-dir too), grants, the two shares, then the masks, then the
-`settings.json` protection. **Ordering rule**: the overlay home first,
+(`mcptools.package_parent()`), the `mcp.json` *file* read-only (never its
+directory: for a generated app id that is the runtime dir, where the plan
+files live — every e2e instance runs on such an id), the socket *file*
+read-write (connect needs write on the inode; only the file, never its
+directory), the workspace and the enclosing repository's `.git` and
+`.claude` (a linked worktree's common git dir too), grants, the two shares
+(the SSH share binds the `SSH_AUTH_SOCK` *file*, never its directory — the
+keyring's control socket sits beside it), then the masks, then the hook
+surface pins: `settings.json` / `settings.local.json`, `~/.claude/plugins`
+and the `claude` launcher on PATH when it is a real file in a shared tree
+(the native installer's is a symlink in `~/.local/bin`, which no bind can
+pin — noted in the plan and stated in the docs). A *symlinked*
+`settings.json` refuses the plan (`PlanRefused`: bwrap can't create the
+destination through it, and the link stays replaceable) unless the switch
+makes it editable. **Ordering rule**: the overlay home first,
 Collins' own read-only binds *before* the workspace (a workspace that
 overlaps them — a Collins checkout under `./start-debug` — must land on
 top and stay writable), masks last. `carried()` decides which masks to
 emit: bwrap would *create* a destination it was told to cover, so only
 secrets that exist and that a shared mount actually reaches are masked.
-The protect-check refuses a plan that would carry `~/.config/collins`,
+The workspace is held to the grant rule (`guard_path`: never a secret,
+inside one, an ancestor of one, `$HOME` or above it — checked as written
+*and* resolved, against the home as written and resolved, and against the
+target of any secret that is itself a symlink, so a `~/.ssh` that points
+into a dotfiles checkout refuses the checkout too); grants go through the
+same guard and are kept as written, not `realpath`'d. The protect-check
+refuses a plan that would carry `~/.config/collins`,
 `~/.local/state/collins`, `~/.cache/collins` or the plan directory
 (`PlanRefused`). Every path is validated (`valid_path`: absolute, bounded,
 no control characters, no `.`/`..`). The output is a JSON document
@@ -63,10 +78,20 @@ diverges from then on), mirrors folder trust (`mirror_trust`:
 nothing else — the one write Collins makes to a file the CLI would not
 have written itself, into a file Collins owns), builds and writes the plan.
 Returns None when no box can be built; the tab then launches unsandboxed
-and says so, dropping a bypass mode the box justified.
+and says so, dropping a bypass mode the box justified. **Every path under
+the sandbox home is attacker-controlled** (it is `$HOME` inside, shared by
+every box): the two writes there go through `_replace_private` —
+`lstat` the destination and refuse anything but a regular file or
+nothing, write a fresh `O_EXCL | O_NOFOLLOW` temp under a random name,
+rename — so a planted `.claude.json` or `.claude.json.tmp` symlink never
+becomes a host write. `sweep_plans(app_id)` at startup clears plan files
+a killed tab never released (bwrap reads its plan once at exec).
 
 **`sandboxrun.py` (stdlib only, nothing from `collins`).** The typed line
-is `python3 -m collins.sandboxrun <plan.json> -- claude …`. It reads and
+is `python3 <…>/collins/sandboxrun.py <plan.json> -- claude …` — the
+launcher by file (`providers.sandboxrun_path`), never `-m
+collins.sandboxrun`: the tab's shell has no PYTHONPATH for a checkout and
+an installed collins would shadow it. It reads and
 validates the plan, execs `bwrap --args <fd> -- claude …` with the
 arguments NUL-separated over a pipe (a memfd past 60 KB), applies the
 scrub with `--unsetenv` (`SSH_AUTH_SOCK`, `SSH_AGENT_PID`,
@@ -81,43 +106,71 @@ file. `TerminalTab._finish_spawn` writes the plan at the last moment
 through `terminal.SANDBOX_PLANNER` (set by `App._start_sandbox_support`,
 like `providers.MCP_CONFIG_PATH`) because the workspace is the *settled*
 cwd — a recreated worktree included — and `Provider.sandbox_prefix`
-prepends the wrapper in `new_command` / `resume_command` /
-`continue_command`. `--die-with-parent` ties the box to the tab's shell, so
-every close flow holds; the plan is unlinked in `_on_child_exited`.
-`tab.sandboxed` is the launch record (as launched, not as the settings now
-say).
+prepends the wrapper in `new_command` / `resume_command` and, for the
+`--continue` override, in the tab itself — which also appends
+`Provider.session_flags` (the permission mode) there, after the options
+settled, so a box that couldn't be built never leaves a bypass flag typed.
+`--die-with-parent` ties the box to the tab's shell, so every close flow
+holds; the plan is unlinked in `_on_child_exited`. `tab.sandboxed` is the
+launch record (as launched, not as the settings now say). A sandboxed
+*fork* tab keeps its origin's id but runs the resolver in `_fork_resolve`
+mode: the forked conversation's id lands on `fork-resolved` and the window
+adds it to the sticky set, so the fork's own row resumes boxed too.
 
 **State.** `sandbox_new_sessions` + `project_sandbox` overrides
 (`sandbox_for_project`, the sidebar project menu's *New sessions are
 sandboxed* check), `sandbox_bypass_permissions`, `sandbox_share_gh`,
 `sandbox_share_ssh`, `sandbox_settings_editable`; the sticky
 `sandboxed_sessions` set (written when a sandboxed launch resolves its id,
-carried by `forward_session`, read by `open_session` for a resume);
-`sandbox_grants` per real workspace path (no UI yet — the footer chip is
-the next PR). `newchat.effective_sandbox` and the draft record's `sandbox`
-slot mirror the worktree checkbox exactly.
+or a sandboxed fork reports its new one, carried by `forward_session`,
+read by `open_session` for a resume); `sandbox_grants` per real workspace
+path (no UI yet — the footer chip is the next PR). The draft record's
+`sandbox` slot mirrors the worktree checkbox exactly, and
+`newchat.effective_sandbox` is the rule the window applies
+(`_sandbox_for_new_session(cwd, choice)`) for the checkbox's start state,
+the Send, and a sibling's default alike.
 
 **Trust and permission mode.** A sandboxed launch defaults the mode to
-`bypassPermissions` (`MainWindow._sandboxed_options`); `start_session`
-grants bypass to a sibling only when the sibling is sandboxed
-(`mcptools.inherited_permission_mode(..., sandboxed=True)`). The trust
-dialog is mirrored, the bypass-acceptance dialog is not persisted by the
-CLI anywhere, so an interactive sandboxed launch still shows it.
+`bypassPermissions` (`MainWindow._sandboxed_options`) — a resume and a
+`--continue` of a sandboxed session too (`Provider.session_flags` types
+`--permission-mode` after `--resume`; the CLI restores no mode by itself).
+`start_session` grants bypass to a sibling only when the sibling is
+sandboxed (`mcptools.inherited_permission_mode(..., sandboxed=True)`). The
+trust dialog is mirrored, the bypass-acceptance dialog is not persisted by
+the CLI anywhere, so an interactive sandboxed launch still shows it.
+
+**What a sandboxed session may ask Collins to do.** Until the policy PR
+(a sandboxed `ShellPage`, a sibling that inherits the box and stays inside
+the workspace), `run_in_terminal`, `read_terminal` and `start_session` are
+**refused from a sandboxed tab** (`mcptools.SANDBOX_HOST_TOOLS`, checked in
+`run_tool_call` after identity, `is_sandboxed=lambda found:
+found[1].sandboxed` from app.py): each reaches the host — the user's own
+unconfined Ctrl+J shell, a sibling in an agent-chosen cwd — and under
+bypassPermissions no prompt stands in between. The display-only tools are
+unchanged.
 
 **Refusals.** `/bg` and `claude attach` are never used for a sandboxed
 session (`bgstatus.BLOCK_SANDBOXED`, `_quit_backgroundable`,
 `open_session`'s attach path, `ClaudeProvider.resume_command` with
 `options.sandbox`): the daemon respawns jobs on the host, and its job
 record has no wrapper seam (`respawnFlags` allowlist, `bgIsolation`
-none|worktree, measured on 2.1.268).
+none|worktree, measured on 2.1.268). The header's background button is
+*hidden* on a sandboxed tab (the refusal never clears, unlike the
+registration window the greyed-with-tooltip rule is for); the sidebar
+row's button stays greyed through the blocker like every other reason.
 
 **The probe.** `sandboxplan.probe()` runs `bwrap --unshare-user
 --unshare-pid … -- /bin/true` once per launch on a thread
 (`probe_async` from `App._start_sandbox_support`) and caches
 `probe_reason()`: `""`, `REASON_NO_BWRAP`, `REASON_NO_USERNS`.
-`available()` probes synchronously if asked before the thread landed. The
-new-chat checkbox and the project-menu item are shown only when it passes;
-the Preferences group's switches go insensitive and its status row says why.
+`available()` probes synchronously (5 s cap) if asked before the thread
+landed — only `prepare_launch` calls it; every UI path reads
+`probe_reason() == ""` and treats None as "not yet", and
+`App._on_sandbox_probe_landed` → `MainWindow.refresh_sandbox_availability`
+→ `NewChatView.set_sandbox_available` puts the checkbox on screens built
+before the verdict. The new-chat checkbox and the project-menu item are
+shown only when it passes; the Preferences group is always built, its
+switches go insensitive and its status row says why.
 
 ## Facts that shape it (measured on Ubuntu 26.04, bwrap 0.11.1, CLI 2.1.268)
 
@@ -138,7 +191,10 @@ the Preferences group's switches go insensitive and its status row says why.
   · couldn't save it as your default" and carries on. `settings.local.json`
   is protected only when it exists (bwrap would create it) — an agent can
   create one; documented, not fixed. The project's own `.claude/settings*`
-  sit in the workspace and can't be protected at all.
+  sit in the workspace and can't be protected at all, and the native
+  installer's `~/.local/bin/claude` symlink sits in a shared tree and can
+  be repointed. The box bounds the filesystem, not the hook surface; the
+  docs say so in those words.
 - `gh` keeps its token in the Secret Service keyring on a desktop, which the
   box can't reach, so a bind of `~/.config/gh` alone yields "token invalid";
   hence `GH_TOKEN` via `gh auth token` in sandboxrun. `git_protocol: ssh`

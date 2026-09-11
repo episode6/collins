@@ -188,7 +188,11 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   is inherited by a later change), and `bypassPermissions` is granted —
   explicit or inherited — only to a sandboxed sibling
   (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is refused; the
-  trust dialog becomes a refusal.
+  trust dialog becomes a refusal. **Refused from a sandboxed tab** for now,
+  with `read_terminal` and `run_in_terminal` (`mcptools.SANDBOX_HOST_TOOLS`,
+  the `is_sandboxed` check in `run_tool_call`): each reaches the host, and
+  a box under bypassPermissions has no prompt in between. The sandbox
+  policy PR replaces the refusal (see `collins-sandboxed-sessions`).
 - `read_terminal` — dumps the Ctrl+J panel shells' scrollback
   (`capture_contents`, tailed to `lines`, max 2000).
 - `run_in_terminal` — types a command into an idle panel shell behind

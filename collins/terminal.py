@@ -1217,6 +1217,10 @@ class TerminalTab(Gtk.Box):
         # Emitted when a tab started without a session id (new / continue)
         # discovers which session it is running (str = session id).
         "session-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A sandboxed fork tab found the transcript the CLI minted for the
+        # forked conversation: its id, for the sticky sandboxed set. The
+        # tab itself stays bound to the id it was opened with.
+        "fork-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # Emitted (debounced) when a panel divider is moved: (scope, mode,
         # size) where scope is "home" (the shells' panel) | "page" (the
         # strip PR views and the other docked pages open into), mode is
@@ -1328,6 +1332,7 @@ class TerminalTab(Gtk.Box):
         self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._resolver_armed_at = 0.0  # wall-clock time polling (re)started
+        self._fork_resolve = False  # a sandboxed fork: report the new id, don't bind to it
         # A `-w` launch this tab is still watching for an early failure, and
         # how many times it has looked (see _check_worktree_launch).
         self._worktree_launch = False
@@ -1600,7 +1605,9 @@ class TerminalTab(Gtk.Box):
                 effort=(options.effort if options else "") or "",
                 pick_effort=self._can_switch_effort(),
                 sandbox_default=sandbox_default,
-                sandbox_available=sandboxplan.available(),
+                # The cached verdict only — never the blocking probe on the
+                # main loop; the app refreshes the box when it lands.
+                sandbox_available=sandboxplan.probe_reason() == "",
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
             self._new_chat.connect(
@@ -1759,6 +1766,14 @@ class TerminalTab(Gtk.Box):
         self._spawn(cwd, session_id)
         if jsonl_path is None and session_id is None:
             self._start_transcript_resolver(cwd)  # find the new session's transcript
+        elif fork and self.sandboxed:
+            # A fork keeps the original's id for the tab, but the CLI mints
+            # a new one for the conversation — and that one must be sticky
+            # too, or resuming the fork's own row later runs unboxed. The
+            # same resolver finds its transcript and reports the id on
+            # "fork-resolved" instead of binding the tab to it.
+            self._fork_resolve = True
+            self._start_transcript_resolver(cwd)
 
     # -- the new-chat screen -------------------------------------------------
 
@@ -1801,6 +1816,12 @@ class TerminalTab(Gtk.Box):
         """The screen's worktree box as the user left it, None while it still
         follows the project's default (see NewChatView.worktree_choice)."""
         return self._new_chat.worktree_choice() if self._new_chat is not None else None
+
+    def set_sandbox_available(self, available: bool, default: bool) -> None:
+        """Hand the new-chat screen the probe's verdict once it lands (see
+        NewChatView.set_sandbox_available); a no-op off the screen."""
+        if self._new_chat is not None:
+            self._new_chat.set_sandbox_available(available, default)
 
     def new_chat_sandbox_choice(self) -> bool | None:
         """The screen's Sandboxed box as the user left it, None while it
@@ -1992,7 +2013,15 @@ class TerminalTab(Gtk.Box):
             # included), so it is written here, at the last moment.
             self._options = self._sandbox_options(cwd)
         if self._command_override is not None:
-            command = self.provider.sandbox_prefix(self._options) + self._command_override
+            # A --continue (or a check script's stand-in): the wrapper in
+            # front, and the flags an existing conversation takes from the
+            # settled options (the permission mode) behind — settled, so a
+            # box that couldn't be built never leaves a bypass flag typed.
+            command = (
+                self.provider.sandbox_prefix(self._options)
+                + self._command_override
+                + self.provider.session_flags(self._options)
+            )
         elif session_id is not None:
             command = self.provider.resume_command(
                 session_id, fork=self.fork, options=self._options
@@ -5190,7 +5219,7 @@ class TerminalTab(Gtk.Box):
         self._arm_transcript_resolver()
 
     def _arm_transcript_resolver(self) -> None:
-        if self._resolver_cwd is None or self.session_id is not None:
+        if self._resolver_cwd is None or (self.session_id is not None and not self._fork_resolve):
             return  # never started for this tab, or already resolved
         self._resolver_attempts = 0
         if self._resolver_source is not None:
@@ -5284,6 +5313,15 @@ class TerminalTab(Gtk.Box):
         except OSError:
             path = None
         if path is not None:
+            if self._fork_resolve:
+                # A sandboxed fork: the new conversation's id, reported and
+                # nothing more — the tab stays bound to the original.
+                self._fork_resolve = False
+                forked = self.provider.session_id_for_transcript(path)
+                if forked and forked != self.session_id:
+                    self.emit("fork-resolved", forked)
+                self._resolver_source = None
+                return GLib.SOURCE_REMOVE
             self.set_transcript_path(str(path))
             if self.session_id is None:
                 self.session_id = self.provider.session_id_for_transcript(path)

@@ -72,6 +72,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -211,19 +212,22 @@ RO_ABSOLUTE: tuple[str, ...] = (
 # Shared read-write: scratch space the box and the host both use.
 RW_ABSOLUTE: tuple[str, ...] = ("/tmp", "/var/tmp")
 
-# Collins' own state, relative to the XDG bases: never inside the box, and
-# the protect-check refuses a plan (or a grant) that would carry any of it
-# in. The plan directory itself joins the list at prepare time.
-PROTECTED_REL: tuple[str, ...] = (".config/collins", ".local/state/collins", ".cache/collins")
-
 # Environment the box must not inherit: where the host's agents listen.
 SCRUB_ENV: tuple[str, ...] = ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO")
 
 # The two files under ~/.claude an agent inside could plant a hook in that
 # runs in the user's next *unsandboxed* session. Bound read-only over
 # themselves (which also pins the inode, so a rename-over fails with
-# EBUSY) unless the user's switch says otherwise.
+# EBUSY) unless the user's switch says otherwise. A symlinked one cannot be
+# pinned (the link itself stays replaceable, and bwrap refuses the
+# destination), so the plan is refused rather than built unprotected.
 PROTECTED_SETTINGS: tuple[str, ...] = (".claude/settings.json", ".claude/settings.local.json")
+
+# Directories under ~/.claude that carry code the host's next session runs
+# (plugin hooks), pinned read-only on the same switch when they exist as
+# real directories. The CLI's plugin installs fail inside, like its
+# self-update; both come from the host.
+PROTECTED_CLAUDE_DIRS: tuple[str, ...] = (".claude/plugins",)
 
 
 class PlanRefused(Exception):
@@ -314,9 +318,10 @@ class Inputs:
     runtime_dir: str | None = None
     tmpdir: str | None = None
     claude_dir: str | None = None  # the resolved CLI's directory, read-only
+    claude_launcher: str | None = None  # the `claude` on PATH, pinned when a real file
     prefix: str | None = None  # sys.prefix, when not under /usr
     package_parent: str | None = None  # where the shim imports collins from
-    config_dir: str | None = None  # the --mcp-config file's directory
+    config_file: str | None = None  # the --mcp-config file itself, read-only
     socket_file: str | None = None  # the MCP socket, read-write
     grants: tuple[str, ...] = ()
     share_gh: bool = False
@@ -387,10 +392,14 @@ def build_plan(inputs: Inputs) -> dict:
     for name, path in (("workspace", ws), ("home", home), ("sandbox home", sandbox_home)):
         if not valid_path(path):
             raise PlanRefused(f"{name} is not a usable path: {path!r}")
-    if ws in (home, "/"):
-        raise PlanRefused(f"refusing to build a sandbox on {ws}")
     if _within(ws, sandbox_home) or _within(sandbox_home, ws):
         raise PlanRefused("the sandbox home and the workspace must not nest")
+    # The workspace is a read-write bind like any grant, and is held to the
+    # same rule: never a secret, an ancestor of one, or $HOME and above.
+    protected = tuple(p for p in inputs.protected if valid_path(p))
+    reason = guard_path(ws, home, protected, sandbox_home)
+    if reason:
+        raise PlanRefused(f"refusing to build a sandbox on {ws}: {reason}")
 
     plan = Plan()
     plan.notes.extend(inputs.notes)
@@ -416,7 +425,9 @@ def build_plan(inputs: Inputs) -> dict:
     # Collins' own pieces the session needs, *before* the workspace: a
     # workspace that overlaps one of these (a checkout of Collins itself,
     # under ./start-debug) has to land on top and stay read-write.
-    for path in (inputs.claude_dir, inputs.prefix, inputs.package_parent, inputs.config_dir):
+    # Only the mcp.json file, never its directory: for a generated app id
+    # the directory is the runtime dir, which holds the plan files.
+    for path in (inputs.claude_dir, inputs.prefix, inputs.package_parent, inputs.config_file):
         if path and valid_path(path) and not _under_usr(path):
             plan.ro(path)
     if inputs.socket_file and valid_path(inputs.socket_file):
@@ -441,10 +452,10 @@ def build_plan(inputs: Inputs) -> dict:
                 plan.notes.append(f"linked worktree: common git dir {common}")
 
     # Grants: the user's per-workspace additions, each re-checked here —
-    # state.json is a file on disk like any other.
-    protected = tuple(p for p in inputs.protected if valid_path(p))
+    # state.json is a file on disk like any other — in both spellings (as
+    # written and resolved), since a symlinked ~/.ssh is still ~/.ssh.
     for grant in inputs.grants:
-        reason = guard_sensitive(grant, home, protected, sandbox_home)
+        reason = guard_path(grant, home, protected, sandbox_home)
         if reason:
             plan.notes.append(f"grant {grant} skipped: {reason}")
             continue
@@ -459,8 +470,10 @@ def build_plan(inputs: Inputs) -> dict:
         plan.notes.append("sharing the GitHub CLI login")
     ssh_sock = inputs.ssh_auth_sock if valid_path(inputs.ssh_auth_sock) else None
     if inputs.share_ssh and ssh_sock:
-        plan.rw(os.path.dirname(ssh_sock))
-        plan.notes.append(f"sharing the SSH agent directory {os.path.dirname(ssh_sock)}")
+        # The socket file alone, after the runtime dir's tmpfs, like the MCP
+        # socket: its directory may hold the keyring's other sockets.
+        plan.rw(ssh_sock)
+        plan.notes.append(f"sharing the SSH agent socket {ssh_sock}")
 
     # Masks last: a deeper, later mount carves a secret back out. Only
     # secrets that exist — bwrap would create the destination it was told
@@ -483,8 +496,26 @@ def build_plan(inputs: Inputs) -> dict:
     if inputs.protect_settings:
         for rel in PROTECTED_SETTINGS:
             full = os.path.join(home, rel)
+            if os.path.islink(full):
+                raise PlanRefused(
+                    f"~/{rel} is a symlink and cannot be protected inside a sandbox"
+                )
             if os.path.isfile(full):
                 plan.ro(full, required=True)
+        for rel in PROTECTED_CLAUDE_DIRS:
+            full = os.path.join(home, rel)
+            if os.path.isdir(full) and not os.path.islink(full):
+                plan.ro(full, required=True)
+        # The `claude` the host's next session runs: pinned when it is a
+        # real file in a shared tree. The native installer's launcher is a
+        # symlink in ~/.local/bin (shared read-write), which no bind can
+        # pin — noted, and stated in the docs.
+        launcher = inputs.claude_launcher
+        if launcher and valid_path(launcher) and plan.carried(launcher, None):
+            if os.path.islink(launcher):
+                plan.notes.append(f"claude launcher {launcher} is a symlink: not pinned")
+            elif os.path.isfile(launcher):
+                plan.ro(launcher, required=True)
 
     # The protect-check: nothing of Collins' own may be reachable inside,
     # whatever carried it — the workspace, a grant, a share.
@@ -523,7 +554,7 @@ def build_plan(inputs: Inputs) -> dict:
             "sandbox_home": sandbox_home,
             "claude_dir": inputs.claude_dir,
             "socket_file": inputs.socket_file,
-            "config_dir": inputs.config_dir,
+            "config_file": inputs.config_file,
             "grants": [g for g in inputs.grants if g in plan.sources],
             "share_gh": bool(inputs.share_gh),
             "share_ssh": bool(inputs.share_ssh and ssh_sock),
@@ -549,6 +580,8 @@ def guard_sensitive(
         return "the whole filesystem"
     if path == home:
         return "the home directory itself"
+    if _within(path, home):
+        return "an ancestor of the home directory"
     for rel in SENSITIVE_HOME:
         secret = os.path.join(home, rel)
         if _within(path, secret) or _within(secret, path):
@@ -558,6 +591,39 @@ def guard_sensitive(
             return f"reaches {kept}"
     if sandbox_home and (_within(path, sandbox_home) or _within(sandbox_home, path)):
         return "reaches the sandbox home"
+    return ""
+
+
+def guard_path(
+    path: str, home: str, protected: tuple[str, ...] = (), sandbox_home: str | None = None
+) -> str:
+    """guard_sensitive over every spelling of *path*: as written and
+    resolved, against the home, the protected paths and the sandbox home
+    both as written and resolved, and against the resolved target of each
+    secret that is itself a symlink. A grant of `~/.ssh` that points into a
+    dotfiles checkout, or a home under a symlinked `/home`, resolves to a
+    string the plain arithmetic would not recognise — and bwrap binds the
+    resolved directory."""
+    reason = guard_sensitive(path, home, protected, sandbox_home)
+    if reason or not valid_path(path):
+        return reason
+    home = home.rstrip("/") or "/"
+    real = os.path.realpath(path)
+    real_home = os.path.realpath(home)
+    real_protected = tuple(os.path.realpath(p) for p in protected)
+    real_sandbox = os.path.realpath(sandbox_home) if sandbox_home else None
+    for candidate in {path, real}:
+        for h, kept, sbx in ((home, protected, sandbox_home), (real_home, real_protected, real_sandbox)):
+            reason = guard_sensitive(candidate, h, kept, sbx)
+            if reason:
+                return reason
+        for rel in SENSITIVE_HOME:
+            secret = os.path.join(home, rel)
+            if not os.path.islink(secret):
+                continue
+            target = os.path.realpath(secret)
+            if _within(candidate, target) or _within(target, candidate):
+                return f"reaches {secret}"
     return ""
 
 
@@ -630,15 +696,18 @@ def gather_inputs(workspace: str, app_id: str, state) -> Inputs:
         notes.append("claude not found on PATH")
     prefix = None if _under_usr(sys.prefix) else sys.prefix
     package_parent = mcptools.package_parent()
-    config_dir = os.path.dirname(mcptools.config_path(app_id))
-    if not os.path.isfile(mcptools.config_path(app_id)):
-        config_dir = None
+    config_file = mcptools.config_path(app_id)
+    if not os.path.isfile(config_file):
+        config_file = None
     socket_file = mcptools.socket_path(app_id)
     if not os.path.exists(socket_file):
         socket_file = None
+    # As written, not resolved: the guard checks both spellings itself, and
+    # a normalised path is what the mask loop can match.
     grants = tuple(
-        os.path.realpath(g) for g in state.get_sandbox_grants(ws) if isinstance(g, str) and g
+        os.path.normpath(g) for g in state.get_sandbox_grants(ws) if isinstance(g, str) and g
     )
+    launcher = shutil.which("claude")
     return Inputs(
         workspace=ws,
         home=home,
@@ -646,9 +715,10 @@ def gather_inputs(workspace: str, app_id: str, state) -> Inputs:
         runtime_dir=os.environ.get("XDG_RUNTIME_DIR") or None,
         tmpdir=os.environ.get("TMPDIR") or None,
         claude_dir=claude_dir,
+        claude_launcher=os.path.abspath(launcher) if launcher else None,
         prefix=prefix,
         package_parent=None if _under_usr(package_parent) else package_parent,
-        config_dir=config_dir,
+        config_file=config_file,
         socket_file=socket_file,
         grants=grants,
         share_gh=bool(state.get_setting("sandbox_share_gh")),
@@ -661,17 +731,63 @@ def gather_inputs(workspace: str, app_id: str, state) -> Inputs:
     )
 
 
+# Everything under the sandbox home is written by the agent inside the box
+# (it is $HOME there, shared by every sandboxed session), so a path in it is
+# attacker-controlled: a planted symlink would turn Collins' own write into
+# a write to any host file. Every write here creates its file O_EXCL |
+# O_NOFOLLOW under a fresh name and renames it over a destination that has
+# been lstat'ed as a plain file (or is absent); anything else is refused.
+
+
+def _write_private(path: str, data: str) -> None:
+    """Create *path* (which must not exist) mode 0600 with *data*."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(data)
+    except BaseException:
+        release_plan(path)
+        raise
+
+
+def _replace_private(dest: str, data: str) -> bool:
+    """Atomically put *data* at *dest*, which must be absent or a regular
+    file (never a symlink, whose target could be anywhere). False when it
+    is anything else or the write fails."""
+    try:
+        st = os.lstat(dest)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        return False
+    else:
+        if not stat.S_ISREG(st.st_mode):
+            log.warning("sandbox: %s is not a regular file; refusing to write it", dest)
+            return False
+    tmp = os.path.join(os.path.dirname(dest), f".{uuid.uuid4().hex}.tmp")
+    try:
+        _write_private(tmp, data)
+        os.replace(tmp, dest)
+    except OSError:
+        release_plan(tmp)
+        return False
+    return True
+
+
 def seed_home(sandbox_home: str, host_config: str | os.PathLike | None = None) -> None:
     """Create the sandbox home (mode 0700) and seed it with the host's
     `~/.claude.json` once — the CLI's onboarding flags, MCP approvals and
-    per-project state start from the user's and diverge from there."""
+    per-project state start from the user's and diverge from there. A
+    planted symlink where the copy would go is never followed."""
     os.makedirs(sandbox_home, mode=0o700, exist_ok=True)
     os.chmod(sandbox_home, 0o700)
     dest = os.path.join(sandbox_home, ".claude.json")
     src = str(host_config if host_config is not None else sessions.CLAUDE_CONFIG)
-    if not os.path.exists(dest) and os.path.isfile(src):
-        shutil.copyfile(src, dest)
-        os.chmod(dest, 0o600)
+    if os.path.lexists(dest) or not os.path.isfile(src):
+        return
+    with open(src, encoding="utf-8") as fh:
+        data = fh.read()
+    _replace_private(dest, data)
 
 
 def mirror_trust(
@@ -687,6 +803,9 @@ def mirror_trust(
     host = str(host_config if host_config is not None else sessions.CLAUDE_CONFIG)
     dest = os.path.join(sandbox_home, ".claude.json")
     try:
+        if not stat.S_ISREG(os.lstat(dest).st_mode):
+            log.warning("sandbox: %s is not a regular file; not mirroring trust", dest)
+            return False
         with open(host, encoding="utf-8") as fh:
             host_data = json.load(fh)
         with open(dest, encoding="utf-8") as fh:
@@ -717,14 +836,7 @@ def mirror_trust(
             changed = True
     if not changed:
         return True
-    try:
-        tmp = dest + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(box_data, fh, indent=2)
-        os.replace(tmp, dest)
-    except OSError:
-        return False
-    return True
+    return _replace_private(dest, json.dumps(box_data, indent=2))
 
 
 def write_plan(plan: dict, directory: str) -> str:
@@ -746,6 +858,29 @@ def release_plan(path: str | None) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+def sweep_plans(app_id: str) -> int:
+    """Unlink every plan file left in this instance's plan directory — a
+    tab destroyed before its shell's exit was observed (a quit, a force
+    close) never released its plan. All of them are this app id's, and
+    bwrap reads a plan once at exec, so nothing running misses it. Returns
+    how many went."""
+    directory = plan_dir(app_id)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return 0
+    swept = 0
+    for name in names:
+        if name.endswith(".json"):
+            path = os.path.join(directory, name)
+            try:
+                os.unlink(path)
+                swept += 1
+            except OSError:
+                pass
+    return swept
 
 
 def prepare_launch(workspace: str, app_id: str, state) -> str | None:

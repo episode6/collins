@@ -271,6 +271,14 @@ class NewChatView(Gtk.Box):
         if not toggles:
             self.emit("changed")
 
+    def set_sandbox_available(self, available: bool, default: bool) -> None:
+        """The probe's verdict landed after this screen was built: show (or
+        hide) the Sandboxed box, and — unless the user already touched it —
+        start it on the project's *default*."""
+        self._sandbox.set_visible(bool(available))
+        if not self._sandbox_touched:
+            self._sandbox.set_active(bool(default) and bool(available))
+
     def sandbox_choice(self) -> bool | None:
         """The Sandboxed box as the user left it, or None while it still
         follows the project's default (what the draft record keeps)."""

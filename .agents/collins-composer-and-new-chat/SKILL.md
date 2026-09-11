@@ -94,7 +94,9 @@ chord, Ctrl+Enter the alternate send) is integer-keyval GTK-free code.
 
 Beside the worktree box sits a **Sandboxed** one on identical terms
 (`sandbox_choice` / `set_sandbox_choice`, `newchat.effective_sandbox`, the
-draft record's `sandbox` slot), visible only when `sandboxplan.available()`;
+draft record's `sandbox` slot), visible only when the probe's cached verdict
+says a box can be built (`set_sandbox_available` puts it on a screen built
+before the verdict landed);
 `send-requested` and the tab's `new-chat-send` carry it as a second bool
 (`text, worktree, sandbox, model, effort`). See `collins-sandboxed-sessions`.
 

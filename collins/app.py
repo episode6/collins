@@ -2484,7 +2484,26 @@ class App(Adw.Application):
         app_id = self.get_application_id()
         state = self.state
         terminal_mod.SANDBOX_PLANNER = lambda cwd: sandboxplan.prepare_launch(cwd, app_id, state)
-        sandboxplan.probe_async()
+        # Plans a previous run never released (a tab destroyed before its
+        # shell's exit landed): all this app id's, and bwrap read each one
+        # at exec, so nothing running misses it.
+        swept = sandboxplan.sweep_plans(app_id)
+        if swept:
+            logging.getLogger(__name__).info("sandbox: swept %d stale plan file(s)", swept)
+        # The UI reads the cached verdict and never blocks on the probe: a
+        # new-chat screen opened before it lands hides its Sandboxed box
+        # until this callback puts it back.
+        sandboxplan.probe_async(
+            lambda _reason: GLib.idle_add(
+                self._on_sandbox_probe_landed, priority=GLib.PRIORITY_DEFAULT
+            )
+        )
+
+    def _on_sandbox_probe_landed(self) -> bool:
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.refresh_sandbox_availability()
+        return GLib.SOURCE_REMOVE
 
     def do_shutdown(self) -> None:
         # Stops accepting and unlinks the socket; mcp.json stays behind on
@@ -2553,6 +2572,10 @@ class App(Adw.Application):
                 "run_in_terminal": self._mcp_run_in_terminal,
             },
             is_enabled=self._mcp_tool_enabled,
+            # A sandboxed session's tab: the tools that reach the host (the
+            # user's own panel shell, a sibling in a cwd of the agent's
+            # choosing) are refused for it — see mcptools.SANDBOX_HOST_TOOLS.
+            is_sandboxed=lambda found: found[1].sandboxed,
         )
 
     def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:

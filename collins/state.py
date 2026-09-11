@@ -115,24 +115,26 @@ DEFAULT_SETTINGS = {
     "sandbox_new_sessions": False,
     # Whether a sandboxed session's permission mode defaults to
     # bypassPermissions — the point of the box: a yolo session that can't
-    # reach ~/.ssh. Read where the new-chat Send settles its launch options
-    # (MainWindow._on_new_chat_send) and by the start_session tool.
+    # reach ~/.ssh. Read by MainWindow._sandboxed_options for every
+    # sandboxed launch: the new-chat Send, a resume or --continue of a
+    # sticky-sandboxed session, and the start_session tool's sibling.
     "sandbox_bypass_permissions": True,
     # Hand the host's GitHub CLI login into sandboxed sessions: ~/.config/gh
     # bound read-only and the token (`gh auth token`) passed in as GH_TOKEN
     # by sandboxrun. Off, gh inside is logged out and HTTPS pushes through
     # gh's credential helper fail. Read by sandboxplan.gather_inputs.
     "sandbox_share_gh": False,
-    # Share the SSH agent with sandboxed sessions: the directory holding
-    # SSH_AUTH_SOCK is bound in and the variable survives the scrub, so ssh
-    # inside signs with keys the box never sees. Read by
-    # sandboxplan.gather_inputs.
+    # Share the SSH agent with sandboxed sessions: the SSH_AUTH_SOCK socket
+    # file is bound in and the variable survives the scrub, so ssh inside
+    # signs with keys the box never sees. Read by sandboxplan.gather_inputs.
     "sandbox_share_ssh": False,
     # Let sandboxed sessions write ~/.claude/settings.json (and
-    # settings.local.json): needed for /model and /effort to persist their
-    # defaults from inside, at the cost that a hook written there runs in
-    # every later session, sandboxed or not. Off, the files are bound
-    # read-only over themselves. Read by sandboxplan.gather_inputs.
+    # settings.local.json, ~/.claude/plugins, a real-file claude launcher):
+    # needed for /model and /effort to persist their defaults from inside,
+    # at the cost that a hook written there runs in every later session,
+    # sandboxed or not. Off, they are bound read-only over themselves, and
+    # a symlinked settings.json refuses the box. Read by
+    # sandboxplan.gather_inputs.
     "sandbox_settings_editable": False,
     # Where the Claude Code CLI lives when PATH doesn't say — desktop
     # launches don't get the folders a shell adds (see clisetup). Stored

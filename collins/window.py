@@ -1795,7 +1795,9 @@ class MainWindow(Adw.ApplicationWindow):
             settings=self.state.settings,
             provider=provider,
             jsonl_path=jsonl_path,
-            options=SessionOptions(sandbox=True) if sandboxed else None,
+            # The box, and the prompts-off mode the setting gives it: the
+            # CLI restores no permission mode on --resume by itself.
+            options=self._sandboxed_options(SessionOptions()) if sandboxed else None,
         )
         title = f"{self.store.display_name(session)} (fork)" if fork else self._tab_title(session)
         project = "Chats" if chats.is_chat_cwd(session.cwd) else session.project_name
@@ -1958,16 +1960,33 @@ class MainWindow(Adw.ApplicationWindow):
             return False
         return self.state.worktree_for_project(project_name_for_cwd(cwd))
 
-    def _sandbox_for_new_session(self, cwd: str) -> bool:
+    def _sandbox_for_new_session(self, cwd: str, choice: bool | None = None) -> bool:
         """Whether a new session in `cwd` should launch inside a sandbox:
-        the project's pinned choice, else the app setting — and never where
-        no box can be built (sandboxplan.available), where the choice has
-        no meaning. Chats are never sandboxed: a scratch directory holds
-        nothing a box would protect, and its throwaway dir is reaped by
-        Collins itself."""
-        if chats.is_chat_cwd(cwd) or not sandboxplan.available():
+        *choice* (the Sandboxed box as the user left it) when there is one,
+        else the project's pinned choice, else the app setting — and never
+        where no box can be built, where the choice has no meaning
+        (newchat.effective_sandbox). The probe's *cached* verdict decides
+        that: the main loop never waits on the probe, and a launch before
+        it lands is simply unsandboxed. Chats are never sandboxed: a
+        scratch directory holds nothing a box would protect, and its
+        throwaway dir is reaped by Collins itself."""
+        if chats.is_chat_cwd(cwd):
             return False
-        return self.state.sandbox_for_project(project_name_for_cwd(cwd))
+        return newchat.effective_sandbox(
+            choice,
+            self.state.sandbox_for_project(project_name_for_cwd(cwd)),
+            sandboxplan.probe_reason() == "",
+        )
+
+    def refresh_sandbox_availability(self) -> None:
+        """The probe's verdict landed (App._on_sandbox_probe_landed): every
+        new-chat screen shows or hides its Sandboxed box accordingly."""
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab) and tab.is_new_chat:
+                tab.set_sandbox_available(
+                    sandboxplan.probe_reason() == "", self._sandbox_for_new_session(tab.cwd)
+                )
 
     def _sandboxed_options(self, options):
         """*options* with the sandbox decision made for a launch that has
@@ -2343,7 +2362,7 @@ class MainWindow(Adw.ApplicationWindow):
             effort=effort or "",
             sandbox=False,
         )
-        if bool(sandbox) and sandboxplan.available():
+        if self._sandbox_for_new_session(cwd, choice=bool(sandbox)):
             options = self._sandboxed_options(options)
         self._cancel_new_chat_save(page)
         draft_id = self._placeholder_pages.get(page)
@@ -2475,12 +2494,15 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _launch_continue(self, cwd: str, provider) -> None:
         # A --continue picks up whatever session is newest there; the box
-        # follows the project's default for new sessions, and the tab's
-        # resolver marks the session it lands on as sandboxed.
-        options = SessionOptions(sandbox=True) if self._sandbox_for_new_session(cwd) else None
+        # follows the project's default for new sessions (with the
+        # prompts-off mode the setting gives a box), and the tab's resolver
+        # marks the session it lands on as sandboxed.
+        options = (
+            self._sandboxed_options(SessionOptions()) if self._sandbox_for_new_session(cwd) else None
+        )
         tab = TerminalTab(
             cwd=cwd, settings=self.state.settings, provider=provider,
-            command_override=provider.continue_command(), options=options,
+            command_override=provider.continue_command(options), options=options,
         )
         self._add_tab(tab, GLib.path_get_basename(cwd), f"continue {provider.name} — {cwd}")
 
@@ -2549,6 +2571,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         watch(tab, "process-exited", self._on_process_exited, page)
         watch(tab, "session-resolved", self._on_session_resolved, page)
+        watch(tab, "fork-resolved", self._on_fork_resolved)
         watch(tab, "panel-size-changed", self._on_panel_size_changed)
         watch(tab, "panel-position-changed", self._on_panel_position_changed)
         watch(tab, "editor-size-changed", self._on_editor_size_changed)
@@ -2762,6 +2785,11 @@ class MainWindow(Adw.ApplicationWindow):
             return None
 
         return walk(self.tab_bar)
+
+    def _on_fork_resolved(self, _tab: TerminalTab, forked_id: str) -> None:
+        """A sandboxed fork tab found the id the CLI minted for the forked
+        conversation: sticky like its origin, so its own row resumes boxed."""
+        self.state.set_sandboxed(forked_id, True)
 
     def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
@@ -4827,12 +4855,14 @@ class MainWindow(Adw.ApplicationWindow):
         The background button additionally greys out whenever the handoff
         couldn't be tracked (see _background_blocker). Greyed rather than
         hidden: a button that vanishes for the couple of seconds a new thread
-        takes to register reads as a glitch, and the tooltip can say why."""
+        takes to register reads as a glitch, and the tooltip can say why. A
+        sandboxed tab is the exception — its refusal never clears, so the
+        button is hidden outright, like a provider with no /bg."""
         tab = page.get_child() if page is not None else None
         is_session = isinstance(tab, TerminalTab)
         self.exit_btn.set_visible(is_session)
         self.background_btn.set_visible(
-            is_session and tab.provider.background_exit() is not None
+            is_session and tab.provider.background_exit() is not None and not tab.sandboxed
         )
         blocker = self._background_blocker(page)
         self.background_btn.set_sensitive(not blocker)
