@@ -986,16 +986,18 @@ class PanelDock(Adw.Bin):
                 strip.select_busy_page()
                 return
 
-    def open_shell_page(self):
+    def open_shell_page(self, sandboxed: bool = False):
         """Append a fresh shell tab beside the last shell page — the
         + button's move, made for run_in_terminal when every open shell is
-        busy. Returns the new shell unselected (the caller reveals it), or
-        None when there is no strip to sit beside — no shells at all, which
-        is `show_panel_terminal`'s case, not this one."""
+        busy. *sandboxed* asks for the shell that runs inside the session's
+        sandbox (see PanelStrip.new_shell). Returns the new shell unselected
+        (the caller reveals it), or None when there is no strip to sit
+        beside — no shells at all, which is `show_panel_terminal`'s case
+        (or, for a sandboxed one, `open_page`'s), not this one."""
         for shell in reversed(self.shell_pages()):
             strip = self._strip_of(shell)  # skips a lifted page's shell
             if strip is not None:
-                return strip.new_shell(select=False)
+                return strip.new_shell(select=False, sandboxed=sandboxed)
         return None
 
     def capture_shell_texts(self) -> dict[int, str]:
@@ -1126,7 +1128,9 @@ class PanelDock(Adw.Bin):
             for page in state["pages"]:
                 if page["kind"] == "shell":
                     shell = strip.new_shell(
-                        restore_text=shell_texts.get(page["hist"]), select=False
+                        restore_text=shell_texts.get(page["hist"]),
+                        select=False,
+                        sandboxed=bool(page.get("sandboxed")),
                     )
                     shell.hist = page["hist"]
                 else:
@@ -1537,9 +1541,13 @@ class PanelDock(Adw.Bin):
         next one *opened* rather than to whichever tab the closing tab row
         happened to select behind it."""
         self._recent = widget
+        # Ctrl+J is the user's own shell: a shell running inside the
+        # session's sandbox (PanelTerminal.sandboxed) never takes the
+        # binding, however it arrived.
         if (
             arrived
             and getattr(widget, "page_kind", None) == "shell"
+            and not getattr(widget, "sandboxed", False)
             and self.panel_terminal is None
         ):
             self._toggle_shell = widget
