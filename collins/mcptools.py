@@ -583,7 +583,10 @@ TOOLS: list[dict] = [
             "exploration to run alongside your own — rather than doing it "
             "inline. The spawned session gets these same Collins tools, so it "
             "can spawn its own; a prompt is required because a session with "
-            "nothing to do is a leaked process."
+            "nothing to do is a leaked process. A session running inside a "
+            "Collins sandbox spawns siblings inside the same sandbox, with "
+            "the same box: the sibling's directory must then lie inside "
+            "that sandbox's workspace or one of its allowed directories."
         ),
         "inputSchema": {
             "type": "object",
@@ -687,7 +690,9 @@ TOOLS: list[dict] = [
             "server they left running, a command they tried — instead of "
             "asking them to paste it. Reading is all this does: it cannot "
             "type into a shell, and it says so when no panel terminal is "
-            "open."
+            "open. From a session running inside a Collins sandbox, only "
+            "the sandboxed shells (tabs titled 'Sandboxed shell N', running "
+            "inside the same sandbox) are readable."
         ),
         "inputSchema": {
             "type": "object",
@@ -735,7 +740,10 @@ TOOLS: list[dict] = [
             "belong in your normal shell tool. Returns as soon as the "
             "command is typed, without waiting for output — follow up with "
             "read_terminal to see how it's going. A terminal busy running "
-            "a command is never typed into."
+            "a command is never typed into. From a session running inside "
+            "a Collins sandbox the command runs in a sandboxed shell (a tab "
+            "titled 'Sandboxed shell N', inside the same sandbox), never in "
+            "the user's own unconfined shell."
         ),
         "inputSchema": {
             "type": "object",
@@ -986,15 +994,17 @@ def _terminal_tail(text: str, lines: int) -> str:
     return "\n".join(text.rstrip().split("\n")[-lines:])
 
 
-def _terminal_section(number: int, busy: bool, text: str) -> str:
+def _terminal_section(number: int, busy: bool, text: str, kind: str = "Terminal") -> str:
     state = "command running" if busy else "idle"
-    return f"── Terminal {number} ({state}) ──\n{text or '(empty)'}"
+    return f"── {kind} {number} ({state}) ──\n{text or '(empty)'}"
 
 
-def terminal_reply(sections: list[tuple[int, bool, str]], lines: int) -> str:
+def terminal_reply(sections: list[tuple], lines: int) -> str:
     """The read_terminal reply: each of *sections* — (tab-title number,
-    has-a-running-command, full scrollback dump) — tailed to *lines* lines
-    under a header naming the terminal.
+    has-a-running-command, full scrollback dump[, the tab title's kind:
+    "Terminal", or "Sandboxed shell" for one running inside a sandboxed
+    session's box]) — tailed to *lines* lines under a header naming the
+    terminal the way its tab does.
 
     Guaranteed to fit one wire frame: an oversize reply doesn't degrade, it
     closes the shim's connection (see mcpserver._send), so after the line
@@ -1006,19 +1016,22 @@ def terminal_reply(sections: list[tuple[int, bool, str]], lines: int) -> str:
     than looped on: a section count that absurd is its own answer, and the
     guarantee this function exists for is "returns, and fits".
     """
-    tails = [(number, busy, _terminal_tail(text, lines)) for number, busy, text in sections]
+    tails = [
+        (number, busy, _terminal_tail(text, lines), *kind) for number, busy, text, *kind in sections
+    ]
     budget = MAX_LINE - _TERMINAL_REPLY_MARGIN
     while True:
         reply = "\n\n".join(_terminal_section(*tail) for tail in tails)
         if len(json.dumps(reply).encode("utf-8")) <= budget:
             return reply
-        if not any(text for _number, _busy, text in tails):
+        if not any(text for _number, _busy, text, *_kind in tails):
             # Headers only by now, so every character is ASCII or "─" and
             # encodes in at most 6 bytes (─) — a sixth of the budget
             # in characters always fits it.
             return reply[: budget // 6]
         tails = [
-            (number, busy, text[(len(text) + 1) // 2 :]) for number, busy, text in tails
+            (number, busy, text[(len(text) + 1) // 2 :], *kind)
+            for number, busy, text, *kind in tails
         ]
 
 
@@ -1472,20 +1485,49 @@ ToolResult = tuple[bool, str] | DeferredResult
 NOT_FROM_TAB_ERROR = "This claude process wasn't launched from a Collins tab"
 
 
-# The tools a *sandboxed* session is refused, until the sandbox policy lands
-# (a sandboxed panel shell, a sibling that inherits the box and stays inside
-# the workspace): each one reaches the host from inside the box, and under
-# bypassPermissions no prompt stands between the agent and it —
-# run_in_terminal types into the user's own unconfined Ctrl+J shell,
-# read_terminal reads that shell's output, start_session mints a sibling in a
-# cwd of the agent's choosing.
-SANDBOX_HOST_TOOLS = frozenset({"run_in_terminal", "read_terminal", "start_session"})
+# -- the sandbox policy ------------------------------------------------------------
+#
+# The MCP socket is bound into a sandboxed session's box, so every tool is
+# reachable from inside one. Collins knows which tabs are sandboxed, and
+# run_tool_call hands that flag to each handler, which applies a policy
+# rather than trusting the caller: the three tools below reach the host, and
+# under bypassPermissions no prompt stands between the agent and them.
+#
+# - run_in_terminal / read_terminal target only *sandboxed* panel shells
+#   (`bwrap <the session's plan> -- $SHELL`, see terminal.PanelTerminal): the
+#   user's own Ctrl+J shell runs unconfined, and a channel that runs commands
+#   outside the box is an escape hatch whatever the file policy says.
+# - start_session inherits the parent's box, always (sibling_sandboxed), with
+#   the parent's exact plan (sandboxplan.derive_plan) — and its cwd must lie
+#   inside that plan's workspace or a grant (sandboxplan.plan_reaches).
 
 
-def sandboxed_error(name: str) -> str:
+def tool_shells(shells: list, sandboxed: bool) -> list:
+    """The panel shells a session's read_terminal / run_in_terminal may see:
+    all of them for an unsandboxed session, and for a sandboxed one only
+    the shells that run inside its box (a `sandboxed` attribute on the
+    page). A sandboxed session never gets a handle on the user's own
+    shell — its scrollback is host output and its commands run unconfined."""
+    if not sandboxed:
+        return list(shells)
+    return [shell for shell in shells if getattr(shell, "sandboxed", False)]
+
+
+def sibling_sandboxed(parent_sandboxed: bool, project_default: bool) -> bool:
+    """Whether a start_session sibling runs inside a sandbox: always when
+    its parent does — an unsandboxed sibling from a sandboxed parent is
+    never possible, whatever the settings say — and otherwise per the
+    project's default for new sessions, like any new session."""
+    return bool(parent_sandboxed) or bool(project_default)
+
+
+def sibling_cwd_refusal(reason: str) -> str:
+    """The start_session reply when a sandboxed parent asks for a sibling
+    in a directory its box doesn't reach."""
     return (
-        f"{name} is not available from a sandboxed session: it would reach "
-        "outside the sandbox"
+        f"start_session from a sandboxed session: {reason}. A sibling runs in "
+        "the same sandbox as its parent, so it has to start inside that "
+        "sandbox's workspace or one of its allowed directories."
     )
 
 
@@ -1503,19 +1545,20 @@ def run_tool_call(
     The branching lives here, GTK-free, so CI can pin its order and error
     strings; app.py supplies the halves that need widgets or settings —
     `find_tab()` (the pid→tab ancestry walk, returning None for a caller no
-    tab owns), `handlers` (tool name → callable taking (found_tab, args) and
-    returning (ok, message), or a `DeferredResult` when the answer needs a
-    worker thread), and `is_enabled` (the Preferences switch;
-    omitted means every tool is on). Validation runs first and
-    unconditionally: the socket is reachable by any local process, so the
-    CLI's own schema enforcement is not a boundary. The switch comes next —
-    it is a property of the tool, not of the caller, and a session that was
-    handed the tool before it was switched off is refused here rather than
-    acted on. Identity comes last, so a bad call fails the same way whoever
-    makes it, leaking nothing about what tabs exist. Then the sandbox
-    policy: `is_sandboxed(found)` says whether the calling tab runs inside
-    a box, and a SANDBOX_HOST_TOOLS call from one is refused before its
-    handler — the handlers reach the host, and the box is the only gate.
+    tab owns), `handlers` (tool name → callable taking (found_tab, args,
+    sandboxed) and returning (ok, message), or a `DeferredResult` when the
+    answer needs a worker thread), `is_enabled` (the Preferences switch;
+    omitted means every tool is on) and `is_sandboxed(found)` (whether the
+    calling tab runs inside a box; omitted means never). Validation runs
+    first and unconditionally: the socket is reachable by any local
+    process, so the CLI's own schema enforcement is not a boundary. The
+    switch comes next — it is a property of the tool, not of the caller,
+    and a session that was handed the tool before it was switched off is
+    refused here rather than acted on. Identity comes last, so a bad call
+    fails the same way whoever makes it, leaking nothing about what tabs
+    exist. The sandbox flag is Collins' own reading of the tab, never the
+    caller's word, and every handler gets it: the policy is theirs to
+    apply (see the sandbox policy notes above).
     """
     error = validate_args(tool, args)
     if error is not None:
@@ -1525,12 +1568,11 @@ def run_tool_call(
     found = find_tab()
     if found is None:
         return False, NOT_FROM_TAB_ERROR
-    if tool in SANDBOX_HOST_TOOLS and is_sandboxed is not None and is_sandboxed(found):
-        return False, sandboxed_error(tool)
     handler = handlers.get(tool)
     if handler is None:  # a TOOLS entry whose handler hasn't landed
         return False, f"Unknown tool: {tool}"
-    return handler(found, args)
+    sandboxed = bool(is_sandboxed(found)) if is_sandboxed is not None else False
+    return handler(found, args, sandboxed)
 
 
 def encode_message(message: dict) -> bytes:

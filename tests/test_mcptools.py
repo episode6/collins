@@ -914,6 +914,21 @@ def test_terminal_reply_names_each_terminal_and_its_state():
     assert "── Terminal 3 (command running) ──\n$ sleep 99" in reply
 
 
+def test_terminal_reply_names_a_sandboxed_shell_the_way_its_tab_does():
+    """A shell running inside a sandboxed session's box is titled
+    'Sandboxed shell N'; the reply's header says so, and the tail and
+    budget logic don't care about the extra field."""
+    reply = mcptools.terminal_reply(
+        [(1, False, "$ ls", "Sandboxed shell"), (2, True, "$ make", "Terminal")], lines=200
+    )
+    assert "── Sandboxed shell 1 (idle) ──\n$ ls" in reply
+    assert "── Terminal 2 (command running) ──\n$ make" in reply
+    big = "x" * (2 * mcptools.MAX_LINE)
+    reply = mcptools.terminal_reply([(1, False, big, "Sandboxed shell")], lines=5)
+    assert reply.startswith("── Sandboxed shell 1 (idle) ──")
+    assert len(json.dumps(reply).encode()) <= mcptools.MAX_LINE
+
+
 def test_terminal_reply_tails_to_the_asked_lines():
     dump = "\n".join(f"line {i}" for i in range(100))
     reply = mcptools.terminal_reply([(1, False, dump)], lines=3)
@@ -966,7 +981,7 @@ def test_terminal_reply_always_fits_one_wire_frame():
 # identity second, and only then a handler.
 
 
-def _rename_ok(found, args):
+def _rename_ok(found, args, sandboxed=False):
     return True, f"renamed {found} to {args['title']}"
 
 
@@ -1030,7 +1045,7 @@ def test_run_tool_call_passes_a_deferred_answer_through():
     result = mcptools.run_tool_call(
         "show_image", {"path": "https://example.com/a.png"},
         find_tab=lambda: "tab-a",
-        handlers={"show_image": lambda found, args: pending},
+        handlers={"show_image": lambda found, args, sandboxed: pending},
     )
     assert result is pending
 
@@ -1117,55 +1132,91 @@ def test_run_tool_call_returns_the_handlers_failure():
     ok, message = mcptools.run_tool_call(
         "set_session_title", {"title": "hi"},
         find_tab=lambda: "tab-a",
-        handlers={"set_session_title": lambda found, args: (False, "not resolved yet")},
+        handlers={"set_session_title": lambda found, args, sandboxed: (False, "not resolved yet")},
     )
     assert (ok, message) == (False, "not resolved yet")
 
 
-def test_run_tool_call_refuses_host_reaching_tools_from_a_sandboxed_tab():
-    """A sandboxed session under bypassPermissions has no prompt between it
-    and the host: the user's own panel shell (run_in_terminal,
-    read_terminal) and a sibling in a cwd of its choosing (start_session)
-    are refused before the handler runs, and only for a sandboxed caller."""
-    calls = []
+def test_run_tool_call_hands_every_handler_the_sandbox_flag():
+    """The socket is bound into a sandboxed session's box, so every tool is
+    reachable from inside one; what the handlers get is Collins' own
+    reading of the calling tab (`is_sandboxed(found)`), never the caller's
+    word, and the policy is theirs to apply. Omitted, the flag is False."""
+    seen = []
     handlers = {
-        name: (lambda found, args, name=name: calls.append(name) or (True, "ran"))
+        name: (lambda found, args, sandboxed, name=name: seen.append((name, sandboxed)) or (True, "ran"))
         for name in ("run_in_terminal", "read_terminal", "start_session", "set_session_title")
     }
     args = {
-        "run_in_terminal": {"command": "cat ~/.ssh/id_ed25519"},
+        "run_in_terminal": {"command": "ls"},
         "read_terminal": {},
         "start_session": {"prompt": "hi", "cwd": "/home/u/.ssh"},
+        "set_session_title": {"title": "hi"},
     }
-    for name in sorted(mcptools.SANDBOX_HOST_TOOLS):
-        ok, message = mcptools.run_tool_call(
+    for name in sorted(args):
+        ok, _message = mcptools.run_tool_call(
             name, args[name], find_tab=lambda: "boxed", handlers=handlers,
             is_sandboxed=lambda found: found == "boxed",
         )
-        assert (ok, message) == (False, mcptools.sandboxed_error(name)), name
-    assert calls == []
-    assert "outside the sandbox" in mcptools.sandboxed_error("run_in_terminal")
-    # The same calls from an unsandboxed tab reach their handlers.
-    for name in sorted(mcptools.SANDBOX_HOST_TOOLS):
+        assert ok, name
         ok, _message = mcptools.run_tool_call(
             name, args[name], find_tab=lambda: "plain", handlers=handlers,
             is_sandboxed=lambda found: found == "boxed",
         )
         assert ok, name
-    assert sorted(calls) == sorted(mcptools.SANDBOX_HOST_TOOLS)
-    # A display-only tool is fine from inside the box.
-    ok, _message = mcptools.run_tool_call(
-        "set_session_title", {"title": "hi"}, find_tab=lambda: "boxed", handlers=handlers,
-        is_sandboxed=lambda found: True,
+    assert sorted(seen) == sorted(
+        [(name, flag) for name in args for flag in (True, False)]
     )
-    assert ok
-    # Identity still comes first: an unowned caller gets the identity error,
-    # never a hint that the tool would have been refused for another reason.
+    seen.clear()
+    ok, _message = mcptools.run_tool_call(
+        "read_terminal", {}, find_tab=lambda: "boxed", handlers=handlers,
+    )
+    assert ok and seen == [("read_terminal", False)]
+    # Identity still comes first: an unowned caller gets the identity error
+    # and the sandbox question is never asked.
+    asked = []
     ok, message = mcptools.run_tool_call(
         "run_in_terminal", {"command": "ls"}, find_tab=lambda: None, handlers=handlers,
-        is_sandboxed=lambda found: True,
+        is_sandboxed=lambda found: asked.append(found) or True,
     )
     assert (ok, message) == (False, mcptools.NOT_FROM_TAB_ERROR)
+    assert asked == []
+
+
+class _Shell:
+    def __init__(self, number, sandboxed=False):
+        self.number = number
+        self.sandboxed = sandboxed
+
+
+def test_tool_shells_keeps_a_sandboxed_session_off_the_users_shell():
+    """run_in_terminal / read_terminal from inside a box see only the shells
+    that run inside it: the user's own Ctrl+J shell runs unconfined, and a
+    channel that runs commands outside the box is an escape hatch whatever
+    the file policy says. An unsandboxed session sees them all."""
+    plain, boxed, plain2 = _Shell(1), _Shell(2, sandboxed=True), _Shell(3)
+    shells = [plain, boxed, plain2]
+    assert mcptools.tool_shells(shells, sandboxed=True) == [boxed]
+    assert mcptools.tool_shells(shells, sandboxed=False) == shells
+    assert mcptools.tool_shells([plain], sandboxed=True) == []
+    # A shell that doesn't say (an older page class) is not a sandboxed one.
+    assert mcptools.tool_shells([object()], sandboxed=True) == []
+
+
+def test_an_unsandboxed_sibling_from_a_sandboxed_parent_is_never_possible():
+    """start_session inherits the sandbox, always: whatever the project's
+    default for new sessions says, a sibling of a sandboxed parent is
+    sandboxed. The other direction is a setting, not a rule."""
+    for project_default in (True, False):
+        assert mcptools.sibling_sandboxed(True, project_default) is True
+    assert mcptools.sibling_sandboxed(False, True) is True
+    assert mcptools.sibling_sandboxed(False, False) is False
+
+
+def test_sibling_cwd_refusal_names_the_rule():
+    text = mcptools.sibling_cwd_refusal("/home/u/.ssh is outside the sandbox's workspace /w")
+    assert text.startswith("start_session from a sandboxed session: /home/u/.ssh is outside")
+    assert "allowed directories" in text
 
 
 # ---- wire framing ------------------------------------------------------------

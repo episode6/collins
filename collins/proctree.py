@@ -147,6 +147,46 @@ def agent_descendant_pid(pid: int, cli: str, depth: int = _MAX_DEPTH) -> int | N
     return _deepest_agent_pid(pid, cli, depth)
 
 
+def _is_sandbox_wrapper(cmdline: str) -> bool:
+    """Whether a command line is one of the processes a sandboxed launch
+    puts between the spawner and what runs inside: Collins' launcher
+    (`python3 …/sandboxrun.py <plan> -- …`) and bubblewrap itself (two
+    `bwrap` processes, the inner one the box's init)."""
+    head = cmdline.split(" ", 1)[0]
+    return (
+        os.path.basename(head) == "bwrap"
+        or "bwrap --args " in cmdline  # the launcher's exec, argv[0] however spelled
+        or "sandboxrun.py" in cmdline
+    )
+
+
+def inner_shell_pid(pid: int | None, depth: int = _MAX_DEPTH) -> int | None:
+    """The pid of the first process at or below *pid* that is not a sandbox
+    wrapper — the shell a sandboxed panel terminal runs inside its box
+    (terminal.PanelTerminal), or *pid* itself for an unsandboxed spawn.
+    None while the wrappers have not spawned it yet, or when nothing under
+    *pid* can be read.
+
+    A host-side `tcgetpgrp` names the foreground process group in the
+    host's pid numbers even for a process inside a pid namespace, so the
+    inside shell's pgid as read here is what the terminal's foreground is
+    compared against to tell "the shell is at its prompt" from "something
+    is running in it".
+    """
+    if not pid or pid <= 0 or depth <= 0:
+        return None
+    cmdline = process_cmdline(pid)
+    if cmdline is None:
+        return None
+    if not _is_sandbox_wrapper(cmdline):
+        return pid
+    for child in process_children(pid):
+        found = inner_shell_pid(child, depth - 1)
+        if found is not None:
+            return found
+    return None
+
+
 def descendant_cmdlines(pid: int, cli: str) -> set[str]:
     """The cmdlines of everything running directly below the agent process at
     or below *pid* — empty when *pid* is not an agent process, or when the

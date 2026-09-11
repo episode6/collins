@@ -219,6 +219,15 @@ def sandboxrun_path() -> str:
     return str(Path(__file__).resolve().parent / "sandboxrun.py")
 
 
+def sandboxed_shell_argv(plan: str, shell: str) -> list[str]:
+    """The argv of a sandboxed panel shell (terminal.PanelTerminal): the
+    same launcher a sandboxed session's typed line starts with, around
+    the user's shell instead of the CLI — `bwrap <plan> -- $SHELL`, so the
+    shell runs inside exactly the box the session does. Spawned directly,
+    not typed: there is no outer shell to type it into."""
+    return [sys.executable, sandboxrun_path(), plan, "--", shell]
+
+
 @dataclass(frozen=True)
 class SessionOptions:
     """Optional CLI flags for a new session — the new-chat screen's model and
