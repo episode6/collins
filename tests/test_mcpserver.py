@@ -81,8 +81,8 @@ class Client:
         return json.loads(line) if line else None
 
     def hello(self, pid: int | None = None) -> None:
-        # The service verifies the declared pid against SO_PEERCRED, so an
-        # honest hello carries this process's own pid.
+        # The service acts on SO_PEERCRED, not the declared pid; an honest
+        # hello still carries this process's own pid, as the shim does.
         self.send({"op": "hello", "pid": os.getpid() if pid is None else pid, "v": 1})
 
 

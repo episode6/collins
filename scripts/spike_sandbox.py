@@ -263,7 +263,11 @@ def build_plan(opts: argparse.Namespace, socket_file: str | None, config_dir: st
         p.rw(os.path.join(home, rel))
     for rel in RW_HOME_ALWAYS:
         full = os.path.join(home, rel)
-        os.makedirs(full, exist_ok=True)
+        # A bind needs a source, so aibox creates these when absent. Only
+        # when a box is actually launched: --print-plan must not touch the
+        # real home (the bind is --bind-try, so a missing one is skipped).
+        if not opts.print_plan:
+            os.makedirs(full, exist_ok=True)
         p.rw(full)
 
     # ---- Collins-specific additions (the spec's list) ----
@@ -319,15 +323,12 @@ def build_plan(opts: argparse.Namespace, socket_file: str | None, config_dir: st
         full = os.path.join(home, rel)
         if not p.carried(full, home):
             continue
-        try:
-            st = os.lstat(full)
-        except OSError:
-            continue
+        if not os.path.lexists(full):
+            continue  # bwrap would create the destination it was told to cover
         if os.path.isdir(full) and not os.path.islink(full):
             p.tmpfs(full)
         else:
             p.mask_file(full)
-        del st
     if ssh_sock and not opts.share_ssh and p.carried(ssh_sock, None):
         p.mask_file(ssh_sock)
     docker = os.environ.get("DOCKER_HOST", "")
@@ -352,6 +353,10 @@ def build_plan(opts: argparse.Namespace, socket_file: str | None, config_dir: st
         p.args += ["--dev-bind-try", dev, dev]
     p.args += ["--chdir", ws, "--setenv", "HOME", home]
     for var in SCRUB_ENV:
+        # --share-ssh binds the agent's directory in; the variable that
+        # points at it has to survive for ssh to find it.
+        if opts.share_ssh and var in ("SSH_AUTH_SOCK", "SSH_AGENT_PID"):
+            continue
         p.args += ["--unsetenv", var]
     if docker.startswith(("unix://", "/")):
         p.args += ["--unsetenv", "DOCKER_HOST"]
@@ -402,6 +407,7 @@ def bwrap_command(plan: Plan, argv: list[str]) -> list[str]:
 
 def inside(args: list[str]) -> int:
     socket_file, workspace, protected = args[0] or None, args[1], args[2] == "1"
+    share_ssh = len(args) > 3 and args[3] == "1"
     rows: list[tuple[str, str, str]] = []
 
     def row(kind: str, name: str, detail: str) -> None:
@@ -430,11 +436,27 @@ def inside(args: list[str]) -> int:
             "absent" if not present else f"{len(listing)} entries",
         )
     run_dir = os.environ.get("XDG_RUNTIME_DIR", "")
-    entries = os.listdir(run_dir) if run_dir and os.path.isdir(run_dir) else []
+    entries = set(os.listdir(run_dir)) if run_dir and os.path.isdir(run_dir) else set()
+    ssh = os.environ.get("SSH_AUTH_SOCK")
+    # Only what the plan bound on purpose: the Collins socket's directory,
+    # and the agent's directory when --share-ssh put it there.
+    allowed = {"collins"}
+    if share_ssh and ssh and ssh.startswith(run_dir + os.sep):
+        allowed.add(ssh[len(run_dir) + 1 :].split(os.sep, 1)[0])
     row(
-        "PASS" if entries in ([], ["collins"]) else "FAIL", "XDG_RUNTIME_DIR private", f"{run_dir}: {entries}"
+        "PASS" if entries <= allowed else "FAIL",
+        "XDG_RUNTIME_DIR private",
+        f"{run_dir}: {sorted(entries)}",
     )
-    row("PASS" if "SSH_AUTH_SOCK" not in os.environ else "FAIL", "SSH_AUTH_SOCK scrubbed", "")
+    if share_ssh:
+        ok = bool(ssh) and os.path.exists(ssh)
+        row(
+            "PASS" if ok else "FAIL",
+            "SSH agent shared",
+            f"SSH_AUTH_SOCK={ssh} {'reachable' if ok else 'missing'}",
+        )
+    else:
+        row("PASS" if not ssh else "FAIL", "SSH_AUTH_SOCK scrubbed", "")
     row("PASS" if os.access(workspace, os.W_OK) else "FAIL", "workspace writable", workspace)
     row("PASS" if os.access(os.path.join(home, ".claude"), os.W_OK) else "FAIL", "~/.claude writable", "")
 
@@ -622,6 +644,7 @@ def main() -> int:
             sock or "",
             os.path.realpath(opts.workspace),
             "0" if opts.unprotect_settings else "1",
+            "1" if opts.share_ssh else "0",
         ]
         return subprocess.run(bwrap_command(plan, argv), check=False).returncode
 

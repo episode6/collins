@@ -20,10 +20,12 @@ goes quiet until it lands, which is the same invariant, held longer.
 The socket sits in a user-private directory, but any local process of the
 user's can still connect — treat every frame as untrusted input: a peer
 whose first line isn't a well-formed hello, or that breaks framing in any
-way, is disconnected rather than guessed at. The hello's pid is load-bearing
-for authorization (the dispatcher walks /proc ancestry from it to decide
-which tab a call may act on), so it is never taken on faith: it must match
-the peer's kernel-verified pid (SO_PEERCRED), or the connection is dropped.
+way, is disconnected rather than guessed at. The pid a connection acts as
+is load-bearing for authorization (the dispatcher walks /proc ancestry from
+it to decide which tab a call may act on), so it is never taken on faith:
+it is the peer's kernel-verified pid (SO_PEERCRED), whatever the hello
+declared — a shim in a PID namespace can only declare its local pid — and a
+peer the kernel won't vouch for is dropped.
 Argument validation against the tool schemas is the dispatcher's job
 (`mcptools.validate_args`), not ours.
 """
