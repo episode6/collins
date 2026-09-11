@@ -81,8 +81,8 @@ class Client:
         return json.loads(line) if line else None
 
     def hello(self, pid: int | None = None) -> None:
-        # The service verifies the declared pid against SO_PEERCRED, so an
-        # honest hello carries this process's own pid.
+        # The service acts on SO_PEERCRED, not the declared pid; an honest
+        # hello still carries this process's own pid, as the shim does.
         self.send({"op": "hello", "pid": os.getpid() if pid is None else pid, "v": 1})
 
 
@@ -253,18 +253,28 @@ def test_a_bad_first_frame_closes_the_connection(tmp_path, first_frame):
     assert run_with_client(tmp_path, client) is None
 
 
-def test_a_spoofed_hello_pid_closes_the_connection(tmp_path):
-    """The declared pid authorizes the call (the dispatcher walks /proc
-    ancestry from it to a tab), so it must be the peer's real pid per
-    SO_PEERCRED — a client claiming some other live process's pid (pid 1
-    always exists) is dropped, not believed."""
+def test_a_spoofed_hello_pid_is_bound_to_the_real_peer(tmp_path):
+    """The pid that authorizes a call is the peer's real pid per SO_PEERCRED
+    (the dispatcher walks /proc ancestry from it to a tab), never the
+    declared one: a client claiming some other live process's pid (pid 1
+    always exists) acts as itself. The declared pid is allowed to differ
+    because a shim inside a PID namespace — a bubblewrap sandbox — can only
+    report its namespace-local pid, and the kernel translates SO_PEERCRED
+    into ours."""
+    seen = {}
+
+    def dispatch(pid, tool, args):
+        seen["pid"] = pid
+        return True, "ok"
 
     def client(sock_path, _service):
         c = Client(sock_path)
         c.hello(pid=1)
+        c.send({"op": "call", "id": 1, "tool": "set_session_title", "args": {}})
         return c.read()
 
-    assert run_with_client(tmp_path, client) is None
+    assert run_with_client(tmp_path, client, dispatch=dispatch)["ok"] is True
+    assert seen["pid"] == os.getpid()
 
 
 def test_an_honest_hello_pid_is_accepted(tmp_path):
