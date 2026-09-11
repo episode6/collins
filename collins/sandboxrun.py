@@ -2,9 +2,12 @@
 
 """The host-side launcher a sandboxed session's command line starts with:
 
-    python3 -m collins.sandboxrun <plan.json> -- claude --resume <id> …
+    python3 <…>/collins/sandboxrun.py <plan.json> -- claude --resume <id> …
 
-It reads the plan sandboxplan wrote, turns it into a bubblewrap invocation
+Named by file, not as `-m collins.sandboxrun`: the typed line runs in the
+tab's shell, which has no PYTHONPATH for a checkout, and a system-installed
+collins would shadow the one running (providers.sandboxrun_path). It
+reads the plan sandboxplan wrote, turns it into a bubblewrap invocation
 and execs it, so the tab's shell ends up running `bwrap … -- claude …` as
 its foreground job — every close flow Collins has (Ctrl+C Ctrl+C through
 the pty's process group, the force-close killing the shell, the tab
@@ -18,9 +21,9 @@ with `--setenv`, and the GitHub token — when the plan asks for it — is
 read off the host with `gh auth token` here and handed in as `GH_TOKEN`
 the same way, never written to disk.
 
-Standard library only, and nothing imported from the collins package: like
-mcp_shim it may run from an install tree the shell can't otherwise see,
-and it must never half-run — a plan it can't read or a bwrap it can't find
+Standard library only, and nothing imported from the collins package: it
+runs as a bare script from wherever Collins is installed, and it must
+never half-run — a plan it can't read or a bwrap it can't find
 is a refusal (exit 2 with the reason on stderr), never an unsandboxed run
 of the command it was handed.
 """
@@ -38,7 +41,7 @@ import sys
 # through a memfd instead, which has no such limit.
 _PIPE_PAYLOAD_MAX = 60_000
 
-_USAGE = "usage: python3 -m collins.sandboxrun <plan.json> -- <command> [args…]"
+_USAGE = "usage: python3 sandboxrun.py <plan.json> -- <command> [args…]"
 
 
 class PlanError(Exception):

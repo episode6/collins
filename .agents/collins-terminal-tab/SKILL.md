@@ -27,11 +27,14 @@ mode, attachments), `vtehtml.py` (reading dim text back out of VTE),
 ## Spawn, resume, attach
 
 A **sandboxed** launch (`SessionOptions.sandbox`) types
-`python3 -m collins.sandboxrun <plan> -- claude …` instead: `_finish_spawn`
+`python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead: `_finish_spawn`
 writes the plan through `terminal.SANDBOX_PLANNER` at the last moment (the
 workspace is the settled cwd, a recreated worktree included), `Provider.
-sandbox_prefix` prepends the wrapper, `_on_child_exited` unlinks the plan,
-and `tab.sandboxed` is what the `/bg` and attach guards read. No box
+sandbox_prefix` prepends the wrapper (and the tab appends
+`provider.session_flags` — the permission mode — behind a `--continue`
+override), `_on_child_exited` unlinks the plan, and `tab.sandboxed` is what
+the `/bg` and attach guards read; a sandboxed fork tab runs the resolver in
+`_fork_resolve` mode and reports the forked id on `fork-resolved`. No box
 possible → an unsandboxed launch that says so, with a bypass mode dropped.
 See `collins-sandboxed-sessions`.
 

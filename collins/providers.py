@@ -211,6 +211,14 @@ _BACKGROUND_TERMINAL_STATES = frozenset({"done", "error", "failed", "stopped"})
 MCP_CONFIG_PATH: str | None = None
 
 
+def sandboxrun_path() -> str:
+    """The host-side sandbox launcher as a file, `collins/sandboxrun.py`
+    beside this module: what a sandboxed launch's typed line names (see
+    Provider.sandbox_prefix). It ships in the package, so the path holds
+    for an install and for a checkout alike."""
+    return str(Path(__file__).resolve().parent / "sandboxrun.py")
+
+
 @dataclass(frozen=True)
 class SessionOptions:
     """Optional CLI flags for a new session — the new-chat screen's model and
@@ -339,28 +347,42 @@ class Provider:
     def sandbox_prefix(self, options) -> str:
         """What a sandboxed launch's typed line starts with: the host-side
         launcher that reads the plan and execs bubblewrap around the CLI
-        (`python3 -m collins.sandboxrun <plan> -- `), or "" for an
+        (`python3 <…>/collins/sandboxrun.py <plan> -- `), or "" for an
         unsandboxed one. The interpreter is this process's, like the shim's
-        in the MCP config: the module has to resolve from wherever Collins
-        is installed, and PATH says nothing about that."""
+        in the MCP config, and the launcher is named by file rather than as
+        a module: the tab's shell has no PYTHONPATH for a checkout, and a
+        system-installed collins would shadow it — sandboxrun is stdlib-only
+        precisely so it runs as a bare script."""
         if not options or not options.sandbox or not options.sandbox_plan:
             return ""
         return (
-            f"{shlex.quote(sys.executable)} -m collins.sandboxrun "
+            f"{shlex.quote(sys.executable)} {shlex.quote(sandboxrun_path())} "
             f"{shlex.quote(options.sandbox_plan)} -- "
         )
 
+    def session_flags(self, options) -> str:
+        """The flags a *resumed or continued* session takes from its
+        options — the permission mode, so a sandboxed resume runs with
+        prompts off like its first launch did — as a string to append to
+        the command (" --flag value" or ""). Base: none."""
+        return ""
+
     def resume_command(self, session_id: str, fork: bool = False, options=None) -> str | None:
         """Shell command to type into the terminal to resume a session.
-        *options* carries the sandbox decision for a resumed session (its
-        other fields are a new session's)."""
+        *options* carries the sandbox decision and the permission mode for
+        a resumed session (its other fields are a new session's)."""
         cli = shutil.which(self.cli)
         if cli is None:
             return None
         cmd = f"{shlex.quote(cli)} --resume {shlex.quote(session_id)}"
         if fork and self.supports_fork:
             cmd += " --fork-session"
-        return self.sandbox_prefix(options) + cmd + self._mcp_config_flag()
+        return (
+            self.sandbox_prefix(options)
+            + cmd
+            + self.session_flags(options)
+            + self._mcp_config_flag()
+        )
 
     def new_command(self, options=None) -> str | None:
         """Shell command to start a fresh session, optionally with the
@@ -380,11 +402,15 @@ class Provider:
         return []
 
     def continue_command(self, options=None) -> str | None:
-        """Shell command to continue the most recent session in the cwd."""
+        """Shell command to continue the most recent session in the cwd.
+        The tab prepends the sandbox wrapper and appends `session_flags`
+        itself at spawn (it is typed as a command override, and the plan is
+        only known then), so *options* is unused here and kept for
+        symmetry."""
         cli = shutil.which(self.cli)
         if cli is None:
             return None
-        return f"{self.sandbox_prefix(options)}{shlex.quote(cli)} --continue{self._mcp_config_flag()}"
+        return f"{shlex.quote(cli)} --continue{self._mcp_config_flag()}"
 
     def session_models(self) -> list[tuple[str, str]]:
         """(flag value, label) model aliases this agent's --model takes. Empty
@@ -840,6 +866,14 @@ class ClaudeProvider(Provider):
             ("acceptEdits", "Accept edits"),
             ("bypassPermissions", "Bypass permissions"),
         ]
+
+    def session_flags(self, options) -> str:
+        # The CLI takes --permission-mode with --resume and --continue as
+        # with a fresh start; nothing else in the options applies to an
+        # existing conversation.
+        if options and options.permission_mode:
+            return f" --permission-mode {shlex.quote(options.permission_mode)}"
+        return ""
 
     def _option_flags(self, options) -> list[str]:
         if not options:

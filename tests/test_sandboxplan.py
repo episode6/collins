@@ -185,10 +185,14 @@ def test_agent_socket_masked_in_a_shared_tmp(home):
     assert ("/dev/null", "/run/user/1000/gcr/ssh") not in _binds(plan, "--ro-bind")
 
 
-def test_sharing_the_ssh_agent_binds_its_directory_and_keeps_the_variable(home):
-    sock = "/run/user/1000/gcr/ssh"
+def test_sharing_the_ssh_agent_binds_the_socket_and_keeps_the_variable(home):
+    sock = "/run/user/1000/keyring/ssh"
     plan = build_plan(_inputs(home, ssh_auth_sock=sock, share_ssh=True))
-    assert ("/run/user/1000/gcr", "/run/user/1000/gcr") in _binds(plan, "--bind-try")
+    # The socket file alone, on top of the runtime dir's tmpfs — never its
+    # directory, which on a desktop also holds the keyring's control socket.
+    assert (sock, sock) in _binds(plan, "--bind-try")
+    assert ("/run/user/1000/keyring", "/run/user/1000/keyring") not in _binds(plan, "--bind-try")
+    assert _index(plan, "--bind-try", sock, sock) > _index(plan, "--tmpfs", "/run/user/1000")
     assert "SSH_AUTH_SOCK" not in plan["unsetenv"]
     assert "SSH_AGENT_PID" not in plan["unsetenv"]
     assert "GPG_AGENT_INFO" in plan["unsetenv"]
@@ -225,6 +229,50 @@ def test_settings_json_is_bound_read_only_over_itself_when_it_exists(home):
     local.write_text("{}")
     plan = build_plan(_inputs(home))
     assert (str(local), str(local)) in _binds(plan, "--ro-bind")
+
+
+def test_a_symlinked_settings_json_refuses_the_plan(home):
+    # A symlink can't be pinned: the link itself stays replaceable from
+    # inside, and bwrap can't create the destination through it. Refused
+    # rather than built unprotected — unless the switch says writable.
+    (home / ".claude").mkdir()
+    (home / "dotfiles").mkdir()
+    real = home / "dotfiles" / "settings.json"
+    real.write_text("{}")
+    (home / ".claude" / "settings.json").symlink_to(real)
+    with pytest.raises(PlanRefused, match="symlink"):
+        build_plan(_inputs(home))
+    plan = build_plan(_inputs(home, protect_settings=False))
+    assert plan["inputs"]["protect_settings"] is False
+
+
+def test_plugins_and_a_real_launcher_are_pinned_read_only(home):
+    plugins = home / ".claude" / "plugins"
+    plugins.mkdir(parents=True)
+    launcher = home / ".local" / "bin" / "claude"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("#!/bin/sh\n")
+    plan = build_plan(_inputs(home, claude_launcher=str(launcher)))
+    ro = _binds(plan, "--ro-bind")
+    assert (str(plugins), str(plugins)) in ro
+    assert (str(launcher), str(launcher)) in ro
+    assert _index(plan, "--ro-bind", str(launcher), str(launcher)) > _index(
+        plan, "--bind-try", str(home / ".local" / "bin"), str(home / ".local" / "bin")
+    )
+    # The native installer's launcher is a symlink in the shared ~/.local/bin:
+    # nothing can pin it, and the plan says so.
+    launcher.unlink()
+    launcher.symlink_to("/nonexistent/claude")
+    plan = build_plan(_inputs(home, claude_launcher=str(launcher)))
+    assert (str(launcher), str(launcher)) not in _binds(plan, "--ro-bind")
+    assert any("not pinned" in note for note in plan["notes"])
+    # A launcher no shared tree reaches (an npm prefix outside home) is
+    # already read-only or absent: nothing to pin.
+    plan = build_plan(_inputs(home, claude_launcher="/opt/npm/bin/claude"))
+    assert ("/opt/npm/bin/claude", "/opt/npm/bin/claude") not in _binds(plan, "--ro-bind")
+    # The switch that unprotects settings.json unpins these too.
+    plan = build_plan(_inputs(home, claude_launcher=str(launcher), protect_settings=False))
+    assert (str(plugins), str(plugins)) not in _binds(plan, "--ro-bind")
 
 
 def test_the_switch_leaves_settings_json_writable(home):
@@ -294,14 +342,14 @@ def test_collins_pieces_are_bound_read_only_before_the_workspace(home):
             claude_dir=str(home / ".local" / "share" / "claude"),
             prefix=str(home / "venv"),
             package_parent=str(home / "src" / "collins"),
-            config_dir=str(home / ".local" / "share" / "collins" / "app"),
+            config_file=str(home / ".local" / "share" / "collins" / "app" / "mcp.json"),
         )
     )
     for path in (
         str(home / ".local" / "share" / "claude"),
         str(home / "venv"),
         str(home / "src" / "collins"),
-        str(home / ".local" / "share" / "collins" / "app"),
+        str(home / ".local" / "share" / "collins" / "app" / "mcp.json"),
     ):
         assert _index(plan, "--ro-bind-try", path, path) < _index(plan, "--bind", ws, ws)
 
@@ -329,6 +377,27 @@ def test_refuses_home_and_root_as_a_workspace(home):
         build_plan(_inputs(home, workspace=str(home)))
     with pytest.raises(PlanRefused):
         build_plan(_inputs(home, workspace="/"))
+    # A strict ancestor of home carries the whole real home; refused too.
+    with pytest.raises(PlanRefused, match="ancestor of the home"):
+        build_plan(_inputs(home, workspace=str(home.parent), sandbox_home="/var/tmp/sbx"))
+
+
+def test_refuses_a_secret_as_a_workspace(home):
+    # The workspace is a read-write bind held to the grant rule: a secret,
+    # something inside one, or an ancestor of one is never a workspace.
+    (home / ".ssh").mkdir()
+    with pytest.raises(PlanRefused, match=".ssh"):
+        build_plan(_inputs(home, workspace=str(home / ".ssh")))
+    (home / ".config" / "gh").mkdir(parents=True)
+    with pytest.raises(PlanRefused, match="reaches"):
+        build_plan(_inputs(home, workspace=str(home / ".config")))
+    with pytest.raises(PlanRefused, match="reaches"):
+        build_plan(_inputs(home, workspace=str(home / ".config" / "gh" / "x")))
+    # A secret that is a symlink into a checkout: the target is refused too.
+    (home / "dotfiles" / "ssh").mkdir(parents=True)
+    (home / ".gnupg").symlink_to(home / "dotfiles" / "ssh")
+    with pytest.raises(PlanRefused, match=".gnupg"):
+        build_plan(_inputs(home, workspace=str(home / "dotfiles" / "ssh")))
 
 
 def test_refuses_a_workspace_that_nests_with_the_sandbox_home(home):
@@ -342,9 +411,13 @@ def test_refuses_a_workspace_that_nests_with_the_sandbox_home(home):
 
 def test_refuses_a_plan_that_would_carry_collins_state(home):
     # A workspace above state.json carries it: refused outright.
-    (home / ".config").mkdir()
+    (home / ".local" / "state" / "collins").mkdir(parents=True)
+    with pytest.raises(PlanRefused, match="reaches"):
+        build_plan(_inputs(home, workspace=str(home / ".local" / "state")))
+    # And the protect-check catches what no guard names: a state directory
+    # kept somewhere a shared tree (~/.claude here) happens to carry.
     with pytest.raises(PlanRefused, match="must stay outside"):
-        build_plan(_inputs(home, workspace=str(home / ".config")))
+        build_plan(_inputs(home, protected=(str(home / ".claude" / "state"),)))
     # A grant that would carry it is dropped (and noted), and the plan
     # still refuses if anything else reaches it.
     plan = build_plan(_inputs(home, grants=(str(home / ".cache"),)))
@@ -402,6 +475,38 @@ def test_guard_sensitive_refuses_secrets_their_ancestors_and_home(home):
     assert guard(str(home / ".configuration")) == ""  # a name prefix is not an ancestor
 
 
+def test_guard_path_sees_through_symlinks(home):
+    h = str(home)
+    (home / "dotfiles" / "ssh").mkdir(parents=True)
+    (home / ".ssh").symlink_to(home / "dotfiles" / "ssh")
+    guard = lambda p: sandboxplan.guard_path(p, h, (), str(home / "sbx"))  # noqa: E731
+    # The link, its target, and anything inside either.
+    assert guard(str(home / ".ssh")) != ""
+    assert guard(str(home / "dotfiles" / "ssh")) != ""
+    assert guard(str(home / "dotfiles" / "ssh" / "keys")) != ""
+    assert guard(str(home / "dotfiles")) != ""  # an ancestor of the target
+    assert guard(str(home / "work" / "other")) == ""
+    # A grant spelled through a link to a secret's parent.
+    (home / "link-to-home").symlink_to(home)
+    assert guard(str(home / "link-to-home" / ".config")) != ""
+    assert guard(str(home / "link-to-home")) != ""
+    # A home reached through a symlinked parent (/home -> /var/home).
+    alias = home.parent / "alias"
+    alias.symlink_to(home.parent)
+    assert sandboxplan.guard_path(str(alias / home.name / ".aws"), h) != ""
+    assert sandboxplan.guard_path(str(alias / home.name / "work"), h) == ""
+
+
+def test_a_symlinked_grant_to_a_secret_is_never_bound(home):
+    (home / "dotfiles" / "ssh").mkdir(parents=True)
+    (home / ".ssh").symlink_to(home / "dotfiles" / "ssh")
+    plan = build_plan(_inputs(home, grants=(str(home / ".ssh"), str(home / "dotfiles" / "ssh"))))
+    binds = _binds(plan, "--bind-try")
+    assert (str(home / ".ssh"), str(home / ".ssh")) not in binds
+    assert (str(home / "dotfiles" / "ssh"), str(home / "dotfiles" / "ssh")) not in binds
+    assert plan["inputs"]["grants"] == []
+
+
 def test_a_refused_grant_is_never_bound(home):
     plan = build_plan(_inputs(home, grants=(str(home / ".ssh"), str(home / ".config"))))
     binds = _binds(plan, "--bind-try")
@@ -425,6 +530,49 @@ def test_seed_home_copies_claude_json_once(tmp_path):
     host.write_text('{"projects": {"changed": true}}')
     sandboxplan.seed_home(str(sbx), host)
     assert seeded.read_text() == '{"projects": {}}'  # diverged: never re-seeded
+
+
+def test_seed_home_never_follows_a_planted_symlink(tmp_path):
+    # The agent owns the sandbox home: a dangling `.claude.json` link
+    # planted from inside must not become a copy of the host config at
+    # wherever it points.
+    host = tmp_path / "claude.json"
+    host.write_text('{"projects": {}}')
+    sbx = tmp_path / "sbx"
+    sbx.mkdir()
+    victim = tmp_path / "victim.json"
+    (sbx / ".claude.json").symlink_to(victim)
+    sandboxplan.seed_home(str(sbx), host)
+    assert not victim.exists()
+    assert (sbx / ".claude.json").is_symlink()
+
+
+def test_mirror_trust_never_writes_through_a_planted_symlink(tmp_path):
+    host = tmp_path / "claude.json"
+    ws = str(tmp_path / "proj")
+    host.write_text(json.dumps({"projects": {ws: {"hasTrustDialogAccepted": True}}}))
+    sbx = tmp_path / "sbx"
+    sbx.mkdir()
+    victim = tmp_path / "victim.json"
+    victim.write_text("precious")
+    # The destination itself a link to a host file: refused, untouched.
+    (sbx / ".claude.json").symlink_to(victim)
+    assert not sandboxplan.mirror_trust(str(sbx), ws, host)
+    assert victim.read_text() == "precious"
+    # A regular destination writes through a fresh private temp file, so a
+    # planted `.claude.json.tmp` link is never the write target either.
+    (sbx / ".claude.json").unlink()
+    (sbx / ".claude.json").write_text("{}")
+    (sbx / ".claude.json.tmp").symlink_to(victim)
+    assert sandboxplan.mirror_trust(str(sbx), ws, host)
+    assert victim.read_text() == "precious"
+    assert not (sbx / ".claude.json").is_symlink()
+    assert json.loads((sbx / ".claude.json").read_text())["projects"][ws] == {
+        "hasTrustDialogAccepted": True
+    }
+    assert stat.S_IMODE((sbx / ".claude.json").stat().st_mode) == 0o600
+    leftovers = [p.name for p in sbx.iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == [".claude.json.tmp"]  # the plant, and nothing of ours
 
 
 def test_seed_home_without_a_host_config(tmp_path):
@@ -491,6 +639,17 @@ def test_write_and_release_plan(tmp_path):
     sandboxplan.release_plan(None)
 
 
+def test_sweep_plans_clears_the_instance_directory(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    directory = sandboxplan.plan_dir("com.example.App")
+    assert sandboxplan.sweep_plans("com.example.App") == 0  # no directory yet
+    for _ in range(3):
+        sandboxplan.write_plan({"version": 1, "bwrap_args": ["--x"]}, directory)
+    open(os.path.join(directory, "keep.txt"), "w").write("")
+    assert sandboxplan.sweep_plans("com.example.App") == 3
+    assert os.listdir(directory) == ["keep.txt"]
+
+
 def test_sandbox_home_dir_honours_the_override(monkeypatch, tmp_path):
     monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(tmp_path / "sbx"))
     assert sandboxplan.sandbox_home_dir() == str(tmp_path / "sbx")
@@ -537,7 +696,7 @@ def test_gather_inputs_reads_state_and_the_environment(monkeypatch, tmp_path):
     inputs = sandboxplan.gather_inputs(str(ws), "com.example.App", state)
     assert inputs.workspace == str(ws.resolve())
     assert inputs.claude_dir == "/opt/claude/bin"
-    assert inputs.grants == (str(other.resolve()),)
+    assert inputs.grants == (str(other),)  # as written; the guard resolves itself
     assert inputs.share_gh is True
     assert inputs.share_ssh is False
     assert inputs.protect_settings is False
@@ -546,8 +705,37 @@ def test_gather_inputs_reads_state_and_the_environment(monkeypatch, tmp_path):
     assert inputs.sandbox_home == str(tmp_path / "sbx")
     # No socket and no config file on this fake instance: neither is bound.
     assert inputs.socket_file is None
-    assert inputs.config_dir is None
+    assert inputs.config_file is None
     assert sandboxplan.plan_dir("com.example.App") in inputs.protected
+
+
+def test_a_generated_app_id_builds_a_plan(monkeypatch, tmp_path, no_shared_tmp):
+    """For an id outside mcptools.STABLE_APP_IDS the mcp.json lives in the
+    runtime dir beside the plan directory: only the file is bound, so the
+    protect-check passes — every e2e instance runs on such an id."""
+    from collins import mcptools
+
+    home = tmp_path / "home"
+    ws = home / "proj"
+    ws.mkdir(parents=True)
+    monkeypatch.setattr(sandboxplan.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
+    monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(tmp_path / "sbx"))
+    monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
+    monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
+    app_id = "com.episode6.Collins.e2e-abc123"
+    assert app_id not in mcptools.STABLE_APP_IDS
+    config = mcptools.config_path(app_id)
+    os.makedirs(os.path.dirname(config), exist_ok=True)
+    open(config, "w").write("{}")
+    inputs = sandboxplan.gather_inputs(str(ws), app_id, _State())
+    assert inputs.config_file == config
+    plan = build_plan(inputs)
+    assert (config, config) in _binds(plan, "--ro-bind-try")
+    assert not any(src == os.path.dirname(config) for src, _d in _binds(plan, "--ro-bind-try"))
 
 
 # -- the probe ---------------------------------------------------------------------
