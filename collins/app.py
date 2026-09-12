@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-11. Full change history: git log for this file.
+# fork. Last modified: 2026-09-12. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -2901,9 +2901,10 @@ class App(Adw.Application):
         mcptools.terminal_reply does the tailing and keeps the reply inside
         the socket's frame limit. A sandboxed session reads only the
         shells running inside its box (mcptools.tool_shells): the user's
-        own shell's scrollback is host output."""
+        own shell's scrollback is host output, and one left running in the
+        box before a *Restart to apply* is no longer the session's own."""
         _window, tab = found
-        visible = mcptools.tool_shells(tab.panel_shells(), sandboxed)
+        visible = mcptools.tool_shells(tab.panel_shells(), sandboxed, tab.sandbox_plan_path)
         shells = visible
         if not shells:
             if sandboxed:
@@ -2940,7 +2941,7 @@ class App(Adw.Application):
         _window, tab = found
         wanted = args.get("terminal")
         opened = False
-        shells = mcptools.tool_shells(tab.panel_shells(), sandboxed)
+        shells = mcptools.tool_shells(tab.panel_shells(), sandboxed, tab.sandbox_plan_path)
         kind = "Sandboxed shell" if sandboxed else "Terminal"
         if wanted is not None:
             target = next((s for s in shells if s.number == wanted), None)
@@ -3042,6 +3043,10 @@ class App(Adw.Application):
             if not sandboxed:
                 allowed.discard("bypassPermissions")
             if mode not in allowed:
+                # Every refusal past the derive releases the sibling's plan
+                # file: nothing will launch from it, and it describes a box
+                # in full.
+                sandboxplan.release_plan(sibling_plan)
                 if mode == "bypassPermissions":
                     return False, (
                         "start_session won't grant bypassPermissions to a spawned "
@@ -3063,6 +3068,7 @@ class App(Adw.Application):
         model = args.get("model")
         if model:
             if not mcptools.valid_model(model):
+                sandboxplan.release_plan(sibling_plan)
                 return False, (
                     "model must be a CLI alias (opus, sonnet, haiku) or a full "
                     "model id."

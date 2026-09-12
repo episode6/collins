@@ -56,6 +56,10 @@ for var in list(os.environ):
     if var.startswith("CLAUDE_"):
         del os.environ[var]
 
+# The session id the transcript resolver would bind to the tab once the CLI
+# mints one: the restart resumes *this* conversation rather than starting a
+# new one in the same tab.
+RESUMED = "11111111-2222-3333-4444-555555555555"
 TRUSTED = f"{E2E}/dev/alpha"
 SUB = f"{TRUSTED}/sub"
 OTHER = f"{E2E}/dev/lib"
@@ -339,12 +343,26 @@ def grants() -> bool:
     check("the chip says the shares are off", shares_off, texts)
     check("the chip says settings.json is protected", "~/.claude/settings.json: protected" in texts, texts)
     names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
-    check("the chip offers Restart to apply", "Restart to apply" in names, names)
     check("…Allow a directory…", "Allow a directory…" in names, names)
     check("…and a sandboxed shell", "Sandboxed shell" in names, names)
+    # Nothing to resume yet: the CLI stand-in writes no transcript, so the
+    # tab's resolver never bound an id. A restart here would *replace* the
+    # conversation with a fresh session, so it isn't offered — and the chip
+    # says why the grant above is still tagged "after restart".
+    check("no restart before the session resolves", not caller.can_restart_sandboxed())
+    check("…so the chip doesn't offer one", "Restart to apply" not in names, names)
+    check(
+        "…and says why the grant can't be applied",
+        any("can't apply it from here" in t for t in texts),
+        texts,
+    )
+    caller.session_id = RESUMED  # what the resolver does when the id lands
+    check("restart is on offer once it has", caller.can_restart_sandboxed())
+    chip._rebuild()
+    names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
+    check("the chip offers Restart to apply", "Restart to apply" in names, names)
     # A toast from the tab reaches the window without incident.
     caller.emit("toast", "hello & goodbye")
-    check("restart is on offer", caller.can_restart_sandboxed())
     check("the restart starts", caller.restart_sandboxed())
     check("…once", not caller.restart_sandboxed())
     GLib.timeout_add(5000, restarted)
@@ -365,6 +383,25 @@ def restarted() -> bool:
         check("the relaunch binds the grant", (OTHER, OTHER) in after(args, "--bind-try"), args)
         check("…in the same workspace", args[args.index("--chdir") + 1] == TRUSTED, args)
     check("the session is up again", caller.has_running_command())
+    check(
+        "…resumed, not started fresh",
+        f"--resume {RESUMED}" in (caller._initial_command or ""),
+        caller._initial_command,
+    )
+    # The shell opened before the restart still runs in the box it spawned
+    # in, which may hold a directory the revoke has since taken away: it
+    # stays on screen for the user, and leaves the agent's reach.
+    got = app._mcp_read_terminal(found(), {}, True)
+    check(
+        "the shell left in the old box is out of the agent's reach",
+        got == (True, "No sandboxed shells are open in this session."),
+        got,
+    )
+    check(
+        "…but the user still has it",
+        any(getattr(s, "sandboxed", False) for s in caller.panel_shells()),
+        caller.panel_shells(),
+    )
     check("the chip is still on", caller._sandbox_chip.get_visible())
     chip = caller._sandbox_chip
     chip._rebuild()
