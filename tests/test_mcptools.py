@@ -1184,9 +1184,10 @@ def test_run_tool_call_hands_every_handler_the_sandbox_flag():
 
 
 class _Shell:
-    def __init__(self, number, sandboxed=False):
+    def __init__(self, number, sandboxed=False, sandbox_plan=None):
         self.number = number
         self.sandboxed = sandboxed
+        self.sandbox_plan = sandbox_plan
 
 
 def test_tool_shells_keeps_a_sandboxed_session_off_the_users_shell():
@@ -1201,6 +1202,25 @@ def test_tool_shells_keeps_a_sandboxed_session_off_the_users_shell():
     assert mcptools.tool_shells([plain], sandboxed=True) == []
     # A shell that doesn't say (an older page class) is not a sandboxed one.
     assert mcptools.tool_shells([object()], sandboxed=True) == []
+
+
+def test_tool_shells_drops_a_shell_left_in_the_box_before_a_restart():
+    """A shell keeps the box it spawned in: --die-with-parent ties that box
+    to the shell's own pty, not to the session, so *Restart to apply* leaves
+    it running in the old one — which may still hold a directory the user
+    revoked. The agent is handed only the shells running in the box it runs
+    in itself; one that hasn't spawned yet takes the session's plan when it
+    does, so it counts."""
+    now, before = "/run/u/plan-2.json", "/run/u/plan-1.json"
+    current = _Shell(1, sandboxed=True, sandbox_plan=now)
+    stale = _Shell(2, sandboxed=True, sandbox_plan=before)
+    unspawned = _Shell(3, sandboxed=True, sandbox_plan=None)
+    shells = [current, stale, unspawned]
+    assert mcptools.tool_shells(shells, sandboxed=True, plan=now) == [current, unspawned]
+    # No plan named: every sandboxed shell, as before.
+    assert mcptools.tool_shells(shells, sandboxed=True) == shells
+    # An unsandboxed session is unaffected by either.
+    assert mcptools.tool_shells(shells, sandboxed=False, plan=now) == shells
 
 
 def test_an_unsandboxed_sibling_from_a_sandboxed_parent_is_never_possible():

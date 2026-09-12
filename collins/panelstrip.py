@@ -76,11 +76,13 @@ class PanelStrip(Gtk.Box):
     }
 
     def __init__(self, shell_factory) -> None:
-        """`shell_factory() -> PanelPage` builds the shell page the + button
-        appends (numbering lives with the dock, so titles stay unique when
-        pages move between strips); `shell_factory(sandboxed=True)` — when
-        the factory takes it — builds the shell that runs inside the
-        session's sandbox (see set_sandboxed_shell_offer)."""
+        """`shell_factory(sandboxed=False) -> PanelPage` builds the shell
+        page the + button appends (numbering lives with the dock, so titles
+        stay unique when pages move between strips). It is always called
+        with the keyword: `sandboxed=True` asks for the shell that runs
+        inside the session's sandbox (see set_sandboxed_shell_offer), and a
+        factory that cannot make one has to say so itself — a plain shell
+        silently substituted under that title would run unconfined."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._shell_factory = shell_factory
         self._settings: dict | None = None  # last applied; new pages start from it
@@ -280,7 +282,7 @@ class PanelStrip(Gtk.Box):
         select it. `restore_text` seeds the scrollback (session restore).
         *sandboxed* asks the factory for the shell that runs inside the
         session's sandbox instead of the user's own."""
-        shell = self._shell_factory(sandboxed=True) if sandboxed else self._shell_factory()
+        shell = self._shell_factory(sandboxed=sandboxed)
         self.add_page(shell, select=False)
         shell.open_shell(self._cwd(), restore_text)
         if select:

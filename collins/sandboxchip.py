@@ -151,6 +151,17 @@ class SandboxChip(Gtk.MenuButton):
             )
             restart.connect("clicked", self._restart)
             self._content.append(restart)
+        elif host is not None and host.plan_stale(plan_path, workspace):
+            # Stale, but this tab can't restart itself: a fork (it holds its
+            # origin's id), a sibling running its parent's derived plan, or
+            # a session whose id hasn't resolved yet. Say so rather than
+            # leave the "after restart" tags above unexplained.
+            self._content.append(
+                _caption(
+                    _("The sandbox changed since this session started — "
+                      "this session can't apply it from here")
+                )
+            )
         shell = Gtk.Button(label=_("Sandboxed shell"))
         shell.set_halign(Gtk.Align.START)
         shell.set_tooltip_text(_("Open a shell inside this session's sandbox"))

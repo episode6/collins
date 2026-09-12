@@ -1502,15 +1502,27 @@ NOT_FROM_TAB_ERROR = "This claude process wasn't launched from a Collins tab"
 #   inside that plan's workspace or a grant (sandboxplan.plan_reaches).
 
 
-def tool_shells(shells: list, sandboxed: bool) -> list:
+def tool_shells(shells: list, sandboxed: bool, plan: str | None = None) -> list:
     """The panel shells a session's read_terminal / run_in_terminal may see:
     all of them for an unsandboxed session, and for a sandboxed one only
     the shells that run inside its box (a `sandboxed` attribute on the
     page). A sandboxed session never gets a handle on the user's own
-    shell — its scrollback is host output and its commands run unconfined."""
+    shell — its scrollback is host output and its commands run unconfined.
+
+    *plan* is the session's current sandbox plan, and narrows that again to
+    the shells running in the box the session itself runs in: a shell keeps
+    the box it spawned in (`sandbox_plan`), which a *Restart to apply*
+    leaves behind — it may still hold a directory the user has revoked
+    since. A shell that hasn't spawned yet (None) takes the session's plan
+    when it does, so it counts. Omitted, no box is singled out."""
     if not sandboxed:
         return list(shells)
-    return [shell for shell in shells if getattr(shell, "sandboxed", False)]
+    boxed = [shell for shell in shells if getattr(shell, "sandboxed", False)]
+    if plan is None:
+        return boxed
+    return [
+        shell for shell in boxed if getattr(shell, "sandbox_plan", None) in (None, plan)
+    ]
 
 
 def sibling_sandboxed(parent_sandboxed: bool, project_default: bool) -> bool:

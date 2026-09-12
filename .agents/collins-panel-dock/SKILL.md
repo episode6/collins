@@ -43,7 +43,10 @@ levels); it keeps its own end slot on the tab.
   `page-attached` and unwires on `page-detached`, so they follow a page moved
   with `Adw.TabView.transfer_page`. Strip signals: `empty`, `bell`,
   `page-touched(widget, arrived)`. Shells come from an injected
-  `shell_factory` (avoids a terminal.py import cycle).
+  `shell_factory(sandboxed=False)` (avoids a terminal.py import cycle),
+  always called with the keyword — a factory that can't build the
+  sandboxed kind must raise rather than hand back a plain shell under
+  that title (the four check scripts' fakes take and ignore it).
 - `panedsizer.PanedSizer` + `panelsizing` (pure arithmetic): remembers an
   end-child size per key, re-applies it across settle passes
   (50/150/300 ms) while a gate stays up, cedes to a live user drag

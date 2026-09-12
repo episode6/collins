@@ -188,9 +188,17 @@ dialog and re-nudges at `_RESTART_NUDGE_TICKS` (a mid-turn agent spends the
 first Ctrl+C Ctrl+C on itself), and — once the shell has the terminal
 back — `_launch_command(self._cwd, self.session_id)` typed again: a fresh
 plan from the state now, the old one released, the same shell, tab and
-row. Gives up with a message at `_RESTART_GIVE_UP_TICKS`. Never for a
-fork (`can_restart_sandboxed`): the tab holds its origin's id, and a
-resume would fork it a second time. The launch cwd, not the agent's last
+row. Gives up with a message at `_RESTART_GIVE_UP_TICKS`. `can_restart_
+sandboxed` also refuses three tabs that would get something other than a
+restart: a fork (the tab holds its origin's id, and a resume would fork it
+a second time), a tab whose id the resolver hasn't bound yet (a
+`new_command` would *replace* the conversation, not restart it), and one
+running a plan adopted from another session (`_sandbox_plan_adopted`: a
+sibling's box was built for its parent's workspace, and a rebuild here
+takes this tab's own cwd, silently narrowing it). The chip says so in a
+caption where the row would be. `_launch_command(cwd, id, restart=True)`
+is what turns the id ahead of a `--continue` override — an initial spawn
+honours the override it was handed. The launch cwd, not the agent's last
 one: a resume re-enters the worktree the transcript records by itself,
 and the worktree lies under the launch workspace's mount.
 
@@ -211,7 +219,15 @@ foreground for itself and the kernel reports its process group in host pid
 numbers, so `has_running_command` compares against the shell *inside*
 (`proctree.inner_shell_pid`: the first descendant that isn't the
 launcher or a `bwrap`), cached once found; measured under a real box
-(idle at the prompt, busy during `sleep`, idle after Ctrl+C). Ctrl+J
+(idle at the prompt, busy during `sleep`, idle after Ctrl+C). A shell keeps the box it spawned in
+(`PanelTerminal.sandbox_plan`, the plan file `_spawn_plan` recorded):
+`--die-with-parent` ties that box to the shell's own pty, not to the
+session, so a *Restart to apply* leaves it running in the old box, which
+may still hold a directory the user has since revoked — the tab notes that
+in its scrollback (`_mark_stale_sandboxed_shells`) and
+`mcptools.tool_shells(shells, sandboxed, plan)` stops handing it to the
+agent (a shell that hasn't spawned yet takes the current plan when it
+does, so it counts). Ctrl+J
 never binds to one (`PanelDock._on_page_touched` skips `sandboxed`
 pages), and `open_shell_page(sandboxed=True)` / `PanelStrip.new_shell(
 sandboxed=True)` / the strip menu's *New sandboxed shell* (offered while

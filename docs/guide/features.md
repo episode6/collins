@@ -1082,12 +1082,18 @@ flipped the switch is refused if it calls it anyway.
   namespaces are restricted on Ubuntu, so nothing can be mounted into it),
   so when the plan the settings would build now differs from the launched
   one the chip offers **Restart to apply**: the session exits cleanly and
-  resumes in the same tab with the new plan. A **Sandboxed shell** — from
+  resumes in the same tab with the new plan. (A session with nothing to
+  resume yet, a fork, and a session running inside another session's box
+  can't restart themselves; the chip says so instead.) A **Sandboxed
+  shell** — from
   the chip, or *New sandboxed shell* in a panel tab's right-click menu —
   is a terminal panel tab running inside the same box (titled *Sandboxed
   shell N*, its scrollback kept like any shell's): the answer to "what can
   the agent see?", and the only kind of shell the agent's terminal tools
-  reach. Ctrl+J keeps opening your own shell. The
+  reach. A shell keeps the box it was opened in, so one left over from
+  before a *Restart to apply* stays on screen for you — with a line saying
+  so — and leaves the agent's reach, which is the point of the restart.
+  Ctrl+J keeps opening your own shell. The
   CLI's user-level MCP servers and Remote Control run inside the box too,
   and its own *sandbox* setting turns itself off there (the two don't
   stack). Whether a session is sandboxed is remembered per session (a fork
