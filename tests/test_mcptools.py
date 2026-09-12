@@ -792,6 +792,17 @@ def test_inherited_mode_caps_bypass_at_accept_edits():
     assert mcptools.inherited_permission_mode("bypassPermissions") == "acceptEdits"
 
 
+def test_inherited_bypass_passes_through_for_a_sandboxed_sibling():
+    # The box bounds a sandboxed sibling, not the prompt: bypass is exactly
+    # what it runs with. Junk stays junk, and nothing else changes.
+    assert mcptools.inherited_permission_mode("bypassPermissions", sandboxed=True) == (
+        "bypassPermissions"
+    )
+    assert mcptools.inherited_permission_mode("acceptEdits", sandboxed=True) == "acceptEdits"
+    assert mcptools.inherited_permission_mode("rm -rf", sandboxed=True) == ""
+    assert mcptools.inherited_permission_mode("", sandboxed=True) == ""
+
+
 def test_inherited_mode_drops_junk_to_the_default():
     """Whatever isn't a plain mode token never reaches a command line."""
     for junk in (None, "", "rm -rf /", "a b", "mode-1", "x" * 33, "café"):
@@ -1109,6 +1120,52 @@ def test_run_tool_call_returns_the_handlers_failure():
         handlers={"set_session_title": lambda found, args: (False, "not resolved yet")},
     )
     assert (ok, message) == (False, "not resolved yet")
+
+
+def test_run_tool_call_refuses_host_reaching_tools_from_a_sandboxed_tab():
+    """A sandboxed session under bypassPermissions has no prompt between it
+    and the host: the user's own panel shell (run_in_terminal,
+    read_terminal) and a sibling in a cwd of its choosing (start_session)
+    are refused before the handler runs, and only for a sandboxed caller."""
+    calls = []
+    handlers = {
+        name: (lambda found, args, name=name: calls.append(name) or (True, "ran"))
+        for name in ("run_in_terminal", "read_terminal", "start_session", "set_session_title")
+    }
+    args = {
+        "run_in_terminal": {"command": "cat ~/.ssh/id_ed25519"},
+        "read_terminal": {},
+        "start_session": {"prompt": "hi", "cwd": "/home/u/.ssh"},
+    }
+    for name in sorted(mcptools.SANDBOX_HOST_TOOLS):
+        ok, message = mcptools.run_tool_call(
+            name, args[name], find_tab=lambda: "boxed", handlers=handlers,
+            is_sandboxed=lambda found: found == "boxed",
+        )
+        assert (ok, message) == (False, mcptools.sandboxed_error(name)), name
+    assert calls == []
+    assert "outside the sandbox" in mcptools.sandboxed_error("run_in_terminal")
+    # The same calls from an unsandboxed tab reach their handlers.
+    for name in sorted(mcptools.SANDBOX_HOST_TOOLS):
+        ok, _message = mcptools.run_tool_call(
+            name, args[name], find_tab=lambda: "plain", handlers=handlers,
+            is_sandboxed=lambda found: found == "boxed",
+        )
+        assert ok, name
+    assert sorted(calls) == sorted(mcptools.SANDBOX_HOST_TOOLS)
+    # A display-only tool is fine from inside the box.
+    ok, _message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"}, find_tab=lambda: "boxed", handlers=handlers,
+        is_sandboxed=lambda found: True,
+    )
+    assert ok
+    # Identity still comes first: an unowned caller gets the identity error,
+    # never a hint that the tool would have been refused for another reason.
+    ok, message = mcptools.run_tool_call(
+        "run_in_terminal", {"command": "ls"}, find_tab=lambda: None, handlers=handlers,
+        is_sandboxed=lambda found: True,
+    )
+    assert (ok, message) == (False, mcptools.NOT_FROM_TAB_ERROR)
 
 
 # ---- wire framing ------------------------------------------------------------

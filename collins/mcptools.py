@@ -904,7 +904,7 @@ def _validate_value(key: str, value, spec: dict) -> str | None:
 _MODE_TOKEN_RE = re.compile(r"[A-Za-z]{1,32}")
 
 
-def inherited_permission_mode(mode: str | None) -> str:
+def inherited_permission_mode(mode: str | None, sandboxed: bool = False) -> str:
     """The permission mode a start_session spawn inherits when its caller
     didn't pick one: the calling session's own current mode, as its
     transcript recorded it.
@@ -918,10 +918,14 @@ def inherited_permission_mode(mode: str | None) -> str:
     let one unattended session mint others no human ever approved —
     acceptEdits is the strongest mode the tool grants explicitly, so it is
     the strongest one inheritance grants too.
+
+    *sandboxed* lifts the cap: a sibling that will run inside a bubblewrap
+    box (sandboxplan) is exactly the session bypass is meant for — the
+    box, not the prompt, is what bounds it — so bypass passes through.
     """
     if not mode or not _MODE_TOKEN_RE.fullmatch(mode):
         return ""
-    if mode == "bypassPermissions":
+    if mode == "bypassPermissions" and not sandboxed:
         return "acceptEdits"
     return mode
 
@@ -1468,12 +1472,30 @@ ToolResult = tuple[bool, str] | DeferredResult
 NOT_FROM_TAB_ERROR = "This claude process wasn't launched from a Collins tab"
 
 
+# The tools a *sandboxed* session is refused, until the sandbox policy lands
+# (a sandboxed panel shell, a sibling that inherits the box and stays inside
+# the workspace): each one reaches the host from inside the box, and under
+# bypassPermissions no prompt stands between the agent and it —
+# run_in_terminal types into the user's own unconfined Ctrl+J shell,
+# read_terminal reads that shell's output, start_session mints a sibling in a
+# cwd of the agent's choosing.
+SANDBOX_HOST_TOOLS = frozenset({"run_in_terminal", "read_terminal", "start_session"})
+
+
+def sandboxed_error(name: str) -> str:
+    return (
+        f"{name} is not available from a sandboxed session: it would reach "
+        "outside the sandbox"
+    )
+
+
 def run_tool_call(
     tool: str,
     args: object,
     find_tab,
     handlers,
     is_enabled: Callable[[str], bool] | None = None,
+    is_sandboxed: Callable[[object], bool] | None = None,
 ) -> ToolResult:
     """One tool call's skeleton: validate, check the switch, resolve identity,
     run the handler.
@@ -1490,7 +1512,10 @@ def run_tool_call(
     it is a property of the tool, not of the caller, and a session that was
     handed the tool before it was switched off is refused here rather than
     acted on. Identity comes last, so a bad call fails the same way whoever
-    makes it, leaking nothing about what tabs exist.
+    makes it, leaking nothing about what tabs exist. Then the sandbox
+    policy: `is_sandboxed(found)` says whether the calling tab runs inside
+    a box, and a SANDBOX_HOST_TOOLS call from one is refused before its
+    handler — the handlers reach the host, and the box is the only gate.
     """
     error = validate_args(tool, args)
     if error is not None:
@@ -1500,6 +1525,8 @@ def run_tool_call(
     found = find_tab()
     if found is None:
         return False, NOT_FROM_TAB_ERROR
+    if tool in SANDBOX_HOST_TOOLS and is_sandboxed is not None and is_sandboxed(found):
+        return False, sandboxed_error(tool)
     handler = handlers.get(tool)
     if handler is None:  # a TOOLS entry whose handler hasn't landed
         return False, f"Unknown tool: {tool}"
@@ -1586,6 +1613,13 @@ def config_path(app_id: str) -> str:
     return os.path.join(config_dir(app_id), "mcp.json")
 
 
+def package_parent() -> str:
+    """The directory the shim imports `collins` from — its PYTHONPATH in
+    the config, and what a sandboxed session's plan binds read-only so the
+    shim resolves inside the box (see sandboxplan)."""
+    return str(Path(__file__).resolve().parent.parent)
+
+
 def _stdio_servers(app_id: str) -> dict:
     """The stdio MCP servers Collins configures, as mcp.json's mcpServers
     value. One definition shared by `write_config` and
@@ -1598,7 +1632,7 @@ def _stdio_servers(app_id: str) -> dict:
             "args": ["-m", "collins.mcp_shim"],
             "env": {
                 "COLLINS_MCP_SOCKET": socket_path(app_id),
-                "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+                "PYTHONPATH": package_parent(),
             },
         },
     }

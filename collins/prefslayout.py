@@ -31,6 +31,7 @@ GROUPS: tuple[str, ...] = (
     "token_use",
     "mcp_tools",
     "sessions",
+    "sandbox",
     "notifications",
     "composer",
     "terminal",
@@ -62,6 +63,32 @@ NOTIFICATION_SEARCH_TERMS: tuple[str, ...] = (
     "chime",
     "badge",
     "unread",
+)
+
+# What the search bar matches the Sandbox group on, beyond its rows' own
+# titles and subtitles: the tool underneath, and the words people have for
+# what the box is for.
+SANDBOX_SEARCH_TERMS: tuple[str, ...] = (
+    "sandbox",
+    "bubblewrap",
+    "bwrap",
+    "isolation",
+    "yolo",
+    "permissions",
+    "gh",
+    "ssh",
+)
+
+# The Sandbox group's rows, top to bottom, by the setting each one writes;
+# "status" is the row under them that writes nothing (whether a box can be
+# built here, and why not).
+SANDBOX_ROWS: tuple[str, ...] = (
+    "sandbox_new_sessions",
+    "sandbox_bypass_permissions",
+    "sandbox_share_gh",
+    "sandbox_share_ssh",
+    "sandbox_settings_editable",
+    "status",
 )
 
 # The Git group's Layout row, in the drop-down's order: the diff view's

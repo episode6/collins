@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-09. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -40,6 +40,7 @@ from . import (
     openwithrows,
     pkgrepos,
     prmenu,
+    sandboxplan,
 )
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
@@ -1451,8 +1452,15 @@ class SessionSidebar(Gtk.Box):
             "project-worktree", None, GLib.Variant.new_boolean(False)
         )
         self._project_worktree_action.connect("change-state", self._on_project_worktree)
+        # …and its "New sessions are sandboxed" twin, armed the same way.
+        self._sandbox_menu_project = ""
+        self._project_sandbox_action = Gio.SimpleAction.new_stateful(
+            "project-sandbox", None, GLib.Variant.new_boolean(False)
+        )
+        self._project_sandbox_action.connect("change-state", self._on_project_sandbox)
         actions = Gio.SimpleActionGroup()
         actions.add_action(self._project_worktree_action)
+        actions.add_action(self._project_sandbox_action)
         self.insert_action_group("sidebar", actions)
 
         store.connect("refreshed", self._on_store_refreshed)
@@ -2722,6 +2730,16 @@ class SessionSidebar(Gtk.Box):
             )
             open_section.append(_("New sessions use a worktree"), "sidebar.project-worktree")
 
+        # The sandbox pin, on the same terms — offered only where a box can
+        # be built (the probe's cached verdict; Preferences says why not).
+        # Not for the Chats project: a scratch directory is never sandboxed.
+        if sandboxplan.probe_reason() == "" and not is_chat_cwd(row.cwd):
+            self._sandbox_menu_project = project_name
+            self._project_sandbox_action.set_state(
+                GLib.Variant.new_boolean(self.store.state.sandbox_for_project(project_name))
+            )
+            open_section.append(_("New sessions are sandboxed"), "sidebar.project-sandbox")
+
         # Repository upkeep, its own section so it doesn't read as another way
         # to launch. Just the pull for now, run in the project root (row.cwd),
         # naming the branch it would pull so there's no guessing which checkout
@@ -2841,6 +2859,12 @@ class SessionSidebar(Gtk.Box):
             self.store.state.set_project_worktree(
                 self._worktree_menu_project, value.get_boolean()
             )
+
+    def _on_project_sandbox(self, action: Gio.SimpleAction, value: GLib.Variant) -> None:
+        """The group menu's sandbox checkbox, pinned the same way."""
+        action.set_state(value)
+        if self._sandbox_menu_project:
+            self.store.state.set_project_sandbox(self._sandbox_menu_project, value.get_boolean())
 
     def _session_cwd(self, session: Session) -> str | None:
         """Where the session is working right now, for its row's "Open In…".

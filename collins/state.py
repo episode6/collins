@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-10. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -105,6 +105,37 @@ DEFAULT_SETTINGS = {
     # git projects, isolating their edits from the live checkout. Per-project
     # overrides live in AppState.project_worktree.
     "worktree_new_sessions": False,
+    # Launch new sessions inside a bubblewrap filesystem sandbox (see
+    # sandboxplan): the workspace read-write, ~/.claude and the toolchain
+    # caches shared, the system read-only, credentials and the rest of the
+    # disk absent. Per-project overrides live in AppState.project_sandbox;
+    # the new-chat screen's Sandboxed box starts on the effective value
+    # (MainWindow._sandbox_for_new_session). Only ever effective where
+    # sandboxplan.available() says a box can be built.
+    "sandbox_new_sessions": False,
+    # Whether a sandboxed session's permission mode defaults to
+    # bypassPermissions — the point of the box: a yolo session that can't
+    # reach ~/.ssh. Read by MainWindow._sandboxed_options for every
+    # sandboxed launch: the new-chat Send, a resume or --continue of a
+    # sticky-sandboxed session, and the start_session tool's sibling.
+    "sandbox_bypass_permissions": True,
+    # Hand the host's GitHub CLI login into sandboxed sessions: ~/.config/gh
+    # bound read-only and the token (`gh auth token`) passed in as GH_TOKEN
+    # by sandboxrun. Off, gh inside is logged out and HTTPS pushes through
+    # gh's credential helper fail. Read by sandboxplan.gather_inputs.
+    "sandbox_share_gh": False,
+    # Share the SSH agent with sandboxed sessions: the SSH_AUTH_SOCK socket
+    # file is bound in and the variable survives the scrub, so ssh inside
+    # signs with keys the box never sees. Read by sandboxplan.gather_inputs.
+    "sandbox_share_ssh": False,
+    # Let sandboxed sessions write ~/.claude/settings.json (and
+    # settings.local.json, ~/.claude/plugins, a real-file claude launcher):
+    # needed for /model and /effort to persist their defaults from inside,
+    # at the cost that a hook written there runs in every later session,
+    # sandboxed or not. Off, they are bound read-only over themselves, and
+    # a symlinked settings.json refuses the box. Read by
+    # sandboxplan.gather_inputs.
+    "sandbox_settings_editable": False,
     # Where the Claude Code CLI lives when PATH doesn't say — desktop
     # launches don't get the folders a shell adds (see clisetup). Stored
     # exactly as picked, symlinks unexpanded, so the installer's stable
@@ -423,6 +454,19 @@ class AppState:
         # Per-project "new sessions use a worktree" choices, by project name.
         # Absent key = follow the worktree_new_sessions setting.
         self.project_worktree: dict[str, bool] = {}
+        # Per-project "new sessions are sandboxed" choices, by project name,
+        # on the same terms (absent = follow sandbox_new_sessions).
+        self.project_sandbox: dict[str, bool] = {}
+        # The sessions that run inside a sandbox: sticky per session, so a
+        # resume builds the same box the session was started in (see
+        # MainWindow.open_session). Recorded when a sandboxed launch resolves
+        # its id; a forward (/bg fork) carries it to the new id.
+        self.sandboxed_sessions: set[str] = set()
+        # workspace (a real path) -> the directories a sandboxed session
+        # there may also reach, read-write, beyond the workspace itself.
+        # Every entry is re-checked against sandboxplan.guard_sensitive
+        # when a plan is built: state.json is a file on disk like any other.
+        self.sandbox_grants: dict[str, list[str]] = {}
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         # Projects kept in the sidebar after their last session went away
         # (project name -> working directory, "" when it was never known), so
@@ -518,6 +562,18 @@ class AppState:
         self.project_worktree = {
             k: v for k, v in (data.get("project_worktree") or {}).items() if isinstance(v, bool)
         }
+        self.project_sandbox = {
+            k: v for k, v in (data.get("project_sandbox") or {}).items() if isinstance(v, bool)
+        }
+        self.sandboxed_sessions = {
+            s for s in (data.get("sandboxed_sessions") or []) if isinstance(s, str) and s
+        }
+        self.sandbox_grants = {
+            k: [g for g in v if isinstance(g, str) and g.startswith("/")]
+            for k, v in (data.get("sandbox_grants") or {}).items()
+            if isinstance(k, str) and isinstance(v, list)
+        }
+        self.sandbox_grants = {k: v for k, v in self.sandbox_grants.items() if v}
         self.project_order = list(data.get("project_order") or [])
         self.virtual_projects = {
             k: v for k, v in (data.get("virtual_projects") or {}).items() if isinstance(v, str)
@@ -593,6 +649,9 @@ class AppState:
             "archived_at": self.archived_at,
             "archived_projects": sorted(self.archived_projects),
             "project_worktree": self.project_worktree,
+            "project_sandbox": self.project_sandbox,
+            "sandboxed_sessions": sorted(self.sandboxed_sessions),
+            "sandbox_grants": self.sandbox_grants,  # order is the payload — never sort
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
@@ -739,6 +798,77 @@ class AppState:
             return override
         return bool(self.get_setting("worktree_new_sessions"))
 
+    # -- per-project sandboxed launches ---------------------------------------
+
+    def project_sandbox_override(self, project_name: str) -> bool | None:
+        """The project's own "new sessions are sandboxed" choice, or None to
+        follow the app-wide setting."""
+        return self.project_sandbox.get(project_name)
+
+    def set_project_sandbox(self, project_name: str, sandboxed: bool) -> None:
+        """Pin a project's choice; kept even when it matches the app setting,
+        like the worktree pin, so a project pinned "off" stays off."""
+        self.project_sandbox[project_name] = sandboxed
+        self.save()
+
+    def sandbox_for_project(self, project_name: str) -> bool:
+        """Effective "new sessions are sandboxed" value for a project — the
+        pin, else the setting. Whether a box can be built at all is the
+        caller's question (sandboxplan.available)."""
+        override = self.project_sandbox.get(project_name)
+        if override is not None:
+            return override
+        return bool(self.get_setting("sandbox_new_sessions"))
+
+    # -- sandboxed sessions ------------------------------------------------------
+
+    def is_sandboxed(self, session_id: str) -> bool:
+        """Whether *session_id* was launched inside a sandbox — what a
+        resume rebuilds. Follows the forward chain, so a /bg fork of a
+        sandboxed session answers as its origin did."""
+        if not session_id:
+            return False
+        return (
+            session_id in self.sandboxed_sessions
+            or self.resolve_forward(session_id) in self.sandboxed_sessions
+        )
+
+    def set_sandboxed(self, session_id: str, sandboxed: bool) -> None:
+        """Record (or clear) a session's sandbox membership. One write."""
+        if not session_id:
+            return
+        if sandboxed:
+            if session_id in self.sandboxed_sessions:
+                return
+            self.sandboxed_sessions.add(session_id)
+        else:
+            if session_id not in self.sandboxed_sessions:
+                return
+            self.sandboxed_sessions.discard(session_id)
+        self.save()
+
+    def get_sandbox_grants(self, workspace: str) -> list[str]:
+        """The directories granted to sandboxed sessions in *workspace*, in
+        the order they were allowed."""
+        return list(self.sandbox_grants.get(workspace) or [])
+
+    def set_sandbox_grants(self, workspace: str, grants: list[str]) -> None:
+        """Persist a workspace's grants; an empty list drops the key. The
+        guard against granting a secret is sandboxplan.guard_sensitive,
+        applied by the surface that asks — and again when a plan is built."""
+        if not workspace:
+            return
+        clean = [g for g in grants if isinstance(g, str) and g.startswith("/")]
+        if clean:
+            if self.sandbox_grants.get(workspace) == clean:
+                return
+            self.sandbox_grants[workspace] = clean
+        else:
+            if workspace not in self.sandbox_grants:
+                return
+            del self.sandbox_grants[workspace]
+        self.save()
+
     # -- virtual projects --------------------------------------------------
 
     def get_virtual_projects(self) -> dict[str, str]:
@@ -819,6 +949,8 @@ class AppState:
             self.emojis[new_id] = self.emojis[old_id]
         if old_id in self.favorites:
             self.favorites.add(new_id)
+        if old_id in self.sandboxed_sessions:
+            self.sandboxed_sessions.add(new_id)
         if old_id in self.panel_layouts and new_id not in self.panel_layouts:
             # Deep copy: a layout entry nests its whole strip tree, and the
             # two sessions' layouts must diverge independently from here.

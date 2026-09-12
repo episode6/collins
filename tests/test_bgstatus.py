@@ -299,6 +299,15 @@ def test_a_non_session_tab_cannot_be_backgrounded():
     assert _blocker(is_session=False) == bgstatus.BLOCK_NOT_SESSION
 
 
+def test_a_sandboxed_session_is_never_backgrounded():
+    # The daemon respawns a job on the host, outside any box; the refusal
+    # outranks registration because it never goes away.
+    assert _blocker(is_sandboxed=True) == bgstatus.BLOCK_SANDBOXED
+    assert _blocker(is_sandboxed=True, session_id=None) == bgstatus.BLOCK_SANDBOXED
+    assert _blocker(is_sandboxed=True, detach_in_flight=True) == bgstatus.BLOCK_SANDBOXED
+    assert _blocker(is_sandboxed=False) == ""
+
+
 def test_a_provider_without_detach_cannot_be_backgrounded():
     assert _blocker(supports_detach=False) == bgstatus.BLOCK_UNSUPPORTED
 

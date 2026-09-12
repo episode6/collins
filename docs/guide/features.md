@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-10. Full change history: git log for this file.
+fork. Last modified: 2026-09-11. Full change history: git log for this file.
 -->
 
 # Features
@@ -1032,6 +1032,51 @@ flipped the switch is refused if it calls it anyway.
   session here (in a worktree)* / *(no worktree)* in the same menu, and
   the matching entry the New Session dropdown grows for the visible
   project.
+- **Sandboxed sessions.** A *Sandboxed* checkbox beside *New git
+  worktree* runs the session inside a [bubblewrap](https://github.com/containers/bubblewrap)
+  filesystem sandbox: the project (its enclosing repository's `.git` and
+  `.claude` included, so a worktree launch works) is read-write, `~/.claude`
+  and the toolchain caches (`~/.cargo`, `~/.npm`, `~/.gradle`, `~/.m2`,
+  `~/.cache/uv`, `~/.local/bin`, …) are shared, the system is read-only,
+  and everything else on disk — `~/.ssh`, `~/.config/gh`, the keyring, the
+  other checkouts — is absent. `$HOME` inside is Collins' own
+  `~/.local/share/collins/sandbox-home/`, seeded once from `~/.claude.json`
+  and diverging from then on (the CLI's onboarding, MCP approvals and
+  per-project state inside stay inside; folder trust is mirrored in before
+  every launch). Inside, the session starts with permission prompts off
+  (`--permission-mode bypassPermissions`; a preference) — that is the point:
+  a session that can't reach your credentials can be left alone. The
+  boundary is the filesystem and the unix sockets that live on it, not the
+  network: the CLI needs the API, and `~/.claude` is shared and writable
+  (transcripts, the OAuth token, todos). The box bounds the filesystem, not
+  the hook surface: `~/.claude/settings.json`, `settings.local.json` (when
+  it exists — a missing one can be created), `~/.claude/plugins` and a
+  `claude` launcher that is a real file are bound read-only over themselves
+  so an agent inside can't plant a hook there that runs in your next
+  unsandboxed session — `/model` and `/effort` then hold for the session
+  only, as the CLI itself says, and a symlinked `settings.json` (a dotfiles
+  setup) refuses the box until the edit switch below is on. What can't be
+  protected: a project's own `.claude/settings.json` sits inside the
+  workspace, and the native installer's `~/.local/bin/claude` symlink sits
+  in a shared tree and can be repointed. Inside the box, the session tools
+  that show you things (`open_in_editor`, `show_diff`, `show_image`,
+  `notify_user`, …) work as ever; `run_in_terminal`, `read_terminal` and
+  `start_session` — which reach your own shell and directories of the
+  agent's choosing — are refused from a sandboxed session for now. The
+  CLI's user-level MCP servers and Remote Control run inside the box too,
+  and its own *sandbox* setting turns itself off there (the two don't
+  stack). Whether a session is sandboxed is remembered per session (a fork
+  of one included), so resuming it rebuilds the same box with the same
+  permission mode; a sandboxed session is never backgrounded (`/bg`) or
+  re-attached — the CLI's daemon would run it outside the sandbox. *Sandbox new sessions* (Preferences → Sandbox) and
+  *New sessions are sandboxed* in a project header's menu set the default,
+  exactly like the worktree pair. Two preferences hand things over: *Share
+  GitHub CLI login* (your token goes in as `GH_TOKEN`; without it `gh` is
+  logged out and HTTPS pushes fail) and *Share SSH agent* (the agent inside
+  can push as you, signing with keys it never sees). The checkbox and the
+  project-menu item appear only where bubblewrap is installed and user
+  namespaces work; the Preferences group is always there, its switches
+  insensitive and its status row saying which is missing.
 - **Folder trust is asked once, up front**: the first launch in a project
   the agent doesn't trust yet asks *Do you trust this folder?* before
   anything starts, and records the answer where the agent reads it, so the
@@ -1166,7 +1211,10 @@ model** pickers (each with a **None** option — it replaced the
 an expired login — off, the usage panel just says to run `claude` yourself — and
 the **Model list** row, which is free — followed by a switch for each of the
 **built-in MCP tools** the agent can call, the **status icon**, **Reopen the
-last session**, what to do **when quitting with running sessions** (ask /
+last session**, a **Sandbox** group — **Sandbox new sessions**, **Skip
+permission prompts inside**, **Share GitHub CLI login**, **Share SSH
+agent**, **Let sandboxed sessions edit ~/.claude/settings.json**, and a
+status row saying whether bubblewrap was found — what to do **when quitting with running sessions** (ask /
 exit / background / hide) and **when archiving a running session** (ask /
 exit / background), **Archive on claude.ai too**, **Delete
 archived sessions after** (a number and a unit; 0 never), **Exact busy

@@ -32,6 +32,28 @@ def test_draft_record_omits_untouched_slots():
 def test_valid_draft_roundtrips_a_good_record():
     record = newchat.draft_record("/p", "claude", "hi", True, {"mode": "right"}, 3.0)
     assert newchat.valid_draft(record) == record
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 3.0, sandbox=True)
+    assert record["sandbox"] is True
+    assert newchat.valid_draft(record) == record
+
+
+def test_draft_record_keeps_the_sandbox_box_only_when_touched():
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, sandbox=None)
+    assert "sandbox" not in record
+    record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, sandbox=False)
+    assert record["sandbox"] is False
+    assert newchat.valid_draft({"cwd": "/p", "sandbox": "yes"}) == {
+        "cwd": "/p", "provider": "claude", "text": "", "created": 0.0,
+    }
+
+
+def test_effective_sandbox_follows_choice_then_default_never_without_a_box():
+    assert newchat.effective_sandbox(None, True, True)
+    assert not newchat.effective_sandbox(None, False, True)
+    assert newchat.effective_sandbox(True, False, True)
+    assert not newchat.effective_sandbox(False, True, True)
+    assert not newchat.effective_sandbox(True, True, False)
+    assert not newchat.effective_sandbox(None, True, False)
 
 
 def test_valid_draft_drops_malformed_records():

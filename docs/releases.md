@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-10. Full change history: git log for this file.
+fork. Last modified: 2026-09-11. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,23 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **Sandboxed sessions.** A *Sandboxed* checkbox beside *New git
+  worktree* on the new-chat screen runs the session inside a bubblewrap
+  filesystem sandbox: the project read-write, `~/.claude` and the
+  toolchain caches shared, the system read-only, `~/.ssh`,
+  `~/.config/gh`, the keyring and every other checkout absent — and
+  permission prompts off inside, which is the point. The box is
+  remembered per session, so a resume rebuilds it; a per-project default
+  (*New sessions are sandboxed* in the project menu) and a Preferences
+  group (*Sandbox new sessions*, *Skip permission prompts inside*, *Share
+  GitHub CLI login*, *Share SSH agent*, *Let sandboxed sessions edit
+  ~/.claude/settings.json*, and a status row saying whether bubblewrap is
+  usable here) round it out. Sandboxed sessions are never backgrounded or
+  re-attached, since the CLI's daemon would run them outside the box, and
+  the `run_in_terminal`, `read_terminal` and `start_session` tools are
+  refused from inside one until the sandbox policy lands. A port of
+  EricKuck's aibox mount plan (MIT). Directory grants and the footer chip
+  that shows what is inside come next.
 - **Notes on lines outside the diff.** The git page's *Add note* only
   reached the lines a hunk showed; an expanded gap's context had no
   menu at all. A right-click on the drawn context now offers *Copy*,

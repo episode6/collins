@@ -65,15 +65,18 @@ def draft_record(
     created: float,
     model: str = "",
     effort: str = "",
+    sandbox: bool | None = None,
 ) -> dict:
     """The persisted shape of a draft (see valid_draft for the contract).
 
     *worktree* is the checkbox as the user left it, or None when it was
     never touched -- an untouched box keeps following the project's default,
-    which may change before the draft is picked up again. *model* is the
-    picker's choice, "" while it stands on the CLI's default -- which,
-    likewise, is read afresh when the draft comes back rather than kept;
-    *effort* is the effort picker's, on the same terms.
+    which may change before the draft is picked up again; *sandbox* is the
+    Sandboxed box on the same terms, kept even while no box is shown (see
+    NewChatView.set_sandbox_choice). *model* is the picker's choice, ""
+    while it stands on the CLI's default -- which, likewise, is read afresh
+    when the draft comes back rather than kept; *effort* is the effort
+    picker's, on the same terms.
     """
     record = {
         "cwd": cwd,
@@ -83,6 +86,8 @@ def draft_record(
     }
     if worktree is not None:
         record["worktree"] = bool(worktree)
+    if sandbox is not None:
+        record["sandbox"] = bool(sandbox)
     if model:
         record["model"] = model
     if effort:
@@ -116,6 +121,9 @@ def valid_draft(record: object) -> dict | None:
     worktree = record.get("worktree")
     if isinstance(worktree, bool):
         clean["worktree"] = worktree
+    sandbox = record.get("sandbox")
+    if isinstance(sandbox, bool):
+        clean["sandbox"] = sandbox
     model = record.get("model")
     if isinstance(model, str) and model.strip():
         clean["model"] = model.strip()
@@ -147,5 +155,16 @@ def effective_worktree(choice: bool | None, project_default: bool, is_git: bool)
     checkout, where the flag has no meaning (the window's rule, see
     MainWindow._worktree_for_new_session)."""
     if not is_git:
+        return False
+    return project_default if choice is None else bool(choice)
+
+
+def effective_sandbox(choice: bool | None, project_default: bool, available: bool) -> bool:
+    """Whether a draft launches inside a sandbox: the Sandboxed box as the
+    user left it, else the project's default -- and never where no box can
+    be built (sandboxplan.available), where the choice has no meaning and
+    the box isn't shown (the window's rule, see
+    MainWindow._sandbox_for_new_session)."""
+    if not available:
         return False
     return project_default if choice is None else bool(choice)

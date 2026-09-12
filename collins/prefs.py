@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-10. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -27,6 +27,7 @@ from . import (  # noqa: E402
     notifysound,
     prefslayout,
     prefssearch,
+    sandboxplan,
     statusicon,
     tokensettings,
     updatecheck,
@@ -272,6 +273,7 @@ class PreferencesDialog(Adw.Dialog):
             "token_use": self._build_token_use_group,
             "mcp_tools": self._build_mcp_tools_group,
             "sessions": self._build_sessions_group,
+            "sandbox": self._build_sandbox_group,
             "notifications": self._build_notifications_group,
             "composer": self._build_composer_group,
             "terminal": self._build_terminal_group,
@@ -600,6 +602,110 @@ class PreferencesDialog(Adw.Dialog):
                 *unit_labels,
             )
         )
+
+    def _build_sandbox_group(self, state: AppState) -> _SearchableGroup:
+        """Sandboxed sessions (see sandboxplan): the default for new
+        sessions, what a box hands over, and whether one can be built here
+        at all — the status row at the bottom says so, and every switch
+        above it goes insensitive when it can't (their values are kept:
+        the machine, not the choice, is what is missing)."""
+        group = _SearchableGroup(title=_("Sandbox"))
+        _searchable(group, *prefslayout.SANDBOX_SEARCH_TERMS)
+        self._sandbox_rows: list[Adw.SwitchRow] = []
+
+        def switch(key: str, title: str, subtitle: str, *terms: str) -> Adw.SwitchRow:
+            row = Adw.SwitchRow(title=title, subtitle=subtitle)
+            row.set_active(bool(state.get_setting(key)))
+            row.connect("notify::active", self._on_sandbox_switch, key)
+            group.add(_searchable(row, *terms))
+            self._sandbox_rows.append(row)
+            return row
+
+        switch(
+            "sandbox_new_sessions",
+            _("Sandbox new sessions"),
+            _(
+                "Run each new session in a bubblewrap box: the project read-write, "
+                "~/.claude and toolchain caches shared, the rest of the disk absent. "
+                "Right-click a project header to override per project"
+            ),
+            "new", "default", "project",
+        )
+        switch(
+            "sandbox_bypass_permissions",
+            _("Skip permission prompts inside"),
+            _("Sandboxed sessions start with --permission-mode bypassPermissions"),
+            "bypass", "prompt", "dangerously",
+        )
+        switch(
+            "sandbox_share_gh",
+            _("Share GitHub CLI login"),
+            _(
+                "The agent inside holds your GitHub token (as GH_TOKEN); without it, "
+                "gh is logged out and HTTPS pushes fail"
+            ),
+            "github", "token", "push",
+        )
+        switch(
+            "sandbox_share_ssh",
+            _("Share SSH agent"),
+            _(
+                "The agent socket goes in: the agent inside can sign with your keys "
+                "— push as you — without seeing them"
+            ),
+            "agent", "keys", "push",
+        )
+        switch(
+            "sandbox_settings_editable",
+            _("Let sandboxed sessions edit ~/.claude/settings.json"),
+            _(
+                "Needed for /model and /effort to persist inside, and for a "
+                "symlinked settings.json; a hook written there runs in every session"
+            ),
+            "settings", "hook", "model", "effort",
+        )
+        # The status row: whether a box can be built here, and why not.
+        self._sandbox_status_row = Adw.ActionRow(title=_("Bubblewrap"), activatable=False)
+        self._sandbox_status_icon = Gtk.Image(valign=Gtk.Align.CENTER)
+        self._sandbox_status_row.add_suffix(self._sandbox_status_icon)
+        group.add(_searchable(self._sandbox_status_row, "status", "available", "installed"))
+        self._refresh_sandbox_status()
+        if sandboxplan.probe_reason() is None:
+            # The launch probe hasn't landed yet: ask again, off the main loop.
+            sandboxplan.probe_async(
+                lambda _reason: GLib.idle_add(
+                    self._refresh_sandbox_status, priority=GLib.PRIORITY_DEFAULT
+                )
+            )
+        return group
+
+    def _refresh_sandbox_status(self) -> bool:
+        reason = sandboxplan.probe_reason()
+        available = reason == ""
+        for row in self._sandbox_rows:
+            row.set_sensitive(available)
+        if reason is None:
+            subtitle = _("Checking whether a sandbox can be built here…")
+            icon = "content-loading-symbolic"
+        elif available:
+            subtitle = _("bubblewrap found and user namespaces work: sessions can be sandboxed")
+            icon = "emblem-ok-symbolic"
+        elif reason == sandboxplan.REASON_NO_BWRAP:
+            subtitle = _("bubblewrap not installed — install the bubblewrap package to sandbox sessions")
+            icon = "dialog-warning-symbolic"
+        else:
+            subtitle = _(
+                "user namespaces are restricted on this system, so bubblewrap can't "
+                "build a sandbox"
+            )
+            icon = "dialog-warning-symbolic"
+        self._sandbox_status_row.set_subtitle(subtitle)
+        self._sandbox_status_icon.set_from_icon_name(icon)
+        return GLib.SOURCE_REMOVE
+
+    def _on_sandbox_switch(self, row: Adw.SwitchRow, _pspec, key: str) -> None:
+        self._state.set_setting(key, row.get_active())
+        self._on_change()
 
     def _build_notifications_group(self, state: AppState) -> _SearchableGroup:
         """The spec's Notifications group: the in-app card and its own

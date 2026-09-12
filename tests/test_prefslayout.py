@@ -48,10 +48,26 @@ def test_the_renew_row_writes_tokenrefreshs_setting():
     assert tokenrefresh.SETTING in prefslayout.TOKEN_USE_ROWS
 
 
-def test_notifications_sit_between_sessions_and_composer():
+def test_sandbox_follows_sessions_then_notifications_then_composer():
+    # The sandbox is a way of starting sessions, so its switches sit right
+    # under the session behaviour they qualify.
     groups = prefslayout.GROUPS
-    assert groups.index("notifications") == groups.index("sessions") + 1
+    assert groups.index("sandbox") == groups.index("sessions") + 1
+    assert groups.index("notifications") == groups.index("sandbox") + 1
     assert groups.index("composer") == groups.index("notifications") + 1
+
+
+def test_every_sandbox_setting_has_its_default():
+    for key in prefslayout.SANDBOX_ROWS:
+        if key != "status":
+            assert key in DEFAULT_SETTINGS, key
+    assert DEFAULT_SETTINGS["sandbox_new_sessions"] is False
+    assert DEFAULT_SETTINGS["sandbox_bypass_permissions"] is True
+    assert DEFAULT_SETTINGS["sandbox_share_gh"] is False
+    assert DEFAULT_SETTINGS["sandbox_share_ssh"] is False
+    assert DEFAULT_SETTINGS["sandbox_settings_editable"] is False
+    for word in ("sandbox", "bubblewrap", "bwrap", "isolation", "yolo", "permissions", "gh", "ssh"):
+        assert word in prefslayout.SANDBOX_SEARCH_TERMS
 
 
 def test_every_notification_setting_has_a_default():
