@@ -42,7 +42,9 @@ balance-e2e-shards skill's refresh_weights.py does that and previews the
 deal; `--list --shard` here shows one shard's estimate).
 
 Adding a new e2e check means dropping a scripts/check_<name>.py that exits
-0 on success — discovery picks it up, no registration step.
+0 on success — discovery picks it up, no registration step. A check that
+can't run where it finds itself exits 77 (SKIP_EXIT) with a printed reason:
+it is reported as skipped, never retried, and never fails the suite.
 """
 
 import argparse
@@ -65,6 +67,7 @@ CHECK_SECONDS = {
     "check_composer_paste_back.py": 17.1,
     "check_new_chat.py": 16.9,
     "check_welcome.py": 16.5,
+    "check_sandbox_policy.py": 16.5,
     "check_terminal_tools.py": 14.1,
     "check_start_session.py": 12.6,
     "check_pr_refresh_on_finish.py": 11.6,
@@ -91,6 +94,10 @@ CHECK_SECONDS = {
     "check_panel_bg_tab_width.py": 1.8,
     "check_editor_narrow.py": 1.2,
     "check_notify_badge.py": 1.0,
+    # Skips in CI's container (no user namespace for bubblewrap), so its
+    # weight is what a skip costs; a machine that can build a box spends
+    # about five seconds more.
+    "check_sandbox_launch.py": 1.0,
     "check_panel_layout.py": 0.7,
     "check_tab_drag.py": 0.5,
     "check_composer_spelling_optional.py": 0.4,
@@ -146,9 +153,17 @@ def discover(only):
     return paths
 
 
+# A check that exits with this says it could not run here and did not fail:
+# the autotools convention. check_sandbox_launch.py uses it where the machine
+# can't give bubblewrap a user namespace (a CI container may not). A skip is
+# never retried and never fails the run, but it is printed as what it is
+# rather than counted as a pass.
+SKIP_EXIT = 77
+
+
 def run_check(path, timeout, use_dbus):
     """Run one check script; return (status, seconds) where status is
-    'pass', 'fail', or 'timeout'."""
+    'pass', 'skip', 'fail', or 'timeout'."""
     cmd = [sys.executable, path]
     if use_dbus:
         cmd = ["dbus-run-session", "--"] + cmd
@@ -162,6 +177,8 @@ def run_check(path, timeout, use_dbus):
         os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
         return "timeout", time.monotonic() - start
+    if code == SKIP_EXIT:
+        return "skip", time.monotonic() - start
     return ("pass" if code == 0 else "fail"), time.monotonic() - start
 
 
@@ -169,7 +186,7 @@ def write_github_summary(results, shard_spec=None):
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
-    icons = {"pass": "✅", "flaky": "⚠️", "fail": "❌", "timeout": "⏰"}
+    icons = {"pass": "✅", "flaky": "⚠️", "skip": "⏭️", "fail": "❌", "timeout": "⏰"}
     with open(summary_path, "a", encoding="utf-8") as f:
         title = "## E2E checks"
         if shard_spec:
@@ -214,7 +231,7 @@ def main():
         name = os.path.basename(path)
         print(f"\n=== [{i}/{len(checks)}] {name} ===", flush=True)
         status, secs = run_check(path, args.timeout, use_dbus)
-        if status != "pass":
+        if status not in ("pass", "skip"):
             print(f"=== {name}: {status.upper()} ({secs:.1f}s), retrying ===",
                   flush=True)
             status2, secs2 = run_check(path, args.timeout, use_dbus)
@@ -226,9 +243,12 @@ def main():
     print("\n=== e2e summary ===")
     for name, status, secs in results:
         print(f"  {status.upper():7}  {secs:6.1f}s  {name}")
-    failed = [r for r in results if r[1] not in ("pass", "flaky")]
+    failed = [r for r in results if r[1] not in ("pass", "flaky", "skip")]
+    skipped = [r for r in results if r[1] == "skip"]
     total = sum(secs for _, _, secs in results)
-    print(f"  {len(results) - len(failed)}/{len(results)} passed in {total:.1f}s")
+    tail = f", {len(skipped)} skipped" if skipped else ""
+    ran = len(results) - len(failed) - len(skipped)
+    print(f"  {ran}/{len(results)} passed{tail} in {total:.1f}s")
     write_github_summary(results, args.shard)
     return 1 if failed else 0
 
