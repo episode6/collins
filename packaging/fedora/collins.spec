@@ -49,6 +49,8 @@ BuildRequires:  appstream
 # binary with no package, so it cannot be a dependency at all; the app's own
 # first-run check handles its absence. markdown-it-py and linkify-it-py
 # (pure Python) render pull request bodies as real markdown blocks.
+# bubblewrap builds a sandboxed session's box; without it Collins says so in
+# Preferences and every session launches unsandboxed, as before the feature.
 Requires:       python3-gobject
 Requires:       gtk4 >= 4.10
 Requires:       libadwaita >= 1.5
@@ -59,6 +61,7 @@ Requires:       python3-linkify-it-py
 Recommends:     libspelling
 Recommends:     gstreamer1
 Recommends:     gstreamer1-plugins-base
+Recommends:     bubblewrap
 
 %description
 Collins browses every Claude Code session on your machine in a sidebar
@@ -116,7 +119,8 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 # debian/changelog's.
 %changelog
 * Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
-- Next release.
+- Recommends bubblewrap: a session can be run inside a filesystem sandbox.
+  Without it every session runs unsandboxed and Preferences says why.
 
 * Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.3-1
 - A native git page beside each session (diffs, staging, notes, commits and

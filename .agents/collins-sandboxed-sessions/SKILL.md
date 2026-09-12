@@ -342,8 +342,15 @@ a grant → stale → restart → relaunch with the grant, and a sibling
 derived / refused. Staged under `~/.cache/collins-e2e` with `HOME` moved
 into the scratch tree — `/tmp` is shared into every box, so a scratch
 tree there trips the protect-check, and a real home would get the
-`RW_HOME_ALWAYS` directories. A real-box launch check is the packaging
-PR's. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
+`RW_HOME_ALWAYS` directories. `scripts/check_sandbox_launch.py` is the
+other half and has no GTK in it: a plan `prepare_launch` wrote, run under
+the **real** bwrap (`sandboxrun.py <plan> -- /bin/sh -c …`), reporting
+from inside — the workspace and the grant writable, the un-granted
+sibling, `~/.ssh`, Collins' own state and the plan file itself absent,
+`settings.json` read-only, `/usr` read-only, its own pid namespace. It is
+the only proof that bwrap *accepts* a generated plan, and it exits 77
+(`run_e2e`'s skip) with a printed reason where no box can be built — a CI
+container may have no user namespace to give. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
 `COLLINS_SANDBOX_HOME` beside the usual scratch tree.
 
 Related: `collins-terminal-tab`, `collins-sessions-and-sidebar`,

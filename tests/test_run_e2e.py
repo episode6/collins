@@ -57,6 +57,21 @@ def test_unweighted_check_is_dealt_once():
     assert run_e2e.check_seconds(checks[-1]) == run_e2e.DEFAULT_SECONDS
 
 
+def test_a_check_that_exits_77_is_skipped_not_failed(tmp_path):
+    """The autotools convention: a check that can't run where it finds
+    itself (check_sandbox_launch.py in a container with no user namespace
+    for bubblewrap) says so with exit 77, and the suite reports a skip
+    rather than retrying it and going red."""
+    script = tmp_path / "check_skips.py"
+    script.write_text("import sys\nprint('SKIP  no box here')\nsys.exit(77)\n")
+    status, _secs = run_e2e.run_check(str(script), timeout=60, use_dbus=False)
+    assert status == "skip"
+    script.write_text("import sys\nsys.exit(0)\n")
+    assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "pass"
+    script.write_text("import sys\nsys.exit(1)\n")
+    assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "fail"
+
+
 def test_one_shard_is_the_whole_suite():
     checks = _all_checks()
     assert run_e2e.shard(checks, 1, 1) == checks
