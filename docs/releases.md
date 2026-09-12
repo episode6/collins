@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-11. Full change history: git log for this file.
+fork. Last modified: 2026-09-12. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -64,6 +64,10 @@ downloads of each version, see the
   new plan. A *Sandboxed shell* (the chip, or *New sandboxed shell* in a
   panel tab's menu) opens a terminal inside the same box, titled as one;
   Ctrl+J still opens your own shell.
+- **Sandboxing is packaged.** The `.deb`, the RPM and the AUR recipe
+  recommend `bubblewrap`, so an install brings it along where the
+  distribution allows; the docs name it beside libspelling and GStreamer
+  as the third optional dependency.
 - **What a sandboxed session may ask Collins to do.** From inside a box,
   `run_in_terminal` and `read_terminal` reach only sandboxed shells —
   opening one when none is idle — never your own; `start_session`

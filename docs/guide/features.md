@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-11. Full change history: git log for this file.
+fork. Last modified: 2026-09-12. Full change history: git log for this file.
 -->
 
 # Features
@@ -1078,10 +1078,12 @@ flipped the switch is refused if it calls it anyway.
   directory is refused with the reason when it is, holds or lies inside a
   secret (`~/.ssh`, `~/.gnupg`, `~/.config/gh`, …), Collins' own state,
   your home or `/`, or the sandbox home itself. Grants are per workspace
-  and land in `state.json`; a running box doesn't change (user
-  namespaces are restricted on Ubuntu, so nothing can be mounted into it),
-  so when the plan the settings would build now differs from the launched
-  one the chip offers **Restart to apply**: the session exits cleanly and
+  and land in `state.json`; a running box doesn't change — every
+  sandboxed session shares one sandbox home, so a directory added to a
+  running box would appear in *every* box open at that moment, which is
+  not what a per-workspace grant promises — so when the plan the settings
+  would build now differs from the launched one the chip offers **Restart
+  to apply**: the session exits cleanly and
   resumes in the same tab with the new plan. (A session with nothing to
   resume yet, a fork, and a session running inside another session's box
   can't restart themselves; the chip says so instead.) A **Sandboxed
