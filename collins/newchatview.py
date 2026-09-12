@@ -281,9 +281,8 @@ class NewChatView(Gtk.Box):
 
     def sandbox_choice(self) -> bool | None:
         """The Sandboxed box as the user left it, or None while it still
-        follows the project's default (what the draft record keeps)."""
-        if not self._sandbox.get_visible():
-            return None
+        follows the project's default (what the draft record keeps). Kept
+        while the box is hidden too — see set_sandbox_choice."""
         return self._sandbox.get_active() if self._sandbox_touched else None
 
     def sandbox(self) -> bool:
@@ -292,9 +291,13 @@ class NewChatView(Gtk.Box):
 
     def set_sandbox_choice(self, choice: bool | None) -> None:
         """Put a kept draft's Sandboxed box back, on set_worktree_choice's
-        terms. Ignored where no box can be built — the draft keeps its
-        choice for a machine that can."""
-        if choice is None or not self._sandbox.get_visible():
+        terms — hidden box or not. A screen built before the probe's
+        verdict has no box yet, and the verdict landing must not put the
+        project's default over the choice (set_sandbox_available keeps a
+        touched box); a machine that can't build a box keeps the choice for
+        one that can. Nothing launches boxed off a hidden box: sandbox()
+        and newchat.effective_sandbox both read it as off."""
+        if choice is None:
             return
         self._sandbox_touched = True
         toggles = self._sandbox.get_active() != bool(choice)

@@ -92,11 +92,15 @@ chord, Ctrl+Enter the alternate send) is integer-keyval GTK-free code.
 
 ## The new-chat screen (`newchat.py`, `newchatview.py`)
 
-Beside the worktree box sits a **Sandboxed** one on identical terms
+Beside the worktree box sits a **Sandboxed** one on the same terms
 (`sandbox_choice` / `set_sandbox_choice`, `newchat.effective_sandbox`, the
 draft record's `sandbox` slot), visible only when the probe's cached verdict
 says a box can be built (`set_sandbox_available` puts it on a screen built
-before the verdict landed);
+before the verdict landed). One difference: a draft's restored choice is
+kept while the box is hidden — reopened before the verdict, or on a machine
+with no box — so the late verdict can't swap in the project's default and a
+re-saved draft doesn't drop it; `sandbox()` and `effective_sandbox` read a
+hidden box as off;
 `send-requested` and the tab's `new-chat-send` carry it as a second bool
 (`text, worktree, sandbox, model, effort`). See `collins-sandboxed-sessions`.
 

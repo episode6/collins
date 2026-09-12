@@ -46,7 +46,7 @@ def _keys(cwd: str) -> list[str]:
     return [path] if real == path else [path, real]
 
 
-def _ancestors(cwd: str) -> list[str]:
+def ancestors(cwd: str) -> list[str]:
     """A directory and every parent above it, for both spellings of the path
     — the chain an inherited trust decision can sit anywhere along."""
     chain: list[str] = []
@@ -80,7 +80,7 @@ def is_trusted(cwd: str) -> bool:
     projects = _projects()
     if not projects:
         return False
-    for key in _ancestors(cwd):
+    for key in ancestors(cwd):
         entry = projects.get(key)
         if isinstance(entry, dict) and entry.get(_TRUST_KEY) is True:
             return True

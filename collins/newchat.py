@@ -72,7 +72,8 @@ def draft_record(
     *worktree* is the checkbox as the user left it, or None when it was
     never touched -- an untouched box keeps following the project's default,
     which may change before the draft is picked up again; *sandbox* is the
-    Sandboxed box on the same terms. *model* is the picker's choice, ""
+    Sandboxed box on the same terms, kept even while no box is shown (see
+    NewChatView.set_sandbox_choice). *model* is the picker's choice, ""
     while it stands on the CLI's default -- which, likewise, is read afresh
     when the draft comes back rather than kept; *effort* is the effort
     picker's, on the same terms.
