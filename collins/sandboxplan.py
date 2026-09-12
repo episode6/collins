@@ -641,11 +641,26 @@ def sandbox_home_dir() -> str:
     return os.path.join(base, "collins", "sandbox-home")
 
 
+def state_base() -> str:
+    """`$XDG_STATE_HOME`, or `~/.local/state`."""
+    return os.environ.get("XDG_STATE_HOME") or os.path.join(str(Path.home()), ".local", "state")
+
+
 def plan_dir(app_id: str) -> str:
     """Where this instance's per-launch plan files go: beside the socket,
     under the runtime dir, so they die with the boot and never enter the
-    box (only the socket file is bound)."""
-    return os.path.join(mcptools.runtime_dir(app_id), "sandbox")
+    box (only the socket file is bound).
+
+    With no `XDG_RUNTIME_DIR` — a Collins started outside a desktop login
+    session, and CI — `mcptools.runtime_dir` falls back to the temp
+    directory, which every box shares read-write: plans there are inside
+    the sandbox, so the protect-check would refuse every launch. Fall back
+    to Collins' own state directory instead, which no box carries. Plans
+    there outlive a reboot rather than dying with it, which `sweep_plans`
+    at startup covers."""
+    if os.environ.get("XDG_RUNTIME_DIR"):
+        return os.path.join(mcptools.runtime_dir(app_id), "sandbox")
+    return os.path.join(state_base(), "collins", "sandbox", app_id)
 
 
 def protected_paths(app_id: str) -> tuple[str, ...]:
@@ -654,7 +669,7 @@ def protected_paths(app_id: str) -> tuple[str, ...]:
     scratch tree is protected the same way) and the plan directory."""
     home = str(Path.home())
     config = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
-    state = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+    state = state_base()
     cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
     paths = [
         os.path.join(config, "collins"),

@@ -671,6 +671,23 @@ def test_protected_paths_follow_the_xdg_overrides(monkeypatch, tmp_path):
     assert sandboxplan.plan_dir("com.example.App").endswith("/collins/com.example.App/sandbox")
 
 
+def test_plan_dir_leaves_the_temp_dir_when_there_is_no_runtime_dir(monkeypatch, tmp_path):
+    """With no XDG_RUNTIME_DIR — a Collins started outside a desktop login
+    session, and CI — mcptools falls back to the temp directory, which
+    every box shares read-write: a plan file there would be inside the
+    sandbox and the protect-check would refuse every launch. The state
+    directory, which no box carries, holds them instead."""
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "s"))
+    directory = sandboxplan.plan_dir("com.example.App")
+    assert directory == str(tmp_path / "s" / "collins" / "sandbox" / "com.example.App")
+    # Inside a protected tree, like the runtime-dir spelling: a plan a box
+    # could reach is exactly what the protect-check refuses.
+    protected = sandboxplan.protected_paths("com.example.App")
+    assert str(tmp_path / "s" / "collins") in protected
+    assert directory in protected
+
+
 class _State:
     def __init__(self, grants=(), **settings):
         self._grants = list(grants)
