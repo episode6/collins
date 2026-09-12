@@ -986,7 +986,6 @@ def test_resume_keeps_the_permission_mode_of_a_sandboxed_session(monkeypatch):
     assert claude.continue_command(opts) == "/usr/bin/claude --continue"
 
 
-
 def test_sandboxed_shell_argv_runs_the_shell_through_the_launcher():
     """A sandboxed panel shell is the same launcher a sandboxed session's
     typed line starts with, around the user's shell: spawned as an argv
