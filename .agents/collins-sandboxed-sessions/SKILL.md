@@ -147,7 +147,7 @@ sandboxed* check), `sandbox_bypass_permissions`, `sandbox_share_gh`,
 `sandboxed_sessions` set (written when a sandboxed launch resolves its id,
 or a sandboxed fork reports its new one, carried by `forward_session`,
 read by `open_session` for a resume); `sandbox_grants` per real workspace
-path (no UI yet — the footer chip is the next PR). The draft record's
+path (edited from the footer chip, see below). The draft record's
 `sandbox` slot mirrors the worktree checkbox, except that a restored
 choice sticks while the box is hidden (a draft reopened before the probe's
 verdict, or on a machine with no box — the late verdict keeps it rather
