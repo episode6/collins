@@ -42,6 +42,10 @@ ICON = "sandbox-shield-symbolic"
 
 _CHIP_ICON_PX = 12
 
+# How long an unbidden dock open waits after the event that asked for it
+# (terminal._PR_PAGE_SETTLE_MS, kept here so this module imports no tab).
+_DOCK_SETTLE_MS = 250
+
 
 class SandboxChip(Gtk.MenuButton):
     """See the module docstring. The callables keep the chip free of any
@@ -228,13 +232,18 @@ class SandboxChip(Gtk.MenuButton):
 
     def _open_shell(self, *_args) -> None:
         self.get_popover().popdown()
-        # After the popover's own focus restore has run, so the shell's
-        # focus grab isn't undone by it (see the GTK skill).
+        # A beat after the popover's own teardown and focus restore, not an
+        # idle inside it: opening a panel page is dock surgery, and doing
+        # that from the cascade that announced the trigger has segfaulted
+        # GTK's Wayland backend before (the footer-chip lesson in
+        # AGENTS.md). The delay is the dock's own settle (terminal.
+        # _PR_PAGE_SETTLE_MS), and it also keeps the shell's focus grab
+        # from being undone by the popover's restore (see the GTK skill).
         def open_shell() -> bool:
             self._on_open_shell()
             return GLib.SOURCE_REMOVE
 
-        GLib.idle_add(open_shell, priority=GLib.PRIORITY_DEFAULT)
+        GLib.timeout_add(_DOCK_SETTLE_MS, open_shell)
 
 
 def _caption(text: str) -> Gtk.Label:
