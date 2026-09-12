@@ -24,6 +24,7 @@ tree too, so the launch's RW_HOME_ALWAYS directories and the seeded sandbox
 home never touch the real one.
 """
 
+import atexit
 import os
 import shutil
 import signal
@@ -34,6 +35,10 @@ REAL_HOME = os.path.expanduser("~")
 STAGE = os.path.join(REAL_HOME, ".cache", "collins-e2e")
 os.makedirs(STAGE, exist_ok=True)
 E2E = tempfile.mkdtemp(prefix="sandbox-policy-", dir=STAGE)
+# ~/.cache outlives the run, so the tree goes however the check ends: an
+# exception while staging, a failed check, a clean finish. The watchdog at
+# the bottom leaves through os._exit, which skips this, and clears it first.
+atexit.register(shutil.rmtree, E2E, True)
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 HOME = f"{E2E}/home"
 
@@ -495,9 +500,13 @@ def finish() -> None:
     app.quit()
 
 
+def watchdog() -> bool:
+    shutil.rmtree(E2E, ignore_errors=True)  # os._exit skips the atexit hook
+    os._exit(3)
+
+
 GLib.timeout_add(250, stage)
-GLib.timeout_add(90_000, lambda: os._exit(3))
+GLib.timeout_add(90_000, watchdog)
 app.run([])
-shutil.rmtree(E2E, ignore_errors=True)
 print(f"\n{PASSED} passed, {FAILED} failed")
 sys.exit(1 if FAILED or not PASSED else 0)
