@@ -68,7 +68,13 @@ no control characters, no `.`/`..`). The output is a JSON document
 (`bwrap_args`, `unsetenv`, `setenv`, `gh_token`, `workspace`, `inputs`,
 `notes`), written by `prepare_launch` to
 `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` mode 0600 and
-regenerated at every launch — a cache of state, never state.
+regenerated at every launch — a cache of state, never state. With no
+`XDG_RUNTIME_DIR` (a Collins started outside a desktop login session, and
+CI) `mcptools.runtime_dir` falls back to the temp directory, which every
+box shares read-write, so `plan_dir` falls back to
+`$XDG_STATE_HOME/collins/sandbox/<app id>` instead — a plan the box could
+reach is exactly what the protect-check refuses, and it would refuse every
+launch.
 
 `prepare_launch(workspace, app_id, state)` is the host side of a launch: it
 creates the `RW_HOME_ALWAYS` directories (a bind needs a source), seeds the
@@ -101,11 +107,28 @@ in as `GH_TOKEN` the same way (never on disk, never on the command line).
 A plan it can't read or a missing bwrap is exit 2 with the reason: it never
 runs the command unsandboxed. `COLLINS_BWRAP` names a fake for tests.
 
+**The host object.** `sandboxplan.SandboxHost(app_id, state)` is the host
+side of everything a running instance asks: `prepare_launch(cwd)`, the
+per-workspace grants (`grants` / `allow` / `revoke` — `allow` runs
+`grant_reason`: the `guard_path` rule first, so a secret is refused whether
+or not it exists, then "already inside the workspace" and "not a
+directory"), `plan_stale(plan_path, workspace)` (the launched plan's
+`inputs` against what `build_plan(gather_inputs(...))` would say now, on
+the `POLICY_INPUTS` keys — grants, the two shares, settings protection),
+and `derive(plan_path, cwd)` (a sibling's plan file, see the policy
+below). `load_plan` reads a launched plan back through `sandboxrun.
+read_plan` plus an `inputs` check; `plan_reaches(plan, path)` is the
+"inside the workspace or a grant" rule; `derive_plan(plan, cwd)` re-issues
+a plan with only `--chdir` changed (`cwd` recorded beside `workspace`).
+The app sets `terminal.SANDBOX_HOST` to one at startup.
+
 **The tab.** `SessionOptions.sandbox` is the decision, `sandbox_plan` the
-file. `TerminalTab._finish_spawn` writes the plan at the last moment
-through `terminal.SANDBOX_PLANNER` (set by `App._start_sandbox_support`,
-like `providers.MCP_CONFIG_PATH`) because the workspace is the *settled*
-cwd — a recreated worktree included — and `Provider.sandbox_prefix`
+file. `TerminalTab._launch_command` (from `_finish_spawn`, and again from a
+restart) writes the plan at the last moment through
+`terminal.SANDBOX_HOST.prepare_launch` because the workspace is the
+*settled* cwd — a recreated worktree included — unless the options already
+carry a plan the tab hasn't seen (a sibling's derived plan), which
+`_sandbox_options` *adopts* instead; and `Provider.sandbox_prefix`
 prepends the wrapper in `new_command` / `resume_command` and, for the
 `--continue` override, in the tab itself — which also appends
 `Provider.session_flags` (the permission mode) there, after the options
@@ -124,7 +147,7 @@ sandboxed* check), `sandbox_bypass_permissions`, `sandbox_share_gh`,
 `sandboxed_sessions` set (written when a sandboxed launch resolves its id,
 or a sandboxed fork reports its new one, carried by `forward_session`,
 read by `open_session` for a resume); `sandbox_grants` per real workspace
-path (no UI yet — the footer chip is the next PR). The draft record's
+path (edited from the footer chip, see below). The draft record's
 `sandbox` slot mirrors the worktree checkbox, except that a restored
 choice sticks while the box is hidden (a draft reopened before the probe's
 verdict, or on a machine with no box — the late verdict keeps it rather
@@ -142,14 +165,99 @@ sandboxed (`mcptools.inherited_permission_mode(..., sandboxed=True)`). The
 trust dialog is mirrored, the bypass-acceptance dialog is not persisted by
 the CLI anywhere, so an interactive sandboxed launch still shows it.
 
-**What a sandboxed session may ask Collins to do.** Until the policy PR
-(a sandboxed `ShellPage`, a sibling that inherits the box and stays inside
-the workspace), `run_in_terminal`, `read_terminal` and `start_session` are
-**refused from a sandboxed tab** (`mcptools.SANDBOX_HOST_TOOLS`, checked in
-`run_tool_call` after identity, `is_sandboxed=lambda found:
-found[1].sandboxed` from app.py): each reaches the host — the user's own
-unconfined Ctrl+J shell, a sibling in an agent-chosen cwd — and under
-bypassPermissions no prompt stands in between. The display-only tools are
+**The footer chip (`sandboxchip.SandboxChip`).** A `Gtk.MenuButton` with
+a TOP popover, built like the model chip and placed first in the footer's
+left run (`_model_sep` follows it), shown by `_sync_sandbox_chip` exactly
+when `tab.sandboxed and tab.sandbox_plan_path` — never on an unsandboxed
+tab. Filled on every `show` from the *launched* plan (`load_plan`, never
+re-derived): the workspace, the two shares' state, settings protection;
+then the host's grants for the workspace, each with a remove button and an
+"after restart" tag when the launched plan lacks it, *Allow a directory…*
+(`Gtk.FileDialog.select_folder`, modal, closes the popover — so the verdict
+goes out as a toast either way: `host.allow`'s reason, or "Allowed … —
+restart the session to apply"), *Restart to apply* when `can_restart_
+sandboxed()` and `host.plan_stale`, and *Sandboxed shell*. The chip knows
+no tab or app: it takes callables (`plan_path`, `host`, `can_restart`,
+`on_restart`, `on_open_shell`, `on_toast`); the tab's `"toast"` signal
+reaches `MainWindow._on_tab_toast` (markup-escaped, over the sidebar's
+toast overlay).
+
+**Restart to apply** (`TerminalTab.restart_sandboxed`): the CLI's exit
+keystroke, a `_RESTART_POLL_MS` poll that answers the worktree keep/remove
+dialog and re-nudges at `_RESTART_NUDGE_TICKS` (a mid-turn agent spends the
+first Ctrl+C Ctrl+C on itself), and — once the shell has the terminal
+back — `_launch_command(self._cwd, self.session_id)` typed again: a fresh
+plan from the state now, the old one released, the same shell, tab and
+row. Gives up with a message at `_RESTART_GIVE_UP_TICKS`. `can_restart_
+sandboxed` also refuses three tabs that would get something other than a
+restart: a fork (the tab holds its origin's id, and a resume would fork it
+a second time), a tab whose id the resolver hasn't bound yet (a
+`new_command` would *replace* the conversation, not restart it), and one
+running a plan adopted from another session (`_sandbox_plan_adopted`: a
+sibling's box was built for its parent's workspace, and a rebuild here
+takes this tab's own cwd, silently narrowing it). The chip says so in a
+caption where the row would be. `_launch_command(cwd, id, restart=True)`
+is what turns the id ahead of a `--continue` override — an initial spawn
+honours the override it was handed. The launch cwd, not the agent's last
+one: a resume re-enters the worktree the transcript records by itself,
+and the worktree lies under the launch workspace's mount.
+
+**The sandboxed shell.** `PanelTerminal(number, plan_lookup=...)` is the
+same page class with `sandboxed` True: `page_kind` stays `"shell"` (so
+history, busy checks, close confirmations and layout persistence all hold;
+`page_state` adds `"sandboxed": True`, which `panellayout._valid_page`
+keeps and `PanelDock._restore_node` hands back to `strip.new_shell(
+sandboxed=True)`), titled *Sandboxed shell N* on the dock-wide numbering,
+wearing `sandboxchip.ICON`. It spawns `providers.sandboxed_shell_argv(
+plan, $SHELL)` — `python3 sandboxrun.py <plan> -- $SHELL`, so it runs in
+exactly the session's box — with a queued `cd` to the agent's directory
+when that lies inside the workspace (bwrap's `--chdir` lands it in the
+workspace). No plan at spawn (a layout restored before the launch settled,
+or into an unsandboxed tab) → a message and no shell; the next show
+retries. **Busy detection**: bash inside the box takes the pty's
+foreground for itself and the kernel reports its process group in host pid
+numbers, so `has_running_command` compares against the shell *inside*
+(`proctree.inner_shell_pid`: the first descendant that isn't the
+launcher or a `bwrap`), cached once found; measured under a real box
+(idle at the prompt, busy during `sleep`, idle after Ctrl+C). A shell keeps the box it spawned in
+(`PanelTerminal.sandbox_plan`, the plan file `_spawn_plan` recorded):
+`--die-with-parent` ties that box to the shell's own pty, not to the
+session, so a *Restart to apply* leaves it running in the old box, which
+may still hold a directory the user has since revoked — the tab notes that
+in its scrollback (`_mark_stale_sandboxed_shells`) and
+`mcptools.tool_shells(shells, sandboxed, plan)` stops handing it to the
+agent (a shell that hasn't spawned yet takes the current plan when it
+does, so it counts). Ctrl+J
+never binds to one (`PanelDock._on_page_touched` skips `sandboxed`
+pages), and `open_shell_page(sandboxed=True)` / `PanelStrip.new_shell(
+sandboxed=True)` / the strip menu's *New sandboxed shell* (offered while
+`set_sandboxed_shell_offer` says there is a plan) are the ways in;
+`TerminalTab.open_sandboxed_shell(focus)` opens one beside the last shell
+or in a strip of its own on the home edge.
+
+**What a sandboxed session may ask Collins to do.** `run_tool_call` hands
+every handler a third argument, `sandboxed` — Collins' own reading of the
+calling tab (`is_sandboxed=lambda found: found[1].sandboxed`), never the
+caller's word — and the three host-reaching handlers apply the policy:
+`_mcp_read_terminal` / `_mcp_run_in_terminal` filter through
+`mcptools.tool_shells(shells, sandboxed)` (a sandboxed session sees only
+`sandboxed` shells; the reply names them *Sandboxed shell N* via
+`terminal_reply`'s fourth tuple slot) and open one with
+`tab.open_panel_shell(sandboxed=True)` when none is idle — the user's own
+Ctrl+J shell is never typed into or read from inside a box.
+`_mcp_start_session`: `mcptools.sibling_sandboxed(parent, project_default)`
+(a sandboxed parent's sibling is always sandboxed — the unit test says so
+in those words), and for a sandboxed parent the sibling gets
+`host.derive(parent's launch plan, cwd)`: the parent's exact box (grants,
+shares, settings protection *as launched*) with `--chdir` moved, refused
+through `mcptools.sibling_cwd_refusal` when the cwd lies outside the
+plan's workspace or grants (`plan_reaches`); the derived plan rides in
+`options.sandbox_plan`, the sibling tab adopts and releases it, and a
+spawn that never made a tab releases it in `_BackgroundSpawn.begin`.
+bypass is granted (explicit or inherited) only when the sibling is
+sandboxed. A parent in a linked worktree gets its sibling refused: the
+sibling collapses to the repo root (the resolver's rule), which the
+worktree's workspace mount doesn't reach. The display-only tools are
 unchanged.
 
 **Refusals.** `/bg` and `claude attach` are never used for a sandboxed
@@ -221,10 +329,22 @@ fixture monkeypatches `RW_ABSOLUTE` to exclude `/tmp`, where pytest's
 fake home lives, or the protect-check refuses every plan); one test runs a
 real box over a real plan and skips where the probe says no.
 `tests/test_sandboxrun.py` runs the module end to end against a fake bwrap
-that dumps the fd. E2E checks (`check_sandbox_launch.py` with
-`COLLINS_BWRAP`, a real-box check that skips) are the packaging PR's. Any
-probe or e2e run needs a fresh `COLLINS_APP_ID` and `COLLINS_SANDBOX_HOME`
-beside the usual scratch tree.
+that dumps the fd; `load_plan` / `plan_reaches` / `derive_plan` and the
+`SandboxHost` (allow, revoke, stale, derive) have their own cases there,
+the policy helpers (`tool_shells`, `sibling_sandboxed`, the handler flag)
+in `tests/test_mcptools.py`, `inner_shell_pid` in `tests/test_proctree.py`
+over a real process tree, the layout flag in `tests/test_panellayout.py`.
+`scripts/check_sandbox_policy.py` is the e2e check: a real App, a session
+launched sandboxed through a **fake** `COLLINS_BWRAP` (records the
+`--args` payload, execs the command; answers the probe with exit 0),
+driving the chip, the sandboxed shell, both terminal tools from the box,
+a grant → stale → restart → relaunch with the grant, and a sibling
+derived / refused. Staged under `~/.cache/collins-e2e` with `HOME` moved
+into the scratch tree — `/tmp` is shared into every box, so a scratch
+tree there trips the protect-check, and a real home would get the
+`RW_HOME_ALWAYS` directories. A real-box launch check is the packaging
+PR's. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
+`COLLINS_SANDBOX_HOME` beside the usual scratch tree.
 
 Related: `collins-terminal-tab`, `collins-sessions-and-sidebar`,
 `collins-session-mcp-tools`, `collins-preferences-keybindings-i18n`.

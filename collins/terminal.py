@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-11. Full change history: git log for this file.
+# fork. Last modified: 2026-09-12. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -42,6 +42,7 @@ from . import (  # noqa: E402
     panellayout,
     prmenu,
     proctree,
+    sandboxchip,
     sandboxplan,
     themes,
     transcriptlinks,
@@ -81,6 +82,7 @@ from .providers import (  # noqa: E402
     EnteredPrompt,
     Provider,
     get_provider,
+    sandboxed_shell_argv,
     split_screen_rows,
 )
 from .prstatus import (  # noqa: E402
@@ -224,12 +226,22 @@ def _within(root: str, path: str) -> bool:
     return path == root or path.startswith(root + os.sep)
 
 
-# How a sandboxed launch gets its plan: a callable taking the settled launch
-# cwd and returning the plan file's path (sandboxplan.prepare_launch bound to
-# the app id and state), or None when no box can be built. Set by the app at
-# startup, like providers.MCP_CONFIG_PATH; None means every sandboxed
-# decision degrades to an unsandboxed launch that says so.
-SANDBOX_PLANNER: Callable[[str], str | None] | None = None
+# The host side of sandboxing (sandboxplan.SandboxHost, bound to the app id
+# and state): how a sandboxed launch gets its plan (`prepare_launch(cwd)`
+# for the settled launch cwd, None when no box can be built), and what the
+# footer chip reads and writes — the workspace's grants, the guard on a new
+# one, whether the launched plan is stale. Set by the app at startup, like
+# providers.MCP_CONFIG_PATH; None means every sandboxed decision degrades
+# to an unsandboxed launch that says so.
+SANDBOX_HOST: sandboxplan.SandboxHost | None = None
+
+# The restart the footer chip's "Restart to apply" runs: the CLI is asked
+# to exit (its Ctrl+C Ctrl+C), nudged again when it hasn't gone, and the
+# session is resumed in the same shell once it has — same rhythm as the
+# window's graceful close, minus the shell exit at the end.
+_RESTART_POLL_MS = 300
+_RESTART_NUDGE_TICKS = (5, 15)
+_RESTART_GIVE_UP_TICKS = 40
 
 
 def _agent_tab_environment() -> list[str]:
@@ -978,9 +990,28 @@ class PanelTerminal(Gtk.Box):
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, number: int = 1) -> None:
+    def __init__(self, number: int = 1, plan_lookup: Callable[[], str | None] | None = None) -> None:
+        """*plan_lookup* makes this the **sandboxed** kind: `() -> the
+        session's sandbox plan path` (or None while there is none), and
+        the shell spawns as `bwrap <plan> -- $SHELL` through the same
+        launcher the session's own typed line starts with — so it runs
+        inside exactly the box the agent does, and is what the agent's
+        run_in_terminal / read_terminal reach from inside one (see
+        mcptools.tool_shells). Titled "Sandboxed shell N"; the same
+        scrollback persistence as any shell."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._number = number
+        self._plan_lookup = plan_lookup
+        # The plan file this shell's box was actually built from, once it
+        # has spawned. A box outlives the plan it was built from: after the
+        # session's *Restart to apply* the tab holds a new plan, and a
+        # shell still running in the old box may hold a directory the user
+        # has since revoked -- so the agent is handed only the shells that
+        # run in the box it runs in itself (see mcptools.tool_shells).
+        self._spawn_plan: str | None = None
+        # The shell inside the box, once the wrappers have spawned it: what
+        # the foreground test compares against (see has_running_command).
+        self._inner_pid: int | None = None
         # The persistent panel-history ordinal this shell saves its
         # scrollback under (see panelhistory); assigned by the dock's shell
         # factory, overwritten by layout restore. Never renumbered — pages
@@ -1028,6 +1059,26 @@ class PanelTerminal(Gtk.Box):
         how the read_terminal tool names one to the agent."""
         return self._number
 
+    @property
+    def sandboxed(self) -> bool:
+        """Whether this shell runs inside the session's sandbox — the kind
+        a sandboxed session's terminal tools may reach, and the kind Ctrl+J
+        never binds to (see paneldock)."""
+        return self._plan_lookup is not None
+
+    @property
+    def sandbox_plan(self) -> str | None:
+        """The plan file this shell's box was built from, or None while it
+        hasn't spawned one (it takes the session's plan of the moment when
+        it does). What tells a shell left over from the box before a
+        *Restart to apply* from one running in the session's current box."""
+        return self._spawn_plan
+
+    def note(self, text: str) -> None:
+        """Feed a dim one-line note into this shell's scrollback — said to
+        the user, never to the shell (nothing is typed)."""
+        self.terminal.feed(f"\r\n\x1b[2m{text}\x1b[0m\r\n".encode())
+
     def open_shell(self, cwd: str | None, restore_text: str | None = None) -> None:
         """Spawn the shell on first show; on later shows follow the agent's
         cwd (it may have moved into a worktree) if the shell sits idle.
@@ -1048,10 +1099,32 @@ class PanelTerminal(Gtk.Box):
         if cwd is None or not Path(cwd).is_dir():
             cwd = str(Path.home())
         shell = os.environ.get("SHELL") or "/bin/bash"
+        argv = [shell]
+        if self._plan_lookup is not None:
+            plan = self._plan_lookup()
+            if not plan:
+                # No box to run in (the session came up unsandboxed, or its
+                # plan isn't written yet): nothing is spawned rather than a
+                # shell that would run unconfined under this title. The
+                # next show tries again (open_shell).
+                self._spawned = False
+                self.terminal.feed(
+                    _("no sandbox plan for this session — the shell was not started").encode()
+                )
+                return
+            # The launcher execs `bwrap --args <fd> -- $SHELL`, whose
+            # --chdir lands the shell in the workspace; the agent's own
+            # directory inside it is one typed `cd` away, queued for the
+            # shell to read the moment it is up (run_command).
+            argv = sandboxed_shell_argv(plan, shell)
+            self._spawn_plan = plan
+            workspace = self._plan_workspace(plan)
+            if workspace and cwd != workspace and _within(workspace, cwd):
+                self.run_command(f"cd {shlex.quote(cwd)}")
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             cwd,
-            [shell],
+            argv,
             None,  # envv: inherit
             GLib.SpawnFlags.DEFAULT,
             None,  # child_setup
@@ -1076,9 +1149,30 @@ class PanelTerminal(Gtk.Box):
     def _on_child_exited(self, _terminal: Vte.Terminal, _status: int) -> None:
         self._spawned = False  # a fresh shell is spawned on the next show
         self._child_pid = None
+        self._inner_pid = None
+        self._spawn_plan = None  # the next spawn takes the plan of its day
         self._pending_input.clear()
         self.terminal.reset(True, True)
         self.emit("shell-exited")
+
+    @staticmethod
+    def _plan_workspace(plan: str) -> str | None:
+        loaded = sandboxplan.load_plan(plan)
+        return loaded["workspace"] if loaded else None
+
+    def _shell_pid(self) -> int | None:
+        """The pid whose process group is "the shell at its prompt": the
+        spawned child for a plain shell; for a sandboxed one the shell
+        inside the box, found below the launcher and bubblewrap once they
+        have spawned it (proctree.inner_shell_pid) and remembered — the
+        wrappers never re-exec it. None until it exists."""
+        if self._child_pid is None:
+            return None
+        if self._plan_lookup is None:
+            return self._child_pid
+        if self._inner_pid is None:
+            self._inner_pid = proctree.inner_shell_pid(self._child_pid)
+        return self._inner_pid
 
     def follow_cwd(self, cwd: str | None) -> bool:
         """`cd` this shell to *cwd* if it is sitting idle at its prompt —
@@ -1086,28 +1180,36 @@ class PanelTerminal(Gtk.Box):
         screen when its session started in a worktree (see
         TerminalTab._offer_shells_follow). False when the shell is busy and
         was left alone, or already there."""
-        if not cwd or not Path(cwd).is_dir() or self._child_pid is None:
+        shell_pid = self._shell_pid()
+        if not cwd or not Path(cwd).is_dir() or shell_pid is None:
             return False
         if self.has_running_command():
             return False
-        if proctree.process_cwd(self._child_pid) == cwd:
+        if proctree.process_cwd(shell_pid) == cwd:
             return False
         self._sync_cwd(cwd)
         return True
 
     def _sync_cwd(self, cwd: str | None) -> None:
-        if not cwd or not Path(cwd).is_dir() or self._child_pid is None:
+        shell_pid = self._shell_pid()
+        if not cwd or not Path(cwd).is_dir() or shell_pid is None:
             return
         if self.has_running_command():
             return  # don't interrupt whatever the user left running
-        if proctree.process_cwd(self._child_pid) == cwd:
+        if proctree.process_cwd(shell_pid) == cwd:
             return
         # The line reset clears any half-typed input before the cd; see
         # shellinput for what else can be sitting on that line.
         self.terminal.feed_child(shell_command(f"cd {shlex.quote(cwd)}\n").encode())
 
     def has_running_command(self) -> bool:
-        return _has_running_command(self.terminal, self._child_pid)
+        """True when something other than the shell owns the terminal's
+        foreground. For a sandboxed shell the comparison is against the
+        shell *inside* the box, not the launcher the terminal spawned:
+        the inside shell takes the foreground for itself, and the kernel
+        reports its process group in host pid numbers, so a bwrap-wrapped
+        shell at its prompt reads idle like a plain one."""
+        return _has_running_command(self.terminal, self._shell_pid())
 
     def run_command(self, command: str) -> None:
         """Type *command* into this shell and run it — behind a line reset,
@@ -1131,8 +1233,12 @@ class PanelTerminal(Gtk.Box):
 
     def page_state(self) -> dict:
         """This shell's slot in a serialized dock layout (see panellayout):
-        its kind plus the history ordinal its scrollback file is keyed by."""
-        return {"kind": "shell", "hist": self.hist}
+        its kind plus the history ordinal its scrollback file is keyed by,
+        and whether it ran inside the sandbox — restored as the same kind."""
+        state = {"kind": "shell", "hist": self.hist}
+        if self.sandboxed:
+            state["sandboxed"] = True
+        return state
 
     def capture_contents(self) -> str:
         """The panel's current text contents including scrollback (plain text
@@ -1160,10 +1266,12 @@ class PanelTerminal(Gtk.Box):
     # -- PanelPage protocol (see panelstrip) -------------------------------
 
     def page_title(self) -> str:
+        if self.sandboxed:
+            return _("Sandboxed shell {number}").format(number=self._number)
         return _("Terminal {number}").format(number=self._number)
 
     def page_icon(self) -> str | None:
-        return None
+        return sandboxchip.ICON if self.sandboxed else None
 
     def grab_page_focus(self) -> None:
         self.terminal.grab_focus()
@@ -1221,6 +1329,10 @@ class TerminalTab(Gtk.Box):
         # forked conversation: its id, for the sticky sandboxed set. The
         # tab itself stays bound to the id it was opened with.
         "fork-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A short message for the user, to float over the window as a toast
+        # (the tab has no overlay of its own): the sandbox chip's refusal of
+        # a directory, and the like. Plain text — the window escapes it.
+        "toast": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # Emitted (debounced) when a panel divider is moved: (scope, mode,
         # size) where scope is "home" (the shells' panel) | "page" (the
         # strip PR views and the other docked pages open into), mode is
@@ -1303,6 +1415,11 @@ class TerminalTab(Gtk.Box):
         # The plan file a sandboxed launch typed (sandboxplan.prepare_launch),
         # unlinked when the shell exits — the box is gone by then.
         self._sandbox_plan_path: str | None = None
+        # Whether that plan came from another session (a start_session
+        # sibling adopts its parent's, derived for its own directory):
+        # a box this tab cannot rebuild by itself, so it never offers
+        # the chip's restart (see can_restart_sandboxed).
+        self._sandbox_plan_adopted = False
         # Decided at spawn time, so a toggle mid-session can't half-apply to
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
@@ -1332,6 +1449,9 @@ class TerminalTab(Gtk.Box):
         self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
         self._known_transcripts: set[Path] = set()  # transcripts predating this tab
         self._resolver_armed_at = 0.0  # wall-clock time polling (re)started
+        # The sandbox chip's restart in flight: its poll's tick count, None
+        # while none is (see restart_sandboxed).
+        self._restart_ticks: int | None = None
         self._fork_resolve = False  # a sandboxed fork: report the new id, don't bind to it
         # A `-w` launch this tab is still watching for an early failure, and
         # how many times it has looked (see _check_worktree_launch).
@@ -1802,6 +1922,14 @@ class TerminalTab(Gtk.Box):
         as the settings now say. What the /bg and attach guards ask."""
         return bool(self._options and self._options.sandbox)
 
+    @property
+    def sandbox_plan_path(self) -> str | None:
+        """The plan file the running box was built from (None for an
+        unsandboxed tab, or before the launch settled): what the footer
+        chip reads back, what a sandboxed panel shell spawns through, and
+        what a sibling's plan is derived from."""
+        return self._sandbox_plan_path
+
     def new_chat_text(self) -> str:
         return self._new_chat.text() if self._new_chat is not None else ""
 
@@ -2008,26 +2136,7 @@ class TerminalTab(Gtk.Box):
         # so aliases/env apply and the tab drops to a prompt when the agent exits.
         # The tab closes when the *shell* exits.
         self._initial_command: str | None = None
-        if self._options is not None and self._options.sandbox:
-            # The plan is a function of the settled cwd (a recreated worktree
-            # included), so it is written here, at the last moment.
-            self._options = self._sandbox_options(cwd)
-        if self._command_override is not None:
-            # A --continue (or a check script's stand-in): the wrapper in
-            # front, and the flags an existing conversation takes from the
-            # settled options (the permission mode) behind — settled, so a
-            # box that couldn't be built never leaves a bypass flag typed.
-            command = (
-                self.provider.sandbox_prefix(self._options)
-                + self._command_override
-                + self.provider.session_flags(self._options)
-            )
-        elif session_id is not None:
-            command = self.provider.resume_command(
-                session_id, fork=self.fork, options=self._options
-            )
-        else:
-            command = self.provider.new_command(self._options)
+        command = self._launch_command(cwd, session_id)
         if command is None:
             self.feed_message(
                 _("warning: `{cli}` not found in PATH — starting a plain shell").format(
@@ -2129,6 +2238,112 @@ class TerminalTab(Gtk.Box):
         self._initial_command = command
         self.terminal.feed_child(f"{command}\n".encode())
 
+    def _launch_command(self, cwd: str, session_id: str | None, restart: bool = False) -> str | None:
+        """The agent command to type into the shell for a launch in *cwd*:
+        the command override (a --continue, or a check script's stand-in),
+        the resume for *session_id*, or a fresh start — with the sandbox
+        settled first, since the plan is a function of the settled cwd (a
+        recreated worktree included) and is written here, at the last
+        moment. None with no CLI.
+
+        *restart* turns the first two around: a --continue tab that has
+        since resolved its id resumes *that* session rather than whatever
+        is newest in the directory now. Only the sandbox restart passes it;
+        an initial spawn honours the override it was handed."""
+        if self._options is not None and self._options.sandbox:
+            self._options = self._sandbox_options(cwd)
+        self._sync_sandbox_chip()
+        resume_first = restart and session_id is not None
+        if self._command_override is not None and not resume_first:
+            # The wrapper in front, and the flags an existing conversation
+            # takes from the settled options (the permission mode) behind —
+            # settled, so a box that couldn't be built never leaves a
+            # bypass flag typed.
+            return (
+                self.provider.sandbox_prefix(self._options)
+                + self._command_override
+                + self.provider.session_flags(self._options)
+            )
+        if session_id is not None:
+            return self.provider.resume_command(session_id, fork=self.fork, options=self._options)
+        return self.provider.new_command(self._options)
+
+    def can_restart_sandboxed(self) -> bool:
+        """Whether *Restart to apply* is on offer: a sandboxed tab with a
+        conversation to resume and a box of its own to rebuild.
+
+        Never a fork, whose own id the tab doesn't hold (a resume would
+        fork the origin a second time). Never before the tab knows what to
+        resume — a session whose id the transcript resolver hasn't bound
+        yet would be *replaced* by a fresh one, not restarted. And never
+        for a tab running a plan derived from another session's (a
+        start_session sibling): the box it holds was built for its
+        parent's workspace, and a restart rebuilds for this tab's own cwd,
+        which would silently narrow it."""
+        return (
+            self.sandboxed
+            and not self.fork
+            and not self._sandbox_plan_adopted
+            and (self.session_id is not None or self._command_override is not None)
+            and self._restart_ticks is None
+        )
+
+    def restart_sandboxed(self) -> bool:
+        """The footer chip's *Restart to apply*: ask the CLI to exit
+        (its Ctrl+C Ctrl+C), and once the shell has the terminal back,
+        resume this session in it with a plan rebuilt from the state now —
+        the grants added or removed, the shares flipped since the launch.
+        The same shell, the same tab, the same row: only the box changes.
+        False when nothing can be restarted (an unsandboxed tab, a fork,
+        one already restarting)."""
+        if not self.can_restart_sandboxed():
+            return False
+        self._restart_ticks = 0
+        if self.has_running_command():
+            exit_text = self.provider.graceful_exit()
+            if exit_text:
+                self.feed_child_text(exit_text)
+        GLib.timeout_add(_RESTART_POLL_MS, self._poll_restart)
+        return True
+
+    def _poll_restart(self) -> bool:
+        if self.get_root() is None or self._restart_ticks is None:
+            self._restart_ticks = None
+            return GLib.SOURCE_REMOVE
+        self._restart_ticks += 1
+        if self.has_running_command():
+            accept = self.worktree_exit_prompt_keystrokes()
+            if accept:
+                # The exit landed on the CLI's "keep or remove this
+                # worktree?" dialog: keep, as the window's close does.
+                self.feed_child_text(accept)
+            elif self._restart_ticks in _RESTART_NUDGE_TICKS:
+                # A mid-turn agent spends the first ask interrupting itself.
+                exit_text = self.provider.graceful_exit()
+                if exit_text:
+                    self.feed_child_text(exit_text)
+            if self._restart_ticks >= _RESTART_GIVE_UP_TICKS:
+                self._restart_ticks = None
+                self.feed_message(
+                    _("the session didn't exit, so the sandbox wasn't restarted — "
+                      "exit it and resume it yourself to apply the change")
+                )
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+        self._restart_ticks = None
+        # The launch cwd, not the agent's last one: a resume re-enters a
+        # worktree the transcript records by itself, and the plan's
+        # workspace has to be the one the session was launched in for the
+        # worktree (under <repo>/.claude/worktrees) to lie inside it.
+        command = self._launch_command(self._cwd or str(Path.home()), self.session_id, restart=True)
+        if command is None:
+            return GLib.SOURCE_REMOVE
+        self._mark_stale_sandboxed_shells()
+        self.feed_message(_("restarting the session with the sandbox's new plan"))
+        self._initial_command = command
+        self.terminal.feed_child(f"{command}\n".encode())
+        return GLib.SOURCE_REMOVE
+
     def _sandbox_options(self, cwd: str):
         """The launch options with the sandbox plan written for *cwd* — or,
         when no box can be built here (bubblewrap missing, a refused
@@ -2136,10 +2351,22 @@ class TerminalTab(Gtk.Box):
         unsandboxed launch that says so on screen, and never one that keeps
         a bypass mode the box was the justification for."""
         options = self._options
+        if options.sandbox_plan and options.sandbox_plan != self._sandbox_plan_path:
+            # A plan settled by the caller — a sibling spawned from inside
+            # a sandboxed session inherits its parent's exact box
+            # (sandboxplan.derive_plan) rather than one built from the
+            # settings now. Adopted: this tab releases it when its shell
+            # exits, like one it wrote itself.
+            self._release_sandbox_plan()
+            if os.path.isfile(options.sandbox_plan):
+                self._sandbox_plan_path = options.sandbox_plan
+                self._sandbox_plan_adopted = True
+                return options
         self._release_sandbox_plan()
-        plan = SANDBOX_PLANNER(cwd) if SANDBOX_PLANNER is not None else None
+        plan = SANDBOX_HOST.prepare_launch(cwd) if SANDBOX_HOST is not None else None
         if plan:
             self._sandbox_plan_path = plan
+            self._sandbox_plan_adopted = False
             return replace(options, sandbox_plan=plan)
         self.feed_message(
             _("warning: no sandbox could be built here — starting the session unsandboxed")
@@ -2336,6 +2563,19 @@ class TerminalTab(Gtk.Box):
         else:
             self._effort_chip = self._effort_label
         self._effort_chip.set_visible(False)
+        # The sandbox chip leads the row when the session runs inside a box
+        # (see sandboxchip): what is inside, the workspace's grants, and a
+        # restart when they changed. Hidden on every other tab, and shown
+        # only once the launch settled with a plan (_sync_sandbox_chip).
+        self._sandbox_chip = sandboxchip.SandboxChip(
+            plan_path=lambda: self._sandbox_plan_path,
+            host=lambda: SANDBOX_HOST,
+            can_restart=self.can_restart_sandboxed,
+            on_restart=self.restart_sandboxed,
+            on_open_shell=self.open_sandboxed_shell,
+            on_toast=lambda text: self.emit("toast", text),
+        )
+        self._sandbox_chip.set_visible(False)
         self._model_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
         self._model_sep.set_visible(False)
 
@@ -2460,6 +2700,7 @@ class TerminalTab(Gtk.Box):
         # wrapper box (not the cwd label) takes the slack so the buttons stay
         # pinned right even while the model, branch and PR labels are hidden.
         left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, hexpand=True)
+        left.append(self._sandbox_chip)
         left.append(self._model_chip)
         left.append(self._effort_chip)
         left.append(self._model_sep)
@@ -2704,6 +2945,13 @@ class TerminalTab(Gtk.Box):
             self._composer.set_effort_name(name or None)
         self._sync_footer_seps()
 
+    def _sync_sandbox_chip(self) -> None:
+        """Show the footer's Sandboxed chip exactly when this tab's agent
+        runs inside a box — after the launch settled with a plan, and
+        never on an unsandboxed tab (or one whose box couldn't be built)."""
+        self._sandbox_chip.set_visible(self.sandboxed and self._sandbox_plan_path is not None)
+        self._sync_footer_seps()
+
     def _can_switch_model(self) -> bool:
         """Whether this provider can switch a running session's model — the
         gate on the footer label's menu and the composer's picker alike,
@@ -2728,7 +2976,9 @@ class TerminalTab(Gtk.Box):
         branch = self._footer_branch is not None
         cwd = self._footer_cwd is not None
         self._model_sep.set_visible(
-            self._footer_model is not None or self._footer_effort is not None
+            self._footer_model is not None
+            or self._footer_effort is not None
+            or self._sandbox_chip.get_visible()
         )
         self._branch_seps[0].set_visible(cwd)
         self._branch_seps[1].set_visible(branch)
@@ -5344,6 +5594,9 @@ class TerminalTab(Gtk.Box):
         (numbered dock-wide) at the agent's current working directory."""
         strip = PanelStrip(shell_factory=self._make_panel_shell)
         strip.set_cwd_lookup(self.current_agent_cwd)
+        # The tab menu's "New sandboxed shell", for as long as there is a
+        # box to open one in.
+        strip.set_sandboxed_shell_offer(lambda: self._sandbox_plan_path is not None)
         # A page arriving or the last one leaving is what makes (or unmakes)
         # a new-chat screen a draft worth keeping; no-ops after the session
         # starts (see _note_new_chat_change).
@@ -5351,11 +5604,15 @@ class TerminalTab(Gtk.Box):
         strip.connect("page-touched", lambda *_a: self._note_new_chat_change())
         return strip
 
-    def _make_panel_shell(self) -> PanelTerminal:
+    def _make_panel_shell(self, sandboxed: bool = False) -> PanelTerminal:
         """A new shell page, its tab-title number and its persistent
         history ordinal both dock-assigned (layout restore overwrites the
-        ordinal with the saved one right after)."""
-        shell = PanelTerminal(self._dock.next_shell_number())
+        ordinal with the saved one right after). *sandboxed* builds the
+        shell that runs inside this session's box — reading the plan at
+        spawn, so one restored before the launch settled retries on its
+        next show, and one restored into an unsandboxed tab never starts."""
+        lookup = (lambda: self._sandbox_plan_path) if sandboxed else None
+        shell = PanelTerminal(self._dock.next_shell_number(), plan_lookup=lookup)
         shell.hist = self._dock.next_hist_ordinal()
         return shell
 
@@ -5655,22 +5912,65 @@ class TerminalTab(Gtk.Box):
         confirmation's "will be terminated" points at something visible."""
         self._dock.select_busy_shell()
 
+    def _mark_stale_sandboxed_shells(self) -> None:
+        """Say so in every sandboxed shell still running in the box the
+        session had before this restart. Their boxes outlive the plan they
+        were built from (--die-with-parent ties one to its own pty, not to
+        the session), so a grant the user has just revoked stays bound in
+        them; the agent is no longer handed them (mcptools.tool_shells),
+        and the user, whose scrollback they are, is told why."""
+        for shell in self.panel_shells():
+            if not getattr(shell, "sandboxed", False):
+                continue
+            plan = getattr(shell, "sandbox_plan", None)
+            if plan is not None and plan != self._sandbox_plan_path:
+                shell.note(
+                    _("the session's sandbox was restarted — this shell still runs in the "
+                      "box it was opened in, and the agent can no longer reach it")
+                )
+
     def panel_shells(self) -> list:
         """Every shell page in this tab's dock, in spatial-then-tab order —
         maximized and stowed pages included (see PanelDock.shell_pages).
         What the read_terminal tool reads."""
         return self._dock.shell_pages()
 
-    def open_panel_shell(self):
+    def open_panel_shell(self, sandboxed: bool = False):
         """A fresh shell page for the run_in_terminal tool: the Ctrl+J
         panel when the dock has no shells at all — saved history restored,
         exactly as the footer button would open it — else a new tab beside
         the last shell page. Neither takes the keyboard: the agent typing
-        is not the user typing. None when no shell could be opened."""
+        is not the user typing. None when no shell could be opened.
+
+        *sandboxed* — what a sandboxed session gets — opens the shell that
+        runs inside its box instead (open_sandboxed_shell, quietly), and
+        never the user's own Ctrl+J shell."""
+        if sandboxed:
+            return self.open_sandboxed_shell(focus=False)
         if not self._dock.shell_pages():
             self.show_panel(focus=False)
             return self._dock.panel_terminal
         shell = self._dock.open_shell_page()
+        self._note_new_chat_change()
+        return shell
+
+    def open_sandboxed_shell(self, focus: bool = True):
+        """A fresh *sandboxed* shell page — `bwrap <this session's plan>
+        -- $SHELL` — beside the last shell page, or in a strip of its own
+        when the dock has none: the panel menu's and the footer chip's
+        "Sandboxed shell", and what run_in_terminal from inside the box
+        opens (with *focus* False: the agent typing is not the user
+        typing). None when this tab runs no box."""
+        if self._sandbox_plan_path is None:
+            return None
+        shell = self._dock.open_shell_page(sandboxed=True)
+        if shell is None:
+            shell = self._make_panel_shell(sandboxed=True)
+            side = "below" if self._dock.home_position == "bottom" else "right"
+            self._dock.open_page(shell, side=side, focus=focus)
+            shell.open_shell(self.current_agent_cwd())
+        else:
+            self._dock.reveal_page(shell, focus=focus)
         self._note_new_chat_change()
         return shell
 

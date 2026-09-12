@@ -27,16 +27,22 @@ mode, attachments), `vtehtml.py` (reading dim text back out of VTE),
 ## Spawn, resume, attach
 
 A **sandboxed** launch (`SessionOptions.sandbox`) types
-`python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead: `_finish_spawn`
-writes the plan through `terminal.SANDBOX_PLANNER` at the last moment (the
-workspace is the settled cwd, a recreated worktree included), `Provider.
+`python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead:
+`_launch_command` (from `_finish_spawn`, and again from the chip's
+*Restart to apply*, `restart_sandboxed`) writes the plan through
+`terminal.SANDBOX_HOST.prepare_launch` at the last moment (the workspace
+is the settled cwd, a recreated worktree included) — or adopts one the
+options already carry (a sibling's derived plan) — `Provider.
 sandbox_prefix` prepends the wrapper (and the tab appends
 `provider.session_flags` — the permission mode — behind a `--continue`
-override), `_on_child_exited` unlinks the plan, and `tab.sandboxed` is what
-the `/bg` and attach guards read; a sandboxed fork tab runs the resolver in
-`_fork_resolve` mode and reports the forked id on `fork-resolved`. No box
-possible → an unsandboxed launch that says so, with a bypass mode dropped.
-See `collins-sandboxed-sessions`.
+override), `_on_child_exited` unlinks the plan, `tab.sandboxed` is what
+the `/bg` and attach guards read and `tab.sandbox_plan_path` what the
+footer's `sandboxchip.SandboxChip` and a sandboxed `PanelTerminal` read;
+a sandboxed fork tab runs the resolver in `_fork_resolve` mode and reports
+the forked id on `fork-resolved`. No box possible → an unsandboxed launch
+that says so, with a bypass mode dropped. A `"toast"` signal carries a
+tab's short message to the window's toast overlay. See
+`collins-sandboxed-sessions`.
 
 A tab spawns the user's `$SHELL` (via `Vte.Terminal.spawn_async`) in the
 session's resume cwd — the **last** cwd its transcript recorded, mapped back
