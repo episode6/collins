@@ -125,7 +125,10 @@ sandboxed* check), `sandbox_bypass_permissions`, `sandbox_share_gh`,
 or a sandboxed fork reports its new one, carried by `forward_session`,
 read by `open_session` for a resume); `sandbox_grants` per real workspace
 path (no UI yet — the footer chip is the next PR). The draft record's
-`sandbox` slot mirrors the worktree checkbox exactly, and
+`sandbox` slot mirrors the worktree checkbox, except that a restored
+choice sticks while the box is hidden (a draft reopened before the probe's
+verdict, or on a machine with no box — the late verdict keeps it rather
+than the project's default), and
 `newchat.effective_sandbox` is the rule the window applies
 (`_sandbox_for_new_session(cwd, choice)`) for the checkbox's start state,
 the Send, and a sibling's default alike.

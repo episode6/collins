@@ -819,7 +819,7 @@ def mirror_trust(
         return False
     trusted = [
         key
-        for key in trust._ancestors(workspace)
+        for key in trust.ancestors(workspace)
         if isinstance(host_projects.get(key), dict)
         and host_projects[key].get("hasTrustDialogAccepted") is True
     ]

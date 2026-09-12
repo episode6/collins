@@ -105,6 +105,7 @@ from gi.repository import GLib  # noqa: E402
 
 from collins import i18n, newchat, proctree, trust  # noqa: E402
 from collins.app import App  # noqa: E402
+from collins.newchatview import NewChatView  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
 PASSED = 0
@@ -166,7 +167,49 @@ def stage() -> bool:
     return GLib.SOURCE_REMOVE
 
 
+def a_hidden_sandbox_box_keeps_the_draft_choice() -> None:
+    """A draft reopened before the bwrap probe's verdict lands has no
+    Sandboxed box to show yet: its choice must survive the wait, and the
+    verdict landing must not put the project's default over it. Standalone
+    screens, because whether this machine can build a box decides what the
+    tab under test shows."""
+
+    def screen(default: bool) -> NewChatView:
+        return NewChatView(
+            PROJECT,
+            lambda: None,
+            lambda _path: None,
+            lambda _message: None,
+            worktree_default=False,
+            is_git=True,
+            pick_model=False,
+            pick_effort=False,
+            sandbox_default=default,
+            sandbox_available=False,
+        )
+
+    view = screen(default=False)
+    view.set_sandbox_choice(True)
+    check("a draft's Sandboxed choice is kept while the box is hidden", view.sandbox_choice() is True)
+    check("…without launching boxed off a hidden box", view.sandbox() is False)
+    view.set_sandbox_available(True, False)
+    check(
+        "…and the verdict landing late doesn't put the project's default over it",
+        (view.sandbox(), view.sandbox_choice()) == (True, True),
+        (view.sandbox(), view.sandbox_choice()),
+    )
+    view = screen(default=True)
+    view.set_sandbox_choice(False)
+    view.set_sandbox_available(True, True)
+    check(
+        "…nor tick the box a draft left clear in a sandboxed project",
+        (view.sandbox(), view.sandbox_choice()) == (False, False),
+        (view.sandbox(), view.sandbox_choice()),
+    )
+
+
 def on_the_screen() -> bool:
+    a_hidden_sandbox_box_keeps_the_draft_choice()
     win = state["win"]
     page = win.tab_view.get_selected_page()
     tab = page.get_child()
