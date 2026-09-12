@@ -23,6 +23,7 @@ shared read-write into every box, and Collins' own state in a scratch tree
 there would trip the plan's protect-check.
 """
 
+import atexit
 import os
 import shutil
 import subprocess
@@ -35,6 +36,9 @@ REAL_HOME = os.path.expanduser("~")
 STAGE = os.path.join(REAL_HOME, ".cache", "collins-e2e")
 os.makedirs(STAGE, exist_ok=True)
 E2E = tempfile.mkdtemp(prefix="sandbox-launch-", dir=STAGE)
+# ~/.cache outlives the run, so the tree goes however the check ends: a
+# skip, a failed check, bwrap outliving the timeout, any exception on the way.
+atexit.register(shutil.rmtree, E2E, True)
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 HOME = f"{E2E}/home"
 
@@ -75,7 +79,6 @@ def check(label: str, ok: bool, detail: object = "") -> None:
 
 def skip(reason: str) -> None:
     print(f"SKIP  {reason}", flush=True)
-    shutil.rmtree(E2E, ignore_errors=True)
     sys.exit(SKIP_EXIT)
 
 
@@ -104,7 +107,6 @@ plan_path = host.prepare_launch(WORKSPACE)
 check("a launch in the workspace gets a plan", bool(plan_path), plan_path)
 if not plan_path:
     print(f"\n{PASSED} passed, {FAILED} failed")
-    shutil.rmtree(E2E, ignore_errors=True)
     sys.exit(1)
 
 # One shell inside the box answers everything, as `key=value` lines: the
@@ -177,6 +179,5 @@ with open(SETTINGS, encoding="utf-8") as fh:
 sandboxplan.release_plan(plan_path)
 check("the plan file is released", not os.path.exists(plan_path))
 
-shutil.rmtree(E2E, ignore_errors=True)
 print(f"\n{PASSED} passed, {FAILED} failed")
 sys.exit(1 if FAILED or not PASSED else 0)
