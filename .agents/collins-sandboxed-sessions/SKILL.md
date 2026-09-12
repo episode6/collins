@@ -68,7 +68,13 @@ no control characters, no `.`/`..`). The output is a JSON document
 (`bwrap_args`, `unsetenv`, `setenv`, `gh_token`, `workspace`, `inputs`,
 `notes`), written by `prepare_launch` to
 `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` mode 0600 and
-regenerated at every launch — a cache of state, never state.
+regenerated at every launch — a cache of state, never state. With no
+`XDG_RUNTIME_DIR` (a Collins started outside a desktop login session, and
+CI) `mcptools.runtime_dir` falls back to the temp directory, which every
+box shares read-write, so `plan_dir` falls back to
+`$XDG_STATE_HOME/collins/sandbox/<app id>` instead — a plan the box could
+reach is exactly what the protect-check refuses, and it would refuse every
+launch.
 
 `prepare_launch(workspace, app_id, state)` is the host side of a launch: it
 creates the `RW_HOME_ALWAYS` directories (a bind needs a source), seeds the
