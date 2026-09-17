@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-10. Full change history: git log for this file.
+fork. Last modified: 2026-09-16. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **Add to chat works on the new-chat screen.** The editor's *Add to
+  chat* — on a file row and on a right-clicked selection — answered "the
+  agent isn't running in this tab" on the new-chat screen, where no agent
+  has started yet. The mention now lands in the screen's own composer, the
+  way its attach button's pick does, relative to the project the session
+  will start in.
 - **The Caffeine button's right-click menu shows again.** Under GNOME on
   Wayland a right-click on the cup brought up the compositor's window menu
   (Take Screenshot, Minimize, Maximize, Close) instead of the durations:

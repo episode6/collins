@@ -108,6 +108,8 @@ Everything here is probed CLI behaviour (2.1.2xx), encoded in
   reads as unreadable until it redraws.
 - `add_file_to_chat` types `@path#L2-4` (`Provider.file_reference`; whole lines
   only) with `dropimages.leading_space` deciding whether a space is needed.
+  It refuses without an agent in the terminal, except on the new-chat
+  screen, where the mention lands in the screen's composer instead.
 
 ## Closing a tab
 

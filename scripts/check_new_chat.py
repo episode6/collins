@@ -196,6 +196,15 @@ def on_the_screen() -> bool:
     )
     check("the screen is an unstarted thread", tab.unstarted_thread())
 
+    # The editor's "Add to chat" has no agent to type at here: the mention
+    # lands in the screen's own composer, relative to the project.
+    tab.add_file_to_chat(os.path.join(PROJECT, "notes.md"), 2, 4)
+    check(
+        "add to chat lands a mention in the screen's composer",
+        tab.new_chat_text() == "@notes.md#L2-4 ",
+        repr(tab.new_chat_text()),
+    )
+
     # Typing makes it a draft; the write is debounced.
     tab._new_chat.set_text(PROMPT + "\nand a second line")
     check("text makes the screen worth keeping", tab.new_chat_worthy())
