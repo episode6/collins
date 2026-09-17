@@ -90,6 +90,12 @@ Feature-specific traps live in the feature skills; these are the general ones.
   indent returns the ListView, not the row's expander — resolve rows from
   coordinates. `GtkButton` claims on release; a non-activatable
   `AdwTabPage` indicator has `can-target=False`.
+- A right-click gesture on a header-bar child must `set_state(CLAIMED)` in
+  `pressed`. `AdwHeaderBar` wraps a `GtkWindowHandle` whose bubble-phase
+  gesture answers any unclaimed secondary press with
+  `gdk_toplevel_show_window_menu`; mutter never refuses it, so the
+  compositor's window menu (Take Screenshot, Minimize, …) takes the grab
+  and the widget's own popover never shows (the Caffeine cup, 570).
 - `Gtk.DragSource` refuses to start for 100 ms after the press; a competing
   gesture without that deadband wins a flick. Take the competitor out with
   `set_propagation_phase(NONE)` rather than racing by depth.

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-10. Full change history: git log for this file.
+# fork. Last modified: 2026-09-16. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -626,7 +626,7 @@ class MainWindow(Adw.ApplicationWindow):
         # A right-click asks how long to stay awake for; it never reaches the
         # button itself, which only activates on a primary click.
         caffeine_menu = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-        caffeine_menu.connect("pressed", lambda *_: self._show_caffeine_menu())
+        caffeine_menu.connect("pressed", self._on_caffeine_secondary)
         self.caffeine_btn.add_controller(caffeine_menu)
         content_header.pack_end(self.caffeine_btn)
         # Packed after the button, so it lands to its left: the shut-off timer
@@ -3164,6 +3164,15 @@ class MainWindow(Adw.ApplicationWindow):
             # a clock timer or Indefinitely instead. (Ignored turning off.)
             app.set_caffeine_enabled(button.get_active(), duration=WHILE_ACTIVE)
         self._sync_caffeine_visuals()
+
+    def _on_caffeine_secondary(self, gesture: Gtk.GestureClick, *_args) -> None:
+        """The button's right-click. Claimed, or the press keeps bubbling up
+        to the header bar's window handle, whose own gesture answers any
+        secondary click with the compositor's window menu (Take Screenshot,
+        Minimize, Maximize, Close) -- under mutter that request never fails,
+        so the window menu took the grab and our popover never showed."""
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        self._show_caffeine_menu()
 
     def _show_caffeine_menu(self) -> None:
         """Right-click on the Caffeine button: how long to stay awake for, and
