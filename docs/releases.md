@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
+- **The Caffeine button's right-click menu shows again.** Under GNOME on
+  Wayland a right-click on the cup brought up the compositor's window menu
+  (Take Screenshot, Minimize, Maximize, Close) instead of the durations:
+  the button's gesture never claimed the press, so it bubbled on to the
+  header bar, which asks the compositor for that menu on any secondary
+  click. The press is now claimed at the button.
 - **Notes on lines outside the diff.** The git page's *Add note* only
   reached the lines a hunk showed; an expanded gap's context had no
   menu at all. A right-click on the drawn context now offers *Copy*,
