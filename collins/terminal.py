@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-07. Full change history: git log for this file.
+# fork. Last modified: 2026-09-16. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -3601,8 +3601,14 @@ class TerminalTab(Gtk.Box):
         input is exactly where a reference gets added mid-sentence. It IS
         gated on the agent actually being in the terminal, though — typed
         at a plain shell prompt the token isn't a mention, it's shell
-        syntax, and the file name inside it is untrusted repo content."""
-        if not self._agent_is_running():
+        syntax, and the file name inside it is untrusted repo content.
+
+        The new-chat screen is the one place with no agent and still an
+        input box: its composer is where the prompt is being written, so
+        the mention lands there (as the screen's own attach button lands
+        its pick — see _on_composer_file_chosen). The path resolves
+        against the project directory the session will start in."""
+        if self._new_chat is None and not self._agent_is_running():
             self.feed_message(_("Add to chat: the agent isn't running in this tab"))
             return
         reference = self.provider.file_reference(
@@ -3613,6 +3619,10 @@ class TerminalTab(Gtk.Box):
             return
         # An open composer *is* the input box right now — the CLI's own was
         # emptied into it — so every attach entry point lands there instead.
+        # On the new-chat screen the screen's composer is that box.
+        if self._new_chat is not None:
+            self._new_chat.composer.insert_mention(reference + " ")
+            return
         if self.composer_open():
             self._composer.insert_mention(reference + " ")
             return
