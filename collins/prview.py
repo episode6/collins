@@ -326,7 +326,7 @@ class PrViewPage(Adw.Bin):
         # Optically centers the mark on the title's first line of text.
         self._mark_slot.set_margin_top(4)
         top.append(self._mark_slot)
-        self._number = Gtk.Label(label=f"#{pr.number}")
+        self._number = Gtk.Label(label=pr.slug)
         self._number.add_css_class("dim-label")
         self._number.set_valign(Gtk.Align.START)
         top.append(self._number)
@@ -563,7 +563,7 @@ class PrViewPage(Adw.Bin):
     # -- PanelPage protocol (see panelstrip) ----------------------------------
 
     def page_title(self) -> str:
-        return f"#{self._pr.number}"
+        return self._pr.slug
 
     def page_icon(self) -> Gio.Icon:
         # The tab wears the same mark the chips and the header do — state
@@ -756,7 +756,7 @@ class PrViewPage(Adw.Bin):
             # a new mark whatever it shows.
             self._mark_slot.set_child(prmenu.status_icon(pr))
             self._marked = pr
-        self._number.set_label(f"#{pr.number}")
+        self._number.set_label(pr.slug)
         title = pr.title or pr.repository or _("Pull request")
         self._title.set_label(title)
         self._title.set_tooltip_text(title)
