@@ -318,18 +318,14 @@ class PrViewPage(Adw.Bin):
         header.add_css_class("pr-view-header")
 
         # Everything in the row anchors to its top: the title may run to
-        # _TITLE_LINES, and the mark, number and buttons should ride its
-        # first line rather than float at the vertical middle of three.
+        # _TITLE_LINES, and the mark and buttons should ride its first line
+        # rather than float at the vertical middle of three.
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._mark_slot = Adw.Bin(child=prmenu.status_icon(pr))
         self._mark_slot.set_valign(Gtk.Align.START)
         # Optically centers the mark on the title's first line of text.
         self._mark_slot.set_margin_top(4)
         top.append(self._mark_slot)
-        self._number = Gtk.Label(label=pr.slug)
-        self._number.add_css_class("dim-label")
-        self._number.set_valign(Gtk.Align.START)
-        top.append(self._number)
         self._title = Gtk.Label(xalign=0.0, yalign=0.0, hexpand=True, selectable=True)
         self._title.add_css_class("pr-view-title")
         # Wrapping up to _TITLE_LINES before the ellipsis: a one-line header
@@ -367,6 +363,15 @@ class PrViewPage(Adw.Bin):
         enable_copy_on_secondary_click(github_btn, lambda: self.pr_url)
         top.append(github_btn)
         header.append(top)
+
+        # owner/repo#number on a line of its own under the title, so the
+        # title gets the whole first row. Shown from the start, unlike the
+        # row below it: the slug is known before any fetch.
+        self._number = Gtk.Label(label=pr.slug, xalign=0.0)
+        self._number.add_css_class("dim-label")
+        self._number.add_css_class("caption")
+        self._number.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        header.append(self._number)
 
         sub = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._branches = Gtk.Label(xalign=0.0)
