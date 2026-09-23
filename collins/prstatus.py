@@ -281,6 +281,16 @@ class PullRequest:
         """``episode6/collins#55``, or just ``#55`` without a repository."""
         return f"{self.repository}#{self.number}" if self.repository else f"#{self.number}"
 
+    def tab_label(self, home_repository: str | None) -> str:
+        """``#55`` when the PR is in *home_repository* (the session's own
+        ``owner/repo``, compared the way GitHub does, ignoring case), else the
+        full `slug` so a PR from another repository is told apart."""
+        if self.repository and (
+            home_repository is None or self.repository.lower() != home_repository.lower()
+        ):
+            return self.slug
+        return f"#{self.number}"
+
     @property
     def merged(self) -> bool:
         """Merged PRs get GitHub's purple git-merge mark as their base icon."""

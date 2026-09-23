@@ -257,8 +257,13 @@ class PrViewPage(Adw.Bin):
         "title-changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, pr: PullRequest, host_factory, pr_store=None) -> None:
+    def __init__(
+        self, pr: PullRequest, host_factory, pr_store=None, home_repository: str | None = None
+    ) -> None:
         super().__init__()
+        # The session's own `owner/repo`: a PR in it needs only its number on
+        # the tab, one from anywhere else keeps the whole slug.
+        self._home_repository = home_repository
         # The text-scale hook: _apply_font_scale's display-wide rules key off
         # this class, which is how a setting reaches every label in the page
         # without touching each one (see the function's comment).
@@ -568,7 +573,7 @@ class PrViewPage(Adw.Bin):
     # -- PanelPage protocol (see panelstrip) ----------------------------------
 
     def page_title(self) -> str:
-        return self._pr.slug
+        return self._pr.tab_label(self._home_repository)
 
     def page_icon(self) -> Gio.Icon:
         # The tab wears the same mark the chips and the header do — state

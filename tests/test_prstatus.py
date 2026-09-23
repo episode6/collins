@@ -2480,3 +2480,12 @@ def test_sweep_still_asks_about_a_closed_pr(gh_json, gh_calls, branches):
     pr = PullRequest(55, URL, title="Track every PR", state="CLOSED")
     sweep([("s1", [pr], None)])
     assert urls == [URL]
+
+
+def test_tab_label_drops_the_home_repository():
+    pr = parse_pr_link(_link())
+    assert pr.tab_label("episode6/collins") == "#55"
+    assert pr.tab_label("Episode6/Collins") == "#55"
+    assert pr.tab_label("episode6/other") == "episode6/collins#55"
+    assert pr.tab_label(None) == "episode6/collins#55"
+    assert parse_pr_link(_link(prRepository=None)).tab_label("episode6/collins") == "#55"

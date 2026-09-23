@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-21. Full change history: git log for this file.
+fork. Last modified: 2026-09-23. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,11 +38,12 @@ downloads of each version, see the
 
 ### v0.1.4 — UNRELEASED
 
-- **The PR page names its repository.** The page's tab and its header
-  read `owner/repo#123` instead of a bare `#123`, so two PRs from
-  different repositories are told apart at a glance. In the header the
-  title has the first line to itself and `owner/repo#123` sits on the
-  line below it.
+- **The PR page names its repository.** The page's header reads
+  `owner/repo#123` instead of a bare `#123`: the title has the first
+  line to itself and `owner/repo#123` sits on the line below it. The
+  page's tab keeps the bare `#123` for a PR in the session's own
+  repository and names the repository only for a PR from another one,
+  so two PRs from different repositories are told apart at a glance.
 - **Add to chat works on the new-chat screen.** The editor's *Add to
   chat* — on a file row and on a right-clicked selection — answered "the
   agent isn't running in this tab" on the new-chat screen, where no agent
