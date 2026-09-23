@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-16. Full change history: git log for this file.
+# fork. Last modified: 2026-09-23. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -54,6 +54,7 @@ from .formatting import display_path  # noqa: E402
 from .gitinfo import (  # noqa: E402
     change_summary,
     current_branch,
+    github_url,
     has_changes,
     parent_branch,
     repo_root,
@@ -5339,7 +5340,13 @@ class TerminalTab(Gtk.Box):
         return None
 
     def _make_pr_page(self, pr: PullRequest) -> PrViewPage:
-        return PrViewPage(pr, host_factory=self._pr_action_host, pr_store=self._pr_store)
+        page = github_url(self._cwd)
+        return PrViewPage(
+            pr,
+            host_factory=self._pr_action_host,
+            pr_store=self._pr_store,
+            home_repository=page.removeprefix("https://github.com/") if page else None,
+        )
 
     # -- the git page ------------------------------------------------------
 
