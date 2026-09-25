@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-09. Full change history: git log for this file.
+# fork. Last modified: 2026-09-25. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1551,10 +1551,15 @@ class SessionSidebar(Gtk.Box):
         header.pack_start(self.search_btn)
 
         # Packed at the end first, so the additive action sits furthest right,
-        # past the refresh button.
-        self._add_project_btn = Gtk.Button(icon_name="folder-new-symbolic")
+        # past the refresh button. Two ways in: a folder already on disk, or
+        # a repository cloned first (clonedialog.py).
+        add_menu = Gio.Menu()
+        add_menu.append(_("Open folder…"), "win.add-project")
+        add_menu.append(_("Clone repository…"), "win.clone-project")
+        self._add_project_btn = Gtk.MenuButton(
+            icon_name="folder-new-symbolic", menu_model=add_menu
+        )
         self._add_project_btn.set_tooltip_text(_("Add project"))
-        self._add_project_btn.set_action_name("win.add-project")
         header.pack_end(self._add_project_btn)
 
         self._refresh_btn = Gtk.Button(icon_name="view-refresh-symbolic")

@@ -1,11 +1,12 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-10. Full change history: git log for this file.
+# fork. Last modified: 2026-09-25. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from . import (  # noqa: E402
     apppicker,
     autodelete,
     clisetup,
+    clonerepo,
     editor,
     footerapps,
     notifycenter,
@@ -33,6 +35,7 @@ from . import (  # noqa: E402
     welcome,
 )
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
+from .formatting import display_path
 from .i18n import LANGUAGES, N_, _, ngettext
 from .state import AppState
 from .themes import DEFAULT_THEME, THEME_NAMES, get_theme
@@ -392,6 +395,7 @@ class PreferencesDialog(Adw.Dialog):
         icon_size_row.set_value(int(state.get_setting("project_icon_size") or 16))
         icon_size_row.connect("notify::value", self._on_icon_size_changed)
         general_group.add(icon_size_row)
+        self._build_clone_directory_row(state, general_group)
         self._usage_panel_row = Adw.SwitchRow(
             title=_("Show Claude usage"),
             subtitle=_("Show subscription usage limits below the session list"),
@@ -412,6 +416,66 @@ class PreferencesDialog(Adw.Dialog):
             _searchable(self._update_check_row, "update", "upgrade", "version", "release", "github")
         )
         return general_group
+
+    def _build_clone_directory_row(self, state: AppState, group: _SearchableGroup) -> None:
+        """Where Add project → Clone repository starts its "Clone into"
+        field (clone_directory). The path is the subtitle; the folder button
+        picks another, and the reset button — shown only once one was
+        picked — goes back to the home folder."""
+        self._clone_dir_row = Adw.ActionRow(title=_("Clone repositories into"))
+        browse = Gtk.Button(
+            icon_name="folder-open-symbolic",
+            valign=Gtk.Align.CENTER,
+            tooltip_text=_("Choose the folder new clones go in"),
+        )
+        browse.add_css_class("flat")
+        browse.connect("clicked", lambda *_: self._browse_clone_directory())
+        self._clone_dir_reset = Gtk.Button(
+            icon_name="edit-undo-symbolic",
+            valign=Gtk.Align.CENTER,
+            tooltip_text=_("Use the home folder"),
+        )
+        self._clone_dir_reset.add_css_class("flat")
+        self._clone_dir_reset.connect("clicked", lambda *_: self._set_clone_directory("~"))
+        self._clone_dir_row.add_suffix(self._clone_dir_reset)
+        self._clone_dir_row.add_suffix(browse)
+        self._refresh_clone_directory_row(state.get_setting("clone_directory"))
+        group.add(
+            _searchable(
+                self._clone_dir_row, "clone", "git", "repository", "folder", "directory", "add project"
+            )
+        )
+
+    def _refresh_clone_directory_row(self, value) -> None:
+        shown = display_path(clonerepo.parent_directory(value))
+        self._clone_dir_row.set_subtitle(
+            _("Add project → Clone repository starts in {folder}").format(folder=shown)
+        )
+        self._clone_dir_reset.set_visible(shown != "~")
+
+    def _set_clone_directory(self, value: str) -> None:
+        self._state.set_setting("clone_directory", value)
+        self._refresh_clone_directory_row(value)
+        self._on_change()
+
+    def _browse_clone_directory(self) -> None:
+        picker = Gtk.FileDialog(title=_("Choose the folder new clones go in"))
+        current = clonerepo.parent_directory(self._state.get_setting("clone_directory"))
+        if os.path.isdir(current):
+            picker.set_initial_folder(Gio.File.new_for_path(current))
+
+        def picked(picker: Gtk.FileDialog, result) -> None:
+            try:
+                folder = picker.select_folder_finish(result)
+            except GLib.Error:
+                return  # dismissed
+            path = folder.get_path() if folder is not None else None
+            if path:
+                # Stored "~/…" under home, so a synced state.json means the
+                # same folder on a machine with a different user name.
+                self._set_clone_directory(display_path(path))
+
+        picker.select_folder(self.get_root(), None, picked)
 
     def _build_token_use_group(self, state: AppState) -> _SearchableGroup:
         """The settings that spend the user's Claude quota, together and

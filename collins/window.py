@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-16. Full change history: git log for this file.
+# fork. Last modified: 2026-09-25. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from . import (
     __version__,
     buildinfo,
     chats,
+    clonedialog,
     contextmenu,
     desktopentry,
     dialogs,
@@ -1367,6 +1368,7 @@ class MainWindow(Adw.ApplicationWindow):
             "toggle-tab-emoji": lambda *_: self._toggle_tab_emoji(),
             "open-session-file": lambda *_: self._open_session_file(),
             "add-project": lambda *_: self._choose_add_project_folder(),
+            "clone-project": lambda *_: self._show_clone_dialog(),
             "copy-tab-session-id": lambda *_: self._copy_tab_session_id(),
             "close-menu-tab": lambda *_: self._close_menu_tab(),
             "toggle-panel": lambda *_: self._toggle_panel(),
@@ -1919,6 +1921,23 @@ class MainWindow(Adw.ApplicationWindow):
         cwd = folder.get_path()
         # Same trust gate as a launch — adding a project is an invitation to
         # run sessions in it — but the button says what actually happens next.
+        self._with_folder_trust(
+            cwd,
+            self._default_provider(),
+            lambda: self._add_project(cwd),
+            confirm_label=_("Trust and add"),
+        )
+
+    def _show_clone_dialog(self) -> None:
+        """Add project → Clone repository: clone into the target directory
+        (the clone_directory setting, editable in the dialog), then add the
+        checkout the way Open folder adds a picked one — trust gate and all."""
+        dialog = clonedialog.CloneDialog(
+            self.state.get_setting("clone_directory"), self._on_project_cloned
+        )
+        dialog.present(self)
+
+    def _on_project_cloned(self, cwd: str) -> None:
         self._with_folder_trust(
             cwd,
             self._default_provider(),

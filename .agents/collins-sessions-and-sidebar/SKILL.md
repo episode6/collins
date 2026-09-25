@@ -6,7 +6,8 @@ description: >-
   SessionItem view-models, AppState and state.json, the sidebar's rows, groups,
   guide lines and status/busy/unread flags, session titles, worktrees and
   worktree recovery, /bg forward chains and background-agent status, folder
-  trust, the Chats virtual project and project icons. Use when touching
+  trust, the Chats virtual project, project icons, and adding or cloning a
+  project (clonerepo.py, clonedialog.py). Use when touching
   anything the sidebar shows, how a session is discovered or grouped, what is
   saved in state.json, archive/favorite/trash semantics, or busy/idle
   detection for a row.
@@ -231,6 +232,28 @@ is why every throwaway instance must set `COLLINS_CHATS_DIR`.
 root replaces the folder icon, gated by `usable_icon_bytes` (SVG only;
 `data:image/png` hrefs allowed, nothing else). Generated icons pass the
 stricter `usable_generated_icon_bytes`. Rasterized via `svgtexture.py`.
+
+**Adding and cloning projects.** The sidebar header's folder button is a
+`Gtk.MenuButton`: *Open folder…* (`win.add-project`, a `Gtk.FileDialog`)
+and *Clone repository…* (`win.clone-project`, `clonedialog.CloneDialog`).
+Both end in `MainWindow._with_folder_trust` → `_add_project` →
+`store.add_project`, which records a virtual project (a no-op for a
+project that already has sessions). The clone dialog's GTK-free half is
+`clonerepo.py`: `parse_source` decides whether the box holds a filter word,
+an `owner/repo` or a clone address (never anything starting with `-`,
+never git's `<transport>::` remote-helper syntax); `fetch_repos` pages `gh
+api user/repos?affiliation=owner,collaborator,organization_member`
+(bounded to `MAX_PAGES`, through `prstatus.gh_json`); `destination` /
+`destination_status` are the path the dialog prints and whether git will
+take it; `clone_argv` is `gh repo clone` for GitHub (gh's protocol
+preference and credentials) and `git clone --` otherwise. The clone runs
+with `GIT_TERMINAL_PROMPT=0`, `stdin=DEVNULL`, in its own session (no
+controlling tty, so ssh can't prompt either). Cancel or closing the
+dialog `killpg`s it, and git removes its half-made folder. The list is
+cached module-wide for the app's lifetime. The dialog's starting folder
+is the `clone_directory` setting (`"~"` by default; Preferences stores a
+picked folder as `~/…` under home). `scripts/check_clone_repo.py` drives
+all of it with a `gh` shim.
 
 ## Footguns
 
