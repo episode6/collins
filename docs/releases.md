@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-23. Full change history: git log for this file.
+fork. Last modified: 2026-09-25. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -37,6 +37,15 @@ downloads of each version, see the
 ## Changelog
 
 ### v0.1.4 — UNRELEASED
+
+- **Clone a repository as a project.** The sidebar's Add project button
+  is now a menu: *Open folder…* is the old folder picker, and *Clone
+  repository…* opens a dialog whose box filters every repository `gh`
+  lists for you (your own, collaborations, and your organizations') or
+  takes any clone address. The dialog shows the full destination path
+  before you clone. It starts under a new setting, Preferences → General →
+  *Clone repositories into*, which defaults to your home folder. The clone
+  joins the sidebar as a project, as a picked folder does.
 
 - **The PR page names its repository.** The page's header reads
   `owner/repo#123` instead of a bare `#123`: the title has the first

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-10. Full change history: git log for this file.
+fork. Last modified: 2026-09-25. Full change history: git log for this file.
 -->
 
 # Features
@@ -62,10 +62,30 @@ the app reads, are in
   matching sessions — and the projects holding them — stay on screen. It
   ships unbound; give it a chord in *Keyboard Bindings* if you want one.
   `Ctrl+K`'s switcher is the one-jump version of the same thing.
-- **Add a project** with the sidebar's **+**: pick a folder, answer the
-  trust prompt once, and it gets a header of its own with no sessions in
-  it yet. A project emptied by archiving can be kept the same way; *Remove
-  project from sidebar* in the header's menu is what finally drops one.
+- **Add a project** with the sidebar header's folder button. *Open
+  folder…* picks a directory already on disk; answer the trust prompt
+  once, and it gets a header of its own with no sessions in it yet. A
+  project emptied by archiving can be kept the same way; *Remove project
+  from sidebar* in the header's menu is what finally drops one.
+- **Clone a repository as a project**: the same button's *Clone
+  repository…* opens a dialog whose one box does two things. Typed words
+  filter every repository `gh` lists for your account (your own, the ones
+  you collaborate on, and everything your organizations show you; newest
+  push first, fuzzy on the name, then the description), and the best match
+  is picked, so Enter clones it. A pasted address (`https://…`, `ssh://…`,
+  `git@host:path`) or an `owner/repo` that isn't in the list is cloned as
+  typed. *Clone into* starts at Preferences → General → *Clone repositories
+  into* (your home folder by default) and can be changed for this one
+  clone. Under it the dialog prints the **full destination path** (the
+  folder git names after the repository) and whether git will accept it
+  there. It refuses a folder that already has something in it, and says so
+  when a missing parent will be created. GitHub repositories clone through
+  `gh repo clone`, so your protocol preference and gh's login apply;
+  anything else runs `git clone`. Neither can stop to prompt for a
+  password: a missing login fails with git's own message in the dialog.
+  Cancel stops a clone mid-way. A finished clone passes the same trust
+  prompt as *Open folder…* and lands in the sidebar as a project. Without
+  `gh` the list is empty, and addresses still work.
 - A **Claude usage panel** under the session list: your subscription
   limits — the 5-hour session window, weekly limits, extra-usage credits —
   as progress bars with reset countdowns, read from the `claude` CLI's own

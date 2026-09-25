@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-10. Full change history: git log for this file.
+# fork. Last modified: 2026-09-25. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -105,6 +105,12 @@ DEFAULT_SETTINGS = {
     # git projects, isolating their edits from the live checkout. Per-project
     # overrides live in AppState.project_worktree.
     "worktree_new_sessions": False,
+    # Where Add project → Clone Repository puts a new checkout: the dialog's
+    # "Clone into" field starts here (clonedialog.CloneDialog, expanded by
+    # clonerepo.parent_directory), and the clone lands in a folder named
+    # after the repository inside it. "~" is the home folder; Preferences →
+    # General stores a picked folder as a "~/…" path when it's under home.
+    "clone_directory": "~",
     # Where the Claude Code CLI lives when PATH doesn't say — desktop
     # launches don't get the folders a shell adds (see clisetup). Stored
     # exactly as picked, symlinks unexpanded, so the installer's stable
