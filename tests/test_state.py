@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-11. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 
 import json
 import time
@@ -1254,7 +1254,7 @@ def test_sandboxed_sessions_are_sticky_and_follow_forwards(app_state):
     state.set_sandboxed("", True)  # no id: nothing recorded
     fresh = app_state.AppState()
     assert fresh.is_sandboxed("a")
-    assert fresh.sandboxed_sessions == {"a"}
+    assert fresh.sandboxed_sessions == {"a": ""}
     # A /bg fork continues the conversation under a new id: still sandboxed.
     fresh.forward_session("a", "b")
     assert fresh.is_sandboxed("b")
@@ -1262,9 +1262,92 @@ def test_sandboxed_sessions_are_sticky_and_follow_forwards(app_state):
     fresh.set_sandboxed("a", False)
     fresh.set_sandboxed("a", False)  # already off: no write, no error
     again = app_state.AppState()
-    assert again.sandboxed_sessions == {"b"}
+    assert again.sandboxed_sessions == {"b": ""}
     assert again.is_sandboxed("b")
     assert again.is_sandboxed("a")  # still answers through its forward
+
+
+BOX_A = "0123456789abcdef0123456789abcdef"
+BOX_B = "fedcba9876543210fedcba9876543210"
+
+
+def test_the_session_to_box_map_round_trips(app_state):
+    state = app_state.AppState()
+    assert state.sandbox_box("a") == ""
+    assert state.sandbox_boxes() == set()
+    state.set_sandboxed("a", True, box=BOX_A)
+    state.set_sandboxed("b", True)  # sandboxed, no box yet
+    state.set_sandboxed("c", True, box=BOX_B)
+    saved = json.loads(app_state._STATE_FILE.read_text())["sandboxed_sessions"]
+    assert saved == {"a": BOX_A, "b": "", "c": BOX_B}
+    assert list(saved) == ["a", "b", "c"]  # an object, keys sorted
+    fresh = app_state.AppState()
+    assert fresh.sandboxed_sessions == {"a": BOX_A, "b": "", "c": BOX_B}
+    assert fresh.sandbox_box("a") == BOX_A
+    assert fresh.sandbox_box("b") == ""
+    assert fresh.sandbox_box("nobody") == ""
+    assert fresh.sandbox_box("") == ""
+    assert fresh.sandbox_boxes() == {BOX_A, BOX_B}
+    assert all(fresh.is_sandboxed(s) for s in "abc")
+
+
+def test_set_sandboxed_keeps_a_box_unless_told(app_state, monkeypatch):
+    state = app_state.AppState()
+    state.set_sandboxed("a", True, box=BOX_A)
+    writes = []
+    real_save = state.save
+    monkeypatch.setattr(state, "save", lambda: (writes.append(1), real_save()))
+    # The plain flag keeps the box the session has, and writes nothing.
+    state.set_sandboxed("a", True)
+    state.set_sandboxed("a", True, box=None)
+    state.set_sandboxed("a", True, box=BOX_A)
+    assert state.sandbox_box("a") == BOX_A
+    assert writes == []
+    # A string replaces it; "" clears it and the flag stays.
+    state.set_sandboxed("a", True, box=BOX_B)
+    assert state.sandbox_box("a") == BOX_B
+    state.set_sandboxed("a", True, box="")
+    assert state.sandbox_box("a") == ""
+    assert state.is_sandboxed("a")
+    assert state.sandbox_boxes() == set()
+    assert len(writes) == 2
+    # Anything that is not a box id is no box: never a path into the root.
+    for junk in ("../../etc", BOX_A.upper(), BOX_A[:31], "/abs", "x"):
+        state.set_sandboxed("a", True, box=junk)
+        assert state.sandbox_box("a") == "", junk
+    state.set_sandboxed("a", False, box=BOX_A)
+    assert not state.is_sandboxed("a")
+    assert "a" not in state.sandboxed_sessions
+    assert app_state.AppState().sandboxed_sessions == {}
+
+
+def test_a_forward_carries_the_box_and_the_box_follows_a_forward(app_state):
+    state = app_state.AppState()
+    state.set_sandboxed("a", True, box=BOX_A)
+    state.forward_session("a", "b")
+    # The same conversation, the same box.
+    assert state.sandboxed_sessions == {"a": BOX_A, "b": BOX_A}
+    assert state.sandbox_box("b") == BOX_A
+    assert state.sandbox_boxes() == {BOX_A}
+    # Never over an entry the new id already has.
+    state.set_sandboxed("c", True, box=BOX_B)
+    state.forward_session("a", "c")
+    assert state.sandbox_box("c") == BOX_B
+    # An id with no entry of its own answers with its forward's end, the
+    # way is_sandboxed does.
+    other = app_state.AppState()
+    other.sandboxed_sessions = {"new": BOX_B}
+    other.session_forwards = {"old": "mid", "mid": "new"}
+    assert other.is_sandboxed("old")
+    assert other.sandbox_box("old") == BOX_B
+    assert other.sandbox_box("mid") == BOX_B
+    # Its own box wins over its forward's.
+    other.sandboxed_sessions["old"] = BOX_A
+    assert other.sandbox_box("old") == BOX_A
+
+
+def test_state_file_names_the_file_it_saves_to(app_state):
+    assert app_state.AppState().state_file() == str(app_state._STATE_FILE)
 
 
 def test_sandbox_grants_roundtrip_and_validate(app_state):
@@ -1292,5 +1375,34 @@ def test_sandbox_state_survives_junk_on_disk(app_state):
     )
     state = app_state.AppState()
     assert state.project_sandbox == {"beta": True}
-    assert state.sandboxed_sessions == {"a"}
+    # A list is what a build from before the boxes wrote: ids with no box.
+    assert state.sandboxed_sessions == {"a": ""}
+    assert state.sandbox_box("a") == ""
+    assert state.is_sandboxed("a")
     assert state.sandbox_grants == {"/ws": ["/ok"]}
+    # An object: string keys, a box id or nothing.
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "sandboxed_sessions": {
+                    "a": BOX_A,
+                    "b": "",
+                    "c": "../../../etc",
+                    "d": BOX_A.upper(),
+                    "e": 7,
+                    "f": None,
+                    "g": ["x"],
+                    "": BOX_B,
+                }
+            }
+        )
+    )
+    state = app_state.AppState()
+    assert state.sandboxed_sessions == {
+        "a": BOX_A, "b": "", "c": "", "d": "", "e": "", "f": "", "g": "",
+    }
+    assert state.sandbox_boxes() == {BOX_A}
+    # Neither shape: no sessions at all.
+    for junk in ("nope", 7, None, True):
+        app_state._STATE_FILE.write_text(json.dumps({"sandboxed_sessions": junk}))
+        assert app_state.AppState().sandboxed_sessions == {}

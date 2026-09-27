@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-12. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1702,6 +1702,17 @@ class _ShowDiff:
         self._deferred.resolve(ok, text)
 
 
+def _drop_sibling_box(plan: str, box: str) -> None:
+    """A start_session sibling that will not launch after all: release the
+    plan derived for it (it describes a box in full) and let go of the box
+    minted with it, which goes when nothing else needs it."""
+    sandboxplan.release_plan(plan)
+    host = terminal_mod.SANDBOX_HOST
+    if box and host is not None:
+        host.release(box)
+        host.discard_box_async(box)
+
+
 class _BackgroundSpawn:
     """One start_session tool call in flight: spawn a background session,
     submit its prompt once the box is ready, and resolve the deferred reply
@@ -1746,8 +1757,9 @@ class _BackgroundSpawn:
             self._cwd, self._provider, self._options, self._worktree
         )
         if tab is None:  # trust is a refusal here, never a dialog over the user
-            # A plan derived for the sibling has no tab to adopt it.
-            sandboxplan.release_plan(self._options.sandbox_plan)
+            # A plan derived for the sibling has no tab to adopt it, and
+            # the box minted with it no session to live in.
+            _drop_sibling_box(self._options.sandbox_plan, self._options.sandbox_box)
             self._finish(
                 False,
                 f"Collins hasn't been trusted to run agents in {self._cwd}; open "
@@ -2485,13 +2497,24 @@ class App(Adw.Application):
         The verdict is cached for the run; a launch that comes before it
         lands probes synchronously once."""
         app_id = self.get_application_id()
-        terminal_mod.SANDBOX_HOST = sandboxplan.SandboxHost(app_id, self.state)
+        host = sandboxplan.SandboxHost(app_id, self.state, self.state.state_file())
+        terminal_mod.SANDBOX_HOST = host
         # Plans a previous run never released (a tab destroyed before its
         # shell's exit landed): all this app id's, and bwrap read each one
         # at exec, so nothing running misses it.
         swept = sandboxplan.sweep_plans(app_id)
         if swept:
             logging.getLogger(__name__).info("sandbox: swept %d stale plan file(s)", swept)
+
+        # And the boxes no session names and no running instance holds (a
+        # launch that never produced a transcript, a session deleted while
+        # Collins was down). Off the main loop: a home can be large.
+        def sweep() -> None:
+            gone = host.sweep_boxes()
+            if gone:
+                logging.getLogger(__name__).info("sandbox: removed %d unused box(es)", gone)
+
+        threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
         # The UI reads the cached verdict and never blocks on the probe: a
         # new-chat screen opened before it lands hides its Sandboxed box
         # until this callback puts it back.
@@ -3015,9 +3038,10 @@ class App(Adw.Application):
         sandboxed = mcptools.sibling_sandboxed(sandboxed, window._sandbox_for_new_session(cwd))
         parent_sandboxed = tab.sandboxed
         if parent_sandboxed:
-            # The parent's exact box: its plan re-issued for the sibling's
-            # directory (sandboxplan.derive_plan) — the same overlay home,
-            # grants, shares and settings protection it was *launched*
+            # The parent's box again, around a home of the sibling's own:
+            # its plan re-issued for the sibling's directory and box
+            # (sandboxplan.derive_plan) — the same workspace, grants,
+            # shares and settings protection it was *launched*
             # with, whatever the switches say now. The tool takes nothing
             # that can loosen it, and a cwd the box doesn't reach — an
             # agent asking for a sibling in ~/.ssh — is refused here.
@@ -3028,11 +3052,11 @@ class App(Adw.Application):
                 return False, mcptools.sibling_cwd_refusal(
                     "the parent session's sandbox plan isn't available"
                 )
-            sibling_plan, reason = host.derive(plan_path, cwd)
+            sibling_plan, sibling_box, reason = host.derive(plan_path, cwd)
             if sibling_plan is None:
                 return False, mcptools.sibling_cwd_refusal(reason)
         else:
-            sibling_plan = ""
+            sibling_plan = sibling_box = ""
 
         mode = args.get("permission_mode")
         if mode:
@@ -3044,9 +3068,9 @@ class App(Adw.Application):
                 allowed.discard("bypassPermissions")
             if mode not in allowed:
                 # Every refusal past the derive releases the sibling's plan
-                # file: nothing will launch from it, and it describes a box
-                # in full.
-                sandboxplan.release_plan(sibling_plan)
+                # file and its box: nothing will launch from them, and the
+                # plan describes a box in full.
+                _drop_sibling_box(sibling_plan, sibling_box)
                 if mode == "bypassPermissions":
                     return False, (
                         "start_session won't grant bypassPermissions to a spawned "
@@ -3068,7 +3092,7 @@ class App(Adw.Application):
         model = args.get("model")
         if model:
             if not mcptools.valid_model(model):
-                sandboxplan.release_plan(sibling_plan)
+                _drop_sibling_box(sibling_plan, sibling_box)
                 return False, (
                     "model must be a CLI alias (opus, sonnet, haiku) or a full "
                     "model id."
@@ -3095,14 +3119,15 @@ class App(Adw.Application):
         if sandboxed:
             options = window._sandboxed_options(options)
         if sibling_plan:
-            # The derived plan travels with the options; the sibling's tab
-            # adopts it at spawn and releases it when its shell exits.
-            options = replace(options, sandbox_plan=sibling_plan)
+            # The derived plan and its box travel with the options; the
+            # sibling's tab adopts them at spawn and releases them when its
+            # shell exits.
+            options = replace(options, sandbox_plan=sibling_plan, sandbox_box=sibling_box)
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
         # anything is spawned.
         if provider.new_command(options) is None:
-            sandboxplan.release_plan(sibling_plan)
+            _drop_sibling_box(sibling_plan, sibling_box)
             return False, f"The {provider.name} CLI isn't available to start a session."
 
         deferred = mcptools.DeferredResult()

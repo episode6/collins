@@ -79,10 +79,19 @@ downloads of each version, see the
   usable here) round it out. Sandboxed sessions are never backgrounded or
   re-attached, since the CLI's daemon would run them outside the box. A
   port of EricKuck's aibox mount plan (MIT).
+- **A sandbox home per session.** `$HOME` inside a box is a directory of
+  the session's own under `~/.local/share/collins/sandbox/`, kept across
+  its resumes and restarts and removed when its transcript is trashed or
+  deleted; a fork and a `start_session` sibling each get one of their
+  own. Nothing a session writes to its home reaches another session's,
+  and a symlink planted there can no longer stop the next launch —
+  Collins clears what stands in a mount's way first. Allowed directories
+  are now kept per project: a session resumed inside one of the
+  project's worktrees shares the repository's list.
 - **The Sandboxed chip.** A shield chip leads the footer of a sandboxed
   tab: what the box was launched with (the workspace, whether the GitHub
   CLI login and the SSH agent went in, whether `~/.claude/settings.json`
-  is protected), the directories allowed to sessions in this workspace —
+  is protected), the directories allowed to sessions of this project —
   each with a remove button, and *Allow a directory…* through the folder
   chooser, refused with the reason when it would reach a secret,
   Collins' own state, your home or `/` — and *Restart to apply* when the
@@ -98,9 +107,10 @@ downloads of each version, see the
 - **What a sandboxed session may ask Collins to do.** From inside a box,
   `run_in_terminal` and `read_terminal` reach only sandboxed shells —
   opening one when none is idle — never your own; `start_session`
-  spawns the sibling inside the parent's exact box (its plan re-issued
-  for the sibling's directory, which must lie inside the workspace or an
-  allowed directory, else it is refused), so an unsandboxed sibling from
+  spawns the sibling inside a box that reaches what its parent's does
+  (the parent's plan re-issued for the sibling's directory, which must
+  lie inside the workspace or an allowed directory, else it is refused),
+  so an unsandboxed sibling from
   a sandboxed parent is never possible, and `bypassPermissions` is
   granted to a sibling only when it is sandboxed. Both tools' earlier
   blanket refusal from a sandboxed session is gone.

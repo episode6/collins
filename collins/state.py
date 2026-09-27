@@ -431,6 +431,28 @@ def panel_size_key(scope: str, mode: str) -> str:
     return f"{prefix}_{mode}"
 
 
+def _valid_box_id(box: object) -> bool:
+    """sandboxplan.valid_box_id, which this module can't import (the plan
+    sits above the state): 32 lowercase hex characters."""
+    return isinstance(box, str) and len(box) == 32 and all(c in "0123456789abcdef" for c in box)
+
+
+def _sandboxed_sessions(raw: object) -> dict[str, str]:
+    """The session → box map out of state.json: an object of string keys,
+    each value kept when it is "" or a box id and read as "" otherwise —
+    or a list of ids (what a build from before the boxes wrote), each with
+    no box yet. Anything else is no sessions at all."""
+    if isinstance(raw, dict):
+        return {
+            key: (box if _valid_box_id(box) else "")
+            for key, box in raw.items()
+            if isinstance(key, str) and key
+        }
+    if isinstance(raw, list):
+        return {key: "" for key in raw if isinstance(key, str) and key}
+    return {}
+
+
 def editor_pops_out(monitor_width: int, limit: int) -> bool:
     """Whether the editor should open popped out rather than docked: true on
     monitors at most `limit` scaled px wide (the pop-out threshold setting;
@@ -463,13 +485,16 @@ class AppState:
         # Per-project "new sessions are sandboxed" choices, by project name,
         # on the same terms (absent = follow sandbox_new_sessions).
         self.project_sandbox: dict[str, bool] = {}
-        # The sessions that run inside a sandbox: sticky per session, so a
-        # resume builds the same box the session was started in (see
+        # The sessions that run inside a sandbox, each with the id of its
+        # box (sandboxplan.box_dir: its own $HOME, kept across resumes), or
+        # "" while it has none yet: sticky per session, so a resume builds
+        # the same box the session was started in (see
         # MainWindow.open_session). Recorded when a sandboxed launch resolves
         # its id; a forward (/bg fork) carries it to the new id.
-        self.sandboxed_sessions: set[str] = set()
-        # workspace (a real path) -> the directories a sandboxed session
-        # there may also reach, read-write, beyond the workspace itself.
+        self.sandboxed_sessions: dict[str, str] = {}
+        # project (sandboxplan.grants_key: a real path, a worktree's
+        # repository) -> the directories a sandboxed session there may also
+        # reach, read-write, beyond the workspace itself.
         # Every entry is re-checked against sandboxplan.guard_sensitive
         # when a plan is built: state.json is a file on disk like any other.
         self.sandbox_grants: dict[str, list[str]] = {}
@@ -571,9 +596,7 @@ class AppState:
         self.project_sandbox = {
             k: v for k, v in (data.get("project_sandbox") or {}).items() if isinstance(v, bool)
         }
-        self.sandboxed_sessions = {
-            s for s in (data.get("sandboxed_sessions") or []) if isinstance(s, str) and s
-        }
+        self.sandboxed_sessions = _sandboxed_sessions(data.get("sandboxed_sessions"))
         self.sandbox_grants = {
             k: [g for g in v if isinstance(g, str) and g.startswith("/")]
             for k, v in (data.get("sandbox_grants") or {}).items()
@@ -643,6 +666,12 @@ class AppState:
         settings.pop("git_viewer", None)
         self.settings = {**DEFAULT_SETTINGS, **settings}
 
+    def state_file(self) -> str:
+        """The file this state is read from and saved to. What the sandbox
+        root's ownership is settled by (sandboxplan.SandboxHost.owns_root):
+        an instance on another state.json names none of this one's boxes."""
+        return str(_STATE_FILE)
+
     def save(self) -> None:
         _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -656,7 +685,7 @@ class AppState:
             "archived_projects": sorted(self.archived_projects),
             "project_worktree": self.project_worktree,
             "project_sandbox": self.project_sandbox,
-            "sandboxed_sessions": sorted(self.sandboxed_sessions),
+            "sandboxed_sessions": dict(sorted(self.sandboxed_sessions.items())),
             "sandbox_grants": self.sandbox_grants,  # order is the payload — never sort
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
@@ -839,27 +868,52 @@ class AppState:
             or self.resolve_forward(session_id) in self.sandboxed_sessions
         )
 
-    def set_sandboxed(self, session_id: str, sandboxed: bool) -> None:
-        """Record (or clear) a session's sandbox membership. One write."""
+    def set_sandboxed(self, session_id: str, sandboxed: bool, box: str | None = None) -> None:
+        """Record (or clear) a session's sandbox membership, and its box:
+        *box* None keeps the one the session has, a string replaces it
+        ("" for none yet; anything that is not a box id is read as that).
+        One write, none when nothing changes."""
         if not session_id:
             return
         if sandboxed:
-            if session_id in self.sandboxed_sessions:
+            current = self.sandboxed_sessions.get(session_id)
+            if box is None:
+                wanted = current or ""
+            else:
+                wanted = box if _valid_box_id(box) else ""
+            if current == wanted:
                 return
-            self.sandboxed_sessions.add(session_id)
+            self.sandboxed_sessions[session_id] = wanted
         else:
             if session_id not in self.sandboxed_sessions:
                 return
-            self.sandboxed_sessions.discard(session_id)
+            del self.sandboxed_sessions[session_id]
         self.save()
 
+    def sandbox_box(self, session_id: str) -> str:
+        """The id of the box *session_id* runs in, or "" with none: its own,
+        or — like is_sandboxed — the one at the end of its forward chain."""
+        if not session_id:
+            return ""
+        return (
+            self.sandboxed_sessions.get(session_id)
+            or self.sandboxed_sessions.get(self.resolve_forward(session_id))
+            or ""
+        )
+
+    def sandbox_boxes(self) -> set[str]:
+        """Every box a session of the map names: what must not be removed.
+        Read from the sweep's thread too, so off a snapshot."""
+        return {box for box in list(self.sandboxed_sessions.values()) if box}
+
     def get_sandbox_grants(self, workspace: str) -> list[str]:
-        """The directories granted to sandboxed sessions in *workspace*, in
-        the order they were allowed."""
+        """The directories granted to sandboxed sessions of the project
+        *workspace* (sandboxplan.grants_key), in the order they were
+        allowed."""
         return list(self.sandbox_grants.get(workspace) or [])
 
     def set_sandbox_grants(self, workspace: str, grants: list[str]) -> None:
-        """Persist a workspace's grants; an empty list drops the key. The
+        """Persist a project's grants; an empty list drops the key. The
         guard against granting a secret is sandboxplan.guard_sensitive,
         applied by the surface that asks — and again when a plan is built."""
         if not workspace:
@@ -955,8 +1009,9 @@ class AppState:
             self.emojis[new_id] = self.emojis[old_id]
         if old_id in self.favorites:
             self.favorites.add(new_id)
-        if old_id in self.sandboxed_sessions:
-            self.sandboxed_sessions.add(new_id)
+        if old_id in self.sandboxed_sessions and new_id not in self.sandboxed_sessions:
+            # The same conversation, the same box.
+            self.sandboxed_sessions[new_id] = self.sandboxed_sessions[old_id]
         if old_id in self.panel_layouts and new_id not in self.panel_layouts:
             # Deep copy: a layout entry nests its whole strip tree, and the
             # two sessions' layouts must diverge independently from here.

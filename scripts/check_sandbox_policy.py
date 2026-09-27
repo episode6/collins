@@ -12,7 +12,10 @@ shell, which Ctrl+J keeps to itself; a grant is refused by the guard or
 recorded, makes the launched plan stale so the chip offers *Restart to
 apply*, and the restart resumes the session in the same shell with a plan
 carrying the grant; a sibling from the sandboxed tab inherits the parent's
-plan derived for its directory, and one outside the box is refused.
+plan derived for its directory and a box of its own, and one outside the
+box is refused. Every session has a box (its own `$HOME`): minted at the
+launch, recorded against the session id when it resolves, kept across the
+restart, and removed when the session's transcript is forgotten.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_sandbox_policy.py
@@ -47,7 +50,7 @@ os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
-os.environ["COLLINS_SANDBOX_HOME"] = f"{E2E}/sbx"
+os.environ["COLLINS_SANDBOX_ROOT"] = f"{E2E}/sbx"
 os.environ["COLLINS_BWRAP"] = f"{E2E}/bin/bwrap"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
@@ -246,7 +249,30 @@ def launched() -> bool:
         check("the box chdirs into the workspace", args[args.index("--chdir") + 1] == TRUSTED, args)
         check("the workspace is bound read-write", (TRUSTED, TRUSTED) in after(args, "--bind"), args)
         check("HOME inside is the sandbox home", ("HOME", HOME) in after(args, "--setenv"), args)
-        check("the overlay home comes first", after(args, "--bind")[0] == (f"{E2E}/sbx", HOME), args)
+        box = caller.sandbox_box
+        state["box1"] = box
+        check("the tab minted a box for the session", sandboxplan.valid_box_id(box), box)
+        check("the launch options carry it", caller.launch_options.sandbox_box == box)
+        check(
+            "the overlay home comes first, and is the box's own",
+            after(args, "--bind")[0] == (f"{E2E}/sbx/{box}/home", HOME),
+            after(args, "--bind")[:1],
+        )
+        check(
+            "the box's carrier is bound where live grants arrive",
+            (f"{E2E}/sbx/{box}/grants", sandboxplan.CARRIER_DEST) in after(args, "--bind"),
+            args,
+        )
+        remounts = [args[i + 1] for i, a in enumerate(args) if a == "--remount-ro"]
+        check("…and remounted read-only", sandboxplan.CARRIER_DEST in remounts, remounts)
+        check("the box is on disk", os.path.isdir(f"{E2E}/sbx/{box}/home"))
+        lease = sandboxplan.read_lease(box)
+        check("…leased to this instance", bool(lease) and lease["pid"] == os.getpid(), lease)
+        check(
+            "no session names the box before the id resolves",
+            box not in AppState().sandbox_boxes(),
+            AppState().sandboxed_sessions,
+        )
 
     # The tool policy: a sandboxed session reaches only sandboxed shells.
     got = app._mcp_read_terminal(found(), {}, True)
@@ -361,7 +387,16 @@ def grants() -> bool:
         any("can't apply it from here" in t for t in texts),
         texts,
     )
-    caller.session_id = RESUMED  # what the resolver does when the id lands
+    # What the resolver does when the id lands: binds the tab, and tells
+    # the window, which records the session as sandboxed — in this box.
+    caller.session_id = RESUMED
+    caller.emit("session-resolved", RESUMED)
+    check("the resolved session is sticky-sandboxed", AppState().is_sandboxed(RESUMED))
+    check(
+        "…in the tab's box",
+        AppState().sandbox_box(RESUMED) == caller.sandbox_box == state["box1"],
+        (AppState().sandboxed_sessions, caller.sandbox_box),
+    )
     check("restart is on offer once it has", caller.can_restart_sandboxed())
     chip._rebuild()
     names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
@@ -380,6 +415,10 @@ def restarted() -> bool:
     plan2 = caller.sandbox_plan_path
     check("the restart wrote a fresh plan", plan2 and plan2 != state["plan1"], (state["plan1"], plan2))
     check("…and released the old one", not os.path.exists(state["plan1"]))
+    check("the restart kept the session's box", caller.sandbox_box == state["box1"], caller.sandbox_box)
+    doc = sandboxplan.load_plan(plan2)
+    check("…and its plan names it", bool(doc) and doc["inputs"]["box"] == state["box1"])
+    check("…still leased", host.held(state["box1"]) and bool(sandboxplan.read_lease(state["box1"])))
     check("the restarted plan carries the grant", plan2 and not host.plan_stale(plan2, TRUSTED))
     seen = launches()
     check("the fake bwrap saw the relaunch", len(seen) == 3, len(seen))
@@ -427,15 +466,21 @@ def siblings() -> bool:
     win = state["win"]
     host = terminal.SANDBOX_HOST
     plan = caller.sandbox_plan_path
-    derived, reason = host.derive(plan, SUB)
+    derived, box, reason = host.derive(plan, SUB)
     check("a sibling inside the workspace gets a derived plan", derived is not None and reason == "", reason)
     if derived:
         doc = sandboxplan.load_plan(derived)
         check("…chdir'd into its directory", doc and doc["cwd"] == SUB, doc and doc.get("cwd"))
         check("…with the parent's grants", doc and doc["inputs"]["grants"] == [OTHER], doc and doc["inputs"])
+        check("…and a box of its own", sandboxplan.valid_box_id(box) and box != caller.sandbox_box, box)
+        check("…made and held", os.path.isdir(f"{E2E}/sbx/{box}/home") and host.held(box))
         sandboxplan.release_plan(derived)
-    refused, reason = host.derive(plan, f"{HOME}/.ssh")
+        # Nothing launched from it: let go, it is nobody's, and goes.
+        host.release(box)
+        check("an unused sibling box is removed", host.discard_box(box) and not os.path.exists(f"{E2E}/sbx/{box}"))
+    refused, no_box, reason = host.derive(plan, f"{HOME}/.ssh")
     check("a sibling in ~/.ssh is refused", refused is None and "outside the sandbox" in reason, reason)
+    check("…and gets no box", no_box == "", no_box)
     got = app._mcp_start_session(found(), {"prompt": "hi", "cwd": f"{HOME}/.ssh"}, True)
     check(
         "start_session from the box refuses a cwd outside it",
@@ -445,6 +490,10 @@ def siblings() -> bool:
         got,
     )
     check("…naming the rule", isinstance(got, tuple) and "allowed directories" in got[1], got)
+    got = app._mcp_start_session(
+        found(), {"prompt": "hi", "cwd": SUB, "model": "not a model; rm -rf"}, True
+    )
+    check("a refusal past the derive", isinstance(got, tuple) and got[0] is False, got)
     before = win.tab_view.get_n_pages()
     got = app._mcp_start_session(found(), {"prompt": "hi", "cwd": SUB}, True)
     check("start_session from the box spawns a sibling", not isinstance(got, tuple), got)
@@ -472,10 +521,72 @@ def sibling_up(before: int) -> bool:
         )
         check("…in bypass mode", sibling.launch_options.permission_mode == "bypassPermissions")
         check("…wearing the chip", sibling._sandbox_chip.get_visible())
+        own = sibling.sandbox_box
+        check(
+            "the sibling's box differs from its parent's",
+            sandboxplan.valid_box_id(own) and own != caller.sandbox_box,
+            (own, caller.sandbox_box),
+        )
+        check("…and its plan names it", doc and doc["inputs"]["box"] == own, doc and doc["inputs"])
         seen = launches()
         check("the sibling's launch went through the box", len(seen) == 4, len(seen))
         if len(seen) == 4:
             check("…chdir'd into its directory", seen[3][seen[3].index("--chdir") + 1] == SUB, seen[3])
+            check(
+                "…with a home of its own",
+                after(seen[3], "--bind")[0] == (f"{E2E}/sbx/{own}/home", HOME),
+                after(seen[3], "--bind")[:1],
+            )
+            check(
+                "…and nothing of its parent's box",
+                not any(caller.sandbox_box in arg for arg in seen[3]),
+                seen[3],
+            )
+        # The refused start_session's box went on its thread: what is left
+        # is the parent's, the sibling's, and the owner's mark.
+        left = sorted(n for n in os.listdir(f"{E2E}/sbx") if sandboxplan.valid_box_id(n))
+        check("a refused sibling leaves no box", left == sorted([caller.sandbox_box, own]), left)
+    return forgotten()
+
+
+def forgotten() -> bool:
+    """A session whose transcript goes takes its box with it; the sticky
+    flag stays, so a transcript restored from the trash resumes boxed."""
+    win = state["win"]
+    gone = "99999999-8888-7777-6666-555555555555"
+    box = sandboxplan.new_box_id()
+    sandboxplan.make_box(box)
+    sandboxplan.seed_home(sandboxplan.box_home(box))
+    os.makedirs(f"{sandboxplan.box_home(box)}/dev/project")
+    with open(f"{sandboxplan.box_home(box)}/dev/project/notes.txt", "w", encoding="utf-8") as fh:
+        fh.write("the agent's own\n")
+    os.symlink(OTHER, f"{sandboxplan.box_home(box)}/dev/lib")  # a live grant's link
+    win.state.set_sandboxed(gone, True, box=box)
+    state["gone"] = (gone, box)
+    win._forget_transcript(gone)
+    check("a forgotten session keeps its sticky flag", AppState().is_sandboxed(gone))
+    check("…and names no box", AppState().sandbox_box(gone) == "", AppState().sandboxed_sessions)
+    # An unsandboxed session's transcript going marks nothing.
+    win._forget_transcript("00000000-aaaa-bbbb-cccc-000000000000")
+    check(
+        "forgetting an unsandboxed session marks nothing",
+        not AppState().is_sandboxed("00000000-aaaa-bbbb-cccc-000000000000"),
+    )
+    # The running session's box is held by its tab: forgetting its id
+    # alone would not remove it.
+    state["polls"] = 0
+    GLib.timeout_add(100, box_gone)
+    return GLib.SOURCE_REMOVE
+
+
+def box_gone() -> bool:
+    _gone, box = state["gone"]
+    state["polls"] += 1
+    if os.path.exists(sandboxplan.box_dir(box)) and state["polls"] < 50:
+        return GLib.SOURCE_CONTINUE
+    check("a trashed session leaves no box directory", not os.path.exists(sandboxplan.box_dir(box)))
+    check("…and what its link pointed at is untouched", os.path.isdir(OTHER))
+    check("the running session's box is still there", os.path.isdir(sandboxplan.box_home(state["box1"])))
     finish()
     return GLib.SOURCE_REMOVE
 

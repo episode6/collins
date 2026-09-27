@@ -584,9 +584,11 @@ TOOLS: list[dict] = [
             "inline. The spawned session gets these same Collins tools, so it "
             "can spawn its own; a prompt is required because a session with "
             "nothing to do is a leaked process. A session running inside a "
-            "Collins sandbox spawns siblings inside the same sandbox, with "
-            "the same box: the sibling's directory must then lie inside "
-            "that sandbox's workspace or one of its allowed directories."
+            "Collins sandbox spawns siblings inside a sandbox that reaches "
+            "the same directories, around a home directory of the "
+            "sibling's own: the sibling's directory must then lie inside "
+            "that sandbox's workspace or one of its allowed directories, "
+            "and nothing written to $HOME is shared between the two."
         ),
         "inputSchema": {
             "type": "object",
@@ -1537,9 +1539,9 @@ def sibling_cwd_refusal(reason: str) -> str:
     """The start_session reply when a sandboxed parent asks for a sibling
     in a directory its box doesn't reach."""
     return (
-        f"start_session from a sandboxed session: {reason}. A sibling runs in "
-        "the same sandbox as its parent, so it has to start inside that "
-        "sandbox's workspace or one of its allowed directories."
+        f"start_session from a sandboxed session: {reason}. A sibling's "
+        "sandbox reaches what its parent's does, so it has to start inside "
+        "that sandbox's workspace or one of its allowed directories."
     )
 
 

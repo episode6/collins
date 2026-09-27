@@ -228,7 +228,7 @@ def _within(root: str, path: str) -> bool:
 
 
 # The host side of sandboxing (sandboxplan.SandboxHost, bound to the app id
-# and state): how a sandboxed launch gets its plan (`prepare_launch(cwd)`
+# and state): how a sandboxed launch gets its plan (`prepare_launch(cwd, box)`
 # for the settled launch cwd, None when no box can be built), and what the
 # footer chip reads and writes — the workspace's grants, the guard on a new
 # one, whether the launched plan is stale. Set by the app at startup, like
@@ -1421,6 +1421,10 @@ class TerminalTab(Gtk.Box):
         # a box this tab cannot rebuild by itself, so it never offers
         # the chip's restart (see can_restart_sandboxed).
         self._sandbox_plan_adopted = False
+        # The box that plan was built for (sandboxplan.box_dir — the
+        # session's own $HOME): the one the options named, else minted at
+        # the first launch and kept across this tab's restarts.
+        self._sandbox_box: str = ""
         # Decided at spawn time, so a toggle mid-session can't half-apply to
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
@@ -1931,6 +1935,13 @@ class TerminalTab(Gtk.Box):
         what a sibling's plan is derived from."""
         return self._sandbox_plan_path
 
+    @property
+    def sandbox_box(self) -> str:
+        """The id of the box this tab's session runs in, "" for an
+        unsandboxed tab or before the launch settled: what the window
+        records against the session id once the resolver binds it."""
+        return self._sandbox_box
+
     def new_chat_text(self) -> str:
         return self._new_chat.text() if self._new_chat is not None else ""
 
@@ -2362,26 +2373,53 @@ class TerminalTab(Gtk.Box):
             if os.path.isfile(options.sandbox_plan):
                 self._sandbox_plan_path = options.sandbox_plan
                 self._sandbox_plan_adopted = True
+                # The box the deriver minted and holds for this tab
+                # (SandboxHost.derive): released with the plan.
+                self._sandbox_box = options.sandbox_box
                 return options
+            if options.sandbox_box and SANDBOX_HOST is not None:
+                # The deriver's hold, with no plan left to adopt: the
+                # launch below takes this tab's own.
+                SANDBOX_HOST.release(options.sandbox_box)
         self._release_sandbox_plan()
-        plan = SANDBOX_HOST.prepare_launch(cwd) if SANDBOX_HOST is not None else None
+        # The session's own box, else the one this tab already launched in
+        # (a restart keeps the home), else a fresh one.
+        box = options.sandbox_box or self._sandbox_box or sandboxplan.new_box_id()
+        plan = SANDBOX_HOST.prepare_launch(cwd, box) if SANDBOX_HOST is not None else None
         if plan:
             self._sandbox_plan_path = plan
             self._sandbox_plan_adopted = False
-            return replace(options, sandbox_plan=plan)
+            self._sandbox_box = box
+            return replace(options, sandbox_plan=plan, sandbox_box=box)
+        if SANDBOX_HOST is not None:
+            # Whatever the attempt left on disk, unless a session names it.
+            SANDBOX_HOST.discard_box_async(box)
+        self._sandbox_box = ""
         self.feed_message(
             _("warning: no sandbox could be built here — starting the session unsandboxed")
         )
         mode = "" if options.permission_mode == "bypassPermissions" else options.permission_mode
-        return replace(options, sandbox=False, sandbox_plan="", permission_mode=mode)
+        return replace(
+            options, sandbox=False, sandbox_plan="", sandbox_box="", permission_mode=mode
+        )
 
     def _release_sandbox_plan(self) -> None:
+        """Let go of the plan file and of the box's lease — before a
+        restart's rebuild and at the shell's exit. The box id stays: a
+        restart launches in the same home."""
+        if self._sandbox_plan_path is not None and self._sandbox_box and SANDBOX_HOST is not None:
+            SANDBOX_HOST.release(self._sandbox_box)
         sandboxplan.release_plan(self._sandbox_plan_path)
         self._sandbox_plan_path = None
 
     def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
         # The shell is gone, and the box with it (--die-with-parent).
         self._release_sandbox_plan()
+        if self._sandbox_box and SANDBOX_HOST is not None:
+            # Nothing happens to a box a session names. This removes the
+            # box of a launch that never produced a transcript, and of a
+            # fork whose id never resolved.
+            SANDBOX_HOST.discard_box_async(self._sandbox_box)
         self.emit("process-exited", status)
 
     # -- copy & paste ------------------------------------------------------

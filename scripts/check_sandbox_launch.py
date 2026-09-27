@@ -44,7 +44,7 @@ HOME = f"{E2E}/home"
 
 os.environ["HOME"] = HOME
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
-os.environ["COLLINS_SANDBOX_HOME"] = f"{E2E}/sbx"
+os.environ["COLLINS_SANDBOX_ROOT"] = f"{E2E}/sbx"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"
@@ -53,6 +53,7 @@ os.environ.pop("TMPDIR", None)
 os.environ.pop("COLLINS_BWRAP", None)  # the real one, or nothing
 
 WORKSPACE = f"{E2E}/dev/alpha"
+SECOND = f"{E2E}/dev/beta"  # a second session's workspace, in a box of its own
 GRANTED = f"{E2E}/dev/lib"
 OTHER = f"{E2E}/dev/secret-project"
 SECRET = f"{HOME}/.ssh"
@@ -87,7 +88,7 @@ reason = sandboxplan.probe()
 if reason:
     skip(f"no box can be built here: {reason}")
 
-for path in (WORKSPACE, GRANTED, OTHER, SECRET, f"{HOME}/.claude"):
+for path in (WORKSPACE, SECOND, GRANTED, OTHER, SECRET, f"{HOME}/.claude"):
     os.makedirs(path, exist_ok=True)
 with open(f"{WORKSPACE}/file.txt", "w", encoding="utf-8") as fh:
     fh.write("workspace\n")
@@ -101,13 +102,20 @@ with open(SETTINGS, "w", encoding="utf-8") as fh:
     fh.write('{"model": "opus"}\n')
 
 state = AppState()
-state.set_sandbox_grants(os.path.realpath(WORKSPACE), [GRANTED])
-host = sandboxplan.SandboxHost(os.environ["COLLINS_APP_ID"], state)
-plan_path = host.prepare_launch(WORKSPACE)
+state.set_sandbox_grants(sandboxplan.grants_key(WORKSPACE), [GRANTED])
+host = sandboxplan.SandboxHost(os.environ["COLLINS_APP_ID"], state, state.state_file())
+BOX = sandboxplan.new_box_id()
+BOX2 = sandboxplan.new_box_id()
+plan_path = host.prepare_launch(WORKSPACE, BOX)
 check("a launch in the workspace gets a plan", bool(plan_path), plan_path)
 if not plan_path:
     print(f"\n{PASSED} passed, {FAILED} failed")
     sys.exit(1)
+second_path = host.prepare_launch(SECOND, BOX2)
+check("a second session gets a plan of its own", bool(second_path), second_path)
+BOX_DIR = sandboxplan.box_dir(BOX)
+BOX2_DIR = sandboxplan.box_dir(BOX2)
+CARRIER = sandboxplan.CARRIER_DEST
 
 # One shell inside the box answers everything, as `key=value` lines: the
 # box is built once, and a failed answer names itself.
@@ -129,6 +137,28 @@ echo dev_entries=$(ls {E2E}/dev 2>/dev/null | sort | xargs echo)
 echo usr=$(test -d /usr/bin && echo yes || echo no)
 echo usr_write=$(touch /usr/collins-e2e 2>/dev/null && echo yes || echo no)
 echo pids=$(ls /proc | grep -c '^[0-9]*$')
+echo home_write=$(echo from-the-first > $HOME/written-in-the-first 2>/dev/null && echo yes || echo no)
+echo carrier=$(test -d {CARRIER} && echo yes || echo no)
+echo carrier_entries=$(ls -A {CARRIER} 2>/dev/null | wc -l)
+echo carrier_write=$(mkdir {CARRIER}/mine 2>/dev/null && echo yes || echo no)
+echo anchor=$(test -d /mnt && echo yes || echo no)
+echo anchor_write=$(mkdir /mnt/collins-e2e-mine 2>/dev/null && echo yes || echo no)
+echo own_box=$(ls {BOX_DIR} 2>/dev/null || echo MISSING)
+echo other_box=$(ls {BOX2_DIR} 2>/dev/null || echo MISSING)
+echo boxes=$(ls {E2E}/sbx 2>/dev/null || echo MISSING)
+"""
+
+# The second box, for the second session: what it sees of the first.
+PROBE2 = f"""
+echo pwd=$(pwd)
+echo home=$HOME
+echo first_file=$(cat $HOME/written-in-the-first 2>/dev/null || echo MISSING)
+echo home_write=$(echo from-the-second > $HOME/written-in-the-second 2>/dev/null && echo yes || echo no)
+echo first_workspace=$(ls {WORKSPACE} 2>/dev/null || echo MISSING)
+echo granted=$(cat {GRANTED}/lib.txt 2>/dev/null || echo MISSING)
+echo carrier_write=$(mkdir {CARRIER}/mine 2>/dev/null && echo yes || echo no)
+echo own_box=$(ls {BOX2_DIR} 2>/dev/null || echo MISSING)
+echo other_box=$(ls {BOX_DIR} 2>/dev/null || echo MISSING)
 """
 
 argv = [sys.executable, providers.sandboxrun_path(), plan_path, "--", "/bin/sh", "-c", PROBE]
@@ -169,6 +199,53 @@ else:
     # machine's. The host has hundreds; the box has the shell and its own.
     pids = int(inside.get("pids", "0") or 0)
     check("the pid namespace is its own", 0 < pids < 20, pids)
+    # The box's own places: a home it writes, a carrier and an anchor it
+    # can't, and nothing of the sandbox root — its own box included.
+    check("$HOME is writable", inside.get("home_write") == "yes", inside.get("home_write"))
+    check("the grant carrier is there", inside.get("carrier") == "yes", inside.get("carrier"))
+    check("…empty", inside.get("carrier_entries") == "0", inside.get("carrier_entries"))
+    check("…and mkdir in it fails", inside.get("carrier_write") == "no", inside.get("carrier_write"))
+    check("/mnt is an anchor", inside.get("anchor") == "yes", inside.get("anchor"))
+    check("…and mkdir in it fails", inside.get("anchor_write") == "no", inside.get("anchor_write"))
+    check("the box's own directory is absent inside", inside.get("own_box") == "MISSING", inside.get("own_box"))
+    check("the other box's directory is absent", inside.get("other_box") == "MISSING", inside.get("other_box"))
+    check("the sandbox root is absent", inside.get("boxes") == "MISSING", inside.get("boxes"))
+
+# The second session's box: the same machine, another home.
+if second_path:
+    argv = [sys.executable, providers.sandboxrun_path(), second_path, "--", "/bin/sh", "-c", PROBE2]
+    proc = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    check("the real bwrap accepted the second plan", proc.returncode == 0, (proc.returncode, proc.stderr[-400:]))
+    second = dict(line.split("=", 1) for line in proc.stdout.splitlines() if "=" in line)
+    check("the second box starts in its own workspace", second.get("pwd") == SECOND, second.get("pwd"))
+    check("$HOME inside has the same name", second.get("home") == HOME, second.get("home"))
+    check(
+        "a file written to $HOME in the first box is absent",
+        second.get("first_file") == "MISSING",
+        second.get("first_file"),
+    )
+    check("its own $HOME is writable", second.get("home_write") == "yes", second.get("home_write"))
+    check(
+        "the first session's workspace is absent",
+        second.get("first_workspace") in ("MISSING", ""),
+        second.get("first_workspace"),
+    )
+    check(
+        "the first project's grant is absent",
+        second.get("granted") == "MISSING",
+        second.get("granted"),
+    )
+    check("mkdir in its carrier fails", second.get("carrier_write") == "no", second.get("carrier_write"))
+    check("its own box directory is absent inside", second.get("own_box") == "MISSING", second.get("own_box"))
+    check("the first box's directory is absent", second.get("other_box") == "MISSING", second.get("other_box"))
+    one, two = sandboxplan.load_plan(plan_path), sandboxplan.load_plan(second_path)
+    check(
+        "the two homes differ on the host",
+        bool(one and two)
+        and one["inputs"]["sandbox_home"] == sandboxplan.box_home(BOX)
+        and two["inputs"]["sandbox_home"] == sandboxplan.box_home(BOX2),
+        (one and one["inputs"]["sandbox_home"], two and two["inputs"]["sandbox_home"]),
+    )
 
 # What the host sees of it afterwards: the writes landed for real, and the
 # plan file is Collins' to release.
@@ -176,8 +253,22 @@ check("the write from inside reached the workspace", os.path.exists(f"{WORKSPACE
 check("…and the granted directory", os.path.exists(f"{GRANTED}/written-inside"))
 with open(SETTINGS, encoding="utf-8") as fh:
     check("settings.json is unchanged on the host", fh.read().strip() == '{"model": "opus"}')
+check(
+    "each box's home holds its own file",
+    os.path.exists(f"{sandboxplan.box_home(BOX)}/written-in-the-first")
+    and not os.path.exists(f"{sandboxplan.box_home(BOX)}/written-in-the-second")
+    and os.path.exists(f"{sandboxplan.box_home(BOX2)}/written-in-the-second") == bool(second_path),
+)
+check("the real home has neither", not os.path.exists(f"{HOME}/written-in-the-first"))
+check("nothing was written into the carrier", os.listdir(sandboxplan.box_carrier(BOX)) == [])
 sandboxplan.release_plan(plan_path)
+sandboxplan.release_plan(second_path)
 check("the plan file is released", not os.path.exists(plan_path))
+# Boxes no session names, let go: removed, by file descriptor, tree and all.
+for box in (BOX, BOX2):
+    host.release(box)
+check("the first box goes once nothing needs it", host.discard_box(BOX) and not os.path.exists(BOX_DIR))
+check("…and the second", host.discard_box(BOX2) == bool(second_path) and not os.path.exists(BOX2_DIR))
 
 print(f"\n{PASSED} passed, {FAILED} failed")
 sys.exit(1 if FAILED or not PASSED else 0)

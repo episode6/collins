@@ -187,10 +187,13 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   its parent is (`mcptools.sibling_sandboxed` — never an unsandboxed
   sibling from a sandboxed parent), else per the project's default
   (`window._sandbox_for_new_session`); a sandboxed parent's sibling runs
-  on the parent's *launched* plan re-issued for its directory
-  (`terminal.SANDBOX_HOST.derive`, `sandboxplan.derive_plan`), and a cwd
+  on the parent's *launched* plan re-issued for its directory and for a
+  box of its own — `terminal.SANDBOX_HOST.derive` returns (plan file, box
+  id, reason), and both ride in the options (`sandbox_plan`,
+  `sandbox_box`) — and a cwd
   outside that plan's workspace or grants is refused
-  (`mcptools.sibling_cwd_refusal`). `bypassPermissions` is granted —
+  (`mcptools.sibling_cwd_refusal`). Every refusal past the derive drops
+  both (`app._drop_sibling_box`). `bypassPermissions` is granted —
   explicit or inherited — only to a sandboxed sibling
   (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is
   refused; the trust dialog becomes a refusal. See

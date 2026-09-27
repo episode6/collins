@@ -5,14 +5,17 @@ description: >-
   sandbox: the GTK-free mount plan (sandboxplan.py, a port of aibox's
   plan.rs with Collins' additions), the stdlib-only host launcher the typed
   command starts with (sandboxrun.py), SessionOptions.sandbox and the
-  provider wrapper, the sticky per-session flag and per-project override in
-  state.json, the new-chat Sandboxed checkbox, trust mirroring into the
-  sandbox home, the /bg and attach refusals, the Preferences group and the
-  bwrap probe, and what the box does and does not contain. Use when changing
-  anything about sandboxed launches, the plan's tables or ordering, grants,
-  the two shares, or debugging a session that came up unsandboxed, a shim
-  that can't reach Collins from inside, or a settings.json write that failed
-  with EBUSY.
+  provider wrapper, the box every sandboxed session has for itself (its own
+  sandbox home, a carrier and anchors, a lease; made, scrubbed, swept and
+  removed by file descriptor), the sticky session-to-box map and
+  per-project override in state.json, the new-chat Sandboxed checkbox,
+  trust mirroring into the sandbox home, the /bg and attach refusals, the
+  Preferences group and the bwrap probe, and what the box does and does not
+  contain. Use when changing anything about sandboxed launches, the plan's
+  tables or ordering, the boxes on disk, grants, the two shares, or
+  debugging a session that came up unsandboxed, a shim that can't reach
+  Collins from inside, a box that wasn't removed, or a settings.json write
+  that failed with EBUSY.
 ---
 
 # Sandboxed sessions
@@ -49,23 +52,33 @@ and the `claude` launcher on PATH when it is a real file in a shared tree
 pin — noted in the plan and stated in the docs). A *symlinked*
 `settings.json` refuses the plan (`PlanRefused`: bwrap can't create the
 destination through it, and the link stays replaceable) unless the switch
-makes it editable. **Ordering rule**: the overlay home first,
+makes it editable. **Ordering rule**: the overlay home first, then the
+system tables, the runtime dir's tmpfs and `TMPDIR`, then the box's
+**anchors** and its **carrier** (below),
 Collins' own read-only binds *before* the workspace (a workspace that
 overlaps them — a Collins checkout under `./start-debug` — must land on
-top and stay writable), masks last. `carried()` decides which masks to
+top and stay writable), masks last, then the protect-check, then
+`--remount-ro` for the carrier and every emitted anchor, then `--proc`.
+`carried()` decides which masks to
 emit: bwrap would *create* a destination it was told to cover, so only
 secrets that exist and that a shared mount actually reaches are masked.
 The workspace is held to the grant rule (`guard_path`: never a secret,
-inside one, an ancestor of one, `$HOME` or above it — checked as written
+inside one, an ancestor of one, `$HOME` or above it, and never anything
+that is, holds or lies inside the **sandbox root** — "reaches the sandbox
+homes": no box is built on, or granted, another box's home — checked as
+written
 *and* resolved, against the home as written and resolved, and against the
 target of any secret that is itself a symlink, so a `~/.ssh` that points
 into a dotfiles checkout refuses the checkout too); grants go through the
 same guard and are kept as written, not `realpath`'d. The protect-check
 refuses a plan that would carry `~/.config/collins`,
-`~/.local/state/collins`, `~/.cache/collins` or the plan directory
+`~/.local/state/collins`, `~/.cache/collins`, the plan directory or the
+sandbox root
 (`PlanRefused`). Every path is validated (`valid_path`: absolute, bounded,
 no control characters, no `.`/`..`). The output is a JSON document
-(`bwrap_args`, `unsetenv`, `setenv`, `gh_token`, `workspace`, `inputs`,
+(`version` 2, `bwrap_args`, `unsetenv`, `setenv`, `gh_token`, `workspace`,
+`inputs` — the policy slice plus `box`, `sandbox_home`, `carrier`, the
+emitted `anchors` and `grants_key` — and
 `notes`), written by `prepare_launch` to
 `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` mode 0600 and
 regenerated at every launch — a cache of state, never state. With no
@@ -76,22 +89,76 @@ box shares read-write, so `plan_dir` falls back to
 reach is exactly what the protect-check refuses, and it would refuse every
 launch.
 
-`prepare_launch(workspace, app_id, state)` is the host side of a launch: it
-creates the `RW_HOME_ALWAYS` directories (a bind needs a source), seeds the
+**The box.** Every sandboxed session has a directory of its own under the
+sandbox root (`sandbox_root()`: `COLLINS_SANDBOX_ROOT`, else
+`$XDG_DATA_HOME/collins/sandbox`, one root whatever the app id), named by
+a **box id** — `uuid4().hex`, 32 lowercase hex characters, and
+`valid_box_id` accepts nothing else, so `box_dir` / `box_home` /
+`box_carrier` / `box_anchor` raise on anything that could be a path:
+
+```
+<root>/owner            which state file's boxes these are (the sweep)
+<root>/<box id>/home/   $HOME inside the box            (agent-written)
+               grants/  the carrier, bound at /run/collins/grants
+               anchors/<top>/   one per anchored top-level directory
+               lease    {"pid", "app_id"} while an instance holds the box
+```
+
+The id is minted by the tab at the first launch — before the CLI has
+minted a session id — and recorded against the session id when the
+resolver binds the tab. The **carrier** and the **anchors** are empty
+host directories bound into the box and remounted read-only there
+(`Plan.remount_ro`), which is what lets a mount the *host* makes in one
+propagate into the running box while the box itself can write none of
+them; nothing mounts there yet (live grants are the next PR of the
+stack). `anchor_roots()` is every real directory in `/` not in
+`NEVER_ANCHORED` (`/mnt`, `/media`, `/srv`, a machine's own `/data`);
+`_kept_anchors` drops one whose destination the plan binds itself (the
+workspace, a grant, the repository's `.git` / `.claude`, one of Collins'
+own pieces — the remount acts on the topmost mount at a path and must
+never be the workspace) or that would cover something bound before it (a
+home outside `/home`, the runtime dir, `TMPDIR`).
+
+`prepare_launch(workspace, app_id, state, box)` is the host side of a
+launch: it validates the box id, creates the `RW_HOME_ALWAYS` directories
+(a bind needs a source) and the box's own (`make_box`, each 0700), seeds
+the
 sandbox home once with `~/.claude.json` (`seed_home`; mode 0700, the copy
 diverges from then on), mirrors folder trust (`mirror_trust`:
 `hasTrustDialogAccepted` for the workspace *and its trusted ancestors*, and
 nothing else — the one write Collins makes to a file the CLI would not
-have written itself, into a file Collins owns), builds and writes the plan.
+have written itself, into a file Collins owns), builds the plan, **scrubs
+the home** (`scrub_home`), writes the plan and the box's lease.
 Returns None when no box can be built; the tab then launches unsandboxed
-and says so, dropping a bypass mode the box justified. **Every path under
-the sandbox home is attacker-controlled** (it is `$HOME` inside, shared by
-every box): the two writes there go through `_replace_private` —
+and says so, dropping a bypass mode the box justified, and discards what
+the attempt left. **Every path under
+a sandbox home is attacker-controlled** (it is `$HOME` inside):
+the two writes there go through `_replace_private` —
 `lstat` the destination and refuse anything but a regular file or
 nothing, write a fresh `O_EXCL | O_NOFOLLOW` temp under a random name,
 rename — so a planted `.claude.json` or `.claude.json.tmp` symlink never
 becomes a host write. `sweep_plans(app_id)` at startup clears plan files
 a killed tab never released (bwrap reads its plan once at exec).
+
+`scrub_home(home_dir, plan, home)` removes what stands in a mount's way
+in this box's own home: for every destination of the plan strictly under
+`$HOME` (a bind whose source exists, a tmpfs) that no earlier mount
+already covers, it walks the path one component at a time, each opened
+relative to the last with `O_NOFOLLOW`. A symlink is unlinked, a stray
+file where a directory goes is unlinked, an empty directory where a file
+goes is removed; bwrap's own stubs and a non-empty directory where a
+file goes are left. It never follows a link, never leaves the home, and
+touches nothing off a mount's path. The notes go into the plan.
+
+`remove_box(box)` is **the one place the feature deletes a tree**, and
+the tree was written by the agent: only `<root>/<32 hex>` (a bad id
+raises); refused while `/proc/self/mountinfo` shows a mount point at or
+under the box (as written and resolved) — never delete through a mount;
+walked by file descriptor (`os.scandir(fd)`, `stat`/`unlink`/`rmdir`
+with `dir_fd`), a symlink unlinked and never followed; an entry on
+another device stops the whole removal before anything is touched (one
+walk to look, one to remove, both checking). These three are not to be
+loosened to make something work.
 
 **`sandboxrun.py` (stdlib only, nothing from `collins`).** The typed line
 is `python3 <…>/collins/sandboxrun.py <plan.json> -- claude …` — the
@@ -107,47 +174,90 @@ in as `GH_TOKEN` the same way (never on disk, never on the command line).
 A plan it can't read or a missing bwrap is exit 2 with the reason: it never
 runs the command unsandboxed. `COLLINS_BWRAP` names a fake for tests.
 
-**The host object.** `sandboxplan.SandboxHost(app_id, state)` is the host
-side of everything a running instance asks: `prepare_launch(cwd)`, the
-per-workspace grants (`grants` / `allow` / `revoke` — `allow` runs
+**The host object.** `sandboxplan.SandboxHost(app_id, state, state_file)`
+is the host
+side of everything a running instance asks: `prepare_launch(cwd, box)`,
+the boxes (`hold` / `release` — counted in memory and written as the
+box's lease; `discard_box`, which removes a box only when no session of
+`state.sandbox_boxes()` names it, no *live* lease of another process
+holds it — live while `/proc/<pid>` exists — and this process doesn't;
+`discard_box_async` on a daemon thread; `sweep_boxes` at startup), the
+per-project grants (`grants` / `allow` / `revoke`, keyed by
+`grants_key(workspace)`: the repository a Claude-managed worktree belongs
+to, else the real workspace — `allow` runs
 `grant_reason`: the `guard_path` rule first, so a secret is refused whether
 or not it exists, then "already inside the workspace" and "not a
 directory"), `plan_stale(plan_path, workspace)` (the launched plan's
 `inputs` against what `build_plan(gather_inputs(...))` would say now, on
 the `POLICY_INPUTS` keys — grants, the two shares, settings protection),
-and `derive(plan_path, cwd)` (a sibling's plan file, see the policy
-below). `load_plan` reads a launched plan back through `sandboxrun.
-read_plan` plus an `inputs` check; `plan_reaches(plan, path)` is the
-"inside the workspace or a grant" rule; `derive_plan(plan, cwd)` re-issues
-a plan with only `--chdir` changed (`cwd` recorded beside `workspace`).
+and `derive(plan_path, cwd)` (a sibling's plan file and box, see the
+policy below). `load_plan` reads a launched plan back through `sandboxrun.
+read_plan` plus an `inputs` check (version 2, a box id, the box's paths);
+`plan_reaches(plan, path)` is the
+"inside the workspace or a grant" rule; `derive_plan(plan, cwd, box)`
+re-issues a plan with `--chdir` changed (`cwd` recorded beside
+`workspace`) and every path under the parent's box moved to the
+sibling's.
 The app sets `terminal.SANDBOX_HOST` to one at startup.
 
+**The sweep belongs to one state file.** `sweep_boxes` removes every box
+the state doesn't name, so it must be the state that names them — and
+every e2e check and capture runs on a scratch `state.json` beside the
+user's real sandbox root. `<root>/owner` names the owning state file
+(`owns_root`): no owner, this instance's, or one whose file is gone →
+this instance claims the root and sweeps; anyone else's → it sweeps
+nothing. `discard_box` has no such check: it is only called for a box
+this instance's own state named or its own tab minted.
+
 **The tab.** `SessionOptions.sandbox` is the decision, `sandbox_plan` the
-file. `TerminalTab._launch_command` (from `_finish_spawn`, and again from a
+file, `sandbox_box` the box. `TerminalTab._launch_command` (from
+`_finish_spawn`, and again from a
 restart) writes the plan at the last moment through
 `terminal.SANDBOX_HOST.prepare_launch` because the workspace is the
-*settled* cwd — a recreated worktree included — unless the options already
-carry a plan the tab hasn't seen (a sibling's derived plan), which
+*settled* cwd — a recreated worktree included — in the box the options
+name (a resumed session's), else the one the tab already launched in (a
+restart keeps the home), else a fresh one — unless the options already
+carry a plan the tab hasn't seen (a sibling's derived plan, with its
+box), which
 `_sandbox_options` *adopts* instead; and `Provider.sandbox_prefix`
 prepends the wrapper in `new_command` / `resume_command` and, for the
 `--continue` override, in the tab itself — which also appends
 `Provider.session_flags` (the permission mode) there, after the options
 settled, so a box that couldn't be built never leaves a bypass flag typed.
 `--die-with-parent` ties the box to the tab's shell, so every close flow
-holds; the plan is unlinked in `_on_child_exited`. `tab.sandboxed` is the
+holds; `_release_sandbox_plan` unlinks the plan and releases the lease
+(before a restart's rebuild, and in `_on_child_exited`, which then asks
+`discard_box_async` — a no-op for a box a session names, and what removes
+the box of a launch that never produced a transcript). `tab.sandboxed`
+is the
 launch record (as launched, not as the settings now say). A sandboxed
 *fork* tab keeps its origin's id but runs the resolver in `_fork_resolve`
 mode: the forked conversation's id lands on `fork-resolved` and the window
-adds it to the sticky set, so the fork's own row resumes boxed too.
+records it with the fork tab's own box, so the fork's row resumes boxed
+too, in its own home.
+
+**Who gets which box.** A resume: the session's (`open_session` passes
+`state.sandbox_box(id)`). A restart: the tab's. A fork: a new one. A
+`--continue` tab: a new one, which replaces the session's when it
+resolves (`_on_session_resolved` discards the previous). A
+`start_session` sibling: a new one, minted by `derive`. A sandboxed panel
+shell: the session's, since it runs the session's plan file. A trashed or
+deleted transcript (`_forget_transcript`): the entry's box is cleared and
+the box discarded — unlinked, not trashed — while the sticky flag stays,
+so a transcript restored from the trash resumes boxed in a fresh home.
 
 **State.** `sandbox_new_sessions` + `project_sandbox` overrides
 (`sandbox_for_project`, the sidebar project menu's *New sessions are
 sandboxed* check), `sandbox_bypass_permissions`, `sandbox_share_gh`,
 `sandbox_share_ssh`, `sandbox_settings_editable`; the sticky
-`sandboxed_sessions` set (written when a sandboxed launch resolves its id,
+`sandboxed_sessions` map, session id → box id or `""` (written when a
+sandboxed launch resolves its id,
 or a sandboxed fork reports its new one, carried by `forward_session`,
-read by `open_session` for a resume); `sandbox_grants` per real workspace
-path (edited from the footer chip, see below). The draft record's
+read by `open_session` for a resume; `set_sandboxed(id, True, box=None)`
+keeps the box, a string replaces it; saved as an object with sorted keys,
+and loaded from an object or from the list an older build wrote — shape
+validation, not a migration); `sandbox_grants` per project
+(`grants_key`; edited from the footer chip, see below). The draft record's
 `sandbox` slot mirrors the worktree checkbox, except that a restored
 choice sticks while the box is hidden (a draft reopened before the probe's
 verdict, or on a machine with no box — the late verdict keeps it rather
@@ -248,12 +358,16 @@ Ctrl+J shell is never typed into or read from inside a box.
 `_mcp_start_session`: `mcptools.sibling_sandboxed(parent, project_default)`
 (a sandboxed parent's sibling is always sandboxed — the unit test says so
 in those words), and for a sandboxed parent the sibling gets
-`host.derive(parent's launch plan, cwd)`: the parent's exact box (grants,
-shares, settings protection *as launched*) with `--chdir` moved, refused
+`host.derive(parent's launch plan, cwd)`: the parent's exact mounts
+(grants, shares, settings protection *as launched*) with `--chdir` moved,
+around **a box of the sibling's own** — `derive` mints it, makes it,
+seeds its home, mirrors trust for the cwd, scrubs, writes the plan and
+holds the lease, returning (plan file, box id, reason) — refused
 through `mcptools.sibling_cwd_refusal` when the cwd lies outside the
-plan's workspace or grants (`plan_reaches`); the derived plan rides in
-`options.sandbox_plan`, the sibling tab adopts and releases it, and a
-spawn that never made a tab releases it in `_BackgroundSpawn.begin`.
+plan's workspace or grants (`plan_reaches`); the derived plan and box
+ride in `options.sandbox_plan` / `sandbox_box`, the sibling tab adopts
+and releases them, and a refusal past the derive, or a
+spawn that never made a tab, drops both (`app._drop_sibling_box`).
 bypass is granted (explicit or inherited) only when the sibling is
 sandboxed. A parent in a linked worktree gets its sibling refused: the
 sibling collapses to the repo root (the resolver's rule), which the
@@ -289,17 +403,35 @@ switches go insensitive and its status row says why.
   shipped profile, but nothing inside can mount and the host can't `setns`
   into the mount namespace. Live grants (aibox's broker/launcher) are
   impossible here; a grant applies at the next launch.
-- **A live grant through FUSE is possible and is deliberately not shipped**
-  (measured 2026-09-12). A `bindfs` mount the host makes under sandbox-home
-  does propagate into a *running* box — about 1.5 s, readable inside, gone
-  again on `fusermount3 -uz`. But every box binds the one sandbox home at
-  `$HOME`, so the mount lands in **every** sandboxed session running at
-  that moment, not the workspace it was allowed for: measured with a box
-  launched for one workspace, which saw a directory mounted for another.
-  A per-workspace grant that silently reaches every open box is not the
-  promise the chip makes, so grants stay grants-on-restart (the static
-  plan, which is per launch and per workspace). Reopening this means
-  giving each session its own sandbox home first.
+- **A home per box isolates a mount the host makes** (measured
+  2026-09-27, scripts in `~/specs/collins/assets/sandbox-live-grants/`).
+  Two boxes, each with its own home and carrier: a `bindfs` mount made on
+  the host in box A's carrier was in A's `/proc/self/mountinfo` 21 ms
+  later, readable and writable there, and box B never saw it. With the
+  one shared sandbox home the stack began with, the same mount landed in
+  **every** open box — which is why a grant was restart-only, and why
+  every session now has a box of its own.
+- **`--ro-bind` is the wrong spelling for the carrier; `--bind` then
+  `--remount-ro` is the right one.** bubblewrap's `--ro-bind` is
+  recursive and remounts every submount it finds read-only: a box
+  launched while a mount already sat in the carrier (a sandboxed panel
+  shell opened later) got it read-only. With `--bind` early and
+  `--remount-ro` at the end of the plan the directory is read-only
+  (`mkdir`, `ln -s`, `mv`, `rmdir` inside: `EROFS`), a mount in it stays
+  `rw`, and a static bind *under* such a directory needs no pre-created
+  mount point (bwrap makes it before the remount).
+- **A leftover symlink where a static bind goes stops the launch.** With
+  a symlink at `<box home>/<rel>` and `--bind <dir> <dir>` for the same
+  path, bwrap exits 1 ("Can't bind mount … No such file or directory").
+  An agent can plant one; with one shared home it bricked every
+  sandboxed session. `scrub_home` clears the destinations before every
+  launch.
+- **State is shared across app ids, not across `XDG_CONFIG_HOME`.**
+  `state.json` is `~/.config/collins/state.json` whatever
+  `COLLINS_APP_ID` says, so a debug instance beside the real one reads
+  the same session → box map: hence one root and the lease. A test
+  instance moves `XDG_CONFIG_HOME` and usually nothing else: hence the
+  root's `owner`.
 - The two `bwrap` processes carry the CLI's argv in their own command
   lines, so `proctree._deepest_agent_pid` walks through them and the CLI
   itself is the deepest agent: they are ancestors, not descendants, and
@@ -320,9 +452,9 @@ switches go insensitive and its status row says why.
   box can't reach, so a bind of `~/.config/gh` alone yields "token invalid";
   hence `GH_TOKEN` via `gh auth token` in sandboxrun. `git_protocol: ssh`
   users push over SSH, which the SSH-agent share covers.
-- bwrap creates every mount point inside sandbox-home and the skeleton
+- bwrap creates every mount point inside the box's home and the skeleton
   persists (empty dirs, 0-byte file stubs for `RO_HOME` files). Derive
-  "what is inside" from the plan, never by listing sandbox-home; a later
+  "what is inside" from the plan, never by listing the home; a later
   launch that no longer binds a `RO_HOME` file exposes the stub.
 - The seeded `~/.claude.json` carries the user's global `mcpServers` and
   Remote Control: both run inside the box, and the file grows with the
@@ -341,6 +473,11 @@ real box over a real plan and skips where the probe says no.
 `tests/test_sandboxrun.py` runs the module end to end against a fake bwrap
 that dumps the fd; `load_plan` / `plan_reaches` / `derive_plan` and the
 `SandboxHost` (allow, revoke, stale, derive) have their own cases there,
+and so do the boxes: ids, anchors and their two drop rules, `scrub_home`
+on real trees (the planted link's target must survive), `remove_box`
+with the mount table and `stat` injected (`mounts=`, `stat_fn=`),
+`discard_box`, the lease, the sweep and its owner;
+the session → box map in `tests/test_state.py`,
 the policy helpers (`tool_shells`, `sibling_sandboxed`, the handler flag)
 in `tests/test_mcptools.py`, `inner_shell_pid` in `tests/test_proctree.py`
 over a real process tree, the layout flag in `tests/test_panellayout.py`.
@@ -357,11 +494,15 @@ other half and has no GTK in it: a plan `prepare_launch` wrote, run under
 the **real** bwrap (`sandboxrun.py <plan> -- /bin/sh -c …`), reporting
 from inside — the workspace and the grant writable, the un-granted
 sibling, `~/.ssh`, Collins' own state and the plan file itself absent,
-`settings.json` read-only, `/usr` read-only, its own pid namespace. It is
+`settings.json` read-only, `/usr` read-only, its own pid namespace, the
+carrier and `/mnt` there and unwritable, the sandbox root absent — and a
+second box for a second workspace, blind to the first's home, workspace
+and grant. It is
 the only proof that bwrap *accepts* a generated plan, and it exits 77
 (`run_e2e`'s skip) with a printed reason where no box can be built — a CI
 container may have no user namespace to give. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
-`COLLINS_SANDBOX_HOME` beside the usual scratch tree.
+`COLLINS_SANDBOX_ROOT` beside the usual scratch tree, staged under
+`~/.cache/collins-e2e`.
 
 Related: `collins-terminal-tab`, `collins-sessions-and-sidebar`,
 `collins-session-mcp-tools`, `collins-preferences-keybindings-i18n`.
