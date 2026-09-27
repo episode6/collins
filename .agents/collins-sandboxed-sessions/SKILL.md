@@ -376,10 +376,18 @@ every mount this instance made.
   project that its plan lacks — nothing for an ordinary launch, the
   grants made since for a sibling on a plan derived earlier; a box
   registered again has what was live in it unmounted first.
-  **`unregister(box, wait=True)`** is what `_release_sandbox_plan` calls:
-  the restart needs the home clear before the next plan is prepared, so
-  it blocks the main loop for the unmounts (milliseconds each, bounded by
-  the kill ladder). **`sweep_mounts()`** at startup, before
+  **`unregister(box, done=)`** unmounts everything live in the box; the
+  restart needs the home clear before the next plan is prepared, and a
+  box can't be removed before its mounts are gone, but **the main loop
+  waits for neither**: a server a process inside still held a file of
+  takes seconds to end, several of them several times that. The tab
+  unregisters through `_unregister_sandbox_box(then)` and goes on from
+  `done` — the restart lands `_relaunch_sandboxed` with `GLib.idle_add`
+  at default priority, the shell's exit releases the lease and discards
+  the box from the worker. `unregister(box, wait=True)` still exists and
+  says whether the unmounts finished in time; `_release_sandbox_plan`
+  calls it for a box that is, by then, already unknown.
+  **`sweep_mounts()`** at startup, before
   `sweep_boxes`, unmounts every `fuse.bindfs` mount under the sandbox
   root whose source is `collins:<pid>` with no such process.
   **`shutdown()`** from `App.do_shutdown`.

@@ -724,6 +724,53 @@ def revoked() -> bool:
     check("…and the link is gone", not os.path.lexists(link))
     check("the directory itself is untouched", os.path.exists(f"{LIVE}/hello.txt"))
     check("the live grants hold nothing", mounts.live_paths(caller.sandbox_box) == [])
+    # Allowed again, and then the session restarted over it: what is
+    # mounted goes first, off the main loop, and the relaunch binds the
+    # directory itself.
+    state["toasts"].clear()
+    caller._sandbox_chip.allow_directory(TRUSTED, LIVE)
+    state["polls"] = 0
+    GLib.timeout_add(50, live_again)
+    return GLib.SOURCE_REMOVE
+
+
+def live_again() -> bool:
+    caller = state["caller"]
+    state["polls"] += 1
+    if not state["toasts"] and state["polls"] < 200:
+        return GLib.SOURCE_CONTINUE
+    check("allowed again, it is mounted again", len(mounts_under(E2E)) == 1, mounts_under(E2E))
+    state["plan_live"] = caller.sandbox_plan_path
+    state["launches"] = len(launches())
+    check("the restart starts over a live grant", caller.restart_sandboxed())
+    GLib.timeout_add(5000, restarted_live)
+    return GLib.SOURCE_REMOVE
+
+
+def restarted_live() -> bool:
+    caller = state["caller"]
+    host = terminal.SANDBOX_HOST
+    mounts = terminal.SANDBOX_GRANTS
+    plan = caller.sandbox_plan_path
+    check("the restart wrote a fresh plan", bool(plan) and plan != state["plan_live"], plan)
+    check("nothing is mounted any more", mounts_under(E2E) == [], mounts_under(E2E))
+    link = f"{sandboxplan.box_home(caller.sandbox_box)}/dev/live"
+    check("the link is out of the way of the bind", not os.path.lexists(link))
+    doc = sandboxplan.load_plan(plan)
+    check(
+        "the relaunch binds what was live itself",
+        bool(doc) and doc["inputs"]["grants"] == [OTHER, LIVE],
+        doc and doc["inputs"]["grants"],
+    )
+    seen = launches()
+    check("the fake bwrap saw the relaunch", len(seen) == state["launches"] + 1, len(seen))
+    if seen:
+        check("…binding the directory at its real path", (LIVE, LIVE) in after(seen[-1], "--bind-try"))
+    check("the box is registered again, in the same home", mounts.registered(caller.sandbox_box))
+    check("…holding the grant statically", mounts.status(caller.sandbox_box, LIVE) == "static")
+    check("…with nothing live", mounts.live_paths(caller.sandbox_box) == [])
+    check("and is not stale", not host.plan_stale(plan, TRUSTED, live=mounts.live_paths(caller.sandbox_box)))
+    check("the session is up again", caller.has_running_command())
     # A static grant taken back stays in the running box until the restart.
     terminal.SANDBOX_HOST.revoke(TRUSTED, OTHER)
     chip = caller._sandbox_chip
@@ -731,7 +778,7 @@ def revoked() -> bool:
     texts = labels(chip._content)
     check("a static grant taken back is tagged until restart", "until restart" in texts, texts)
     remove = [b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]
-    check("…with no remove button", remove == [], len(remove))
+    check("…with no remove button: only the grant still held has one", len(remove) == 1, len(remove))
     names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
     check("…and the restart on offer", "Restart to apply" in names, names)
     finish()

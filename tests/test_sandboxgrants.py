@@ -878,10 +878,33 @@ def test_unregister_waits_until_nothing_is_mounted(tmp_path, home, world):
     assert not grants.registered(BOX)
     assert grants.live_paths(BOX) == []
     assert all(proc.returncode is not None for proc in world.procs)
-    grants.unregister(BOX, wait=True)  # twice is once
-    grants.unregister("f" * 32)
+    assert grants.unregister(BOX, wait=True) is True  # twice is once
+    assert grants.unregister("f" * 32) is True
+    # Without waiting: `done` says when, on the worker — and at once, here,
+    # for a box there is nothing to unmount in.
+    _call(grants.register, _plan(tmp_path, home))
+    assert len(world.table.points()) == 2
+    assert _call(lambda done: grants.unregister(BOX, done=done)) == []
+    assert world.table.points() == []
+    seen = []
+    grants.unregister(BOX, done=lambda gone: seen.append(threading.current_thread().name))
+    assert seen == [threading.current_thread().name]
     # What is allowed afterwards has no box to reach.
     assert _call(grants.allow, ws, str(home / "work" / "other")) == []
+
+
+def test_a_wait_that_runs_out_says_so(tmp_path, home, world, monkeypatch):
+    """The caller that waits is told when the unmounts didn't finish in
+    time, rather than going on as if they had."""
+    grants = world.grants()
+    _call(grants.register, _plan(tmp_path, home))
+    monkeypatch.setattr(sandboxgrants, "WAIT_TIMEOUT_S", 0.05)
+    release = threading.Event()
+    grants._submit(lambda: release.wait(10) and [])  # the worker, busy
+    assert grants.unregister(BOX, wait=True) is False
+    release.set()
+    _settle(grants)
+    assert not grants.registered(BOX)
 
 
 def test_shutdown_unmounts_everything_and_stops_the_thread(tmp_path, home, world):

@@ -2350,6 +2350,21 @@ class TerminalTab(Gtk.Box):
                 )
                 return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
+        # The shell has the terminal back. What was mounted into the old
+        # box goes first — the next plan is prepared in a home with its
+        # links gone — and that is the grants' worker's job, not the main
+        # loop's: a bindfs server a process inside still held a file of
+        # takes seconds to end. The relaunch lands when it is done;
+        # _restart_ticks stays set meanwhile, so no second restart starts.
+        self._unregister_sandbox_box(
+            lambda: GLib.idle_add(self._relaunch_sandboxed, priority=GLib.PRIORITY_DEFAULT)
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _relaunch_sandboxed(self) -> bool:
+        if self.get_root() is None or self._restart_ticks is None:
+            self._restart_ticks = None
+            return GLib.SOURCE_REMOVE
         self._restart_ticks = None
         # The launch cwd, not the agent's last one: a resume re-enters a
         # worktree the transcript records by itself, and the plan's
@@ -2423,15 +2438,26 @@ class TerminalTab(Gtk.Box):
         if SANDBOX_GRANTS is not None:
             SANDBOX_GRANTS.register(sandboxplan.load_plan(self._sandbox_plan_path))
 
+    def _unregister_sandbox_box(self, then) -> None:
+        """Have what was mounted into this tab's box while it ran unmounted,
+        and call *then()* once it is — on the grants' worker thread, or
+        here and now when there is nothing to unmount. Never waits: the
+        main loop goes on, and *then* lands itself where it needs to be."""
+        if SANDBOX_GRANTS is None or not self._sandbox_box:
+            then()
+            return
+        SANDBOX_GRANTS.unregister(self._sandbox_box, done=lambda _gone: then())
+
     def _release_sandbox_plan(self) -> None:
         """Let go of the plan file, of what was mounted into the box while
-        it ran, and of the box's lease — before a restart's rebuild and at
-        the shell's exit. The box id stays: a restart launches in the same
-        home.
+        it ran, and of the box's lease — before a launch builds the next
+        plan. The box id stays: a restart launches in the same home.
 
-        The unmounts are waited for: the next step — scrubbing the home,
-        bubblewrap binding into it — needs the links and the mounts gone.
-        Milliseconds each, bounded by the server's kill ladder."""
+        Both callers that can have anything mounted — the restart and the
+        shell's exit — unregister the box first and come here from its
+        callback (_unregister_sandbox_box), so the wait below is for a box
+        that is already unknown and returns at once. It stays as the
+        guarantee that no plan is prepared over a box still registered."""
         if self._sandbox_plan_path is not None and self._sandbox_box:
             if SANDBOX_GRANTS is not None:
                 SANDBOX_GRANTS.unregister(self._sandbox_box, wait=True)
@@ -2441,13 +2467,26 @@ class TerminalTab(Gtk.Box):
         self._sandbox_plan_path = None
 
     def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
-        # The shell is gone, and the box with it (--die-with-parent).
-        self._release_sandbox_plan()
-        if self._sandbox_box and SANDBOX_HOST is not None:
+        # The shell is gone, and the box with it (--die-with-parent). What
+        # was mounted into it goes on the grants' worker, and the rest
+        # follows from there: the main loop waits for none of it.
+        box, host = self._sandbox_box, SANDBOX_HOST
+        held = self._sandbox_plan_path is not None and bool(box)
+        sandboxplan.release_plan(self._sandbox_plan_path)
+        self._sandbox_plan_path = None
+
+        def gone() -> None:
+            if host is None or not box:
+                return
+            if held:
+                host.release(box)
             # Nothing happens to a box a session names. This removes the
             # box of a launch that never produced a transcript, and of a
-            # fork whose id never resolved.
-            SANDBOX_HOST.discard_box_async(self._sandbox_box)
+            # fork whose id never resolved — once nothing is mounted in
+            # it: a box with a mount under it is never removed.
+            host.discard_box_async(box)
+
+        self._unregister_sandbox_box(gone)
         self.emit("process-exited", status)
 
     # -- copy & paste ------------------------------------------------------

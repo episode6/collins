@@ -352,7 +352,9 @@ class GrantMounts:
                 except Exception:
                     log.exception("sandbox grants: a job's callback failed")
 
-    def _submit(self, work, done=None, wait: bool = False) -> None:
+    def _submit(self, work, done=None, wait: bool = False) -> bool:
+        """Queue *work* for the worker. With *wait*, whether it was done
+        within WAIT_TIMEOUT_S; True otherwise."""
         with self._lock:
             stopped = self._stopped
         if stopped or threading.current_thread() is self._thread:
@@ -360,11 +362,13 @@ class GrantMounts:
             # queued from inside one.
             if done is not None:
                 done([])
-            return
+            return True
         finished = threading.Event() if wait else None
         self._jobs.put((work, done, finished))
         if finished is not None and not finished.wait(WAIT_TIMEOUT_S):
             log.warning("sandbox grants: gave up waiting for the worker")
+            return False
+        return True
 
     # -- can anything be delivered live here? -------------------------------------
 
@@ -452,20 +456,27 @@ class GrantMounts:
 
         self._submit(work, done)
 
-    def unregister(self, box: str, wait: bool = False) -> None:
+    def unregister(self, box: str, wait: bool = False, done=None) -> bool:
         """The box is gone (or about to be rebuilt): unmount everything
-        live in it and remove its links. *wait* blocks until that is done —
-        a restart needs the home clear before the next plan is prepared."""
+        live in it and remove its links. A restart needs the home clear
+        before the next plan is prepared, and nothing may remove a box
+        before its mounts are gone: *done([])* is called once they are —
+        on the worker thread, or at once for a box this doesn't know — and
+        is how a caller on the main loop goes on without waiting there.
+        *wait* blocks instead, and the answer is whether the unmounts
+        finished in time (always True without it)."""
         with self._lock:
             record = self._boxes.pop(box, None)
         if record is None:
-            return
+            if done is not None:
+                done([])
+            return True
 
         def work() -> list[Delivery]:
             self._retire_all(record)
             return []
 
-        self._submit(work, None, wait=wait)
+        return self._submit(work, done, wait=wait)
 
     def shutdown(self) -> None:
         """Unmount everything this instance mounted and stop the worker.
