@@ -455,6 +455,71 @@ def test_writable_is_the_last_mount_that_holds_the_path():
     assert plan.writable("/boxes/x/home/file") is False
 
 
+def test_a_remount_turns_the_topmost_mount_at_the_path_read_only():
+    plan = sandboxplan.Plan()
+    plan.rw("/boxes/x/grants", "/grants")
+    plan.rw("/srv/data", "/grants/data")
+    plan.remount_ro("/grants")
+    assert plan.args[-2:] == ["--remount-ro", "/grants"]
+    assert plan.writable("/grants/file") is False
+    # Not recursive: a mount that sits in the directory keeps its verdict.
+    assert plan.writable("/grants/data/file") is True
+    # The topmost mount at the path, and only that one.
+    plan = sandboxplan.Plan()
+    plan.rw("/a")
+    plan.rw("/b", "/a")
+    plan.remount_ro("/a")
+    assert plan.mounts == [("/a", True), ("/a", False)]
+    # A path no mount is at changes nothing.
+    plan.remount_ro("/a/b")
+    assert plan.mounts == [("/a", True), ("/a", False)]
+
+
+def _writable_in(plan, path):
+    """`Plan.writable` replayed over a built plan's arguments."""
+    flags = {"--bind": True, "--bind-try": True, "--ro-bind": False, "--ro-bind-try": False}
+    args = plan["bwrap_args"]
+    verdict = False
+    for i, arg in enumerate(args):
+        if arg in flags and sandboxplan.within(args[i + 2], path):
+            verdict = flags[arg]
+        elif arg == "--tmpfs" and sandboxplan.within(args[i + 1], path):
+            verdict = True
+    return verdict
+
+
+def test_what_the_docs_say_stays_writable_does(home):
+    # The examples docs/guide/features.md and the skill give of what a
+    # session can write and the host runs later, switch or no switch.
+    ws = home / "work" / "repo"
+    named = [
+        ws / ".husky" / "pre-commit",
+        ws / ".claude" / "settings.json",
+        ws / ".git" / "config",
+        home / ".cargo" / "bin" / "cargo",
+        home / ".gradle" / "init.d" / "init.gradle",
+        home / ".m2" / "repository",
+        home / ".npm" / "_cacache",
+        home / ".local" / "share" / "pnpm" / "pnpm",
+        home / ".pyenv" / "shims" / "python",
+        home / ".volta" / "bin" / "node",
+        home / ".sdkman" / "candidates",
+        home / ".claude" / "commands",  # a pinned name that doesn't exist yet
+    ]
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".claude").mkdir()
+    (ws / ".git" / "hooks").mkdir(parents=True)
+    for path in named[:-1]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    for protect in (True, False):
+        plan = build_plan(_inputs(home, protect_settings=protect))
+        for path in named:
+            assert _writable_in(plan, str(path)), path
+        # What the switch decides, for contrast.
+        assert _writable_in(plan, str(ws / ".git" / "hooks" / "pre-commit")) is not protect
+        assert _writable_in(plan, str(home / ".local" / "bin" / "tool")) is not protect
+
+
 def test_the_switch_leaves_settings_json_writable(home):
     (home / ".claude").mkdir()
     settings = home / ".claude" / "settings.json"

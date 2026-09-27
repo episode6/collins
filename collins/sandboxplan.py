@@ -553,8 +553,14 @@ class Plan:
     def remount_ro(self, dest: str) -> None:
         """The topmost mount at *dest* made read-only, and only it: unlike
         `--ro-bind`, which is recursive, a mount that sits in the directory
-        — or propagates into it later — stays read-write."""
+        — or propagates into it later — stays read-write. `writable` is
+        told the same way: the last mount at *dest* turns read-only, and
+        one that landed deeper keeps its own verdict."""
         self.args += ["--remount-ro", dest]
+        for i in range(len(self.mounts) - 1, -1, -1):
+            if self.mounts[i][0] == dest:
+                self.mounts[i] = (dest, False)
+                break
 
     def carried(self, path: str, within: str | None) -> bool:
         """Whether a mount already in the plan reaches *path* — a source

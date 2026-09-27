@@ -64,7 +64,8 @@ inverse of `sandbox_settings_editable`): `settings.json` /
 enclosing repository's git directory and in a linked worktree's common
 one (`PROTECTED_GIT_DIRS`), and the `claude` launcher on PATH when it is
 a real file in a tree the box can write (`Plan.writable`: the last mount
-holding a path decides). `~/.local/bin` (`HOST_BIN_HOME`) is bound with
+holding a path decides, and `Plan.remount_ro` turns the topmost mount at
+its path read-only there too). `~/.local/bin` (`HOST_BIN_HOME`) is bound with
 the home tables — read-only on the same switch, read-write with it off —
 and is no longer in `RW_HOME_ALWAYS`, so a launch doesn't create it.
 Each pin is emitted only for what exists as the real thing: a missing one
@@ -712,7 +713,8 @@ switches go insensitive and its status row says why.
   `~/.local/share/pnpm`, version managers' shims); and in `~/.claude`,
   any pinned name that is missing or a symlink. Narrowing a `-w` launch
   to its worktree is the open item. When a table changes, the list in
-  `docs/guide/features.md` changes with it.
+  `docs/guide/features.md` changes with it, and so do the examples
+  `test_what_the_docs_say_stays_writable_does` builds a plan around.
 - `gh` keeps its token in the Secret Service keyring on a desktop, which the
   box can't reach, so a bind of `~/.config/gh` alone yields "token invalid";
   hence `GH_TOKEN` via `gh auth token` in sandboxrun. `git_protocol: ssh`
