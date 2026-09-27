@@ -189,7 +189,10 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   (`window._sandbox_for_new_session`); a sandboxed parent's sibling runs
   on the parent's *launched* plan re-issued for its directory and for a
   box of its own — `terminal.SANDBOX_HOST.derive` returns (plan file, box
-  id, reason), and both ride in the options (`sandbox_plan`,
+  id, reason), records the parent's launch-time grants as the sibling's
+  own list (grants are a session's: nothing the parent holds live or is
+  allowed later reaches the sibling, and it takes no project defaults),
+  and both ride in the options (`sandbox_plan`,
   `sandbox_box`) — and a cwd
   outside that plan's workspace or grants is refused
   (`mcptools.sibling_cwd_refusal`) — one inside a directory the parent

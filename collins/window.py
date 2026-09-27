@@ -1779,22 +1779,34 @@ class MainWindow(Adw.ApplicationWindow):
                 self._update_active_row()
                 return
 
-        box = ""
-        if sandboxed and not fork:
-            # The session's own box — its $HOME, as it left it. One with
-            # none yet (recorded before the boxes, or its transcript back
-            # from the trash) gets its id here rather than from the tab:
-            # a resumed tab resolves nothing, so nothing else would record
-            # it, and the home would be a fresh one at every resume.
-            box = self.state.sandbox_box(session.session_id)
-            if not box:
-                box = sandboxplan.new_box_id()
-                self.state.set_sandboxed(session.session_id, True, box=box)
-
         cwd = resume_cwd(session)
         # A chat's throwaway directory may have been swept or trashed since;
         # recreate it rather than letting the terminal fall back to $HOME.
         chats.ensure_chat_dir(cwd)
+        box = ""
+        host = terminal_mod.SANDBOX_HOST
+        if sandboxed and host is not None:
+            box = self.state.sandbox_box(session.session_id)
+            if fork:
+                # Another conversation: a box of its own, which starts with
+                # a copy of what its origin is allowed — taken once, here;
+                # the two lists are independent from now on. No project
+                # defaults: the origin's list is what the user left it as.
+                origin = box
+                box = host.mint_box(cwd, seed=False)
+                grants = self.state.get_sandbox_grants(origin) if origin else []
+                if grants:
+                    self.state.set_sandbox_grants(box, grants)
+            elif not box:
+                # The session's own box is its $HOME, as it left it. One
+                # with none yet (recorded before the boxes, or its
+                # transcript back from the trash) gets its id here rather
+                # than from the tab — a resumed tab resolves nothing, so
+                # nothing else would record it, and the home would be a
+                # fresh one at every resume — and starts, like a new
+                # session, with its project's defaults.
+                box = host.mint_box(cwd)
+                self.state.set_sandboxed(session.session_id, True, box=box)
         # The tab is bound to the id the CLI actually runs, which for an
         # attached fork is the fork's — including its (still stubby) transcript.
         bound_id = attach_id or session.session_id
@@ -1811,9 +1823,7 @@ class MainWindow(Adw.ApplicationWindow):
             provider=provider,
             jsonl_path=jsonl_path,
             # The box, and the prompts-off mode the setting gives it: the
-            # CLI restores no permission mode on --resume by itself. A fork
-            # is another conversation and gets a box of its own, minted by
-            # its tab.
+            # CLI restores no permission mode on --resume by itself.
             options=replace(self._sandboxed_options(SessionOptions()), sandbox_box=box)
             if sandboxed
             else None,
@@ -2836,6 +2846,23 @@ class MainWindow(Adw.ApplicationWindow):
         can carry an ampersand."""
         self.sidebar.toast_overlay.add_toast(Adw.Toast(title=GLib.markup_escape_text(text)))
 
+    def _settle_sandbox_box(self, tab: TerminalTab, session_id: str) -> None:
+        """Record the box a sandboxed tab launched in against the session
+        it turned out to be, and settle what that box is allowed
+        (SandboxHost.settle_box: a `--continue` tab's box takes over the
+        grants of the box the session had, or gets its project's defaults
+        now). What it is owed is then delivered to the running box, or
+        waits for a restart."""
+        box = tab.sandbox_box
+        owed = tab.take_sandbox_defaults_owed()
+        host = terminal_mod.SANDBOX_HOST
+        if host is None:
+            self.state.set_sandboxed(session_id, True, box=box)
+            return
+        grants = terminal_mod.SANDBOX_GRANTS
+        if host.settle_box(session_id, box, tab.start_cwd, owed) and grants is not None:
+            grants.sync(box)
+
     def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
         to the session so the sidebar highlight, open-dedup, rename and status sync
@@ -2845,14 +2872,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._pages[session_id] = page
         if tab.sandboxed:
             # Sticky from here: a resume rebuilds the box (open_session),
-            # around the home this launch ran in. A --continue tab may have
-            # landed on a session that already had a box: the tab's is the
-            # one the conversation lives in now, and the old one goes.
-            previous = self.state.sandbox_box(session_id)
-            self.state.set_sandboxed(session_id, True, box=tab.sandbox_box)
-            host = terminal_mod.SANDBOX_HOST
-            if previous and previous != tab.sandbox_box and host is not None:
-                host.discard_box_async(previous)
+            # around the home this launch ran in.
+            self._settle_sandbox_box(tab, session_id)
         self._sync_process_poll()
         self._sync_background_busy_poll()
         # Anything absorbed into the plumbing baseline before the id was
@@ -7077,17 +7098,18 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.pr_store.set_records(session_id, [])
         self.state.set_session_attachments(session_id, [])
         if session_id in self.state.sandboxed_sessions:
-            # Its box goes with it — unlinked, not trashed: Collins' own
-            # derived data, possibly large. The sticky flag stays, so a
-            # transcript restored from the trash resumes boxed, in a fresh
-            # home. A box another id of the conversation still names (a
-            # forward), or one a tab still holds, is refused here and goes
-            # when that lets go.
+            # Its box goes with it, and what the box was allowed — unlinked,
+            # not trashed: Collins' own derived data, possibly large. The
+            # sticky flag stays, so a transcript restored from the trash
+            # resumes boxed, in a fresh home, as a new session would. A
+            # box another id of the conversation still names (a forward)
+            # keeps its grants and stays; one a tab still holds goes when
+            # that lets go.
             box = self.state.sandboxed_sessions[session_id]
             self.state.set_sandboxed(session_id, True, box="")
             host = terminal_mod.SANDBOX_HOST
             if box and host is not None:
-                host.discard_box_async(box)
+                host.forget_box(box)
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)

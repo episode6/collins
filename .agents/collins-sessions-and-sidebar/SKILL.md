@@ -101,9 +101,13 @@ probe_reason() == ""`), plus the sticky `sandboxed_sessions` map a resume
 reads — session id → the id of its box, its own `$HOME` (`is_sandboxed`
 and `sandbox_box` follow the forward chain; `forward_session` carries the
 entry; saved as an object, and a list from an older build loads as ids
-with no box) — and `sandbox_grants` per project (`sandboxplan.grants_key`:
-a worktree's repository). `_forget_transcript` clears a trashed session's
-box and has it removed; the flag stays. See `collins-sandboxed-sessions`.
+with no box) — `sandbox_grants` per **session**, keyed by box id (an
+entry keyed by anything else is dropped on load; written on the main loop
+only), and `sandbox_project_grants`, the defaults a *new* session of a
+project starts with (keyed by `sandboxplan.project_key`: a worktree's
+repository; copied into a box's list once, when the box is minted).
+`_forget_transcript` clears a trashed session's box and has it forgotten
+— its grants with it; the flag stays. See `collins-sandboxed-sessions`.
 
 `~/.config/collins/state.json`, written synchronously and atomically on every
 mutation; `DEFAULT_SETTINGS` is the settings catalogue, each key with a

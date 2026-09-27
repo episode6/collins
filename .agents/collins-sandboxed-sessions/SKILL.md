@@ -7,7 +7,9 @@ description: >-
   command starts with (sandboxrun.py), SessionOptions.sandbox and the
   provider wrapper, the box every sandboxed session has for itself (its own
   sandbox home, a carrier and anchors, a lease; made, scrubbed, swept and
-  removed by file descriptor), live grants (sandboxgrants.py: a directory
+  removed by file descriptor), grants that are one session's (keyed by its
+  box) and a project's defaults that seed new sessions, live grants
+  (sandboxgrants.py: a directory
   allowed while a session runs, mounted into the running box with bindfs
   and fusermount3 on one worker thread), the sticky session-to-box map and
   per-project override in state.json, the new-chat Sandboxed checkbox,
@@ -80,8 +82,8 @@ sandbox root
 (`PlanRefused`). Every path is validated (`valid_path`: absolute, bounded,
 no control characters, no `.`/`..`). The output is a JSON document
 (`version` 2, `bwrap_args`, `unsetenv`, `setenv`, `gh_token`, `workspace`,
-`inputs` — the policy slice plus `box`, `sandbox_home`, `carrier`, the
-emitted `anchors` and `grants_key` — and
+`inputs` — the policy slice plus `box`, `sandbox_home`, `carrier` and the
+emitted `anchors` — and
 `notes`), written by `prepare_launch` to
 `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` mode 0600 and
 regenerated at every launch — a cache of state, never state. With no
@@ -188,12 +190,13 @@ box's lease; `discard_box`, which removes a box only when no session of
 `state.sandbox_boxes()` names it, no *live* lease of another process
 holds it — live while `/proc/<pid>` exists — and this process doesn't;
 `discard_box_async` on a daemon thread; `sweep_boxes` at startup), the
-per-project grants (`grants` / `allow` / `revoke`, keyed by
-`grants_key(workspace)`: the repository a Claude-managed worktree belongs
-to, else the real workspace — `allow` runs
+session's grants (`grants(box)` / `allow(box, workspace, path)` /
+`revoke(box, path)` — every one is handed the box it is about; `allow`
+runs
 `grant_reason`: the `guard_path` rule first, so a secret is refused whether
 or not it exists, then "already inside the workspace" and "not a
-directory"), `plan_stale(plan_path, workspace)` (the launched plan's
+directory"), the project's defaults (below), `plan_stale(plan_path,
+workspace)` (the box is read off the launched plan; the launched plan's
 `inputs` against what `build_plan(gather_inputs(...))` would say now, on
 the `POLICY_INPUTS` keys — grants, the two shares, settings protection),
 and `derive(plan_path, cwd)` (a sibling's plan file and box, see the
@@ -205,6 +208,60 @@ re-issues a plan with `--chdir` changed (`cwd` recorded beside
 `workspace`) and every path under the parent's box moved to the
 sibling's.
 The app sets `terminal.SANDBOX_HOST` to one at startup.
+
+**Grants are a session's.** A sandboxed session's box is that session's
+alone: its home, *and the directories it is allowed*. `state.
+sandbox_grants` is box id → list — the box is the one identity a session
+has before the CLI has minted its id — and an entry keyed by anything
+else is dropped on load. A directory allowed in one session's chip
+reaches that session and no other, running or future. **Nothing
+delivers, lists or removes a grant for any box but the one it was asked
+about, and there is no lookup from a workspace, a project or a
+repository to a set of boxes anywhere in the feature.**
+`state.sandbox_grants` is written on the main loop only.
+
+**A project's defaults** are what a *new* session of it starts allowed:
+`state.sandbox_project_grants`, keyed by `project_key(workspace)` (the
+repository a Claude-managed worktree belongs to, else the real
+workspace). `host.project_grants` / `is_project_default` /
+`set_project_default(workspace, path, on)` — the guard a grant is held
+to, without "already inside the workspace" and "not a directory", which
+are about one session on one day. They are **a template, never a live
+link**: `mint_box(workspace, seed=True)` — the one place a session's box
+id is made; `new_box_id()` is not called outside `sandboxplan.py` —
+copies them into the new box's list once (`seed_box`: each kept only
+when `grant_reason` passes for this session; one that doesn't is
+skipped with a log line and stays a default). From then on the two lists
+have nothing to do with each other: marking or removing a default
+changes no session that exists.
+
+| The session is | Its box | Its grants at launch |
+| --- | --- | --- |
+| new (Send, the header button, a project row) | `mint_box(cwd)` by its tab | the project's defaults |
+| resumed | the one the state maps it to | that box's |
+| resumed with no box (`""`) | `mint_box(cwd)` by `open_session` | the project's defaults |
+| a fork | `mint_box(cwd, seed=False)` by `open_session` | a copy of its origin's, taken once |
+| a `--continue` tab | `mint_box(cwd, seed=False)` by its tab | none until it resolves |
+| a sibling of a sandboxed parent | `mint_box(cwd, seed=False)` by `derive` | its parent's static grants as launched |
+| a sibling of an unsandboxed parent | `mint_box(cwd)` by its tab | the project's defaults |
+| the same conversation under a forwarded id | the same box | the same |
+
+`host.settle_box(session_id, box, workspace, owed)` is what
+`_on_session_resolved` calls (through `MainWindow._settle_sandbox_box`):
+for a `--continue` tab (`tab.take_sandbox_defaults_owed()`) whose session
+already had a box, the tab's box takes over that box's grants and the
+old box is forgotten; one whose session had none is seeded with the
+defaults then. It answers whether `GrantMounts.sync(box)` is owed.
+
+**Forgetting.** Grants leave the state with their box.
+`host.forget_box(box)` (main loop) drops the grants of a box no session
+names and then asks `discard_box_async`; **every caller outside
+`sandboxplan.py` uses it, never `discard_box_async`** — the tab at its
+shell's exit (landed on the main loop first), a launch that couldn't be
+prepared, the `--continue` takeover, `_forget_transcript`, every
+`start_session` refusal that drops a sibling's box.
+`host.prune_grants()` at startup drops the entry of every box no session
+names and whose directory is gone.
 
 **The sweep belongs to one state file.** `sweep_boxes` removes every box
 the state doesn't name, so it must be the state that names them — and
@@ -233,8 +290,9 @@ settled, so a box that couldn't be built never leaves a bypass flag typed.
 `--die-with-parent` ties the box to the tab's shell, so every close flow
 holds; `_release_sandbox_plan` unlinks the plan and releases the lease
 (before a restart's rebuild, and in `_on_child_exited`, which then asks
-`discard_box_async` — a no-op for a box a session names, and what removes
-the box of a launch that never produced a transcript). `tab.sandboxed`
+`forget_box` — a no-op for a box a session names, and what removes
+the box of a launch that never produced a transcript, its grants with
+it). `tab.sandboxed`
 is the
 launch record (as launched, not as the settings now say). A sandboxed
 *fork* tab keeps its origin's id but runs the resolver in `_fork_resolve`
@@ -242,15 +300,12 @@ mode: the forked conversation's id lands on `fork-resolved` and the window
 records it with the fork tab's own box, so the fork's row resumes boxed
 too, in its own home.
 
-**Who gets which box.** A resume: the session's (`open_session` passes
-`state.sandbox_box(id)`). A restart: the tab's. A fork: a new one. A
-`--continue` tab: a new one, which replaces the session's when it
-resolves (`_on_session_resolved` discards the previous). A
-`start_session` sibling: a new one, minted by `derive`. A sandboxed panel
-shell: the session's, since it runs the session's plan file. A trashed or
+**Also.** A restart keeps the tab's box. A sandboxed panel shell runs in
+the session's, since it runs the session's plan file. A trashed or
 deleted transcript (`_forget_transcript`): the entry's box is cleared and
-the box discarded — unlinked, not trashed — while the sticky flag stays,
-so a transcript restored from the trash resumes boxed in a fresh home.
+the box forgotten — unlinked, not trashed, its grants gone with it —
+while the sticky flag stays, so a transcript restored from the trash
+resumes boxed in a fresh home, as a new session would.
 
 **State.** `sandbox_new_sessions` + `project_sandbox` overrides
 (`sandbox_for_project`, the sidebar project menu's *New sessions are
@@ -262,8 +317,9 @@ or a sandboxed fork reports its new one, carried by `forward_session`,
 read by `open_session` for a resume; `set_sandboxed(id, True, box=None)`
 keeps the box, a string replaces it; saved as an object with sorted keys,
 and loaded from an object or from the list an older build wrote — shape
-validation, not a migration); `sandbox_grants` per project
-(`grants_key`; edited from the footer chip, see below). The draft record's
+validation, not a migration); `sandbox_grants` per session, by box id,
+and `sandbox_project_grants`, the defaults (both edited from the footer
+chip, see below). The draft record's
 `sandbox` slot mirrors the worktree checkbox, except that a restored
 choice sticks while the box is hidden (a draft reopened before the probe's
 verdict, or on a machine with no box — the late verdict keeps it rather
@@ -287,8 +343,12 @@ left run (`_model_sep` follows it), shown by `_sync_sandbox_chip` exactly
 when `tab.sandboxed and tab.sandbox_plan_path` — never on an unsandboxed
 tab. Filled on every `show` from the *launched* plan (`load_plan`, never
 re-derived): the workspace, the two shares' state, settings protection;
-then the host's grants for the project, one row each by
-`GrantMounts.status`:
+then two lists. **Allowed directories**, captioned *For this session
+only*: the host's grants for this session's box (`box()`), one row each
+by `GrantMounts.status`, each but a `LEAVING` one with a pin before its
+remove button (a flat `Gtk.ToggleButton`, `view-pin-symbolic`, active
+when `host.is_project_default`; `chip.set_project_default` toggles it,
+and a refusal is a toast and the pin goes back):
 
 | The grant is | Row | Remove button |
 | --- | --- | --- |
@@ -300,7 +360,14 @@ then the host's grants for the project, one row each by
 — the state's grants, then the `LEAVING` ones from the launched plan.
 With no `GrantMounts`, one that isn't `capable()`, or a box it doesn't
 know, the rows are drawn from the launched plan alone (nothing, or *after
-restart*). *Allow a directory…*
+restart*). Then **New sessions of this project**: the project's defaults
+(`host.project_grants(workspace)`), each with a remove button, *None*
+when there are none. Removing one there changes nothing in the list
+above but that row's pin; removing a row above leaves the defaults
+alone; nothing in the second list affects *Restart to apply*. Every call
+that means *whose grants* passes the box; the workspace is passed only
+where `grant_reason` and the defaults need it and as the folder
+chooser's starting point. *Allow a directory…*
 (`Gtk.FileDialog.select_folder`, modal, closes the popover — so the verdict
 goes out as a toast either way) is `allow_directory`: `host.allow`, whose
 refusal is a toast and ends there; then `grants.allow(workspace, path,
@@ -331,8 +398,11 @@ every mount this instance made.
   them, and it is the thread `PR_SET_PDEATHSIG` ties the servers to —
   **never spawn `bindfs` from anywhere else**, a short-lived thread's
   exit would take the mount with it. `register(plan)` / `unregister(box,
-  wait=)` follow a box's life, `allow` / `revoke(workspace, path, done)`
-  a grant's; each queues and returns. `done(list[Delivery])` is called on
+  wait=)` follow a box's life, `allow` / `revoke(box, path, done)` a
+  grant's and `sync(box, done)` delivers what the state holds for a box
+  that it lacks; each acts on the one box it is handed (`allow` mounts
+  nothing the state doesn't grant that box, and nothing for a box that
+  isn't registered), queues and returns. `done(list[Delivery])` is called on
   the worker thread. `status`, `delivery`, `live_paths`, `registered` read
   a table under a lock and never block.
 - **`capable()`** is `""` or the reason, settled once: `bindfs not
@@ -372,9 +442,9 @@ every mount this instance made.
   exit for 1 s, `SIGTERM`, 2 s, `SIGKILL`, then `rmdir` of the mount
   point. Where the grant is static nothing can be done to the running
   box: `LEAVING`.
-- **`register`** delivers every grant the state holds for the box's
-  project that its plan lacks — nothing for an ordinary launch, the
-  grants made since for a sibling on a plan derived earlier; a box
+- **`register`** ends as `sync` does: every grant the state holds for
+  this box that its plan lacks is delivered — nothing for an ordinary
+  launch, whose plan was built from that very list; a box
   registered again has what was live in it unmounted first.
   **`unregister(box, done=)`** unmounts everything live in the box; the
   restart needs the home clear before the next plan is prepared, and a
@@ -383,8 +453,8 @@ every mount this instance made.
   takes seconds to end, several of them several times that. The tab
   unregisters through `_unregister_sandbox_box(then)` and goes on from
   `done` — the restart lands `_relaunch_sandboxed` with `GLib.idle_add`
-  at default priority, the shell's exit releases the lease and discards
-  the box from the worker. `unregister(box, wait=True)` still exists and
+  at default priority, and so does the shell's exit, which releases the
+  lease and forgets the box there. `unregister(box, wait=True)` still exists and
   says whether the unmounts finished in time; `_release_sandbox_plan`
   calls it for a box that is, by then, already unknown.
   **`sweep_mounts()`** at startup, before
@@ -393,8 +463,11 @@ every mount this instance made.
   **`shutdown()`** from `App.do_shutdown`.
 - **A sibling can't start inside a directory its parent holds only
   live** (`SandboxHost.derive(..., live=grants.live_paths(parent box))`):
-  its plan is the parent's as launched. Once up it registers like any
-  box and receives the project's newer grants live.
+  its plan is the parent's as launched, and `derive` records the
+  parent's static grants as the sibling's own list. Nothing the parent
+  holds live, and nothing it is allowed later, reaches the sibling: a
+  directory is allowed in the sibling's own chip, and delivered live
+  there like any grant.
 
 **The invariants** — the first three are never loosened to make
 something work:
@@ -412,6 +485,11 @@ something work:
 6. `bindfs` is spawned only by the `sandbox-grants` thread.
 7. A sandboxed session never launches unsandboxed because of anything
    here.
+8. Nothing delivers, lists or removes a grant for any box but the one it
+   was asked about. There is no lookup from a workspace, a project or a
+   repository to a set of boxes anywhere in the feature — a project's
+   defaults are copied into a box when it is minted, and never linked.
+9. `state.sandbox_grants` is written on the main loop only.
 
 **Restart to apply** (`TerminalTab.restart_sandboxed`): the CLI's exit
 keystroke, a `_RESTART_POLL_MS` poll that answers the worktree keep/remove

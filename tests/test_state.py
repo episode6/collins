@@ -1350,16 +1350,112 @@ def test_state_file_names_the_file_it_saves_to(app_state):
     assert app_state.AppState().state_file() == str(app_state._STATE_FILE)
 
 
-def test_sandbox_grants_roundtrip_and_validate(app_state):
+def test_sandbox_grants_roundtrip_by_box_id(app_state):
     state = app_state.AppState()
-    assert state.get_sandbox_grants("/ws") == []
-    state.set_sandbox_grants("/ws", ["/home/u/other", "relative", "", "/home/u/more"])
-    state.set_sandbox_grants("", ["/x"])  # no workspace: nothing recorded
+    assert state.get_sandbox_grants(BOX_A) == []
+    assert state.sandbox_grant_boxes() == set()
+    state.set_sandbox_grants(BOX_A, ["/home/u/other", "relative", "", "/home/u/more"])
+    state.set_sandbox_grants(BOX_B, ["/home/u/lib"])
+    # A grant is a box's: a path, nothing, or anything else is no key.
+    for bad in ("", "/ws", BOX_A.upper(), BOX_A[:31], "../" + BOX_A[3:], None):
+        state.set_sandbox_grants(bad, ["/x"])
     fresh = app_state.AppState()
-    assert fresh.get_sandbox_grants("/ws") == ["/home/u/other", "/home/u/more"]
-    assert fresh.sandbox_grants == {"/ws": ["/home/u/other", "/home/u/more"]}
-    fresh.set_sandbox_grants("/ws", [])
-    assert app_state.AppState().sandbox_grants == {}
+    assert fresh.get_sandbox_grants(BOX_A) == ["/home/u/other", "/home/u/more"]
+    assert fresh.sandbox_grants == {
+        BOX_A: ["/home/u/other", "/home/u/more"],
+        BOX_B: ["/home/u/lib"],
+    }
+    assert fresh.sandbox_grant_boxes() == {BOX_A, BOX_B}
+    assert fresh.get_sandbox_grants("/ws") == []
+    # The list handed out is a copy.
+    fresh.get_sandbox_grants(BOX_A).append("/nope")
+    assert fresh.get_sandbox_grants(BOX_A) == ["/home/u/other", "/home/u/more"]
+    fresh.set_sandbox_grants(BOX_A, [])
+    fresh.set_sandbox_grants(BOX_A, [])  # gone already: no write, no error
+    assert app_state.AppState().sandbox_grants == {BOX_B: ["/home/u/lib"]}
+
+
+def test_a_grants_entry_not_keyed_by_a_box_is_dropped_on_load(app_state):
+    """What a build of the stack wrote while grants were keyed by a path
+    is nobody's default: not a session's, and not a project's."""
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "sandbox_grants": {
+                    "/home/u/work/repo": ["/home/u/work/lib"],  # a path
+                    BOX_A[:31]: ["/home/u/short"],
+                    BOX_A.upper(): ["/home/u/upper"],
+                    BOX_A: ["/home/u/kept", "relative", 7],
+                    BOX_B: [],
+                    "x": "nope",
+                }
+            }
+        )
+    )
+    state = app_state.AppState()
+    assert state.sandbox_grants == {BOX_A: ["/home/u/kept"]}
+    assert state.sandbox_grant_boxes() == {BOX_A}
+    assert state.sandbox_project_grants == {}
+    assert state.get_sandbox_project_grants("/home/u/work/repo") == []
+    for junk in (["/a"], "nope", 7, None):
+        app_state._STATE_FILE.write_text(json.dumps({"sandbox_grants": junk}))
+        assert app_state.AppState().sandbox_grants == {}
+
+
+def test_a_projects_default_grants_roundtrip_in_order(app_state):
+    state = app_state.AppState()
+    assert state.get_sandbox_project_grants("/home/u/work/repo") == []
+    state.set_sandbox_project_grants("/home/u/work/repo", ["/home/u/z", "/home/u/a", "relative", ""])
+    state.set_sandbox_project_grants("/home/u/work/other", ["/home/u/lib"])
+    for bad in ("", "relative", None, 7):
+        state.set_sandbox_project_grants(bad, ["/x"])
+    saved = json.loads(app_state._STATE_FILE.read_text())["sandbox_project_grants"]
+    assert saved == {
+        "/home/u/work/repo": ["/home/u/z", "/home/u/a"],  # as made, never sorted
+        "/home/u/work/other": ["/home/u/lib"],
+    }
+    fresh = app_state.AppState()
+    assert fresh.get_sandbox_project_grants("/home/u/work/repo") == ["/home/u/z", "/home/u/a"]
+    # No session's grants came of it, and none go.
+    assert fresh.sandbox_grants == {}
+    fresh.set_sandbox_project_grants("/home/u/work/repo", [])
+    assert app_state.AppState().sandbox_project_grants == {"/home/u/work/other": ["/home/u/lib"]}
+
+
+def test_set_sandbox_project_grants_writes_once(app_state, monkeypatch):
+    state = app_state.AppState()
+    state.set_sandbox_project_grants("/p", ["/a"])
+    writes = []
+    real_save = state.save
+    monkeypatch.setattr(state, "save", lambda: (writes.append(1), real_save()))
+    state.set_sandbox_project_grants("/p", ["/a"])  # nothing changes
+    state.set_sandbox_project_grants("/q", [])  # nothing to drop
+    assert writes == []
+    state.set_sandbox_project_grants("/p", ["/a", "/b"])
+    assert len(writes) == 1
+
+
+def test_project_default_grants_survive_junk_on_disk(app_state):
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "sandbox_project_grants": {
+                    "/home/u/repo": ["/ok", "", "relative", 7, "/also"],
+                    "relative/key": ["/x"],
+                    BOX_A: ["/x"],  # not an absolute path
+                    "/not-a-list": "nope",
+                    "/empty": [],
+                }
+            }
+        )
+    )
+    state = app_state.AppState()
+    assert state.sandbox_project_grants == {"/home/u/repo": ["/ok", "/also"]}
+    for junk in (["/a"], "nope", 7, None):
+        app_state._STATE_FILE.write_text(json.dumps({"sandbox_project_grants": junk}))
+        assert app_state.AppState().sandbox_project_grants == {}
 
 
 def test_sandbox_state_survives_junk_on_disk(app_state):
@@ -1369,7 +1465,7 @@ def test_sandbox_state_survives_junk_on_disk(app_state):
             {
                 "project_sandbox": {"alpha": "yes", "beta": True},
                 "sandboxed_sessions": ["a", 3, "", None],
-                "sandbox_grants": {"/ws": ["/ok", "bad", 7], "/empty": [], "x": "nope"},
+                "sandbox_grants": {BOX_A: ["/ok", "bad", 7], BOX_B: [], "x": "nope"},
             }
         )
     )
@@ -1379,7 +1475,7 @@ def test_sandbox_state_survives_junk_on_disk(app_state):
     assert state.sandboxed_sessions == {"a": ""}
     assert state.sandbox_box("a") == ""
     assert state.is_sandboxed("a")
-    assert state.sandbox_grants == {"/ws": ["/ok"]}
+    assert state.sandbox_grants == {BOX_A: ["/ok"]}
     # An object: string keys, a box id or nothing.
     app_state._STATE_FILE.write_text(
         json.dumps(

@@ -585,10 +585,12 @@ TOOLS: list[dict] = [
             "can spawn its own; a prompt is required because a session with "
             "nothing to do is a leaked process. A session running inside a "
             "Collins sandbox spawns siblings inside a sandbox that reaches "
-            "the same directories, around a home directory of the "
-            "sibling's own: the sibling's directory must then lie inside "
-            "that sandbox's workspace or one of its allowed directories, "
-            "and nothing written to $HOME is shared between the two."
+            "what this session's did when it was launched, around a home "
+            "directory of the sibling's own: the sibling's directory must "
+            "then lie inside that sandbox's workspace or one of the "
+            "directories it was launched with; nothing written to $HOME "
+            "is shared between the two, and a directory the user allows "
+            "one of them later is that one's alone."
         ),
         "inputSchema": {
             "type": "object",
