@@ -381,6 +381,13 @@ DEFAULT_SETTINGS = {
     # out of what a session is offered, and refused if an older session calls
     # it anyway.
     **mcptools.default_tool_settings(),
+    # And one per tool for sessions that run in a sandbox:
+    # "sandbox_tool_<name>", on for mcptools.SANDBOX_DEFAULT_TOOLS and off
+    # for the rest. What a sandboxed session is offered unless its own box
+    # says otherwise (AppState.sandbox_tools, edited in the Sandboxed
+    # chip); read by sandboxplan.SandboxHost.tool_enabled for every list
+    # and every call. A tool off above is off inside a box too.
+    **mcptools.default_sandbox_tool_settings(),
 }
 
 # Floor for a restored window, so a corrupt/absurd saved value can't produce
@@ -475,6 +482,21 @@ def _sandbox_grants(raw: object) -> dict[str, list[str]]:
     return {box: paths for box, paths in grants.items() if paths}
 
 
+def _sandbox_tools(raw: object) -> dict[str, dict[str, bool]]:
+    """The box → tool switches map out of state.json: an object whose keys
+    are box ids and whose values map a tool's name to on or off
+    (mcptools.tool_overrides: names the table has, booleans). An entry
+    keyed by anything else is dropped, and so is one left with nothing."""
+    if not isinstance(raw, dict):
+        return {}
+    tools = {
+        box: mcptools.tool_overrides(switches)
+        for box, switches in raw.items()
+        if _valid_box_id(box)
+    }
+    return {box: switches for box, switches in tools.items() if switches}
+
+
 def _sandbox_project_grants(raw: object) -> dict[str, list[str]]:
     """The project → default grants map out of state.json: keys that are
     absolute paths, values that are lists of absolute paths. Anything else
@@ -543,6 +565,12 @@ class AppState:
         # is minted (SandboxHost.mint_box) and never a live link: changing
         # it changes no session that exists.
         self.sandbox_project_grants: dict[str, list[str]] = {}
+        # box id -> the session tools that box's session is, or is not,
+        # offered where that differs from the default for sandboxed
+        # sessions (the "sandbox_tool_<name>" settings): tool name -> on.
+        # A tool with no entry follows the default. Keyed by the box and
+        # gone with it, like the grants; written on the main loop only.
+        self.sandbox_tools: dict[str, dict[str, bool]] = {}
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         # Projects kept in the sidebar after their last session went away
         # (project name -> working directory, "" when it was never known), so
@@ -643,6 +671,7 @@ class AppState:
         }
         self.sandboxed_sessions = _sandboxed_sessions(data.get("sandboxed_sessions"))
         self.sandbox_grants = _sandbox_grants(data.get("sandbox_grants"))
+        self.sandbox_tools = _sandbox_tools(data.get("sandbox_tools"))
         self.sandbox_project_grants = _sandbox_project_grants(
             data.get("sandbox_project_grants")
         )
@@ -731,6 +760,7 @@ class AppState:
             "sandboxed_sessions": dict(sorted(self.sandboxed_sessions.items())),
             "sandbox_grants": self.sandbox_grants,  # order is the payload — never sort
             "sandbox_project_grants": self.sandbox_project_grants,  # likewise
+            "sandbox_tools": self.sandbox_tools,
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
@@ -978,6 +1008,32 @@ class AppState:
     def sandbox_grant_boxes(self) -> set[str]:
         """Every box that has grants recorded."""
         return set(self.sandbox_grants)
+
+    def get_sandbox_tools(self, box: str) -> dict[str, bool]:
+        """The tool switches of the session whose box is *box*: tool name
+        → on, for the tools it differs from the default on. A copy."""
+        return dict(self.sandbox_tools.get(box) or {})
+
+    def set_sandbox_tools(self, box: str, switches: dict[str, bool]) -> None:
+        """Persist a box's tool switches whole; an empty map drops the key,
+        and anything that is not a box id is no key at all. One write,
+        none when nothing changes. Main loop only."""
+        if not _valid_box_id(box):
+            return
+        clean = mcptools.tool_overrides(switches)
+        if clean:
+            if self.sandbox_tools.get(box) == clean:
+                return
+            self.sandbox_tools[box] = clean
+        else:
+            if box not in self.sandbox_tools:
+                return
+            del self.sandbox_tools[box]
+        self.save()
+
+    def sandbox_tool_boxes(self) -> set[str]:
+        """Every box that has tool switches recorded."""
+        return set(self.sandbox_tools)
 
     def get_sandbox_project_grants(self, key: str) -> list[str]:
         """The default grants of the project *key* (sandboxplan.

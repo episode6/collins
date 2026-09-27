@@ -32,7 +32,7 @@ def run_with_client(tmp_path, client_fn, list_tools=None, dispatch=None):
     sock_path = str(tmp_path / "mcp.sock")
     service = SessionToolService(
         sock_path,
-        list_tools=list_tools or (lambda: mcptools.TOOLS),
+        list_tools=list_tools or (lambda _pid: mcptools.TOOLS),
         dispatch=dispatch or _default_dispatch,
     )
     service.start()
@@ -96,8 +96,28 @@ def test_list_returns_the_injected_tool_table(tmp_path):
         c.send({"op": "list", "id": 1})
         return c.read()
 
-    reply = run_with_client(tmp_path, client, list_tools=lambda: [{"name": "t"}])
+    reply = run_with_client(tmp_path, client, list_tools=lambda _pid: [{"name": "t"}])
     assert reply == {"id": 1, "ok": True, "tools": [{"name": "t"}]}
+
+
+def test_list_is_asked_for_the_peer_the_kernel_names(tmp_path):
+    """A sandboxed session is offered a list of its own, so the list is
+    asked for by pid — the kernel's, never the one the hello declares."""
+    asked = []
+
+    def client(path, _service):
+        c = Client(path)
+        c.send({"op": "hello", "pid": 1})  # somebody else's
+        c.send({"op": "list", "id": 1})
+        return c.read()
+
+    def list_tools(pid):
+        asked.append(pid)
+        return []
+
+    reply = run_with_client(tmp_path, client, list_tools=list_tools)
+    assert reply == {"id": 1, "ok": True, "tools": []}
+    assert asked == [os.getpid()]
 
 
 def test_call_reaches_dispatch_with_the_hello_pid(tmp_path):

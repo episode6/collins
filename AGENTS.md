@@ -125,7 +125,7 @@ directly. No separate API key exists anywhere.
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
-| Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session → box map; the sandbox switches | `state.json` |
+| Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
 | Everything of the CLI's | `~/.claude/` — read only |
 
@@ -226,7 +226,7 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store, sidebar, state.json, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `models` `state` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the tool policy for a sandboxed session, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` | `collins-sandboxed-sessions` |
+| Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |

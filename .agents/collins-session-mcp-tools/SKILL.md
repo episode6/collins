@@ -21,7 +21,12 @@ server, `python3 -m collins.mcp_shim`, so the agent sees a `collins` server in
 `/mcp` with the tools the user left on. Thirteen tools today; each has an
 on/off switch in Preferences → Built-in MCP tools (`mcp_tool_<name>`, derived
 from the tool table by `mcptools.default_tool_settings()` so a new tool can't
-ship without a switch). The config file itself is per app id under
+ship without a switch). **A sandboxed session is offered six of them by
+default** (`mcptools.SANDBOX_DEFAULT_TOOLS`), by a second set of switches
+(`sandbox_tool_<name>`, Preferences → Sandbox) and its own box's
+(`state.sandbox_tools`, the Sandboxed chip): a new tool is **off** inside
+a box until it is put on that list — see `collins-sandboxed-sessions`.
+The config file itself is per app id under
 `~/.local/share/collins/<app id>/`; the socket is
 `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock`. Every tool's definition rides in
 each session's context, which is why the Token use disclosure lists them.
@@ -44,8 +49,10 @@ Error strings are agent-facing English, untranslated.
 `tools/list`, in MCP's own shape with JSON schemas; `validate_args` checks
 calls against them (strings with min/max length, integers with `maximum`,
 booleans, enums; `additionalProperties: False`). `run_tool_call(tool, args,
-find_tab, handlers, is_enabled)` is the validate → switch → identity → handler
-skeleton, so its branching is unit-tested. Also here: `encode_message` /
+find_tab, handlers, is_enabled, is_sandboxed, is_offered)` is the validate →
+switch → identity → offered → handler
+skeleton, so its branching is unit-tested (`is_offered(found, tool)` is the
+caller's own list: a sandboxed session's, by its box). Also here: `encode_message` /
 `decode_message` (framing shared with the shim), `runtime_dir` / `socket_path`
 / `config_path` / `write_config`, `infrastructure_cmdlines()` (the shim's
 cmdline for the process-baseline that keeps it from reading as work),
@@ -229,7 +236,10 @@ shim — so it should arm and ride the busy→idle finish edge
 ## Adding a tool
 
 1. Append to `mcptools.TOOLS` with a tight schema and an agent-facing
-   description that says when to call it. The setting key follows.
+   description that says when to call it. The setting key follows — and
+   so does `sandbox_tool_<name>`, which is **off**: decide whether a
+   sandboxed session should be offered the tool (it runs on the host,
+   outside the box) and add it to `SANDBOX_DEFAULT_TOOLS` only if so.
 2. Add `App._mcp_<name>` and register it in `_mcp_dispatch`'s handler map;
    keep decisions in a GTK-free module (as `gitloads` does for `show_diff`).
 3. If it opens or changes panels: `focus=False`, and a beat's delay if it runs

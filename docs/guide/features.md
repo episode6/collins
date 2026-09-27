@@ -1120,10 +1120,24 @@ flipped the switch is refused if it calls it anyway.
   any of the pinned names that doesn't exist yet (a missing `CLAUDE.md`
   or `commands` can be created) or is a symlink (the link can be
   replaced; the Sandboxed chip names each one it couldn't pin). Read what
-  a sandboxed session changed before you run it. Inside the box, the session tools
-  that show you things (`open_in_editor`, `show_diff`, `show_image`,
-  `notify_user`, …) work as ever; the three that reach the host apply a
-  policy instead: `run_in_terminal` and `read_terminal` see only
+  a sandboxed session changed before you run it. **A sandboxed session is
+  offered six of the thirteen session tools**: `set_session_title`,
+  `open_in_editor`, `show_diff`, `show_image`, `notify_user` and
+  `attach_pr`, the ones that put something in front of you. Every session
+  tool runs in Collins, on the host, outside the box — so the ones that
+  read the host back to the agent (`read_terminal`, `diff_context`), write
+  to it (`run_in_terminal`, `annotate_diff`, `highlight_diff`,
+  `clear_diff_marks`) or start another agent (`start_session`) are off
+  inside a box until you switch them on: for every sandboxed session under
+  *Tools a sandboxed session may call* in Preferences → Sandbox, or for one
+  session in its Sandboxed chip. Collins decides which list a call is held
+  to from its own record of the tab the caller runs under — the kernel
+  names the calling process, and nothing a session sends says whether it
+  is sandboxed or what it is offered — and refuses a tool that is off
+  before anything runs. A tool switched off for every session under
+  *Built-in MCP tools* is off inside a box too. Switched on, the three
+  that reach the host apply a policy: `run_in_terminal` and
+  `read_terminal` see only
   *sandboxed shells* (below), opening one when none is idle and never your
   own Ctrl+J shell, and `start_session` spawns the sibling inside a box
   that reaches exactly what its parent's does — the same plan re-issued
@@ -1191,7 +1205,19 @@ flipped the switch is refused if it calls it anyway.
   to apply**: the session exits cleanly and
   resumes in the same tab, in the same home, with the new plan. (A session with nothing to
   resume yet, a fork, and a session running inside another session's box
-  can't restart themselves; the chip says so instead.) A **Sandboxed
+  can't restart themselves; the chip says so instead.) Under the lists,
+  **Session tools: 6 of 13 on** unfolds into a check per session tool:
+  what *this* session may ask Collins to do. A check you change is this
+  session's own switch — it holds whatever the defaults in Preferences
+  come to say, reaches no other session, and goes when the session's
+  transcript does — and *Use the defaults* drops them all. Switching a
+  tool off is refused from the next call on; one switched on is refused
+  no longer, and the session is told it exists when it next starts (the
+  CLI reads its tool list once, at launch). A fork starts with its
+  origin's switches. A sibling spawned by `start_session` starts on the
+  defaults less whatever its parent was denied, so a session can't come
+  by a tool through a sibling; what its parent was given beyond the
+  defaults stays its parent's. A **Sandboxed
   shell** — from
   the chip, or *New sandboxed shell* in a panel tab's right-click menu —
   is a terminal panel tab running inside the same box (titled *Sandboxed
@@ -1211,7 +1237,13 @@ flipped the switch is refused if it calls it anyway.
   exactly like the worktree pair. Two preferences hand things over: *Share
   GitHub CLI login* (your token goes in as `GH_TOKEN`; without it `gh` is
   logged out and HTTPS pushes fail) and *Share SSH agent* (the agent inside
-  can push as you, signing with keys it never sees). The checkbox and the
+  can push as you, signing with keys it never sees). *Tools a sandboxed
+  session may call* holds a switch per session tool: the default for
+  every sandboxed session that has no switch of its own for that tool,
+  running ones included. A row is greyed, and says so, while its tool is
+  switched off for every session under *Built-in MCP tools* — as the
+  chip greys its check; the row keeps its value for when the tool comes
+  back. The checkbox and the
   project-menu item appear only where bubblewrap is installed and user
   namespaces work; the Preferences group is always there, its switches
   insensitive and its status row saying which is missing — and, where a

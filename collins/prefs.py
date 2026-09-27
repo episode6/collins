@@ -676,7 +676,7 @@ class PreferencesDialog(Adw.Dialog):
         the machine, not the choice, is what is missing)."""
         group = _SearchableGroup(title=_("Sandbox"))
         _searchable(group, *prefslayout.SANDBOX_SEARCH_TERMS)
-        self._sandbox_rows: list[Adw.SwitchRow] = []
+        self._sandbox_rows: list[Adw.PreferencesRow] = []
 
         def switch(key: str, title: str, subtitle: str, *terms: str) -> Adw.SwitchRow:
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
@@ -735,6 +735,37 @@ class PreferencesDialog(Adw.Dialog):
             "settings", "hook", "model", "effort", "skills", "commands", "agents",
             "git", "bin", "install",
         )
+        # The session tools a sandboxed session is offered unless its own
+        # chip says otherwise: every tool runs on the host, outside the
+        # box, so the list is short by default. The search can't read
+        # inside an expander: the tools' names ride on the row itself.
+        tools_row = Adw.ExpanderRow(
+            title=_("Tools a sandboxed session may call"),
+            subtitle=_(
+                "Every tool runs outside the box. The Sandboxed chip changes "
+                "the list for one session"
+            ),
+        )
+        self._sandbox_tool_rows = tokensettings.build_sandbox_tool_rows(state, self._on_change)
+        for row in self._sandbox_tool_rows.values():
+            tools_row.add_row(row)
+        # A tool switched off for every session is off inside a box too:
+        # its row here follows that switch, which sits in a group of this
+        # same dialog (built before this one: prefslayout.GROUPS) and
+        # writes its setting before this handler hears of it.
+        for row in getattr(self, "_mcp_tool_rows", {}).values():
+            row.connect(
+                "notify::active",
+                lambda *_a: tokensettings.sync_sandbox_tool_rows(
+                    self._sandbox_tool_rows, self._state
+                ),
+            )
+        group.add(
+            _searchable(
+                tools_row, "tools", "mcp", "session tools", *self._sandbox_tool_rows
+            )
+        )
+        self._sandbox_rows.append(tools_row)
         # The status row: whether a box can be built here, and why not.
         self._sandbox_status_row = Adw.ActionRow(title=_("Bubblewrap"), activatable=False)
         self._sandbox_status_icon = Gtk.Image(valign=Gtk.Align.CENTER)

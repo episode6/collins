@@ -23,7 +23,10 @@ says *live*. One that couldn't be says *after restart*, and one the
 launched plan binds that has since been taken back says *until restart*;
 when the state's grants are not what the box holds, or a share changed, a
 *Restart to apply* row runs the graceful exit and resumes the session in
-the same tab (terminal.TerminalTab.restart_sandboxed). The *Sandboxed
+the same tab (terminal.TerminalTab.restart_sandboxed). Then the **session
+tools** this session is offered, a check each, folded under a line that
+counts them: every tool runs on the host, so a sandboxed session starts
+with a short list and this is where one session's differs. The *Sandboxed
 shell* row opens a shell inside the same box — the answer to "what can
 the agent see?".
 
@@ -42,7 +45,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import sandboxgrants, sandboxplan  # noqa: E402
+from . import mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -55,6 +58,10 @@ ICON = "sandbox-shield-symbolic"
 PIN_ICON = "view-pin-symbolic"
 
 _CHIP_ICON_PX = 12
+
+# The most the unfolded tools list takes of the popover before it scrolls:
+# about seven checks.
+_TOOLS_MAX_HEIGHT = 210
 
 # How long an unbidden dock open waits after the event that asked for it
 # (terminal._PR_PAGE_SETTLE_MS, kept here so this module imports no tab).
@@ -90,6 +97,10 @@ class SandboxChip(Gtk.MenuButton):
         self._on_restart = on_restart
         self._on_open_shell = on_open_shell
         self._on_toast = on_toast
+        # Whether the tools list is unfolded: the popover is drawn again
+        # at every change, and a list that folded itself at each tick
+        # would be no list to work in.
+        self._tools_expanded = False
         self.add_css_class("flat")
         icon = Gtk.Image.new_from_icon_name(ICON)
         icon.set_pixel_size(_CHIP_ICON_PX)
@@ -203,6 +214,9 @@ class SandboxChip(Gtk.MenuButton):
             self._content.append(self._default_row(workspace, path))
 
         self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        self._content.append(self._tools_section(host, box))
+
+        self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         # What is mounted into the running box counts as held, whether or
         # not the rows above are drawn from it.
         every = self._grants()
@@ -314,7 +328,90 @@ class SandboxChip(Gtk.MenuButton):
         row.append(remove)
         return row
 
+    def _tools_section(self, host, box: str) -> Gtk.Widget:
+        """The session tools this session is offered: a check per tool,
+        folded away under a line that counts them. Every tool runs on the
+        host, outside the box, so a sandboxed session starts with a short
+        list (Preferences → Sandbox) and this is where one session's
+        differs from it."""
+        names = mcptools.tool_names()
+        offered = [
+            name
+            for name in names
+            if host is not None and host.tool_available(name) and host.tool_enabled(box, name)
+        ]
+        expander = Gtk.Expander(
+            label=_("Session tools: {on} of {all} on").format(on=len(offered), all=len(names))
+        )
+        expander.set_expanded(self._tools_expanded)
+        expander.connect("notify::expanded", self._on_tools_expanded)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        body.set_margin_top(4)
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        # A list that scrolls: thirteen checks under everything else the
+        # popover holds would be taller than a small window.
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_propagate_natural_height(True)
+        scroller.set_propagate_natural_width(True)
+        scroller.set_max_content_height(_TOOLS_MAX_HEIGHT)
+        scroller.set_child(rows)
+        body.append(scroller)
+        for name in names:
+            title, subtitle = tokensettings.mcp_tool_label(name)
+            check = Gtk.CheckButton(label=title)
+            available = host is not None and host.tool_available(name)
+            check.set_active(name in offered)
+            check.set_sensitive(available and sandboxplan.valid_box_id(box))
+            check.set_tooltip_text(
+                subtitle
+                if available
+                else _("{name} is switched off for every session in Preferences").format(name=name)
+            )
+            check.connect("toggled", self._on_tool_toggled, name)
+            rows.append(check)
+        body.append(_caption(_("Off is refused at once; on reaches the session when it restarts")))
+        if host is not None and host.tool_overrides(box):
+            reset = Gtk.Button(label=_("Use the defaults"))
+            reset.add_css_class("flat")
+            reset.set_halign(Gtk.Align.START)
+            reset.set_tooltip_text(
+                _("Offer this session what Preferences → Sandbox offers sandboxed sessions")
+            )
+            reset.connect("clicked", lambda *_a: self.reset_tools())
+            body.append(reset)
+        expander.set_child(body)
+        return expander
+
     # -- actions ---------------------------------------------------------------
+
+    def _on_tools_expanded(self, expander: Gtk.Expander, _pspec) -> None:
+        self._tools_expanded = expander.get_expanded()
+
+    def _on_tool_toggled(self, check: Gtk.CheckButton, name: str) -> None:
+        self.set_tool(name, check.get_active())
+
+    def set_tool(self, name: str, on: bool) -> bool:
+        """Offer this session the tool *name*, or stop offering it —
+        this session's box, and no other; whether the state says so now.
+        A refusal is a toast."""
+        host = self._host()
+        if host is None:
+            return False
+        reason = host.set_tool(self._box(), name, on)
+        if reason:
+            self._on_toast(
+                _("Can't change {name}: {reason}").format(name=name, reason=reason)
+            )
+        self._refresh()
+        return not reason
+
+    def reset_tools(self) -> None:
+        """This session is offered what the defaults say again."""
+        host = self._host()
+        if host is not None:
+            host.reset_tools(self._box())
+        self._refresh()
 
     def _on_pin_toggled(self, pin: Gtk.ToggleButton, workspace: str, grant: str) -> None:
         self.set_project_default(workspace, grant, pin.get_active())

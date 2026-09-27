@@ -2163,6 +2163,74 @@ class SandboxHost:
         grants = [g for g in self.state.get_sandbox_grants(box) if g != path]
         self.state.set_sandbox_grants(box, grants)
 
+    # -- the session tools a box's session is offered --------------------------------
+    #
+    # Every session tool runs on the host, outside the box. What a
+    # sandboxed session may call is a short list by default (the
+    # "sandbox_tool_<name>" settings, mcptools.SANDBOX_DEFAULT_TOOLS), and
+    # each box can differ from it: `state.sandbox_tools`, box id → tool →
+    # on, edited in that session's chip. The dispatcher asks
+    # `tool_enabled` for every list and every call, by the box of the tab
+    # the caller's pid resolves to — never by anything the caller says.
+
+    def tool_available(self, name: str) -> bool:
+        """Whether the tool *name* is switched on for any session at all
+        (Preferences → Built-in MCP tools). One that isn't is off inside
+        a box whatever the box says."""
+        return bool(self.state.get_setting(mcptools.tool_setting_key(name)))
+
+    def tool_default(self, name: str) -> bool:
+        """Whether sandboxed sessions are offered the tool *name* unless
+        their box says otherwise."""
+        return self.state.get_setting(mcptools.sandbox_tool_setting_key(name)) is True
+
+    def tool_overrides(self, box: str) -> dict[str, bool]:
+        """The switches *box* has of its own: tool name → on."""
+        if not valid_box_id(box):
+            return {}
+        return mcptools.tool_overrides(self.state.get_sandbox_tools(box))
+
+    def tool_enabled(self, box: str, name: str) -> bool:
+        """Whether the session whose box is *box* is offered the tool
+        *name*: the box's own switch, else the default for sandboxed
+        sessions. A session with no box yet has the defaults."""
+        return mcptools.sandbox_tool_enabled(
+            name, self.tool_default(name), self.tool_overrides(box)
+        )
+
+    def set_tool(self, box: str, name: str, on: bool) -> str:
+        """Switch the tool *name* on or off for the session whose box is
+        *box*, whatever the default says or comes to say. Returns the
+        refusal, or "". Main loop."""
+        if not valid_box_id(box):
+            return "this session has no sandbox yet"
+        if name not in mcptools.tool_names():
+            return f"no such tool: {name}"
+        switches = self.tool_overrides(box)
+        switches[name] = bool(on)
+        self.state.set_sandbox_tools(box, switches)
+        return ""
+
+    def reset_tools(self, box: str) -> None:
+        """Drop the box's own switches: its session is offered what the
+        defaults say, now and as they change. Main loop."""
+        if valid_box_id(box):
+            self.state.set_sandbox_tools(box, {})
+
+    def copy_tools(self, source: str, box: str, only_off: bool = False) -> None:
+        """Start *box* with the switches of *source*: all of them for a
+        fork and for a `--continue` tab that takes a session over, and
+        with *only_off* just the ones that are off — a sibling is offered
+        the defaults, less what its parent was denied, so a session can't
+        come by a tool through a sibling it spawned. Main loop."""
+        if not valid_box_id(box) or not valid_box_id(source) or source == box:
+            return
+        switches = self.tool_overrides(source)
+        if only_off:
+            switches = {name: on for name, on in switches.items() if not on}
+        merged = {**self.tool_overrides(box), **switches}
+        self.state.set_sandbox_tools(box, merged)
+
     # -- a project's defaults ----------------------------------------------------
     #
     # A template for new sessions, never a live link: the defaults are
@@ -2253,6 +2321,12 @@ class SandboxHost:
             extra = [g for g in self.state.get_sandbox_grants(previous) if g not in mine]
             if extra:
                 self.state.set_sandbox_grants(box, [*mine, *extra])
+            # And the tools the session was, or was not, offered — under
+            # what was switched in this tab's own chip meanwhile.
+            mine_tools = self.tool_overrides(box)
+            self.copy_tools(previous, box)
+            if mine_tools:
+                self.state.set_sandbox_tools(box, {**self.tool_overrides(box), **mine_tools})
         elif owed and not previous and workspace:
             self.seed_box(box, workspace)
         self.state.set_sandboxed(session_id, True, box=box)
@@ -2262,7 +2336,8 @@ class SandboxHost:
 
     def forget_box(self, box: str) -> None:
         """The box may be done with: when no session names it, its grants
-        leave the state — they are the session's, and go with it — and the
+        and its tool switches leave the state — they are the session's,
+        and go with it — and the
         box is discarded, which still refuses one that is named, leased by
         another process or held. Main loop: this is where the state is
         written."""
@@ -2270,10 +2345,12 @@ class SandboxHost:
             return
         if box not in self.state.sandbox_boxes():
             self.state.set_sandbox_grants(box, [])
+            self.state.set_sandbox_tools(box, {})
         self.discard_box_async(box)
 
     def prune_grants(self) -> int:
-        """Drop the grants of every box no session names and whose
+        """Drop the grants and the tool switches of every box no session
+        names and whose
         directory is gone — a box swept at an earlier start, or removed by
         hand; how many went. A directory that exists is either about to
         be swept (the next start prunes its entry) or another instance's
@@ -2282,12 +2359,14 @@ class SandboxHost:
         startup."""
         named = self.state.sandbox_boxes()
         pruned = 0
-        for box in sorted(self.state.sandbox_grant_boxes()):
+        recorded = self.state.sandbox_grant_boxes() | self.state.sandbox_tool_boxes()
+        for box in sorted(recorded):
             if box in named or not valid_box_id(box):
                 continue
             if os.path.lexists(box_dir(box)):
                 continue
             self.state.set_sandbox_grants(box, [])
+            self.state.set_sandbox_tools(box, {})
             pruned += 1
         return pruned
 
@@ -2376,6 +2455,9 @@ class SandboxHost:
             return None, "", f"couldn't write the sandbox plan: {err}"
         self._claim_root()
         self.state.set_sandbox_grants(box, list(derived["inputs"].get("grants") or []))
+        # The tools its parent was denied stay denied: a session must not
+        # come by one through a sibling it spawned.
+        self.copy_tools(parent["inputs"]["box"], box, only_off=True)
         return path, box, ""
 
 

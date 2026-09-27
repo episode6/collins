@@ -1375,6 +1375,62 @@ def test_sandbox_grants_roundtrip_by_box_id(app_state):
     assert app_state.AppState().sandbox_grants == {BOX_B: ["/home/u/lib"]}
 
 
+def test_sandbox_tools_roundtrip_by_box_id(app_state, monkeypatch):
+    state = app_state.AppState()
+    assert state.get_sandbox_tools(BOX_A) == {}
+    assert state.sandbox_tool_boxes() == set()
+    state.set_sandbox_tools(
+        BOX_A, {"run_in_terminal": True, "show_diff": False, "no_such_tool": True, "attach_pr": "no"}
+    )
+    state.set_sandbox_tools(BOX_B, {"start_session": True})
+    for bad in ("", "/ws", BOX_A.upper(), BOX_A[:31], None):
+        state.set_sandbox_tools(bad, {"run_in_terminal": True})
+    saved = json.loads(app_state._STATE_FILE.read_text())["sandbox_tools"]
+    assert saved == {
+        BOX_A: {"run_in_terminal": True, "show_diff": False},
+        BOX_B: {"start_session": True},
+    }
+    fresh = app_state.AppState()
+    assert fresh.get_sandbox_tools(BOX_A) == {"run_in_terminal": True, "show_diff": False}
+    assert fresh.sandbox_tool_boxes() == {BOX_A, BOX_B}
+    # A copy; one write, none when nothing changes.
+    fresh.get_sandbox_tools(BOX_A)["read_terminal"] = True
+    assert fresh.get_sandbox_tools(BOX_A) == {"run_in_terminal": True, "show_diff": False}
+    writes = []
+    real_save = fresh.save
+    monkeypatch.setattr(fresh, "save", lambda: (writes.append(1), real_save()))
+    fresh.set_sandbox_tools(BOX_A, {"show_diff": False, "run_in_terminal": True})
+    fresh.set_sandbox_tools(BOX_A.replace("a", "c"), {})
+    assert writes == []
+    fresh.set_sandbox_tools(BOX_A, {})
+    assert len(writes) == 1
+    assert app_state.AppState().sandbox_tools == {BOX_B: {"start_session": True}}
+    # The defaults for sandboxed sessions are settings, and saved as such.
+    assert app_state.AppState().get_setting("sandbox_tool_show_diff") is True
+    assert app_state.AppState().get_setting("sandbox_tool_run_in_terminal") is False
+
+
+def test_sandbox_tools_survive_junk_on_disk(app_state):
+    app_state._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    app_state._STATE_FILE.write_text(
+        json.dumps(
+            {
+                "sandbox_tools": {
+                    BOX_A: {"run_in_terminal": True, "nope": True, "show_diff": 1},
+                    BOX_B: {},
+                    "/home/u/repo": {"run_in_terminal": True},
+                    BOX_A.upper(): {"run_in_terminal": True},
+                    BOX_A[:31]: ["run_in_terminal"],
+                }
+            }
+        )
+    )
+    assert app_state.AppState().sandbox_tools == {BOX_A: {"run_in_terminal": True}}
+    for junk in (["x"], "nope", 7, None, True):
+        app_state._STATE_FILE.write_text(json.dumps({"sandbox_tools": junk}))
+        assert app_state.AppState().sandbox_tools == {}
+
+
 def test_a_grants_entry_not_keyed_by_a_box_is_dropped_on_load(app_state):
     """What a build of the stack wrote while grants were keyed by a path
     is nobody's default: not a session's, and not a project's."""

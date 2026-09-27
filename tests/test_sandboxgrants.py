@@ -32,6 +32,19 @@ class _State:
     def __init__(self, grants=None):
         self.grants = {k: list(v) for k, v in (grants or {}).items()}
         self.defaults = {}
+        self.tools = {}
+
+    def get_sandbox_tools(self, box):
+        return dict(self.tools.get(box) or {})
+
+    def set_sandbox_tools(self, box, switches):
+        if switches:
+            self.tools[box] = dict(switches)
+        else:
+            self.tools.pop(box, None)
+
+    def sandbox_tool_boxes(self):
+        return set(self.tools)
 
     def get_sandbox_grants(self, box):
         return list(self.grants.get(box) or [])

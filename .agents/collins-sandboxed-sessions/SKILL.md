@@ -614,6 +614,9 @@ something work:
    repository to a set of boxes anywhere in the feature — a project's
    defaults are copied into a box when it is minted, and never linked.
 9. `state.sandbox_grants` is written on the main loop only.
+10. What a session is offered is decided from Collins' own record of the
+    tab the caller's pid resolves to, never from anything in a call, and
+    before any handler runs. A tool with no default is off inside a box.
 
 **Restart to apply** (`TerminalTab.restart_sandboxed`): the CLI's exit
 keystroke, a `_RESTART_POLL_MS` poll that answers the worktree keep/remove
@@ -671,7 +674,77 @@ sandboxed=True)` / the strip menu's *New sandboxed shell* (offered while
 `TerminalTab.open_sandboxed_shell(focus)` opens one beside the last shell
 or in a strip of its own on the home edge.
 
-**What a sandboxed session may ask Collins to do.** `run_tool_call` hands
+**The session tools a sandboxed session is offered.** Every session tool
+runs in Collins, on the host, outside the box, so a sandboxed session has
+a list of its own, and a short one: `mcptools.SANDBOX_DEFAULT_TOOLS`
+(`set_session_title`, `open_in_editor`, `show_diff`, `show_image`,
+`notify_user`, `attach_pr` — what puts something in front of the user).
+What reads the host back to the agent, writes to it or starts another
+agent is off inside a box until the user switches it on. **The user
+asked for this in these words: "I don't trust agents to pass a sandbox
+flag"** — so nothing about it is the caller's to say:
+
+- **Where it is decided.** `mcptools.run_tool_call(..., is_offered=)`,
+  after the arguments, the global switch and the identity, before any
+  handler: `App._mcp_tool_offered(found, tool)` is True for a tab that
+  isn't `sandboxed`, else `SANDBOX_HOST.tool_enabled(tab.sandbox_box,
+  tool)`. The tab is the one the peer's `SO_PEERCRED` pid walks up to;
+  `tab.sandboxed` and `tab.sandbox_box` are the launch's own records. The
+  refusal is `mcptools.sandbox_disabled_error`. A call's arguments can't
+  carry a claim: every schema is `additionalProperties: False`.
+- **The list a session is told** is filtered the same way:
+  `SessionToolService`'s `list_tools(pid)` takes the peer's pid
+  (`App._mcp_list_tools`). The CLI reads it once, at launch, which is
+  why the call is gated too: a tool switched off is refused at once, one
+  switched on is refused no longer and *listed* from the next launch.
+- **The two layers.** `sandbox_tool_<name>` settings
+  (`mcptools.default_sandbox_tool_settings`, folded into
+  `DEFAULT_SETTINGS`; a tool added to the table is **off** inside a box
+  until it is put on the default list) are the default for every
+  sandboxed session, edited under *Tools a sandboxed session may call*
+  in Preferences → Sandbox (`tokensettings.build_sandbox_tool_rows`, an
+  `Adw.ExpanderRow`; `prefslayout.SANDBOX_ROWS`' `sandbox_tools`).
+  `state.sandbox_tools` is box id → {tool: on}, one box's own switches,
+  edited in the chip. `SandboxHost.tool_enabled(box, name)` is the box's
+  switch when it has one, else the default
+  (`mcptools.sandbox_tool_enabled`: a default that isn't `True` is off,
+  a name the table lacks is never on). **A default is a live rule, not a
+  template** — unlike a project's default grants: changing one moves
+  every box that has no switch of its own for that tool, running ones
+  included. A switch off in *Built-in MCP tools* (`mcp_tool_<name>`) is
+  off inside a box whatever either layer says (`host.tool_available`),
+  and **both surfaces show it**: the chip greys the check, and
+  Preferences greys the tool's Sandbox row and puts
+  `tokensettings.SANDBOX_TOOL_UNAVAILABLE` where its own line was
+  (`sync_sandbox_tool_rows`, run when the rows are built and on every
+  `notify::active` of a *Built-in MCP tools* row — which is why
+  `mcp_tools` has to come before `sandbox` in `prefslayout.GROUPS`). The
+  row keeps its value. The two refusals an agent reads,
+  `mcptools.disabled_error` and `sandbox_disabled_error`, name those
+  places as the window does (*Built-in MCP tools*, *Session tools*,
+  *Tools a sandboxed session may call*); a test holds the strings.
+- **A box's switches are the session's and go with the box**, like its
+  grants: `forget_box` and `prune_grants` drop them, entries not keyed
+  by a box id or naming no known tool are dropped on load, and
+  `state.sandbox_tools` is written on the main loop only. A **fork**
+  starts with a copy of its origin's (`host.copy_tools`, in
+  `open_session`); a `--continue` tab that lands on a session with a box
+  takes them over under what was switched in its own chip meanwhile
+  (`settle_box`); a **sibling** gets `copy_tools(parent, box,
+  only_off=True)` in `derive` — the defaults, less what its parent was
+  denied, so a session can't come by a tool through a sibling it
+  spawned, and what its parent was *given* stays its parent's.
+- **The chip**: *Session tools: N of 13 on*, a `Gtk.Expander` over a
+  `Gtk.CheckButton` per tool (`tokensettings.mcp_tool_label`; greyed
+  when the tool is off for every session), *Use the defaults* when the
+  box has switches of its own (`chip.set_tool` / `reset_tools`). An
+  expander holds its child only while it is open, and the popover is
+  drawn again at every change, so the chip remembers whether it was
+  (`_tools_expanded`) — and a check script has to set that before it
+  looks for the checks.
+
+**What a sandboxed session may ask Collins to do, once a tool is on.**
+`run_tool_call` hands
 every handler a third argument, `sandboxed` — Collins' own reading of the
 calling tab (`is_sandboxed=lambda found: found[1].sandboxed`), never the
 caller's word — and the three host-reaching handlers apply the policy:
@@ -933,7 +1006,17 @@ worktree=True)`): the name typed after `-w`, the fake bwrap's arguments,
 the chip's *Read-only* row, the refused sibling, the restart, and
 `_relaunch_without_worktree` rebuilding the box around the checkout — it
 finds its launches by where they start (`--chdir`), not by count, since
-a launch reaches the fake bwrap when its own shell gets to it. Any
+a launch reaches the fake bwrap when its own shell gets to it. Its
+**tools stage** goes through the dispatcher by pid
+(`app._mcp_dispatch(tab._child_pid, …)`, `app._mcp_list_tools(pid)`),
+not through a handler: six tools listed, the others refused with
+nothing opened, an argument claiming otherwise a schema error, a switch
+in the chip reaching one box, the global switch winning, a default
+moving the boxes without a switch of their own, the sibling denied what
+its parent was, the fork copying its origin's, and a session of a
+project pinned unsandboxed offered all thirteen. The rules themselves
+are in `tests/test_mcptools.py`, the state in `tests/test_state.py`, the
+host in `tests/test_sandboxplan.py`. Any
 probe or e2e run needs a fresh `COLLINS_APP_ID` and
 `COLLINS_SANDBOX_ROOT` beside the usual scratch tree, staged under
 `~/.cache/collins-e2e` — under `$HOME`, where AppArmor lets `fusermount3`

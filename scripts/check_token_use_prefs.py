@@ -259,7 +259,12 @@ def step_search() -> bool:
         ),
         # Not read_terminal: the group's description names it, and a group
         # whose own text matches keeps every row, by design.
-        ("run_in_terminal", ["Run commands in the terminal panel"]),
+        # …and the Sandbox group's expander, which holds a switch for the
+        # same tool: what a sandboxed session is offered.
+        (
+            "run_in_terminal",
+            ["Run commands in the terminal panel", "Tools a sandboxed session may call"],
+        ),
     ):
         entry.set_text(query)
         dialog._apply_filter()
@@ -268,6 +273,39 @@ def step_search() -> bool:
     entry.set_text("")
     dialog._apply_filter()
     check("clearing the search shows everything again", len(visible_rows(page)) > 40, len(visible_rows(page)))
+    return step_sandbox_tools()
+
+
+def step_sandbox_tools() -> bool:
+    """A tool switched off for every session is off inside a box too, and
+    its row under Sandbox says so rather than staying a switch that
+    decides nothing. The rows' own sensitivity is what is read: the group
+    above them is greyed whole on a machine with no bubblewrap."""
+    dialog = state["dialog"]
+    every, boxed = dialog._mcp_tool_rows, dialog._sandbox_tool_rows
+    check("Sandbox has a row per tool", list(boxed) == [t["name"] for t in mcptools.TOOLS], list(boxed))
+    on = sorted(name for name, row in boxed.items() if row.get_active())
+    check("six of them on", on == sorted(mcptools.SANDBOX_DEFAULT_TOOLS), on)
+    check("each of them live while its tool is on", all(row.get_sensitive() for row in boxed.values()))
+    row = boxed["show_diff"]
+    line = row.get_subtitle()
+    check("the row carries the tool's own line", line.startswith("show_diff"), line)
+    every["show_diff"].set_active(False)
+    check("switched off for every session, its Sandbox row is greyed", not row.get_sensitive())
+    check(
+        "…and says why",
+        row.get_subtitle() == "Switched off for every session under Built-in MCP tools",
+        row.get_subtitle(),
+    )
+    check("…keeping what it said", row.get_active() and AppState().get_setting("sandbox_tool_show_diff") is True)
+    check("the rows beside it are as they were", boxed["show_image"].get_sensitive() and boxed["run_in_terminal"].get_sensitive())
+    every["show_diff"].set_active(True)
+    check("switched back on, the row is live again", row.get_sensitive() and row.get_subtitle() == line, row.get_subtitle())
+    boxed["run_in_terminal"].set_active(True)
+    check("a Sandbox row writes its own setting", AppState().get_setting("sandbox_tool_run_in_terminal") is True)
+    check("…and not the tool's", AppState().get_setting("mcp_tool_run_in_terminal") is True)
+    boxed["run_in_terminal"].set_active(False)
+    check("…both ways", AppState().get_setting("sandbox_tool_run_in_terminal") is False)
     return done()
 
 

@@ -59,8 +59,24 @@ def test_sandbox_follows_sessions_then_notifications_then_composer():
 
 def test_every_sandbox_setting_has_its_default():
     for key in prefslayout.SANDBOX_ROWS:
-        if key != "status":
+        # Two rows write no setting of their own name: the status row, and
+        # the expander of per-tool switches ("sandbox_tool_<name>").
+        if key not in ("status", "sandbox_tools"):
             assert key in DEFAULT_SETTINGS, key
+    assert prefslayout.SANDBOX_ROWS[-2:] == ("sandbox_tools", "status")
+    # The expander's rows follow the switches of the Built-in MCP tools
+    # group (a tool off for every session is off inside a box, and its row
+    # says so), which the dialog therefore has to have built first.
+    assert prefslayout.GROUPS.index("mcp_tools") < prefslayout.GROUPS.index("sandbox")
+    offered = sorted(
+        key[len("sandbox_tool_"):]
+        for key, on in DEFAULT_SETTINGS.items()
+        if key.startswith("sandbox_tool_") and on is True
+    )
+    assert offered == [
+        "attach_pr", "notify_user", "open_in_editor", "set_session_title", "show_diff",
+        "show_image",
+    ]
     assert DEFAULT_SETTINGS["sandbox_new_sessions"] is False
     # Off until asked for: with no prompt the box is the only barrier.
     assert DEFAULT_SETTINGS["sandbox_bypass_permissions"] is False
