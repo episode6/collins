@@ -1,6 +1,9 @@
 collins (0.1.4) UNRELEASED; urgency=medium
 
-  * Next release.
+  * New recommended dependency bubblewrap: a session can be run inside a
+    filesystem sandbox (the project read-write, the credentials and the
+    other checkouts absent). Without it every session runs unsandboxed
+    and Preferences says why.
 
  -- Geoff Hackett <ghackett@episode6.com>  Tue, 08 Sep 2026 20:00:00 -0400
 

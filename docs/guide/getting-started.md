@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-07. Full change history: git log for this file.
+fork. Last modified: 2026-09-12. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -14,8 +14,10 @@ Collins is a GTK4 app. You'll need:
 - **GTK ≥ 4.10**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), **GtkSourceView 5**, and **PyGObject**
 - **markdown-it-py** with **linkify-it-py** (the PR page's markdown parser — without
   them a PR's description falls back to plain text)
-- Optional: **libspelling** (spell-check in the composer) and **GStreamer** with its base
-  plugins (the notification sound — without it the desktop's beep stands in)
+- Optional: **libspelling** (spell-check in the composer), **GStreamer** with its base
+  plugins (the notification sound — without it the desktop's beep stands in), and
+  **bubblewrap** (sandboxed sessions — without it every session runs unsandboxed,
+  and Preferences says why)
 - The [`claude` CLI](https://claude.com/claude-code) on your `PATH`
 
 Optional, but worth having: the [**GitHub CLI**](https://cli.github.com/)
@@ -32,25 +34,27 @@ Install the system libraries with your distro's package manager:
 ::: code-group
 
 ```bash [Ubuntu / Debian]
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 bubblewrap
 ```
 
 ```bash [Fedora]
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base bubblewrap
 ```
 
 ```bash [Arch]
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs bubblewrap
 ```
 
 :::
 
-The last three packages on each line are optional. The spelling one
+The last four packages on each line are optional. The spelling one
 (`gir1.2-spelling-1` / `libspelling`) adds spell-check to the prompt
 composer; the two GStreamer ones play the notification sound for in-app
 notifications — without them Collins uses the desktop's beep instead, and
-says so under Preferences → *Notifications* → *Sound*. Collins runs fine
-without any of the three, and the .deb and RPM only recommend them.
+says so under Preferences → *Notifications* → *Sound*; `bubblewrap` is what
+a sandboxed session's box is built with — without it the *Sandboxed*
+checkbox never appears and Preferences → *Sandbox* says so. Collins runs
+fine without any of the four, and the .deb and RPM only recommend them.
 
 ## Install
 

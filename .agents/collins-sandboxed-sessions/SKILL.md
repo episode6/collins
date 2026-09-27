@@ -288,8 +288,18 @@ switches go insensitive and its status row says why.
 - Unprivileged userns is AppArmor-restricted: bwrap works through Ubuntu's
   shipped profile, but nothing inside can mount and the host can't `setns`
   into the mount namespace. Live grants (aibox's broker/launcher) are
-  impossible here; a grant applies at the next launch. Phase 2 is FUSE
-  (`bindfs` mounted by the host under sandbox-home propagates in).
+  impossible here; a grant applies at the next launch.
+- **A live grant through FUSE is possible and is deliberately not shipped**
+  (measured 2026-09-12). A `bindfs` mount the host makes under sandbox-home
+  does propagate into a *running* box — about 1.5 s, readable inside, gone
+  again on `fusermount3 -uz`. But every box binds the one sandbox home at
+  `$HOME`, so the mount lands in **every** sandboxed session running at
+  that moment, not the workspace it was allowed for: measured with a box
+  launched for one workspace, which saw a directory mounted for another.
+  A per-workspace grant that silently reaches every open box is not the
+  promise the chip makes, so grants stay grants-on-restart (the static
+  plan, which is per launch and per workspace). Reopening this means
+  giving each session its own sandbox home first.
 - The two `bwrap` processes carry the CLI's argv in their own command
   lines, so `proctree._deepest_agent_pid` walks through them and the CLI
   itself is the deepest agent: they are ancestors, not descendants, and
@@ -342,8 +352,15 @@ a grant → stale → restart → relaunch with the grant, and a sibling
 derived / refused. Staged under `~/.cache/collins-e2e` with `HOME` moved
 into the scratch tree — `/tmp` is shared into every box, so a scratch
 tree there trips the protect-check, and a real home would get the
-`RW_HOME_ALWAYS` directories. A real-box launch check is the packaging
-PR's. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
+`RW_HOME_ALWAYS` directories. `scripts/check_sandbox_launch.py` is the
+other half and has no GTK in it: a plan `prepare_launch` wrote, run under
+the **real** bwrap (`sandboxrun.py <plan> -- /bin/sh -c …`), reporting
+from inside — the workspace and the grant writable, the un-granted
+sibling, `~/.ssh`, Collins' own state and the plan file itself absent,
+`settings.json` read-only, `/usr` read-only, its own pid namespace. It is
+the only proof that bwrap *accepts* a generated plan, and it exits 77
+(`run_e2e`'s skip) with a printed reason where no box can be built — a CI
+container may have no user namespace to give. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
 `COLLINS_SANDBOX_HOME` beside the usual scratch tree.
 
 Related: `collins-terminal-tab`, `collins-sessions-and-sidebar`,
