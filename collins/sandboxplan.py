@@ -478,6 +478,264 @@ def worktree_common_git(git_file: Path) -> str | None:
     return common if valid_path(common) else None
 
 
+# -- a launch narrowed to its worktree ---------------------------------------------
+#
+# A session started with the CLI's worktree flag works in
+# `<repo>/.claude/worktrees/<name>`, which the CLI creates after it has
+# started — inside the box, where a bind needs a source that exists when
+# bubblewrap runs. So Collins picks the name, makes the directory empty on
+# the host (the reservation), binds it read-write and types `-w <name>`:
+# the CLI's own `git worktree add` accepts an empty directory (measured,
+# CLI 2.1.283, git 2.53). The launch directory — the main checkout — is
+# bound read-only instead of read-write: the CLI reads it while it cuts
+# the worktree (`.worktreeinclude`, the project's local settings), and git
+# inside sees every worktree it has registered, so nothing there reads as
+# missing and prunable.
+
+# Where the CLI keeps the worktrees of a repository, under its root.
+WORKTREES: tuple[str, ...] = (".claude", "worktrees")
+
+# The CLI's own rule for one segment of a worktree name, and its bound.
+_WORKTREE_NAME_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+)
+MAX_WORKTREE_NAME = 64
+
+# What a reserved worktree is named from: two words and four hex digits,
+# so a footer or a branch list reads as something, and two launches in a
+# row don't collide.
+_WORKTREE_WORDS: tuple[tuple[str, ...], tuple[str, ...]] = (
+    (
+        "amber", "brisk", "calm", "clear", "dusty", "early", "faint", "gentle",
+        "hazy", "keen", "late", "mellow", "quiet", "steady", "swift", "warm",
+    ),
+    (
+        "alder", "brook", "cedar", "dune", "ember", "fern", "finch", "harbor",
+        "heron", "lark", "maple", "meadow", "otter", "reed", "ridge", "wren",
+    ),
+)
+
+
+def valid_worktree_name(name: object) -> bool:
+    """Whether *name* is one Collins would hand the CLI's worktree flag: a
+    single segment of letters, digits, dots, underscores and dashes, of
+    bounded length, that starts with a letter or a digit (so it never
+    reads as a flag or a dotfile) and is not git's own directory."""
+    if not isinstance(name, str) or not 0 < len(name) <= MAX_WORKTREE_NAME:
+        return False
+    if not name[0].isascii() or not name[0].isalnum():
+        return False
+    if any(ch not in _WORKTREE_NAME_CHARS for ch in name):
+        return False
+    return name.lower().rstrip(".") != ".git"
+
+
+def new_worktree_name() -> str:
+    """A fresh name for a reserved worktree."""
+    seed = uuid.uuid4().hex
+    first, second = _WORKTREE_WORDS
+    return f"{first[int(seed[0], 16)]}-{second[int(seed[1], 16)]}-{seed[2:6]}"
+
+
+def worktree_branch(name: str) -> str:
+    """The branch the CLI checks a worktree called *name* out on."""
+    return f"worktree-{name}"
+
+
+def worktree_base(workspace: str) -> str | None:
+    """The main checkout a `-w` launch in *workspace* cuts its worktree
+    under, or None where a launch is not narrowed: outside a repository,
+    and in a checkout that is itself a linked worktree (its `.git` is a
+    file, and what it can write is that checkout and nothing else's)."""
+    root = repo_root(workspace)
+    if root is None or not valid_path(root):
+        return None
+    git_dir = os.path.join(root, ".git")
+    if os.path.islink(git_dir) or not os.path.isdir(git_dir):
+        return None
+    return root
+
+
+def worktree_reason(path: object, workspace: str) -> str:
+    """Why *path* is not a worktree a launch in *workspace* can be narrowed
+    to, or "" when it is: `<main checkout>/.claude/worktrees/<name>`, a
+    real directory, reached through no symlink."""
+    if not valid_path(path):
+        return "not an absolute path"
+    base = worktree_base(workspace)
+    if base is None:
+        return f"{workspace} is not in a repository's main checkout"
+    parent, name = os.path.split(path)
+    if parent != os.path.join(base, *WORKTREES) or not valid_worktree_name(name):
+        return f"not a worktree of {base}"
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return "it is not there"
+    if not stat.S_ISDIR(mode):
+        return "not a directory"
+    if os.path.realpath(path) != os.path.join(os.path.realpath(base), *WORKTREES, name):
+        return "reached through a symlink"
+    return ""
+
+
+def _open_worktrees(base: str, create: bool) -> int:
+    """A descriptor on `<base>/.claude/worktrees`, each component opened
+    relative to the last and never through a symlink — the directories are
+    in a checkout a session may have written. Raises OSError."""
+    fd = os.open(base, DIR_FLAGS)
+    try:
+        for part in WORKTREES:
+            if create:
+                try:
+                    os.mkdir(part, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            deeper = os.open(part, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = deeper
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _branch_taken(base: str, name: str) -> bool:
+    """Whether the repository at *base* already has the branch, or the
+    worktree registration, a worktree called *name* would take: the CLI
+    checks its branch out with `-B`, which would reset one that exists.
+    Read off the git directory, no subprocess."""
+    git_dir = os.path.join(base, ".git")
+    ref = f"refs/heads/{worktree_branch(name)}"
+    if os.path.lexists(os.path.join(git_dir, ref)):
+        return True
+    if os.path.lexists(os.path.join(git_dir, "worktrees", name)):
+        return True
+    try:
+        with open(os.path.join(git_dir, "packed-refs"), encoding="utf-8", errors="replace") as fh:
+            return any(line.rstrip("\n").endswith(" " + ref) for line in fh)
+    except OSError:
+        return False
+
+
+def reserve_worktree(workspace: str, name: str = "") -> tuple[str, str] | None:
+    """Make the directory a `-w` launch in *workspace* will cut its
+    worktree in, empty, and return (its name, its path) — or None where a
+    launch is not narrowed (worktree_base) or the directory can't be made.
+    With no *name* a fresh one is picked, one no branch or worktree of the
+    repository bears. With one — a restart, which binds the worktree the
+    session already has — the directory is made only when it is missing."""
+    base = worktree_base(os.path.realpath(workspace))
+    if base is None or (name and not valid_worktree_name(name)):
+        return None
+    try:
+        fd = _open_worktrees(base, create=True)
+    except OSError as err:
+        log.warning("sandbox: can't reserve a worktree under %s: %s", base, err)
+        return None
+    try:
+        if name:
+            try:
+                os.mkdir(name, dir_fd=fd)
+            except FileExistsError:
+                mode = os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode
+                if not stat.S_ISDIR(mode):
+                    return None
+            return name, os.path.join(base, *WORKTREES, name)
+        for _attempt in range(16):
+            candidate = new_worktree_name()
+            if _branch_taken(base, candidate):
+                continue
+            try:
+                os.mkdir(candidate, dir_fd=fd)
+            except FileExistsError:
+                continue
+            return candidate, os.path.join(base, *WORKTREES, candidate)
+        return None
+    except OSError as err:
+        log.warning("sandbox: can't reserve a worktree under %s: %s", base, err)
+        return None
+    finally:
+        os.close(fd)
+
+
+def release_worktree(path: str) -> bool:
+    """Remove the reserved worktree directory at *path* when it is empty,
+    and say whether it went. A worktree the CLI removes from inside the
+    box — an untouched one at exit, or the user's answer to its "keep or
+    remove" question — loses its content and its registration, and keeps
+    its directory: that is a mount point there. Anything in the directory
+    leaves it alone."""
+    parent, name = os.path.split(path)
+    base = os.path.dirname(os.path.dirname(parent))
+    if parent != os.path.join(base, *WORKTREES) or not valid_worktree_name(name):
+        return False
+    try:
+        fd = _open_worktrees(base, create=False)
+    except OSError:
+        return False
+    try:
+        os.rmdir(name, dir_fd=fd)
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    return True
+
+
+def _host_git(base: str, *args: str) -> subprocess.CompletedProcess | None:
+    """git in the repository at *base*, on the host, with what the
+    repository's own config could make it run switched off: the config is
+    writable from inside a box."""
+    git = shutil.which("git")
+    if not git:
+        return None
+    argv = [git, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", base]
+    try:
+        return subprocess.run(
+            [*argv, *args],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def drop_worktree_branch(base: str, name: str) -> bool:
+    """Delete the branch a removed worktree left behind, when it holds
+    nothing of its own: every commit on it is reachable from another ref.
+    The CLI deletes the branch of a worktree it removes, and can't finish
+    the removal from inside a box (release_worktree). git refuses a branch
+    a worktree still has checked out. Runs git: call off the main loop."""
+    if not valid_worktree_name(name) or worktree_base(base) != base:
+        return False
+    ref = f"refs/heads/{worktree_branch(name)}"
+    found = _host_git(base, "rev-parse", "--verify", "--quiet", ref)
+    if found is None or found.returncode != 0:
+        return False
+    own = _host_git(base, "rev-list", "--max-count=1", ref, "--not", f"--exclude={ref}", "--all")
+    if own is None or own.returncode != 0 or own.stdout.strip():
+        return False
+    gone = _host_git(base, "branch", "-D", worktree_branch(name))
+    return gone is not None and gone.returncode == 0
+
+
+def retire_worktree(path: str) -> bool:
+    """What is left of a reserved worktree once its session is over, tidied
+    on the host: the directory when it is empty, and then the branch when
+    it holds nothing. True when the directory went. Runs git: call off the
+    main loop."""
+    if not release_worktree(path):
+        return False
+    parent, name = os.path.split(path)
+    drop_worktree_branch(os.path.dirname(os.path.dirname(parent)), name)
+    return True
+
+
 # -- the plan ---------------------------------------------------------------
 
 
@@ -509,6 +767,9 @@ class Inputs:
     sandbox_root: str = ""  # what a workspace or a grant must never reach
     carrier: str | None = None  # host directory, bound at CARRIER_DEST
     anchors: tuple[tuple[str, str], ...] = ()  # (host directory, destination)
+    # The worktree a `-w` launch is narrowed to (reserve_worktree): bound
+    # read-write, and the workspace — the main checkout — read-only.
+    worktree: str | None = None
 
 
 @dataclass
@@ -627,6 +888,17 @@ def build_plan(inputs: Inputs) -> dict:
     if root and (Path(root) / ".git").is_file():
         common = worktree_common_git(Path(root) / ".git")
     anchors = _kept_anchors(inputs, home, root, common)
+    # A launch narrowed to its worktree. One that can't be bound — gone, a
+    # symlink in its path, not this repository's — never widens the box and
+    # never refuses it: the checkout stays read-only, with nothing of it
+    # writable, and the plan says why.
+    narrowed = bool(inputs.worktree)
+    worktree = None
+    unbound = ""
+    if narrowed:
+        unbound = worktree_reason(inputs.worktree, ws)
+        if not unbound:
+            worktree = inputs.worktree
 
     plan = Plan()
     plan.notes.extend(inputs.notes)
@@ -682,13 +954,29 @@ def build_plan(inputs: Inputs) -> dict:
     # The workspace, and the enclosing repository's two shared directories
     # (only those two, so a nested workspace never exposes the parent's
     # working tree). A linked worktree's common git dir comes along.
-    plan.rw(ws, required=True)
+    # Narrowed to a worktree, the workspace and the repository's `.claude`
+    # — which holds every worktree — are read-only, the git directory
+    # stays shared, and the one worktree lands on top, read-write.
+    if narrowed:
+        plan.ro(ws, required=True)
+    else:
+        plan.rw(ws, required=True)
     if root:
-        for name in (".git", ".claude"):
-            plan.rw(os.path.join(root, name))
+        plan.rw(os.path.join(root, ".git"))
+        if narrowed:
+            plan.ro(os.path.join(root, ".claude"))
+        else:
+            plan.rw(os.path.join(root, ".claude"))
         if common:
             plan.rw(common)
             plan.notes.append(f"linked worktree: common git dir {common}")
+    if worktree:
+        plan.rw(worktree, required=True)
+        plan.notes.append(f"narrowed to the worktree {worktree}: {ws} is read-only")
+    elif narrowed:
+        plan.notes.append(
+            f"the worktree {inputs.worktree} can't be bound ({unbound}): {ws} is read-only"
+        )
 
     # Grants: what the user allowed this session, each re-checked here —
     # state.json is a file on disk like any other — in both spellings (as
@@ -827,7 +1115,12 @@ def build_plan(inputs: Inputs) -> dict:
     if docker_sock:
         unsetenv.append("DOCKER_HOST")
 
-    return {
+    # What the session can write: the worktree of a narrowed launch, else
+    # the directory it starts in. Grants, siblings and the chip are about
+    # this one; a narrowed launch still starts in the checkout (`cwd`),
+    # where the CLI's worktree flag has to be given.
+    writes = worktree or ws
+    document = {
         "version": PLAN_VERSION,
         "bwrap_args": plan.args,
         "unsetenv": unsetenv,
@@ -836,9 +1129,11 @@ def build_plan(inputs: Inputs) -> dict:
         # hands it in as GH_TOKEN over the args fd: never on disk, never
         # on the typed command line.
         "gh_token": bool(inputs.share_gh),
-        "workspace": ws,
+        "workspace": writes,
         "inputs": {
-            "workspace": ws,
+            "workspace": writes,
+            "launch_dir": ws if narrowed else None,
+            "worktree": worktree,
             "sandbox_home": sandbox_home,
             "claude_dir": inputs.claude_dir,
             "socket_file": inputs.socket_file,
@@ -854,6 +1149,9 @@ def build_plan(inputs: Inputs) -> dict:
         },
         "notes": plan.notes,
     }
+    if narrowed:
+        document["cwd"] = ws
+    return document
 
 
 def _kept_anchors(
@@ -876,6 +1174,7 @@ def _kept_anchors(
         inputs.socket_file,
         inputs.ssh_auth_sock,
         common,
+        inputs.worktree,
     ):
         if path:
             taken.add(path)
@@ -1023,11 +1322,14 @@ def resolved_claude() -> tuple[str, str] | None:
     return real, os.path.dirname(real)
 
 
-def gather_inputs(workspace: str, app_id: str, state, box: str) -> Inputs:
+def gather_inputs(
+    workspace: str, app_id: str, state, box: str, worktree: str = ""
+) -> Inputs:
     """The inputs for a launch in *workspace* inside the box *box*: the
     environment, the resolved CLI, Collins' own paths, the box's
-    directories, and the grants and switches from *state*. Raises
-    ValueError for anything that is not a box id."""
+    directories, and the grants and switches from *state*. *worktree* is
+    the reserved worktree a `-w` launch is narrowed to (reserve_worktree).
+    Raises ValueError for anything that is not a box id."""
     home_dir = box_home(box)  # first: a bad id stops here
     ws = os.path.realpath(workspace)
     home = str(Path.home())
@@ -1081,6 +1383,7 @@ def gather_inputs(workspace: str, app_id: str, state, box: str) -> Inputs:
         protect_settings=not bool(state.get_setting("sandbox_settings_editable")),
         protected=protected_paths(app_id),
         notes=tuple(notes),
+        worktree=os.path.normpath(worktree) if worktree else None,
     )
 
 
@@ -1545,6 +1848,13 @@ def load_plan(path: str | None) -> dict | None:
     for key in ("sandbox_home", "carrier"):
         if not valid_path(inputs.get(key)):
             return None
+    # A narrowed launch's two directories; a plan that names neither (an
+    # ordinary launch, an earlier build's) loads as it always has.
+    for key in ("launch_dir", "worktree"):
+        if inputs.get(key) is not None and not valid_path(inputs.get(key)):
+            return None
+    if plan.get("cwd") is not None and not valid_path(plan.get("cwd")):
+        return None
     anchors = inputs.get("anchors")
     if not isinstance(anchors, list):
         return None
@@ -1568,6 +1878,23 @@ def plan_unpinned(plan: dict) -> list[str]:
     if not isinstance(listed, list):
         return []
     return [p for p in listed if valid_path(p)][:MAX_UNPINNED]
+
+
+def plan_start_dir(plan: dict) -> str:
+    """The directory a process started in the box built from *plan* lands
+    in (bubblewrap's `--chdir`): the workspace, except for a launch
+    narrowed to its worktree, which starts in the checkout, and a
+    sibling's derived plan, which starts where the sibling was asked for."""
+    start = plan.get("cwd")
+    return start if valid_path(start) else plan["workspace"]
+
+
+def plan_launch_dir(plan: dict) -> str | None:
+    """The checkout a launch narrowed to its worktree started in, which
+    the box holds read-only — or None for a plan that isn't narrowed."""
+    inputs = plan.get("inputs")
+    launch_dir = inputs.get("launch_dir") if isinstance(inputs, dict) else None
+    return launch_dir if valid_path(launch_dir) else None
 
 
 def plan_reaches(plan: dict, path: str) -> str:
@@ -1659,7 +1986,7 @@ class SandboxHost:
         self._claimed = False  # whether this run has looked at the root's owner
         self._lock = threading.Lock()
 
-    def prepare_launch(self, workspace: str, box: str) -> str | None:
+    def prepare_launch(self, workspace: str, box: str, worktree: str = "") -> str | None:
         """See prepare_launch. The box is held from before its directory
         is made — this instance's own sweep runs on a thread at startup,
         and must never find a box between its creation and its hold —
@@ -1667,7 +1994,7 @@ class SandboxHost:
         if not valid_box_id(box):
             return prepare_launch(workspace, self.app_id, self.state, box)  # the refusal
         self._count(box)
-        path = prepare_launch(workspace, self.app_id, self.state, box)
+        path = prepare_launch(workspace, self.app_id, self.state, box, worktree=worktree)
         if path is None:
             self.release(box)
             return None
@@ -2075,11 +2402,15 @@ def sweep_plans(app_id: str) -> int:
     return swept
 
 
-def prepare_launch(workspace: str, app_id: str, state, box: str) -> str | None:
+def prepare_launch(
+    workspace: str, app_id: str, state, box: str, worktree: str = ""
+) -> str | None:
     """Everything a sandboxed launch in *workspace* needs on the host, then
     the plan file's path — or None when no box can be built (bubblewrap
     missing, a bad box id, a refused plan, an unwritable directory), which
-    the caller turns into an unsandboxed launch with a message. Creates
+    the caller turns into an unsandboxed launch with a message. *worktree*
+    narrows the box to a reserved worktree (reserve_worktree); one that
+    can't be bound leaves the checkout read-only and refuses nothing. Creates
     the RW_HOME_ALWAYS directories and the box's own (its carrier, its
     anchors), seeds and secures its home, mirrors folder trust into its
     `~/.claude.json`, clears what stands in a mount's way there
@@ -2090,7 +2421,7 @@ def prepare_launch(workspace: str, app_id: str, state, box: str) -> str | None:
         log.warning("sandbox: refusing to build a box for %s: bad box id %r", workspace, box)
         return None
     try:
-        inputs = gather_inputs(workspace, app_id, state, box)
+        inputs = gather_inputs(workspace, app_id, state, box, worktree=worktree)
         for rel in RW_HOME_ALWAYS:
             os.makedirs(os.path.join(inputs.home, rel), exist_ok=True)
         make_box(box, [host_dir for host_dir, _dest in inputs.anchors], lease=app_id)

@@ -1055,11 +1055,25 @@ flipped the switch is refused if it calls it anyway.
 - **Sandboxed sessions.** A *Sandboxed* checkbox beside *New git
   worktree* runs the session inside a [bubblewrap](https://github.com/containers/bubblewrap)
   filesystem sandbox: the project (its enclosing repository's `.git` and
-  `.claude` included, so a worktree launch works) is read-write, `~/.claude`
+  `.claude` included) is read-write, `~/.claude`
   and the toolchain caches (`~/.cargo`, `~/.npm`, `~/.gradle`, `~/.m2`,
   `~/.cache/uv`, …) are shared, `~/.local/bin` and the system are read-only,
   and everything else on disk — `~/.ssh`, `~/.config/gh`, the keyring, the
-  other checkouts — is absent. `$HOME` inside is a directory of the
+  other checkouts — is absent. **With *New git worktree* ticked too, the
+  box is narrowed to the worktree**: the session writes its own worktree
+  and the repository's git directory, which git needs, and nothing else
+  of the repository — the main checkout, its `.claude` and the other
+  sessions' worktrees are there to be read (the CLI copies from the
+  checkout as it cuts the worktree, and git sees every worktree it has
+  registered) and can't be written. Collins names such a worktree itself
+  (two words and four hex digits, `calm-heron-3f9a`, on the branch
+  `worktree-calm-heron-3f9a`) and makes its directory before the launch,
+  because a box holds only what is there when it is built; the CLI cuts
+  the worktree in it as it would any other. When the CLI removes the
+  worktree — an untouched one as it exits, or on your answer to its
+  question — what it can't finish from inside, the emptied directory and
+  a branch that holds no commit of its own, Collins tidies once the tab
+  closes. `$HOME` inside is a directory of the
   session's own, `~/.local/share/collins/sandbox/<box id>/home`: seeded
   once from `~/.claude.json` and diverging from then on (the CLI's
   onboarding, MCP approvals and per-project state inside stay inside;
@@ -1093,9 +1107,9 @@ flipped the switch is refused if it calls it anyway.
   and hooks**, hands all of it back. What stays writable from inside and
   runs on the host, switch or no switch: the workspace itself (its
   scripts and build files, its own `.claude/settings.json`, a hooks
-  directory it carries such as `.husky`) — and a session started in a new
-  worktree has the whole repository for a workspace, its other worktrees
-  included; the repository's `.git/config`, where `core.hooksPath`,
+  directory it carries such as `.husky`) — for a session started in a new
+  worktree that is the worktree, and what it changed reaches the main
+  checkout when you merge its branch; the repository's `.git/config`, where `core.hooksPath`,
   `core.sshCommand`, `core.fsmonitor` and the aliases live — it is left
   writable because branch tracking (`git push -u`) is written there, so
   the pin on `.git/hooks` narrows that way out without closing it; the
@@ -1117,14 +1131,20 @@ flipped the switch is refused if it calls it anyway.
   directory must lie inside the workspace or an allowed directory the
   parent was launched with
   (a sibling in `~/.ssh` is refused with the reason, and so is one inside
-  a directory the parent holds only live — restart the parent first); the
+  a directory the parent holds only live — restart the parent first; a
+  session working in a worktree can't spawn one either, since a sibling
+  starts in the repository, which that box doesn't write — allow the
+  session the repository first if it is to spawn siblings; and a sibling
+  of a session in the main checkout runs in its parent's box, whole
+  repository and all, worktree or not); the
   sibling is a session of its own from there, with a list of its own
   that starts as what its parent was launched with; an unsandboxed
   sibling from a sandboxed parent is never possible, and
   `bypassPermissions` is granted to a sibling only when it is sandboxed.
   A **Sandboxed** chip (a shield) leads the footer of a sandboxed tab and
   is absent everywhere else: it shows what the box was *launched* with —
-  the workspace, whether the GitHub CLI login and the SSH agent went in,
+  the workspace (the worktree of a session started in one, with the
+  checkout under it as *Read-only*), whether the GitHub CLI login and the SSH agent went in,
   whether settings and hooks are read-only, and any of them that stayed
   writable because it is a symlink — and two lists. The
   **allowed directories** are this session's, *for this session only*:

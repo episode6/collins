@@ -14,7 +14,9 @@ description: >-
   and fusermount3 on one worker thread), the sticky session-to-box map and
   per-project override in state.json, the new-chat Sandboxed checkbox,
   trust mirroring into the sandbox home, the /bg and attach refusals, the
-  Preferences group and the bwrap probe, and what the box does and does not
+  Preferences group and the bwrap probe, a worktree launch narrowed to its
+  worktree (the directory reserved on the host, the checkout read-only),
+  and what the box does and does not
   contain. Use when changing anything about sandboxed launches, the plan's
   tables or ordering, the boxes on disk, grants and how they reach a
   running session, the two shares, or debugging a session that came up
@@ -53,7 +55,9 @@ directory: for a generated app id that is the runtime dir, where the plan
 files live — every e2e instance runs on such an id), the socket *file*
 read-write (connect needs write on the inode; only the file, never its
 directory), the workspace and the enclosing repository's `.git` and
-`.claude` (a linked worktree's common git dir too), grants, the two shares
+`.claude` (a linked worktree's common git dir too; for a launch narrowed
+to its worktree the workspace and `.claude` read-only and the worktree
+on top, below), grants, the two shares
 (the SSH share binds the `SSH_AUTH_SOCK` *file*, never its directory — the
 keyring's control socket sits beside it), then the masks, then the pins
 over what the host runs later, all on one switch (`protect_settings`, the
@@ -223,12 +227,95 @@ the `POLICY_INPUTS` keys — grants, the two shares, settings protection),
 and `derive(plan_path, cwd)` (a sibling's plan file and box, see the
 policy below). `load_plan` reads a launched plan back through `sandboxrun.
 read_plan` plus an `inputs` check (version 2, a box id, the box's paths);
+`plan_start_dir(plan)` is where a process started in the box lands
+(`--chdir`: the plan's `cwd` when it names one, else its workspace) and
+`plan_launch_dir(plan)` the checkout a narrowed launch holds read-only;
 `plan_reaches(plan, path)` is the
 "inside the workspace or a grant" rule; `derive_plan(plan, cwd, box)`
 re-issues a plan with `--chdir` changed (`cwd` recorded beside
 `workspace`) and every path under the parent's box moved to the
 sibling's.
 The app sets `terminal.SANDBOX_HOST` to one at startup.
+
+**A worktree launch is narrowed to its worktree.** `claude -w` makes
+`<repo>/.claude/worktrees/<name>` *after* it has started, inside the box,
+and a bind needs a source that exists when bubblewrap runs — so a plan
+built for the launch directory used to hold the whole main checkout
+read-write, every other worktree with it. Now the tab settles the
+worktree first (`TerminalTab._reserve_worktree`, from `_sandbox_options(
+cwd, fresh=True)` — a new session's launch with `options.worktree`, never
+a plan adopted from a parent):
+
+- `worktree_base(workspace)` is the main checkout a launch is narrowed
+  in: the nearest ancestor whose `.git` is a real directory. None outside
+  a repository and in a checkout that is itself a linked worktree (`.git`
+  is a file) — there the launch is as it was, a plain `-w`.
+- `reserve_worktree(workspace, name="")` makes the directory, empty, and
+  returns (name, path). It walks `<base>/.claude/worktrees` by file
+  descriptor with `O_NOFOLLOW` (the checkout is somewhere a session may
+  have written: a `.claude` or `worktrees` that is a link is refused and
+  nothing is made where it points). A fresh name is `new_worktree_name()`
+  — two words and four hex digits — passed over when the repository has
+  that directory, that branch (loose or packed) or that registration: the
+  CLI checks its branch out with `-B`, which would reset one that exists.
+  With a name (a restart) the directory is made only when it is missing.
+- `SessionOptions.worktree_name` is typed after the flag
+  (`Provider._option_flags`: `-w <name>`, only a name matching
+  `_WORKTREE_NAME_RE`).
+- `Inputs.worktree` narrows `build_plan`: the workspace `--ro-bind`
+  instead of `--bind`, the repository's `.git` shared as ever (hooks
+  pinned on top), its `.claude` `--ro-bind-try` instead of `--bind-try`,
+  then the worktree `--bind`. `--chdir` stays the launch directory — the
+  CLI's flag has to be given in the checkout. The document's `workspace`
+  (top level and in `inputs`) is **what the session can write**, the
+  worktree; `cwd` and `inputs.launch_dir` are the checkout;
+  `inputs.worktree` the worktree. So the chip, `grant_reason`'s "already
+  inside the workspace", `plan_stale` and `plan_reaches` are all about
+  the worktree, and a project default inside the checkout seeds
+  (`mint_box(worktree)`).
+- **A worktree that can't be bound never widens the box and never refuses
+  it** (`worktree_reason`: missing, not a directory, not
+  `<base>/.claude/worktrees/<valid name>`, reached through a symlink):
+  the plan keeps the checkout read-only with nothing of it writable,
+  `inputs.worktree` is None, and a note says why. A refusal would be an
+  unsandboxed launch.
+- Where a launch is narrowed and the directory can't be reserved, the
+  session starts **without** a worktree and says so — a box around the
+  checkout, as an unticked box gives — never a whole-repository box for
+  the sake of a worktree.
+- `_relaunch_without_worktree` (the CLI printed *Error creating
+  worktree*) drops the flag, the name and the reservation, and for a
+  sandboxed launch **builds the box again** before it types the command:
+  the narrowed one holds the checkout read-only. It unregisters first
+  and goes on from the callback, like the restart.
+- **Restart** (`_relaunch_sandboxed`): a CLI that reaped the worktree as
+  it exited leaves the session in the checkout on resume, which this box
+  can't write — so the worktree is put back first
+  (`sessions.recreatable_worktree` / `recreate_worktree`, off the main
+  loop), then `_type_restart` launches from the launch cwd with the same
+  worktree bound again. **Resume** from the sidebar is as it was: the
+  cwd is the worktree, the box is the worktree and the common git
+  directory, the checkout absent.
+- **What the CLI's removal of a worktree leaves.** From inside, `git
+  worktree remove --force` empties the directory and drops the
+  registration, fails on the directory itself (a mount point under a
+  read-only parent: `EROFS`), and the CLI then leaves the branch.
+  `retire_worktree(path)` — from the tab's `_on_child_exited` and from
+  the fallback, on a thread — removes the directory *when it is empty*
+  (`release_worktree`, by file descriptor) and then the branch *when
+  every commit on it is reachable from another ref*
+  (`drop_worktree_branch`). Its git runs through `_host_git`: `-c
+  core.hooksPath=/dev/null -c core.fsmonitor=false`, since the
+  repository's config is writable from inside a box. An app that quits
+  with tabs open never gets there; `sessions.recreatable_worktree` reads
+  an *empty* directory as a reaped worktree for that reason.
+- **Siblings.** A session working in a worktree — launched into one or
+  resumed in one — can't spawn a sibling: the sibling collapses to the
+  repository, which the box doesn't write (`plan_reaches` is about the
+  workspace and the grants). Allowing the session the repository is the
+  way, and takes a restart to be in the plan a sibling derives from. A
+  sibling of a session in the main checkout adopts its parent's plan,
+  whole repository and all, and its `-w` is a plain one: not narrowed.
 
 **Grants are a session's.** A sandboxed session's box is that session's
 alone: its home, *and the directories it is allowed*. `state.
@@ -509,7 +596,8 @@ something work:
    never a guess: the restart applies it.
 6. `bindfs` is spawned only by the `sandbox-grants` thread.
 7. A sandboxed session never launches unsandboxed because of anything
-   here.
+   here. A narrowed launch whose worktree can't be bound keeps its box,
+   with the checkout read-only; it is never refused and never widened.
 8. Nothing delivers, lists or removes a grant for any box but the one it
    was asked about. There is no lookup from a workspace, a project or a
    repository to a set of boxes anywhere in the feature — a project's
@@ -534,7 +622,9 @@ caption where the row would be. `_launch_command(cwd, id, restart=True)`
 is what turns the id ahead of a `--continue` override — an initial spawn
 honours the override it was handed. The launch cwd, not the agent's last
 one: a resume re-enters the worktree the transcript records by itself,
-and the worktree lies under the launch workspace's mount.
+and has to start in the checkout to find it. A launch narrowed to its
+worktree binds that worktree again, put back first if the CLI reaped it
+(above); any other has the worktree inside its workspace.
 
 **The sandboxed shell.** `PanelTerminal(number, plan_lookup=...)` is the
 same page class with `sandboxed` True: `page_kind` stays `"shell"` (so
@@ -545,8 +635,9 @@ sandboxed=True)`), titled *Sandboxed shell N* on the dock-wide numbering,
 wearing `sandboxchip.ICON`. It spawns `providers.sandboxed_shell_argv(
 plan, $SHELL)` — `python3 sandboxrun.py <plan> -- $SHELL`, so it runs in
 exactly the session's box — with a queued `cd` to the agent's directory
-when that lies inside the workspace (bwrap's `--chdir` lands it in the
-workspace). No plan at spawn (a layout restored before the launch settled,
+when that lies inside the workspace and isn't where bwrap's `--chdir`
+lands it (`plan_start_dir`: the workspace, or the checkout of a narrowed
+launch, whose agent is in the worktree). No plan at spawn (a layout restored before the launch settled,
 or into an unsandboxed tab) → a message and no shell; the next show
 retries. **Busy detection**: bash inside the box takes the pty's
 foreground for itself and the kernel reports its process group in host pid
@@ -595,7 +686,9 @@ spawn that never made a tab, drops both (`app._drop_sibling_box`).
 bypass is granted (explicit or inherited) only when the sibling is
 sandboxed. A parent in a linked worktree gets its sibling refused: the
 sibling collapses to the repo root (the resolver's rule), which the
-worktree's workspace mount doesn't reach. The display-only tools are
+worktree's workspace mount doesn't reach — and that is every sandboxed
+session working in a worktree now, the one launched with `-w` included,
+whose workspace is its worktree. The display-only tools are
 unchanged.
 
 **Refusals.** `/bg` and `claude attach` are never used for a sandboxed
@@ -704,17 +797,43 @@ switches go insensitive and its status row says why.
 - **What stays writable from inside and runs on the host**, switch or no
   switch — the list the docs carry, and the reason bypass is off by
   default: the workspace itself (scripts, build files, the project's own
-  `.claude/settings*`, a `.husky`), and for a session started with `-w`
-  the whole repository, its other worktrees included; `.git/config`
+  `.claude/settings*`, a `.husky`) — the worktree, for a session started
+  with `-w`; `.git/config`
   (`core.hooksPath`, `core.sshCommand`, `core.fsmonitor`, aliases); the
   hooks of a nested repository, a submodule or a granted directory; the
   toolchain directories a build needs writable (`~/.cargo/bin`,
   `~/.gradle/init.d`, cached artifacts in `~/.m2` and `~/.npm`,
   `~/.local/share/pnpm`, version managers' shims); and in `~/.claude`,
-  any pinned name that is missing or a symlink. Narrowing a `-w` launch
-  to its worktree is the open item. When a table changes, the list in
-  `docs/guide/features.md` changes with it, and so do the examples
-  `test_what_the_docs_say_stays_writable_does` builds a plan around.
+  any pinned name that is missing or a symlink. When a table changes,
+  the list in `docs/guide/features.md` changes with it, and so do the
+  examples `test_what_the_docs_say_stays_writable_does` builds a plan
+  around.
+- **The CLI's worktree flag, measured (CLI 2.1.283, git 2.53,
+  2026-09-27).** `-w, --worktree [name]` takes a name: one or more
+  `/`-separated segments of letters, digits, dots, underscores and
+  dashes, 64 characters at most, never `.`, `..` or `.git`. The worktree
+  is `<repo>/.claude/worktrees/<name>` on the branch `worktree-<name>`,
+  checked out with `git worktree add --no-track -B`. **An empty directory
+  already there is taken as it is**: the CLI looks for a worktree in it,
+  finds none, and cuts one. It refuses a symlink at `.claude`,
+  `.claude/worktrees` or the worktree itself. It `mkdir -p`s the
+  worktrees directory, which succeeds on a read-only one that exists. As
+  it cuts the worktree it reads the main checkout: `.worktreeinclude`
+  (ignored files copied in, measured: a `.env` arrived), the project's
+  `settings.local.json`, `.husky`, `core.hooksPath` — which is why the
+  checkout is read-only inside rather than absent, and git inside would
+  read an absent worktree as missing and prunable. With nothing
+  reserved, the same launch prints *Error creating worktree: … could not
+  create leading directories … Read-only file system* and leaves the
+  branch it had already made. Exiting an untouched session prints
+  *Cleaning up worktree (no pending changes)*: in a box that holds the
+  whole repository the directory and the branch go; narrowed, the
+  directory is emptied and unregistered and the branch stays. No login
+  is needed for any of it — a probe with a scratch home and no
+  credentials reaches the input box, spends nothing, and cuts the
+  worktree on the way. Not measured against the real CLI: the resume
+  half of a restart, which needs a conversation to resume.
+>>>>>>> 564712b (Sandboxed sessions: a worktree launch is narrowed to its worktree)
 - `gh` keeps its token in the Secret Service keyring on a desktop, which the
   box can't reach, so a bind of `~/.config/gh` alone yields "token invalid";
   hence `GH_TOKEN` via `gh auth token` in sandboxrun. `git_protocol: ssh`
@@ -787,7 +906,23 @@ the only proof that bwrap *accepts* a generated plan, and it exits 77
 container may have no user namespace to give. Both checks print their
 live part as *SKIP* and still pass where `capable()` says no, or where
 the first delivery comes back `PENDING` (a container with the tools and
-nothing to mount with); on a development machine they must run. Any
+nothing to mount with); on a development machine they must run. The
+launch check's **narrowed section** is the box of a `-w` launch over a
+real repository with another session's worktree in it: the git command
+the CLI runs cuts the worktree in the reserved directory, which is
+written and committed in; the checkout, a script in it, its
+`.claude/settings.json`, a new `settings.local.json` and the other
+worktree can't be written; a restart binds the same worktree; removing
+it from inside leaves what `retire_worktree` tidies (the branch kept
+with a commit of its own, gone without); a worktree that isn't there
+leaves a box that writes nothing of the repository. It is skipped with a
+printed reason where there is no git. The policy check launches one
+through the widgets (`start_background_session(checkout,
+worktree=True)`): the name typed after `-w`, the fake bwrap's arguments,
+the chip's *Read-only* row, the refused sibling, the restart, and
+`_relaunch_without_worktree` rebuilding the box around the checkout — it
+finds its launches by where they start (`--chdir`), not by count, since
+a launch reaches the fake bwrap when its own shell gets to it. Any
 probe or e2e run needs a fresh `COLLINS_APP_ID` and
 `COLLINS_SANDBOX_ROOT` beside the usual scratch tree, staged under
 `~/.cache/collins-e2e` — under `$HOME`, where AppArmor lets `fusermount3`

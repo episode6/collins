@@ -230,7 +230,8 @@ def _within(root: str, path: str) -> bool:
 
 # The host side of sandboxing (sandboxplan.SandboxHost, bound to the app id
 # and state): how a sandboxed launch gets its plan (`prepare_launch(cwd, box)`
-# for the settled launch cwd, None when no box can be built), and what the
+# for the settled launch cwd — with the worktree a `-w` launch is narrowed
+# to — None when no box can be built), and what the
 # footer chip reads and writes — the workspace's grants, the guard on a new
 # one, whether the launched plan is stale. Set by the app at startup, like
 # providers.MCP_CONFIG_PATH; None means every sandboxed decision degrades
@@ -1122,13 +1123,15 @@ class PanelTerminal(Gtk.Box):
                 )
                 return
             # The launcher execs `bwrap --args <fd> -- $SHELL`, whose
-            # --chdir lands the shell in the workspace; the agent's own
-            # directory inside it is one typed `cd` away, queued for the
-            # shell to read the moment it is up (run_command).
+            # --chdir lands the shell where the plan starts — the
+            # workspace, or the checkout of a launch narrowed to its
+            # worktree; the agent's own directory inside the workspace is
+            # one typed `cd` away, queued for the shell to read the moment
+            # it is up (run_command).
             argv = sandboxed_shell_argv(plan, shell)
             self._spawn_plan = plan
-            workspace = self._plan_workspace(plan)
-            if workspace and cwd != workspace and _within(workspace, cwd):
+            workspace, start = self._plan_workspace(plan)
+            if workspace and cwd != start and _within(workspace, cwd):
                 self.run_command(f"cd {shlex.quote(cwd)}")
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
@@ -1165,9 +1168,13 @@ class PanelTerminal(Gtk.Box):
         self.emit("shell-exited")
 
     @staticmethod
-    def _plan_workspace(plan: str) -> str | None:
+    def _plan_workspace(plan: str) -> tuple[str | None, str | None]:
+        """(the workspace of the box *plan* builds, the directory a process
+        started in it lands in), or two Nones for a plan that can't be read."""
         loaded = sandboxplan.load_plan(plan)
-        return loaded["workspace"] if loaded else None
+        if not loaded:
+            return None, None
+        return loaded["workspace"], sandboxplan.plan_start_dir(loaded)
 
     def _shell_pid(self) -> int | None:
         """The pid whose process group is "the shell at its prompt": the
@@ -1437,6 +1444,10 @@ class TerminalTab(Gtk.Box):
         # not know whose it would be (a --continue launch): the window
         # settles what it starts with when the session resolves.
         self._sandbox_defaults_owed = False
+        # The worktree directory this tab made on the host for a sandboxed
+        # `-w` launch (sandboxplan.reserve_worktree), which its box is
+        # narrowed to — kept across restarts, tidied when the shell exits.
+        self._reserved_worktree: str = ""
         # Decided at spawn time, so a toggle mid-session can't half-apply to
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
@@ -2255,12 +2266,44 @@ class TerminalTab(Gtk.Box):
     def _relaunch_without_worktree(self) -> None:
         """Type the same new-session command again with the worktree dropped.
         The tab's own options lose the flag too, so anything that later asks
-        what this session was started with is told what actually ran."""
-        self._options = replace(self._options, worktree=False) if self._options else None
+        what this session was started with is told what actually ran.
+
+        A sandboxed launch that was narrowed to the worktree gets a box
+        built again first: the one it has holds the checkout read-only,
+        which is no place to start a session in."""
+        narrowed = self._drop_reserved_worktree()
         self._shells_follow_armed = False  # no worktree to follow into
+        if narrowed and self._options is not None and self._options.sandbox:
+            self._unregister_sandbox_box(
+                lambda: GLib.idle_add(
+                    self._type_without_worktree, True, priority=GLib.PRIORITY_DEFAULT
+                )
+            )
+            return
+        self._type_without_worktree(False)
+
+    def _drop_reserved_worktree(self) -> bool:
+        """Forget the worktree this launch asked for — the flag, the name
+        and the reserved directory, which is tidied off the main loop — and
+        say whether one had been reserved."""
+        if self._options is not None:
+            self._options = replace(self._options, worktree=False, worktree_name="")
+        reserved, self._reserved_worktree = self._reserved_worktree, ""
+        if reserved:
+            threading.Thread(
+                target=sandboxplan.retire_worktree, args=(reserved,), daemon=True
+            ).start()
+        return bool(reserved)
+
+    def _type_without_worktree(self, rebuild: bool) -> bool:
+        if self.get_root() is None:
+            return GLib.SOURCE_REMOVE
+        if rebuild:
+            self._options = self._sandbox_options(self._cwd or str(Path.home()), fresh=True)
+            self._sync_sandbox_chip()
         command = self.provider.new_command(self._options)
         if command is None:  # the CLI vanished from PATH between the two launches
-            return
+            return GLib.SOURCE_REMOVE
         self.feed_message(
             _("couldn't create a worktree — starting the session in {cwd} instead").format(
                 cwd=display_path(self._cwd or "")
@@ -2268,6 +2311,7 @@ class TerminalTab(Gtk.Box):
         )
         self._initial_command = command
         self.terminal.feed_child(f"{command}\n".encode())
+        return GLib.SOURCE_REMOVE
 
     def _launch_command(self, cwd: str, session_id: str | None, restart: bool = False) -> str | None:
         """The agent command to type into the shell for a launch in *cwd*:
@@ -2282,7 +2326,8 @@ class TerminalTab(Gtk.Box):
         is newest in the directory now. Only the sandbox restart passes it;
         an initial spawn honours the override it was handed."""
         if self._options is not None and self._options.sandbox:
-            self._options = self._sandbox_options(cwd)
+            fresh = session_id is None and self._command_override is None
+            self._options = self._sandbox_options(cwd, fresh=fresh)
         self._sync_sandbox_chip()
         resume_first = restart and session_id is not None
         if self._command_override is not None and not resume_first:
@@ -2376,11 +2421,41 @@ class TerminalTab(Gtk.Box):
         if self.get_root() is None or self._restart_ticks is None:
             self._restart_ticks = None
             return GLib.SOURCE_REMOVE
+        state = (
+            recreatable_worktree(self._transcript.path, self._reserved_worktree)
+            if self._reserved_worktree
+            else None
+        )
+        if state is not None and state.get("worktreePath") == self._reserved_worktree:
+            # The CLI reaped the worktree as it exited (an untouched one
+            # goes without a question), and the resume would leave the
+            # session in the checkout, which this box holds read-only. Put
+            # it back first, as a resume from the sidebar does (_spawn) —
+            # off the main loop, and _restart_ticks stays set meanwhile.
+            self.feed_message(
+                _("recreating removed worktree {path}").format(
+                    path=display_path(self._reserved_worktree)
+                )
+            )
+
+            def recreate() -> None:
+                recreate_worktree(state)
+                GLib.idle_add(self._type_restart, priority=GLib.PRIORITY_DEFAULT)
+
+            threading.Thread(target=recreate, daemon=True).start()
+            return GLib.SOURCE_REMOVE
+        return self._type_restart()
+
+    def _type_restart(self) -> bool:
+        if self.get_root() is None or self._restart_ticks is None:
+            self._restart_ticks = None
+            return GLib.SOURCE_REMOVE
         self._restart_ticks = None
         # The launch cwd, not the agent's last one: a resume re-enters a
-        # worktree the transcript records by itself, and the plan's
-        # workspace has to be the one the session was launched in for the
-        # worktree (under <repo>/.claude/worktrees) to lie inside it.
+        # worktree the transcript records by itself, and the CLI has to
+        # start where it was launched — the checkout — to find it. A
+        # launch narrowed to its worktree binds that worktree again
+        # (_sandbox_options); any other has it inside its workspace.
         command = self._launch_command(self._cwd or str(Path.home()), self.session_id, restart=True)
         if command is None:
             return GLib.SOURCE_REMOVE
@@ -2390,12 +2465,16 @@ class TerminalTab(Gtk.Box):
         self.terminal.feed_child(f"{command}\n".encode())
         return GLib.SOURCE_REMOVE
 
-    def _sandbox_options(self, cwd: str):
+    def _sandbox_options(self, cwd: str, fresh: bool = False):
         """The launch options with the sandbox plan written for *cwd* — or,
         when no box can be built here (bubblewrap missing, a refused
         workspace), the same options with the sandbox dropped: an
         unsandboxed launch that says so on screen, and never one that keeps
-        a bypass mode the box was the justification for."""
+        a bypass mode the box was the justification for.
+
+        *fresh* is a new session's launch, the one that can ask the CLI
+        for a worktree: the tab reserves the directory first, so the box
+        is narrowed to it (_reserve_worktree)."""
         options = self._options
         if options.sandbox_plan and options.sandbox_plan != self._sandbox_plan_path:
             # A plan settled by the caller — a sibling spawned from inside
@@ -2417,6 +2496,21 @@ class TerminalTab(Gtk.Box):
                 # launch below takes this tab's own.
                 SANDBOX_HOST.release(options.sandbox_box)
         self._release_sandbox_plan()
+        if fresh and options.worktree and SANDBOX_HOST is not None:
+            options = self._reserve_worktree(cwd, options)
+        elif self._reserved_worktree:
+            # A restart: the worktree the session has, made again if it is
+            # gone — a bind needs a source. One that can't be leaves the
+            # box with the checkout read-only, never with it writable.
+            name = os.path.basename(self._reserved_worktree)
+            if sandboxplan.reserve_worktree(cwd, name) is None:
+                self.feed_message(
+                    _("warning: the worktree {path} can't be put in the sandbox — "
+                      "the repository is read-only inside it").format(
+                        path=display_path(self._reserved_worktree)
+                    )
+                )
+        worktree = self._reserved_worktree
         # The session's own box, else the one this tab already launched in
         # (a restart keeps the home), else a fresh one — which starts with
         # its project's default grants, unless this is a --continue tab:
@@ -2425,9 +2519,15 @@ class TerminalTab(Gtk.Box):
         box = options.sandbox_box or self._sandbox_box
         if not box and SANDBOX_HOST is not None:
             seeded = self._command_override is None
-            box = SANDBOX_HOST.mint_box(cwd, seed=seeded)
+            # Seeded against what the session can write: a default inside
+            # the checkout is not "already inside" a worktree's box.
+            box = SANDBOX_HOST.mint_box(worktree or cwd, seed=seeded)
             self._sandbox_defaults_owed = not seeded
-        plan = SANDBOX_HOST.prepare_launch(cwd, box) if SANDBOX_HOST is not None else None
+        plan = (
+            SANDBOX_HOST.prepare_launch(cwd, box, worktree=worktree)
+            if SANDBOX_HOST is not None
+            else None
+        )
         if plan:
             self._sandbox_plan_path = plan
             self._sandbox_plan_adopted = False
@@ -2447,6 +2547,33 @@ class TerminalTab(Gtk.Box):
         return replace(
             options, sandbox=False, sandbox_plan="", sandbox_box="", permission_mode=mode
         )
+
+    def _reserve_worktree(self, cwd: str, options):
+        """*options* for a sandboxed launch that asks the CLI for a
+        worktree, with the worktree settled first: the CLI makes it after
+        it has started, inside the box, and a box binds only what is there
+        when it is built. So the tab picks the name and makes the
+        directory, and the box holds that one worktree read-write and the
+        checkout read-only.
+
+        Where the launch is in a repository's main checkout and the
+        directory can't be made, the session starts without a worktree
+        and says so — never in a box that holds the whole repository
+        writable for the sake of a worktree. Anywhere else (a checkout
+        that is itself a linked worktree) the launch is as it was."""
+        if sandboxplan.worktree_base(os.path.realpath(cwd)) is None:
+            return options
+        reserved = sandboxplan.reserve_worktree(cwd)
+        if reserved is None:
+            self._shells_follow_armed = False
+            self.feed_message(
+                _("couldn't create a worktree — starting the session in {cwd} instead").format(
+                    cwd=display_path(cwd)
+                )
+            )
+            return replace(options, worktree=False, worktree_name="")
+        name, self._reserved_worktree = reserved
+        return replace(options, worktree_name=name)
 
     def _register_sandbox_box(self) -> None:
         """Tell the live grants this tab's box is up on the plan just
@@ -2493,6 +2620,13 @@ class TerminalTab(Gtk.Box):
         held = self._sandbox_plan_path is not None and bool(box)
         sandboxplan.release_plan(self._sandbox_plan_path)
         self._sandbox_plan_path = None
+        if self._reserved_worktree:
+            # What the CLI's own removal of the worktree couldn't finish
+            # from inside the box: the emptied directory, and its branch.
+            # A worktree with anything in it is left as it is.
+            threading.Thread(
+                target=sandboxplan.retire_worktree, args=(self._reserved_worktree,), daemon=True
+            ).start()
 
         def gone() -> bool:
             if host is not None and box:

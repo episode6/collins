@@ -15,7 +15,12 @@ carrying the grant; a sibling from the sandboxed tab inherits the parent's
 plan derived for its directory and a box of its own, and one outside the
 box is refused. Every session has a box (its own `$HOME`): minted at the
 launch, recorded against the session id when it resolves, kept across the
-restart, and removed when the session's transcript is forgotten.
+restart, and removed when the session's transcript is forgotten. A launch
+that asks the CLI for a worktree reserves it first and types its name: the
+box holds that worktree read-write and the checkout read-only, the chip
+says so, the restart binds the same worktree again, a sibling in the
+checkout is refused, and a worktree the CLI couldn't cut puts the session
+in a box rebuilt around the checkout.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_sandbox_policy.py
@@ -107,6 +112,9 @@ OTHER = f"{E2E}/dev/lib"
 LIVE = f"{HOME}/dev/live"  # under $HOME: what a live grant can link at its real path
 EXTRA = f"{E2E}/dev/extra"  # allowed to one session, then pinned as a project default
 PINNED = f"{E2E}/dev/pinned"  # a project default the first session never held
+# A repository's main checkout, for the launch that asks for a worktree.
+CHECKOUT = f"{E2E}/dev/gamma"
+NARROWED = "22222222-3333-4444-5555-666666666666"
 SHIM = f"{E2E}/bin/claude"
 FAKE_BWRAP = os.environ["COLLINS_BWRAP"]
 FAKE_LOG = os.environ["SANDBOX_FAKE_LOG"]
@@ -122,7 +130,7 @@ _PROJECT = f"{E2E}/projects/" + "".join(c if c.isalnum() else "-" for c in TRUST
 
 for path in (
     f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", HOME, SUB, OTHER, LIVE, EXTRA, PINNED,
-    f"{HOME}/.ssh", _PROJECT,
+    f"{HOME}/.ssh", _PROJECT, f"{CHECKOUT}/.git",
 ):
     os.makedirs(path, exist_ok=True)
 # A dotfiles setup: the user's instructions are a symlink, which no bind can
@@ -273,6 +281,7 @@ def labels(widget) -> list[str]:
 
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(TRUSTED)
+trust.trust_dir(CHECKOUT)
 app = App()
 
 tries = 0
@@ -727,12 +736,12 @@ def win_state():
     return state["win"].state if "win" in state else AppState()
 
 
-def launch(then) -> None:
-    """Another sandboxed session of the same project, and *then(tab)* once
-    its launch has settled on a plan."""
+def launch(then, cwd: str = TRUSTED, **how) -> None:
+    """Another sandboxed session of the same project — or one in *cwd*,
+    launched *how* — and *then(tab)* once its launch has settled on a plan."""
     win = state["win"]
     before = {win.tab_view.get_nth_page(i).get_child() for i in range(win.tab_view.get_n_pages())}
-    win.start_background_session(TRUSTED)
+    win.start_background_session(cwd, **how)
     ticks = {"n": 0}
 
     def settled() -> bool:
@@ -881,7 +890,7 @@ def forked() -> None:
     origin = win.store.get_session(ORIGIN)
     check("the earlier session is in the store", origin is not None)
     if origin is None:
-        live()
+        narrowed()
         return
     check("it holds a directory of its own", host.grants(ORIGIN_BOX) == [OTHER], host.grants(ORIGIN_BOX))
     host.set_project_default(TRUSTED, PINNED, True)  # a fork takes no defaults
@@ -898,7 +907,7 @@ def forked() -> None:
     )
     check("the fork opened", fork is not None and fork.fork)
     if fork is None:
-        live()
+        narrowed()
         return
     box = fork.launch_options.sandbox_box
     check("the window minted the fork's box", sandboxplan.valid_box_id(box) and box != ORIGIN_BOX, box)
@@ -909,7 +918,143 @@ def forked() -> None:
     check("the fork's list stays put", host.grants(box) == [OTHER], host.grants(box))
     host.revoke(box, OTHER)
     check("…and the origin's, when the fork drops one", host.grants(ORIGIN_BOX) == [OTHER, EXTRA])
+    narrowed()
+
+
+def narrowed() -> None:
+    """A launch that asks the CLI for a worktree: narrowed to it."""
+    launch(narrowed_typed, CHECKOUT, worktree=True)
+
+
+def in_checkout() -> list[list[str]]:
+    """The launches that started in the checkout, in order. By where they
+    start, not by count: the fork before them reaches the fake bwrap when
+    its own shell gets to it."""
+    return [
+        args
+        for args in launches()
+        if "--chdir" in args and args[args.index("--chdir") + 1] == CHECKOUT
+    ]
+
+
+def narrowed_typed(tab) -> None:
+    """The plan is settled before the shell has run the command typed into
+    it: wait for the launch itself to reach the fake bwrap."""
+    ticks = {"n": 0}
+
+    def seen() -> bool:
+        ticks["n"] += 1
+        if not in_checkout() and ticks["n"] < 100:
+            return GLib.SOURCE_CONTINUE
+        narrowed_up(tab)
+        return GLib.SOURCE_REMOVE
+
+    GLib.timeout_add(100, seen)
+
+
+def narrowed_up(tab) -> None:
+    host = terminal.SANDBOX_HOST
+    state["narrow"] = tab
+    options = tab.launch_options
+    name = options.worktree_name
+    own = f"{CHECKOUT}/.claude/worktrees/{name}"
+    state["own"] = own
+    check("a worktree launch is sandboxed", tab.sandboxed and options.worktree, options)
+    check("the tab named the worktree", sandboxplan.valid_worktree_name(name), name)
+    check("…and made its directory, empty", os.path.isdir(own) and os.listdir(own) == [], own)
+    typed = tab._initial_command or ""
+    check("the name is typed after the flag", f" -w {name} " in f"{typed} ", typed)
+    doc = sandboxplan.load_plan(tab.sandbox_plan_path)
+    check("the plan's workspace is the worktree", bool(doc) and doc["workspace"] == own, doc and doc["workspace"])
+    check("…started in the checkout", bool(doc) and sandboxplan.plan_start_dir(doc) == CHECKOUT)
+    seen = in_checkout()
+    check("the launch starts in the checkout", len(seen) == 1, len(seen))
+    args = seen[-1] if seen else []
+    check("the checkout is bound read-only", (CHECKOUT, CHECKOUT) in after(args, "--ro-bind"), args)
+    check(
+        "…and never read-write",
+        (CHECKOUT, CHECKOUT) not in after(args, "--bind") + after(args, "--bind-try"),
+        args,
+    )
+    claude_dir = f"{CHECKOUT}/.claude"
+    check("so is the directory that holds every worktree", (claude_dir, claude_dir) in after(args, "--ro-bind-try"), args)
+    check("the worktree is bound read-write", (own, own) in after(args, "--bind"), args)
+    check("the git directory stays shared", (f"{CHECKOUT}/.git", f"{CHECKOUT}/.git") in after(args, "--bind-try"), args)
+    chip = tab._sandbox_chip
+    chip._rebuild()
+    texts = labels(chip._content)
+    check("the chip names the worktree", any(t.endswith(f"/worktrees/{name}") for t in texts), texts)
+    read_only = [t for t in texts if t.startswith("Read-only: ")]
+    check("…and the checkout, read-only", len(read_only) == 1 and read_only[0].endswith("/dev/gamma"), texts)
+    check("the launched plan is not stale", not host.plan_stale(tab.sandbox_plan_path, own))
+    # The checkout is not "already inside": the user can allow it.
+    check("the guard would allow the checkout", host.grant_reason(own, CHECKOUT) == "", host.grant_reason(own, CHECKOUT))
+    # A sibling collapses to the repository, which the box can't write.
+    got = app._mcp_start_session((state["win"], tab), {"prompt": "hi", "cwd": own}, True)
+    check(
+        "a sibling of a session in its worktree is refused",
+        isinstance(got, tuple) and got[0] is False and "outside the sandbox's workspace" in got[1],
+        got,
+    )
+    tab.session_id = NARROWED
+    tab.emit("session-resolved", NARROWED)
+    check("the resolved session is sticky-sandboxed", AppState().is_sandboxed(NARROWED))
+    check("the restart starts", tab.restart_sandboxed())
+    GLib.timeout_add(5000, narrowed_restarted)
+
+
+def narrowed_restarted() -> bool:
+    tab = state["narrow"]
+    own = state["own"]
+    seen = in_checkout()
+    check("the fake bwrap saw the relaunch, in the checkout", len(seen) == 2, len(seen))
+    args = seen[-1] if seen else []
+    check("the restart binds the same worktree", (own, own) in after(args, "--bind"), args)
+    check("…and the checkout read-only still", (CHECKOUT, CHECKOUT) in after(args, "--ro-bind"), args)
+    typed = tab._initial_command or ""
+    check("the session is resumed", f"--resume {NARROWED}" in typed and " -w" not in typed, typed)
+    check("…and up again", tab.has_running_command())
+    # The CLI leaves, as it does when it can't cut the worktree.
+    tab.feed_child_text("\x03")
+    GLib.timeout_add(1500, narrowed_fallback)
+    return GLib.SOURCE_REMOVE
+
+
+def narrowed_fallback() -> bool:
+    tab = state["narrow"]
+    check("the CLI is gone", not tab.has_running_command())
+    state["narrow_plan"] = tab.sandbox_plan_path
+    tab._relaunch_without_worktree()
+    GLib.timeout_add(3000, narrowed_fell_back)
+    return GLib.SOURCE_REMOVE
+
+
+def narrowed_fell_back() -> bool:
+    tab = state["narrow"]
+    own = state["own"]
+    options = tab.launch_options
+    check("without its worktree, the launch drops the flag", not options.worktree and not options.worktree_name, options)
+    check("…and stays sandboxed", tab.sandboxed and bool(tab.sandbox_plan_path))
+    check("…on a plan of its own", tab.sandbox_plan_path != state["narrow_plan"], tab.sandbox_plan_path)
+    check("the plan before it is released", not os.path.exists(state["narrow_plan"]))
+    doc = sandboxplan.load_plan(tab.sandbox_plan_path)
+    check("whose workspace is the checkout", bool(doc) and doc["workspace"] == CHECKOUT, doc and doc["workspace"])
+    check("…not narrowed", bool(doc) and sandboxplan.plan_launch_dir(doc) is None)
+    seen = in_checkout()
+    check("the fake bwrap saw the launch", len(seen) == 3, len(seen))
+    args = seen[-1] if seen else []
+    check("the checkout is bound read-write", (CHECKOUT, CHECKOUT) in after(args, "--bind"), args)
+    check("…and the worktree not at all", not any(own == a for a in args), args)
+    typed = tab._initial_command or ""
+    check("the command is typed without the flag", " -w" not in typed and "--resume" not in typed, typed)
+    check("the session is up", tab.has_running_command())
+    for _tick in range(100):
+        if not os.path.exists(own):
+            break
+        GLib.usleep(20_000)
+    check("the reserved directory is tidied away", not os.path.exists(own), own)
     live()
+    return GLib.SOURCE_REMOVE
 
 
 def live() -> bool:

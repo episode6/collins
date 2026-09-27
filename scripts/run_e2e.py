@@ -66,7 +66,7 @@ CHECK_SECONDS = {
     "check_archive_worktree.py": 28.3,
     "check_pr_refresh_on_finish.py": 18.5,
     "check_composer_paste_back.py": 18.1,
-    "check_sandbox_policy.py": 17.1,
+    "check_sandbox_policy.py": 29.0,
     "check_welcome.py": 16.9,
     "check_new_chat.py": 16.7,
     "check_terminal_tools.py": 14.2,

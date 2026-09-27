@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -400,6 +400,19 @@ def _worktree_related(jsonl_path: Path, cwd: str) -> bool:
     return "--claude-worktrees-" in jsonl_path.parent.name
 
 
+def _worktree_present(path: str) -> bool:
+    """Whether a worktree's directory is there with something in it. An
+    empty one is a reaped worktree too: the CLI removing a worktree from
+    inside a sandbox empties the directory and drops the registration, and
+    can't remove the directory itself — that is a mount point there — and
+    `git worktree add` takes an empty directory as it takes a missing one."""
+    try:
+        with os.scandir(path) as entries:
+            return next(entries, None) is not None
+    except OSError:
+        return False
+
+
 def recreatable_worktree(jsonl_path: str | Path | None, cwd: str) -> dict | None:
     """The worktree a session needs put back before it resumes, or None.
 
@@ -430,7 +443,7 @@ def recreatable_worktree(jsonl_path: str | Path | None, cwd: str) -> dict | None
     # A worktree that is still there needs nothing; one that never had a
     # branch recorded (a session that entered somebody else's worktree)
     # can't be put back.
-    if not isinstance(path, str) or Path(path).is_dir() or not state.get("worktreeBranch"):
+    if not isinstance(path, str) or _worktree_present(path) or not state.get("worktreeBranch"):
         return None
     root = worktree_project_root(path)
     if root is None or not Path(root, ".git").exists():

@@ -74,6 +74,10 @@ _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 # loose substring would also match the phrase quoted anywhere else on screen.
 _WORKTREE_LAUNCH_ERROR_RE = re.compile(r"^\s*Error creating worktree:", re.MULTILINE)
 
+# A worktree name Collins will type after `-w`: one segment of what the CLI
+# takes, starting with a letter or a digit so it can't read as a flag.
+_WORKTREE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
 # How Claude Code frames its input box (probed live against 2.1.226 — the
 # captured screens are in test_providers): a full-width rule row above and
 # below, the prompt-mark row, and continuation rows opening with two plain
@@ -241,6 +245,10 @@ class SessionOptions:
     permission_mode: str = ""
     add_dirs: tuple[str, ...] = ()
     worktree: bool = False  # start the session in a fresh git worktree
+    # The name that worktree is given, when the launcher has to know where
+    # it will be before the CLI makes it: a sandboxed launch binds the
+    # directory (sandboxplan.reserve_worktree). "" leaves the name to the CLI.
+    worktree_name: str = ""
     # Run the CLI inside a bubblewrap box (see sandboxplan / sandboxrun).
     # `sandbox` is the decision; `sandbox_plan` is the plan file the tab
     # writes at spawn time, and the wrapper is only typed once both are set
@@ -901,6 +909,10 @@ class ClaudeProvider(Provider):
             out += ["--add-dir", shlex.quote(d)]
         if options.worktree:
             out.append("-w")
+            if _WORKTREE_NAME_RE.match(options.worktree_name or ""):
+                # `-w [name]`: the CLI cuts <repo>/.claude/worktrees/<name>
+                # on the branch worktree-<name>.
+                out.append(shlex.quote(options.worktree_name))
         return out
 
     def chat_variants(self) -> list[ChatVariant]:

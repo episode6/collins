@@ -91,6 +91,22 @@ downloads of each version, see the
   credentials and your other checkouts, it does not contain a hostile
   one — the workspace, the repository's `.git/config` and the toolchain
   directories stay writable, and the guide lists what that leaves open.
+- **A sandboxed worktree session writes its worktree, not the
+  repository.** With *Sandboxed* and *New git worktree* both ticked, the
+  box is narrowed to the worktree: the session writes its own worktree
+  and the repository's git directory, and the main checkout, its
+  `.claude` and the other sessions' worktrees are read-only inside —
+  nothing can be planted in a script, a build file or a project setting
+  you run from the checkout later. Collins names the worktree
+  (`calm-heron-3f9a`) and makes its directory before the launch, since a
+  box holds only what is there when it is built, and the CLI cuts the
+  worktree in it; the chip shows the worktree as the workspace and the
+  checkout as *Read-only*, *Restart to apply* binds the same worktree
+  again, and what the CLI's own removal of a worktree can't finish from
+  inside a box — the emptied directory, a branch with no commit of its
+  own — Collins tidies when the tab closes. A session working in a
+  worktree can't spawn a `start_session` sibling unless it is allowed
+  the repository.
 - **A sandbox home per session.** `$HOME` inside a box is a directory of
   the session's own under `~/.local/share/collins/sandbox/`, kept across
   its resumes and restarts and removed when its transcript is trashed or
