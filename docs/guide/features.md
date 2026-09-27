@@ -436,6 +436,12 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   file (an Agent files row too), the same **Open In…** submenu as the git
   page's files list: your *Footer apps* that take a file, then *Default
   app* (`xdg-open`).
+- **Add to chat** — on a tree or Agent files row, or on a right-clicked
+  selection in the editor — types the agent's `@` mention for the file
+  (with the selected line range) into the prompt without sending it, so you
+  say what to do with it. It lands in the composer when one is open, and on
+  the new-chat screen in that screen's composer, relative to the project the
+  session will start in.
 - **External changes are the normal case** — the agent is rewriting these
   files while you look at them. A clean buffer reloads silently, cursor and
   scroll preserved; a buffer with your own edits gets a banner instead, so
