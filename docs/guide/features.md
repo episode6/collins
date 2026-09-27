@@ -1059,11 +1059,18 @@ flipped the switch is refused if it calls it anyway.
   and the toolchain caches (`~/.cargo`, `~/.npm`, `~/.gradle`, `~/.m2`,
   `~/.cache/uv`, `~/.local/bin`, …) are shared, the system is read-only,
   and everything else on disk — `~/.ssh`, `~/.config/gh`, the keyring, the
-  other checkouts — is absent. `$HOME` inside is Collins' own
-  `~/.local/share/collins/sandbox-home/`, seeded once from `~/.claude.json`
-  and diverging from then on (the CLI's onboarding, MCP approvals and
-  per-project state inside stay inside; folder trust is mirrored in before
-  every launch). Inside, the session starts with permission prompts off
+  other checkouts — is absent. `$HOME` inside is a directory of the
+  session's own, `~/.local/share/collins/sandbox/<box id>/home`: seeded
+  once from `~/.claude.json` and diverging from then on (the CLI's
+  onboarding, MCP approvals and per-project state inside stay inside;
+  folder trust is mirrored in before every launch), kept across the
+  session's resumes and restarts, shared with no other session — a fork
+  and a `start_session` sibling each get their own — and removed when the
+  session's transcript is trashed or deleted (unlinked, not trashed: it is
+  derived data, and a transcript restored from the trash resumes in a
+  fresh home). Before every launch Collins clears what stands in a
+  mount's way in that home, a symlink above all: one planted there would
+  otherwise stop the next launch. Inside, the session starts with permission prompts off
   (`--permission-mode bypassPermissions`; a preference) — that is the point:
   a session that can't reach your credentials can be left alone. The
   boundary is the filesystem and the unix sockets that live on it, not the
@@ -1083,9 +1090,10 @@ flipped the switch is refused if it calls it anyway.
   `notify_user`, …) work as ever; the three that reach the host apply a
   policy instead: `run_in_terminal` and `read_terminal` see only
   *sandboxed shells* (below), opening one when none is idle and never your
-  own Ctrl+J shell, and `start_session` spawns the sibling inside the
-  parent's exact box — the same plan re-issued for the sibling's
-  directory, which must lie inside the workspace or an allowed directory
+  own Ctrl+J shell, and `start_session` spawns the sibling inside a box
+  that reaches exactly what its parent's does — the same plan re-issued
+  for the sibling's directory, around a home of the sibling's own; the
+  directory must lie inside the workspace or an allowed directory
   (a sibling in `~/.ssh` is refused with the reason); an unsandboxed
   sibling from a sandboxed parent is never possible, and
   `bypassPermissions` is granted to a sibling only when it is sandboxed.
@@ -1093,18 +1101,17 @@ flipped the switch is refused if it calls it anyway.
   is absent everywhere else: it shows what the box was *launched* with —
   the workspace, whether the GitHub CLI login and the SSH agent went in,
   whether `~/.claude/settings.json` is protected — and the **allowed
-  directories** for sessions in this workspace, each with a remove
+  directories** for sessions of this project, each with a remove
   button, plus *Allow a directory…* through the folder chooser. A
   directory is refused with the reason when it is, holds or lies inside a
   secret (`~/.ssh`, `~/.gnupg`, `~/.config/gh`, …), Collins' own state,
-  your home or `/`, or the sandbox home itself. Grants are per workspace
-  and land in `state.json`; a running box doesn't change — every
-  sandboxed session shares one sandbox home, so a directory added to a
-  running box would appear in *every* box open at that moment, which is
-  not what a per-workspace grant promises — so when the plan the settings
+  your home or `/`, or the sandbox homes (no box is granted another's).
+  Grants are per project — a session resumed inside one of the project's
+  worktrees shares the repository's list — and land in `state.json`; a
+  running box is changed by a restart, so when the plan the settings
   would build now differs from the launched one the chip offers **Restart
   to apply**: the session exits cleanly and
-  resumes in the same tab with the new plan. (A session with nothing to
+  resumes in the same tab, in the same home, with the new plan. (A session with nothing to
   resume yet, a fork, and a session running inside another session's box
   can't restart themselves; the chip says so instead.) A **Sandboxed
   shell** — from

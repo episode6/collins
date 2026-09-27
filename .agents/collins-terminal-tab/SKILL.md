@@ -30,14 +30,21 @@ A **sandboxed** launch (`SessionOptions.sandbox`) types
 `python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead:
 `_launch_command` (from `_finish_spawn`, and again from the chip's
 *Restart to apply*, `restart_sandboxed`) writes the plan through
-`terminal.SANDBOX_HOST.prepare_launch` at the last moment (the workspace
-is the settled cwd, a recreated worktree included) — or adopts one the
-options already carry (a sibling's derived plan) — `Provider.
+`terminal.SANDBOX_HOST.prepare_launch(cwd, box)` at the last moment (the
+workspace is the settled cwd, a recreated worktree included; the box is
+the one the options name — a resumed session's — else the one this tab
+already launched in, else freshly minted) — or adopts the plan and box
+the options already carry (a sibling's derived ones) — `Provider.
 sandbox_prefix` prepends the wrapper (and the tab appends
 `provider.session_flags` — the permission mode — behind a `--continue`
-override), `_on_child_exited` unlinks the plan, `tab.sandboxed` is what
-the `/bg` and attach guards read and `tab.sandbox_plan_path` what the
-footer's `sandboxchip.SandboxChip` and a sandboxed `PanelTerminal` read;
+override), `_release_sandbox_plan` unlinks the plan and releases the
+box's lease (before a restart's rebuild and in `_on_child_exited`, which
+also asks for the box to be discarded — a no-op for one a session
+names), `tab.sandboxed` is what
+the `/bg` and attach guards read, `tab.sandbox_plan_path` what the
+footer's `sandboxchip.SandboxChip` and a sandboxed `PanelTerminal` read,
+and `tab.sandbox_box` what the window records against the session id on
+`session-resolved` / `fork-resolved`;
 a sandboxed fork tab runs the resolver in `_fork_resolve` mode and reports
 the forked id on `fork-resolved`. No box possible → an unsandboxed launch
 that says so, with a bypass mode dropped. A `"toast"` signal carries a

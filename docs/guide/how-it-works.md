@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-08. Full change history: git log for this file.
+fork. Last modified: 2026-09-27. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -211,7 +211,10 @@ are stored separately in `~/.config/collins/state.json`; the headless
 runs' scratch directory is `~/.config/collins/title-scratch/` beside it.
 The terminal panel's per-session scrollback lives in
 `~/.local/state/collins/panel_history/` (one file per panel tab), and the
-sidebar's Chats project in `~/.local/share/collins/chats/`. Caches —
+sidebar's Chats project in `~/.local/share/collins/chats/`. Each sandboxed
+session has a box of its own — its `$HOME` inside the sandbox — under
+`~/.local/share/collins/sandbox/`, removed with the session's transcript.
+Caches —
 the model list (`models.json`) and the update-check stamp
 (`update-check.json`) — sit in `~/.cache/collins/`; the MCP server's config
 and socket are under `~/.local/share/collins/<app id>/` and

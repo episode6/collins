@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-11. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -245,9 +245,12 @@ class SessionOptions:
     # `sandbox` is the decision; `sandbox_plan` is the plan file the tab
     # writes at spawn time, and the wrapper is only typed once both are set
     # — a decision with no plan (bubblewrap missing) launches unsandboxed,
-    # and says so.
+    # and says so. `sandbox_box` is the id of the box the session runs in
+    # (sandboxplan.box_dir: its own $HOME): the one a resumed session
+    # already has, a sibling's fresh one, or "" for the tab to mint.
     sandbox: bool = False
     sandbox_plan: str = ""
+    sandbox_box: str = ""
 
 
 @dataclass(frozen=True)

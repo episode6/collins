@@ -26,20 +26,35 @@ def no_shared_tmp(monkeypatch):
     monkeypatch.setattr(sandboxplan, "RW_ABSOLUTE", ("/var/tmp",))
 
 
+BOX = "0123456789abcdef0123456789abcdef"
+OTHER_BOX = "fedcba9876543210fedcba9876543210"
+
+
+def _root(home):
+    """The sandbox root under the fake home: where every box lives."""
+    return home / ".local" / "share" / "collins" / "sandbox"
+
+
 @pytest.fixture
 def home(tmp_path, no_shared_tmp):
-    """A fake real home with a workspace beside Collins' data dirs."""
+    """A fake real home with a workspace beside Collins' data dirs, and
+    one box under the sandbox root."""
     home = tmp_path / "home"
     (home / "work" / "repo").mkdir(parents=True)
-    (home / ".local" / "share" / "collins" / "sandbox-home").mkdir(parents=True)
+    (_root(home) / BOX / "home").mkdir(parents=True)
+    (_root(home) / BOX / "grants").mkdir()
     return home
 
 
-def _inputs(home, **kw):
+def _inputs(home, box=BOX, **kw):
     base = dict(
         workspace=str(home / "work" / "repo"),
         home=str(home),
-        sandbox_home=str(home / ".local" / "share" / "collins" / "sandbox-home"),
+        sandbox_home=str(_root(home) / box / "home"),
+        box=box,
+        sandbox_root=str(_root(home)),
+        carrier=str(_root(home) / box / "grants"),
+        grants_key=str(home / "work" / "repo"),
         runtime_dir="/run/user/1000",
         protected=(
             str(home / ".config" / "collins"),
@@ -379,7 +394,15 @@ def test_refuses_home_and_root_as_a_workspace(home):
         build_plan(_inputs(home, workspace="/"))
     # A strict ancestor of home carries the whole real home; refused too.
     with pytest.raises(PlanRefused, match="ancestor of the home"):
-        build_plan(_inputs(home, workspace=str(home.parent), sandbox_home="/var/tmp/sbx"))
+        build_plan(
+            _inputs(
+                home,
+                workspace=str(home.parent),
+                sandbox_home=f"/var/tmp/sbx/{BOX}/home",
+                sandbox_root="/var/tmp/sbx",
+                carrier=f"/var/tmp/sbx/{BOX}/grants",
+            )
+        )
 
 
 def test_refuses_a_secret_as_a_workspace(home):
@@ -400,11 +423,19 @@ def test_refuses_a_secret_as_a_workspace(home):
         build_plan(_inputs(home, workspace=str(home / "dotfiles" / "ssh")))
 
 
-def test_refuses_a_workspace_that_nests_with_the_sandbox_home(home):
-    inside = home / ".local" / "share" / "collins" / "sandbox-home" / "proj"
+def test_refuses_a_workspace_that_nests_with_the_sandbox_root(home):
+    # Inside this box's own home, inside another box's, the root itself,
+    # and above it: no box is built on, or around, any box's home.
+    inside = _root(home) / BOX / "home" / "proj"
     inside.mkdir()
-    with pytest.raises(PlanRefused):
+    with pytest.raises(PlanRefused, match="must not nest"):
         build_plan(_inputs(home, workspace=str(inside)))
+    other = _root(home) / OTHER_BOX / "home" / "proj"
+    other.mkdir(parents=True)
+    with pytest.raises(PlanRefused, match="must not nest"):
+        build_plan(_inputs(home, workspace=str(other)))
+    with pytest.raises(PlanRefused, match="must not nest"):
+        build_plan(_inputs(home, workspace=str(_root(home))))
     with pytest.raises(PlanRefused):
         build_plan(_inputs(home, workspace=str(home / ".local")))
 
@@ -650,12 +681,17 @@ def test_sweep_plans_clears_the_instance_directory(monkeypatch, tmp_path):
     assert os.listdir(directory) == ["keep.txt"]
 
 
-def test_sandbox_home_dir_honours_the_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(tmp_path / "sbx"))
-    assert sandboxplan.sandbox_home_dir() == str(tmp_path / "sbx")
-    monkeypatch.delenv("COLLINS_SANDBOX_HOME")
+def test_sandbox_root_honours_the_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "sbx"))
+    assert sandboxplan.sandbox_root() == str(tmp_path / "sbx")
+    assert sandboxplan.box_dir(BOX) == str(tmp_path / "sbx" / BOX)
+    monkeypatch.delenv("COLLINS_SANDBOX_ROOT")
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    assert sandboxplan.sandbox_home_dir() == str(tmp_path / "data" / "collins" / "sandbox-home")
+    root = tmp_path / "data" / "collins" / "sandbox"
+    assert sandboxplan.sandbox_root() == str(root)
+    assert sandboxplan.box_home(BOX) == str(root / BOX / "home")
+    assert sandboxplan.box_carrier(BOX) == str(root / BOX / "grants")
+    assert sandboxplan.box_anchor(BOX, "mnt") == str(root / BOX / "anchors" / "mnt")
 
 
 def test_protected_paths_follow_the_xdg_overrides(monkeypatch, tmp_path):
@@ -669,6 +705,9 @@ def test_protected_paths_follow_the_xdg_overrides(monkeypatch, tmp_path):
     assert str(tmp_path / "k" / "collins") in paths
     assert sandboxplan.plan_dir("com.example.App") in paths
     assert sandboxplan.plan_dir("com.example.App").endswith("/collins/com.example.App/sandbox")
+    # Every box's home, as one path: nothing may carry the root inside.
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "boxes"))
+    assert str(tmp_path / "boxes") in sandboxplan.protected_paths("com.example.App")
 
 
 def test_plan_dir_leaves_the_temp_dir_when_there_is_no_runtime_dir(monkeypatch, tmp_path):
@@ -689,8 +728,9 @@ def test_plan_dir_leaves_the_temp_dir_when_there_is_no_runtime_dir(monkeypatch, 
 
 
 class _State:
-    def __init__(self, grants=(), **settings):
+    def __init__(self, grants=(), boxes=(), **settings):
         self._grants = list(grants)
+        self._boxes = set(boxes)
         self._settings = settings
 
     def get_sandbox_grants(self, workspace):
@@ -698,6 +738,9 @@ class _State:
 
     def get_setting(self, key):
         return self._settings.get(key, False)
+
+    def sandbox_boxes(self):
+        return set(self._boxes)
 
 
 def test_gather_inputs_reads_state_and_the_environment(monkeypatch, tmp_path):
@@ -707,10 +750,21 @@ def test_gather_inputs_reads_state_and_the_environment(monkeypatch, tmp_path):
     other.mkdir()
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("SSH_AUTH_SOCK", "/tmp/agent.sock")
-    monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(tmp_path / "sbx"))
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "sbx"))
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: ("/opt/claude/bin/claude", "/opt/claude/bin"))
+    monkeypatch.setattr(sandboxplan, "anchor_roots", lambda: ("/media", "/mnt"))
     state = _State(grants=[str(other)], sandbox_share_gh=True, sandbox_settings_editable=True)
-    inputs = sandboxplan.gather_inputs(str(ws), "com.example.App", state)
+    with pytest.raises(ValueError):
+        sandboxplan.gather_inputs(str(ws), "com.example.App", state, "not-a-box")
+    inputs = sandboxplan.gather_inputs(str(ws), "com.example.App", state, BOX)
+    assert inputs.box == BOX
+    assert inputs.sandbox_root == str(tmp_path / "sbx")
+    assert inputs.carrier == str(tmp_path / "sbx" / BOX / "grants")
+    assert inputs.anchors == (
+        (str(tmp_path / "sbx" / BOX / "anchors" / "media"), "/media"),
+        (str(tmp_path / "sbx" / BOX / "anchors" / "mnt"), "/mnt"),
+    )
+    assert inputs.grants_key == str(ws.resolve())
     assert inputs.workspace == str(ws.resolve())
     assert inputs.claude_dir == "/opt/claude/bin"
     assert inputs.grants == (str(other),)  # as written; the guard resolves itself
@@ -719,7 +773,7 @@ def test_gather_inputs_reads_state_and_the_environment(monkeypatch, tmp_path):
     assert inputs.protect_settings is False
     assert inputs.ssh_auth_sock == "/tmp/agent.sock"
     assert inputs.runtime_dir == str(tmp_path / "run")
-    assert inputs.sandbox_home == str(tmp_path / "sbx")
+    assert inputs.sandbox_home == str(tmp_path / "sbx" / BOX / "home")
     # No socket and no config file on this fake instance: neither is bound.
     assert inputs.socket_file is None
     assert inputs.config_file is None
@@ -740,7 +794,7 @@ def test_a_generated_app_id_builds_a_plan(monkeypatch, tmp_path, no_shared_tmp):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
-    monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(tmp_path / "sbx"))
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "sbx"))
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
     monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
     app_id = "com.episode6.Collins.e2e-abc123"
@@ -748,7 +802,7 @@ def test_a_generated_app_id_builds_a_plan(monkeypatch, tmp_path, no_shared_tmp):
     config = mcptools.config_path(app_id)
     os.makedirs(os.path.dirname(config), exist_ok=True)
     open(config, "w").write("{}")
-    inputs = sandboxplan.gather_inputs(str(ws), app_id, _State())
+    inputs = sandboxplan.gather_inputs(str(ws), app_id, _State(), BOX)
     assert inputs.config_file == config
     plan = build_plan(inputs)
     assert (config, config) in _binds(plan, "--ro-bind-try")
@@ -827,27 +881,41 @@ def test_prepare_launch_writes_a_plan_and_seeds_the_home(
     monkeypatch.setattr(sandboxplan.Path, "home", classmethod(lambda cls: home))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("XDG_DATA_HOME", str(home / ".local" / "share"))
-    monkeypatch.delenv("COLLINS_SANDBOX_HOME", raising=False)
+    monkeypatch.delenv("COLLINS_SANDBOX_ROOT", raising=False)
     monkeypatch.setenv("COLLINS_BWRAP", _fake_bwrap(tmp_path, "exit 0"))
+    monkeypatch.setattr(sandboxplan, "anchor_roots", lambda: ("/mnt",))
     host_config = tmp_path / "claude.json"
     host_config.write_text(json.dumps({"projects": {str(ws): {"hasTrustDialogAccepted": True}}}))
     monkeypatch.setattr(sandboxplan.sessions, "CLAUDE_CONFIG", host_config)
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
-    path = sandboxplan.prepare_launch(str(ws), "com.example.App", _State())
+    path = sandboxplan.prepare_launch(str(ws), "com.example.App", _State(), BOX)
     assert path is not None and os.path.exists(path)
     plan = json.load(open(path))
     assert plan["workspace"] == str(ws.resolve())
-    sbx = home / ".local" / "share" / "collins" / "sandbox-home"
+    assert plan["inputs"]["box"] == BOX
+    box = _root(home) / BOX
+    sbx = box / "home"
     assert (sbx / ".claude.json").exists()
     assert json.load(open(sbx / ".claude.json"))["projects"][str(ws)]["hasTrustDialogAccepted"]
+    # The box's own directories, each the user's alone, and its lease.
+    for made in (_root(home), box, sbx, box / "grants", box / "anchors" / "mnt"):
+        assert made.is_dir(), made
+        assert stat.S_IMODE(made.stat().st_mode) == 0o700, made
+    lease = json.load(open(box / "lease"))
+    assert lease == {"pid": os.getpid(), "app_id": "com.example.App"}
     for rel in sandboxplan.RW_HOME_ALWAYS:
         assert (home / rel).is_dir(), rel
-    # A refused workspace yields no plan, quietly.
-    assert sandboxplan.prepare_launch(str(home), "com.example.App", _State()) is None
+    # A second launch in another box shares nothing under the root.
+    second = sandboxplan.prepare_launch(str(ws), "com.example.App", _State(), OTHER_BOX)
+    assert json.load(open(second))["inputs"]["sandbox_home"] == str(_root(home) / OTHER_BOX / "home")
+    # A refused workspace yields no plan, quietly; so does a bad box id.
+    assert sandboxplan.prepare_launch(str(home), "com.example.App", _State(), BOX) is None
+    assert sandboxplan.prepare_launch(str(ws), "com.example.App", _State(), "../escape") is None
+    assert sandboxplan.prepare_launch(str(ws), "com.example.App", _State(), "") is None
     # And no box at all without bubblewrap.
     sandboxplan.reset_probe()
     monkeypatch.setenv("COLLINS_BWRAP", str(tmp_path / "missing"))
-    assert sandboxplan.prepare_launch(str(ws), "com.example.App", _State()) is None
+    assert sandboxplan.prepare_launch(str(ws), "com.example.App", _State(), BOX) is None
 
 
 def test_resolved_claude_binds_the_native_install_whole(monkeypatch, tmp_path):
@@ -875,47 +943,80 @@ def test_resolved_claude_binds_the_native_install_whole(monkeypatch, tmp_path):
 def test_the_plan_runs_a_real_box_when_the_machine_allows(
     monkeypatch, tmp_path, fresh_probe, no_shared_tmp
 ):
-    """A real bwrap over a real plan: the mounts are consistent enough for
-    /bin/true, the workspace is the cwd inside, and the home is the
-    sandbox home. Skipped where the probe says no box can be built."""
+    """A real bwrap over real plans: the mounts are consistent enough for
+    a shell, the workspace is the cwd inside, the home is the box's own —
+    a file written to `$HOME` in one box is absent from another's — and
+    the carrier and an anchor are there and read-only. Skipped where the
+    probe says no box can be built."""
     monkeypatch.delenv("COLLINS_BWRAP", raising=False)
     if not os.path.exists("/usr/bin/bwrap") or sandboxplan.probe():
         pytest.skip("no bubblewrap box on this machine")
     home = tmp_path / "home"
     ws = home / "proj"
     ws.mkdir(parents=True)
-    sbx = tmp_path / "sbx"
-    sbx.mkdir()
-    plan = build_plan(
-        Inputs(workspace=str(ws), home=str(home), sandbox_home=str(sbx), protected=())
+    root = tmp_path / "sbx"
+
+    def run(box, script):
+        for made in ("home", "grants", "anchors/mnt"):
+            (root / box / made).mkdir(parents=True, exist_ok=True)
+        plan = build_plan(
+            Inputs(
+                workspace=str(ws),
+                home=str(home),
+                sandbox_home=str(root / box / "home"),
+                box=box,
+                sandbox_root=str(root),
+                carrier=str(root / box / "grants"),
+                anchors=((str(root / box / "anchors" / "mnt"), "/mnt"),),
+                protected=(),
+            )
+        )
+        argv = ["/usr/bin/bwrap", *plan["bwrap_args"]]
+        for var in plan["unsetenv"]:
+            argv += ["--unsetenv", var]
+        for k, v in plan["setenv"].items():
+            argv += ["--setenv", k, v]
+        result = subprocess.run(
+            [*argv, "--", "/bin/sh", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip().splitlines()
+
+    probe = (
+        'echo "$PWD $HOME"; touch "$HOME/inside"; '
+        "mkdir /run/collins/grants/x 2>/dev/null && echo carrier-writable; "
+        "mkdir /mnt/x 2>/dev/null && echo anchor-writable; "
+        "test -d /run/collins/grants && test -d /mnt && echo both-there"
     )
-    argv = ["/usr/bin/bwrap", *plan["bwrap_args"]]
-    for var in plan["unsetenv"]:
-        argv += ["--unsetenv", var]
-    for k, v in plan["setenv"].items():
-        argv += ["--setenv", k, v]
-    result = subprocess.run(
-        [*argv, "--", "/bin/sh", "-c", 'echo "$PWD $HOME"; touch "$HOME/inside"'],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == f"{ws} {home}"
-    assert (sbx / "inside").exists()  # $HOME inside is the sandbox home
+    assert run(BOX, probe) == [f"{ws} {home}", "both-there"]
+    assert (root / BOX / "home" / "inside").exists()  # $HOME inside is the box's home
     assert not (home / "inside").exists()
+    # Another box, the same workspace: its own home, blind to the first's.
+    seen = run(OTHER_BOX, 'test -e "$HOME/inside" && echo leaked; touch "$HOME/other"')
+    assert seen == []
+    assert (root / OTHER_BOX / "home" / "other").exists()
+    assert not (root / BOX / "home" / "other").exists()
+    assert not (root / OTHER_BOX / "home" / "inside").exists()
 
 
 # ---- reading a launched plan back: the chip, a sibling's derivation ----------
 
 
 class _GrantState:
-    """A state with grants keyed the way AppState keys them, saving nothing."""
+    """A state with grants keyed the way AppState keys them, and the boxes
+    its sessions name, saving nothing."""
 
-    def __init__(self, grants=None, **settings):
+    def __init__(self, grants=None, boxes=(), **settings):
         self.grants = dict(grants or {})
+        self.boxes = set(boxes)
         self._settings = settings
+
+    def sandbox_boxes(self):
+        return set(self.boxes)
 
     def get_sandbox_grants(self, workspace):
         return list(self.grants.get(workspace) or [])
@@ -945,14 +1046,30 @@ def test_load_plan_reads_back_what_was_written(home, tmp_path):
 
 
 def test_load_plan_refuses_a_plan_that_lost_its_shape(home, tmp_path):
-    plan, path = _written(home, tmp_path)
+    plan, path = _written(home, tmp_path, anchors=((str(_root(home) / BOX / "anchors" / "mnt"), "/mnt"),))
+    assert sandboxplan.load_plan(path) is not None
+    inputs = plan["inputs"]
+    without_box = {k: v for k, v in inputs.items() if k != "box"}
+    without_anchors = {k: v for k, v in inputs.items() if k != "anchors"}
     for broken in (
         {**plan, "inputs": "nope"},
-        {**plan, "inputs": {**plan["inputs"], "workspace": "relative"}},
-        {**plan, "inputs": {**plan["inputs"], "grants": ["../x"]}},
-        {**plan, "inputs": {**plan["inputs"], "share_gh": "yes"}},
+        {**plan, "inputs": {**inputs, "workspace": "relative"}},
+        {**plan, "inputs": {**inputs, "grants": ["../x"]}},
+        {**plan, "inputs": {**inputs, "share_gh": "yes"}},
         {**plan, "workspace": 7},
         {**plan, "bwrap_args": []},
+        # A plan from before the boxes, and one that lost a piece of its box.
+        {**plan, "version": 1},
+        {**plan, "version": 1, "inputs": without_box},
+        {**plan, "inputs": without_box},
+        {**plan, "inputs": {**inputs, "box": BOX.upper()}},
+        {**plan, "inputs": {**inputs, "carrier": None}},
+        {**plan, "inputs": {**inputs, "carrier": "relative"}},
+        {**plan, "inputs": {**inputs, "grants_key": ""}},
+        {**plan, "inputs": without_anchors},
+        {**plan, "inputs": {**inputs, "anchors": [["/only-one"]]}},
+        {**plan, "inputs": {**inputs, "anchors": [["/a", "../b"]]}},
+        {**plan, "inputs": {**inputs, "anchors": "nope"}},
     ):
         with open(path, "w") as fh:
             json.dump(broken, fh)
@@ -985,12 +1102,36 @@ def test_derive_plan_reissues_the_parents_box_for_the_siblings_directory(home):
     (ws / "sub").mkdir()
     lib = home / "work" / "lib"
     lib.mkdir()
-    parent = build_plan(_inputs(home, grants=(str(lib),), share_gh=True))
-    sibling = sandboxplan.derive_plan(parent, str(ws / "sub"))
-    # The same mounts, shares and grants — only the starting directory moved.
-    assert _binds(sibling, "--bind") == _binds(parent, "--bind")
+    anchors = (
+        (str(_root(home) / BOX / "anchors" / "mnt"), "/mnt"),
+        (str(_root(home) / BOX / "anchors" / "srv"), "/srv"),
+    )
+    parent = build_plan(_inputs(home, grants=(str(lib),), share_gh=True, anchors=anchors))
+    sibling = sandboxplan.derive_plan(parent, str(ws / "sub"), OTHER_BOX)
+    # The same workspace, shares and grants, around a box of its own: the
+    # home, the carrier and every anchor are the sibling's…
+    own = _root(home) / OTHER_BOX
+    assert sibling["inputs"]["box"] == OTHER_BOX
+    assert sibling["inputs"]["sandbox_home"] == str(own / "home")
+    assert sibling["inputs"]["carrier"] == str(own / "grants")
+    assert sibling["inputs"]["anchors"] == [
+        [str(own / "anchors" / "mnt"), "/mnt"],
+        [str(own / "anchors" / "srv"), "/srv"],
+    ]
+    binds = _binds(sibling, "--bind")
+    assert binds[0] == (str(own / "home"), str(home))
+    assert (str(own / "grants"), sandboxplan.CARRIER_DEST) in binds
+    assert (str(own / "anchors" / "mnt"), "/mnt") in binds
+    assert (str(own / "anchors" / "srv"), "/srv") in binds
+    # …and the parent's box is named nowhere.
+    assert BOX not in json.dumps(sibling)
+    # Everything else is the parent's, mount for mount.
+    swap = lambda pairs: [(s.replace(BOX, OTHER_BOX), d) for s, d in pairs]  # noqa: E731
+    assert binds == swap(_binds(parent, "--bind"))
+    assert _binds(sibling, "--bind-try") == _binds(parent, "--bind-try")
     assert _binds(sibling, "--ro-bind-try") == _binds(parent, "--ro-bind-try")
-    assert sibling["inputs"] == parent["inputs"]
+    for key in ("workspace", "grants", "share_gh", "share_ssh", "protect_settings", "grants_key"):
+        assert sibling["inputs"][key] == parent["inputs"][key], key
     assert sibling["gh_token"] is True
     assert sibling["workspace"] == str(ws)
     assert sibling["cwd"] == str(ws / "sub")
@@ -1001,14 +1142,19 @@ def test_derive_plan_reissues_the_parents_box_for_the_siblings_directory(home):
     # The parent is untouched.
     assert parent["bwrap_args"][parent["bwrap_args"].index("--chdir") + 1] == str(ws)
     # A grant is a fine place to start a sibling; ~/.ssh is not.
-    assert sandboxplan.derive_plan(parent, str(lib))["cwd"] == str(lib)
+    assert sandboxplan.derive_plan(parent, str(lib), OTHER_BOX)["cwd"] == str(lib)
     with pytest.raises(PlanRefused, match="outside the sandbox"):
-        sandboxplan.derive_plan(parent, str(home / ".ssh"))
+        sandboxplan.derive_plan(parent, str(home / ".ssh"), OTHER_BOX)
     with pytest.raises(PlanRefused):
-        sandboxplan.derive_plan(parent, str(home / "work"))
+        sandboxplan.derive_plan(parent, str(home / "work"), OTHER_BOX)
+    # Its own box, by a real id: never the parent's, never a path.
+    with pytest.raises(PlanRefused):
+        sandboxplan.derive_plan(parent, str(ws / "sub"), BOX)
+    with pytest.raises(PlanRefused, match="box id"):
+        sandboxplan.derive_plan(parent, str(ws / "sub"), "../../etc")
 
 
-def _host(monkeypatch, tmp_path, home, state):
+def _host(monkeypatch, tmp_path, home, state, **kw):
     """A SandboxHost over the fake home, its protected paths under it, a
     fake bwrap that says yes, and no host claude on PATH."""
     sandboxplan.reset_probe()
@@ -1018,12 +1164,13 @@ def _host(monkeypatch, tmp_path, home, state):
     monkeypatch.setenv("XDG_STATE_HOME", str(home / ".local" / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(home / ".cache"))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
-    monkeypatch.setenv("COLLINS_SANDBOX_HOME", str(home / ".local" / "share" / "collins" / "sandbox-home"))
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(_root(home)))
     monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     monkeypatch.setattr(sandboxplan, "resolved_claude", lambda: None)
     monkeypatch.setattr(sandboxplan.shutil, "which", lambda name: None)
-    return sandboxplan.SandboxHost("com.example.App", state)
+    monkeypatch.setattr(sandboxplan, "anchor_roots", lambda: ("/mnt", "/srv"))
+    return sandboxplan.SandboxHost("com.example.App", state, **kw)
 
 
 def test_host_allow_and_revoke_hold_grants_to_the_guard(monkeypatch, tmp_path, home, fresh_probe):
@@ -1039,14 +1186,23 @@ def test_host_allow_and_revoke_hold_grants_to_the_guard(monkeypatch, tmp_path, h
     assert host.grants(str(ws)) == [str(lib)]
     assert state.grants == {str(ws.resolve()): [str(lib)]}
     # Refusals, each with its reason: a secret, an ancestor of one, $HOME,
-    # /, Collins' own state, the sandbox home, a file, the workspace itself.
+    # /, Collins' own state, the sandbox homes, a file, the workspace itself.
     assert "reaches" in host.allow(str(ws), str(home / ".ssh"))
     assert host.allow(str(ws), str(home)) == "the home directory itself"
     assert host.allow(str(ws), "/") == "the whole filesystem"
     assert "reaches" in host.allow(str(ws), str(home / ".config" / "collins"))
-    assert host.allow(str(ws), str(home / ".local" / "share" / "collins" / "sandbox-home")) == (
-        "reaches the sandbox home"
-    )
+    # The root, another box's home, something inside one, an ancestor of
+    # the root: no box is granted another's home.
+    other_home = _root(home) / OTHER_BOX / "home"
+    (other_home / "dev").mkdir(parents=True)
+    for refused in (
+        _root(home),
+        other_home,
+        other_home / "dev",
+        _root(home) / BOX / "home",
+        _root(home).parent,
+    ):
+        assert host.allow(str(ws), str(refused)) == "reaches the sandbox homes", refused
     assert host.allow(str(ws), str(lib / "missing")) == "not a directory"
     assert host.allow(str(ws), str(ws / "sub")) == "already inside the workspace"
     assert host.allow(str(ws), "relative/path") == "not an absolute path"
@@ -1065,7 +1221,7 @@ def test_host_plan_stale_compares_the_launched_policy_with_the_state(
     lib.mkdir()
     state = _GrantState()
     host = _host(monkeypatch, tmp_path, home, state)
-    path = host.prepare_launch(str(ws))
+    path = host.prepare_launch(str(ws), BOX)
     assert path is not None
     assert host.plan_stale(path, str(ws)) is False
     # A grant added since the launch: the running box doesn't have it.
@@ -1091,23 +1247,808 @@ def test_host_derive_writes_the_siblings_plan_beside_the_parents(
     ws = home / "work" / "repo"
     (ws / "sub").mkdir()
     host = _host(monkeypatch, tmp_path, home, _GrantState())
-    parent_path = host.prepare_launch(str(ws))
+    host_config = tmp_path / "claude.json"
+    host_config.write_text(
+        json.dumps({"projects": {str(ws / "sub"): {"hasTrustDialogAccepted": True}}})
+    )
+    monkeypatch.setattr(sandboxplan.sessions, "CLAUDE_CONFIG", host_config)
+    parent_path = host.prepare_launch(str(ws), BOX)
     assert parent_path is not None
-    sibling_path, reason = host.derive(parent_path, str(ws / "sub"))
+    before = set(os.listdir(_root(home)))
+    sibling_path, box, reason = host.derive(parent_path, str(ws / "sub"))
     assert reason == "" and sibling_path is not None
+    assert sandboxplan.valid_box_id(box) and box != BOX
     assert os.path.dirname(sibling_path) == os.path.dirname(parent_path)
     assert stat.S_IMODE(os.stat(sibling_path).st_mode) == 0o600
     sibling = sandboxplan.load_plan(sibling_path)
+    parent = sandboxplan.load_plan(parent_path)
     assert sibling["cwd"] == str(ws / "sub")
-    assert sibling["inputs"] == sandboxplan.load_plan(parent_path)["inputs"]
-    # Outside the box: no file, the reason instead.
-    refused, reason = host.derive(parent_path, str(home / ".ssh"))
-    assert refused is None and "outside the sandbox" in reason
+    assert sibling["inputs"]["box"] == box
+    assert sibling["inputs"]["grants"] == parent["inputs"]["grants"]
+    assert BOX not in json.dumps(sibling)
+    # The box is there, made and seeded like any other, and held.
+    own = _root(home) / box
+    assert set(os.listdir(_root(home))) == before | {box}
+    for made in (own / "home", own / "grants", own / "anchors" / "mnt", own / "anchors" / "srv"):
+        assert made.is_dir(), made
+    seeded = json.load(open(own / "home" / ".claude.json"))
+    assert seeded["projects"][str(ws / "sub")]["hasTrustDialogAccepted"] is True
+    assert host.held(box)
+    assert json.load(open(own / "lease"))["pid"] == os.getpid()
+    assert host.discard_box(box) is False  # held: not while its tab is coming
+    # Outside the box: no file, no box, the reason instead.
+    refused, no_box, reason = host.derive(parent_path, str(home / ".ssh"))
+    assert refused is None and no_box == "" and "outside the sandbox" in reason
     # No parent plan to derive from.
-    refused, reason = host.derive(None, str(ws))
-    assert refused is None and "can't be read" in reason
+    refused, no_box, reason = host.derive(None, str(ws))
+    assert refused is None and no_box == "" and "can't be read" in reason
+    assert set(os.listdir(_root(home))) == before | {box}
     sandboxplan.release_plan(parent_path)
     sandboxplan.release_plan(sibling_path)
+    # Let go, and named by no session, it goes.
+    host.release(box)
+    assert not (own / "lease").exists()
+    assert host.discard_box(box) is True
+    assert not own.exists()
+
+
+# ---- a box of the session's own: ids, the carrier, the anchors ----------------
+
+
+def test_a_box_id_is_32_lowercase_hex_and_nothing_else():
+    assert sandboxplan.valid_box_id(BOX)
+    minted = sandboxplan.new_box_id()
+    assert sandboxplan.valid_box_id(minted) and minted != sandboxplan.new_box_id()
+    for bad in (
+        BOX.upper(),
+        BOX[:31],
+        BOX + "0",
+        BOX[:16] + "/" + BOX[17:],
+        "..",
+        "../" + BOX[3:],
+        BOX[:31] + "g",
+        BOX[:31] + "\n",
+        "",
+        None,
+        7,
+        BOX.encode(),
+    ):
+        assert not sandboxplan.valid_box_id(bad), bad
+        with pytest.raises(ValueError):
+            sandboxplan.box_dir(bad)
+        with pytest.raises(ValueError):
+            sandboxplan.box_home(bad)
+    for bad_top in ("", ".", "..", "a/b", "/mnt"):
+        with pytest.raises(ValueError):
+            sandboxplan.box_anchor(BOX, bad_top)
+
+
+def test_anchor_roots_are_the_real_top_level_directories(tmp_path):
+    root = tmp_path / "slash"
+    for name in ("mnt", "media", "data", "usr", "home", "tmp", "run", "lost+found"):
+        (root / name).mkdir(parents=True)
+    (root / "swap.img").write_text("")
+    (root / "link").symlink_to(root / "data")
+    assert sandboxplan.anchor_roots(str(root)) == (
+        str(root / "data"),
+        str(root / "media"),
+        str(root / "mnt"),
+    )
+    assert sandboxplan.anchor_roots(str(tmp_path / "missing")) == ()
+    # The machine's own: nothing the system tables or the home live in.
+    for top in sandboxplan.anchor_roots():
+        assert os.path.basename(top) not in sandboxplan.NEVER_ANCHORED
+        assert os.path.dirname(top) == "/"
+
+
+def _anchors(home, box=BOX, *dests):
+    return tuple(
+        (str(_root(home) / box / "anchors" / os.path.basename(dest)), dest) for dest in dests
+    )
+
+
+def _remounts(plan):
+    args = plan["bwrap_args"]
+    return [args[i + 1] for i, a in enumerate(args) if a == "--remount-ro"]
+
+
+def test_the_carrier_and_the_anchors_are_bound_then_remounted_read_only(home):
+    (home / ".m2").mkdir()
+    (home / ".m2" / "settings.xml").write_text("<settings/>")
+    plan = build_plan(_inputs(home, anchors=_anchors(home, BOX, "/mnt", "/srv")))
+    args = plan["bwrap_args"]
+    binds = _binds(plan, "--bind")
+    box = _root(home) / BOX
+    assert (str(box / "grants"), sandboxplan.CARRIER_DEST) in binds
+    assert (str(box / "anchors" / "mnt"), "/mnt") in binds
+    assert (str(box / "anchors" / "srv"), "/srv") in binds
+    # Never --ro-bind: it is recursive, and would make a live grant that
+    # already sits in the carrier read-only in a box launched later.
+    ro = _binds(plan, "--ro-bind") + _binds(plan, "--ro-bind-try")
+    assert not any(dest in (sandboxplan.CARRIER_DEST, "/mnt", "/srv") for _src, dest in ro)
+    # Bound early — after the system and before the home's shares and the
+    # workspace, which land on top…
+    ws = str(home / "work" / "repo")
+    for dest in (sandboxplan.CARRIER_DEST, "/mnt", "/srv"):
+        src = next(s for s, d in binds if d == dest)
+        assert _index(plan, "--ro-bind-try", "/usr", "/usr") < _index(plan, "--bind", src, dest)
+        assert _index(plan, "--bind", src, dest) < _index(plan, "--bind", ws, ws)
+    # …and every one remounted read-only after the last mount, before --proc.
+    assert sorted(_remounts(plan)) == sorted([sandboxplan.CARRIER_DEST, "/mnt", "/srv"])
+    mount_flags = ("--bind", "--bind-try", "--ro-bind", "--ro-bind-try", "--tmpfs")
+    last_mount = max(i for i, a in enumerate(args[: args.index("--proc")]) if a in mount_flags)
+    for i, arg in enumerate(args):
+        if arg == "--remount-ro":
+            assert last_mount < i < args.index("--proc")
+    assert plan["inputs"]["box"] == BOX
+    assert plan["inputs"]["carrier"] == str(box / "grants")
+    assert plan["inputs"]["anchors"] == [
+        [str(box / "anchors" / "mnt"), "/mnt"],
+        [str(box / "anchors" / "srv"), "/srv"],
+    ]
+    assert plan["inputs"]["grants_key"] == ws
+    assert plan["version"] == 2
+
+
+def test_an_anchor_the_plan_binds_over_is_dropped_with_no_remount(home):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    anchors = (
+        (str(_root(home) / BOX / "anchors" / "a"), str(ws)),  # the workspace itself
+        (str(_root(home) / BOX / "anchors" / "b"), str(lib)),  # a grant
+        (str(_root(home) / BOX / "anchors" / "c"), str(home / "work")),  # holds the workspace
+        (str(_root(home) / BOX / "anchors" / "d"), "/mnt"),
+        (str(_root(home) / BOX / "anchors" / "e"), "/mnt"),  # twice: once
+        (str(_root(home) / BOX / "anchors" / "f"), "/"),
+        (str(_root(home) / BOX / "anchors" / "g"), "relative"),
+    )
+    plan = build_plan(_inputs(home, grants=(str(lib),), anchors=anchors))
+    # The remount acts on the topmost mount at a path: it must never be
+    # the workspace, or a grant.
+    assert sorted(_remounts(plan)) == sorted(
+        [sandboxplan.CARRIER_DEST, str(home / "work"), "/mnt"]
+    )
+    assert [dest for _src, dest in plan["inputs"]["anchors"]] == [str(home / "work"), "/mnt"]
+    binds = _binds(plan, "--bind")
+    assert (str(ws), str(ws)) in binds
+    assert not any(dest == str(ws) and "anchors" in src for src, dest in binds)
+    assert not any(dest == str(lib) and "anchors" in src for src, dest in binds)
+    # An anchor above the workspace stays, under it: the workspace lands
+    # on top, and only the anchor is remounted.
+    held = next(src for src, dest in binds if dest == str(home / "work"))
+    assert _index(plan, "--bind", held, str(home / "work")) < _index(plan, "--bind", str(ws), str(ws))
+    # The repository's two directories and a worktree's common git dir.
+    (ws / ".git").mkdir()
+    repo_anchors = (
+        (str(_root(home) / BOX / "anchors" / "a"), str(ws / ".git")),
+        (str(_root(home) / BOX / "anchors" / "b"), str(ws / ".claude")),
+    )
+    plan = build_plan(_inputs(home, anchors=repo_anchors))
+    assert _remounts(plan) == [sandboxplan.CARRIER_DEST]
+
+
+def test_an_anchor_that_would_cover_an_earlier_mount_is_dropped(home):
+    """The anchors come after the home, the system tables, the runtime dir
+    and TMPDIR: one bound over a directory holding any of them would hide
+    it. A home at /data/home/u makes /data such a root."""
+    anchors = (
+        (str(_root(home) / BOX / "anchors" / "a"), str(home.parent)),  # holds the home
+        (str(_root(home) / BOX / "anchors" / "b"), str(home)),  # the home itself
+        (str(_root(home) / BOX / "anchors" / "c"), "/run"),  # holds the runtime dir
+        (str(_root(home) / BOX / "anchors" / "d"), "/scratch"),  # holds TMPDIR
+        (str(_root(home) / BOX / "anchors" / "e"), "/var"),  # holds /var/tmp
+        (str(_root(home) / BOX / "anchors" / "f"), "/mnt"),
+    )
+    plan = build_plan(_inputs(home, anchors=anchors, tmpdir="/scratch/tmp"))
+    assert _remounts(plan) == [sandboxplan.CARRIER_DEST, "/mnt"]
+    assert _binds(plan, "--bind")[0] == (str(_root(home) / BOX / "home"), str(home))
+
+
+def test_two_boxes_plans_share_no_path_under_the_root(home):
+    (_root(home) / OTHER_BOX / "home").mkdir(parents=True)
+    one = build_plan(_inputs(home, BOX, anchors=_anchors(home, BOX, "/mnt")))
+    two = build_plan(_inputs(home, OTHER_BOX, anchors=_anchors(home, OTHER_BOX, "/mnt")))
+    root = str(_root(home))
+    under = lambda plan: {a for a in plan["bwrap_args"] if a.startswith(root + "/")}  # noqa: E731
+    assert under(one) and under(two)
+    assert under(one).isdisjoint(under(two))
+    assert all(a.startswith(f"{root}/{BOX}/") for a in under(one))
+    assert all(a.startswith(f"{root}/{OTHER_BOX}/") for a in under(two))
+    # The same mounts otherwise, in the same places.
+    assert _binds(one, "--bind-try") == _binds(two, "--bind-try")
+    assert [d for _s, d in _binds(one, "--bind")] == [d for _s, d in _binds(two, "--bind")]
+
+
+def test_a_grant_that_reaches_the_sandbox_root_is_never_bound(home):
+    other_home = _root(home) / OTHER_BOX / "home"
+    (other_home / "dev").mkdir(parents=True)
+    grants = (
+        str(_root(home)),
+        str(other_home),
+        str(other_home / "dev"),
+        str(_root(home) / BOX / "home"),
+        str(_root(home).parent),
+    )
+    plan = build_plan(_inputs(home, grants=grants))
+    assert plan["inputs"]["grants"] == []
+    sources = [src for src, _d in _binds(plan, "--bind-try")]
+    assert not any(grant in sources for grant in grants)
+    notes = [n for n in plan["notes"] if "skipped" in n]
+    assert len(notes) == len(grants)
+    assert all("reaches the sandbox homes" in n for n in notes)
+    # A root reached through a symlink is the root.
+    (home / "alias").symlink_to(_root(home))
+    plan = build_plan(_inputs(home, grants=(str(home / "alias" / OTHER_BOX / "home"),)))
+    assert plan["inputs"]["grants"] == []
+    # And a share that would carry the root is what the protect-check refuses.
+    with pytest.raises(PlanRefused, match="must stay outside"):
+        build_plan(
+            _inputs(
+                home,
+                sandbox_root=str(home / ".m2" / "boxes"),
+                sandbox_home=str(home / ".m2" / "boxes" / BOX / "home"),
+                carrier=str(home / ".m2" / "boxes" / BOX / "grants"),
+                protected=(str(home / ".m2" / "boxes"),),
+            )
+        )
+
+
+def test_grants_are_keyed_by_the_repository_a_worktree_belongs_to(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    repo = home / "work" / "repo"
+    wt = repo / ".claude" / "worktrees" / "brave-otter"
+    wt.mkdir(parents=True)
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    assert sandboxplan.grants_key(str(wt)) == str(repo.resolve())
+    assert sandboxplan.grants_key(str(wt / "src")) == str(repo.resolve())
+    assert sandboxplan.grants_key(str(repo)) == str(repo.resolve())
+    assert sandboxplan.grants_key(str(lib)) == str(lib.resolve())
+    link = tmp_path / "link"
+    link.symlink_to(wt)
+    assert sandboxplan.grants_key(str(link)) == str(repo.resolve())
+    # Allowed from the worktree: in the repository's list, and in the plan
+    # of a launch from either.
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    assert host.allow(str(wt), str(lib)) == ""
+    assert state.grants == {str(repo.resolve()): [str(lib)]}
+    assert host.grants(str(repo)) == [str(lib)]
+    assert host.grants(str(wt)) == [str(lib)]
+    for ws in (repo, wt):
+        inputs = sandboxplan.gather_inputs(str(ws), "com.example.App", state, BOX)
+        assert inputs.grants == (str(lib),)
+        assert inputs.grants_key == str(repo.resolve())
+    # "Already inside the workspace" is still about the real workspace.
+    assert host.allow(str(wt), str(wt / "src")) == "already inside the workspace"
+    assert host.allow(str(wt), str(repo / "docs")) == "not a directory"
+    host.revoke(str(wt), str(lib))
+    assert state.grants == {}
+
+
+# ---- scrubbing the home before a launch ---------------------------------------
+
+
+def _scrub_plan(home, *mounts):
+    """A plan's worth of arguments: (flag, source, destination) triples,
+    and ("--tmpfs", destination) pairs."""
+    args = ["--bind", "/nonexistent/home", str(home)]
+    for mount in mounts:
+        args += list(mount)
+    return {"bwrap_args": args}
+
+
+def test_scrub_home_removes_a_symlink_at_a_destination(tmp_path):
+    home = tmp_path / "home"
+    src = home / "work" / "lib"
+    src.mkdir(parents=True)
+    (src / "precious.txt").write_text("keep")
+    box_home = tmp_path / "box" / "home"
+    (box_home / "work").mkdir(parents=True)
+    (box_home / "work" / "lib").symlink_to(src)  # what a live grant left, or a plant
+    notes = sandboxplan.scrub_home(
+        str(box_home), _scrub_plan(home, ("--bind-try", str(src), str(src))), str(home)
+    )
+    assert not os.path.lexists(box_home / "work" / "lib")
+    assert (box_home / "work").is_dir()
+    assert (src / "precious.txt").read_text() == "keep"
+    assert len(notes) == 1 and "symlink" in notes[0] and str(src) in notes[0]
+
+
+def test_scrub_home_removes_a_symlink_at_a_parent_component(tmp_path):
+    home = tmp_path / "home"
+    src = home / "work" / "deep" / "lib"
+    src.mkdir(parents=True)
+    victim = tmp_path / "victim"
+    (victim / "deep" / "lib").mkdir(parents=True)
+    (victim / "deep" / "lib" / "precious.txt").write_text("keep")
+    (victim / "other.txt").write_text("keep")
+    box_home = tmp_path / "box" / "home"
+    box_home.mkdir(parents=True)
+    (box_home / "work").symlink_to(victim)
+    notes = sandboxplan.scrub_home(
+        str(box_home), _scrub_plan(home, ("--bind", str(src), str(src))), str(home)
+    )
+    assert not os.path.lexists(box_home / "work")
+    # Never followed: everything the link pointed at is as it was.
+    assert (victim / "deep" / "lib" / "precious.txt").read_text() == "keep"
+    assert (victim / "other.txt").read_text() == "keep"
+    assert sorted(p.name for p in victim.iterdir()) == ["deep", "other.txt"]
+    assert len(notes) == 1
+
+
+def test_scrub_home_clears_a_file_where_a_directory_goes(tmp_path):
+    home = tmp_path / "home"
+    src = home / "work" / "lib"
+    src.mkdir(parents=True)
+    file_src = home / ".gitconfig"
+    file_src.write_text("[user]")
+    box_home = tmp_path / "box" / "home"
+    (box_home / "work").mkdir(parents=True)
+    (box_home / "work" / "lib").write_text("in the way")
+    (box_home / ".gitconfig").mkdir()  # an empty directory where a file goes
+    (box_home / ".cache").write_text("a file where a parent directory goes")
+    plan = _scrub_plan(
+        home,
+        ("--bind-try", str(src), str(src)),
+        ("--ro-bind-try", str(file_src), str(file_src)),
+        ("--tmpfs", str(home / ".cache" / "scratch")),
+    )
+    notes = sandboxplan.scrub_home(str(box_home), plan, str(home))
+    assert not os.path.lexists(box_home / "work" / "lib")
+    assert not os.path.lexists(box_home / ".gitconfig")
+    assert not os.path.lexists(box_home / ".cache")
+    assert len(notes) == 3
+
+
+def test_scrub_home_leaves_what_matches_and_what_it_cannot_settle(tmp_path):
+    home = tmp_path / "home"
+    src = home / "work" / "lib"
+    src.mkdir(parents=True)
+    file_src = home / ".gitconfig"
+    file_src.write_text("[user]")
+    other_file = home / ".bashrc"
+    other_file.write_text("")
+    box_home = tmp_path / "box" / "home"
+    (box_home / "work" / "lib").mkdir(parents=True)  # bwrap's own stub
+    (box_home / "work" / "lib" / "left-by-the-agent").write_text("x")
+    (box_home / ".gitconfig").write_text("")  # a file stub for a file
+    (box_home / ".bashrc").mkdir()  # a non-empty directory where a file goes
+    (box_home / ".bashrc" / "inside").write_text("x")
+    (box_home / "unrelated").symlink_to(tmp_path)  # on no mount's path
+    (box_home / "notes.txt").write_text("the agent's own")
+    plan = _scrub_plan(
+        home,
+        ("--bind-try", str(src), str(src)),
+        ("--ro-bind-try", str(file_src), str(file_src)),
+        ("--ro-bind-try", str(other_file), str(other_file)),
+        # A source that doesn't exist is a bind bwrap skips: nothing to clear.
+        ("--bind-try", str(home / "missing"), str(home / "unrelated")),
+        # Destinations outside the home are none of the home's business.
+        ("--ro-bind-try", "/usr", "/usr"),
+        ("--tmpfs", "/run/user/1000"),
+    )
+    assert sandboxplan.scrub_home(str(box_home), plan, str(home)) == []
+    assert (box_home / "work" / "lib" / "left-by-the-agent").exists()
+    assert (box_home / ".gitconfig").is_file()
+    assert (box_home / ".bashrc" / "inside").exists()
+    assert (box_home / "unrelated").is_symlink()
+    assert (box_home / "notes.txt").read_text() == "the agent's own"
+    # No home at all, or the home a symlink: nothing happens, quietly.
+    assert sandboxplan.scrub_home(str(tmp_path / "nowhere"), plan, str(home)) == []
+    (tmp_path / "linked-home").symlink_to(box_home)
+    (box_home / "work" / "lib" / "left-by-the-agent").unlink()
+    (box_home / "work" / "lib").rmdir()
+    (box_home / "work" / "lib").symlink_to(src)
+    assert sandboxplan.scrub_home(str(tmp_path / "linked-home"), plan, str(home)) == []
+    assert (box_home / "work" / "lib").is_symlink()
+
+
+def test_scrub_home_touches_nothing_outside_the_home(tmp_path):
+    """The planted link points at a directory full of files, under the very
+    names the mounts would have: every one survives."""
+    home = tmp_path / "home"
+    (home / "work" / "lib").mkdir(parents=True)
+    (home / ".claude").mkdir()
+    (home / ".gitconfig").write_text("[user]")
+    victim = tmp_path / "victim"
+    (victim / "work" / "lib").mkdir(parents=True)
+    (victim / ".claude").mkdir()
+    files = [
+        victim / "precious.txt",
+        victim / ".gitconfig",
+        victim / "work" / "lib" / "source.py",
+        victim / ".claude" / "settings.json",
+    ]
+    for path in files:
+        path.write_text("keep")
+    (victim / "work" / "link").symlink_to(victim / "precious.txt")
+    before = sorted(str(p.relative_to(victim)) for p in victim.rglob("*"))
+    box = tmp_path / "box"
+    box.mkdir()
+    (box / "home").symlink_to(victim)  # the home itself
+    plan = _scrub_plan(
+        home,
+        ("--bind-try", str(home / "work" / "lib"), str(home / "work" / "lib")),
+        ("--bind-try", str(home / ".claude"), str(home / ".claude")),
+        ("--ro-bind-try", str(home / ".gitconfig"), str(home / ".gitconfig")),
+    )
+    assert sandboxplan.scrub_home(str(box / "home"), plan, str(home)) == []
+    # And planted deeper: every top-level name of the home a link to it.
+    (box / "home").unlink()
+    (box / "home").mkdir()
+    for name in ("work", ".claude", ".gitconfig"):
+        (box / "home" / name).symlink_to(victim / name)
+    notes = sandboxplan.scrub_home(str(box / "home"), plan, str(home))
+    assert len(notes) == 3
+    assert list((box / "home").iterdir()) == []
+    assert sorted(str(p.relative_to(victim)) for p in victim.rglob("*")) == before
+    for path in files:
+        assert path.read_text() == "keep"
+
+
+def test_scrub_home_skips_a_destination_inside_an_earlier_mount(tmp_path):
+    """A mount under the workspace lands in the workspace's own directory,
+    not in the home: what the home holds under that name is no mount
+    point, and is left alone."""
+    home = tmp_path / "home"
+    ws = home / "work" / "repo"
+    (ws / ".git").mkdir(parents=True)
+    box_home = tmp_path / "box" / "home"
+    (box_home / "work" / "repo").mkdir(parents=True)
+    (box_home / "work" / "repo" / ".git").symlink_to(tmp_path)
+    plan = _scrub_plan(
+        home,
+        ("--bind", str(ws), str(ws)),
+        ("--bind-try", str(ws / ".git"), str(ws / ".git")),
+    )
+    assert sandboxplan.scrub_home(str(box_home), plan, str(home)) == []
+    assert (box_home / "work" / "repo" / ".git").is_symlink()
+
+
+def test_prepare_launch_scrubs_the_home_and_says_so(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    (lib / "precious.txt").write_text("keep")
+    state = _GrantState({str(ws.resolve()): [str(lib)]})
+    host = _host(monkeypatch, tmp_path, home, state)
+    box_home = _root(home) / BOX / "home"
+    (box_home / "work").mkdir()
+    (box_home / "work" / "lib").symlink_to(sandboxplan.CARRIER_DEST + "/lib-0a1b2c3d")
+    path = host.prepare_launch(str(ws), BOX)
+    assert path is not None
+    assert not os.path.lexists(box_home / "work" / "lib")
+    plan = sandboxplan.load_plan(path)
+    assert any("symlink" in note and str(lib) in note for note in plan["notes"])
+    assert (lib / "precious.txt").read_text() == "keep"
+
+
+# ---- removing a box ---------------------------------------------------------------
+
+
+@pytest.fixture
+def root(monkeypatch, tmp_path):
+    """A sandbox root of the test's own."""
+    root = tmp_path / "boxes"
+    root.mkdir()
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(root))
+    return root
+
+
+def _make_box(root, box=BOX):
+    for made in ("home/dev/project", "grants", "anchors/mnt/data"):
+        (root / box / made).mkdir(parents=True)
+    (root / box / "home" / ".claude.json").write_text("{}")
+    (root / box / "home" / "dev" / "project" / "main.py").write_text("print()")
+    return root / box
+
+
+def test_remove_box_removes_a_tree_without_following_its_symlinks(root, tmp_path):
+    box = _make_box(root)
+    victim = tmp_path / "victim"
+    (victim / "deep").mkdir(parents=True)
+    (victim / "deep" / "precious.txt").write_text("keep")
+    (victim / "file.txt").write_text("keep")
+    (box / "home" / "to-dir").symlink_to(victim)
+    (box / "home" / "to-file").symlink_to(victim / "file.txt")
+    (box / "home" / "dev" / "dangling").symlink_to(tmp_path / "nothing")
+    (box / "home" / "dev" / "up").symlink_to("../../..")
+    # What an agent leaves behind: a read-only directory with files in it.
+    locked = box / "home" / "locked"
+    locked.mkdir()
+    (locked / "inside").write_text("x")
+    locked.chmod(0o555)
+    assert sandboxplan.remove_box(BOX, mounts=lambda: ["/", "/proc", str(tmp_path / "elsewhere")])
+    assert not box.exists()
+    assert root.is_dir()
+    assert (victim / "deep" / "precious.txt").read_text() == "keep"
+    assert (victim / "file.txt").read_text() == "keep"
+    # Gone already, or never there: nothing removed, no error.
+    assert sandboxplan.remove_box(BOX, mounts=lambda: []) is False
+    with pytest.raises(ValueError):
+        sandboxplan.remove_box("../victim", mounts=lambda: [])
+    with pytest.raises(ValueError):
+        sandboxplan.remove_box("", mounts=lambda: [])
+
+
+def test_remove_box_refuses_a_box_with_a_mount_under_it(root):
+    box = _make_box(root)
+    everything = sorted(str(p) for p in box.rglob("*"))
+    for point in (
+        str(box / "grants" / "lib-0a1b2c3d"),
+        str(box / "anchors" / "mnt" / "data"),
+        str(box / "home"),
+        str(box),
+    ):
+        assert sandboxplan.remove_box(BOX, mounts=lambda point=point: ["/", point]) is False
+        assert sorted(str(p) for p in box.rglob("*")) == everything
+    # A mount table that can't be read is no licence to delete.
+
+    def unreadable():
+        raise OSError("no /proc")
+
+    assert sandboxplan.remove_box(BOX, mounts=unreadable) is False
+    assert sorted(str(p) for p in box.rglob("*")) == everything
+    # A mount beside the box, or under a name it is a prefix of, is not under it.
+    assert sandboxplan.remove_box(BOX, mounts=lambda: [str(root / OTHER_BOX), str(box) + "x"])
+    assert not box.exists()
+
+
+def test_remove_box_sees_a_mount_through_a_symlinked_root(monkeypatch, tmp_path):
+    real = tmp_path / "real-boxes"
+    real.mkdir()
+    (tmp_path / "boxes").symlink_to(real)
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "boxes"))
+    box = _make_box(real)
+    # The kernel names the mount by its real path.
+    point = str(real / BOX / "grants" / "lib")
+    assert sandboxplan.remove_box(BOX, mounts=lambda: [point]) is False
+    assert box.is_dir()
+    assert sandboxplan.remove_box(BOX, mounts=lambda: [])
+    assert not box.exists()
+
+
+def test_remove_box_stops_at_another_device(root):
+    """An entry on another device is a mount the mount table didn't show:
+    the removal stops before anything is touched."""
+    box = _make_box(root)
+    everything = sorted(str(p) for p in box.rglob("*"))
+
+    def stat_with_a_mount(name, *, dir_fd=None, follow_symlinks=True):
+        st = os.stat(name, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+        if name == "data":  # anchors/mnt/data: the last directory walked
+            return os.stat_result((*st[:2], st.st_dev + 1, *st[3:]))
+        return st
+
+    assert sandboxplan.remove_box(BOX, mounts=lambda: [], stat_fn=stat_with_a_mount) is False
+    assert sorted(str(p) for p in box.rglob("*")) == everything
+    assert sandboxplan.remove_box(BOX, mounts=lambda: [])
+    assert not box.exists()
+
+
+def test_mount_points_reads_the_kernels_table():
+    text = (
+        "36 35 98:0 / / rw,noatime shared:1 - ext4 /dev/sda1 rw\n"
+        "412 36 0:60 / /home/u/my\\040repo rw,nosuid shared:230 - fuse.bindfs collins:123 rw\n"
+        "short line\n"
+    )
+    assert sandboxplan.mount_points(text) == ["/", "/home/u/my repo"]
+    assert "/" in sandboxplan.mount_points()  # the real one
+
+
+def test_discard_box_removes_only_what_nothing_needs(monkeypatch, tmp_path, home, fresh_probe):
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    box = _make_box(_root(home), OTHER_BOX)
+    # A box a session of the state names.
+    state.boxes = {OTHER_BOX}
+    assert host.discard_box(OTHER_BOX) is False
+    assert box.is_dir()
+    state.boxes = set()
+    # A box another running process holds (pid 1 always runs).
+    (box / "lease").write_text(json.dumps({"pid": 1, "app_id": "com.example.Other"}))
+    assert host.discard_box(OTHER_BOX) is False
+    assert box.is_dir()
+    # A box this process holds.
+    (box / "lease").unlink()
+    host.hold(OTHER_BOX)
+    assert host.discard_box(OTHER_BOX) is False
+    host.hold(OTHER_BOX)  # twice: counted
+    host.release(OTHER_BOX)
+    assert host.held(OTHER_BOX)
+    assert (box / "lease").exists()
+    assert host.discard_box(OTHER_BOX) is False
+    host.release(OTHER_BOX)
+    assert not host.held(OTHER_BOX)
+    assert not (box / "lease").exists()
+    # A lease of a process that no longer runs is no lease.
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    (box / "lease").write_text(json.dumps({"pid": dead.pid, "app_id": "com.example.Gone"}))
+    assert host.discard_box(OTHER_BOX) is True
+    assert not box.exists()
+    # Never anything but a box.
+    assert host.discard_box("../" + BOX) is False
+    assert host.discard_box("") is False
+    host.release("not a box")  # quietly
+    host.hold("not a box")
+    assert not host.held("not a box")
+
+
+def test_a_lease_that_lost_its_shape_is_no_lease(root):
+    box = _make_box(root)
+    for junk in ("", "not json", "[]", '{"pid": "1"}', '{"pid": true}', '{"pid": -4}', "{}"):
+        (box / "lease").write_text(junk)
+        assert sandboxplan.read_lease(BOX) is None, junk
+    assert not sandboxplan.lease_live(None)
+    (box / "lease").write_text(json.dumps({"pid": os.getpid(), "app_id": "x"}))
+    assert sandboxplan.lease_live(sandboxplan.read_lease(BOX))
+    # Another process's lease is not this one's to remove.
+    (box / "lease").write_text(json.dumps({"pid": 1, "app_id": "x"}))
+    host = sandboxplan.SandboxHost("com.example.App", _GrantState())
+    host.release(BOX)
+    assert (box / "lease").exists()
+    # A planted link where the lease goes is never written through.
+    (box / "lease").unlink()
+    victim = root / "victim.json"
+    (box / "lease").symlink_to(victim)
+    assert sandboxplan.write_lease(BOX, "com.example.App") is False
+    assert not victim.exists()
+
+
+def test_sweep_boxes_leaves_what_is_not_a_box(monkeypatch, tmp_path, home, fresh_probe):
+    state = _GrantState(boxes={BOX})
+    host = _host(monkeypatch, tmp_path, home, state)
+    root = _root(home)
+    unused = _make_box(root, OTHER_BOX)
+    third = "00000000000000000000000000000000"
+    held = _make_box(root, third)
+    (held / "lease").write_text(json.dumps({"pid": 1, "app_id": "com.example.Other"}))
+    (root / "not-a-box").mkdir()  # a name that is not a box id
+    (root / "not-a-box" / "keep.txt").write_text("keep")
+    (root / BOX.upper()).mkdir()
+    (root / "notes.txt").write_text("keep")
+    assert host.sweep_boxes() == 1
+    assert not unused.exists()
+    assert held.is_dir()
+    assert (root / BOX).is_dir()  # a session's
+    assert (root / "not-a-box" / "keep.txt").read_text() == "keep"
+    assert (root / BOX.upper()).is_dir()
+    assert (root / "notes.txt").read_text() == "keep"
+    assert host.sweep_boxes() == 0
+    monkeypatch.setenv("COLLINS_SANDBOX_ROOT", str(tmp_path / "no-root"))
+    assert host.sweep_boxes() == 0
+
+
+def test_the_sweep_is_the_owning_states_alone(monkeypatch, tmp_path, home, fresh_probe):
+    """An instance on a scratch state.json beside the user's sandbox root
+    (every e2e check, every capture) names none of the user's boxes: its
+    sweep must remove none of them."""
+    root = _root(home)
+    mine = tmp_path / "config" / "collins" / "state.json"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("{}")
+    scratch = tmp_path / "scratch" / "collins" / "state.json"
+    scratch.parent.mkdir(parents=True)
+    scratch.write_text("{}")
+    owner = _host(monkeypatch, tmp_path, home, _GrantState(boxes={BOX}), state_file=str(mine))
+    assert owner.sweep_boxes() == 0  # claims the root
+    assert json.load(open(root / "owner")) == {"state": str(mine)}
+    box = _make_box(root, OTHER_BOX)
+    visitor = sandboxplan.SandboxHost("com.example.E2E", _GrantState(), str(scratch))
+    assert visitor.owns_root() is False
+    assert visitor.sweep_boxes() == 0
+    assert box.is_dir() and (root / BOX).is_dir()
+    assert json.load(open(root / "owner")) == {"state": str(mine)}
+    # An instance that knows no state file claims nothing and sweeps
+    # nothing of a root somebody owns.
+    nameless = sandboxplan.SandboxHost("com.example.E2E", _GrantState())
+    assert nameless.sweep_boxes() == 0
+    assert box.is_dir()
+    # The owner's own sweep takes what nothing names.
+    assert owner.sweep_boxes() == 1
+    assert not box.exists() and (root / BOX).is_dir()
+    # The owning state file gone (a scratch tree cleaned up, a moved
+    # config): the next instance takes the root over.
+    box = _make_box(root, OTHER_BOX)
+    mine.unlink()
+    assert visitor.sweep_boxes() == 2  # it names neither box
+    assert json.load(open(root / "owner")) == {"state": str(scratch)}
+    # An owner file that lost its shape is no owner.
+    (root / "owner").write_text("not json")
+    assert owner.owns_root() is True
+    assert json.load(open(root / "owner")) == {"state": str(mine)}
+
+
+def test_the_first_launch_claims_an_unowned_root(monkeypatch, tmp_path, home, fresh_probe):
+    """The root is claimed the moment this state has a box in it — not at
+    the next startup's sweep, by which time a scratch instance could have
+    found it unowned and swept it."""
+    mine = tmp_path / "config" / "collins" / "state.json"
+    mine.parent.mkdir(parents=True)
+    mine.write_text("{}")
+    scratch = tmp_path / "scratch" / "state.json"
+    scratch.parent.mkdir()
+    scratch.write_text("{}")
+    root = _root(home)
+    host = _host(monkeypatch, tmp_path, home, _GrantState(), state_file=str(mine))
+    assert not (root / "owner").exists()
+    path = host.prepare_launch(str(home / "work" / "repo"), BOX)
+    assert path is not None
+    assert json.load(open(root / "owner")) == {"state": str(mine)}
+    # Somebody else's root stays somebody else's.
+    visitor = sandboxplan.SandboxHost("com.example.E2E", _GrantState(), str(scratch))
+    assert visitor.prepare_launch(str(home / "work" / "repo"), OTHER_BOX) is not None
+    assert json.load(open(root / "owner")) == {"state": str(mine)}
+    assert visitor.sweep_boxes() == 0
+    assert (root / BOX).is_dir()
+
+
+def test_a_box_is_held_from_before_it_is_made(monkeypatch, tmp_path, home, fresh_probe):
+    """The startup sweep runs on a thread: a box must never be on disk
+    unheld, not even while its launch is still being prepared."""
+    ws = home / "work" / "repo"
+    (ws / "sub").mkdir()
+    host = _host(monkeypatch, tmp_path, home, _GrantState())
+    root = _root(home)
+    seen = []
+    real_seed = sandboxplan.seed_home
+
+    def seed(home_dir, *args):
+        box = os.path.basename(os.path.dirname(home_dir))
+        lease = sandboxplan.read_lease(box)
+        seen.append((box, host.held(box), lease and lease["pid"], host.discard_box(box)))
+        return real_seed(home_dir, *args)
+
+    monkeypatch.setattr(sandboxplan, "seed_home", seed)
+    path = host.prepare_launch(str(ws), OTHER_BOX)
+    assert path is not None
+    assert seen == [(OTHER_BOX, True, os.getpid(), False)]
+    assert (root / OTHER_BOX / "home").is_dir()
+    # A sibling's box likewise.
+    sibling, box, _reason = host.derive(path, str(ws / "sub"))
+    assert sibling is not None
+    assert seen[1] == (box, True, os.getpid(), False)
+    # A launch that can't be prepared lets go of what it held.
+    third = "00000000000000000000000000000000"
+    assert host.prepare_launch(str(home), third) is None
+    assert not host.held(third)
+    assert sandboxplan.read_lease(third) is None
+    assert host.discard_box(third) is True
+    # …once: a hold taken twice is still let go of once per launch.
+    assert host.held(OTHER_BOX)
+    host.release(OTHER_BOX)
+    assert not host.held(OTHER_BOX)
+
+
+def test_discard_box_async_runs_off_the_calling_thread(monkeypatch, tmp_path, home, fresh_probe):
+    import threading
+
+    host = _host(monkeypatch, tmp_path, home, _GrantState())
+    box = _make_box(_root(home), OTHER_BOX)
+    seen = []
+    done = threading.Event()
+    real = host.discard_box
+
+    def discard(name):
+        seen.append(threading.current_thread().name)
+        try:
+            return real(name)
+        finally:
+            done.set()
+
+    monkeypatch.setattr(host, "discard_box", discard)
+    host.discard_box_async(OTHER_BOX)
+    assert done.wait(10)
+    assert seen == ["sandbox-discard"]
+    assert not box.exists()
+    host.discard_box_async("not a box")  # nothing started
+    assert seen == ["sandbox-discard"]
 
 
 def test_the_module_stays_gtk_free():

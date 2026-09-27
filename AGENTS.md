@@ -123,16 +123,16 @@ directly. No separate API key exists anywhere.
 | Chats virtual project | `~/.local/share/collins/chats/` |
 | MCP config file | `~/.local/share/collins/<app id>/` |
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
-| Sandbox home (`$HOME` inside a sandboxed session's box) | `~/.local/share/collins/sandbox-home/` |
+| A sandboxed session's box: its `$HOME` (`home/`), and the carrier (`grants/`) and anchors a mount made on the host reaches the running box through | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
-| Sandbox grants per workspace, the sandboxed-session set, the sandbox switches | `state.json` |
+| Sandbox grants per project, the session → box map, the sandbox switches | `state.json` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
 | Everything of the CLI's | `~/.claude/` — read only |
 
 Every one of these has an environment override used by tests, captures and
 e2e checks: `COLLINS_APP_ID`, `COLLINS_PROJECTS_DIR`, `COLLINS_CLAUDE_CONFIG`,
 `COLLINS_CHATS_DIR`, `COLLINS_CLAUDE_CREDENTIALS`, `COLLINS_USAGE_FIXTURE`,
-`COLLINS_PR_STATUS_CACHE`, `COLLINS_SANDBOX_HOME`, `COLLINS_BWRAP` (a fake
+`COLLINS_PR_STATUS_CACHE`, `COLLINS_SANDBOX_ROOT`, `COLLINS_BWRAP` (a fake
 bubblewrap, like the fake `claude`), plus `XDG_CONFIG_HOME` /
 `XDG_STATE_HOME` / `XDG_RUNTIME_DIR`.
 Diagnostics: `COLLINS_LOG=INFO`, `COLLINS_SHIM_LOG=<file>`,

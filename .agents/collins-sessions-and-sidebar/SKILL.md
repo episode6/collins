@@ -97,9 +97,13 @@ question "does this header stand for a folder with nothing in it";
 Sandboxing mirrors the worktree pair exactly: `sandbox_new_sessions` +
 `project_sandbox` overrides (`sandbox_for_project`, the project menu's
 *New sessions are sandboxed* check, shown only when `sandboxplan.
-probe_reason() == ""`), plus the sticky `sandboxed_sessions` set a resume
-reads (`is_sandboxed` follows the forward chain; `forward_session` carries
-it) and `sandbox_grants` per workspace. See `collins-sandboxed-sessions`.
+probe_reason() == ""`), plus the sticky `sandboxed_sessions` map a resume
+reads — session id → the id of its box, its own `$HOME` (`is_sandboxed`
+and `sandbox_box` follow the forward chain; `forward_session` carries the
+entry; saved as an object, and a list from an older build loads as ids
+with no box) — and `sandbox_grants` per project (`sandboxplan.grants_key`:
+a worktree's repository). `_forget_transcript` clears a trashed session's
+box and has it removed; the flag stays. See `collins-sandboxed-sessions`.
 
 `~/.config/collins/state.json`, written synchronously and atomically on every
 mutation; `DEFAULT_SETTINGS` is the settings catalogue, each key with a
