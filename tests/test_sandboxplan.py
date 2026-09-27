@@ -1989,6 +1989,43 @@ def test_the_first_launch_claims_an_unowned_root(monkeypatch, tmp_path, home, fr
     assert (root / BOX).is_dir()
 
 
+def test_a_box_is_held_from_before_it_is_made(monkeypatch, tmp_path, home, fresh_probe):
+    """The startup sweep runs on a thread: a box must never be on disk
+    unheld, not even while its launch is still being prepared."""
+    ws = home / "work" / "repo"
+    (ws / "sub").mkdir()
+    host = _host(monkeypatch, tmp_path, home, _GrantState())
+    root = _root(home)
+    seen = []
+    real_seed = sandboxplan.seed_home
+
+    def seed(home_dir, *args):
+        box = os.path.basename(os.path.dirname(home_dir))
+        lease = sandboxplan.read_lease(box)
+        seen.append((box, host.held(box), lease and lease["pid"], host.discard_box(box)))
+        return real_seed(home_dir, *args)
+
+    monkeypatch.setattr(sandboxplan, "seed_home", seed)
+    path = host.prepare_launch(str(ws), OTHER_BOX)
+    assert path is not None
+    assert seen == [(OTHER_BOX, True, os.getpid(), False)]
+    assert (root / OTHER_BOX / "home").is_dir()
+    # A sibling's box likewise.
+    sibling, box, _reason = host.derive(path, str(ws / "sub"))
+    assert sibling is not None
+    assert seen[1] == (box, True, os.getpid(), False)
+    # A launch that can't be prepared lets go of what it held.
+    third = "00000000000000000000000000000000"
+    assert host.prepare_launch(str(home), third) is None
+    assert not host.held(third)
+    assert sandboxplan.read_lease(third) is None
+    assert host.discard_box(third) is True
+    # …once: a hold taken twice is still let go of once per launch.
+    assert host.held(OTHER_BOX)
+    host.release(OTHER_BOX)
+    assert not host.held(OTHER_BOX)
+
+
 def test_discard_box_async_runs_off_the_calling_thread(monkeypatch, tmp_path, home, fresh_probe):
     import threading
 

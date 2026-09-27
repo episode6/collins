@@ -1120,14 +1120,22 @@ _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _BIND_FLAGS = ("--bind", "--bind-try", "--ro-bind", "--ro-bind-try")
 
 
-def make_box(box: str, anchors: tuple[str, ...] | list[str] = ()) -> str:
+def make_box(
+    box: str, anchors: tuple[str, ...] | list[str] = (), lease: str | None = None
+) -> str:
     """Create the box's own directories, each mode 0700: the root, the box,
     its carrier, and every anchor in *anchors* (host directories, which
-    must lie inside the box). The home is seed_home's. Returns the box
-    directory."""
+    must lie inside the box). The home is seed_home's. *lease* is the app
+    id to lease the box to, written the moment its directory exists —
+    before anything else is made in it — so no sweep finds a box that is
+    being built unheld. Returns the box directory."""
     top = box_dir(box)
     os.makedirs(sandbox_root(), mode=0o700, exist_ok=True)
-    for path in (top, box_carrier(box), os.path.join(top, "anchors")):
+    os.makedirs(top, mode=0o700, exist_ok=True)
+    os.chmod(top, 0o700)
+    if lease is not None:
+        write_lease(box, lease)
+    for path in (box_carrier(box), os.path.join(top, "anchors")):
         os.makedirs(path, mode=0o700, exist_ok=True)
         os.chmod(path, 0o700)
     for path in anchors:
@@ -1534,13 +1542,35 @@ class SandboxHost:
         self._lock = threading.Lock()
 
     def prepare_launch(self, workspace: str, box: str) -> str | None:
-        """See prepare_launch. The box is held from here until `release`."""
+        """See prepare_launch. The box is held from before its directory
+        is made — this instance's own sweep runs on a thread at startup,
+        and must never find a box between its creation and its hold —
+        until `release`; a launch that can't be prepared lets go again."""
+        if not valid_box_id(box):
+            return prepare_launch(workspace, self.app_id, self.state, box)  # the refusal
+        self._count(box)
         path = prepare_launch(workspace, self.app_id, self.state, box)
-        if path:
-            self.hold(box)
+        if path is None:
+            self.release(box)
+            return None
+        self._claim_root()
         return path
 
     # -- the boxes ---------------------------------------------------------------
+
+    def _count(self, box: str) -> None:
+        with self._lock:
+            self._held[box] = self._held.get(box, 0) + 1
+
+    def _claim_root(self) -> None:
+        """At the first box this run holds: the root exists from here on,
+        and is this state's unless somebody's already (owns_root) — before
+        any other instance's sweep can find it unowned."""
+        with self._lock:
+            claim = not self._claimed
+            self._claimed = True
+        if claim:
+            self.owns_root()
 
     def hold(self, box: str) -> None:
         """This process needs *box*: counted here, and written as the
@@ -1548,17 +1578,10 @@ class SandboxHost:
         shared across app ids) off a box whose session has no id yet."""
         if not valid_box_id(box):
             return
-        with self._lock:
-            self._held[box] = self._held.get(box, 0) + 1
-            claim = not self._claimed
-            self._claimed = True
+        self._count(box)
         try:
             write_lease(box, self.app_id)
-            if claim:
-                # The first box this run: the root exists from here on, and
-                # is this state's unless somebody's already (owns_root) —
-                # before any other instance's sweep can find it unowned.
-                self.owns_root()
+            self._claim_root()
         except OSError as err:
             log.info("sandbox: couldn't write the lease of %s: %s", box, err)
 
@@ -1725,21 +1748,23 @@ class SandboxHost:
             derived = derive_plan(parent, cwd, box)
         except PlanRefused as err:
             return None, "", str(err)
+        self._count(box)  # held before it is there to be swept
         try:
-            make_box(box, [host_dir for host_dir, _dest in derived["inputs"]["anchors"]])
+            anchors = [host_dir for host_dir, _dest in derived["inputs"]["anchors"]]
+            make_box(box, anchors, lease=self.app_id)
             home_dir = derived["inputs"]["sandbox_home"]
             seed_home(home_dir)
             mirror_trust(home_dir, cwd)
             home = derived.get("setenv", {}).get("HOME") or str(Path.home())
             derived["notes"] = [*derived["notes"], *scrub_home(home_dir, derived, home)]
             path = write_plan(derived, plan_dir(self.app_id))
-        except PlanRefused as err:
+        except (PlanRefused, OSError) as err:
+            self.release(box)
             remove_box(box)
-            return None, "", str(err)
-        except OSError as err:
-            remove_box(box)
+            if isinstance(err, PlanRefused):
+                return None, "", str(err)
             return None, "", f"couldn't write the sandbox plan: {err}"
-        self.hold(box)
+        self._claim_root()
         return path, box, ""
 
 
@@ -1784,14 +1809,12 @@ def prepare_launch(workspace: str, app_id: str, state, box: str) -> str | None:
         inputs = gather_inputs(workspace, app_id, state, box)
         for rel in RW_HOME_ALWAYS:
             os.makedirs(os.path.join(inputs.home, rel), exist_ok=True)
-        make_box(box, [host_dir for host_dir, _dest in inputs.anchors])
+        make_box(box, [host_dir for host_dir, _dest in inputs.anchors], lease=app_id)
         seed_home(inputs.sandbox_home)
         mirror_trust(inputs.sandbox_home, inputs.workspace)
         plan = build_plan(inputs)
         plan["notes"] = [*plan["notes"], *scrub_home(inputs.sandbox_home, plan, inputs.home)]
-        path = write_plan(plan, plan_dir(app_id))
-        write_lease(box, app_id)
-        return path
+        return write_plan(plan, plan_dir(app_id))
     except PlanRefused as err:
         log.warning("sandbox: refusing to build a box for %s: %s", workspace, err)
     except OSError as err:

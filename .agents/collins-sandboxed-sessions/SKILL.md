@@ -121,14 +121,17 @@ home outside `/home`, the runtime dir, `TMPDIR`).
 
 `prepare_launch(workspace, app_id, state, box)` is the host side of a
 launch: it validates the box id, creates the `RW_HOME_ALWAYS` directories
-(a bind needs a source) and the box's own (`make_box`, each 0700), seeds
+(a bind needs a source) and the box's own (`make_box`, each 0700, the
+lease written the moment the box's directory exists — and the host
+counts the hold *before* that, so the startup sweep's thread never finds
+a box that is still being built unheld), seeds
 the
 sandbox home once with `~/.claude.json` (`seed_home`; mode 0700, the copy
 diverges from then on), mirrors folder trust (`mirror_trust`:
 `hasTrustDialogAccepted` for the workspace *and its trusted ancestors*, and
 nothing else — the one write Collins makes to a file the CLI would not
 have written itself, into a file Collins owns), builds the plan, **scrubs
-the home** (`scrub_home`), writes the plan and the box's lease.
+the home** (`scrub_home`) and writes the plan.
 Returns None when no box can be built; the tab then launches unsandboxed
 and says so, dropping a bypass mode the box justified, and discards what
 the attempt left. **Every path under
