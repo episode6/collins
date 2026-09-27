@@ -136,6 +136,15 @@ class SandboxChip(Gtk.MenuButton):
         title.add_css_class("heading")
         self._content.append(title)
         self._content.append(_path_label(workspace))
+        # A launch narrowed to its worktree: the checkout it started in is
+        # inside too, and can't be written.
+        launch_dir = sandboxplan.plan_launch_dir(plan)
+        if launch_dir:
+            row = _caption(_("Read-only: {path}").format(path=display_path(launch_dir)))
+            row.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row.set_max_width_chars(48)
+            row.set_tooltip_text(launch_dir)
+            self._content.append(row)
         for text in (
             _("GitHub CLI login: shared")
             if inputs.get("share_gh")

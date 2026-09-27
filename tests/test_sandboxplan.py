@@ -2683,5 +2683,486 @@ def test_discard_box_async_runs_off_the_calling_thread(monkeypatch, tmp_path, ho
     assert seen == ["sandbox-discard"]
 
 
+# ---- a launch narrowed to its worktree ---------------------------------------
+
+
+def _checkout(home):
+    """The fake workspace as a repository's main checkout, with a worktree
+    of another session beside the one a launch will reserve."""
+    repo = home / "work" / "repo"
+    (repo / ".git" / "hooks").mkdir(parents=True)
+    (repo / ".git" / "config").write_text("[core]\n")
+    (repo / ".claude" / "worktrees" / "sibling").mkdir(parents=True)
+    return repo
+
+
+def test_a_worktree_name_is_one_plain_segment():
+    for good in ("calm-heron-3f9a", "a", "A.b_c-9", "x" * 64):
+        assert sandboxplan.valid_worktree_name(good), good
+    for bad in (
+        "", "x" * 65, "-w", "--model", ".hidden", "..", ".", "a/b", "a b", "a\nb",
+        ".git", "café", "$(id)", None, 7, b"name",
+    ):
+        assert not sandboxplan.valid_worktree_name(bad), bad
+    names = {sandboxplan.new_worktree_name() for _ in range(64)}
+    assert len(names) > 32
+    assert all(sandboxplan.valid_worktree_name(name) for name in names)
+    assert sandboxplan.worktree_branch("calm-heron-3f9a") == "worktree-calm-heron-3f9a"
+
+
+def test_worktree_base_is_a_main_checkout(home, tmp_path):
+    repo = _checkout(home)
+    (repo / "src").mkdir()
+    assert sandboxplan.worktree_base(str(repo)) == str(repo)
+    assert sandboxplan.worktree_base(str(repo / "src")) == str(repo)
+    # Outside any repository.
+    assert sandboxplan.worktree_base(str(tmp_path)) is None
+    # A checkout that is itself a linked worktree: its `.git` is a file.
+    linked = home / "work" / "linked"
+    linked.mkdir()
+    (linked / ".git").write_text(f"gitdir: {repo}/.git/worktrees/linked\n")
+    assert sandboxplan.worktree_base(str(linked)) is None
+    # A git directory reached through a symlink is not taken for one.
+    other = home / "work" / "other"
+    other.mkdir()
+    (other / ".git").symlink_to(repo / ".git")
+    assert sandboxplan.worktree_base(str(other)) is None
+
+
+def test_reserve_worktree_makes_an_empty_directory(home, monkeypatch):
+    repo = _checkout(home)
+    name, path = sandboxplan.reserve_worktree(str(repo))
+    assert sandboxplan.valid_worktree_name(name)
+    assert path == str(repo / ".claude" / "worktrees" / name)
+    assert os.path.isdir(path) and os.listdir(path) == []
+    assert sandboxplan.worktree_reason(path, str(repo)) == ""
+    again, other = sandboxplan.reserve_worktree(str(repo))
+    assert again != name and os.path.isdir(other)
+    # A name that is taken is passed over: a directory, a branch (loose or
+    # packed), a registration. The CLI checks its branch out with -B.
+    (repo / ".claude" / "worktrees" / "taken-dir").mkdir()
+    (repo / ".git" / "refs" / "heads").mkdir(parents=True)
+    (repo / ".git" / "refs" / "heads" / "worktree-taken-ref").write_text("0" * 40 + "\n")
+    (repo / ".git" / "packed-refs").write_text(
+        "# pack-refs with: peeled fully-peeled sorted\n"
+        + "0" * 40
+        + " refs/heads/worktree-taken-packed\n"
+    )
+    (repo / ".git" / "worktrees" / "taken-admin").mkdir(parents=True)
+    offered = iter(["taken-dir", "taken-ref", "taken-packed", "taken-admin", "free-one"])
+    monkeypatch.setattr(sandboxplan, "new_worktree_name", lambda: next(offered))
+    assert sandboxplan.reserve_worktree(str(repo)) == (
+        "free-one",
+        str(repo / ".claude" / "worktrees" / "free-one"),
+    )
+    # A restart: the worktree the session has, made only when it is missing.
+    (repo / ".claude" / "worktrees" / name / "kept.txt").write_text("work")
+    assert sandboxplan.reserve_worktree(str(repo), name) == (name, path)
+    assert os.listdir(path) == ["kept.txt"]
+    assert sandboxplan.reserve_worktree(str(repo), "put-back") == (
+        "put-back",
+        str(repo / ".claude" / "worktrees" / "put-back"),
+    )
+    assert (repo / ".claude" / "worktrees" / "put-back").is_dir()
+    (repo / ".claude" / "worktrees" / "a-file").write_text("")
+    assert sandboxplan.reserve_worktree(str(repo), "a-file") is None
+    assert sandboxplan.reserve_worktree(str(repo), "../escape") is None
+
+
+def test_reserve_worktree_makes_the_claude_directory_of_a_repository_without_one(home):
+    repo = home / "work" / "repo"
+    (repo / ".git").mkdir()
+    name, path = sandboxplan.reserve_worktree(str(repo))
+    assert path == str(repo / ".claude" / "worktrees" / name)
+    assert os.path.isdir(path)
+
+
+def test_reserve_worktree_never_goes_through_a_symlink(home, tmp_path):
+    """The checkout is somewhere a session may have written: a `.claude`
+    or a `worktrees` that is a link is refused, and nothing is made where
+    it points."""
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "worktrees").mkdir(parents=True)
+    repo = home / "work" / "repo"
+    (repo / ".git").mkdir()
+    (repo / ".claude").symlink_to(elsewhere)
+    assert sandboxplan.reserve_worktree(str(repo)) is None
+    assert os.listdir(elsewhere / "worktrees") == []
+    (repo / ".claude").unlink()
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "worktrees").symlink_to(elsewhere / "worktrees")
+    assert sandboxplan.reserve_worktree(str(repo)) is None
+    assert sandboxplan.reserve_worktree(str(repo), "named") is None
+    assert os.listdir(elsewhere / "worktrees") == []
+    # Nowhere a launch is narrowed: outside a repository, in a linked worktree.
+    assert sandboxplan.reserve_worktree(str(tmp_path)) is None
+    linked = home / "work" / "linked"
+    linked.mkdir()
+    (linked / ".git").write_text("gitdir: /srv/repo/.git/worktrees/linked\n")
+    assert sandboxplan.reserve_worktree(str(linked)) is None
+    assert not (linked / ".claude").exists()
+
+
+def test_release_worktree_removes_only_an_empty_directory(home, tmp_path):
+    repo = _checkout(home)
+    _name, path = sandboxplan.reserve_worktree(str(repo))
+    (repo / ".claude" / "worktrees" / "sibling" / "work.txt").write_text("work")
+    assert sandboxplan.release_worktree(str(repo / ".claude" / "worktrees" / "sibling")) is False
+    assert (repo / ".claude" / "worktrees" / "sibling" / "work.txt").exists()
+    assert sandboxplan.release_worktree(path) is True
+    assert not os.path.exists(path)
+    assert sandboxplan.release_worktree(path) is False  # already gone
+    # Nothing that is not a worktree's place, and nothing through a link.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert sandboxplan.release_worktree(str(empty)) is False
+    assert empty.is_dir()
+    assert sandboxplan.release_worktree(str(repo / ".claude" / "worktrees" / "..")) is False
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "victim").mkdir(parents=True)
+    other = home / "work" / "other"
+    (other / ".claude").mkdir(parents=True)
+    (other / ".claude" / "worktrees").symlink_to(elsewhere)
+    assert sandboxplan.release_worktree(str(other / ".claude" / "worktrees" / "victim")) is False
+    assert (elsewhere / "victim").is_dir()
+
+
+def test_a_worktree_launch_is_narrowed_to_its_worktree(home):
+    repo = _checkout(home)
+    ws = str(repo)
+    _name, worktree = sandboxplan.reserve_worktree(ws)
+    sibling = str(repo / ".claude" / "worktrees" / "sibling")
+    plan = build_plan(_inputs(home, worktree=worktree))
+    git_dir, claude_dir = str(repo / ".git"), str(repo / ".claude")
+    hooks = str(repo / ".git" / "hooks")
+    # The checkout and the directory that holds every worktree: read-only.
+    assert (ws, ws) in _binds(plan, "--ro-bind")
+    assert (claude_dir, claude_dir) in _binds(plan, "--ro-bind-try")
+    for flag in ("--bind", "--bind-try"):
+        assert (ws, ws) not in _binds(plan, flag)
+        assert (claude_dir, claude_dir) not in _binds(plan, flag)
+        assert (sibling, sibling) not in _binds(plan, flag)
+    # The git directory stays shared, its hooks pinned as ever; the one
+    # worktree lands on top of the checkout, read-write.
+    assert (git_dir, git_dir) in _binds(plan, "--bind-try")
+    assert (hooks, hooks) in _binds(plan, "--ro-bind")
+    assert (worktree, worktree) in _binds(plan, "--bind")
+    checkout = _index(plan, "--ro-bind", ws, ws)
+    assert checkout < _index(plan, "--bind-try", git_dir, git_dir)
+    assert checkout < _index(plan, "--ro-bind-try", claude_dir, claude_dir)
+    assert _index(plan, "--ro-bind-try", claude_dir, claude_dir) < _index(
+        plan, "--bind", worktree, worktree
+    )
+    assert _index(plan, "--bind-try", git_dir, git_dir) < _index(plan, "--ro-bind", hooks, hooks)
+    # The CLI starts in the checkout, where its worktree flag is given;
+    # what the session can write — its workspace — is the worktree.
+    assert plan["bwrap_args"][-2:] == ["--chdir", ws]
+    assert plan["workspace"] == worktree
+    assert plan["cwd"] == ws
+    assert plan["inputs"]["workspace"] == worktree
+    assert plan["inputs"]["worktree"] == worktree
+    assert plan["inputs"]["launch_dir"] == ws
+    assert any("narrowed to the worktree" in note for note in plan["notes"])
+    assert sandboxplan.plan_start_dir(plan) == ws
+    assert sandboxplan.plan_launch_dir(plan) == ws
+    json.dumps(plan)
+    # A launch that asks for no worktree is as it was.
+    plain = build_plan(_inputs(home))
+    assert (ws, ws) in _binds(plain, "--bind")
+    assert (claude_dir, claude_dir) in _binds(plain, "--bind-try")
+    assert plain["workspace"] == ws and "cwd" not in plain
+    assert plain["inputs"]["launch_dir"] is None and plain["inputs"]["worktree"] is None
+    assert sandboxplan.plan_start_dir(plain) == ws
+    assert sandboxplan.plan_launch_dir(plain) is None
+
+
+def test_a_narrowed_launch_from_a_subdirectory_keeps_the_parents_tree_out(home):
+    repo = _checkout(home)
+    (repo / "src").mkdir()
+    _name, worktree = sandboxplan.reserve_worktree(str(repo / "src"))
+    assert worktree.startswith(str(repo / ".claude" / "worktrees"))
+    plan = build_plan(_inputs(home, workspace=str(repo / "src"), worktree=worktree))
+    assert (str(repo / "src"), str(repo / "src")) in _binds(plan, "--ro-bind")
+    assert (worktree, worktree) in _binds(plan, "--bind")
+    for flag in ("--bind", "--bind-try", "--ro-bind", "--ro-bind-try"):
+        assert (str(repo), str(repo)) not in _binds(plan, flag)
+
+
+def test_a_worktree_that_cant_be_bound_leaves_the_checkout_read_only(home, tmp_path):
+    """Never a refusal — that is an unsandboxed launch — and never the
+    checkout writable: nothing of the repository's tree can be written."""
+    repo = _checkout(home)
+    ws = str(repo)
+    worktrees = repo / ".claude" / "worktrees"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (worktrees / "a-link").symlink_to(elsewhere)
+    (worktrees / "a-file").write_text("")
+    other = home / "work" / "other"
+    (other / ".git").mkdir(parents=True)
+    (other / ".claude" / "worktrees" / "theirs").mkdir(parents=True)
+    for bad, why in (
+        (str(worktrees / "missing"), "not there"),
+        (str(worktrees / "a-link"), "not a directory"),
+        (str(worktrees / "a-file"), "not a directory"),
+        (str(other / ".claude" / "worktrees" / "theirs"), "not a worktree of"),
+        (str(worktrees / "sibling" / "deeper"), "not a worktree of"),
+        (str(worktrees), "not a worktree of"),
+        (ws, "not a worktree of"),
+        (str(worktrees / ".git"), "not a worktree of"),
+        ("relative", "not an absolute path"),
+    ):
+        assert why in sandboxplan.worktree_reason(bad, ws), bad
+        plan = build_plan(_inputs(home, worktree=bad))
+        assert (ws, ws) in _binds(plan, "--ro-bind"), bad
+        for flag in ("--bind", "--bind-try"):
+            assert (ws, ws) not in _binds(plan, flag), bad
+            assert (bad, bad) not in _binds(plan, flag), bad
+            assert (str(repo / ".claude"), str(repo / ".claude")) not in _binds(plan, flag), bad
+        assert plan["inputs"]["worktree"] is None
+        assert plan["inputs"]["launch_dir"] == ws
+        assert plan["workspace"] == ws
+        assert any("can't be bound" in note and why in note for note in plan["notes"]), bad
+    # A component that became a link after the reservation.
+    _name, worktree = sandboxplan.reserve_worktree(ws)
+    os.rename(repo / ".claude", repo / ".claude.real")
+    (repo / ".claude").symlink_to(repo / ".claude.real")
+    assert sandboxplan.worktree_reason(worktree, ws) == "reached through a symlink"
+    plan = build_plan(_inputs(home, worktree=worktree))
+    assert (worktree, worktree) not in _binds(plan, "--bind")
+    # Where no launch is narrowed — a linked worktree — the same holds.
+    linked = home / "work" / "linked"
+    linked.mkdir()
+    (linked / ".git").write_text(f"gitdir: {repo}/.git/worktrees/linked\n")
+    plan = build_plan(_inputs(home, workspace=str(linked), worktree=worktree))
+    assert (str(linked), str(linked)) in _binds(plan, "--ro-bind")
+    assert (worktree, worktree) not in _binds(plan, "--bind")
+
+
+def test_a_narrowed_plan_holds_a_sibling_and_a_grant_to_the_worktree(home):
+    repo = _checkout(home)
+    ws = str(repo)
+    _name, worktree = sandboxplan.reserve_worktree(ws)
+    plan = build_plan(_inputs(home, worktree=worktree))
+    assert sandboxplan.plan_reaches(plan, worktree) == ""
+    assert sandboxplan.plan_reaches(plan, os.path.join(worktree, "src")) == ""
+    # The checkout is inside, and nothing a sibling can start in: the box
+    # can't write it, and a sibling's own worktree couldn't be cut there.
+    assert "outside the sandbox's workspace" in sandboxplan.plan_reaches(plan, ws)
+    sibling = str(repo / ".claude" / "worktrees" / "sibling")
+    assert sandboxplan.plan_reaches(plan, sibling) != ""
+    with pytest.raises(PlanRefused, match="outside the sandbox"):
+        sandboxplan.derive_plan(plan, ws, OTHER_BOX)
+    derived = sandboxplan.derive_plan(plan, worktree, OTHER_BOX)
+    assert derived["cwd"] == worktree
+    assert derived["inputs"]["launch_dir"] == ws
+    assert (ws, ws) in _binds(derived, "--ro-bind")
+    # The user can allow the checkout, which lands on top, read-write —
+    # and the hooks stay pinned over it.
+    allowed = build_plan(_inputs(home, worktree=worktree, grants=(ws,)))
+    assert _index(allowed, "--bind-try", ws, ws) > _index(allowed, "--bind", worktree, worktree)
+    hooks = str(repo / ".git" / "hooks")
+    assert _index(allowed, "--ro-bind", hooks, hooks) > _index(allowed, "--bind-try", ws, ws)
+    assert sandboxplan.plan_reaches(allowed, ws) == ""
+
+
+def test_load_plan_reads_a_narrowed_plan(home, tmp_path):
+    repo = _checkout(home)
+    _name, worktree = sandboxplan.reserve_worktree(str(repo))
+    plan, path = _written(home, tmp_path, worktree=worktree)
+    loaded = sandboxplan.load_plan(path)
+    assert loaded == json.loads(json.dumps(plan))
+    assert sandboxplan.plan_start_dir(loaded) == str(repo)
+    inputs = plan["inputs"]
+    for broken in (
+        {**plan, "cwd": "relative"},
+        {**plan, "cwd": 7},
+        {**plan, "inputs": {**inputs, "launch_dir": "../x"}},
+        {**plan, "inputs": {**inputs, "worktree": ["nope"]}},
+    ):
+        with open(path, "w") as fh:
+            json.dump(broken, fh)
+        assert sandboxplan.load_plan(path) is None, broken
+    # A plan an earlier build wrote names neither, and loads.
+    older = {k: v for k, v in plan.items() if k != "cwd"}
+    older["inputs"] = {k: v for k, v in inputs.items() if k not in ("launch_dir", "worktree")}
+    with open(path, "w") as fh:
+        json.dump(older, fh)
+    loaded = sandboxplan.load_plan(path)
+    assert loaded is not None
+    assert sandboxplan.plan_launch_dir(loaded) is None
+    assert sandboxplan.plan_start_dir(loaded) == loaded["workspace"]
+    assert sandboxplan.plan_launch_dir({"inputs": "nope"}) is None
+
+
+def test_the_host_prepares_a_narrowed_launch(monkeypatch, tmp_path, home, fresh_probe):
+    repo = _checkout(home)
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    _name, worktree = sandboxplan.reserve_worktree(str(repo))
+    box = host.mint_box(worktree)
+    path = host.prepare_launch(str(repo), box, worktree=worktree)
+    plan = sandboxplan.load_plan(path)
+    assert plan["workspace"] == worktree and plan["cwd"] == str(repo)
+    assert (worktree, worktree) in _binds(plan, "--bind")
+    assert (str(repo), str(repo)) in _binds(plan, "--ro-bind")
+    # The chip asks about the plan's workspace — the worktree.
+    assert host.plan_stale(path, plan["inputs"]["workspace"]) is False
+    assert host.allow(box, worktree, os.path.join(worktree, "src")) == "already inside the workspace"
+    # The checkout is not "already inside": it can be allowed, and asks
+    # for the restart like any grant.
+    assert host.allow(box, worktree, str(lib)) == ""
+    assert host.plan_stale(path, plan["inputs"]["workspace"]) is True
+    # A worktree that has gone by the next launch: a box all the same,
+    # with the checkout read-only.
+    os.rmdir(worktree)
+    again = host.prepare_launch(str(repo), box, worktree=worktree)
+    assert again is not None
+    later = sandboxplan.load_plan(again)
+    assert later["inputs"]["worktree"] is None
+    assert (str(repo), str(repo)) in _binds(later, "--ro-bind")
+    assert (str(repo), str(repo)) not in _binds(later, "--bind")
+    # A session in the worktree shares its repository's defaults.
+    assert sandboxplan.project_key(worktree) == str(repo)
+
+
+def _git(root, *args):
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.invalid",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
+    }
+    done = subprocess.run(
+        ["git", "-C", str(root), *args], env=env, capture_output=True, text=True, check=True
+    )
+    return done.stdout.strip()
+
+
+def _git_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "readme.md").write_text("hi")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "first")
+    return repo
+
+
+def test_retire_worktree_takes_the_directory_and_a_branch_with_nothing_of_its_own(
+    tmp_path, monkeypatch
+):
+    """What the CLI's removal of a worktree leaves from inside a box: the
+    directory, emptied, and the branch. Both go — the branch only when
+    every commit on it is reachable from somewhere else, and with nothing
+    the repository's config names run for it."""
+    if not sandboxplan.shutil.which("git"):
+        pytest.skip("no git on this machine")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    repo = _git_repo(tmp_path)
+    ran = tmp_path / "hook-ran"
+    hooks = tmp_path / "hooks"
+    hooks.mkdir()
+    for hook in ("reference-transaction", "post-checkout"):
+        (hooks / hook).write_text(f"#!/bin/sh\ntouch {ran}\n")
+        (hooks / hook).chmod(0o755)
+    _git(repo, "config", "core.hooksPath", str(hooks))
+
+    def branches():
+        return _git(repo, "branch", "--format=%(refname:short)").split()
+
+    # Untouched: the branch sits on a commit main has.
+    name, path = sandboxplan.reserve_worktree(str(repo))
+    _git(repo, "branch", f"worktree-{name}")
+    ran.unlink(missing_ok=True)
+    assert sandboxplan.retire_worktree(path) is True
+    assert not os.path.exists(path)
+    assert branches() == ["main"]
+    assert not ran.exists()
+    # With a commit of its own the branch stays, the directory still goes.
+    name, path = sandboxplan.reserve_worktree(str(repo))
+    _git(repo, "worktree", "add", "-q", "-B", f"worktree-{name}", path, "HEAD")
+    (tmp_path / "repo" / ".claude" / "worktrees" / name / "work.md").write_text("work")
+    _git(path, "add", "-A")
+    _git(path, "commit", "-qm", "work")
+    # Anything in the directory leaves everything alone.
+    assert sandboxplan.retire_worktree(path) is False
+    assert os.path.isdir(path) and f"worktree-{name}" in branches()
+    _git(repo, "worktree", "remove", "--force", path)
+    os.mkdir(path)
+    assert sandboxplan.retire_worktree(path) is True
+    assert f"worktree-{name}" in branches()
+    # A branch a worktree still has checked out is git's to refuse.
+    name, path = sandboxplan.reserve_worktree(str(repo))
+    _git(repo, "worktree", "add", "-q", "-B", f"worktree-{name}", path, "HEAD")
+    assert sandboxplan.drop_worktree_branch(str(repo), name) is False
+    assert f"worktree-{name}" in branches()
+    # No such branch, no such repository, no such name.
+    assert sandboxplan.drop_worktree_branch(str(repo), "never-was") is False
+    assert sandboxplan.drop_worktree_branch(str(tmp_path), name) is False
+    assert sandboxplan.drop_worktree_branch(str(repo), "../x") is False
+
+
+def test_a_narrowed_box_runs_when_the_machine_allows(
+    monkeypatch, tmp_path, fresh_probe, no_shared_tmp
+):
+    """The real bwrap over a narrowed plan: the worktree is written, the
+    checkout, its `.claude` and another session's worktree are not. Skipped
+    where the probe says no box can be built."""
+    monkeypatch.delenv("COLLINS_BWRAP", raising=False)
+    if not os.path.exists("/usr/bin/bwrap") or sandboxplan.probe():
+        pytest.skip("no bubblewrap box on this machine")
+    home = tmp_path / "home"
+    repo = _checkout(home)
+    (repo / ".claude" / "settings.json").write_text("{}")
+    _name, worktree = sandboxplan.reserve_worktree(str(repo))
+    root = tmp_path / "sbx"
+    for made in ("home", "grants"):
+        (root / BOX / made).mkdir(parents=True)
+    plan = build_plan(
+        Inputs(
+            workspace=str(repo),
+            home=str(home),
+            sandbox_home=str(root / BOX / "home"),
+            box=BOX,
+            sandbox_root=str(root),
+            carrier=str(root / BOX / "grants"),
+            protected=(),
+            worktree=worktree,
+        )
+    )
+    script = (
+        'echo "$PWD"; '
+        f'touch "{worktree}/made" && echo worktree-written; '
+        "touch planted 2>/dev/null && echo checkout-written; "
+        "echo x >> .claude/settings.json 2>/dev/null && echo settings-written; "
+        "touch .claude/worktrees/sibling/planted 2>/dev/null && echo sibling-written; "
+        "mkdir .claude/worktrees/another 2>/dev/null && echo worktrees-written; "
+        "touch .git/config && echo git-written; "
+        "touch .git/hooks/planted 2>/dev/null && echo hooks-written; "
+        "true"
+    )
+    argv = ["/usr/bin/bwrap", *plan["bwrap_args"]]
+    for key, value in plan["setenv"].items():
+        argv += ["--setenv", key, value]
+    result = subprocess.run(
+        [*argv, "--", "/bin/sh", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == [str(repo), "worktree-written", "git-written"]
+    assert os.path.exists(os.path.join(worktree, "made"))
+    assert not (repo / "planted").exists()
+
+
 def test_the_module_stays_gtk_free():
     assert "gi.repository.Gtk" not in sys.modules

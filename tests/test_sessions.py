@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 
 import json
 import os
@@ -655,9 +655,15 @@ def test_recreatable_worktree(tmp_path):
     # still needs the worktree back before the CLI re-enters it.
     assert recreatable_worktree(jsonl, str(root)) == state
     assert recreatable_worktree(jsonl, str(root / ".claude" / "worktrees" / "other")) == state
-    # Nothing to repair: the worktree is still there.
+    # An empty directory is a reaped worktree too: what the CLI leaves when
+    # it removes one from inside a sandbox, where the directory is a mount
+    # point it can empty and not remove.
     Path(cwd).mkdir(parents=True)
+    assert recreatable_worktree(jsonl, cwd) == state
+    # Nothing to repair: the worktree is still there.
+    (Path(cwd) / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
     assert recreatable_worktree(jsonl, cwd) is None
+    (Path(cwd) / ".git").unlink()
     Path(cwd).rmdir()
     # No transcript to read / the repository itself is gone.
     assert recreatable_worktree(None, cwd) is None

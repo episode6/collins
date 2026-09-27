@@ -26,6 +26,15 @@ skipped — and the check still passes — where the machine can't deliver a
 grant live: `GrantMounts.capable()` says why, or the first mount is
 refused (a container with the tools and no FUSE to mount with).
 
+**The narrowed section** is the box of a launch that asks the CLI for a
+worktree (`claude -w`): a real repository with another session's worktree
+in it, a worktree reserved on the host (sandboxplan.reserve_worktree), and
+the git command the CLI runs, run inside — the worktree is cut in the
+reserved directory, written and committed in; the checkout, its `.claude`
+and the other worktree are read and can't be written; removing the
+worktree from inside leaves what the host then tidies. Skipped, and the
+check still passes, where there is no git.
+
 Staged under ~/.cache rather than /tmp, like the policy check: /tmp is
 shared read-write into every box, and Collins' own state in a scratch tree
 there would trip the plan's protect-check.
@@ -546,6 +555,218 @@ def live_section() -> None:
 
 if beside_path:
     live_section()
+
+# ---- the narrowed section: a launch that asks the CLI for a worktree ----------------
+
+REPO = f"{E2E}/dev/gamma"  # a real repository: the main checkout of a `-w` launch
+GIT_ENV = {
+    "GIT_AUTHOR_NAME": "check",
+    "GIT_AUTHOR_EMAIL": "check@example.invalid",
+    "GIT_COMMITTER_NAME": "check",
+    "GIT_COMMITTER_EMAIL": "check@example.invalid",
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_SYSTEM": "/dev/null",
+}
+
+
+def git(*args: str, cwd: str = REPO) -> str:
+    done = subprocess.run(
+        ["git", *args], cwd=cwd, env={**os.environ, **GIT_ENV}, capture_output=True, text=True
+    )
+    if done.returncode:
+        print(f"      git {' '.join(args)}: {done.stderr.strip()}", flush=True)
+    return done.stdout.strip()
+
+
+def in_box(plan: str, script: str) -> tuple[int, dict, str]:
+    argv = [sys.executable, providers.sandboxrun_path(), plan, "--", "/bin/sh", "-c", script]
+    done = subprocess.run(
+        argv, capture_output=True, text=True, timeout=120, env={**os.environ, **GIT_ENV}
+    )
+    answers = dict(line.split("=", 1) for line in done.stdout.splitlines() if "=" in line)
+    return done.returncode, answers, done.stderr[-400:]
+
+
+def narrowed_section() -> None:
+    """What the CLI's worktree flag does, done by hand with the same git
+    command, inside the box a `-w` launch gets: the worktree is cut in the
+    directory reserved on the host and written; the checkout, its
+    `.claude` and another session's worktree are read and not written."""
+    if not shutil.which("git"):
+        print("SKIP  the narrowed section: no git on this machine", flush=True)
+        return
+    os.makedirs(REPO)
+    git("init", "-q", "-b", "main")
+    with open(f"{REPO}/README", "w", encoding="utf-8") as fh:
+        fh.write("the main checkout\n")
+    with open(f"{REPO}/build.sh", "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\necho built\n")
+    os.makedirs(f"{REPO}/.claude")
+    with open(f"{REPO}/.claude/settings.json", "w", encoding="utf-8") as fh:
+        fh.write("{}\n")
+    with open(f"{REPO}/.gitignore", "w", encoding="utf-8") as fh:
+        fh.write(".claude/worktrees/\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "first")
+    hook = f"{REPO}/.git/hooks/pre-commit"
+    os.makedirs(os.path.dirname(hook), exist_ok=True)
+    with open(hook, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\nexit 0\n")
+    os.chmod(hook, 0o755)
+    sibling = f"{REPO}/.claude/worktrees/sibling"
+    git("worktree", "add", "-q", "-b", "worktree-sibling", sibling, "HEAD")
+
+    reserved = sandboxplan.reserve_worktree(REPO)
+    check("a worktree is reserved on the host", reserved is not None, reserved)
+    if reserved is None:
+        return
+    name, own = reserved
+    branch = sandboxplan.worktree_branch(name)
+    check("…empty, where the CLI will cut it", os.listdir(own) == [] and own == f"{REPO}/.claude/worktrees/{name}", own)
+    box = host.mint_box(own)
+    plan_file = host.prepare_launch(REPO, box, worktree=own)
+    check("the launch gets a plan", bool(plan_file), plan_file)
+    if not plan_file:
+        return
+    plan = sandboxplan.load_plan(plan_file)
+    check("whose workspace is the worktree", bool(plan) and plan["workspace"] == own, plan and plan["workspace"])
+    check("…and which starts in the checkout", bool(plan) and sandboxplan.plan_start_dir(plan) == REPO)
+    print(f"  --  narrowed: a launch in {REPO}, its worktree {own}", flush=True)
+    probe = f"""
+echo pwd=$(pwd)
+echo mkdir_p=$(mkdir -p {REPO}/.claude/worktrees 2>/dev/null && echo yes || echo no)
+echo cut=$(git worktree add --no-track -B {branch} {own} HEAD >/dev/null 2>&1 && echo yes || echo no)
+echo checked_out=$(cat {own}/README 2>/dev/null || echo MISSING)
+echo branch=$(git -C {own} symbolic-ref --short HEAD 2>/dev/null || echo NONE)
+echo worktree_write=$(echo inside > {own}/made-inside.txt 2>/dev/null && echo yes || echo no)
+echo checkout_read=$(cat {REPO}/README 2>/dev/null || echo MISSING)
+echo checkout_write=$(echo planted > {REPO}/planted.sh 2>/dev/null && echo yes || echo no)
+echo script_write=$(echo planted >> {REPO}/build.sh 2>/dev/null && echo yes || echo no)
+echo script_replace=$(mv {own}/made-inside.txt {REPO}/build.sh 2>/dev/null && echo yes || echo no)
+echo settings_write=$(echo x >> {REPO}/.claude/settings.json 2>/dev/null && echo yes || echo no)
+echo local_settings_add=$(echo x > {REPO}/.claude/settings.local.json 2>/dev/null && echo yes || echo no)
+echo sibling_read=$(cat {sibling}/README 2>/dev/null || echo MISSING)
+echo sibling_write=$(echo planted > {sibling}/planted.sh 2>/dev/null && echo yes || echo no)
+echo another=$(mkdir {REPO}/.claude/worktrees/another 2>/dev/null && echo yes || echo no)
+echo hook_write=$(echo x >> {hook} 2>/dev/null && echo yes || echo no)
+echo git_config_write=$(git -C {own} config --local check.key value 2>/dev/null && echo yes || echo no)
+echo added=$(git -C {own} add -A >/dev/null 2>&1 && echo yes || echo no)
+echo committed=$(git -C {own} commit -q -m inside >/dev/null 2>&1 && echo yes || echo no)
+echo commits=$(git -C {own} rev-list --count HEAD 2>/dev/null || echo 0)
+echo status=$(git -C {own} status --short 2>/dev/null | wc -l)
+echo listed=$(git -C {own} worktree list 2>/dev/null | wc -l)
+"""
+    code, inside, err = in_box(plan_file, probe)
+    check("the real bwrap accepted the narrowed plan", code == 0, (code, err))
+    check("it starts in the checkout", inside.get("pwd") == REPO, inside.get("pwd"))
+    check("mkdir -p of the worktrees directory is fine, as the CLI does it", inside.get("mkdir_p") == "yes")
+    check("git cuts the worktree in the reserved directory", inside.get("cut") == "yes", inside.get("cut"))
+    check("…checked out", inside.get("checked_out") == "the main checkout", inside.get("checked_out"))
+    check("…on its branch", inside.get("branch") == branch, inside.get("branch"))
+    check("the worktree is writable", inside.get("worktree_write") == "yes", inside.get("worktree_write"))
+    check("the checkout is readable", inside.get("checkout_read") == "the main checkout", inside.get("checkout_read"))
+    check("…and a file can't be planted in it", inside.get("checkout_write") == "no", inside.get("checkout_write"))
+    check("…nor a script of its own rewritten", inside.get("script_write") == "no", inside.get("script_write"))
+    check("…or replaced", inside.get("script_replace") == "no", inside.get("script_replace"))
+    check("its .claude/settings.json can't be written", inside.get("settings_write") == "no", inside.get("settings_write"))
+    check("…nor a settings.local.json added", inside.get("local_settings_add") == "no", inside.get("local_settings_add"))
+    check("another session's worktree is readable", inside.get("sibling_read") == "the main checkout", inside.get("sibling_read"))
+    check("…and not writable", inside.get("sibling_write") == "no", inside.get("sibling_write"))
+    check("no other worktree directory can be made", inside.get("another") == "no", inside.get("another"))
+    check("the repository's hooks stay pinned", inside.get("hook_write") == "no", inside.get("hook_write"))
+    check("…and its config writable", inside.get("git_config_write") == "yes", inside.get("git_config_write"))
+    check("git adds inside the worktree", inside.get("added") == "yes", inside.get("added"))
+    check("…and commits", inside.get("committed") == "yes", inside.get("committed"))
+    check("…on top of the checkout's history", inside.get("commits") == "2", inside.get("commits"))
+    check("…leaving a clean tree", inside.get("status") == "0", inside.get("status"))
+    check("git sees all three worktrees", inside.get("listed") == "3", inside.get("listed"))
+    # The host's side of it.
+    check("the write from inside is in the worktree", os.path.exists(f"{own}/made-inside.txt"))
+    check("nothing was planted in the checkout", not os.path.exists(f"{REPO}/planted.sh"))
+    with open(f"{REPO}/build.sh", encoding="utf-8") as fh:
+        check("its script is unchanged", fh.read() == "#!/bin/sh\necho built\n")
+    check("no settings.local.json appeared", not os.path.exists(f"{REPO}/.claude/settings.local.json"))
+    check("nothing was planted in the other worktree", not os.path.exists(f"{sibling}/planted.sh"))
+    check("the commit from inside is the repository's", git("rev-list", "--count", branch) == "2")
+
+    # A restart builds the box again around the same worktree.
+    sandboxplan.release_plan(plan_file)
+    host.release(box)
+    check("the worktree is kept for a restart", sandboxplan.reserve_worktree(REPO, name) == (name, own))
+    plan_file = host.prepare_launch(REPO, box, worktree=own)
+    code, inside, err = in_box(
+        plan_file,
+        f"""
+echo kept=$(cat {own}/made-inside.txt 2>/dev/null || echo MISSING)
+echo write=$(echo again >> {own}/made-inside.txt 2>/dev/null && echo yes || echo no)
+echo checkout_write=$(echo planted > {REPO}/planted.sh 2>/dev/null && echo yes || echo no)
+echo removed=$(git worktree remove --force {own} >/dev/null 2>&1 && echo yes || echo no)
+echo left=$(ls -A {own} 2>/dev/null | wc -l)
+echo there=$(test -d {own} && echo yes || echo no)
+echo listed=$(git worktree list 2>/dev/null | wc -l)
+""",
+    )
+    check("restarted, the box holds the worktree as it was", code == 0 and inside.get("kept") == "inside", (code, err, inside.get("kept")))
+    check("…writable", inside.get("write") == "yes", inside.get("write"))
+    check("…and the checkout still isn't", inside.get("checkout_write") == "no", inside.get("checkout_write"))
+    # What the CLI does to a worktree it removes — an untouched one at exit,
+    # or the user's answer to its question: from inside, git empties the
+    # directory and drops the registration, and can't remove a mount point.
+    check("removing the worktree from inside reports a failure", inside.get("removed") == "no", inside.get("removed"))
+    check("…having emptied it", inside.get("left") == "0" and inside.get("there") == "yes", inside)
+    check("…and dropped its registration", inside.get("listed") == "2", inside.get("listed"))
+    check("the host tidies the directory", sandboxplan.retire_worktree(own) is True and not os.path.exists(own))
+    check("…and keeps a branch that holds a commit of its own", branch in git("branch", "--list", branch))
+    check("the other worktree is as it was", os.path.exists(f"{sibling}/README") and "sibling" in git("worktree", "list"))
+    sandboxplan.release_plan(plan_file)
+    host.release(box)
+
+    # An untouched worktree: the branch holds nothing, and goes too.
+    name, own = sandboxplan.reserve_worktree(REPO)
+    branch = sandboxplan.worktree_branch(name)
+    plan_file = host.prepare_launch(REPO, box, worktree=own)
+    code, inside, err = in_box(
+        plan_file,
+        f"""
+echo cut=$(git worktree add --no-track -B {branch} {own} HEAD >/dev/null 2>&1 && echo yes || echo no)
+echo removed=$(git worktree remove --force {own} >/dev/null 2>&1 && echo yes || echo no)
+""",
+    )
+    check("an untouched worktree, cut and removed inside", code == 0 and inside.get("cut") == "yes", (code, err, inside))
+    check("…leaves its branch behind", branch in git("branch", "--list", branch))
+    check("the host takes the directory", sandboxplan.retire_worktree(own) is True and not os.path.exists(own))
+    check("…and the branch, which held nothing", git("branch", "--list", branch) == "")
+    sandboxplan.release_plan(plan_file)
+    host.release(box)
+
+    # A worktree that can't be bound never widens the box: the checkout is
+    # read-only, and nothing of the repository's tree can be written.
+    missing = f"{REPO}/.claude/worktrees/never-made"
+    plan_file = host.prepare_launch(REPO, box, worktree=missing)
+    check("a launch whose worktree is gone still gets a box", bool(plan_file), plan_file)
+    if plan_file:
+        code, inside, err = in_box(
+            plan_file,
+            f"""
+echo pwd=$(pwd)
+echo checkout_write=$(echo planted > {REPO}/planted.sh 2>/dev/null && echo yes || echo no)
+echo made=$(mkdir -p {missing} 2>/dev/null && echo yes || echo no)
+""",
+        )
+        check("…in the checkout", code == 0 and inside.get("pwd") == REPO, (code, err))
+        check("…which it can't write", inside.get("checkout_write") == "no", inside.get("checkout_write"))
+        check("…nor make the worktree in", inside.get("made") == "no", inside.get("made"))
+        sandboxplan.release_plan(plan_file)
+        host.release(box)
+    host.forget_box(box)
+    for _tick in range(200):
+        if not os.path.exists(sandboxplan.box_dir(box)):
+            break
+        time.sleep(0.05)
+    check("the narrowed launch's box goes with it", not os.path.exists(sandboxplan.box_dir(box)))
+
+
+narrowed_section()
 check("nothing is mounted under the scratch tree", mounts_under(E2E) == [], mounts_under(E2E))
 
 sandboxplan.release_plan(plan_path)
