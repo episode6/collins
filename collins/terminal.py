@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     sandboxchip,
+    sandboxgrants,
     sandboxplan,
     themes,
     transcriptlinks,
@@ -235,6 +236,13 @@ def _within(root: str, path: str) -> bool:
 # providers.MCP_CONFIG_PATH; None means every sandboxed decision degrades
 # to an unsandboxed launch that says so.
 SANDBOX_HOST: sandboxplan.SandboxHost | None = None
+
+# The live grants of this instance (sandboxgrants.GrantMounts): every box a
+# tab launches registers with it, so a directory allowed while the session
+# runs is mounted into the running box, and unregisters before its plan is
+# rebuilt and when its shell exits. Set by the app beside SANDBOX_HOST;
+# None means a grant applies at the next restart, as a static bind.
+SANDBOX_GRANTS: sandboxgrants.GrantMounts | None = None
 
 # The restart the footer chip's "Restart to apply" runs: the CLI is asked
 # to exit (its Ctrl+C Ctrl+C), nudged again when it hasn't gone, and the
@@ -2376,6 +2384,7 @@ class TerminalTab(Gtk.Box):
                 # The box the deriver minted and holds for this tab
                 # (SandboxHost.derive): released with the plan.
                 self._sandbox_box = options.sandbox_box
+                self._register_sandbox_box()
                 return options
             if options.sandbox_box and SANDBOX_HOST is not None:
                 # The deriver's hold, with no plan left to adopt: the
@@ -2390,6 +2399,7 @@ class TerminalTab(Gtk.Box):
             self._sandbox_plan_path = plan
             self._sandbox_plan_adopted = False
             self._sandbox_box = box
+            self._register_sandbox_box()
             return replace(options, sandbox_plan=plan, sandbox_box=box)
         if SANDBOX_HOST is not None:
             # Whatever the attempt left on disk, unless a session names it.
@@ -2403,12 +2413,30 @@ class TerminalTab(Gtk.Box):
             options, sandbox=False, sandbox_plan="", sandbox_box="", permission_mode=mode
         )
 
+    def _register_sandbox_box(self) -> None:
+        """Tell the live grants this tab's box is up on the plan just
+        settled: what the project was granted since the plan was built
+        reaches it (a sibling on a plan derived earlier), and what is
+        granted from here on does. The registration lasts as long as the
+        plan path — past the CLI's exit, while the tab's shell lives — since
+        a sandboxed panel shell binds the same home and carrier."""
+        if SANDBOX_GRANTS is not None:
+            SANDBOX_GRANTS.register(sandboxplan.load_plan(self._sandbox_plan_path))
+
     def _release_sandbox_plan(self) -> None:
-        """Let go of the plan file and of the box's lease — before a
-        restart's rebuild and at the shell's exit. The box id stays: a
-        restart launches in the same home."""
-        if self._sandbox_plan_path is not None and self._sandbox_box and SANDBOX_HOST is not None:
-            SANDBOX_HOST.release(self._sandbox_box)
+        """Let go of the plan file, of what was mounted into the box while
+        it ran, and of the box's lease — before a restart's rebuild and at
+        the shell's exit. The box id stays: a restart launches in the same
+        home.
+
+        The unmounts are waited for: the next step — scrubbing the home,
+        bubblewrap binding into it — needs the links and the mounts gone.
+        Milliseconds each, bounded by the server's kill ladder."""
+        if self._sandbox_plan_path is not None and self._sandbox_box:
+            if SANDBOX_GRANTS is not None:
+                SANDBOX_GRANTS.unregister(self._sandbox_box, wait=True)
+            if SANDBOX_HOST is not None:
+                SANDBOX_HOST.release(self._sandbox_box)
         sandboxplan.release_plan(self._sandbox_plan_path)
         self._sandbox_plan_path = None
 
@@ -2609,6 +2637,8 @@ class TerminalTab(Gtk.Box):
         self._sandbox_chip = sandboxchip.SandboxChip(
             plan_path=lambda: self._sandbox_plan_path,
             host=lambda: SANDBOX_HOST,
+            grants=lambda: SANDBOX_GRANTS,
+            box=lambda: self._sandbox_box,
             can_restart=self.can_restart_sandboxed,
             on_restart=self.restart_sandboxed,
             on_open_shell=self.open_sandboxed_shell,

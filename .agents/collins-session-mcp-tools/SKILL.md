@@ -192,7 +192,10 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   id, reason), and both ride in the options (`sandbox_plan`,
   `sandbox_box`) — and a cwd
   outside that plan's workspace or grants is refused
-  (`mcptools.sibling_cwd_refusal`). Every refusal past the derive drops
+  (`mcptools.sibling_cwd_refusal`) — one inside a directory the parent
+  holds only *live* included (`derive(..., live=SANDBOX_GRANTS.
+  live_paths(parent box))`: "restart the parent session to start a
+  sibling there"). Every refusal past the derive drops
   both (`app._drop_sibling_box`). `bypassPermissions` is granted —
   explicit or inherited — only to a sandboxed sibling
   (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is

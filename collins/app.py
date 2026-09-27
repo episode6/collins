@@ -48,6 +48,7 @@ from . import (
     proctree,
     providers,
     remoteimages,
+    sandboxgrants,
     sandboxplan,
     statusicon,
     tokenrefresh,
@@ -2506,10 +2507,23 @@ class App(Adw.Application):
         if swept:
             logging.getLogger(__name__).info("sandbox: swept %d stale plan file(s)", swept)
 
-        # And the boxes no session names and no running instance holds (a
+        # The live grants: one owner of every bindfs mount this instance
+        # makes, and the thread they are made on.
+        grants = sandboxgrants.GrantMounts(host)
+        self._sandbox_grants = grants
+        terminal_mod.SANDBOX_GRANTS = grants
+
+        # The mounts an instance that died left under the sandbox root,
+        # then the boxes no session names and no running instance holds (a
         # launch that never produced a transcript, a session deleted while
-        # Collins was down). Off the main loop: a home can be large.
+        # Collins was down) — in that order: a box with a mount under it
+        # is never removed. Off the main loop: a home can be large.
         def sweep() -> None:
+            unmounted = grants.sweep_mounts()
+            if unmounted:
+                logging.getLogger(__name__).info(
+                    "sandbox: unmounted %d grant(s) a dead instance left", unmounted
+                )
             gone = host.sweep_boxes()
             if gone:
                 logging.getLogger(__name__).info("sandbox: removed %d unused box(es)", gone)
@@ -2538,6 +2552,14 @@ class App(Adw.Application):
         # errors rather than breaking the session.
         if self._mcp_service is not None:
             self._mcp_service.stop()
+        grants = getattr(self, "_sandbox_grants", None)
+        if grants is not None:
+            # Every directory mounted into a running box, unmounted; the
+            # bindfs servers would go with the process anyway
+            # (PR_SET_PDEATHSIG), this leaves nothing to chance.
+            terminal_mod.SANDBOX_GRANTS = None
+            grants.shutdown()
+            self._sandbox_grants = None
         if self._status_icon is not None:
             self._status_icon.stop()
             self._status_icon = None
@@ -3052,7 +3074,12 @@ class App(Adw.Application):
                 return False, mcptools.sibling_cwd_refusal(
                     "the parent session's sandbox plan isn't available"
                 )
-            sibling_plan, sibling_box, reason = host.derive(plan_path, cwd)
+            # What the parent holds mounted since its launch is not in the
+            # plan the sibling inherits: a sibling asked for inside such a
+            # directory is refused, and told why.
+            grants = terminal_mod.SANDBOX_GRANTS
+            live = grants.live_paths(tab.sandbox_box) if grants is not None else ()
+            sibling_plan, sibling_box, reason = host.derive(plan_path, cwd, live=live)
             if sibling_plan is None:
                 return False, mcptools.sibling_cwd_refusal(reason)
         else:

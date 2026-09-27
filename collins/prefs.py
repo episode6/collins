@@ -29,6 +29,7 @@ from . import (  # noqa: E402
     notifysound,
     prefslayout,
     prefssearch,
+    sandboxgrants,
     sandboxplan,
     statusicon,
     tokensettings,
@@ -732,7 +733,12 @@ class PreferencesDialog(Adw.Dialog):
         self._sandbox_status_row = Adw.ActionRow(title=_("Bubblewrap"), activatable=False)
         self._sandbox_status_icon = Gtk.Image(valign=Gtk.Align.CENTER)
         self._sandbox_status_row.add_suffix(self._sandbox_status_icon)
-        group.add(_searchable(self._sandbox_status_row, "status", "available", "installed"))
+        group.add(
+            _searchable(
+                self._sandbox_status_row,
+                "status", "available", "installed", "bindfs", "fuse", "live",
+            )
+        )
         self._refresh_sandbox_status()
         if sandboxplan.probe_reason() is None:
             # The launch probe hasn't landed yet: ask again, off the main loop.
@@ -763,9 +769,38 @@ class PreferencesDialog(Adw.Dialog):
                 "build a sandbox"
             )
             icon = "dialog-warning-symbolic"
+        if available:
+            live = self._live_grants_line()
+            if live:
+                subtitle = f"{subtitle}\n{live}"
         self._sandbox_status_row.set_subtitle(subtitle)
         self._sandbox_status_icon.set_from_icon_name(icon)
         return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _live_grants_line() -> str:
+        """The status row's second line: whether a directory allowed while
+        a session runs reaches it at once (sandboxgrants), or waits for the
+        restart and why. "" when the app runs no live grants at all."""
+        from . import terminal  # the app's instance lives beside the tabs
+
+        grants = terminal.SANDBOX_GRANTS
+        if grants is None:
+            return ""
+        reason = grants.capable()
+        if not reason:
+            return _("Allowed directories reach a running session")
+        reasons = {
+            sandboxgrants.REASON_NO_BINDFS: _("bindfs not installed"),
+            sandboxgrants.REASON_NO_FUSERMOUNT: _("fusermount3 not installed"),
+            sandboxgrants.REASON_NO_FUSE: _("FUSE is not available"),
+            sandboxgrants.REASON_NO_PROPAGATION: _(
+                "mounts don't propagate from the sandbox directory"
+            ),
+        }
+        return _("Allowed directories apply at the next restart — {reason}").format(
+            reason=reasons.get(reason, reason)
+        )
 
     def _on_sandbox_switch(self, row: Adw.SwitchRow, _pspec, key: str) -> None:
         self._state.set_setting(key, row.get_active())

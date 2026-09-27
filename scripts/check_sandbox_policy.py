@@ -31,6 +31,7 @@ import atexit
 import os
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 
@@ -38,10 +39,38 @@ REAL_HOME = os.path.expanduser("~")
 STAGE = os.path.join(REAL_HOME, ".cache", "collins-e2e")
 os.makedirs(STAGE, exist_ok=True)
 E2E = tempfile.mkdtemp(prefix="sandbox-policy-", dir=STAGE)
+
+
+def mounts_under(tree: str) -> list[str]:
+    """Every mount point at or under *tree*, deepest first."""
+    found = []
+    with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            fields = line.split(" ")
+            if len(fields) > 4:
+                point = fields[4].replace("\\040", " ")
+                if point == tree or point.startswith(tree + "/"):
+                    found.append(point)
+    return sorted(found, key=len, reverse=True)
+
+
+def clear_tree() -> None:
+    """Remove the scratch tree — never through a mount: a bindfs mount in
+    it *is* the granted directory. Whatever is still mounted is unmounted
+    first, and a tree that still holds a mount is left where it is."""
+    for point in mounts_under(E2E):
+        subprocess.run(["fusermount3", "-u", "-z", point], check=False, capture_output=True)
+    left = mounts_under(E2E)
+    if left:
+        print(f"not removing {E2E}: still mounted: {left}", file=sys.stderr)
+        return
+    shutil.rmtree(E2E, True)
+
+
 # ~/.cache outlives the run, so the tree goes however the check ends: an
 # exception while staging, a failed check, a clean finish. The watchdog at
 # the bottom leaves through os._exit, which skips this, and clears it first.
-atexit.register(shutil.rmtree, E2E, True)
+atexit.register(clear_tree)
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 HOME = f"{E2E}/home"
 
@@ -52,6 +81,9 @@ os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["COLLINS_SANDBOX_ROOT"] = f"{E2E}/sbx"
 os.environ["COLLINS_BWRAP"] = f"{E2E}/bin/bwrap"
+# No bindfs for the first pass: a grant waits for the restart, as it does on
+# a machine that can't deliver one live. The last stage takes this away.
+os.environ["COLLINS_BINDFS"] = "/nonexistent"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"
@@ -71,11 +103,12 @@ RESUMED = "11111111-2222-3333-4444-555555555555"
 TRUSTED = f"{E2E}/dev/alpha"
 SUB = f"{TRUSTED}/sub"
 OTHER = f"{E2E}/dev/lib"
+LIVE = f"{HOME}/dev/live"  # under $HOME: what a live grant can link at its real path
 SHIM = f"{E2E}/bin/claude"
 FAKE_BWRAP = os.environ["COLLINS_BWRAP"]
 FAKE_LOG = os.environ["SANDBOX_FAKE_LOG"]
 
-for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", HOME, SUB, OTHER, f"{HOME}/.ssh"):
+for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", HOME, SUB, OTHER, LIVE, f"{HOME}/.ssh"):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
@@ -134,7 +167,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from collins import i18n, panellayout, sandboxplan, terminal, trust  # noqa: E402
+from collins import i18n, panellayout, sandboxgrants, sandboxplan, terminal, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -353,6 +386,14 @@ def grants() -> bool:
     caller = state["caller"]
     host = terminal.SANDBOX_HOST
     check("the app installed a sandbox host", host is not None)
+    mounts = terminal.SANDBOX_GRANTS
+    check("…and the live grants", mounts is not None)
+    check(
+        "which can't deliver one here, and say why",
+        mounts is not None and mounts.capable() == "bindfs not installed",
+        mounts and mounts.capable(),
+    )
+    check("the session's box is registered with them", mounts.registered(caller.sandbox_box))
     plan_path = caller.sandbox_plan_path
     check("the launched plan is not stale yet", not host.plan_stale(plan_path, TRUSTED))
     reason = host.allow(TRUSTED, f"{HOME}/.ssh")
@@ -587,6 +628,112 @@ def box_gone() -> bool:
     check("a trashed session leaves no box directory", not os.path.exists(sandboxplan.box_dir(box)))
     check("…and what its link pointed at is untouched", os.path.isdir(OTHER))
     check("the running session's box is still there", os.path.isdir(sandboxplan.box_home(state["box1"])))
+    return live()
+
+
+def live() -> bool:
+    """The second pass, where the machine can: bindfs back, a directory
+    allowed through the chip while the session runs is tagged *live* and
+    nothing asks for a restart."""
+    caller = state["caller"]
+    host = terminal.SANDBOX_HOST
+    del os.environ["COLLINS_BINDFS"]
+    mounts = sandboxgrants.GrantMounts(host)
+    reason = mounts.capable()
+    if reason:
+        print(f"SKIP  the live pass: {reason}", flush=True)
+        mounts.shutdown()
+        finish()
+        return GLib.SOURCE_REMOVE
+    # The app's own, in place of the one that had no bindfs: what a launch
+    # on this machine gets.
+    terminal.SANDBOX_GRANTS.shutdown()
+    terminal.SANDBOX_GRANTS = mounts
+    app._sandbox_grants = mounts
+    # The grant taken back in the first pass, allowed again: the box holds
+    # it statically, and the state agrees with the box from here.
+    host.allow(TRUSTED, OTHER)
+    mounts.register(sandboxplan.load_plan(caller.sandbox_plan_path))
+    check("the box holds the first grant statically", mounts.status(caller.sandbox_box, OTHER) == "static")
+    check("…and is not stale", not host.plan_stale(caller.sandbox_plan_path, TRUSTED))
+    state["toasts"] = []
+    caller.connect("toast", lambda _tab, text: state["toasts"].append(text))
+    with open(f"{LIVE}/hello.txt", "w", encoding="utf-8") as fh:
+        fh.write("from the host\n")
+    # The chip's own flow, minus the folder chooser.
+    caller._sandbox_chip.allow_directory(TRUSTED, LIVE)
+    state["polls"] = 0
+    GLib.timeout_add(50, delivered)
+    return GLib.SOURCE_REMOVE
+
+
+def delivered() -> bool:
+    caller = state["caller"]
+    host = terminal.SANDBOX_HOST
+    mounts = terminal.SANDBOX_GRANTS
+    state["polls"] += 1
+    if not state["toasts"] and state["polls"] < 200:
+        return GLib.SOURCE_CONTINUE
+    box = caller.sandbox_box
+    own = mounts.delivery(box, LIVE)
+    if own is None or own.status != sandboxgrants.LIVE:
+        why = own.reason if own is not None else "nothing was delivered"
+        print(f"SKIP  the live pass: the grant couldn't be mounted here: {why}", flush=True)
+        finish()
+        return GLib.SOURCE_REMOVE
+    print(f"  --  live: {LIVE} allowed through the chip while the session runs", flush=True)
+    check("the verdict lands as one toast", state["toasts"] == [f"Allowed {LIVE.replace(HOME, '~')}"], state["toasts"])
+    point = f"{sandboxplan.box_carrier(box)}/{sandboxgrants.slot_name(LIVE)}"
+    check("the mount is in the box's carrier, and nowhere else", mounts_under(E2E) == [point], mounts_under(E2E))
+    check("…and holds the directory", os.path.exists(f"{point}/hello.txt"))
+    link = f"{sandboxplan.box_home(box)}/dev/live"
+    check("the real path is a link in the box's home", os.path.islink(link) and os.readlink(link) == own.inside)
+    check("the grant is recorded", host.grants(TRUSTED) == [OTHER, LIVE], host.grants(TRUSTED))
+    chip = caller._sandbox_chip
+    chip._rebuild()
+    texts = labels(chip._content)
+    check("the chip tags the row live", "live" in texts, texts)
+    check("…and nothing after restart", "after restart" not in texts, texts)
+    names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
+    check("no Restart to apply: the box holds what the state grants", "Restart to apply" not in names, names)
+    check("both rows can be removed", len([b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]) == 2)
+    # A sibling can't start inside a directory its parent holds only live.
+    got = app._mcp_start_session(found(), {"prompt": "hi", "cwd": LIVE}, True)
+    check(
+        "a sibling inside the live grant is refused, and told why",
+        isinstance(got, tuple) and got[0] is False and "was allowed while the parent session was running" in got[1],
+        got,
+    )
+    # Taken back through its remove button: out of the running box.
+    remove = [b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]
+    remove[-1].emit("clicked")
+    check("the remove button revokes it", host.grants(TRUSTED) == [OTHER], host.grants(TRUSTED))
+    state["polls"] = 0
+    GLib.timeout_add(50, revoked)
+    return GLib.SOURCE_REMOVE
+
+
+def revoked() -> bool:
+    caller = state["caller"]
+    mounts = terminal.SANDBOX_GRANTS
+    state["polls"] += 1
+    if mounts_under(E2E) and state["polls"] < 200:
+        return GLib.SOURCE_CONTINUE
+    check("revoked, nothing is left mounted", mounts_under(E2E) == [], mounts_under(E2E))
+    link = f"{sandboxplan.box_home(caller.sandbox_box)}/dev/live"
+    check("…and the link is gone", not os.path.lexists(link))
+    check("the directory itself is untouched", os.path.exists(f"{LIVE}/hello.txt"))
+    check("the live grants hold nothing", mounts.live_paths(caller.sandbox_box) == [])
+    # A static grant taken back stays in the running box until the restart.
+    terminal.SANDBOX_HOST.revoke(TRUSTED, OTHER)
+    chip = caller._sandbox_chip
+    chip._rebuild()
+    texts = labels(chip._content)
+    check("a static grant taken back is tagged until restart", "until restart" in texts, texts)
+    remove = [b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]
+    check("…with no remove button", remove == [], len(remove))
+    names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
+    check("…and the restart on offer", "Restart to apply" in names, names)
     finish()
     return GLib.SOURCE_REMOVE
 
@@ -612,7 +759,7 @@ def finish() -> None:
 
 
 def watchdog() -> bool:
-    shutil.rmtree(E2E, ignore_errors=True)  # os._exit skips the atexit hook
+    clear_tree()  # os._exit skips the atexit hook
     os._exit(3)
 
 
