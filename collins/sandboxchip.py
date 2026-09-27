@@ -141,11 +141,18 @@ class SandboxChip(Gtk.MenuButton):
             if inputs.get("share_gh")
             else _("GitHub CLI login: not shared"),
             _("SSH agent: shared") if inputs.get("share_ssh") else _("SSH agent: not shared"),
-            _("~/.claude/settings.json: protected")
+            _("Settings and hooks: read-only")
             if inputs.get("protect_settings")
-            else _("~/.claude/settings.json: editable"),
+            else _("Settings and hooks: writable"),
         ):
             self._content.append(_caption(text))
+        # What was to be read-only and isn't: a symlink can't be pinned.
+        for path in sandboxplan.plan_unpinned(plan):
+            row = _caption(_("Writable, a symlink: {path}").format(path=display_path(path)))
+            row.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            row.set_max_width_chars(48)
+            row.set_tooltip_text(path)
+            self._content.append(row)
 
         self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         heading = Gtk.Label(label=_("Allowed directories"), xalign=0.0)

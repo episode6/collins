@@ -69,16 +69,28 @@ downloads of each version, see the
   worktree* on the new-chat screen runs the session inside a bubblewrap
   filesystem sandbox: the project read-write, `~/.claude` and the
   toolchain caches shared, the system read-only, `~/.ssh`,
-  `~/.config/gh`, the keyring and every other checkout absent — and
-  permission prompts off inside, which is the point. The box is
+  `~/.config/gh`, the keyring and every other checkout absent. The box is
   remembered per session, so a resume rebuilds it; a per-project default
   (*New sessions are sandboxed* in the project menu) and a Preferences
   group (*Sandbox new sessions*, *Skip permission prompts inside*, *Share
-  GitHub CLI login*, *Share SSH agent*, *Let sandboxed sessions edit
-  ~/.claude/settings.json*, and a status row saying whether bubblewrap is
+  GitHub CLI login*, *Share SSH agent*, *Let sandboxed sessions write
+  settings and hooks*, and a status row saying whether bubblewrap is
   usable here) round it out. Sandboxed sessions are never backgrounded or
   re-attached, since the CLI's daemon would run them outside the box. A
   port of EricKuck's aibox mount plan (MIT).
+- **What a sandboxed session can't plant.** Some of what a box shares
+  is run outside it later, so the part that can be held read-only is:
+  `~/.claude/settings.json` and `settings.local.json`, `~/.claude/plugins`,
+  `skills`, `commands`, `agents` and `CLAUDE.md`, the repository's
+  `.git/hooks`, and `~/.local/bin`. Hooks and tools still run inside;
+  installing one from inside fails. One switch, *Let sandboxed sessions
+  write settings and hooks*, hands it all back, and the Sandboxed chip
+  names anything that stayed writable because it is a symlink. Permission
+  prompts stay on inside unless *Skip permission prompts inside* is
+  switched on: the box keeps an unattended agent away from your
+  credentials and your other checkouts, it does not contain a hostile
+  one — the workspace, the repository's `.git/config` and the toolchain
+  directories stay writable, and the guide lists what that leaves open.
 - **A sandbox home per session.** `$HOME` inside a box is a directory of
   the session's own under `~/.local/share/collins/sandbox/`, kept across
   its resumes and restarts and removed when its transcript is trashed or
@@ -114,8 +126,8 @@ downloads of each version, see the
   which it is, and why.
 - **The Sandboxed chip.** A shield chip leads the footer of a sandboxed
   tab: what the box was launched with (the workspace, whether the GitHub
-  CLI login and the SSH agent went in, whether `~/.claude/settings.json`
-  is protected), the directories allowed to this session —
+  CLI login and the SSH agent went in, whether settings and hooks are
+  read-only), the directories allowed to this session —
   each with a remove button and a pin, and *Allow a directory…* through
   the folder chooser, refused with the reason when it would reach a
   secret, Collins' own state, your home or `/` — the project's defaults

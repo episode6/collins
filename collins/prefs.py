@@ -699,7 +699,10 @@ class PreferencesDialog(Adw.Dialog):
         switch(
             "sandbox_bypass_permissions",
             _("Skip permission prompts inside"),
-            _("Sandboxed sessions start with --permission-mode bypassPermissions"),
+            _(
+                "Sandboxed sessions start with --permission-mode bypassPermissions: "
+                "the box is then the only barrier"
+            ),
             "bypass", "prompt", "dangerously",
         )
         switch(
@@ -722,12 +725,15 @@ class PreferencesDialog(Adw.Dialog):
         )
         switch(
             "sandbox_settings_editable",
-            _("Let sandboxed sessions edit ~/.claude/settings.json"),
+            _("Let sandboxed sessions write settings and hooks"),
             _(
-                "Needed for /model and /effort to persist inside, and for a "
-                "symlinked settings.json; a hook written there runs in every session"
+                "~/.claude settings, skills, commands, agents and CLAUDE.md, the "
+                "repository's git hooks, ~/.local/bin. Needed for /model and /effort "
+                "to persist inside and for a symlinked settings.json; what is written "
+                "there runs in every session"
             ),
-            "settings", "hook", "model", "effort",
+            "settings", "hook", "model", "effort", "skills", "commands", "agents",
+            "git", "bin", "install",
         )
         # The status row: whether a box can be built here, and why not.
         self._sandbox_status_row = Adw.ActionRow(title=_("Bubblewrap"), activatable=False)

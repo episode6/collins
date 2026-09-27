@@ -31,9 +31,14 @@ the workspace read-write, `~/.claude` and the toolchain caches shared, the
 system read-only, credentials and every other checkout absent. It is a
 **filesystem** sandbox with a PID namespace; IP networking is not isolated
 (the CLI needs the API) and unix sockets are absent only because the
-mounts carrying them are. The point is a yolo session — permission prompts
-off by default inside — that cannot reach `~/.ssh`, `~/.config/gh`, the
-keyring, or the other checkouts.
+mounts carrying them are. The point is an unattended session that cannot
+reach `~/.ssh`, `~/.config/gh`, the keyring, or the other checkouts.
+**It keeps an agent away from credentials; it does not contain a hostile
+one** — the workspace, the repository's `.git/config` and the toolchain
+directories stay writable and are run on the host later — which is why
+permission prompts stay *on* inside by default
+(`sandbox_bypass_permissions` is False), and why docs and copy never
+promise containment.
 
 ## The pieces
 
@@ -50,11 +55,27 @@ read-write (connect needs write on the inode; only the file, never its
 directory), the workspace and the enclosing repository's `.git` and
 `.claude` (a linked worktree's common git dir too), grants, the two shares
 (the SSH share binds the `SSH_AUTH_SOCK` *file*, never its directory — the
-keyring's control socket sits beside it), then the masks, then the hook
-surface pins: `settings.json` / `settings.local.json`, `~/.claude/plugins`
-and the `claude` launcher on PATH when it is a real file in a shared tree
-(the native installer's is a symlink in `~/.local/bin`, which no bind can
-pin — noted in the plan and stated in the docs). A *symlinked*
+keyring's control socket sits beside it), then the masks, then the pins
+over what the host runs later, all on one switch (`protect_settings`, the
+inverse of `sandbox_settings_editable`): `settings.json` /
+`settings.local.json` (`PROTECTED_SETTINGS`), `~/.claude/plugins`,
+`skills`, `commands` and `agents` (`PROTECTED_CLAUDE_DIRS`),
+`~/.claude/CLAUDE.md` (`PROTECTED_CLAUDE_FILES`), `hooks` in the
+enclosing repository's git directory and in a linked worktree's common
+one (`PROTECTED_GIT_DIRS`), and the `claude` launcher on PATH when it is
+a real file in a tree the box can write (`Plan.writable`: the last mount
+holding a path decides, and `Plan.remount_ro` turns the topmost mount at
+its path read-only there too). `~/.local/bin` (`HOST_BIN_HOME`) is bound with
+the home tables — read-only on the same switch, read-write with it off —
+and is no longer in `RW_HOME_ALWAYS`, so a launch doesn't create it.
+Each pin is emitted only for what exists as the real thing: a missing one
+is left alone (bwrap would create the destination, in the user's own
+`~/.claude`), and a symlink can't be pinned (measured: bwrap exits 1,
+"Can't create file at …") — it gets a plan note and an entry in
+`inputs.unpinned`, which the chip lists through `plan_unpinned`.
+`.git/config` is deliberately not pinned: `git push -u` writes branch
+tracking there, so `core.hooksPath` can still redirect git and the hooks
+pin narrows that way out without closing it. A *symlinked*
 `settings.json` refuses the plan (`PlanRefused`: bwrap can't create the
 destination through it, and the link stays replaceable) unless the switch
 makes it editable. **Ordering rule**: the overlay home first, then the
@@ -328,7 +349,10 @@ than the project's default), and
 (`_sandbox_for_new_session(cwd, choice)`) for the checkbox's start state,
 the Send, and a sibling's default alike.
 
-**Trust and permission mode.** A sandboxed launch defaults the mode to
+**Trust and permission mode.** With `sandbox_bypass_permissions` on (it
+is off by default: with no prompt the box is the only barrier, and it
+has the gaps listed under the facts below) a sandboxed launch defaults
+the mode to
 `bypassPermissions` (`MainWindow._sandboxed_options`) — a resume and a
 `--continue` of a sandboxed session too (`Provider.session_flags` types
 `--permission-mode` after `--resume`; the CLI restores no mode by itself).
@@ -342,8 +366,9 @@ a TOP popover, built like the model chip and placed first in the footer's
 left run (`_model_sep` follows it), shown by `_sync_sandbox_chip` exactly
 when `tab.sandboxed and tab.sandbox_plan_path` — never on an unsandboxed
 tab. Filled on every `show` from the *launched* plan (`load_plan`, never
-re-derived): the workspace, the two shares' state, settings protection;
-then two lists. **Allowed directories**, captioned *For this session
+re-derived): the workspace, the two shares' state, *Settings and hooks:
+read-only* / *writable*, and one *Writable, a symlink: …* caption per
+path of `plan_unpinned(plan)`; then two lists. **Allowed directories**, captioned *For this session
 only*: the host's grants for this session's box (`box()`), one row each
 by `GrantMounts.status`, each but a `LEAVING` one with a pin before its
 remove button (a flat `Gtk.ToggleButton`, `view-pin-symbolic`, active
@@ -669,11 +694,27 @@ switches go insensitive and its status row says why.
   EROFS, a rename-over EBUSY; `/model` inside says "for this session only
   · couldn't save it as your default" and carries on. `settings.local.json`
   is protected only when it exists (bwrap would create it) — an agent can
-  create one; documented, not fixed. The project's own `.claude/settings*`
-  sit in the workspace and can't be protected at all, and the native
-  installer's `~/.local/bin/claude` symlink sits in a shared tree and can
-  be repointed. The box bounds the filesystem, not the hook surface; the
-  docs say so in those words.
+  create one; documented, not fixed. The same holds for every pin: a
+  read-only bind over a directory (`.git/hooks`, `~/.claude/skills`,
+  `~/.local/bin`) or a file (`CLAUDE.md`) leaves what is in it running
+  and readable inside, a write or an added entry fails EROFS, moving the
+  pinned path itself aside fails EBUSY, and `.git/config` beside a pinned
+  `hooks` stays writable (measured 2026-09-27, and asserted under the
+  real bwrap by `check_sandbox_launch.py`).
+- **What stays writable from inside and runs on the host**, switch or no
+  switch — the list the docs carry, and the reason bypass is off by
+  default: the workspace itself (scripts, build files, the project's own
+  `.claude/settings*`, a `.husky`), and for a session started with `-w`
+  the whole repository, its other worktrees included; `.git/config`
+  (`core.hooksPath`, `core.sshCommand`, `core.fsmonitor`, aliases); the
+  hooks of a nested repository, a submodule or a granted directory; the
+  toolchain directories a build needs writable (`~/.cargo/bin`,
+  `~/.gradle/init.d`, cached artifacts in `~/.m2` and `~/.npm`,
+  `~/.local/share/pnpm`, version managers' shims); and in `~/.claude`,
+  any pinned name that is missing or a symlink. Narrowing a `-w` launch
+  to its worktree is the open item. When a table changes, the list in
+  `docs/guide/features.md` changes with it, and so do the examples
+  `test_what_the_docs_say_stays_writable_does` builds a plan around.
 - `gh` keeps its token in the Secret Service keyring on a desktop, which the
   box can't reach, so a bind of `~/.config/gh` alone yields "token invalid";
   hence `GH_TOKEN` via `gh auth token` in sandboxrun. `git_protocol: ssh`
@@ -732,7 +773,10 @@ other half and has no GTK in it: a plan `prepare_launch` wrote, run under
 the **real** bwrap (`sandboxrun.py <plan> -- /bin/sh -c …`), reporting
 from inside — the workspace and the grant writable, the un-granted
 sibling, `~/.ssh`, Collins' own state and the plan file itself absent,
-`settings.json` read-only, `/usr` read-only, its own pid namespace, the
+`settings.json` read-only, the pins (a hook that runs and can't be
+rewritten, added to or moved aside, `.git/config` writable beside it,
+`~/.claude/skills` and `CLAUDE.md`, a tool in `~/.local/bin` that runs
+and can't be repointed), `/usr` read-only, its own pid namespace, the
 carrier and `/mnt` there and unwritable, the sandbox root absent — and a
 second box for a second workspace, blind to the first's home, workspace
 and grant — and the **live section**: both boxes kept running on a

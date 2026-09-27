@@ -263,7 +263,8 @@ def test_a_symlinked_settings_json_refuses_the_plan(home):
 def test_plugins_and_a_real_launcher_are_pinned_read_only(home):
     plugins = home / ".claude" / "plugins"
     plugins.mkdir(parents=True)
-    launcher = home / ".local" / "bin" / "claude"
+    # A real file in a tree the box can write: a version manager's bin.
+    launcher = home / ".volta" / "bin" / "claude"
     launcher.parent.mkdir(parents=True)
     launcher.write_text("#!/bin/sh\n")
     plan = build_plan(_inputs(home, claude_launcher=str(launcher)))
@@ -271,10 +272,9 @@ def test_plugins_and_a_real_launcher_are_pinned_read_only(home):
     assert (str(plugins), str(plugins)) in ro
     assert (str(launcher), str(launcher)) in ro
     assert _index(plan, "--ro-bind", str(launcher), str(launcher)) > _index(
-        plan, "--bind-try", str(home / ".local" / "bin"), str(home / ".local" / "bin")
+        plan, "--bind-try", str(home / ".volta"), str(home / ".volta")
     )
-    # The native installer's launcher is a symlink in the shared ~/.local/bin:
-    # nothing can pin it, and the plan says so.
+    # A symlink there can't be pinned by a bind, and the plan says so.
     launcher.unlink()
     launcher.symlink_to("/nonexistent/claude")
     plan = build_plan(_inputs(home, claude_launcher=str(launcher)))
@@ -287,6 +287,237 @@ def test_plugins_and_a_real_launcher_are_pinned_read_only(home):
     # The switch that unprotects settings.json unpins these too.
     plan = build_plan(_inputs(home, claude_launcher=str(launcher), protect_settings=False))
     assert (str(plugins), str(plugins)) not in _binds(plan, "--ro-bind")
+
+
+def test_local_bin_is_shared_read_only(home):
+    # On the host's PATH: what sits there runs outside the box. The
+    # directory's own read-only bind holds everything in it, the native
+    # installer's launcher symlink included — nothing to pin, nothing to note.
+    host_bin = home / ".local" / "bin"
+    host_bin.mkdir(parents=True)
+    launcher = host_bin / "claude"
+    launcher.symlink_to("/nonexistent/claude")
+    plan = build_plan(_inputs(home, claude_launcher=str(launcher)))
+    assert (str(host_bin), str(host_bin)) in _binds(plan, "--ro-bind-try")
+    assert (str(host_bin), str(host_bin)) not in _binds(plan, "--bind-try")
+    assert (str(launcher), str(launcher)) not in _binds(plan, "--ro-bind")
+    assert not any("not pinned" in note for note in plan["notes"])
+    launcher.unlink()
+    launcher.write_text("#!/bin/sh\n")
+    plan = build_plan(_inputs(home, claude_launcher=str(launcher)))
+    assert (str(launcher), str(launcher)) not in _binds(plan, "--ro-bind")
+    # It is no cache: a launch doesn't create it on the host.
+    assert ".local/bin" not in sandboxplan.RW_HOME_ALWAYS
+    # The switch hands it back read-write, and the symlink is then one
+    # nothing can pin.
+    launcher.unlink()
+    launcher.symlink_to("/nonexistent/claude")
+    plan = build_plan(_inputs(home, claude_launcher=str(launcher), protect_settings=False))
+    assert (str(host_bin), str(host_bin)) in _binds(plan, "--bind-try")
+    assert (str(host_bin), str(host_bin)) not in _binds(plan, "--ro-bind-try")
+
+
+def test_skills_commands_agents_and_instructions_are_pinned(home):
+    claude = home / ".claude"
+    for name in ("skills", "commands"):
+        (claude / name).mkdir(parents=True)
+    instructions = claude / "CLAUDE.md"
+    instructions.write_text("mine\n")
+    plan = build_plan(_inputs(home))
+    ro = _binds(plan, "--ro-bind")
+    for path in (claude / "skills", claude / "commands", instructions):
+        assert (str(path), str(path)) in ro, path
+        # On top of ~/.claude's own read-write bind.
+        assert _index(plan, "--ro-bind", str(path), str(path)) > _index(
+            plan, "--bind-try", str(claude), str(claude)
+        )
+    # One that doesn't exist is left alone: bwrap would create it, in the
+    # user's own ~/.claude.
+    agents = claude / "agents"
+    assert not any(str(agents) in pair for pair in ro)
+    assert not agents.exists()
+    # The switch unpins them all.
+    plan = build_plan(_inputs(home, protect_settings=False))
+    ro = _binds(plan, "--ro-bind")
+    for path in (claude / "skills", claude / "commands", instructions):
+        assert (str(path), str(path)) not in ro, path
+
+
+def test_a_symlinked_instructions_file_is_noted_not_refused(home):
+    # bwrap can't bind over a symlink, and the link stays replaceable from
+    # inside; unlike settings.json this one costs a note, not the box.
+    claude = home / ".claude"
+    claude.mkdir()
+    (home / "dotfiles" / "skills").mkdir(parents=True)
+    (home / "dotfiles" / "AGENTS.md").write_text("mine\n")
+    (claude / "CLAUDE.md").symlink_to(home / "dotfiles" / "AGENTS.md")
+    (claude / "skills").symlink_to(home / "dotfiles" / "skills")
+    plan = build_plan(_inputs(home))
+    args = plan["bwrap_args"]
+    assert str(claude / "CLAUDE.md") not in args
+    assert str(claude / "skills") not in args
+    assert "~/.claude/CLAUDE.md is a symlink: not pinned" in plan["notes"]
+    assert "~/.claude/skills is a symlink: not pinned" in plan["notes"]
+    # …and the plan names them, for the chip.
+    assert plan["inputs"]["unpinned"] == [str(claude / "skills"), str(claude / "CLAUDE.md")]
+    assert sandboxplan.plan_unpinned(plan) == plan["inputs"]["unpinned"]
+    # With the switch on nothing was to be pinned, so nothing is listed.
+    plan = build_plan(_inputs(home, protect_settings=False))
+    assert plan["inputs"]["unpinned"] == []
+
+
+def test_plan_unpinned_reads_only_what_is_a_list_of_paths():
+    assert sandboxplan.plan_unpinned({}) == []
+    assert sandboxplan.plan_unpinned({"inputs": []}) == []
+    assert sandboxplan.plan_unpinned({"inputs": {}}) == []  # an earlier build's plan
+    assert sandboxplan.plan_unpinned({"inputs": {"unpinned": "/a"}}) == []
+    listed = ["/home/u/.claude/CLAUDE.md", "relative", 7, "/a/../b", "/x\ny"]
+    assert sandboxplan.plan_unpinned({"inputs": {"unpinned": listed}}) == [
+        "/home/u/.claude/CLAUDE.md"
+    ]
+    many = [f"/p/{n}" for n in range(40)]
+    assert len(sandboxplan.plan_unpinned({"inputs": {"unpinned": many}})) == (
+        sandboxplan.MAX_UNPINNED
+    )
+
+
+def test_the_repository_hooks_are_pinned_read_only(home):
+    ws = home / "work" / "repo"
+    git_dir = ws / ".git"
+    (git_dir / "hooks").mkdir(parents=True)
+    (git_dir / "config").write_text("[core]\n")
+    plan = build_plan(_inputs(home))
+    hooks = str(git_dir / "hooks")
+    assert (hooks, hooks) in _binds(plan, "--ro-bind")
+    # On top of the workspace and of the git directory's own bind.
+    assert _index(plan, "--ro-bind", hooks, hooks) > _index(plan, "--bind", str(ws), str(ws))
+    assert _index(plan, "--ro-bind", hooks, hooks) > _index(
+        plan, "--bind-try", str(git_dir), str(git_dir)
+    )
+    # The config beside them is not: branch tracking is written there.
+    assert str(git_dir / "config") not in plan["bwrap_args"]
+    plan = build_plan(_inputs(home, protect_settings=False))
+    assert (hooks, hooks) not in _binds(plan, "--ro-bind")
+
+
+def test_a_nested_workspace_pins_the_enclosing_repository_hooks(home):
+    ws = home / "work" / "repo"
+    (ws / ".git" / "hooks").mkdir(parents=True)
+    nested = ws / "packages" / "app"
+    nested.mkdir(parents=True)
+    plan = build_plan(_inputs(home, workspace=str(nested)))
+    hooks = str(ws / ".git" / "hooks")
+    assert (hooks, hooks) in _binds(plan, "--ro-bind")
+
+
+def test_a_linked_worktree_pins_the_common_hooks(home):
+    main = home / "work" / "main"
+    (main / ".git" / "hooks").mkdir(parents=True)
+    (main / ".git" / "worktrees" / "wt").mkdir(parents=True)
+    ws = home / "work" / "repo"
+    (ws / ".git").write_text(f"gitdir: {main}/.git/worktrees/wt\n")
+    plan = build_plan(_inputs(home))
+    hooks = str(main / ".git" / "hooks")
+    assert (hooks, hooks) in _binds(plan, "--ro-bind")
+    assert _index(plan, "--ro-bind", hooks, hooks) > _index(
+        plan, "--bind-try", str(main / ".git"), str(main / ".git")
+    )
+
+
+def test_symlinked_or_missing_hooks_are_left_alone(home):
+    ws = home / "work" / "repo"
+    (ws / ".git").mkdir()
+    plan = build_plan(_inputs(home))
+    assert str(ws / ".git" / "hooks") not in plan["bwrap_args"]
+    (home / "elsewhere").mkdir()
+    (ws / ".git" / "hooks").symlink_to(home / "elsewhere")
+    plan = build_plan(_inputs(home))
+    assert str(ws / ".git" / "hooks") not in plan["bwrap_args"]
+    assert any("hooks is a symlink: not pinned" in note for note in plan["notes"])
+    assert plan["inputs"]["unpinned"] == [str(ws / ".git" / "hooks")]
+
+
+def test_writable_is_the_last_mount_that_holds_the_path():
+    plan = sandboxplan.Plan()
+    assert plan.writable("/a/b") is False  # nothing reaches it
+    plan.rw("/a")
+    assert plan.writable("/a/b") is True
+    plan.ro("/a/b")
+    assert plan.writable("/a/b") is False
+    assert plan.writable("/a/b/c") is False
+    assert plan.writable("/a/other") is True
+    plan.rw("/a/b/c")
+    assert plan.writable("/a/b/c/d") is True
+    # By destination, not source: the overlay home is written at $HOME.
+    plan = sandboxplan.Plan()
+    plan.rw("/boxes/x/home", "/home/u")
+    assert plan.writable("/home/u/file") is True
+    assert plan.writable("/boxes/x/home/file") is False
+
+
+def test_a_remount_turns_the_topmost_mount_at_the_path_read_only():
+    plan = sandboxplan.Plan()
+    plan.rw("/boxes/x/grants", "/grants")
+    plan.rw("/srv/data", "/grants/data")
+    plan.remount_ro("/grants")
+    assert plan.args[-2:] == ["--remount-ro", "/grants"]
+    assert plan.writable("/grants/file") is False
+    # Not recursive: a mount that sits in the directory keeps its verdict.
+    assert plan.writable("/grants/data/file") is True
+    # The topmost mount at the path, and only that one.
+    plan = sandboxplan.Plan()
+    plan.rw("/a")
+    plan.rw("/b", "/a")
+    plan.remount_ro("/a")
+    assert plan.mounts == [("/a", True), ("/a", False)]
+    # A path no mount is at changes nothing.
+    plan.remount_ro("/a/b")
+    assert plan.mounts == [("/a", True), ("/a", False)]
+
+
+def _writable_in(plan, path):
+    """`Plan.writable` replayed over a built plan's arguments."""
+    flags = {"--bind": True, "--bind-try": True, "--ro-bind": False, "--ro-bind-try": False}
+    args = plan["bwrap_args"]
+    verdict = False
+    for i, arg in enumerate(args):
+        if arg in flags and sandboxplan.within(args[i + 2], path):
+            verdict = flags[arg]
+        elif arg == "--tmpfs" and sandboxplan.within(args[i + 1], path):
+            verdict = True
+    return verdict
+
+
+def test_what_the_docs_say_stays_writable_does(home):
+    # The examples docs/guide/features.md and the skill give of what a
+    # session can write and the host runs later, switch or no switch.
+    ws = home / "work" / "repo"
+    named = [
+        ws / ".husky" / "pre-commit",
+        ws / ".claude" / "settings.json",
+        ws / ".git" / "config",
+        home / ".cargo" / "bin" / "cargo",
+        home / ".gradle" / "init.d" / "init.gradle",
+        home / ".m2" / "repository",
+        home / ".npm" / "_cacache",
+        home / ".local" / "share" / "pnpm" / "pnpm",
+        home / ".pyenv" / "shims" / "python",
+        home / ".volta" / "bin" / "node",
+        home / ".sdkman" / "candidates",
+        home / ".claude" / "commands",  # a pinned name that doesn't exist yet
+    ]
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".claude").mkdir()
+    (ws / ".git" / "hooks").mkdir(parents=True)
+    for path in named[:-1]:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    for protect in (True, False):
+        plan = build_plan(_inputs(home, protect_settings=protect))
+        for path in named:
+            assert _writable_in(plan, str(path)), path
+        # What the switch decides, for contrast.
+        assert _writable_in(plan, str(ws / ".git" / "hooks" / "pre-commit")) is not protect
+        assert _writable_in(plan, str(home / ".local" / "bin" / "tool")) is not protect
 
 
 def test_the_switch_leaves_settings_json_writable(home):
