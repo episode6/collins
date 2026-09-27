@@ -9384,11 +9384,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'A clone address: it is cloned as typed':
             'Une adresse de clonage : elle est clonée telle que saisie',
         "A file is in the way: part of that path isn't a folder":
-            'Un fichier gêne : une partie de ce chemin n’est pas un dossier',
+            "Un fichier gêne : une partie de ce chemin n'est pas un dossier",
         'A new folder, cloned from {origin} with {tool}':
             'Un nouveau dossier, cloné depuis {origin} avec {tool}',
         "A sandboxed session can't be backgrounded — the CLI's daemon would run it outside the sandbox":
-            'Une session en bac à sable ne peut pas passer en arrière-plan — le démon de la CLI l’exécuterait hors du bac à sable',
+            "Une session en bac à sable ne peut pas passer en arrière-plan — le démon de la CLI l'exécuterait hors du bac à sable",
         'Add project → Clone repository starts in {folder}':
             'Ajouter un projet → Cloner un dépôt commence dans {folder}',
         'Allow a directory':
@@ -9400,7 +9400,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Allowed directories':
             'Répertoires autorisés',
         'Allowed directories apply at the next restart — {reason}':
-            'Les répertoires autorisés s’appliquent au prochain redémarrage — {reason}',
+            "Les répertoires autorisés s'appliquent au prochain redémarrage — {reason}",
         'Allowed directories reach a running session':
             'Les répertoires autorisés atteignent une session en cours',
         'Allowed in new sessions of this project':
@@ -9410,13 +9410,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Allowed {path} — inside the sandbox at {inside}':
             '{path} autorisé — dans le bac à sable sous {inside}',
         'Allowed {path} — restart the session to apply':
-            '{path} autorisé — redémarrez la session pour l’appliquer',
+            "{path} autorisé — redémarrez la session pour l'appliquer",
         'Back to the diff':
             'Retour au diff',
         'Bubblewrap':
             'Bubblewrap',
         "Can't allow {path}: {reason}":
-            'Impossible d’autoriser {path} : {reason}',
+            "Impossible d'autoriser {path} : {reason}",
         "Can't change {name}: {reason}":
             'Impossible de modifier {name} : {reason}',
         "Can't make {path} a default: {reason}":
@@ -9442,11 +9442,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Cloning…':
             'Clonage…',
         "Couldn't open {path} with the default app":
-            'Impossible d’ouvrir {path} avec l’application par défaut',
+            "Impossible d'ouvrir {path} avec l'application par défaut",
         "Couldn't open {path} with {app}":
-            'Impossible d’ouvrir {path} avec {app}',
+            "Impossible d'ouvrir {path} avec {app}",
         "Couldn't read the index for {path}":
-            'Impossible de lire l’index pour {path}',
+            "Impossible de lire l'index pour {path}",
         "Couldn't resolve {path}: {reason}":
             'Impossible de résoudre {path} : {reason}',
         'Destination':
@@ -9456,11 +9456,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Draw lines that differ only in whitespace as unchanged':
             'Afficher comme inchangées les lignes qui ne diffèrent que par les espaces',
         'Every tool runs outside the box. The Sandboxed chip changes the list for one session':
-            'Chaque outil s’exécute hors de la boîte. La puce Bac à sable modifie la liste pour une session',
+            "Chaque outil s'exécute hors de la boîte. La puce Bac à sable modifie la liste pour une session",
         'Every unmerged file is replaced with the {side} version and staged as resolved (`git checkout --{side}` then `git add`, one file at a time). Edits made to the conflict markers are lost.':
             'Chaque fichier non fusionné est remplacé par la version {side} et indexé comme résolu (`git checkout --{side}` puis `git add`, un fichier à la fois). Les modifications faites aux marqueurs de conflit sont perdues.',
         'FUSE is not available':
-            'FUSE n’est pas disponible',
+            "FUSE n'est pas disponible",
         'Filter your repositories, or paste a clone address':
             'Filtrez vos dépôts ou collez une adresse de clonage',
         'Fold the unchanged lines back up':
@@ -9472,7 +9472,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'GitHub CLI login: shared':
             'Connexion GitHub CLI : partagée',
         'Hide whitespace changes':
-            'Masquer les changements d’espaces',
+            "Masquer les changements d'espaces",
         'Inside the sandbox at {inside}':
             'Dans le bac à sable sous {inside}',
         'Install the GitHub CLI (gh) to list your repositories. Any clone address still works':
@@ -9492,11 +9492,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'No repositories match':
             'Aucun dépôt ne correspond',
         'None — the workspace only':
-            'Aucun — l’espace de travail seulement',
+            "Aucun — l'espace de travail seulement",
         'Not in your list; {repo} is cloned from GitHub as typed':
             'Absent de votre liste ; {repo} est cloné depuis GitHub tel que saisi',
         'Nothing is unmerged: reloading':
-            'Rien n’est non fusionné : rechargement',
+            "Rien n'est non fusionné : rechargement",
         'Off is refused at once; on reaches the session when it restarts':
             'Désactiver est refusé aussitôt ; activer atteint la session à son redémarrage',
         'Offer this session what Preferences → Sandbox offers sandboxed sessions':
@@ -9520,7 +9520,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Resolve all {count} conflicts with {side}?':
             'Résoudre les {count} conflits avec {side} ?',
         'Resolve every unmerged file with one side and stage it as resolved':
-            'Résoudre chaque fichier non fusionné avec un côté et l’indexer comme résolu',
+            "Résoudre chaque fichier non fusionné avec un côté et l'indexer comme résolu",
         'Resolve the conflict with {side}?':
             'Résoudre le conflit avec {side} ?',
         'Resolve with ours':
@@ -9544,7 +9544,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Restart to apply':
             'Redémarrer pour appliquer',
         'Run each new session in a bubblewrap box: the project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent. Right-click a project header to override per project':
-            'Exécuter chaque nouvelle session dans une boîte bubblewrap : le projet en écriture, ~/.claude et les caches des outils partagés, le reste du disque absent. Clic droit sur l’en-tête d’un projet pour le changer par projet',
+            "Exécuter chaque nouvelle session dans une boîte bubblewrap : le projet en écriture, ~/.claude et les caches des outils partagés, le reste du disque absent. Clic droit sur l'en-tête d'un projet pour le changer par projet",
         'Run gh auth login to list your repositories. Any clone address still works':
             'Lancez gh auth login pour lister vos dépôts. Toute adresse de clonage fonctionne toujours',
         'Run the session in a bubblewrap sandbox: this project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent':
@@ -9574,11 +9574,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Share GitHub CLI login':
             'Partager la connexion GitHub CLI',
         'Share SSH agent':
-            'Partager l’agent SSH',
+            "Partager l'agent SSH",
         'Skip permission prompts inside':
-            'Ignorer les demandes d’autorisation à l’intérieur',
+            "Ignorer les demandes d'autorisation à l'intérieur",
         'Something is already there. Choose another folder to clone into':
-            'Quelque chose s’y trouve déjà. Choisissez un autre dossier où cloner',
+            "Quelque chose s'y trouve déjà. Choisissez un autre dossier où cloner",
         'Stop allowing this directory':
             'Ne plus autoriser ce répertoire',
         'Stop allowing this directory in new sessions':
@@ -9588,13 +9588,13 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Switched off for every session under Built-in MCP tools':
             'Désactivé pour toutes les sessions sous Outils MCP intégrés',
         'The agent inside holds your GitHub token (as GH_TOKEN); without it, gh is logged out and HTTPS pushes fail':
-            'L’agent à l’intérieur détient votre jeton GitHub (en GH_TOKEN) ; sans lui, gh est déconnecté et les push HTTPS échouent',
+            "L'agent à l'intérieur détient votre jeton GitHub (en GH_TOKEN) ; sans lui, gh est déconnecté et les push HTTPS échouent",
         'The agent socket goes in: the agent inside can sign with your keys — push as you — without seeing them':
-            'Le socket de l’agent entre : l’agent à l’intérieur peut signer avec vos clés — pousser en votre nom — sans les voir',
+            "Le socket de l'agent entre : l'agent à l'intérieur peut signer avec vos clés — pousser en votre nom — sans les voir",
         'The clone failed (exit status {code})':
             'Le clonage a échoué (code de sortie {code})',
         "The sandbox changed since this session started — this session can't apply it from here":
-            'Le bac à sable a changé depuis le début de cette session — cette session ne peut pas l’appliquer d’ici',
+            "Le bac à sable a changé depuis le début de cette session — cette session ne peut pas l'appliquer d'ici",
         "The sandbox plan for this session can't be read":
             'Le plan du bac à sable de cette session est illisible',
         'The session runs in a box built before the grants or shares changed; exit it and resume it here with the new plan':
@@ -9602,9 +9602,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'Theirs':
             'Theirs',
         'This session runs inside a sandbox — click to see what is inside':
-            'Cette session s’exécute dans un bac à sable — cliquez pour voir ce qu’il contient',
+            "Cette session s'exécute dans un bac à sable — cliquez pour voir ce qu'il contient",
         'Tools a sandboxed session may call':
-            'Outils qu’une session en bac à sable peut appeler',
+            "Outils qu'une session en bac à sable peut appeler",
         'Use the defaults':
             'Utiliser les valeurs par défaut',
         'Use the home folder':
@@ -9616,17 +9616,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         'archived':
             'archivé',
         'bindfs not installed':
-            'bindfs n’est pas installé',
+            "bindfs n'est pas installé",
         'bubblewrap found and user namespaces work: sessions can be sandboxed':
             'bubblewrap trouvé et les espaces de noms utilisateur fonctionnent : les sessions peuvent être en bac à sable',
         'bubblewrap not installed — install the bubblewrap package to sandbox sessions':
-            'bubblewrap n’est pas installé — installez le paquet bubblewrap pour mettre les sessions en bac à sable',
+            "bubblewrap n'est pas installé — installez le paquet bubblewrap pour mettre les sessions en bac à sable",
         'fork':
             'fork',
         'fusermount3 not installed':
-            'fusermount3 n’est pas installé',
+            "fusermount3 n'est pas installé",
         "gh couldn't list your repositories. Any clone address still works":
-            'gh n’a pas pu lister vos dépôts. Toute adresse de clonage fonctionne toujours',
+            "gh n'a pas pu lister vos dépôts. Toute adresse de clonage fonctionne toujours",
         'gh lists no repositories for this account':
             'gh ne liste aucun dépôt pour ce compte',
         'live':
@@ -9634,7 +9634,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "mounts don't propagate from the sandbox directory":
             'les montages ne se propagent pas depuis le répertoire du bac à sable',
         'no sandbox plan for this session — the shell was not started':
-            'aucun plan de bac à sable pour cette session — le shell n’a pas été lancé',
+            "aucun plan de bac à sable pour cette session — le shell n'a pas été lancé",
         'ours':
             'ours',
         'private':
@@ -9642,39 +9642,39 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "restarting the session with the sandbox's new plan":
             'redémarrage de la session avec le nouveau plan du bac à sable',
         "the session didn't exit, so the sandbox wasn't restarted — exit it and resume it yourself to apply the change":
-            'la session ne s’est pas terminée, le bac à sable n’a donc pas été redémarré — quittez-la et reprenez-la vous-même pour appliquer le changement',
+            "la session ne s'est pas terminée, le bac à sable n'a donc pas été redémarré — quittez-la et reprenez-la vous-même pour appliquer le changement",
         "the session's sandbox was restarted — this shell still runs in the box it was opened in, and the agent can no longer reach it":
-            'le bac à sable de la session a été redémarré — ce shell tourne encore dans la boîte où il a été ouvert, et l’agent ne peut plus l’atteindre',
+            "le bac à sable de la session a été redémarré — ce shell tourne encore dans la boîte où il a été ouvert, et l'agent ne peut plus l'atteindre",
         'theirs':
             'theirs',
         'until restart':
-            'jusqu’au redémarrage',
+            "jusqu'au redémarrage",
         "user namespaces are restricted on this system, so bubblewrap can't build a sandbox":
             'les espaces de noms utilisateur sont restreints sur ce système, bubblewrap ne peut donc pas créer de bac à sable',
         'warning: no sandbox could be built here — starting the session unsandboxed':
-            'avertissement : aucun bac à sable n’a pu être créé ici — la session démarre sans bac à sable',
+            "avertissement : aucun bac à sable n'a pu être créé ici — la session démarre sans bac à sable",
         "warning: the worktree {path} can't be put in the sandbox — the repository is read-only inside it":
             'avertissement : le worktree {path} ne peut pas être placé dans le bac à sable — le dépôt y est en lecture seule',
         "warning: the worktree {path} couldn't be recreated — it is empty, and the repository is read-only inside the sandbox":
-            'avertissement : le worktree {path} n’a pas pu être recréé — il est vide, et le dépôt est en lecture seule dans le bac à sable',
+            "avertissement : le worktree {path} n'a pas pu être recréé — il est vide, et le dépôt est en lecture seule dans le bac à sable",
         '{app} is not installed':
-            '{app} n’est pas installé',
+            "{app} n'est pas installé",
         "{folder} doesn't exist yet and will be created":
-            '{folder} n’existe pas encore et sera créé',
+            "{folder} n'existe pas encore et sera créé",
         '{name} is switched off for every session in Preferences':
             '{name} est désactivé pour toutes les sessions dans les Préférences',
         '{path} is not unmerged: reloading':
-            '{path} n’est pas non fusionné : rechargement',
+            "{path} n'est pas non fusionné : rechargement",
         '{path} is replaced with the {side} version and staged as resolved (`git checkout --{side} -- {path} && git add -- {path}`). Edits made to the conflict markers are lost.':
             '{path} est remplacé par la version {side} et indexé comme résolu (`git checkout --{side} -- {path} && git add -- {path}`). Les modifications faites aux marqueurs de conflit sont perdues.',
         '{side} has no version of this file: resolving with it removes {path} from the working tree and the index (`git rm -- {path}`).':
-            '{side} n’a pas de version de ce fichier : résoudre avec lui supprime {path} de l’arbre de travail et de l’index (`git rm -- {path}`).',
+            "{side} n'a pas de version de ce fichier : résoudre avec lui supprime {path} de l'arbre de travail et de l'index (`git rm -- {path}`).",
         '{side} has no version of {listed}: resolving removes it from the working tree and the index (`git rm`).':
-            '{side} n’a pas de version de {listed} : la résolution le supprime de l’arbre de travail et de l’index (`git rm`).',
+            "{side} n'a pas de version de {listed} : la résolution le supprime de l'arbre de travail et de l'index (`git rm`).",
         '{side} has no version of {listed}: resolving removes them from the working tree and the index (`git rm`).':
-            '{side} n’a pas de version de {listed} : la résolution les supprime de l’arbre de travail et de l’index (`git rm`).',
+            "{side} n'a pas de version de {listed} : la résolution les supprime de l'arbre de travail et de l'index (`git rm`).",
         "~/.claude settings, skills, commands, agents and CLAUDE.md, the repository's git hooks, ~/.local/bin. Needed for /model and /effort to persist inside and for a symlinked settings.json; what is written there runs in every session":
-            'Les réglages, skills, commandes, agents et CLAUDE.md de ~/.claude, les hooks git du dépôt, ~/.local/bin. Nécessaire pour que /model et /effort persistent à l’intérieur et pour un settings.json en lien symbolique ; ce qui y est écrit s’exécute dans chaque session',
+            "Les réglages, skills, commandes, agents et CLAUDE.md de ~/.claude, les hooks git du dépôt, ~/.local/bin. Nécessaire pour que /model et /effort persistent à l'intérieur et pour un settings.json en lien symbolique ; ce qui y est écrit s'exécute dans chaque session",
     },
 }
 
