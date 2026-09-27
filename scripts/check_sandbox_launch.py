@@ -140,10 +140,13 @@ with open(SETTINGS, "w", encoding="utf-8") as fh:
     fh.write('{"model": "opus"}\n')
 
 state = AppState()
-state.set_sandbox_grants(sandboxplan.grants_key(WORKSPACE), [GRANTED])
 host = sandboxplan.SandboxHost(os.environ["COLLINS_APP_ID"], state, state.state_file())
-BOX = sandboxplan.new_box_id()
-BOX2 = sandboxplan.new_box_id()
+# Three sessions: two of one workspace, side by side, and one of another.
+# A directory is allowed to the first — a session's grants are its box's.
+BOX = host.mint_box(WORKSPACE)
+BOX2 = host.mint_box(SECOND)
+BOX3 = host.mint_box(WORKSPACE)
+check("the guard allows the granted directory", host.allow(BOX, WORKSPACE, GRANTED) == "")
 plan_path = host.prepare_launch(WORKSPACE, BOX)
 check("a launch in the workspace gets a plan", bool(plan_path), plan_path)
 if not plan_path:
@@ -151,6 +154,14 @@ if not plan_path:
     sys.exit(1)
 second_path = host.prepare_launch(SECOND, BOX2)
 check("a second session gets a plan of its own", bool(second_path), second_path)
+beside_path = host.prepare_launch(WORKSPACE, BOX3)
+check("…and so does another session of the first's workspace", bool(beside_path), beside_path)
+beside = sandboxplan.load_plan(beside_path)
+check(
+    "whose plan binds nothing the first was allowed",
+    bool(beside) and beside["inputs"]["grants"] == [] and not any(GRANTED in a for a in beside["bwrap_args"]),
+    beside and beside["inputs"]["grants"],
+)
 BOX_DIR = sandboxplan.box_dir(BOX)
 BOX2_DIR = sandboxplan.box_dir(BOX2)
 CARRIER = sandboxplan.CARRIER_DEST
@@ -320,10 +331,11 @@ done
 
 class RunningBox:
     """A box that stays up — the session — taking commands through a
-    directory of its workspace."""
+    directory of its own in its workspace, which it may share with
+    another box."""
 
-    def __init__(self, plan: str, workspace: str) -> None:
-        self.dir = f"{workspace}/live-check"
+    def __init__(self, plan: str, workspace: str, name: str) -> None:
+        self.dir = f"{workspace}/live-check-{name}"
         os.makedirs(self.dir, exist_ok=True)
         argv = [sys.executable, providers.sandboxrun_path(), plan, "--"]
         self.proc = subprocess.Popen(
@@ -390,27 +402,38 @@ def live_section() -> None:
         os.makedirs(LIVE, exist_ok=True)
         with open(f"{LIVE}/hello.txt", "w", encoding="utf-8") as fh:
             fh.write("from the host\n")
-        first = RunningBox(plan_path, WORKSPACE)
+        # Two sessions of the **same workspace**, each in its own box.
+        first = RunningBox(plan_path, WORKSPACE, "first")
         boxes.append(first)
-        second = RunningBox(second_path, SECOND)
+        second = RunningBox(beside_path, WORKSPACE, "second")
         boxes.append(second)
         grants.register(sandboxplan.load_plan(plan_path))
-        grants.register(sandboxplan.load_plan(second_path))
+        grants.register(beside)
+        ask(grants.sync, BOX)  # nothing owed; and the registrations are done
         read = f'cat "{LIVE}/hello.txt" 2>/dev/null || echo MISSING'
         absent = first.run(read) == "MISSING" and second.run(read) == "MISSING"
-        refusal = host.allow(WORKSPACE, LIVE)
+        static = f'cat "{GRANTED}/lib.txt" 2>/dev/null || echo MISSING'
+        shared = second.run(f'test -d "{first.dir}" && echo yes || echo no')
+        refusal = host.allow(BOX, WORKSPACE, LIVE)
         started = time.monotonic()
-        delivered = ask(grants.allow, WORKSPACE, LIVE)
+        delivered = ask(grants.allow, BOX, LIVE)
         took = time.monotonic() - started
         own = next((d for d in delivered if d.box == BOX), None)
         if own is None or own.status != sandboxgrants.LIVE:
             why = own.reason if own is not None else "nothing was delivered"
             print(f"SKIP  the live section: the grant couldn't be mounted here: {why}", flush=True)
             return
-        print(f"  --  live: two boxes running, {LIVE} allowed to the first's project", flush=True)
+        print(
+            f"  --  live: two sessions of {WORKSPACE} running, {LIVE} allowed to the first",
+            flush=True,
+        )
+        check("the two boxes share their workspace", shared == "yes", shared)
+        check("the first holds its launch-time grant", first.run(static) == "granted")
+        check("…which the second, beside it, was never allowed", second.run(static) == "MISSING")
         check("the directory is in neither box before it is allowed", absent)
         check("the guard allows it", refusal == "", refusal)
         check("it is delivered to the first box, and only to it", [d.box for d in delivered] == [BOX])
+        check("it is the first's alone in the state", host.grants(BOX3) == [] and LIVE in host.grants(BOX))
         check("…live, at its real path", own.linked and own.inside.startswith(CARRIER + "/"), own)
         seen = first.until(read, "from the host")
         check("the file is readable at its real path inside within 2 s", seen is not None, seen)
@@ -430,6 +453,11 @@ def live_section() -> None:
         check("the second box is blind to it", second.run(read) == "MISSING")
         entries = second.run(f"ls -A {CARRIER} | wc -l")
         check("…its carrier empty", entries == "0", entries)
+        check("…and nothing of it in the live grants", grants.delivery(BOX3, LIVE) is None)
+        check(
+            "the second has nothing to restart for",
+            not host.plan_stale(beside_path, WORKSPACE, live=grants.live_paths(BOX3)),
+        )
         check("the grant is live in the first box", grants.status(BOX, LIVE) == sandboxgrants.LIVE)
         check("…so the box is not stale", not host.plan_stale(plan_path, WORKSPACE, live=grants.live_paths(BOX)))
         check("…though its plan alone would be", host.plan_stale(plan_path, WORKSPACE))
@@ -438,9 +466,9 @@ def live_section() -> None:
         check("one mount on the host, in the first box's carrier", points == [expected], points)
         check("a box with a mount under it is never removed", sandboxplan.remove_box(BOX) is False)
         check("…nor anything in the granted directory", os.path.exists(f"{LIVE}/hello.txt"))
-        host.revoke(WORKSPACE, LIVE)
+        host.revoke(BOX, LIVE)
         started = time.monotonic()
-        ask(grants.revoke, WORKSPACE, LIVE)
+        ask(grants.revoke, BOX, LIVE)
         took = time.monotonic() - started
         gone = first.until(read, "MISSING")
         check("revoked, it is gone inside within 2 s", gone is not None, gone)
@@ -459,18 +487,27 @@ def live_section() -> None:
         grants.shutdown()
 
 
-if second_path:
+if beside_path:
     live_section()
 check("nothing is mounted under the scratch tree", mounts_under(E2E) == [], mounts_under(E2E))
 
 sandboxplan.release_plan(plan_path)
 sandboxplan.release_plan(second_path)
+sandboxplan.release_plan(beside_path)
 check("the plan file is released", not os.path.exists(plan_path))
-# Boxes no session names, let go: removed, by file descriptor, tree and all.
-for box in (BOX, BOX2):
+# Boxes no session names, let go: their grants leave the state with them,
+# and they are removed, by file descriptor, tree and all.
+check("the first box's grant is still recorded", host.grants(BOX) == [GRANTED], host.grants(BOX))
+for box in (BOX, BOX2, BOX3):
     host.release(box)
-check("the first box goes once nothing needs it", host.discard_box(BOX) and not os.path.exists(BOX_DIR))
-check("…and the second", host.discard_box(BOX2) == bool(second_path) and not os.path.exists(BOX2_DIR))
+    host.forget_box(box)
+check("forgotten, a box's grants are gone", AppState().sandbox_grants == {}, AppState().sandbox_grants)
+for _tick in range(200):
+    if not any(os.path.exists(sandboxplan.box_dir(box)) for box in (BOX, BOX2, BOX3)):
+        break
+    time.sleep(0.05)
+check("the first box goes once nothing needs it", not os.path.exists(BOX_DIR))
+check("…and the others", not os.path.exists(BOX2_DIR) and not os.path.exists(sandboxplan.box_dir(BOX3)))
 
 print(f"\n{PASSED} passed, {FAILED} failed")
 sys.exit(1 if FAILED or not PASSED else 0)

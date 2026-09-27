@@ -125,7 +125,7 @@ directly. No separate API key exists anywhere.
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
-| Sandbox grants per project, the session → box map, the sandbox switches | `state.json` |
+| Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session → box map; the sandbox switches | `state.json` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
 | Everything of the CLI's | `~/.claude/` — read only |
 

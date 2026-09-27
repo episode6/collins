@@ -395,11 +395,13 @@ def anchor_roots(root: str = "/") -> tuple[str, ...]:
     return tuple(found)
 
 
-def grants_key(workspace: str) -> str:
-    """What a workspace's grants are recorded under: the repository a
-    Claude-managed worktree belongs to, else the workspace itself, resolved.
-    Grants are per project — a session resumed inside
-    `<repo>/.claude/worktrees/<name>` shares its repository's."""
+def project_key(workspace: str) -> str:
+    """What a project's *default* grants are recorded under: the repository
+    a Claude-managed worktree belongs to, else the workspace itself,
+    resolved. A session in `<repo>/.claude/worktrees/<name>` has its
+    repository's defaults. Only the defaults are keyed this way — a
+    session's own grants are keyed by its box, and nothing goes from this
+    key to a box."""
     real = os.path.realpath(workspace)
     return sessions.worktree_project_root(real) or real
 
@@ -477,7 +479,6 @@ class Inputs:
     sandbox_root: str = ""  # what a workspace or a grant must never reach
     carrier: str | None = None  # host directory, bound at CARRIER_DEST
     anchors: tuple[tuple[str, str], ...] = ()  # (host directory, destination)
-    grants_key: str = ""  # what the grants were read under (see grants_key)
 
 
 @dataclass
@@ -632,7 +633,7 @@ def build_plan(inputs: Inputs) -> dict:
             plan.rw(common)
             plan.notes.append(f"linked worktree: common git dir {common}")
 
-    # Grants: the user's per-project additions, each re-checked here —
+    # Grants: what the user allowed this session, each re-checked here —
     # state.json is a file on disk like any other — in both spellings (as
     # written and resolved), since a symlinked ~/.ssh is still ~/.ssh.
     granted: list[str] = []
@@ -754,7 +755,6 @@ def build_plan(inputs: Inputs) -> dict:
             "box": inputs.box,
             "carrier": carrier,
             "anchors": [[host_dir, dest] for host_dir, dest in anchors],
-            "grants_key": inputs.grants_key or ws,
         },
         "notes": plan.notes,
     }
@@ -934,7 +934,6 @@ def gather_inputs(workspace: str, app_id: str, state, box: str) -> Inputs:
     ValueError for anything that is not a box id."""
     home_dir = box_home(box)  # first: a bad id stops here
     ws = os.path.realpath(workspace)
-    key = grants_key(ws)
     home = str(Path.home())
     notes: list[str] = []
     cli = resolved_claude()
@@ -952,10 +951,12 @@ def gather_inputs(workspace: str, app_id: str, state, box: str) -> Inputs:
     socket_file = mcptools.socket_path(app_id)
     if not os.path.exists(socket_file):
         socket_file = None
-    # As written, not resolved: the guard checks both spellings itself, and
-    # a normalised path is what the mask loop can match.
+    # The box's own grants: a directory is allowed to one session, never
+    # to a workspace or a project. As written, not resolved: the guard
+    # checks both spellings itself, and a normalised path is what the mask
+    # loop can match.
     grants = tuple(
-        os.path.normpath(g) for g in state.get_sandbox_grants(key) if isinstance(g, str) and g
+        os.path.normpath(g) for g in state.get_sandbox_grants(box) if isinstance(g, str) and g
     )
     launcher = shutil.which("claude")
     return Inputs(
@@ -968,7 +969,6 @@ def gather_inputs(workspace: str, app_id: str, state, box: str) -> Inputs:
         anchors=tuple(
             (box_anchor(box, os.path.basename(top)), top) for top in anchor_roots()
         ),
-        grants_key=key,
         runtime_dir=os.environ.get("XDG_RUNTIME_DIR") or None,
         tmpdir=os.environ.get("TMPDIR") or None,
         claude_dir=claude_dir,
@@ -1441,10 +1441,12 @@ def load_plan(path: str | None) -> dict | None:
     for key in ("share_gh", "share_ssh", "protect_settings"):
         if not isinstance(inputs.get(key, False), bool):
             return None
-    # The box: its id, and the three places of its own the plan binds.
+    # The box: its id, and the places of its own the plan binds. (A plan
+    # an earlier build wrote may name what its grants were read under as
+    # well; it loads, and nothing reads that.)
     if not valid_box_id(inputs.get("box")):
         return None
-    for key in ("sandbox_home", "carrier", "grants_key"):
+    for key in ("sandbox_home", "carrier"):
         if not valid_path(inputs.get(key)):
             return None
     anchors = inputs.get("anchors")
@@ -1675,10 +1677,12 @@ class SandboxHost:
 
     # -- grants ------------------------------------------------------------------
 
-    def grants(self, workspace: str) -> list[str]:
-        """The directories granted to sandboxed sessions of *workspace*'s
-        project, keyed the way a launch reads them (grants_key)."""
-        return self.state.get_sandbox_grants(grants_key(workspace))
+    # A grant is one session's: every method here is handed the box it is
+    # about, and none looks up a box from a workspace or a project.
+
+    def grants(self, box: str) -> list[str]:
+        """The directories granted to the session whose box is *box*."""
+        return self.state.get_sandbox_grants(box)
 
     def grant_reason(self, workspace: str, path: str) -> str:
         """Why *path* can't be granted to sessions in *workspace*, or "":
@@ -1699,24 +1703,154 @@ class SandboxHost:
             return "not a directory"
         return ""
 
-    def allow(self, workspace: str, path: str) -> str:
-        """Grant *path* to sessions of *workspace*'s project (in state;
-        applied at their next launch). Returns the refusal, or "" when it
-        was recorded — or was already there."""
+    def allow(self, box: str, workspace: str, path: str) -> str:
+        """Grant *path* to the session whose box is *box* and whose
+        workspace is *workspace* (in state; the live grants deliver it to
+        the running box, or the next launch binds it). Returns the refusal,
+        or "" when it was recorded — or was already there. Main loop."""
+        if not valid_box_id(box):
+            return "this session has no sandbox yet"
         reason = self.grant_reason(workspace, path)
         if reason:
             return reason
         path = os.path.normpath(path)
-        key = grants_key(workspace)
-        grants = self.state.get_sandbox_grants(key)
+        grants = self.state.get_sandbox_grants(box)
         if path not in grants:
-            self.state.set_sandbox_grants(key, [*grants, path])
+            self.state.set_sandbox_grants(box, [*grants, path])
         return ""
 
-    def revoke(self, workspace: str, path: str) -> None:
-        key = grants_key(workspace)
-        grants = [g for g in self.state.get_sandbox_grants(key) if g != path]
-        self.state.set_sandbox_grants(key, grants)
+    def revoke(self, box: str, path: str) -> None:
+        """Take *path* back from the session whose box is *box*. Main loop."""
+        grants = [g for g in self.state.get_sandbox_grants(box) if g != path]
+        self.state.set_sandbox_grants(box, grants)
+
+    # -- a project's defaults ----------------------------------------------------
+    #
+    # A template for new sessions, never a live link: the defaults are
+    # copied into a box's list once, when the box is minted, and from then
+    # on the two lists have nothing to do with each other. Marking or
+    # removing a default changes no session that exists.
+
+    def project_grants(self, workspace: str) -> list[str]:
+        """The directories a new session of *workspace*'s project starts
+        allowed."""
+        return self.state.get_sandbox_project_grants(project_key(workspace))
+
+    def is_project_default(self, workspace: str, path: str) -> bool:
+        return os.path.normpath(path) in self.project_grants(workspace)
+
+    def set_project_default(self, workspace: str, path: str, on: bool) -> str:
+        """Make *path* a default of *workspace*'s project, or stop it being
+        one. Returns the refusal, or "" when the list says so now. The
+        guard is the grant's — never a secret, Collins' own state, the
+        home or the sandbox homes — without the two checks that are about
+        one session on one day (inside that session's workspace, not a
+        directory right now): a default is about other sessions too, and
+        each is checked again when a box is seeded. Main loop."""
+        path = os.path.normpath(path)
+        key = project_key(workspace)
+        defaults = self.state.get_sandbox_project_grants(key)
+        if not on:
+            self.state.set_sandbox_project_grants(key, [d for d in defaults if d != path])
+            return ""
+        if not valid_path(path):
+            return "not an absolute path"
+        reason = guard_path(path, str(Path.home()), protected_paths(self.app_id), sandbox_root())
+        if reason:
+            return reason
+        if path not in defaults:
+            self.state.set_sandbox_project_grants(key, [*defaults, path])
+        return ""
+
+    def seed_box(self, box: str, workspace: str) -> list[str]:
+        """Copy the project's defaults into *box*'s list, after what it
+        holds already, and return the list. A default is skipped — with a
+        line in the log, and left in the defaults — when this session
+        can't be granted it today (grant_reason: it has become a secret's
+        ancestor, is no longer a directory, or lies inside this session's
+        workspace). Main loop."""
+        if not valid_box_id(box):
+            return []
+        grants = self.state.get_sandbox_grants(box)
+        for path in self.project_grants(workspace):
+            reason = self.grant_reason(workspace, path)
+            if reason:
+                log.info("sandbox: default %s not given to a new session: %s", path, reason)
+            elif path not in grants:
+                grants.append(path)
+        self.state.set_sandbox_grants(box, grants)
+        return grants
+
+    def mint_box(self, workspace: str, seed: bool = True) -> str:
+        """A box id for a session in *workspace* — the one place one is
+        made. With *seed* the project's defaults become its list (seed_box):
+        what a new session starts with. Without, it starts with none: a
+        fork, a sibling and a `--continue` tab get theirs from elsewhere.
+        Main loop."""
+        box = new_box_id()
+        if seed:
+            self.seed_box(box, workspace)
+        return box
+
+    def settle_box(self, session_id: str, box: str, workspace: str | None, owed: bool) -> bool:
+        """A sandboxed tab that launched in *box* turned out to be
+        *session_id*: record the box against the session, and settle what
+        the box is allowed. Whether the box is owed a delivery
+        (GrantMounts.sync) afterwards.
+
+        For a new session there is nothing to settle: its box was minted
+        with its project's defaults. A `--continue` tab could not know
+        which session it would land on, so its box was minted with none
+        (*owed*). When the session already had a box, the tab's takes over
+        what that one was allowed — after what it was allowed itself
+        meanwhile — and the old box is forgotten. When it had none, the
+        tab's box gets the project's defaults now. Main loop."""
+        if not session_id or not valid_box_id(box):
+            return False
+        previous = self.state.sandbox_box(session_id)
+        taken_over = bool(previous) and previous != box
+        if taken_over:
+            mine = self.state.get_sandbox_grants(box)
+            extra = [g for g in self.state.get_sandbox_grants(previous) if g not in mine]
+            if extra:
+                self.state.set_sandbox_grants(box, [*mine, *extra])
+        elif owed and not previous and workspace:
+            self.seed_box(box, workspace)
+        self.state.set_sandboxed(session_id, True, box=box)
+        if taken_over:
+            self.forget_box(previous)
+        return taken_over or (owed and not previous)
+
+    def forget_box(self, box: str) -> None:
+        """The box may be done with: when no session names it, its grants
+        leave the state — they are the session's, and go with it — and the
+        box is discarded, which still refuses one that is named, leased by
+        another process or held. Main loop: this is where the state is
+        written."""
+        if not valid_box_id(box):
+            return
+        if box not in self.state.sandbox_boxes():
+            self.state.set_sandbox_grants(box, [])
+        self.discard_box_async(box)
+
+    def prune_grants(self) -> int:
+        """Drop the grants of every box no session names and whose
+        directory is gone — a box swept at an earlier start, or removed by
+        hand; how many went. A directory that exists is either about to
+        be swept (the next start prunes its entry) or another instance's
+        running box. Touches nothing but this instance's own state, so it
+        runs whether or not this instance owns the root. Main loop, at
+        startup."""
+        named = self.state.sandbox_boxes()
+        pruned = 0
+        for box in sorted(self.state.sandbox_grant_boxes()):
+            if box in named or not valid_box_id(box):
+                continue
+            if os.path.lexists(box_dir(box)):
+                continue
+            self.state.set_sandbox_grants(box, [])
+            pruned += 1
+        return pruned
 
     def plan_stale(
         self, plan_path: str | None, workspace: str, live: Iterable[str] = ()
@@ -1756,6 +1890,12 @@ class SandboxHost:
         scrubbed, and held. The caller's tab adopts the plan and the box,
         and releases both.
 
+        The sibling's grants are recorded as what its plan binds: its
+        parent's *static* grants, as the parent was launched. Nothing the
+        parent holds live, and nothing the parent is allowed later, reaches
+        it — a directory is allowed in the sibling's own chip. Main loop:
+        the state is written here.
+
         *live* is what the parent holds mounted since its launch
         (GrantMounts.live_paths): the sibling's plan is the parent's as
         launched, so it can't *start* inside such a directory — it would
@@ -1763,7 +1903,10 @@ class SandboxHost:
         parent = load_plan(plan_path)
         if parent is None:
             return None, "", "the parent session's sandbox plan can't be read"
-        box = new_box_id()
+        # No defaults: a sibling holds nothing its parent wasn't launched
+        # with, and a default the parent's user took from the parent must
+        # not come back through a sibling.
+        box = self.mint_box(cwd, seed=False)
         try:
             derived = derive_plan(parent, cwd, box)
         except PlanRefused as err:
@@ -1793,6 +1936,7 @@ class SandboxHost:
                 return None, "", str(err)
             return None, "", f"couldn't write the sandbox plan: {err}"
         self._claim_root()
+        self.state.set_sandbox_grants(box, list(derived["inputs"].get("grants") or []))
         return path, box, ""
 
 

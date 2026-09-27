@@ -85,13 +85,22 @@ downloads of each version, see the
   deleted; a fork and a `start_session` sibling each get one of their
   own. Nothing a session writes to its home reaches another session's,
   and a symlink planted there can no longer stop the next launch —
-  Collins clears what stands in a mount's way first. Allowed directories
-  are now kept per project: a session resumed inside one of the
-  project's worktrees shares the repository's list.
+  Collins clears what stands in a mount's way first.
+- **Allowed directories are a session's.** A directory allowed in one
+  session's chip reaches that session and no other — not a session
+  running beside it in its project, and not the next one started there.
+  What a *new* session starts allowed is the project's **defaults**: pin
+  a directory in a session's chip and new sessions of the project start
+  with it. Defaults are copied into a session's list when it starts and
+  are never a link: pinning or unpinning one changes no session that
+  exists, and a session can drop a directory it started with. A session
+  in one of the project's worktrees shares the repository's defaults; a
+  fork starts with a copy of its origin's list, and a sibling spawned by
+  `start_session` with what its parent was launched with. A session's
+  list goes when its transcript does.
 - **Allowed directories reach a running session.** *Allow a
   directory…* in the Sandboxed chip no longer waits for a restart: the
-  directory is mounted into the running session — and into every other
-  running sandboxed session of the same project, and no other — and its
+  directory is mounted into the running session, and its
   row says *live*; removing it takes it out again at once, open files
   included. A live grant is a `bindfs` mount Collins makes on the host in
   a directory of the box that the box itself can't write, so nothing the
@@ -106,10 +115,11 @@ downloads of each version, see the
 - **The Sandboxed chip.** A shield chip leads the footer of a sandboxed
   tab: what the box was launched with (the workspace, whether the GitHub
   CLI login and the SSH agent went in, whether `~/.claude/settings.json`
-  is protected), the directories allowed to sessions of this project —
-  each with a remove button, and *Allow a directory…* through the folder
-  chooser, refused with the reason when it would reach a secret,
-  Collins' own state, your home or `/` — and *Restart to apply* when the
+  is protected), the directories allowed to this session —
+  each with a remove button and a pin, and *Allow a directory…* through
+  the folder chooser, refused with the reason when it would reach a
+  secret, Collins' own state, your home or `/` — the project's defaults
+  for new sessions, and *Restart to apply* when the
   box the session runs in doesn't hold what the settings grant: the
   session exits cleanly and resumes in the same tab with the new plan. A *Sandboxed shell* (the chip, or *New sandboxed shell* in a
   panel tab's menu) opens a terminal inside the same box, titled as one;

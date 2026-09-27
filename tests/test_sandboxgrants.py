@@ -26,19 +26,33 @@ CARRIER = sandboxplan.CARRIER_DEST
 
 
 class _State:
-    """The grants a project holds, keyed as AppState keys them."""
+    """The grants each box holds, keyed as AppState keys them, and the
+    defaults each project holds."""
 
     def __init__(self, grants=None):
         self.grants = {k: list(v) for k, v in (grants or {}).items()}
+        self.defaults = {}
 
-    def get_sandbox_grants(self, key):
-        return list(self.grants.get(key) or [])
+    def get_sandbox_grants(self, box):
+        return list(self.grants.get(box) or [])
 
-    def set_sandbox_grants(self, key, grants):
+    def set_sandbox_grants(self, box, grants):
         if grants:
-            self.grants[key] = list(grants)
+            self.grants[box] = list(grants)
         else:
-            self.grants.pop(key, None)
+            self.grants.pop(box, None)
+
+    def sandbox_grant_boxes(self):
+        return set(self.grants)
+
+    def get_sandbox_project_grants(self, key):
+        return list(self.defaults.get(key) or [])
+
+    def set_sandbox_project_grants(self, key, grants):
+        if grants:
+            self.defaults[key] = list(grants)
+        else:
+            self.defaults.pop(key, None)
 
     def get_setting(self, key):
         return False
@@ -211,7 +225,7 @@ def world(tmp_path, home):
         one.shutdown()
 
 
-def _plan(tmp_path, home, box=BOX, key=None, grants=(), anchors=("/mnt",), binds=()):
+def _plan(tmp_path, home, box=BOX, grants=(), anchors=("/mnt",), binds=(), workspace=None):
     """A launched plan, as far as the live grants read one; its box made."""
     top = tmp_path / "boxes" / box
     for made in ("home", "grants", *(f"anchors/{os.path.basename(a)}" for a in anchors)):
@@ -223,11 +237,10 @@ def _plan(tmp_path, home, box=BOX, key=None, grants=(), anchors=("/mnt",), binds
         "version": 2,
         "bwrap_args": args,
         "setenv": {"HOME": str(home)},
-        "workspace": str(home / "work" / "repo"),
+        "workspace": str(workspace or home / "work" / "repo"),
         "inputs": {
-            "workspace": str(home / "work" / "repo"),
+            "workspace": str(workspace or home / "work" / "repo"),
             "box": box,
-            "grants_key": key or str(home / "work" / "repo"),
             "grants": [str(g) for g in grants],
             "carrier": str(top / "grants"),
             "anchors": [[str(top / "anchors" / os.path.basename(a)), a] for a in anchors],
@@ -251,6 +264,25 @@ def _call(method, *args):
     assert landed.wait(10), "the worker never answered"
     assert seen == ["sandbox-grants"]  # done runs on the worker thread
     return got
+
+
+def _allow(world, grants, box, path):
+    """What the chip does: the grant recorded for the box, then delivered
+    to it. Whatever was queued before is done first, so it is this call
+    that delivers, not a registration still on its way."""
+    _settle(grants)
+    path = os.path.normpath(str(path))
+    held = world.state.get_sandbox_grants(box)
+    if path not in held:
+        world.state.set_sandbox_grants(box, [*held, path])
+    return _call(grants.allow, box, path)
+
+
+def _revoke(world, grants, box, path):
+    path = os.path.normpath(str(path))
+    held = [g for g in world.state.get_sandbox_grants(box) if g != path]
+    world.state.set_sandbox_grants(box, held)
+    return _call(grants.revoke, box, path)
 
 
 def _settle(grants):
@@ -430,8 +462,7 @@ def test_placement(tmp_path, home, world):
 
 def test_a_grant_is_delivered_live(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = home / "work" / "repo"
-    world.state.grants = {str(ws): [str(lib)]}
+    world.state.grants = {BOX: [str(lib)]}
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
     _settle(grants)
@@ -458,17 +489,16 @@ def test_a_grant_is_delivered_live(tmp_path, home, world):
     link = top / "home" / "work" / "lib"
     assert link.is_symlink() and os.readlink(link) == f"{CARRIER}/{_slot(lib)}"
     # A second allow of the same directory finds the box holding it.
-    assert _call(grants.allow, str(ws), str(lib)) == []
+    assert _allow(world, grants, BOX, str(lib)) == []
     assert len(world.spawned) == 1
 
 
 def test_a_server_that_exits_leaves_the_grant_pending(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = home / "work" / "repo"
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
     world.behaviour = "exits"
-    (delivery,) = _call(grants.allow, str(ws), str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert delivery == sandboxgrants.Delivery(
         BOX, str(lib), PENDING, "", False, "fuse: bad mount point: Permission denied"
     )
@@ -482,15 +512,15 @@ def test_a_server_that_exits_leaves_the_grant_pending(tmp_path, home, world):
     assert not os.path.lexists(top / "home" / "work" / "lib")
     # A server with nothing to say still has a reason.
     world.behaviour = "silent-exit"
-    (delivery,) = _call(grants.allow, str(ws), str(home / "work" / "other"))
+    (delivery,) = _allow(world, grants, BOX, str(home / "work" / "other"))
     assert delivery.status == PENDING and delivery.reason == "bindfs exited with status 3"
     # One that can't be started at all.
     world.behaviour = "raises"
-    (delivery,) = _call(grants.allow, str(ws), str(home / "work" / "third"))
+    (delivery,) = _allow(world, grants, BOX, str(home / "work" / "third"))
     assert delivery.status == PENDING and "couldn't start bindfs" in delivery.reason
     # And the next one that works is LIVE, the reason forgotten.
     world.behaviour = "mount"
-    (delivery,) = _call(grants.allow, str(ws), str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert delivery.status == LIVE and delivery.reason == ""
     assert grants.status(BOX, str(lib)) == LIVE
 
@@ -500,7 +530,7 @@ def test_a_mount_that_never_appears_is_given_up_on(tmp_path, home, world):
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
     world.behaviour = "hangs"
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert delivery.status == PENDING and delivery.reason == "the mount didn't appear"
     # Five seconds of looking, then the child killed: asked first, then not.
     assert world.now >= sandboxgrants.MOUNT_TIMEOUT_S
@@ -514,7 +544,7 @@ def test_a_mount_that_half_appeared_is_unmounted(tmp_path, home, world):
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
     world.behaviour = "half"
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert delivery.status == PENDING
     point = str(tmp_path / "boxes" / BOX / "grants" / _slot(lib))
     assert world.table.points() == []
@@ -529,30 +559,29 @@ def test_a_stale_mount_at_the_mount_point_goes_first(tmp_path, home, world):
     point = str(tmp_path / "boxes" / BOX / "grants" / _slot(lib))
     os.makedirs(point)
     world.table.add(point, "collins:1")
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert delivery.status == LIVE
     assert world.ran[0] == [world.fusermount, "-u", "-z", point]  # before the spawn
     assert world.table.mounts[point] == ("fuse.bindfs", f"collins:{os.getpid()}")
 
 
 def test_what_cant_be_delivered_is_pending_with_its_reason(tmp_path, home, world, monkeypatch):
-    ws = str(home / "work" / "repo")
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
     # Nowhere to put it in a running box.
-    (delivery,) = _call(grants.allow, ws, "/opt/thing")
+    (delivery,) = _allow(world, grants, BOX, "/opt/thing")
     assert (delivery.status, delivery.reason) == (PENDING, "can't be added to a running sandbox")
     # The guard again, as a launch applies it: state.json is a file on disk.
-    (delivery,) = _call(grants.allow, ws, str(home / ".ssh"))
+    (delivery,) = _allow(world, grants, BOX, str(home / ".ssh"))
     assert delivery.status == PENDING and "reaches" in delivery.reason and ".ssh" in delivery.reason
-    (delivery,) = _call(grants.allow, ws, str(tmp_path / "boxes" / BOX2 / "home"))
+    (delivery,) = _allow(world, grants, BOX, str(tmp_path / "boxes" / BOX2 / "home"))
     assert (delivery.status, delivery.reason) == (PENDING, "reaches the sandbox homes")
     assert world.spawned == []
     # A machine that can't at all: every grant, with that reason.
     private = _World(tmp_path, root_options="")
     none = private.grants()
     none.register(_plan(tmp_path, home, box=BOX3))
-    (delivery,) = _call(none.allow, ws, str(home / "work" / "lib"))
+    (delivery,) = _allow(private, none, BOX3, str(home / "work" / "lib"))
     assert (delivery.status, delivery.reason) == (
         PENDING, "mounts don't propagate from the sandbox directory",
     )
@@ -563,13 +592,13 @@ def test_what_cant_be_delivered_is_pending_with_its_reason(tmp_path, home, world
 def test_an_anchored_grant_mounts_at_its_real_path(tmp_path, home, world):
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), "/mnt/data/x")
+    (delivery,) = _allow(world, grants, BOX, "/mnt/data/x")
     assert delivery == sandboxgrants.Delivery(BOX, "/mnt/data/x", LIVE, "/mnt/data/x", True, "")
     top = tmp_path / "boxes" / BOX
     assert world.table.points() == [str(top / "anchors" / "mnt" / "data" / "x")]
     # No link: nothing of it in the home.
     assert os.listdir(top / "home") == []
-    _call(grants.revoke, str(home / "work" / "repo"), "/mnt/data/x")
+    _revoke(world, grants, BOX, "/mnt/data/x")
     assert world.table.points() == []
     assert not (top / "anchors" / "mnt" / "data" / "x").exists()
 
@@ -583,7 +612,7 @@ def test_a_mount_point_is_never_made_through_a_link(tmp_path, home, world):
     victim = tmp_path / "victim"
     victim.mkdir()
     (top / "anchors" / "mnt" / "data").symlink_to(victim)
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), "/mnt/data/x")
+    (delivery,) = _allow(world, grants, BOX, "/mnt/data/x")
     assert delivery.status == PENDING and "mount point" in delivery.reason
     assert os.listdir(victim) == []
     assert world.spawned == []
@@ -639,12 +668,12 @@ def test_the_link_gives_way_to_what_it_cant_replace(tmp_path, home, world):
     assert grants._make_link(record, placement) is False
     # A home that is not there, or is itself a link.
     gone = sandboxgrants._Box(
-        BOX, "k", (), str(tmp_path / "c"), (), str(tmp_path / "no-home"), str(home), ()
+        BOX, (), str(tmp_path / "c"), (), str(tmp_path / "no-home"), str(home), ()
     )
     assert grants._make_link(gone, placement) is False
     (tmp_path / "linked-home").symlink_to(box_home)
     linked = sandboxgrants._Box(
-        BOX, "k", (), str(tmp_path / "c"), (), str(tmp_path / "linked-home"), str(home), ()
+        BOX, (), str(tmp_path / "c"), (), str(tmp_path / "linked-home"), str(home), ()
     )
     assert grants._make_link(linked, _placed(grants, home / "fresh")) is False
     assert not os.path.lexists(box_home / "fresh")
@@ -661,7 +690,7 @@ def test_the_link_never_follows_a_planted_parent(tmp_path, home, world):
     (victim / "precious.txt").write_text("keep")
     before = sorted(str(p.relative_to(victim)) for p in victim.rglob("*"))
     (box_home / "work").symlink_to(victim)
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), str(home / "work" / "lib"))
+    (delivery,) = _allow(world, grants, BOX, str(home / "work" / "lib"))
     # Mounted all the same, in the carrier — where it answers.
     assert delivery.status == LIVE and delivery.linked is False
     assert delivery.inside == f"{CARRIER}/{_slot(home / 'work' / 'lib')}"
@@ -670,9 +699,7 @@ def test_the_link_never_follows_a_planted_parent(tmp_path, home, world):
     # Deeper: the planted link one level down.
     (box_home / "dev").mkdir()
     (box_home / "dev" / "mid").symlink_to(victim / "deep")
-    (delivery,) = _call(
-        grants.allow, str(home / "work" / "repo"), str(home / "dev" / "mid" / "new" / "lib")
-    )
+    (delivery,) = _allow(world, grants, BOX, home / "dev" / "mid" / "new" / "lib")
     assert delivery.status == LIVE and delivery.linked is False
     assert sorted(str(p.relative_to(victim)) for p in victim.rglob("*")) == before
     assert (victim / "precious.txt").read_text() == "keep"
@@ -680,78 +707,168 @@ def test_the_link_never_follows_a_planted_parent(tmp_path, home, world):
 
 def test_removing_the_link_leaves_one_that_points_elsewhere(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = str(home / "work" / "repo")
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
-    (delivery,) = _call(grants.allow, ws, str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert delivery.linked is True
     link = tmp_path / "boxes" / BOX / "home" / "work" / "lib"
     # The agent can't write the carrier, but it owns its home: the link
     # repointed is the agent's, and not Collins' to remove.
     link.unlink()
     link.symlink_to("/somewhere/else")
-    _call(grants.revoke, ws, str(lib))
+    _revoke(world, grants, BOX, str(lib))
     assert link.is_symlink() and os.readlink(link) == "/somewhere/else"
     assert world.table.points() == []
     # Its own link goes.
     link.unlink()
-    (delivery,) = _call(grants.allow, ws, str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     assert link.is_symlink()
-    _call(grants.revoke, ws, str(lib))
+    _revoke(world, grants, BOX, str(lib))
     assert not os.path.lexists(link)
     assert link.parent.is_dir()
     # A directory where the link was is left alone as well.
-    (delivery,) = _call(grants.allow, ws, str(lib))
+    (delivery,) = _allow(world, grants, BOX, str(lib))
     link.unlink()
     link.mkdir()
     (link / "kept").write_text("x")
-    _call(grants.revoke, ws, str(lib))
+    _revoke(world, grants, BOX, str(lib))
     assert (link / "kept").read_text() == "x"
 
 
 # -- the boxes of a project ------------------------------------------------------
 
 
-def test_allow_reaches_the_boxes_of_the_project_and_no_other(tmp_path, home, world):
+def test_allow_reaches_one_box_and_no_other(tmp_path, home, world):
+    """Two sessions of the same workspace, side by side, and a third in a
+    worktree of it: a directory allowed to one reaches that one."""
     lib = home / "work" / "lib"
     ws = home / "work" / "repo"
     wt = ws / ".claude" / "worktrees" / "brave-otter"
     wt.mkdir(parents=True)
     grants = world.grants()
     grants.register(_plan(tmp_path, home, BOX))
-    grants.register(_plan(tmp_path, home, BOX2))  # a second session of the project
-    grants.register(_plan(tmp_path, home, BOX3, key=str(home / "work" / "other")))
-    # Allowed from a worktree of the project: the repository's boxes.
-    delivered = _call(grants.allow, str(wt), str(lib))
-    assert sorted(d.box for d in delivered) == sorted([BOX, BOX2])
-    assert all(d.status == LIVE and d.linked for d in delivered)
-    assert world.table.points() == sorted(
-        str(tmp_path / "boxes" / box / "grants" / _slot(lib)) for box in (BOX, BOX2)
-    )
-    assert grants.status(BOX3, str(lib)) == PENDING
-    assert grants.live_paths(BOX3) == []
-    assert os.listdir(tmp_path / "boxes" / BOX3 / "grants") == []
-    assert os.listdir(tmp_path / "boxes" / BOX3 / "home") == []
-    assert grants.delivery(BOX3, str(lib)) is None
+    grants.register(_plan(tmp_path, home, BOX2))  # the same workspace, another session
+    grants.register(_plan(tmp_path, home, BOX3, workspace=wt))  # and one in its worktree
+    (delivery,) = _allow(world, grants, BOX, lib)
+    assert (delivery.box, delivery.status, delivery.linked) == (BOX, LIVE, True)
+    # The fake spawn ran once, for the one box.
+    assert len(world.spawned) == 1
+    assert world.table.points() == [str(tmp_path / "boxes" / BOX / "grants" / _slot(lib))]
+    assert world.state.grants == {BOX: [str(lib)]}
+    for other in (BOX2, BOX3):
+        assert grants.status(other, str(lib)) == PENDING  # by absence: it was never allowed it
+        assert grants.delivery(other, str(lib)) is None
+        assert grants.live_paths(other) == []
+        assert os.listdir(tmp_path / "boxes" / other / "grants") == []
+        assert os.listdir(tmp_path / "boxes" / other / "home") == []
     # A box nobody registered knows nothing.
     assert grants.status("f" * 32, str(lib)) == PENDING
     assert grants.delivery("f" * 32, str(lib)) is None
     assert grants.registered(BOX) and not grants.registered("f" * 32)
 
 
+def test_allow_to_a_box_that_isnt_running_mounts_nothing(tmp_path, home, world):
+    lib = home / "work" / "lib"
+    grants = world.grants()
+    grants.register(_plan(tmp_path, home, BOX))
+    # Granted in the state, to a box that is not up: static at its next launch.
+    assert _allow(world, grants, BOX2, lib) == []
+    assert world.spawned == []
+    assert world.table.points() == []
+    assert world.state.grants == {BOX2: [str(lib)]}
+    assert grants.live_paths(BOX) == []
+    # And never what the state doesn't grant the box, whoever asks: the
+    # chip records a grant before it has it delivered.
+    assert _call(grants.allow, BOX, str(lib)) == []
+    assert world.spawned == []
+    assert grants.status(BOX, str(lib)) == PENDING
+
+
+def test_revoke_in_one_box_leaves_the_same_path_live_in_another(tmp_path, home, world):
+    lib = home / "work" / "lib"
+    grants = world.grants()
+    grants.register(_plan(tmp_path, home, BOX))
+    grants.register(_plan(tmp_path, home, BOX2))
+    _allow(world, grants, BOX, lib)
+    _allow(world, grants, BOX2, lib)  # allowed separately, in its own chip
+    assert len(world.table.points()) == 2
+    assert _revoke(world, grants, BOX, lib) == []
+    assert world.table.points() == [str(tmp_path / "boxes" / BOX2 / "grants" / _slot(lib))]
+    assert grants.status(BOX, str(lib)) == PENDING
+    assert grants.status(BOX2, str(lib)) == LIVE
+    assert world.state.grants == {BOX2: [str(lib)]}
+    assert os.path.islink(tmp_path / "boxes" / BOX2 / "home" / "work" / "lib")
+    assert not os.path.lexists(tmp_path / "boxes" / BOX / "home" / "work" / "lib")
+    # Revoking in a box that isn't up touches nothing.
+    assert _call(grants.revoke, BOX3, str(lib)) == []
+    assert grants.status(BOX2, str(lib)) == LIVE
+
+
+def test_sync_delivers_what_the_state_holds_and_the_box_lacks(tmp_path, home, world):
+    lib = home / "work" / "lib"
+    other = home / "work" / "other"
+    grants = world.grants()
+    grants.register(_plan(tmp_path, home, BOX, grants=(other,)))
+    grants.register(_plan(tmp_path, home, BOX2))
+    world.state.grants = {BOX: [str(other)]}
+    # Nothing, when there is nothing.
+    assert _call(grants.sync, BOX) == []
+    assert _call(grants.sync, BOX2) == []
+    assert _call(grants.sync, BOX3) == []  # not up
+    assert world.spawned == []
+    # The box took over another's grants (a --continue tab that resolved).
+    world.state.grants = {BOX: [str(other), str(lib), "/opt/unplaceable"]}
+    delivered = _call(grants.sync, BOX)
+    assert [(d.box, d.path, d.status) for d in delivered] == [
+        (BOX, str(lib), LIVE), (BOX, "/opt/unplaceable", PENDING),
+    ]
+    assert grants.status(BOX, str(other)) == STATIC
+    assert grants.live_paths(BOX) == [str(lib)]
+    assert grants.live_paths(BOX2) == []
+    # Again: what is live is held.
+    delivered = _call(grants.sync, BOX)
+    assert [(d.path, d.status) for d in delivered] == [("/opt/unplaceable", PENDING)]
+    assert len(world.spawned) == 1
+
+
+def test_a_project_default_is_no_delivery(tmp_path, home, world):
+    """Marking a directory a session holds live as a default of its
+    project spawns nothing and changes no box: defaults are a template
+    for new sessions, never a link to the running ones."""
+    lib = home / "work" / "lib"
+    ws = home / "work" / "repo"
+    host = sandboxplan.SandboxHost("com.example.App", world.state)
+    grants = world.grants(host)
+    grants.register(_plan(tmp_path, home, BOX))
+    grants.register(_plan(tmp_path, home, BOX2))
+    _allow(world, grants, BOX, lib)
+    before = (list(world.spawned), world.table.points(), dict(world.state.grants))
+    assert host.set_project_default(str(ws), str(lib), True) == ""
+    _settle(grants)
+    assert world.state.defaults == {str(ws): [str(lib)]}
+    assert (list(world.spawned), world.table.points(), dict(world.state.grants)) == before
+    assert grants.status(BOX, str(lib)) == LIVE
+    assert grants.status(BOX2, str(lib)) == PENDING
+    assert grants.delivery(BOX2, str(lib)) is None
+    # Nor does taking it back.
+    assert host.set_project_default(str(ws), str(lib), False) == ""
+    _settle(grants)
+    assert (list(world.spawned), world.table.points(), dict(world.state.grants)) == before
+    assert grants.status(BOX, str(lib)) == LIVE
+
+
 def test_a_box_that_holds_the_path_statically_is_skipped(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = str(home / "work" / "repo")
-    world.state.grants = {ws: [str(lib)]}
+    world.state.grants = {BOX: [str(lib)], BOX2: [str(lib)]}
     grants = world.grants()
     grants.register(_plan(tmp_path, home, BOX, grants=(lib,)))  # launched with it
-    grants.register(_plan(tmp_path, home, BOX2))  # launched before it was allowed
+    grants.register(_plan(tmp_path, home, BOX2))  # its plan was built before it was allowed
     _settle(grants)
     assert grants.status(BOX, str(lib)) == STATIC
     assert grants.status(BOX2, str(lib)) == LIVE
     assert grants.delivery(BOX, str(lib)) is None
     assert len(world.spawned) == 1
-    assert _call(grants.allow, ws, str(lib)) == []
+    assert _allow(world, grants, BOX, str(lib)) == []
     assert len(world.spawned) == 1
     assert os.listdir(tmp_path / "boxes" / BOX / "grants") == []
 
@@ -759,8 +876,7 @@ def test_a_box_that_holds_the_path_statically_is_skipped(tmp_path, home, world):
 def test_revoke(tmp_path, home, world):
     lib = home / "work" / "lib"
     other = home / "work" / "other"
-    ws = str(home / "work" / "repo")
-    world.state.grants = {ws: [str(lib), str(other)]}
+    world.state.grants = {BOX: [str(lib), str(other)]}
     grants = world.grants()
     grants.register(_plan(tmp_path, home, BOX, grants=(other,)))
     _settle(grants)
@@ -768,8 +884,8 @@ def test_revoke(tmp_path, home, world):
     assert grants.status(BOX, str(other)) == STATIC
     point = str(tmp_path / "boxes" / BOX / "grants" / _slot(lib))
     # Live: unmounted, the link gone, the mount point gone.
-    world.state.grants = {ws: [str(other)]}
-    assert _call(grants.revoke, ws, str(lib)) == []
+    world.state.grants = {BOX: [str(other)]}
+    assert _revoke(world, grants, BOX, str(lib)) == []
     assert world.ran == [[world.fusermount, "-u", "-z", point]]
     assert world.table.points() == []
     assert not os.path.exists(point)
@@ -779,14 +895,14 @@ def test_revoke(tmp_path, home, world):
     assert world.procs[0].signals == []  # it left by itself
     # Static: nothing can be done to the running box.
     world.state.grants = {}
-    assert _call(grants.revoke, ws, str(other)) == []
+    assert _revoke(world, grants, BOX, str(other)) == []
     assert grants.status(BOX, str(other)) == LEAVING
     assert len(world.ran) == 1
     # Revoking what was only pending forgets the reason.
     world.behaviour = "exits"
-    _call(grants.allow, ws, str(lib))
+    _allow(world, grants, BOX, str(lib))
     assert grants.delivery(BOX, str(lib)).status == PENDING
-    _call(grants.revoke, ws, str(lib))
+    _revoke(world, grants, BOX, str(lib))
     assert grants.delivery(BOX, str(lib)) is None
 
 
@@ -795,15 +911,14 @@ def test_revoke_ends_a_server_that_wont_leave(tmp_path, home, world):
     serving a file a process inside holds open. Ending the server is what
     cuts it: its own exit for a second, SIGTERM, two seconds, SIGKILL."""
     lib = home / "work" / "lib"
-    ws = str(home / "work" / "repo")
     grants = world.grants()
     grants.register(_plan(tmp_path, home))
-    _call(grants.allow, ws, str(lib))
+    _allow(world, grants, BOX, str(lib))
     proc = world.procs[0]
     proc.stubborn = True
     world.exits_on_unmount = False
     before = world.now
-    _call(grants.revoke, ws, str(lib))
+    _revoke(world, grants, BOX, str(lib))
     assert world.ran == [
         [world.fusermount, "-u", "-z", str(tmp_path / "boxes" / BOX / "grants" / _slot(lib))]
     ]
@@ -813,28 +928,32 @@ def test_revoke_ends_a_server_that_wont_leave(tmp_path, home, world):
     assert sandboxgrants.UNMOUNT_GRACE_S + sandboxgrants.TERM_GRACE_S <= waited < 3.5
     assert world.table.points() == []
     # One that answers SIGTERM is never killed.
-    _call(grants.allow, ws, str(lib))
+    _allow(world, grants, BOX, str(lib))
     polite = world.procs[1]
-    _call(grants.revoke, ws, str(lib))
+    _revoke(world, grants, BOX, str(lib))
     assert polite.signals == ["TERM"]
 
 
 def test_register_delivers_what_the_plan_lacks(tmp_path, home, world):
     lib = home / "work" / "lib"
     other = home / "work" / "other"
-    ws = str(home / "work" / "repo")
-    # A sibling on a plan derived earlier: launched with `other`, and `lib`
-    # was allowed since.
-    world.state.grants = {ws: [str(other), str(lib), "/opt/unplaceable"]}
+    # A plan whose box has a newer grant in the state: built with `other`,
+    # and the box was allowed `lib` before it came up. Another box's
+    # grants are none of its business.
+    world.state.grants = {
+        BOX: [str(other), str(lib), "/opt/unplaceable"],
+        BOX2: [str(other)],
+        BOX3: [str(home / "work" / "third")],
+    }
     grants = world.grants()
     delivered = _call(grants.register, _plan(tmp_path, home, grants=(other,)))
-    assert [(d.path, d.status) for d in delivered] == [
-        (str(lib), LIVE), ("/opt/unplaceable", PENDING),
+    assert [(d.box, d.path, d.status) for d in delivered] == [
+        (BOX, str(lib), LIVE), (BOX, "/opt/unplaceable", PENDING),
     ]
     assert grants.live_paths(BOX) == [str(lib)]
     # An ordinary launch has them all: nothing to deliver.
-    world.state.grants = {ws: [str(other)]}
     assert _call(grants.register, _plan(tmp_path, home, BOX2, grants=(other,))) == []
+    assert len(world.spawned) == 1
     # Nothing to register.
     grants.register(None)
     grants.register({})
@@ -842,8 +961,7 @@ def test_register_delivers_what_the_plan_lacks(tmp_path, home, world):
 
 def test_registering_again_unmounts_first(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = str(home / "work" / "repo")
-    world.state.grants = {ws: [str(lib)]}
+    world.state.grants = {BOX: [str(lib)]}
     grants = world.grants()
     _call(grants.register, _plan(tmp_path, home))
     point = str(tmp_path / "boxes" / BOX / "grants" / _slot(lib))
@@ -857,7 +975,7 @@ def test_registering_again_unmounts_first(tmp_path, home, world):
     assert grants.live_paths(BOX) == []
     assert not os.path.lexists(tmp_path / "boxes" / BOX / "home" / "work" / "lib")
     # …or one that still lacks it: unmounted, then mounted afresh.
-    world.state.grants = {ws: [str(lib), str(home / "work" / "other")]}
+    world.state.grants = {BOX: [str(lib), str(home / "work" / "other")]}
     _call(grants.register, _plan(tmp_path, home))
     _call(grants.register, _plan(tmp_path, home))
     assert len(world.table.points()) == 2
@@ -866,8 +984,7 @@ def test_registering_again_unmounts_first(tmp_path, home, world):
 
 def test_unregister_waits_until_nothing_is_mounted(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = str(home / "work" / "repo")
-    world.state.grants = {ws: [str(lib), "/mnt/data/x"]}
+    world.state.grants = {BOX: [str(lib), "/mnt/data/x"]}
     grants = world.grants()
     _call(grants.register, _plan(tmp_path, home))
     assert len(world.table.points()) == 2
@@ -890,7 +1007,7 @@ def test_unregister_waits_until_nothing_is_mounted(tmp_path, home, world):
     grants.unregister(BOX, done=lambda gone: seen.append(threading.current_thread().name))
     assert seen == [threading.current_thread().name]
     # What is allowed afterwards has no box to reach.
-    assert _call(grants.allow, ws, str(home / "work" / "other")) == []
+    assert _allow(world, grants, BOX, str(home / "work" / "other")) == []
 
 
 def test_a_wait_that_runs_out_says_so(tmp_path, home, world, monkeypatch):
@@ -909,8 +1026,7 @@ def test_a_wait_that_runs_out_says_so(tmp_path, home, world, monkeypatch):
 
 def test_shutdown_unmounts_everything_and_stops_the_thread(tmp_path, home, world):
     lib = home / "work" / "lib"
-    ws = str(home / "work" / "repo")
-    world.state.grants = {ws: [str(lib)]}
+    world.state.grants = {BOX: [str(lib)], BOX2: [str(lib)]}
     grants = world.grants()
     _call(grants.register, _plan(tmp_path, home, BOX))
     _call(grants.register, _plan(tmp_path, home, BOX2))
@@ -919,7 +1035,8 @@ def test_shutdown_unmounts_everything_and_stops_the_thread(tmp_path, home, world
     assert world.table.points() == []
     assert not grants._thread.is_alive()
     # After it, everything answers at once and mounts nothing.
-    assert _calls_back(grants.allow, ws, str(lib)) == []
+    assert _calls_back(grants.allow, BOX, str(lib)) == []
+    assert _calls_back(grants.sync, BOX) == []
     grants.register(_plan(tmp_path, home, BOX3))
     grants.unregister(BOX3, wait=True)
     grants.shutdown()
@@ -934,13 +1051,13 @@ def _calls_back(method, *args):
 
 
 def test_every_spawn_happens_on_the_one_thread(tmp_path, home, world):
-    ws = str(home / "work" / "repo")
-    world.state.grants = {ws: [str(home / "work" / "lib")]}
+    dirs = [str(home / "work" / f"dir{n}") for n in range(6)]
+    world.state.grants = {BOX: [str(home / "work" / "lib"), *dirs], BOX2: dirs[:1], BOX3: dirs[:1]}
     grants = world.grants()
     grants.register(_plan(tmp_path, home, BOX))
 
     def from_elsewhere(n):
-        grants.allow(ws, str(home / "work" / f"dir{n}"))
+        grants.allow(BOX, dirs[n])
         grants.register(_plan(tmp_path, home, BOX2 if n % 2 else BOX3))
 
     threads = [threading.Thread(target=from_elsewhere, args=(n,)) for n in range(6)]
@@ -962,7 +1079,7 @@ def test_a_failing_job_doesnt_stop_the_worker(tmp_path, home, world):
         raise RuntimeError("boom")
 
     assert _call(lambda done: grants._submit(broken, done)) == []
-    (delivery,) = _call(grants.allow, str(home / "work" / "repo"), str(home / "work" / "lib"))
+    (delivery,) = _allow(world, grants, BOX, str(home / "work" / "lib"))
     assert delivery.status == LIVE
 
 
@@ -1013,23 +1130,29 @@ def test_plan_stale_counts_what_is_live(monkeypatch, tmp_path, home):
     ws = home / "work" / "repo"
     lib = home / "work" / "lib"
     other = home / "work" / "other"
-    state = _State({str(ws): [str(other)]})
+    state = _State({BOX: [str(other)]})
     host = _real_host(monkeypatch, tmp_path, home, state)
     path = host.prepare_launch(str(ws), BOX)
     assert path is not None
     assert host.plan_stale(path, str(ws)) is False
     # A grant in the state that is live in the box is held: not stale.
-    assert host.allow(str(ws), str(lib)) == ""
+    assert host.allow(BOX, str(ws), str(lib)) == ""
     assert host.plan_stale(path, str(ws)) is True  # pending: it waits for the restart
     assert host.plan_stale(path, str(ws), live=[str(lib)]) is False
     assert host.plan_stale(path, str(ws), live=(str(lib) + "/",)) is False
     # One that is pending is.
     assert host.plan_stale(path, str(ws), live=[]) is True
     # A static one taken back is leaving: stale, live or not.
-    host.revoke(str(ws), str(other))
+    host.revoke(BOX, str(other))
     assert host.plan_stale(path, str(ws), live=[str(lib)]) is True
-    assert host.allow(str(ws), str(other)) == ""
+    assert host.allow(BOX, str(ws), str(other)) == ""
     assert host.plan_stale(path, str(ws), live=[str(lib)]) is False  # the order is not the box
+    # What another session of the same workspace is allowed is none of
+    # this box's business: the box is read off the launched plan.
+    assert host.allow(BOX2, str(ws), str(home / "work" / "third")) != ""  # not a directory
+    (home / "work" / "third").mkdir()
+    assert host.allow(BOX2, str(ws), str(home / "work" / "third")) == ""
+    assert host.plan_stale(path, str(ws), live=[str(lib)]) is False
     # A share flipped is stale whatever the grants say.
     state.get_setting = lambda key: key == "sandbox_share_gh"
     assert host.plan_stale(path, str(ws), live=[str(lib)]) is True
@@ -1089,24 +1212,25 @@ done
 
 class _RealBox:
     """A real bubblewrap box on a real plan, running a loop that takes
-    commands through its workspace."""
+    commands through a directory of its own in the workspace — which it
+    may share with another box: two sessions of one project."""
 
     def __init__(self, root, home, name, box):
         self.box = box
-        self.ws = home / "work" / name
+        self.workspace = home / "work" / "shared"
+        self.ws = self.workspace / f"loop-{name}"
         self.ws.mkdir(parents=True)
         for made in ("home", "grants", "anchors/mnt"):
             (root / box / made).mkdir(parents=True)
         self.plan = sandboxplan.build_plan(
             sandboxplan.Inputs(
-                workspace=str(self.ws),
+                workspace=str(self.workspace),
                 home=str(home),
                 sandbox_home=str(root / box / "home"),
                 box=box,
                 sandbox_root=str(root),
                 carrier=str(root / box / "grants"),
                 anchors=((str(root / box / "anchors" / "mnt"), "/mnt"),),
-                grants_key=str(self.ws),
                 protected=(),
             )
         )
@@ -1157,10 +1281,11 @@ class _RealBox:
 
 
 def test_a_real_grant_reaches_a_real_box_and_only_that_box(tmp_path, monkeypatch, capsys):
-    """Real bubblewrap, real bindfs, real fusermount3: a directory allowed
-    while two boxes run is readable and writable at its real path inside
-    the one it was allowed for, absent from the other, and gone again on
-    revoke. Skips where the machine can't (no box, no FUSE)."""
+    """Real bubblewrap, real bindfs, real fusermount3: two sessions of
+    **one workspace**, each in its box; a directory allowed to one while
+    both run is readable and writable at its real path inside that one,
+    absent from the other, and gone again on revoke. Skips where the
+    machine can't (no box, no FUSE)."""
     monkeypatch.delenv("COLLINS_BWRAP", raising=False)
     monkeypatch.delenv("COLLINS_BINDFS", raising=False)
     monkeypatch.delenv("COLLINS_FUSERMOUNT", raising=False)
@@ -1191,14 +1316,19 @@ def test_a_real_grant_reaches_a_real_box_and_only_that_box(tmp_path, monkeypatch
     try:
         one = _RealBox(root, home, "alpha", BOX)
         two = _RealBox(root, home, "beta", BOX2)
+        assert one.workspace == two.workspace
+        assert one.plan["workspace"] == two.plan["workspace"]
         grants.register(one.plan)
         grants.register(two.plan)
+        _settle(grants)
         path = str(granted)
         read = f'cat "{path}/hello.txt" 2>/dev/null || echo MISSING'
         assert one.run(read) == "MISSING"
-        state.grants = {str(one.ws): [path]}
+        assert two.run(f'test -d "{one.ws}" && echo same-workspace') == "same-workspace"
+        assert host.allow(BOX, str(one.workspace), path) == ""
+        assert state.grants == {BOX: [path]}
         started = time.monotonic()
-        delivered = _call(grants.allow, str(one.ws), path)
+        delivered = _call(grants.allow, BOX, path)
         mounted = time.monotonic() - started
         assert [(d.box, d.status, d.linked, d.reason) for d in delivered] == [
             (BOX, LIVE, True, "")
@@ -1220,6 +1350,7 @@ def test_a_real_grant_reaches_a_real_box_and_only_that_box(tmp_path, monkeypatch
         assert two.run(f"ls -A {CARRIER} | wc -l") == "0"
         assert two.run(f'test -e "{path}" && echo there || echo absent') == "absent"
         assert grants.status(BOX2, path) == PENDING and grants.live_paths(BOX2) == []
+        assert grants.delivery(BOX2, path) is None and host.grants(BOX2) == []
         # The host's own view: one bindfs mount, this process's, in the carrier.
         mine = [
             m for m in sandboxgrants.parse_mountinfo(sandboxgrants.read_mountinfo())
@@ -1233,9 +1364,10 @@ def test_a_real_grant_reaches_a_real_box_and_only_that_box(tmp_path, monkeypatch
         assert sorted(str(p) for p in (root / BOX / "home").rglob("*")) == everything
         assert (granted / "hello.txt").read_text() == "from the host\n"
         # Revoked: gone inside, the server gone, nothing left mounted.
-        state.grants = {}
+        host.revoke(BOX, path)
+        assert state.grants == {}
         started = time.monotonic()
-        _call(grants.revoke, str(one.ws), path)
+        _call(grants.revoke, BOX, path)
         took = time.monotonic() - started
         gone = one.wait_for(read, "MISSING", seconds=2.0)
         assert gone is not None, "the grant never left the running box"

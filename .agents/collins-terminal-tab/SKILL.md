@@ -32,8 +32,10 @@ A **sandboxed** launch (`SessionOptions.sandbox`) types
 *Restart to apply*, `restart_sandboxed`) writes the plan through
 `terminal.SANDBOX_HOST.prepare_launch(cwd, box)` at the last moment (the
 workspace is the settled cwd, a recreated worktree included; the box is
-the one the options name — a resumed session's — else the one this tab
-already launched in, else freshly minted) — or adopts the plan and box
+the one the options name — a resumed session's, a fork's — else the one
+this tab already launched in, else minted by `SANDBOX_HOST.mint_box(cwd)`,
+seeded with the project's default grants unless this is a `--continue`
+launch, whose box is settled when it resolves) — or adopts the plan and box
 the options already carry (a sibling's derived ones) — `Provider.
 sandbox_prefix` prepends the wrapper (and the tab appends
 `provider.session_flags` — the permission mode — behind a `--continue`
@@ -45,8 +47,9 @@ the grants' worker and calls `then` when it is (the restart's relaunch,
 main loop never waits for an unmount), `_release_sandbox_plan`
 unlinks the plan and releases the
 box's lease (before a restart's rebuild and in `_on_child_exited`, which
-also asks for the box to be discarded — a no-op for one a session
-names), `tab.sandboxed` is what
+also asks for the box to be forgotten, on the main loop — a no-op for
+one a session names, and otherwise the end of the box and of the grants
+recorded for it), `tab.sandboxed` is what
 the `/bg` and attach guards read, `tab.sandbox_plan_path` what the
 footer's `sandboxchip.SandboxChip` and a sandboxed `PanelTerminal` read,
 and `tab.sandbox_box` what the window records against the session id on

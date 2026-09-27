@@ -453,6 +453,36 @@ def _sandboxed_sessions(raw: object) -> dict[str, str]:
     return {}
 
 
+def _sandbox_grants(raw: object) -> dict[str, list[str]]:
+    """The box → grants map out of state.json: an object whose keys are box
+    ids and whose values are lists of absolute paths. An entry keyed by
+    anything else is dropped — a path, which is what a build from before
+    grants were a session's own wrote, is nobody's default — and so is one
+    left with no path in it."""
+    if not isinstance(raw, dict):
+        return {}
+    grants = {
+        box: [path for path in paths if isinstance(path, str) and path.startswith("/")]
+        for box, paths in raw.items()
+        if _valid_box_id(box) and isinstance(paths, list)
+    }
+    return {box: paths for box, paths in grants.items() if paths}
+
+
+def _sandbox_project_grants(raw: object) -> dict[str, list[str]]:
+    """The project → default grants map out of state.json: keys that are
+    absolute paths, values that are lists of absolute paths. Anything else
+    is dropped, and so is an entry left with nothing in it."""
+    if not isinstance(raw, dict):
+        return {}
+    grants = {
+        key: [path for path in paths if isinstance(path, str) and path.startswith("/")]
+        for key, paths in raw.items()
+        if isinstance(key, str) and key.startswith("/") and isinstance(paths, list)
+    }
+    return {key: paths for key, paths in grants.items() if paths}
+
+
 def editor_pops_out(monitor_width: int, limit: int) -> bool:
     """Whether the editor should open popped out rather than docked: true on
     monitors at most `limit` scaled px wide (the pop-out threshold setting;
@@ -492,12 +522,21 @@ class AppState:
         # MainWindow.open_session). Recorded when a sandboxed launch resolves
         # its id; a forward (/bg fork) carries it to the new id.
         self.sandboxed_sessions: dict[str, str] = {}
-        # project (sandboxplan.grants_key: a real path, a worktree's
-        # repository) -> the directories a sandboxed session there may also
-        # reach, read-write, beyond the workspace itself.
-        # Every entry is re-checked against sandboxplan.guard_sensitive
-        # when a plan is built: state.json is a file on disk like any other.
+        # box id -> the directories that box's session may also reach,
+        # read-write, beyond its workspace. A grant is one session's: it is
+        # keyed by the session's box (the one identity a session has before
+        # the CLI has minted its id), never by a workspace or a project, and
+        # it leaves the state with its box (SandboxHost.forget_box).
+        # Written on the main loop only. Every entry is re-checked against
+        # sandboxplan.guard_sensitive when a plan is built: state.json is a
+        # file on disk like any other.
         self.sandbox_grants: dict[str, list[str]] = {}
+        # project (sandboxplan.project_key: a real path, a worktree's
+        # repository) -> the directories a *new* session of it starts
+        # allowed. A template, copied into a box's list once when the box
+        # is minted (SandboxHost.mint_box) and never a live link: changing
+        # it changes no session that exists.
+        self.sandbox_project_grants: dict[str, list[str]] = {}
         self.project_order: list[str] = []  # user-arranged sidebar order, by project name
         # Projects kept in the sidebar after their last session went away
         # (project name -> working directory, "" when it was never known), so
@@ -597,12 +636,10 @@ class AppState:
             k: v for k, v in (data.get("project_sandbox") or {}).items() if isinstance(v, bool)
         }
         self.sandboxed_sessions = _sandboxed_sessions(data.get("sandboxed_sessions"))
-        self.sandbox_grants = {
-            k: [g for g in v if isinstance(g, str) and g.startswith("/")]
-            for k, v in (data.get("sandbox_grants") or {}).items()
-            if isinstance(k, str) and isinstance(v, list)
-        }
-        self.sandbox_grants = {k: v for k, v in self.sandbox_grants.items() if v}
+        self.sandbox_grants = _sandbox_grants(data.get("sandbox_grants"))
+        self.sandbox_project_grants = _sandbox_project_grants(
+            data.get("sandbox_project_grants")
+        )
         self.project_order = list(data.get("project_order") or [])
         self.virtual_projects = {
             k: v for k, v in (data.get("virtual_projects") or {}).items() if isinstance(v, str)
@@ -687,6 +724,7 @@ class AppState:
             "project_sandbox": self.project_sandbox,
             "sandboxed_sessions": dict(sorted(self.sandboxed_sessions.items())),
             "sandbox_grants": self.sandbox_grants,  # order is the payload — never sort
+            "sandbox_project_grants": self.sandbox_project_grants,  # likewise
             "project_order": self.project_order,  # order is the payload — never sort
             "virtual_projects": self.virtual_projects,
             "expanded_groups": sorted(self.expanded_groups),
@@ -906,27 +944,54 @@ class AppState:
         Read from the sweep's thread too, so off a snapshot."""
         return {box for box in list(self.sandboxed_sessions.values()) if box}
 
-    def get_sandbox_grants(self, workspace: str) -> list[str]:
-        """The directories granted to sandboxed sessions of the project
-        *workspace* (sandboxplan.grants_key), in the order they were
-        allowed."""
-        return list(self.sandbox_grants.get(workspace) or [])
+    def get_sandbox_grants(self, box: str) -> list[str]:
+        """The directories granted to the session whose box is *box*, in
+        the order they were allowed. Read from the live grants' thread too,
+        so off a copy."""
+        return list(self.sandbox_grants.get(box) or [])
 
-    def set_sandbox_grants(self, workspace: str, grants: list[str]) -> None:
-        """Persist a project's grants; an empty list drops the key. The
-        guard against granting a secret is sandboxplan.guard_sensitive,
-        applied by the surface that asks — and again when a plan is built."""
-        if not workspace:
+    def set_sandbox_grants(self, box: str, grants: list[str]) -> None:
+        """Persist a box's grants; an empty list drops the key, and
+        anything that is not a box id is no key at all. The guard against
+        granting a secret is sandboxplan.guard_sensitive, applied by the
+        surface that asks — and again when a plan is built. Main loop
+        only."""
+        if not _valid_box_id(box):
             return
         clean = [g for g in grants if isinstance(g, str) and g.startswith("/")]
         if clean:
-            if self.sandbox_grants.get(workspace) == clean:
+            if self.sandbox_grants.get(box) == clean:
                 return
-            self.sandbox_grants[workspace] = clean
+            self.sandbox_grants[box] = clean
         else:
-            if workspace not in self.sandbox_grants:
+            if box not in self.sandbox_grants:
                 return
-            del self.sandbox_grants[workspace]
+            del self.sandbox_grants[box]
+        self.save()
+
+    def sandbox_grant_boxes(self) -> set[str]:
+        """Every box that has grants recorded."""
+        return set(self.sandbox_grants)
+
+    def get_sandbox_project_grants(self, key: str) -> list[str]:
+        """The default grants of the project *key* (sandboxplan.
+        project_key), in the order they were made defaults."""
+        return list(self.sandbox_project_grants.get(key) or [])
+
+    def set_sandbox_project_grants(self, key: str, grants: list[str]) -> None:
+        """Persist a project's default grants; an empty list drops the
+        key. One write, none when nothing changes. Main loop only."""
+        if not isinstance(key, str) or not key.startswith("/"):
+            return
+        clean = [g for g in grants if isinstance(g, str) and g.startswith("/")]
+        if clean:
+            if self.sandbox_project_grants.get(key) == clean:
+                return
+            self.sandbox_project_grants[key] = clean
+        else:
+            if key not in self.sandbox_project_grants:
+                return
+            del self.sandbox_project_grants[key]
         self.save()
 
     # -- virtual projects --------------------------------------------------

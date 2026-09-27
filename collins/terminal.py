@@ -1433,6 +1433,10 @@ class TerminalTab(Gtk.Box):
         # session's own $HOME): the one the options named, else minted at
         # the first launch and kept across this tab's restarts.
         self._sandbox_box: str = ""
+        # Whether that box was minted with no grants because the tab could
+        # not know whose it would be (a --continue launch): the window
+        # settles what it starts with when the session resolves.
+        self._sandbox_defaults_owed = False
         # Decided at spawn time, so a toggle mid-session can't half-apply to
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
@@ -1950,6 +1954,13 @@ class TerminalTab(Gtk.Box):
         records against the session id once the resolver binds it."""
         return self._sandbox_box
 
+    def take_sandbox_defaults_owed(self) -> bool:
+        """Whether this tab's box is still owed its first grants — it was
+        minted for a --continue launch, with none — and no longer after
+        this call: the window asks once, when the session resolves."""
+        owed, self._sandbox_defaults_owed = self._sandbox_defaults_owed, False
+        return owed
+
     def new_chat_text(self) -> str:
         return self._new_chat.text() if self._new_chat is not None else ""
 
@@ -2407,8 +2418,15 @@ class TerminalTab(Gtk.Box):
                 SANDBOX_HOST.release(options.sandbox_box)
         self._release_sandbox_plan()
         # The session's own box, else the one this tab already launched in
-        # (a restart keeps the home), else a fresh one.
-        box = options.sandbox_box or self._sandbox_box or sandboxplan.new_box_id()
+        # (a restart keeps the home), else a fresh one — which starts with
+        # its project's default grants, unless this is a --continue tab:
+        # that one can't know which session it will land on, and takes
+        # its grants when it resolves (MainWindow._on_session_resolved).
+        box = options.sandbox_box or self._sandbox_box
+        if not box and SANDBOX_HOST is not None:
+            seeded = self._command_override is None
+            box = SANDBOX_HOST.mint_box(cwd, seed=seeded)
+            self._sandbox_defaults_owed = not seeded
         plan = SANDBOX_HOST.prepare_launch(cwd, box) if SANDBOX_HOST is not None else None
         if plan:
             self._sandbox_plan_path = plan
@@ -2417,9 +2435,11 @@ class TerminalTab(Gtk.Box):
             self._register_sandbox_box()
             return replace(options, sandbox_plan=plan, sandbox_box=box)
         if SANDBOX_HOST is not None:
-            # Whatever the attempt left on disk, unless a session names it.
-            SANDBOX_HOST.discard_box_async(box)
+            # Whatever the attempt left, on disk and of grants, unless a
+            # session names the box.
+            SANDBOX_HOST.forget_box(box)
         self._sandbox_box = ""
+        self._sandbox_defaults_owed = False
         self.feed_message(
             _("warning: no sandbox could be built here — starting the session unsandboxed")
         )
@@ -2430,11 +2450,10 @@ class TerminalTab(Gtk.Box):
 
     def _register_sandbox_box(self) -> None:
         """Tell the live grants this tab's box is up on the plan just
-        settled: what the project was granted since the plan was built
-        reaches it (a sibling on a plan derived earlier), and what is
-        granted from here on does. The registration lasts as long as the
-        plan path — past the CLI's exit, while the tab's shell lives — since
-        a sandboxed panel shell binds the same home and carrier."""
+        settled, so what this session is allowed from here on reaches it
+        while it runs. The registration lasts as long as the plan path —
+        past the CLI's exit, while the tab's shell lives — since a
+        sandboxed panel shell binds the same home and carrier."""
         if SANDBOX_GRANTS is not None:
             SANDBOX_GRANTS.register(sandboxplan.load_plan(self._sandbox_plan_path))
 
@@ -2475,18 +2494,23 @@ class TerminalTab(Gtk.Box):
         sandboxplan.release_plan(self._sandbox_plan_path)
         self._sandbox_plan_path = None
 
-        def gone() -> None:
-            if host is None or not box:
-                return
-            if held:
-                host.release(box)
-            # Nothing happens to a box a session names. This removes the
-            # box of a launch that never produced a transcript, and of a
-            # fork whose id never resolved — once nothing is mounted in
-            # it: a box with a mount under it is never removed.
-            host.discard_box_async(box)
+        def gone() -> bool:
+            if host is not None and box:
+                if held:
+                    host.release(box)
+                # Nothing happens to a box a session names. This forgets
+                # the box of a launch that never produced a transcript,
+                # and of a fork whose id never resolved — its grants with
+                # it — once nothing is mounted in it: a box with a mount
+                # under it is never removed.
+                host.forget_box(box)
+            return GLib.SOURCE_REMOVE
 
-        self._unregister_sandbox_box(gone)
+        # On the main loop, where the state is written: the grants' worker
+        # only says when.
+        self._unregister_sandbox_box(
+            lambda: GLib.idle_add(gone, priority=GLib.PRIORITY_DEFAULT)
+        )
         self.emit("process-exited", status)
 
     # -- copy & paste ------------------------------------------------------

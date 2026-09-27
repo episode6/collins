@@ -1,18 +1,23 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """The footer's *Sandboxed* chip: what a sandboxed session's box holds, the
-workspace's allowed directories, and the restart that applies a change.
+directories this session is allowed, and the restart that applies a change.
 
 A `Gtk.MenuButton` built like the model chip beside it (a popover opening
 upwards from the footer), showing the plan the session was *launched*
 with — read back from the plan file (sandboxplan.load_plan), never
 re-derived: the workspace, whether the GitHub CLI login and the SSH agent
 were shared in, whether `~/.claude/settings.json` is protected. Under
-that, the grants recorded for this project (sandboxplan.SandboxHost):
-each with a remove button, and *Allow a directory…* through the file
+that, two lists. The grants of **this session** (sandboxplan.SandboxHost,
+by the session's box — a directory is allowed to one session and no
+other): each with a remove button and a pin that makes it a default of
+the project, and *Allow a directory…* through the file
 chooser, held to the same guard a launch applies (a secret, an ancestor
 of one, `$HOME`, `/`, Collins' own state — refused, with the reason in a
-toast). A grant lands in state.json and, where the machine can do it, is
+toast). And the **project's defaults**: what a *new* session of the
+project starts allowed — a template copied into a session's list when
+its box is minted, so marking or removing one changes no session that
+exists, this one included. A grant lands in state.json and, where the machine can do it, is
 mounted into the running box at once (sandboxgrants.GrantMounts): its row
 says *live*. One that couldn't be says *after restart*, and one the
 launched plan binds that has since been taken back says *until restart*;
@@ -44,6 +49,10 @@ from .i18n import _  # noqa: E402
 # The shield glyph: the chip, and the tab icon of a sandboxed panel shell.
 # A filled path in data/icons/hicolor/scalable/actions/.
 ICON = "sandbox-shield-symbolic"
+
+# The pin on a session's row: the directory is a default of the project.
+# From the icon theme (adwaita-icon-theme ships it), like list-remove.
+PIN_ICON = "view-pin-symbolic"
 
 _CHIP_ICON_PX = 12
 
@@ -142,11 +151,12 @@ class SandboxChip(Gtk.MenuButton):
         heading = Gtk.Label(label=_("Allowed directories"), xalign=0.0)
         heading.add_css_class("caption-heading")
         self._content.append(heading)
+        self._content.append(_caption(_("For this session only")))
         host = self._host()
         mounts = self._live_grants()
         box = self._box()
         launched = list(inputs.get("grants", []))
-        grants = host.grants(workspace) if host is not None else list(launched)
+        grants = host.grants(box) if host is not None else list(launched)
         # The state's grants, then the ones the launched plan binds that
         # have been taken back since — drawn only where a grant can arrive
         # live, since only there does the difference show.
@@ -163,6 +173,18 @@ class SandboxChip(Gtk.MenuButton):
         allow.set_sensitive(host is not None)
         allow.connect("clicked", lambda *_a: self._pick_directory(workspace))
         self._content.append(allow)
+
+        # What a new session of the project starts allowed. Nothing here
+        # touches the list above, or any session that exists.
+        self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
+        heading = Gtk.Label(label=_("New sessions of this project"), xalign=0.0)
+        heading.add_css_class("caption-heading")
+        self._content.append(heading)
+        defaults = host.project_grants(workspace) if host is not None else []
+        if not defaults:
+            self._content.append(_caption(_("None")))
+        for path in defaults:
+            self._content.append(self._default_row(workspace, path))
 
         self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
         # What is mounted into the running box counts as held, whether or
@@ -237,25 +259,79 @@ class SandboxChip(Gtk.MenuButton):
             label.add_css_class("dim-label")
             row.append(_caption(_("until restart")))
             return row
+        row.append(self._pin(workspace, grant))
         remove = Gtk.Button.new_from_icon_name("list-remove-symbolic")
         remove.add_css_class("flat")
         remove.set_valign(Gtk.Align.CENTER)
         remove.set_tooltip_text(_("Stop allowing this directory"))
-        remove.connect("clicked", lambda *_a: self._revoke(workspace, grant))
+        remove.connect("clicked", lambda *_a: self._revoke(grant))
+        row.append(remove)
+        return row
+
+    def _pin(self, workspace: str, grant: str) -> Gtk.ToggleButton:
+        """The toggle that makes a directory this session holds a default
+        of its project: what new sessions start allowed."""
+        host = self._host()
+        pinned = host is not None and host.is_project_default(workspace, grant)
+        pin = Gtk.ToggleButton(icon_name=PIN_ICON, active=pinned)
+        pin.add_css_class("flat")
+        pin.set_valign(Gtk.Align.CENTER)
+        pin.set_sensitive(host is not None)
+        pin.set_tooltip_text(
+            _("Allowed in new sessions of this project")
+            if pinned
+            else _("Allow in new sessions of this project")
+        )
+        pin.connect("toggled", self._on_pin_toggled, workspace, grant)
+        return pin
+
+    def _default_row(self, workspace: str, path: str) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        label = _path_label(path)
+        label.set_hexpand(True)
+        row.append(label)
+        remove = Gtk.Button.new_from_icon_name("list-remove-symbolic")
+        remove.add_css_class("flat")
+        remove.set_valign(Gtk.Align.CENTER)
+        remove.set_tooltip_text(_("Stop allowing this directory in new sessions"))
+        remove.connect("clicked", lambda *_a: self.set_project_default(workspace, path, False))
         row.append(remove)
         return row
 
     # -- actions ---------------------------------------------------------------
 
-    def _revoke(self, workspace: str, grant: str) -> None:
+    def _on_pin_toggled(self, pin: Gtk.ToggleButton, workspace: str, grant: str) -> None:
+        self.set_project_default(workspace, grant, pin.get_active())
+
+    def set_project_default(self, workspace: str, path: str, on: bool) -> bool:
+        """Make *path* a default of this session's project, or stop it
+        being one; whether the list says so now. A refusal is a toast. The
+        session's own list, and every other session's, is left as it is."""
+        host = self._host()
+        if host is None:
+            return False
+        reason = host.set_project_default(workspace, path, on)
+        if reason:
+            self._on_toast(
+                _("Can't make {path} a default: {reason}").format(
+                    path=display_path(path), reason=reason
+                )
+            )
+        # Drawn again either way: the pin goes back after a refusal, and
+        # the list below follows the toggle.
+        self._refresh()
+        return not reason
+
+    def _revoke(self, grant: str) -> None:
+        box = self._box()
         host = self._host()
         if host is not None:
-            host.revoke(workspace, grant)
+            host.revoke(box, grant)
         mounts = self._grants()
         if mounts is not None:
             # Out of the running box, where it arrived live; the rows are
             # drawn again once it has gone.
-            mounts.revoke(workspace, grant, lambda _gone: self._land(self._refresh))
+            mounts.revoke(box, grant, lambda _gone: self._land(self._refresh))
         self._rebuild()
 
     def _land(self, call, *args) -> None:
@@ -294,13 +370,14 @@ class SandboxChip(Gtk.MenuButton):
             self.allow_directory(workspace, path)
 
     def allow_directory(self, workspace: str, path: str) -> None:
-        """Grant *path* to this session's project and say what became of
-        it: the guard's refusal, or — once the live grants have tried it in
-        every running box of the project — where it stands in this one."""
+        """Grant *path* to this session — its box, and no other — and say
+        what became of it: the guard's refusal, or, once the live grants
+        have tried it in the running box, where it stands there."""
         host = self._host()
         if host is None:
             return
-        reason = host.allow(workspace, path)
+        box = self._box()
+        reason = host.allow(box, workspace, path)
         shown = display_path(path)
         if reason:
             self._on_toast(_("Can't allow {path}: {reason}").format(path=shown, reason=reason))
@@ -313,14 +390,13 @@ class SandboxChip(Gtk.MenuButton):
             return
         path = os.path.normpath(path)
         mounts.allow(
-            workspace, path, lambda delivered: self._land(self._on_delivered, path, delivered)
+            box, path, lambda delivered: self._land(self._on_delivered, box, path, delivered)
         )
         self._refresh()
 
-    def _on_delivered(self, path: str, delivered: list) -> None:
-        """The live grants tried *path* in every box of the project: one
-        toast, by what became of it in this session's own."""
-        box = self._box()
+    def _on_delivered(self, box: str, path: str, delivered: list) -> None:
+        """The live grants tried *path* in this session's box: one toast,
+        by what became of it there."""
         mounts = self._grants()
         own = next((d for d in delivered if d.box == box), None)
         if own is None and mounts is not None:

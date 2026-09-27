@@ -28,6 +28,7 @@ home never touch the real one.
 """
 
 import atexit
+import json
 import os
 import shutil
 import signal
@@ -104,19 +105,56 @@ TRUSTED = f"{E2E}/dev/alpha"
 SUB = f"{TRUSTED}/sub"
 OTHER = f"{E2E}/dev/lib"
 LIVE = f"{HOME}/dev/live"  # under $HOME: what a live grant can link at its real path
+EXTRA = f"{E2E}/dev/extra"  # allowed to one session, then pinned as a project default
+PINNED = f"{E2E}/dev/pinned"  # a project default the first session never held
 SHIM = f"{E2E}/bin/claude"
 FAKE_BWRAP = os.environ["COLLINS_BWRAP"]
 FAKE_LOG = os.environ["SANDBOX_FAKE_LOG"]
 
-for path in (f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", HOME, SUB, OTHER, LIVE, f"{HOME}/.ssh"):
+# A session from an earlier run, sandboxed, with a box and a directory of
+# its own: what a fork is taken from.
+ORIGIN = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+ORIGIN_BOX = "0123456789abcdef0123456789abcdef"
+# What a build from before grants were a session's wrote, keyed by a path:
+# dropped on load, and nobody's default.
+STALE_KEY = TRUSTED
+_PROJECT = f"{E2E}/projects/" + "".join(c if c.isalnum() else "-" for c in TRUSTED)
+
+for path in (
+    f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", HOME, SUB, OTHER, LIVE, EXTRA, PINNED,
+    f"{HOME}/.ssh", _PROJECT,
+):
     os.makedirs(path, exist_ok=True)
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
+with open(f"{_PROJECT}/{ORIGIN}.jsonl", "w", encoding="utf-8") as fh:
+    fh.write(
+        json.dumps(
+            {
+                "type": "user",
+                "uuid": "u1",
+                "timestamp": "2026-09-05T09:00:00Z",
+                "cwd": TRUSTED,
+                "sessionId": ORIGIN,
+                "message": {"role": "user", "content": "An earlier sandboxed session"},
+            }
+        )
+        + "\n"
+    )
 os.makedirs(f"{E2E}/config/collins", exist_ok=True)
 with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
-    fh.write(
-        '{"settings": {"welcome_seen": true, "gh_welcome_dismissed": true, '
-        '"title_model": "none", "sandbox_new_sessions": true}}'
+    json.dump(
+        {
+            "settings": {
+                "welcome_seen": True,
+                "gh_welcome_dismissed": True,
+                "title_model": "none",
+                "sandbox_new_sessions": True,
+            },
+            "sandboxed_sessions": {ORIGIN: ORIGIN_BOX},
+            "sandbox_grants": {ORIGIN_BOX: [OTHER], STALE_KEY: [PINNED]},
+        },
+        fh,
     )
 
 # The CLI stand-in: draws the idle prompt, holds the terminal, and leaves on
@@ -395,15 +433,24 @@ def grants() -> bool:
     )
     check("the session's box is registered with them", mounts.registered(caller.sandbox_box))
     plan_path = caller.sandbox_plan_path
+    box = caller.sandbox_box
     check("the launched plan is not stale yet", not host.plan_stale(plan_path, TRUSTED))
-    reason = host.allow(TRUSTED, f"{HOME}/.ssh")
+    # What a build wrote while grants were keyed by a path is nobody's.
+    check(
+        "a grants entry keyed by a path was dropped on load",
+        win_state().sandbox_grants == {ORIGIN_BOX: [OTHER]},
+        win_state().sandbox_grants,
+    )
+    check("…and is no project's default", host.project_grants(TRUSTED) == [], host.project_grants(TRUSTED))
+    check("a new session starts with no grants", host.grants(box) == [], host.grants(box))
+    reason = host.allow(box, TRUSTED, f"{HOME}/.ssh")
     check("a secret is refused by the guard", "reaches" in reason and ".ssh" in reason, reason)
-    check("the home itself is refused", host.allow(TRUSTED, HOME) == "the home directory itself")
-    reason = host.allow(TRUSTED, SUB)
+    check("the home itself is refused", host.allow(box, TRUSTED, HOME) == "the home directory itself")
+    reason = host.allow(box, TRUSTED, SUB)
     check("a subdirectory of the workspace is redundant", reason == "already inside the workspace", reason)
-    check("a plain directory is allowed", host.allow(TRUSTED, OTHER) == "")
-    check("…recorded for the workspace", host.grants(TRUSTED) == [OTHER], host.grants(TRUSTED))
-    check("…and in state.json", AppState().get_sandbox_grants(os.path.realpath(TRUSTED)) == [OTHER])
+    check("a plain directory is allowed", host.allow(box, TRUSTED, OTHER) == "")
+    check("…recorded for the session's box", host.grants(box) == [OTHER], host.grants(box))
+    check("…and in state.json", AppState().get_sandbox_grants(box) == [OTHER])
     check("the launched plan is stale now", host.plan_stale(plan_path, TRUSTED))
     chip = caller._sandbox_chip
     chip._rebuild()
@@ -411,6 +458,9 @@ def grants() -> bool:
     check("the chip lists the workspace", any(TRUSTED.split("/")[-1] in t for t in texts), texts)
     listed = any("lib" in t for t in texts) and "after restart" in texts
     check("the chip lists the grant, not yet applied", listed, texts)
+    check("…under a caption saying whose it is", "For this session only" in texts, texts)
+    check("…and the project's defaults, none yet", texts.count("None") == 1, texts)
+    check("…under their own heading", "New sessions of this project" in texts, texts)
     shares_off = "GitHub CLI login: not shared" in texts and "SSH agent: not shared" in texts
     check("the chip says the shares are off", shares_off, texts)
     check("the chip says settings.json is protected", "~/.claude/settings.json: protected" in texts, texts)
@@ -495,9 +545,11 @@ def restarted() -> bool:
     # Revoke through the chip's remove button.
     remove = [b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]
     check("the grant row has a remove button", len(remove) == 1, len(remove))
+    pins = [b for b in buttons(chip._content) if b.get_icon_name() == "view-pin-symbolic"]
+    check("…and a pin, not set", len(pins) == 1 and not pins[0].get_active(), len(pins))
     if remove:
         remove[0].emit("clicked")
-        check("…which revokes it", host.grants(TRUSTED) == [], host.grants(TRUSTED))
+        check("…which revokes it", host.grants(state["box1"]) == [], host.grants(state["box1"]))
         check("…making the plan stale again", host.plan_stale(plan2, TRUSTED))
     return siblings()
 
@@ -507,18 +559,24 @@ def siblings() -> bool:
     win = state["win"]
     host = terminal.SANDBOX_HOST
     plan = caller.sandbox_plan_path
+    # A default of the project that the parent never held: a sibling holds
+    # nothing its parent wasn't launched with, defaults included.
+    check("a default is made", host.set_project_default(TRUSTED, PINNED, True) == "")
     derived, box, reason = host.derive(plan, SUB)
     check("a sibling inside the workspace gets a derived plan", derived is not None and reason == "", reason)
     if derived:
         doc = sandboxplan.load_plan(derived)
         check("…chdir'd into its directory", doc and doc["cwd"] == SUB, doc and doc.get("cwd"))
         check("…with the parent's grants", doc and doc["inputs"]["grants"] == [OTHER], doc and doc["inputs"])
+        check("…recorded as its own list", host.grants(box) == [OTHER], host.grants(box))
         check("…and a box of its own", sandboxplan.valid_box_id(box) and box != caller.sandbox_box, box)
         check("…made and held", os.path.isdir(f"{E2E}/sbx/{box}/home") and host.held(box))
         sandboxplan.release_plan(derived)
-        # Nothing launched from it: let go, it is nobody's, and goes.
+        # Nothing launched from it: let go, it is nobody's, and goes, its
+        # grants with it.
         host.release(box)
-        check("an unused sibling box is removed", host.discard_box(box) and not os.path.exists(f"{E2E}/sbx/{box}"))
+        host.forget_box(box)
+        check("an unused sibling box's grants are forgotten", host.grants(box) == [], host.grants(box))
     refused, no_box, reason = host.derive(plan, f"{HOME}/.ssh")
     check("a sibling in ~/.ssh is refused", refused is None and "outside the sandbox" in reason, reason)
     check("…and gets no box", no_box == "", no_box)
@@ -569,6 +627,25 @@ def sibling_up(before: int) -> bool:
             (own, caller.sandbox_box),
         )
         check("…and its plan names it", doc and doc["inputs"]["box"] == own, doc and doc["inputs"])
+        host = terminal.SANDBOX_HOST
+        # Its parent was launched with the first grant, and has lost it
+        # since; the sibling holds what the parent was launched with.
+        check("the parent's own list is empty by now", host.grants(caller.sandbox_box) == [])
+        check("the sibling's list is its parent's launch-time grants", host.grants(own) == [OTHER], host.grants(own))
+        chip = sibling._sandbox_chip
+        chip._rebuild()
+        texts = labels(chip._content)
+        check("the sibling's chip lists the grant", any(t.endswith("/lib") for t in texts), texts)
+        tags = [t for t in texts if t in ("after restart", "until restart", "live")]
+        check("…untagged", tags == [], tags)
+        check(
+            "…and not a default its parent lacks",
+            PINNED not in host.grants(own) and not any(PINNED in a for a in doc["bwrap_args"]),
+            host.grants(own),
+        )
+        check("…though the project has it", host.project_grants(TRUSTED) == [PINNED])
+        check("the sibling is not stale", not host.plan_stale(sibling.sandbox_plan_path, TRUSTED))
+        check("the default is taken back", host.set_project_default(TRUSTED, PINNED, False) == "")
         seen = launches()
         check("the sibling's launch went through the box", len(seen) == 4, len(seen))
         if len(seen) == 4:
@@ -595,7 +672,8 @@ def forgotten() -> bool:
     flag stays, so a transcript restored from the trash resumes boxed."""
     win = state["win"]
     gone = "99999999-8888-7777-6666-555555555555"
-    box = sandboxplan.new_box_id()
+    box = terminal.SANDBOX_HOST.mint_box(TRUSTED, seed=False)
+    win.state.set_sandbox_grants(box, [OTHER])
     sandboxplan.make_box(box)
     sandboxplan.seed_home(sandboxplan.box_home(box))
     os.makedirs(f"{sandboxplan.box_home(box)}/dev/project")
@@ -607,6 +685,7 @@ def forgotten() -> bool:
     win._forget_transcript(gone)
     check("a forgotten session keeps its sticky flag", AppState().is_sandboxed(gone))
     check("…and names no box", AppState().sandbox_box(gone) == "", AppState().sandboxed_sessions)
+    check("…and its grants went with its box", AppState().get_sandbox_grants(box) == [])
     # An unsandboxed session's transcript going marks nothing.
     win._forget_transcript("00000000-aaaa-bbbb-cccc-000000000000")
     check(
@@ -628,7 +707,196 @@ def box_gone() -> bool:
     check("a trashed session leaves no box directory", not os.path.exists(sandboxplan.box_dir(box)))
     check("…and what its link pointed at is untouched", os.path.isdir(OTHER))
     check("the running session's box is still there", os.path.isdir(sandboxplan.box_home(state["box1"])))
-    return live()
+    return sessions()
+
+
+def win_state():
+    return state["win"].state if "win" in state else AppState()
+
+
+def launch(then) -> None:
+    """Another sandboxed session of the same project, and *then(tab)* once
+    its launch has settled on a plan."""
+    win = state["win"]
+    before = {win.tab_view.get_nth_page(i).get_child() for i in range(win.tab_view.get_n_pages())}
+    win.start_background_session(TRUSTED)
+    ticks = {"n": 0}
+
+    def settled() -> bool:
+        ticks["n"] += 1
+        for i in range(win.tab_view.get_n_pages()):
+            tab = win.tab_view.get_nth_page(i).get_child()
+            if tab not in before and getattr(tab, "sandbox_plan_path", None):
+                then(tab)
+                return GLib.SOURCE_REMOVE
+        if ticks["n"] > 100:
+            check("another session launched", False, "no tab settled on a plan")
+            finish()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    GLib.timeout_add(100, settled)
+
+
+def chip_rows(tab) -> tuple[list[str], list[str]]:
+    """(the session's rows, the project's defaults) as the tab's chip
+    draws them: the path labels under each of the two headings."""
+    chip = tab._sandbox_chip
+    chip._rebuild()
+    texts = labels(chip._content)
+    start = texts.index("Allowed directories")
+    split = texts.index("New sessions of this project")
+    mine = [t for t in texts[start + 1 : split] if t.startswith(("/", "~"))]
+    defaults = []
+    for text in texts[split + 1 :]:
+        if text == "None":
+            continue
+        if not text.startswith(("/", "~")):
+            break  # the restart row, the shell button: past the list
+        defaults.append(text)
+    return mine, defaults
+
+
+def sessions() -> bool:
+    """Grants are a session's: two sessions of one project, side by side,
+    and what a project's defaults do and don't do to them."""
+    caller = state["caller"]
+    host = terminal.SANDBOX_HOST
+    first = caller.sandbox_box
+    state["toasts"] = []
+    caller.connect("toast", lambda _tab, text: state["toasts"].append(text))
+    caller._sandbox_chip.allow_directory(TRUSTED, EXTRA)
+    check("the first session is allowed a directory", host.grants(first) == [EXTRA], host.grants(first))
+    launch(second_up)
+    return GLib.SOURCE_REMOVE
+
+
+def second_up(second) -> None:
+    caller = state["caller"]
+    host = terminal.SANDBOX_HOST
+    first = caller.sandbox_box
+    state["second"] = second
+    box = second.sandbox_box
+    check("a second session of the project has a box of its own", sandboxplan.valid_box_id(box) and box != first)
+    doc = sandboxplan.load_plan(second.sandbox_plan_path)
+    check("…in the same workspace", bool(doc) and doc["inputs"]["workspace"] == TRUSTED)
+    check("a session launched afterwards starts with none", host.grants(box) == [], host.grants(box))
+    check("…its plan binds nothing of the first's", bool(doc) and doc["inputs"]["grants"] == [])
+    check("…not by any other name either", bool(doc) and not any(EXTRA in a for a in doc["bwrap_args"]))
+    mine, defaults = chip_rows(second)
+    check("the second's chip lists nothing", mine == [] and defaults == [], (mine, defaults))
+    mine, defaults = chip_rows(caller)
+    check("the first's chip lists its own", len(mine) == 1 and mine[0].endswith("/extra"), mine)
+    # Pinned in the first session's chip: a default of the project.
+    pins = [b for b in buttons(caller._sandbox_chip._content) if b.get_icon_name() == "view-pin-symbolic"]
+    check("the first's row has a pin", len(pins) == 1 and not pins[0].get_active(), len(pins))
+    if pins:
+        pins[0].set_active(True)
+    check("pinned, it is a default of the project", host.project_grants(TRUSTED) == [EXTRA], host.project_grants(TRUSTED))
+    check("…in state.json, under the project", AppState().sandbox_project_grants == {os.path.realpath(TRUSTED): [EXTRA]})
+    mine, defaults = chip_rows(caller)
+    check("the first's chip lists it as one", len(defaults) == 1 and defaults[0].endswith("/extra"), defaults)
+    pins = [b for b in buttons(caller._sandbox_chip._content) if b.get_icon_name() == "view-pin-symbolic"]
+    check("…its pin set", len(pins) == 1 and pins[0].get_active())
+    check("the first's own list is as it was", host.grants(first) == [EXTRA], host.grants(first))
+    # The second session, already running, is none the wiser.
+    check("the second session's list is unchanged", host.grants(box) == [], host.grants(box))
+    mine, defaults = chip_rows(second)
+    check("…its chip shows the default, and none of its own", mine == [] and len(defaults) == 1, (mine, defaults))
+    check("…and it has nothing to restart for", not host.plan_stale(second.sandbox_plan_path, TRUSTED))
+    # A secret is no default either, and says so.
+    state["toasts"].clear()
+    check("a secret can't be made a default", not caller._sandbox_chip.set_project_default(TRUSTED, f"{HOME}/.ssh", True))
+    check("…with the reason in a toast", any("Can't make" in t and ".ssh" in t for t in state["toasts"]), state["toasts"])
+    launch(third_up)
+
+
+def third_up(third) -> None:
+    host = terminal.SANDBOX_HOST
+    state["third"] = third
+    box = third.sandbox_box
+    check("a session launched after the pin starts with the default", host.grants(box) == [EXTRA], host.grants(box))
+    doc = sandboxplan.load_plan(third.sandbox_plan_path)
+    check("…and its plan binds it", bool(doc) and doc["inputs"]["grants"] == [EXTRA], doc and doc["inputs"]["grants"])
+    check("…as a plain bind", bool(doc) and (EXTRA, EXTRA) in after(doc["bwrap_args"], "--bind-try"))
+    chip = third._sandbox_chip
+    chip._rebuild()
+    texts = labels(chip._content)
+    tags = [t for t in texts if t in ("after restart", "until restart", "live")]
+    mine, _defaults = chip_rows(third)
+    check("its chip lists it untagged", len(mine) == 1 and tags == [], (mine, tags))
+    names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
+    check("…with nothing to restart for", "Restart to apply" not in names, names)
+    # Unpinned — from the defaults list of another session's chip.
+    second = state["second"]
+    chip_rows(second)
+    remove = [b for b in buttons(second._sandbox_chip._content) if b.get_icon_name() == "list-remove-symbolic"]
+    check("the second's chip can take the default back", len(remove) == 1, len(remove))
+    if remove:
+        remove[0].emit("clicked")
+    check("unpinned, the project has no defaults", host.project_grants(TRUSTED) == [], host.project_grants(TRUSTED))
+    check("the third keeps what it was seeded with", host.grants(box) == [EXTRA], host.grants(box))
+    check("…and so does the first", host.grants(state["caller"].sandbox_box) == [EXTRA])
+    # A session can drop what it was seeded with without touching the defaults.
+    host.set_project_default(TRUSTED, EXTRA, True)
+    chip_rows(third)
+    remove = [b for b in buttons(third._sandbox_chip._content) if b.get_icon_name() == "list-remove-symbolic"]
+    check("the third's chip has its row's button and the default's", len(remove) == 2, len(remove))
+    if remove:
+        remove[0].emit("clicked")
+    check("the third drops it", host.grants(box) == [], host.grants(box))
+    check("…and the default stays", host.project_grants(TRUSTED) == [EXTRA], host.project_grants(TRUSTED))
+    host.set_project_default(TRUSTED, EXTRA, False)
+    launch(fourth_up)
+
+
+def fourth_up(fourth) -> None:
+    host = terminal.SANDBOX_HOST
+    box = fourth.sandbox_box
+    check("a session launched after the unpin starts without it", host.grants(box) == [], host.grants(box))
+    doc = sandboxplan.load_plan(fourth.sandbox_plan_path)
+    check("…in its plan too", bool(doc) and doc["inputs"]["grants"] == [])
+    boxes = {t.sandbox_box for t in (state["caller"], state["second"], state["third"], fourth)}
+    check("four sessions of one project, four boxes", len(boxes) == 4, boxes)
+    forked()
+
+
+def forked() -> None:
+    """A fork starts with a copy of its origin's grants, taken once."""
+    win = state["win"]
+    host = terminal.SANDBOX_HOST
+    origin = win.store.get_session(ORIGIN)
+    check("the earlier session is in the store", origin is not None)
+    if origin is None:
+        live()
+        return
+    check("it holds a directory of its own", host.grants(ORIGIN_BOX) == [OTHER], host.grants(ORIGIN_BOX))
+    host.set_project_default(TRUSTED, PINNED, True)  # a fork takes no defaults
+    before = {win.tab_view.get_nth_page(i).get_child() for i in range(win.tab_view.get_n_pages())}
+    win.open_session(origin, fork=True)
+    host.set_project_default(TRUSTED, PINNED, False)
+    fork = next(
+        (
+            win.tab_view.get_nth_page(i).get_child()
+            for i in range(win.tab_view.get_n_pages())
+            if win.tab_view.get_nth_page(i).get_child() not in before
+        ),
+        None,
+    )
+    check("the fork opened", fork is not None and fork.fork)
+    if fork is None:
+        live()
+        return
+    box = fork.launch_options.sandbox_box
+    check("the window minted the fork's box", sandboxplan.valid_box_id(box) and box != ORIGIN_BOX, box)
+    check("the fork's list equals its origin's at the fork", host.grants(box) == [OTHER], host.grants(box))
+    check("the origin still names its own box", AppState().sandbox_box(ORIGIN) == ORIGIN_BOX)
+    # The origin is allowed another: the fork's list stays put.
+    check("the origin is allowed another", host.allow(ORIGIN_BOX, TRUSTED, EXTRA) == "")
+    check("the fork's list stays put", host.grants(box) == [OTHER], host.grants(box))
+    host.revoke(box, OTHER)
+    check("…and the origin's, when the fork drops one", host.grants(ORIGIN_BOX) == [OTHER, EXTRA])
+    live()
 
 
 def live() -> bool:
@@ -650,14 +918,18 @@ def live() -> bool:
     terminal.SANDBOX_GRANTS.shutdown()
     terminal.SANDBOX_GRANTS = mounts
     app._sandbox_grants = mounts
-    # The grant taken back in the first pass, allowed again: the box holds
-    # it statically, and the state agrees with the box from here.
-    host.allow(TRUSTED, OTHER)
+    # The grant taken back in the first pass, allowed again, and the one
+    # that waited for a restart dropped: the box holds the first
+    # statically, and the state agrees with the box from here.
+    box = caller.sandbox_box
+    host.revoke(box, EXTRA)
+    host.allow(box, TRUSTED, OTHER)
     mounts.register(sandboxplan.load_plan(caller.sandbox_plan_path))
-    check("the box holds the first grant statically", mounts.status(caller.sandbox_box, OTHER) == "static")
+    # The second session of the project, running beside it.
+    mounts.register(sandboxplan.load_plan(state["second"].sandbox_plan_path))
+    check("the box holds the first grant statically", mounts.status(box, OTHER) == "static")
     check("…and is not stale", not host.plan_stale(caller.sandbox_plan_path, TRUSTED))
-    state["toasts"] = []
-    caller.connect("toast", lambda _tab, text: state["toasts"].append(text))
+    state["toasts"].clear()
     with open(f"{LIVE}/hello.txt", "w", encoding="utf-8") as fh:
         fh.write("from the host\n")
     # The chip's own flow, minus the folder chooser.
@@ -688,7 +960,16 @@ def delivered() -> bool:
     check("…and holds the directory", os.path.exists(f"{point}/hello.txt"))
     link = f"{sandboxplan.box_home(box)}/dev/live"
     check("the real path is a link in the box's home", os.path.islink(link) and os.readlink(link) == own.inside)
-    check("the grant is recorded", host.grants(TRUSTED) == [OTHER, LIVE], host.grants(TRUSTED))
+    check("the grant is recorded, for this session", host.grants(box) == [OTHER, LIVE], host.grants(box))
+    # The second session of the same project, running beside it.
+    second = state["second"]
+    beside = second.sandbox_box
+    check("the second session was allowed nothing", host.grants(beside) == [], host.grants(beside))
+    check("…holds nothing live", mounts.live_paths(beside) == [] and mounts.delivery(beside, LIVE) is None)
+    check("…has an empty carrier", os.listdir(sandboxplan.box_carrier(beside)) == [])
+    check("…and no link in its home", not os.path.lexists(f"{sandboxplan.box_home(beside)}/dev/live"))
+    mine, _defaults = chip_rows(second)
+    check("…and its chip lists nothing", mine == [], mine)
     chip = caller._sandbox_chip
     chip._rebuild()
     texts = labels(chip._content)
@@ -707,7 +988,7 @@ def delivered() -> bool:
     # Taken back through its remove button: out of the running box.
     remove = [b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]
     remove[-1].emit("clicked")
-    check("the remove button revokes it", host.grants(TRUSTED) == [OTHER], host.grants(TRUSTED))
+    check("the remove button revokes it", host.grants(box) == [OTHER], host.grants(box))
     state["polls"] = 0
     GLib.timeout_add(50, revoked)
     return GLib.SOURCE_REMOVE
@@ -772,7 +1053,7 @@ def restarted_live() -> bool:
     check("and is not stale", not host.plan_stale(plan, TRUSTED, live=mounts.live_paths(caller.sandbox_box)))
     check("the session is up again", caller.has_running_command())
     # A static grant taken back stays in the running box until the restart.
-    terminal.SANDBOX_HOST.revoke(TRUSTED, OTHER)
+    terminal.SANDBOX_HOST.revoke(caller.sandbox_box, OTHER)
     chip = caller._sandbox_chip
     chip._rebuild()
     texts = labels(chip._content)

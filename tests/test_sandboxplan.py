@@ -54,7 +54,6 @@ def _inputs(home, box=BOX, **kw):
         box=box,
         sandbox_root=str(_root(home)),
         carrier=str(_root(home) / box / "grants"),
-        grants_key=str(home / "work" / "repo"),
         runtime_dir="/run/user/1000",
         protected=(
             str(home / ".config" / "collins"),
@@ -764,7 +763,6 @@ def test_gather_inputs_reads_state_and_the_environment(monkeypatch, tmp_path):
         (str(tmp_path / "sbx" / BOX / "anchors" / "media"), "/media"),
         (str(tmp_path / "sbx" / BOX / "anchors" / "mnt"), "/mnt"),
     )
-    assert inputs.grants_key == str(ws.resolve())
     assert inputs.workspace == str(ws.resolve())
     assert inputs.claude_dir == "/opt/claude/bin"
     assert inputs.grants == (str(other),)  # as written; the guard resolves itself
@@ -1007,25 +1005,39 @@ def test_the_plan_runs_a_real_box_when_the_machine_allows(
 
 
 class _GrantState:
-    """A state with grants keyed the way AppState keys them, and the boxes
-    its sessions name, saving nothing."""
+    """A state with grants keyed the way AppState keys them — by box — the
+    defaults of each project, and the boxes its sessions name, saving
+    nothing."""
 
     def __init__(self, grants=None, boxes=(), **settings):
         self.grants = dict(grants or {})
+        self.defaults = {}
         self.boxes = set(boxes)
         self._settings = settings
 
     def sandbox_boxes(self):
         return set(self.boxes)
 
-    def get_sandbox_grants(self, workspace):
-        return list(self.grants.get(workspace) or [])
+    def get_sandbox_grants(self, box):
+        return list(self.grants.get(box) or [])
 
-    def set_sandbox_grants(self, workspace, grants):
+    def set_sandbox_grants(self, box, grants):
         if grants:
-            self.grants[workspace] = list(grants)
+            self.grants[box] = list(grants)
         else:
-            self.grants.pop(workspace, None)
+            self.grants.pop(box, None)
+
+    def sandbox_grant_boxes(self):
+        return set(self.grants)
+
+    def get_sandbox_project_grants(self, key):
+        return list(self.defaults.get(key) or [])
+
+    def set_sandbox_project_grants(self, key, grants):
+        if grants:
+            self.defaults[key] = list(grants)
+        else:
+            self.defaults.pop(key, None)
 
     def get_setting(self, key):
         return self._settings.get(key, False)
@@ -1065,7 +1077,6 @@ def test_load_plan_refuses_a_plan_that_lost_its_shape(home, tmp_path):
         {**plan, "inputs": {**inputs, "box": BOX.upper()}},
         {**plan, "inputs": {**inputs, "carrier": None}},
         {**plan, "inputs": {**inputs, "carrier": "relative"}},
-        {**plan, "inputs": {**inputs, "grants_key": ""}},
         {**plan, "inputs": without_anchors},
         {**plan, "inputs": {**inputs, "anchors": [["/only-one"]]}},
         {**plan, "inputs": {**inputs, "anchors": [["/a", "../b"]]}},
@@ -1130,7 +1141,7 @@ def test_derive_plan_reissues_the_parents_box_for_the_siblings_directory(home):
     assert binds == swap(_binds(parent, "--bind"))
     assert _binds(sibling, "--bind-try") == _binds(parent, "--bind-try")
     assert _binds(sibling, "--ro-bind-try") == _binds(parent, "--ro-bind-try")
-    for key in ("workspace", "grants", "share_gh", "share_ssh", "protect_settings", "grants_key"):
+    for key in ("workspace", "grants", "share_gh", "share_ssh", "protect_settings"):
         assert sibling["inputs"][key] == parent["inputs"][key], key
     assert sibling["gh_token"] is True
     assert sibling["workspace"] == str(ws)
@@ -1180,17 +1191,17 @@ def test_host_allow_and_revoke_hold_grants_to_the_guard(monkeypatch, tmp_path, h
     (home / ".ssh").mkdir()
     state = _GrantState()
     host = _host(monkeypatch, tmp_path, home, state)
-    assert host.grants(str(ws)) == []
-    assert host.allow(str(ws), str(lib)) == ""
-    assert host.allow(str(ws), str(lib)) == ""  # twice is once
-    assert host.grants(str(ws)) == [str(lib)]
-    assert state.grants == {str(ws.resolve()): [str(lib)]}
+    assert host.grants(BOX) == []
+    assert host.allow(BOX, str(ws), str(lib)) == ""
+    assert host.allow(BOX, str(ws), str(lib)) == ""  # twice is once
+    assert host.grants(BOX) == [str(lib)]
+    assert state.grants == {BOX: [str(lib)]}
     # Refusals, each with its reason: a secret, an ancestor of one, $HOME,
     # /, Collins' own state, the sandbox homes, a file, the workspace itself.
-    assert "reaches" in host.allow(str(ws), str(home / ".ssh"))
-    assert host.allow(str(ws), str(home)) == "the home directory itself"
-    assert host.allow(str(ws), "/") == "the whole filesystem"
-    assert "reaches" in host.allow(str(ws), str(home / ".config" / "collins"))
+    assert "reaches" in host.allow(BOX, str(ws), str(home / ".ssh"))
+    assert host.allow(BOX, str(ws), str(home)) == "the home directory itself"
+    assert host.allow(BOX, str(ws), "/") == "the whole filesystem"
+    assert "reaches" in host.allow(BOX, str(ws), str(home / ".config" / "collins"))
     # The root, another box's home, something inside one, an ancestor of
     # the root: no box is granted another's home.
     other_home = _root(home) / OTHER_BOX / "home"
@@ -1202,15 +1213,15 @@ def test_host_allow_and_revoke_hold_grants_to_the_guard(monkeypatch, tmp_path, h
         _root(home) / BOX / "home",
         _root(home).parent,
     ):
-        assert host.allow(str(ws), str(refused)) == "reaches the sandbox homes", refused
-    assert host.allow(str(ws), str(lib / "missing")) == "not a directory"
-    assert host.allow(str(ws), str(ws / "sub")) == "already inside the workspace"
-    assert host.allow(str(ws), "relative/path") == "not an absolute path"
-    assert host.grants(str(ws)) == [str(lib)]
-    host.revoke(str(ws), str(lib))
-    assert host.grants(str(ws)) == []
+        assert host.allow(BOX, str(ws), str(refused)) == "reaches the sandbox homes", refused
+    assert host.allow(BOX, str(ws), str(lib / "missing")) == "not a directory"
+    assert host.allow(BOX, str(ws), str(ws / "sub")) == "already inside the workspace"
+    assert host.allow(BOX, str(ws), "relative/path") == "not an absolute path"
+    assert host.grants(BOX) == [str(lib)]
+    host.revoke(BOX, str(lib))
+    assert host.grants(BOX) == []
     assert state.grants == {}
-    host.revoke(str(ws), str(lib))  # nothing to revoke: no error
+    host.revoke(BOX, str(lib))  # nothing to revoke: no error
 
 
 def test_host_plan_stale_compares_the_launched_policy_with_the_state(
@@ -1225,9 +1236,9 @@ def test_host_plan_stale_compares_the_launched_policy_with_the_state(
     assert path is not None
     assert host.plan_stale(path, str(ws)) is False
     # A grant added since the launch: the running box doesn't have it.
-    assert host.allow(str(ws), str(lib)) == ""
+    assert host.allow(BOX, str(ws), str(lib)) == ""
     assert host.plan_stale(path, str(ws)) is True
-    host.revoke(str(ws), str(lib))
+    host.revoke(BOX, str(lib))
     assert host.plan_stale(path, str(ws)) is False
     # A share flipped since the launch.
     state._settings["sandbox_share_gh"] = True
@@ -1386,7 +1397,6 @@ def test_the_carrier_and_the_anchors_are_bound_then_remounted_read_only(home):
         [str(box / "anchors" / "mnt"), "/mnt"],
         [str(box / "anchors" / "srv"), "/srv"],
     ]
-    assert plan["inputs"]["grants_key"] == ws
     assert plan["version"] == 2
 
 
@@ -1494,7 +1504,330 @@ def test_a_grant_that_reaches_the_sandbox_root_is_never_bound(home):
         )
 
 
-def test_grants_are_keyed_by_the_repository_a_worktree_belongs_to(
+# ---- grants are a session's: keyed by its box ----------------------------------
+
+THIRD_BOX = "00000000000000000000000000000000"
+
+
+def _grants_bound(plan):
+    """The directories a plan binds as grants: its record of them, checked
+    against its arguments."""
+    binds = _binds(plan, "--bind-try")
+    for grant in plan["inputs"]["grants"]:
+        assert (grant, grant) in binds
+    return plan["inputs"]["grants"]
+
+
+def test_two_boxes_of_one_workspace_hold_separate_grants(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    """Two sessions of the same project, side by side: a directory allowed
+    to one is in the other's list no more than in its plan."""
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    assert host.allow(BOX, str(ws), str(lib)) == ""
+    assert host.grants(BOX) == [str(lib)]
+    assert host.grants(OTHER_BOX) == []
+    assert state.grants == {BOX: [str(lib)]}
+    one = build_plan(sandboxplan.gather_inputs(str(ws), "com.example.App", state, BOX))
+    two = build_plan(sandboxplan.gather_inputs(str(ws), "com.example.App", state, OTHER_BOX))
+    assert one["workspace"] == two["workspace"]
+    assert _grants_bound(one) == [str(lib)]
+    assert _grants_bound(two) == []
+    assert not any(str(lib) in arg for arg in two["bwrap_args"])
+    # A session started afterwards, in the same workspace: none either.
+    later = build_plan(sandboxplan.gather_inputs(str(ws), "com.example.App", state, THIRD_BOX))
+    assert _grants_bound(later) == []
+    # Taking it back in one touches no other.
+    assert host.allow(OTHER_BOX, str(ws), str(lib)) == ""
+    host.revoke(BOX, str(lib))
+    assert state.grants == {OTHER_BOX: [str(lib)]}
+    # No box, no grant: a path is not a key, and neither is nothing.
+    for bad in ("", str(ws), "../" + BOX, BOX.upper(), None):
+        assert host.allow(bad, str(ws), str(lib)) == "this session has no sandbox yet", bad
+    assert state.grants == {OTHER_BOX: [str(lib)]}
+    # "Already inside the workspace" is still about the session's workspace.
+    (ws / "sub").mkdir()
+    assert host.allow(BOX, str(ws), str(ws / "sub")) == "already inside the workspace"
+
+
+def test_a_worktree_session_and_its_repositorys_are_two_boxes_with_two_lists(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    repo = home / "work" / "repo"
+    wt = repo / ".claude" / "worktrees" / "brave-otter"
+    wt.mkdir(parents=True)
+    lib = home / "work" / "lib"
+    other = home / "work" / "other"
+    lib.mkdir()
+    other.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    assert host.allow(BOX, str(repo), str(lib)) == ""
+    assert host.allow(OTHER_BOX, str(wt), str(other)) == ""
+    assert state.grants == {BOX: [str(lib)], OTHER_BOX: [str(other)]}
+    in_repo = build_plan(sandboxplan.gather_inputs(str(repo), "com.example.App", state, BOX))
+    in_tree = build_plan(sandboxplan.gather_inputs(str(wt), "com.example.App", state, OTHER_BOX))
+    assert _grants_bound(in_repo) == [str(lib)]
+    assert _grants_bound(in_tree) == [str(other)]
+    assert "grants_key" not in in_repo["inputs"] and "grants_key" not in in_tree["inputs"]
+
+
+def test_load_plan_reads_a_plan_with_or_without_a_grants_key(home, tmp_path):
+    plan, path = _written(home, tmp_path, grants=(str(home / "work" / "lib"),))
+    assert "grants_key" not in plan["inputs"]
+    assert sandboxplan.load_plan(path) is not None
+    # One an earlier build of the stack wrote still carries the key.
+    carried = {**plan, "inputs": {**plan["inputs"], "grants_key": str(home / "work" / "repo")}}
+    with open(path, "w") as fh:
+        json.dump(carried, fh)
+    loaded = sandboxplan.load_plan(path)
+    assert loaded is not None and loaded["inputs"]["box"] == BOX
+    assert plan["version"] == sandboxplan.PLAN_VERSION == 2
+
+
+def test_plan_stale_reads_the_box_from_the_plan(monkeypatch, tmp_path, home, fresh_probe):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    one = host.prepare_launch(str(ws), BOX)
+    two = host.prepare_launch(str(ws), OTHER_BOX)
+    assert host.allow(BOX, str(ws), str(lib)) == ""
+    # The same workspace, asked about both: only the box that was allowed
+    # something has anything to restart for.
+    assert host.plan_stale(one, str(ws)) is True
+    assert host.plan_stale(two, str(ws)) is False
+    assert host.plan_stale(one, str(ws), live=[str(lib)]) is False
+
+
+def test_a_siblings_grants_are_its_parents_as_launched(monkeypatch, tmp_path, home, fresh_probe):
+    ws = home / "work" / "repo"
+    (ws / "sub").mkdir()
+    lib = home / "work" / "lib"
+    later = home / "work" / "later"
+    pinned = home / "work" / "pinned"
+    for made in (lib, later, pinned):
+        made.mkdir()
+    state = _GrantState({BOX: [str(lib)]})
+    host = _host(monkeypatch, tmp_path, home, state)
+    # A default of the project the parent was never given.
+    assert host.set_project_default(str(ws), str(pinned), True) == ""
+    parent = host.prepare_launch(str(ws), BOX)
+    path, box, reason = host.derive(parent, str(ws / "sub"))
+    assert reason == "" and path is not None
+    sibling = sandboxplan.load_plan(path)
+    # Its list says what its plan binds: the parent's static grants.
+    assert host.grants(box) == [str(lib)] == _grants_bound(sibling)
+    assert state.grants == {BOX: [str(lib)], box: [str(lib)]}
+    assert host.plan_stale(path, str(ws)) is False
+    # None of the project's defaults that its parent's plan lacks.
+    assert str(pinned) not in host.grants(box)
+    assert not any(str(pinned) in arg for arg in sibling["bwrap_args"])
+    # What the parent is allowed afterwards reaches neither the sibling's
+    # list nor its plan; nor the other way round.
+    assert host.allow(BOX, str(ws), str(later)) == ""
+    assert host.grants(box) == [str(lib)]
+    assert not any(str(later) in arg for arg in sandboxplan.load_plan(path)["bwrap_args"])
+    assert host.allow(box, str(ws), str(pinned)) == ""
+    assert host.grants(BOX) == [str(lib), str(later)]
+    # A sibling that is refused records nothing.
+    before = dict(state.grants)
+    refused, no_box, reason = host.derive(parent, str(home / "work" / "other"))
+    assert refused is None and no_box == "" and reason
+    assert state.grants == before
+
+
+def test_forget_box_drops_the_grants_of_a_box_no_session_names(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    lib = home / "work" / "lib"
+    state = _GrantState({BOX: [str(lib)], OTHER_BOX: [str(lib)]}, boxes={BOX})
+    host = _host(monkeypatch, tmp_path, home, state)
+    discarded = []
+    monkeypatch.setattr(host, "discard_box_async", discarded.append)
+    host.forget_box(OTHER_BOX)  # nobody's
+    host.forget_box(BOX)  # a session's
+    assert state.grants == {BOX: [str(lib)]}
+    # Discarding is asked for either way: it refuses what is named itself.
+    assert discarded == [OTHER_BOX, BOX]
+    for bad in ("", "not a box", "../" + BOX):
+        host.forget_box(bad)
+    assert discarded == [OTHER_BOX, BOX]
+    assert state.grants == {BOX: [str(lib)]}
+
+
+class _SessionState(_GrantState):
+    """…and the session → box map, as AppState keeps it."""
+
+    def __init__(self, *args, sessions=None, **kw):
+        super().__init__(*args, **kw)
+        self.sessions = dict(sessions or {})
+
+    def sandbox_box(self, session_id):
+        return self.sessions.get(session_id, "")
+
+    def set_sandboxed(self, session_id, sandboxed, box=None):
+        self.sessions[session_id] = self.sessions.get(session_id, "") if box is None else box
+
+    def sandbox_boxes(self):
+        return {box for box in self.sessions.values() if box}
+
+
+def test_a_continue_tab_takes_over_the_grants_of_the_box_the_session_had(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    other = home / "work" / "other"
+    mine = home / "work" / "mine"
+    pinned = home / "work" / "pinned"
+    for made in (lib, other, mine, pinned):
+        made.mkdir()
+    state = _SessionState(
+        {BOX: [str(lib), str(other)], OTHER_BOX: [str(mine), str(other)]},
+        sessions={"s": BOX},
+    )
+    host = _host(monkeypatch, tmp_path, home, state)
+    host.set_project_default(str(ws), str(pinned), True)
+    forgotten = []
+    monkeypatch.setattr(host, "discard_box_async", forgotten.append)
+    # The session had BOX; the --continue tab launched in OTHER_BOX, with
+    # nothing but what it was allowed meanwhile.
+    assert host.settle_box("s", OTHER_BOX, str(ws), owed=True) is True  # a delivery is owed
+    assert state.sessions == {"s": OTHER_BOX}
+    assert state.grants == {OTHER_BOX: [str(mine), str(other), str(lib)]}  # the old box's went with it
+    assert forgotten == [BOX]
+    # No defaults: the list the user left the session with is what it has.
+    assert str(pinned) not in state.grants[OTHER_BOX]
+    # Again, the same box: nothing to settle.
+    assert host.settle_box("s", OTHER_BOX, str(ws), owed=False) is False
+    assert forgotten == [BOX]
+
+
+def test_a_continue_tab_on_a_session_with_no_box_gets_the_defaults_then(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    pinned = home / "work" / "pinned"
+    mine = home / "work" / "mine"
+    pinned.mkdir()
+    mine.mkdir()
+    state = _SessionState({BOX: [str(mine)]}, sessions={"sticky": ""})
+    host = _host(monkeypatch, tmp_path, home, state)
+    host.set_project_default(str(ws), str(pinned), True)
+    monkeypatch.setattr(host, "discard_box_async", lambda box: None)
+    # It was unsandboxed, or sticky with no box: seeded now, after what
+    # the tab was allowed before it resolved.
+    assert host.settle_box("unsandboxed", BOX, str(ws), owed=True) is True
+    assert state.grants == {BOX: [str(mine), str(pinned)]}
+    assert state.sessions["unsandboxed"] == BOX
+    assert host.settle_box("sticky", OTHER_BOX, str(ws), owed=True) is True
+    assert state.grants[OTHER_BOX] == [str(pinned)]
+    # A new session's box was seeded when it was minted: not again, so a
+    # default the user took from it before it resolved stays gone.
+    box = host.mint_box(str(ws))
+    host.revoke(box, str(pinned))
+    assert host.settle_box("new", box, str(ws), owed=False) is False
+    assert host.grants(box) == []
+    assert state.sessions["new"] == box
+    # A sibling's box, and one with no workspace to read defaults by.
+    assert host.settle_box("x", "not a box", str(ws), owed=True) is False
+    assert host.settle_box("", BOX, str(ws), owed=True) is False
+    third = host.mint_box(str(ws), seed=False)
+    assert host.settle_box("y", third, None, owed=True) is True
+    assert host.grants(third) == []
+
+
+def test_prune_grants(monkeypatch, tmp_path, home, fresh_probe):
+    lib = home / "work" / "lib"
+    gone, on_disk, named = THIRD_BOX, OTHER_BOX, BOX
+    state = _GrantState(
+        {gone: [str(lib)], on_disk: [str(lib)], named: [str(lib)]}, boxes={named}
+    )
+    host = _host(monkeypatch, tmp_path, home, state)
+    (_root(home) / on_disk / "home").mkdir(parents=True)
+    import shutil
+
+    shutil.rmtree(_root(home) / named)  # a session names it: kept, directory or none
+    assert not (_root(home) / gone).exists()
+    assert host.prune_grants() == 1
+    assert state.grants == {on_disk: [str(lib)], named: [str(lib)]}
+    assert host.prune_grants() == 0
+    # The directory swept since, at the next start.
+    shutil.rmtree(_root(home) / on_disk)
+    assert host.prune_grants() == 1
+    assert state.grants == {named: [str(lib)]}
+    # Whether or not this instance owns the root: it is its own state.
+    scratch = tmp_path / "scratch.json"
+    scratch.write_text("{}")
+    (_root(home) / "owner").write_text(json.dumps({"state": str(scratch)}))
+    state.grants[gone] = [str(lib)]
+    assert host.prune_grants() == 1
+
+
+# ---- a project's defaults: a template for new sessions -------------------------
+
+
+def test_project_key(tmp_path, home):
+    repo = home / "work" / "repo"
+    wt = repo / ".claude" / "worktrees" / "brave-otter"
+    wt.mkdir(parents=True)
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    assert sandboxplan.project_key(str(wt)) == str(repo.resolve())
+    assert sandboxplan.project_key(str(wt / "src")) == str(repo.resolve())
+    assert sandboxplan.project_key(str(repo)) == str(repo.resolve())
+    assert sandboxplan.project_key(str(lib)) == str(lib.resolve())
+    link = tmp_path / "link"
+    link.symlink_to(wt)
+    assert sandboxplan.project_key(str(link)) == str(repo.resolve())
+    assert not hasattr(sandboxplan, "grants_key")
+
+
+def test_set_project_default(monkeypatch, tmp_path, home, fresh_probe):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    (ws / "sub").mkdir()
+    (home / ".ssh").mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    assert host.project_grants(str(ws)) == []
+    assert host.is_project_default(str(ws), str(lib)) is False
+    assert host.set_project_default(str(ws), str(lib), True) == ""
+    assert host.set_project_default(str(ws), str(lib) + "/", True) == ""  # twice: one entry
+    assert host.project_grants(str(ws)) == [str(lib)]
+    assert host.is_project_default(str(ws), str(lib)) is True
+    assert state.defaults == {str(ws.resolve()): [str(lib)]}
+    # The guard a grant is held to.
+    assert "reaches" in host.set_project_default(str(ws), str(home / ".ssh"), True)
+    assert host.set_project_default(str(ws), str(home), True) == "the home directory itself"
+    assert host.set_project_default(str(ws), str(_root(home)), True) == (
+        "reaches the sandbox homes"
+    )
+    assert host.set_project_default(str(ws), "relative", True) == "not an absolute path"
+    # Without the two checks that are about one session on one day: a
+    # directory inside this workspace, and one that isn't there (yet).
+    assert host.set_project_default(str(ws), str(ws / "sub"), True) == ""
+    assert host.set_project_default(str(ws), str(home / "work" / "not-yet"), True) == ""
+    assert host.project_grants(str(ws)) == [
+        str(lib), str(ws / "sub"), str(home / "work" / "not-yet"),
+    ]
+    # No session's list was touched by any of it.
+    assert state.grants == {}
+    # Off again; removing what isn't there is nothing.
+    assert host.set_project_default(str(ws), str(ws / "sub"), False) == ""
+    assert host.set_project_default(str(ws), str(home / "never"), False) == ""
+    assert host.set_project_default(str(ws), str(home / ".ssh"), False) == ""
+    assert host.project_grants(str(ws)) == [str(lib), str(home / "work" / "not-yet")]
+
+
+def test_a_worktree_session_shares_its_repositorys_defaults(
     monkeypatch, tmp_path, home, fresh_probe
 ):
     repo = home / "work" / "repo"
@@ -1502,30 +1835,98 @@ def test_grants_are_keyed_by_the_repository_a_worktree_belongs_to(
     wt.mkdir(parents=True)
     lib = home / "work" / "lib"
     lib.mkdir()
-    assert sandboxplan.grants_key(str(wt)) == str(repo.resolve())
-    assert sandboxplan.grants_key(str(wt / "src")) == str(repo.resolve())
-    assert sandboxplan.grants_key(str(repo)) == str(repo.resolve())
-    assert sandboxplan.grants_key(str(lib)) == str(lib.resolve())
-    link = tmp_path / "link"
-    link.symlink_to(wt)
-    assert sandboxplan.grants_key(str(link)) == str(repo.resolve())
-    # Allowed from the worktree: in the repository's list, and in the plan
-    # of a launch from either.
     state = _GrantState()
     host = _host(monkeypatch, tmp_path, home, state)
-    assert host.allow(str(wt), str(lib)) == ""
-    assert state.grants == {str(repo.resolve()): [str(lib)]}
-    assert host.grants(str(repo)) == [str(lib)]
-    assert host.grants(str(wt)) == [str(lib)]
-    for ws in (repo, wt):
-        inputs = sandboxplan.gather_inputs(str(ws), "com.example.App", state, BOX)
-        assert inputs.grants == (str(lib),)
-        assert inputs.grants_key == str(repo.resolve())
-    # "Already inside the workspace" is still about the real workspace.
-    assert host.allow(str(wt), str(wt / "src")) == "already inside the workspace"
-    assert host.allow(str(wt), str(repo / "docs")) == "not a directory"
-    host.revoke(str(wt), str(lib))
-    assert state.grants == {}
+    assert host.set_project_default(str(wt), str(lib), True) == ""
+    assert list(state.defaults) == [str(repo.resolve())]  # one list
+    assert host.project_grants(str(repo)) == host.project_grants(str(wt)) == [str(lib)]
+    assert host.is_project_default(str(repo), str(lib))
+    # …and a new session of either starts with it.
+    assert host.grants(host.mint_box(str(repo))) == [str(lib)]
+    assert host.grants(host.mint_box(str(wt))) == [str(lib)]
+    # Another project has its own.
+    assert host.project_grants(str(lib)) == []
+    assert host.grants(host.mint_box(str(home / "work" / "elsewhere"))) == []
+
+
+def test_mint_box_seeds_a_copy(monkeypatch, tmp_path, home, fresh_probe):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    other = home / "work" / "other"
+    lib.mkdir()
+    other.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    host.set_project_default(str(ws), str(lib), True)
+    box = host.mint_box(str(ws))
+    assert sandboxplan.valid_box_id(box)
+    assert host.grants(box) == [str(lib)]
+    plan = build_plan(sandboxplan.gather_inputs(str(ws), "com.example.App", state, box))
+    assert _grants_bound(plan) == [str(lib)]  # from its launch, as a plain bind
+    # A copy: the two lists have nothing to do with each other from here.
+    host.set_project_default(str(ws), str(other), True)
+    host.set_project_default(str(ws), str(lib), False)
+    assert host.project_grants(str(ws)) == [str(other)]
+    assert host.grants(box) == [str(lib)]  # a default removed takes it from no session
+    host.revoke(box, str(lib))
+    host.allow(box, str(ws), str(lib))
+    assert host.project_grants(str(ws)) == [str(other)]  # and the reverse
+    # The next one starts with what the defaults are now, a different id.
+    second = host.mint_box(str(ws))
+    assert second != box and host.grants(second) == [str(other)]
+    # Without seeding: no entry at all.
+    bare = host.mint_box(str(ws), seed=False)
+    assert host.grants(bare) == [] and bare not in state.grants
+
+
+def test_a_box_minted_before_a_default_was_added_doesnt_hold_it(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    lib.mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    box = host.mint_box(str(ws))
+    path = host.prepare_launch(str(ws), box)
+    assert host.set_project_default(str(ws), str(lib), True) == ""
+    assert host.grants(box) == []
+    assert box not in state.grants
+    assert host.plan_stale(path, str(ws)) is False  # nothing to restart for
+    after = build_plan(sandboxplan.gather_inputs(str(ws), "com.example.App", state, box))
+    assert _grants_bound(after) == []
+    assert not any(str(lib) in arg for arg in after["bwrap_args"])
+
+
+def test_a_default_this_session_cant_be_given_is_skipped_and_stays(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    lib = home / "work" / "lib"
+    gone = home / "work" / "gone"
+    lib.mkdir()
+    gone.mkdir()
+    (ws / "sub").mkdir()
+    state = _GrantState()
+    host = _host(monkeypatch, tmp_path, home, state)
+    for path in (ws / "sub", gone, lib, home / "dotfiles"):
+        assert host.set_project_default(str(ws), str(path), True) == ""
+    gone.rmdir()  # no longer a directory
+    (home / "dotfiles" / "ssh").mkdir(parents=True)
+    (home / ".ssh").symlink_to(home / "dotfiles" / "ssh")  # now a secret's ancestor
+    box = host.mint_box(str(ws))
+    assert host.grants(box) == [str(lib)]
+    # Every one of them is still a default: another session, another day.
+    assert host.project_grants(str(ws)) == [
+        str(ws / "sub"), str(gone), str(lib), str(home / "dotfiles"),
+    ]
+    # seed_box adds to what a box holds already, once.
+    (home / "work" / "mine").mkdir()
+    assert host.allow(box, str(ws), str(home / "work" / "mine")) == ""
+    host.revoke(box, str(lib))
+    assert host.seed_box(box, str(ws)) == [str(home / "work" / "mine"), str(lib)]
+    assert host.seed_box(box, str(ws)) == [str(home / "work" / "mine"), str(lib)]
+    assert host.seed_box("not a box", str(ws)) == []
 
 
 # ---- scrubbing the home before a launch ---------------------------------------
@@ -1715,7 +2116,7 @@ def test_prepare_launch_scrubs_the_home_and_says_so(
     lib = home / "work" / "lib"
     lib.mkdir()
     (lib / "precious.txt").write_text("keep")
-    state = _GrantState({str(ws.resolve()): [str(lib)]})
+    state = _GrantState({BOX: [str(lib)]})
     host = _host(monkeypatch, tmp_path, home, state)
     box_home = _root(home) / BOX / "home"
     (box_home / "work").mkdir()

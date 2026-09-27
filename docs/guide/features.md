@@ -1097,24 +1097,38 @@ flipped the switch is refused if it calls it anyway.
   parent was launched with
   (a sibling in `~/.ssh` is refused with the reason, and so is one inside
   a directory the parent holds only live — restart the parent first); the
-  sibling then receives the project's newer grants live, like any running
-  session; an unsandboxed
+  sibling is a session of its own from there, with a list of its own
+  that starts as what its parent was launched with; an unsandboxed
   sibling from a sandboxed parent is never possible, and
   `bypassPermissions` is granted to a sibling only when it is sandboxed.
   A **Sandboxed** chip (a shield) leads the footer of a sandboxed tab and
   is absent everywhere else: it shows what the box was *launched* with —
   the workspace, whether the GitHub CLI login and the SSH agent went in,
-  whether `~/.claude/settings.json` is protected — and the **allowed
-  directories** for sessions of this project, each with a remove
-  button, plus *Allow a directory…* through the folder chooser. A
+  whether `~/.claude/settings.json` is protected — and two lists. The
+  **allowed directories** are this session's, *for this session only*:
+  each with a remove button, plus *Allow a directory…* through the folder
+  chooser. A
   directory is refused with the reason when it is, holds or lies inside a
   secret (`~/.ssh`, `~/.gnupg`, `~/.config/gh`, …), Collins' own state,
   your home or `/`, or the sandbox homes (no box is granted another's).
-  Grants are per project — a session resumed inside one of the project's
-  worktrees shares the repository's list — and land in `state.json`.
+  **A sandboxed session's box is that session's alone — its home, and the
+  directories it is allowed.** A directory allowed in one session's chip
+  reaches that session and no other: not a session running beside it
+  in that project, and not the next one started there. The second
+  list, **New sessions of this project**, is the project's defaults: what
+  a new session of it starts allowed. A directory gets there by the pin
+  on its row in the first list, and leaves by the pin or by the remove
+  button in the second. Defaults are a template, copied into a session's
+  list once, when the session is started: pinning or unpinning one
+  changes no session that already exists, this one included, and a
+  session can drop a directory it started with without touching the
+  defaults. A session in one of the project's worktrees shares the
+  repository's defaults. A fork starts with a copy of what its origin was
+  allowed, and a sibling spawned by `start_session` with what its parent
+  was launched with; neither takes the defaults. Both lists land in
+  `state.json`, and a session's goes when the session's transcript does.
   **A directory allowed while the session runs reaches it without a
-  restart**, and so does every other running sandboxed session of the
-  same project, and no other: its row says *live*. A live grant is a FUSE
+  restart**: its row says *live*. A live grant is a FUSE
   passthrough (`bindfs`, mounted by Collins on the host into a directory
   of the box that the box itself can't write) — fine for reading and
   editing a source tree, slow for a build that hammers it. Under your
@@ -1126,8 +1140,7 @@ flipped the switch is refused if it calls it anyway.
   included. A restart turns a live grant into a plain bind at its real
   path, which is what every grant present at a launch is — so removing
   one of *those* takes the restart too, and its row says *until restart*
-  meanwhile. A directory allowed while no session of the project runs is
-  simply there at the next launch. Where the machine can't deliver a
+  meanwhile. Where the machine can't deliver a
   grant live — no `bindfs` or `fusermount3`, no FUSE, mounts that don't
   propagate, a directory elsewhere than under your home or one of those
   roots — the row says *after restart* (its tooltip says why), and

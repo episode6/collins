@@ -1706,12 +1706,13 @@ class _ShowDiff:
 def _drop_sibling_box(plan: str, box: str) -> None:
     """A start_session sibling that will not launch after all: release the
     plan derived for it (it describes a box in full) and let go of the box
-    minted with it, which goes when nothing else needs it."""
+    minted with it, which goes — with the grants recorded for it — when
+    nothing else needs it."""
     sandboxplan.release_plan(plan)
     host = terminal_mod.SANDBOX_HOST
     if box and host is not None:
         host.release(box)
-        host.discard_box_async(box)
+        host.forget_box(box)
 
 
 class _BackgroundSpawn:
@@ -2506,6 +2507,14 @@ class App(Adw.Application):
         swept = sandboxplan.sweep_plans(app_id)
         if swept:
             logging.getLogger(__name__).info("sandbox: swept %d stale plan file(s)", swept)
+        # Grants are a session's and go with its box: the ones left by a
+        # box no session names and that is no longer on disk. Here, on the
+        # main loop, before the sweep's thread: it writes the state.
+        pruned = host.prune_grants()
+        if pruned:
+            logging.getLogger(__name__).info(
+                "sandbox: dropped the grants of %d box(es) that are gone", pruned
+            )
 
         # The live grants: one owner of every bindfs mount this instance
         # makes, and the thread they are made on.

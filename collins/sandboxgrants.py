@@ -141,7 +141,6 @@ class _Live:
 @dataclass
 class _Box:
     box: str
-    key: str  # sandboxplan.grants_key: whose grants it takes
     static: tuple[str, ...]  # what the plan it launched with binds
     carrier: str
     anchors: tuple[tuple[str, str], ...]  # (host directory, destination)
@@ -417,10 +416,10 @@ class GrantMounts:
 
     def register(self, plan: dict | None, done=None) -> None:
         """A box came up on *plan* (sandboxplan.load_plan's). Records it and
-        delivers every grant the state holds for its project that the plan
-        lacks: nothing for an ordinary launch, the grants made since for a
-        sibling running a plan derived earlier. A box already registered
-        is replaced, and what was live in it unmounted first."""
+        ends as `sync` does: every grant the state holds for this box that
+        the plan lacks is delivered — nothing for an ordinary launch, whose
+        plan was built from that very list. A box already registered is
+        replaced, and what was live in it unmounted first."""
         if not plan:
             return
         inputs = plan["inputs"]
@@ -428,7 +427,6 @@ class GrantMounts:
         home = home.rstrip("/") or "/"
         record = _Box(
             box=inputs["box"],
-            key=inputs["grants_key"],
             static=tuple(inputs.get("grants") or ()),
             carrier=inputs["carrier"],
             anchors=tuple((host_dir, dest) for host_dir, dest in inputs.get("anchors") or ()),
@@ -448,11 +446,7 @@ class GrantMounts:
 
         def work() -> list[Delivery]:
             self._retire_stale(record)
-            out = []
-            for path in self._state_grants(record.key):
-                if not self._holds(record, path):
-                    out.append(self._deliver(record, path))
-            return out
+            return self._sync(record)
 
         self._submit(work, done)
 
@@ -500,40 +494,67 @@ class GrantMounts:
 
     # -- a grant's life -----------------------------------------------------------
 
-    def allow(self, workspace: str, path: str, done=None) -> None:
-        """*path* was granted to *workspace*'s project (SandboxHost.allow
-        recorded it): deliver it to every registered box of the project
-        that doesn't hold it already, static or live."""
-        key = sandboxplan.grants_key(workspace)
+    # A grant is one session's. Each of these is handed the box it is
+    # about and touches that box alone: there is no way from a workspace,
+    # a project or a repository to a set of boxes anywhere in here.
+
+    def allow(self, box: str, path: str, done=None) -> None:
+        """*path* was granted to the session whose box is *box*
+        (SandboxHost.allow recorded it): deliver it to that box, when it is
+        registered and doesn't hold the path already, static or live.
+        *done* gets at most one Delivery, and none for a box that isn't
+        running: the grant is in the state, and its next launch binds it.
+        A path the state doesn't grant the box is never mounted."""
         path = os.path.normpath(path)
 
         def work() -> list[Delivery]:
-            return [
-                self._deliver(record, path)
-                for record in self._boxes_of(key)
-                if not self._holds(record, path)
-            ]
+            record = self._record(box)
+            if record is None or self._holds(record, path):
+                return []
+            if path not in self._state_grants(box):
+                log.warning("sandbox grants: %s is not granted to %s; not mounting it", path, box)
+                return []
+            return [self._deliver(record, path)]
 
         self._submit(work, done)
 
-    def revoke(self, workspace: str, path: str, done=None) -> None:
-        """*path* is no longer granted: take it out of every box of the
-        project that holds it live. Where it is static nothing can be done
-        to the running box; its status there is LEAVING. *done* gets an
-        empty list."""
-        key = sandboxplan.grants_key(workspace)
+    def revoke(self, box: str, path: str, done=None) -> None:
+        """*path* is no longer granted to the session whose box is *box*:
+        take it out of that box where it arrived live. Where it is static
+        nothing can be done to the running box; its status there is
+        LEAVING. *done* gets an empty list."""
         path = os.path.normpath(path)
 
         def work() -> list[Delivery]:
-            for record in self._boxes_of(key):
-                with self._lock:
-                    live = record.live.pop(path, None)
-                    record.pending.pop(path, None)
-                if live is not None:
-                    self._retire(record, live)
+            record = self._record(box)
+            if record is None:
+                return []
+            with self._lock:
+                live = record.live.pop(path, None)
+                record.pending.pop(path, None)
+            if live is not None:
+                self._retire(record, live)
             return []
 
         self._submit(work, done)
+
+    def sync(self, box: str, done=None) -> None:
+        """Deliver every grant the state holds for *box* that the box holds
+        neither statically nor live — what a box that took over another's
+        grants is owed. Nothing, when there is nothing."""
+
+        def work() -> list[Delivery]:
+            record = self._record(box)
+            return self._sync(record) if record is not None else []
+
+        self._submit(work, done)
+
+    def _sync(self, record: _Box) -> list[Delivery]:
+        return [
+            self._deliver(record, path)
+            for path in self._state_grants(record.box)
+            if not self._holds(record, path)
+        ]
 
     # -- the table ----------------------------------------------------------------
 
@@ -547,9 +568,8 @@ class GrantMounts:
                 return PENDING
             static = path in record.static
             live = path in record.live
-            key = record.key
         if static:
-            return STATIC if path in self._state_grants(key) else LEAVING
+            return STATIC if path in self._state_grants(box) else LEAVING
         return LIVE if live else PENDING
 
     def delivery(self, box: str, path: str) -> Delivery | None:
@@ -576,18 +596,18 @@ class GrantMounts:
             record = self._boxes.get(box)
             return list(record.live) if record is not None else []
 
-    def _boxes_of(self, key: str) -> list[_Box]:
+    def _record(self, box: str) -> _Box | None:
         with self._lock:
-            return [record for record in self._boxes.values() if record.key == key]
+            return self._boxes.get(box)
 
     def _holds(self, record: _Box, path: str) -> bool:
         with self._lock:
             return path in record.static or path in record.live
 
-    def _state_grants(self, key: str) -> list[str]:
+    def _state_grants(self, box: str) -> list[str]:
         return [
             os.path.normpath(grant)
-            for grant in self._host.state.get_sandbox_grants(key)
+            for grant in self._host.state.get_sandbox_grants(box)
             if isinstance(grant, str) and grant
         ]
 
