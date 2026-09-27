@@ -80,7 +80,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import mcptools, sessions, trust
+from . import mcptools, sandboxrun, sessions, trust
 
 log = logging.getLogger(__name__)
 
@@ -641,11 +641,26 @@ def sandbox_home_dir() -> str:
     return os.path.join(base, "collins", "sandbox-home")
 
 
+def state_base() -> str:
+    """`$XDG_STATE_HOME`, or `~/.local/state`."""
+    return os.environ.get("XDG_STATE_HOME") or os.path.join(str(Path.home()), ".local", "state")
+
+
 def plan_dir(app_id: str) -> str:
     """Where this instance's per-launch plan files go: beside the socket,
     under the runtime dir, so they die with the boot and never enter the
-    box (only the socket file is bound)."""
-    return os.path.join(mcptools.runtime_dir(app_id), "sandbox")
+    box (only the socket file is bound).
+
+    With no `XDG_RUNTIME_DIR` — a Collins started outside a desktop login
+    session, and CI — `mcptools.runtime_dir` falls back to the temp
+    directory, which every box shares read-write: plans there are inside
+    the sandbox, so the protect-check would refuse every launch. Fall back
+    to Collins' own state directory instead, which no box carries. Plans
+    there outlive a reboot rather than dying with it, which `sweep_plans`
+    at startup covers."""
+    if os.environ.get("XDG_RUNTIME_DIR"):
+        return os.path.join(mcptools.runtime_dir(app_id), "sandbox")
+    return os.path.join(state_base(), "collins", "sandbox", app_id)
 
 
 def protected_paths(app_id: str) -> tuple[str, ...]:
@@ -654,7 +669,7 @@ def protected_paths(app_id: str) -> tuple[str, ...]:
     scratch tree is protected the same way) and the plan directory."""
     home = str(Path.home())
     config = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
-    state = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+    state = state_base()
     cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
     paths = [
         os.path.join(config, "collins"),
@@ -858,6 +873,177 @@ def release_plan(path: str | None) -> None:
         os.unlink(path)
     except OSError:
         pass
+
+
+# -- reading a launched plan back --------------------------------------------------
+
+# The policy inputs a launched plan records (its `inputs` slice) that a
+# later launch may differ on: what the footer chip compares the plan the
+# session runs under against what the state says now (plan_stale).
+POLICY_INPUTS: tuple[str, ...] = ("grants", "share_gh", "share_ssh", "protect_settings")
+
+
+def load_plan(path: str | None) -> dict | None:
+    """The plan document at *path* as build_plan wrote it, or None when it
+    can't be read or isn't that shape. The file is Collins' own (mode 0600
+    under the runtime dir), but it is read back after the launch — the
+    footer chip, a sibling's derivation — so the shape is checked rather
+    than assumed: sandboxrun's validation for the bwrap half, and the
+    `inputs` slice here."""
+    if not path:
+        return None
+    try:
+        plan = sandboxrun.read_plan(path)
+    except sandboxrun.PlanError:
+        return None
+    inputs = plan.get("inputs")
+    if not isinstance(inputs, dict) or not valid_path(inputs.get("workspace")):
+        return None
+    if not valid_path(plan.get("workspace")):
+        return None
+    grants = inputs.get("grants", [])
+    if not isinstance(grants, list) or not all(valid_path(g) for g in grants):
+        return None
+    for key in ("share_gh", "share_ssh", "protect_settings"):
+        if not isinstance(inputs.get(key, False), bool):
+            return None
+    return plan
+
+
+def plan_reaches(plan: dict, path: str) -> str:
+    """Why *path* is not a directory the box built from *plan* can work in,
+    or "" when it lies inside the plan's workspace or one of its grants
+    (as written or resolved — bwrap binds the resolved directory). The
+    rule a sibling's cwd is held to: a start_session from inside the box
+    must not mint a workspace mount of anything the box doesn't already
+    reach."""
+    if not valid_path(path):
+        return f"{path!r} is not an absolute path"
+    inputs = plan["inputs"]
+    roots = [inputs["workspace"], *inputs.get("grants", [])]
+    candidates = {path, os.path.realpath(path)}
+    for root in roots:
+        for spelled in {root, os.path.realpath(root)}:
+            if any(_within(spelled, c) for c in candidates):
+                return ""
+    return (
+        f"{path} is outside the sandbox's workspace {inputs['workspace']} and its "
+        "allowed directories"
+    )
+
+
+def derive_plan(plan: dict, cwd: str) -> dict:
+    """*plan* again for a session starting in *cwd* — the same mounts, the
+    same grants and shares, the same settings-file protection, only the
+    starting directory changed: what a sibling spawned from a sandboxed
+    session launches with, so it sees exactly what its parent sees.
+    Raises PlanRefused when *cwd* is not inside the box (plan_reaches)."""
+    reason = plan_reaches(plan, cwd)
+    if reason:
+        raise PlanRefused(reason)
+    args = list(plan["bwrap_args"])
+    for i in range(len(args) - 2, -1, -1):
+        if args[i] == "--chdir":
+            args[i + 1] = cwd
+            break
+    else:
+        args += ["--chdir", cwd]
+    derived = dict(plan)
+    derived["bwrap_args"] = args
+    derived["inputs"] = dict(plan["inputs"])
+    derived["cwd"] = cwd
+    derived["notes"] = [*plan.get("notes", []), f"derived for {cwd} from the parent's plan"]
+    return derived
+
+
+class SandboxHost:
+    """The host side of sandboxing for one app instance: the plan for a
+    launch, the grants a workspace's chip edits, and the questions a
+    running sandboxed session asks about its own box. Bound to the app id
+    and the state; handed to the tabs as terminal.SANDBOX_HOST."""
+
+    def __init__(self, app_id: str, state) -> None:
+        self.app_id = app_id
+        self.state = state
+
+    def prepare_launch(self, workspace: str) -> str | None:
+        """See prepare_launch."""
+        return prepare_launch(workspace, self.app_id, self.state)
+
+    def grants(self, workspace: str) -> list[str]:
+        """The directories granted to sandboxed sessions in *workspace*,
+        keyed the way a launch reads them (the real path)."""
+        return self.state.get_sandbox_grants(os.path.realpath(workspace))
+
+    def grant_reason(self, workspace: str, path: str) -> str:
+        """Why *path* can't be granted to sessions in *workspace*, or "":
+        the secret / protected / home rule (guard_path), plus the plain
+        facts — it has to be a directory, and one the box doesn't already
+        hold."""
+        path = os.path.normpath(path)
+        if not valid_path(path):
+            return "not an absolute path"
+        # The guard first: a secret is refused whether or not it exists.
+        reason = guard_path(path, str(Path.home()), protected_paths(self.app_id), sandbox_home_dir())
+        if reason:
+            return reason
+        ws = os.path.realpath(workspace)
+        if _within(ws, path) or _within(ws, os.path.realpath(path)):
+            return "already inside the workspace"
+        if not os.path.isdir(path):
+            return "not a directory"
+        return ""
+
+    def allow(self, workspace: str, path: str) -> str:
+        """Grant *path* to sessions in *workspace* (in state; applied at
+        their next launch). Returns the refusal, or "" when it was
+        recorded — or was already there."""
+        reason = self.grant_reason(workspace, path)
+        if reason:
+            return reason
+        path = os.path.normpath(path)
+        ws = os.path.realpath(workspace)
+        grants = self.state.get_sandbox_grants(ws)
+        if path not in grants:
+            self.state.set_sandbox_grants(ws, [*grants, path])
+        return ""
+
+    def revoke(self, workspace: str, path: str) -> None:
+        ws = os.path.realpath(workspace)
+        grants = [g for g in self.state.get_sandbox_grants(ws) if g != path]
+        self.state.set_sandbox_grants(ws, grants)
+
+    def plan_stale(self, plan_path: str | None, workspace: str) -> bool:
+        """Whether a box launched from *plan_path* differs from the one the
+        state would build for *workspace* now — a grant added or removed,
+        a share or the settings switch flipped — so the chip can offer a
+        restart. False when either side can't be read: a box that can't be
+        rebuilt has nothing to restart into."""
+        launched = load_plan(plan_path)
+        if launched is None:
+            return False
+        try:
+            current = build_plan(gather_inputs(workspace, self.app_id, self.state))
+        except (PlanRefused, OSError):
+            return False
+        before, now = launched["inputs"], current["inputs"]
+        return any(before.get(key) != now.get(key) for key in POLICY_INPUTS)
+
+    def derive(self, plan_path: str | None, cwd: str) -> tuple[str | None, str]:
+        """A fresh plan file for a session starting in *cwd* inside the box
+        *plan_path* describes (derive_plan): (its path, "") — or (None, the
+        reason) when the parent's plan can't be read or *cwd* lies outside
+        it. The caller's tab adopts and releases the file."""
+        parent = load_plan(plan_path)
+        if parent is None:
+            return None, "the parent session's sandbox plan can't be read"
+        try:
+            derived = derive_plan(parent, cwd)
+            return write_plan(derived, plan_dir(self.app_id)), ""
+        except PlanRefused as err:
+            return None, str(err)
+        except OSError as err:
+            return None, f"couldn't write the sandbox plan: {err}"
 
 
 def sweep_plans(app_id: str) -> int:

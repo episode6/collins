@@ -219,3 +219,22 @@ def test_a_bubblewrap_wrapper_is_walked_through_to_the_agent(tree):
     assert proctree.agent_descendant_pid(proc.pid, "claude") != proc.pid
     assert proctree.descendant_cmdlines(proc.pid, "claude") == set()
     assert not proctree.has_live_descendant(proc.pid, "claude")
+
+
+def test_inner_shell_pid_walks_through_the_sandbox_wrappers(tree):
+    """A sandboxed panel shell spawns `python3 …/sandboxrun.py <plan> --
+    $SHELL`, which execs bubblewrap, which runs the shell inside the box:
+    the shell the terminal's foreground is compared against is the first
+    process below the wrappers, and a plain spawn is its own shell."""
+    proc, _parent_dir, _child_dir = tree("bwrap --args 5 -- /bin/sh", "/bin/sh -i")
+    children = proctree.process_children(proc.pid)
+    assert children
+    assert proctree.inner_shell_pid(proc.pid) == children[0]
+    # The launcher itself, above the bwrap pair, is walked through the same way.
+    proc2, _p, _c = tree("sandboxrun.py /run/x/plan.json -- /bin/sh", "/bin/sh -i")
+    assert proctree.inner_shell_pid(proc2.pid) == proctree.process_children(proc2.pid)[0]
+    # A plain shell is its own answer; a dead pid and a bad one are None.
+    assert proctree.inner_shell_pid(os.getpid()) == os.getpid()
+    assert proctree.inner_shell_pid(2**31 - 1) is None
+    assert proctree.inner_shell_pid(None) is None
+    assert proctree.inner_shell_pid(0) is None

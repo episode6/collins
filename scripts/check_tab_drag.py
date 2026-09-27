@@ -100,7 +100,9 @@ def make_dock() -> PanelDock:
     terminal = Gtk.Label(label="agent")
     dock = PanelDock(terminal, None, "bottom")
 
-    def make_shell():
+    def make_shell(sandboxed=False):
+        # The strip always passes the keyword (panelstrip.PanelStrip); these
+        # fakes are never the sandboxed kind.
         shell = FakeShell(dock.next_shell_number())
         shell.hist = dock.next_hist_ordinal()
         return shell

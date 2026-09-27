@@ -43,7 +43,10 @@ levels); it keeps its own end slot on the tab.
   `page-attached` and unwires on `page-detached`, so they follow a page moved
   with `Adw.TabView.transfer_page`. Strip signals: `empty`, `bell`,
   `page-touched(widget, arrived)`. Shells come from an injected
-  `shell_factory` (avoids a terminal.py import cycle).
+  `shell_factory(sandboxed=False)` (avoids a terminal.py import cycle),
+  always called with the keyword — a factory that can't build the
+  sandboxed kind must raise rather than hand back a plain shell under
+  that title (the four check scripts' fakes take and ignore it).
 - `panedsizer.PanedSizer` + `panelsizing` (pure arithmetic): remembers an
   end-child size per key, re-applies it across settle passes
   (50/150/300 ms) while a gate stays up, cedes to a live user drag
@@ -127,6 +130,17 @@ the footer-chip rebuild cascade segfaulted GTK's Wayland backend;
 `_on_hub_pr_attached` uses a 250 ms timeout. A widget `_split_leaf` just
 reparented reports `get_width() == 0` until the next layout pass, so two
 opens in one frame make the second join.
+
+**The sandboxed shell is a shell.** `PanelTerminal(number, plan_lookup=…)`
+runs `$SHELL` inside the session's bubblewrap box (see
+`collins-sandboxed-sessions`) with `page_kind` still `"shell"` and a
+`sandboxed` attribute: history, busy checks and layout persistence hold
+(`page_state` adds `"sandboxed": True`, `_restore_node` passes it to
+`strip.new_shell(sandboxed=True)`), the title is *Sandboxed shell N* on
+the dock-wide numbering, and Ctrl+J never binds to one
+(`_on_page_touched`). `open_shell_page(sandboxed=True)` sits one beside
+the last shell page; the strip's tab menu offers *New sandboxed shell*
+while `set_sandboxed_shell_offer` says there is a plan.
 
 ## Adding a page kind
 

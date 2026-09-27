@@ -200,3 +200,24 @@ def test_from_legacy_garbage():
             "b": _strip([_shell(0)], home=True),
         },
     }
+
+
+def test_validate_keeps_a_sandboxed_shell_as_one():
+    """A shell that ran inside the session's sandbox restores as that kind
+    (its page dict says `sandboxed: true`); anything but a literal true
+    reads as the plain kind, so a hand-edited file can't smuggle one in as
+    a string."""
+    boxed = {"kind": "shell", "hist": 3, "sandboxed": True}
+    tree = {"split": "h", "a": {"terminal": True}, "b": _strip([boxed, _shell(1)])}
+    clean = panellayout.validate({"tree": tree})["tree"]
+    assert clean["b"]["strip"]["pages"] == [boxed, _shell(1)]
+    for junk in ("yes", 1, None, False):
+        page = {"kind": "shell", "hist": 3, "sandboxed": junk}
+        tree = {"split": "h", "a": {"terminal": True}, "b": _strip([page])}
+        clean = panellayout.validate({"tree": tree})["tree"]
+        assert clean["b"]["strip"]["pages"] == [_shell(3)], junk
+    # Pruning to the shell kind keeps it: it is a shell.
+    entry = panellayout.validate(
+        {"mode": "right", "tree": {"split": "h", "a": {"terminal": True}, "b": _strip([boxed])}}
+    )
+    assert panellayout.prune(entry, {"shell"}) == entry

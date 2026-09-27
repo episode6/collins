@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-11. Full change history: git log for this file.
+# fork. Last modified: 2026-09-12. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from collections import deque
+from dataclasses import replace
 from pathlib import Path
 
 import gi
@@ -1745,6 +1746,8 @@ class _BackgroundSpawn:
             self._cwd, self._provider, self._options, self._worktree
         )
         if tab is None:  # trust is a refusal here, never a dialog over the user
+            # A plan derived for the sibling has no tab to adopt it.
+            sandboxplan.release_plan(self._options.sandbox_plan)
             self._finish(
                 False,
                 f"Collins hasn't been trusted to run agents in {self._cwd}; open "
@@ -2482,8 +2485,7 @@ class App(Adw.Application):
         The verdict is cached for the run; a launch that comes before it
         lands probes synchronously once."""
         app_id = self.get_application_id()
-        state = self.state
-        terminal_mod.SANDBOX_PLANNER = lambda cwd: sandboxplan.prepare_launch(cwd, app_id, state)
+        terminal_mod.SANDBOX_HOST = sandboxplan.SandboxHost(app_id, self.state)
         # Plans a previous run never released (a tab destroyed before its
         # shell's exit landed): all this app id's, and bwrap read each one
         # at exec, so nothing running misses it.
@@ -2572,13 +2574,14 @@ class App(Adw.Application):
                 "run_in_terminal": self._mcp_run_in_terminal,
             },
             is_enabled=self._mcp_tool_enabled,
-            # A sandboxed session's tab: the tools that reach the host (the
-            # user's own panel shell, a sibling in a cwd of the agent's
-            # choosing) are refused for it — see mcptools.SANDBOX_HOST_TOOLS.
+            # Whether the calling tab's agent runs inside a sandbox — Collins'
+            # own reading of the launch, handed to every handler; the three
+            # that reach the host apply the sandbox policy on it (see the
+            # notes above mcptools.run_tool_call).
             is_sandboxed=lambda found: found[1].sandboxed,
         )
 
-    def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_set_session_title(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         window, tab = found
         if not tab.session_id:
             return False, (
@@ -2606,7 +2609,7 @@ class App(Adw.Application):
                 return os.path.normpath(trial)
         return None
 
-    def _mcp_open_in_editor(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_open_in_editor(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         window, tab = found
         path = self._mcp_resolve_file(tab, args["path"])
         if path is None:
@@ -2617,7 +2620,7 @@ class App(Adw.Application):
         window.open_in_tab_editor(tab, path, [line - 1, 0] if line else None)
         return True, "Opened in the editor."
 
-    def _mcp_show_diff(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_show_diff(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         """Open the session's git page on a diff, and point it at a file.
 
         Everything an obviously-bad call can be refused for is checked here,
@@ -2698,7 +2701,7 @@ class App(Adw.Application):
             return None
         return lambda raw: gitloads.diff_file_path(raw, str(root), tab.current_agent_cwd())
 
-    def _mcp_diff_context(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_diff_context(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         _window, tab = found
 
         def act(page) -> tuple[bool, str]:
@@ -2711,7 +2714,7 @@ class App(Adw.Application):
 
         return self._mcp_on_diff_page(tab, act)
 
-    def _mcp_annotate_diff(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_annotate_diff(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         _window, tab = found
 
         def act(page) -> tuple[bool, str]:
@@ -2730,7 +2733,7 @@ class App(Adw.Application):
 
         return self._mcp_on_diff_page(tab, act)
 
-    def _mcp_highlight_diff(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_highlight_diff(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         _window, tab = found
 
         def act(page) -> tuple[bool, str]:
@@ -2747,7 +2750,7 @@ class App(Adw.Application):
 
         return self._mcp_on_diff_page(tab, act)
 
-    def _mcp_clear_diff_marks(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_clear_diff_marks(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         _window, tab = found
 
         def act(page) -> tuple[bool, str]:
@@ -2770,7 +2773,7 @@ class App(Adw.Application):
 
         return self._mcp_on_diff_page(tab, act)
 
-    def _mcp_show_image(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_show_image(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         window, tab = found
         raw = args["path"]
         if remoteimages.looks_remote(raw):
@@ -2860,7 +2863,7 @@ class App(Adw.Application):
         threading.Thread(target=download, name="show-image-fetch", daemon=True).start()
         return deferred
 
-    def _mcp_notify_user(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_notify_user(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         """The reply says where the message went — a card in Collins, the
         desktop, or straight into the history because the user is looking
         at this very session — since the model can only know by asking
@@ -2871,7 +2874,7 @@ class App(Adw.Application):
             return False, "Collins couldn't post a notification"
         return True, notifycenter.tool_reply(deliveries)
 
-    def _mcp_attach_pr(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_attach_pr(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         """Put a PR on the calling session's row without a gh call: the
         dispatch runs on the main loop, so the number and repository are read
         off the URL here and the tab's own update thread fetches title and
@@ -2890,63 +2893,79 @@ class App(Adw.Application):
             return True, f"{pr.slug} is already attached to this session."
         return True, f"Attached {pr.slug} to this session."
 
-    def _mcp_read_terminal(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_read_terminal(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         """Hand the agent its session's terminal-panel shells, as text: each
         one's scrollback tail under a header naming it. The dump is VTE's
         own (capture_contents — what panel history saves), read here on the
         main loop like every dispatch, so the screen can't change mid-read;
         mcptools.terminal_reply does the tailing and keeps the reply inside
-        the socket's frame limit."""
+        the socket's frame limit. A sandboxed session reads only the
+        shells running inside its box (mcptools.tool_shells): the user's
+        own shell's scrollback is host output, and one left running in the
+        box before a *Restart to apply* is no longer the session's own."""
         _window, tab = found
-        shells = tab.panel_shells()
+        visible = mcptools.tool_shells(tab.panel_shells(), sandboxed, tab.sandbox_plan_path)
+        shells = visible
         if not shells:
+            if sandboxed:
+                return True, "No sandboxed shells are open in this session."
             return True, "No terminal-panel tabs are open in this session."
         wanted = args.get("terminal")
         if wanted is not None:
             shells = [shell for shell in shells if shell.number == wanted]
             if not shells:
-                numbers = ", ".join(str(s.number) for s in tab.panel_shells())
-                return False, f"No terminal numbered {wanted} — open: {numbers}"
+                numbers = ", ".join(str(s.number) for s in visible)
+                kind = "sandboxed shell" if sandboxed else "terminal"
+                return False, f"No {kind} numbered {wanted} — open: {numbers}"
         sections = [
-            (shell.number, shell.has_running_command(), shell.capture_contents())
+            (
+                shell.number,
+                shell.has_running_command(),
+                shell.capture_contents(),
+                "Sandboxed shell" if getattr(shell, "sandboxed", False) else "Terminal",
+            )
             for shell in shells
         ]
         lines = args.get("lines", mcptools.TERMINAL_DEFAULT_LINES)
         return True, mcptools.terminal_reply(sections, lines)
 
-    def _mcp_run_in_terminal(self, found, args: dict) -> tuple[bool, str]:
+    def _mcp_run_in_terminal(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         """Type a command into one of the session's panel shells — an idle
         one, never a busy one (its stdin belongs to the running program),
         opening a fresh tab when there is nothing idle to type into. The
         target is revealed but never focused: the user must see what the
-        agent runs, and must not have their keyboard moved by it."""
+        agent runs, and must not have their keyboard moved by it. A
+        sandboxed session types only into a shell running inside its box
+        (mcptools.tool_shells), opening one when none is idle — never into
+        the user's own unconfined shell."""
         _window, tab = found
         wanted = args.get("terminal")
         opened = False
+        shells = mcptools.tool_shells(tab.panel_shells(), sandboxed, tab.sandbox_plan_path)
+        kind = "Sandboxed shell" if sandboxed else "Terminal"
         if wanted is not None:
-            target = next((s for s in tab.panel_shells() if s.number == wanted), None)
+            target = next((s for s in shells if s.number == wanted), None)
             if target is None:
-                numbers = ", ".join(str(s.number) for s in tab.panel_shells())
-                return False, f"No terminal numbered {wanted} — open: {numbers or 'none'}"
+                numbers = ", ".join(str(s.number) for s in shells)
+                return False, f"No {kind.lower()} numbered {wanted} — open: {numbers or 'none'}"
             if target.has_running_command():
                 return False, (
-                    f"Terminal {wanted} is busy running a command — pick an "
+                    f"{kind} {wanted} is busy running a command — pick an "
                     "idle one, or omit 'terminal' to open a new tab"
                 )
         else:
-            shells = tab.panel_shells()
             target = next((s for s in shells if not s.has_running_command()), None)
             if target is None:
-                target = tab.open_panel_shell()
+                target = tab.open_panel_shell(sandboxed=sandboxed)
                 opened = True
             if target is None:
                 return False, "Collins couldn't open a terminal in this session"
         tab.reveal_panel_shell(target)
         target.run_command(args["command"])
         prefix = "Running in new" if opened else "Running in"
-        return True, f"{prefix} Terminal {target.number}."
+        return True, f"{prefix} {kind} {target.number}."
 
-    def _mcp_start_session(self, found, args: dict) -> mcptools.ToolResult:
+    def _mcp_start_session(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         """Spawn a sibling session in a background tab and hand it a prompt.
 
         The reply is deferred (mcptools.DeferredResult): the model gets a real
@@ -2985,13 +3004,35 @@ class App(Adw.Application):
         # None) for any cwd that isn't a Claude-managed worktree.
         cwd = worktree_project_root(cwd) or cwd
 
-        # Whether the sibling runs inside a sandbox: the project's default
-        # for new sessions, as any new session follows it. (The parent's
-        # own box is inherited by a later change; a sibling spawned from a
-        # sandboxed tab today follows the same default.) A sandboxed sibling
-        # is what bypassPermissions is for — the box bounds it, not the
-        # prompt — so bypass is granted to one, explicit or inherited.
-        sandboxed = window._sandbox_for_new_session(cwd)
+        # Whether the sibling runs inside a sandbox: always when its parent
+        # does — an unsandboxed sibling from a sandboxed parent is never
+        # possible (mcptools.sibling_sandboxed) — and otherwise per the
+        # project's default for new sessions, as any new session follows
+        # it. A sandboxed sibling is what bypassPermissions is for — the box
+        # bounds it, not the prompt — so bypass is granted to one, explicit
+        # or inherited. *sandboxed* here is run_tool_call's reading of the
+        # calling tab, never the caller's word.
+        sandboxed = mcptools.sibling_sandboxed(sandboxed, window._sandbox_for_new_session(cwd))
+        parent_sandboxed = tab.sandboxed
+        if parent_sandboxed:
+            # The parent's exact box: its plan re-issued for the sibling's
+            # directory (sandboxplan.derive_plan) — the same overlay home,
+            # grants, shares and settings protection it was *launched*
+            # with, whatever the switches say now. The tool takes nothing
+            # that can loosen it, and a cwd the box doesn't reach — an
+            # agent asking for a sibling in ~/.ssh — is refused here.
+            host = terminal_mod.SANDBOX_HOST
+            launch = tab.launch_options
+            plan_path = launch.sandbox_plan if launch is not None else ""
+            if host is None or not plan_path:
+                return False, mcptools.sibling_cwd_refusal(
+                    "the parent session's sandbox plan isn't available"
+                )
+            sibling_plan, reason = host.derive(plan_path, cwd)
+            if sibling_plan is None:
+                return False, mcptools.sibling_cwd_refusal(reason)
+        else:
+            sibling_plan = ""
 
         mode = args.get("permission_mode")
         if mode:
@@ -3002,6 +3043,10 @@ class App(Adw.Application):
             if not sandboxed:
                 allowed.discard("bypassPermissions")
             if mode not in allowed:
+                # Every refusal past the derive releases the sibling's plan
+                # file: nothing will launch from it, and it describes a box
+                # in full.
+                sandboxplan.release_plan(sibling_plan)
                 if mode == "bypassPermissions":
                     return False, (
                         "start_session won't grant bypassPermissions to a spawned "
@@ -3023,6 +3068,7 @@ class App(Adw.Application):
         model = args.get("model")
         if model:
             if not mcptools.valid_model(model):
+                sandboxplan.release_plan(sibling_plan)
                 return False, (
                     "model must be a CLI alias (opus, sonnet, haiku) or a full "
                     "model id."
@@ -3048,10 +3094,15 @@ class App(Adw.Application):
         options = SessionOptions(model=model, effort=effort, permission_mode=mode or "")
         if sandboxed:
             options = window._sandboxed_options(options)
+        if sibling_plan:
+            # The derived plan travels with the options; the sibling's tab
+            # adopts it at spawn and releases it when its shell exits.
+            options = replace(options, sandbox_plan=sibling_plan)
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
         # anything is spawned.
         if provider.new_command(options) is None:
+            sandboxplan.release_plan(sibling_plan)
             return False, f"The {provider.name} CLI isn't available to start a session."
 
         deferred = mcptools.DeferredResult()

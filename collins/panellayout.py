@@ -18,6 +18,7 @@ strips exist) the serialized split tree:
            | {"split": "h" | "v", "size": px, "managed": "a" | "b",
               "a": node, "b": node}
     page  := {"kind": "shell", "hist": ordinal}    # panelhistory file key
+           | {"kind": "shell", "hist": ordinal, "sandboxed": true}  # inside the box
            | {"kind": <other>, ...}                # future kinds (e.g. "pr")
 
 A split's "size" is the managed child's pixel extent (the value its
@@ -73,7 +74,13 @@ def _valid_page(page: object) -> dict | None:
         hist = page.get("hist")
         if not isinstance(hist, int) or isinstance(hist, bool) or hist < 0:
             return None
-        return {"kind": "shell", "hist": hist}
+        clean = {"kind": "shell", "hist": hist}
+        # A shell that ran inside the session's sandbox comes back as one
+        # (terminal.PanelTerminal spawns it through the session's plan);
+        # anything but a literal true reads as the plain kind.
+        if page.get("sandboxed") is True:
+            clean["sandboxed"] = True
+        return clean
     return dict(page)
 
 

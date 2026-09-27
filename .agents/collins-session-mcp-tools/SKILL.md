@@ -183,16 +183,26 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   answering with the new session id once `session-resolved` fires (12 s
   deadline, `process-exited` fail-fast, tab kept on failure). Spawns
   **serialize per project root** (`_start_session_chains`) so two siblings
-  can't claim each other's transcript. The sibling follows the project's
-  sandbox default (`window._sandbox_for_new_session`; the parent's own box
-  is inherited by a later change), and `bypassPermissions` is granted —
+  can't claim each other's transcript. The sibling is sandboxed whenever
+  its parent is (`mcptools.sibling_sandboxed` — never an unsandboxed
+  sibling from a sandboxed parent), else per the project's default
+  (`window._sandbox_for_new_session`); a sandboxed parent's sibling runs
+  on the parent's *launched* plan re-issued for its directory
+  (`terminal.SANDBOX_HOST.derive`, `sandboxplan.derive_plan`), and a cwd
+  outside that plan's workspace or grants is refused
+  (`mcptools.sibling_cwd_refusal`). `bypassPermissions` is granted —
   explicit or inherited — only to a sandboxed sibling
-  (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is refused; the
-  trust dialog becomes a refusal. **Refused from a sandboxed tab** for now,
-  with `read_terminal` and `run_in_terminal` (`mcptools.SANDBOX_HOST_TOOLS`,
-  the `is_sandboxed` check in `run_tool_call`): each reaches the host, and
-  a box under bypassPermissions has no prompt in between. The sandbox
-  policy PR replaces the refusal (see `collins-sandboxed-sessions`).
+  (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is
+  refused; the trust dialog becomes a refusal. See
+  `collins-sandboxed-sessions`.
+- Every handler is `App._mcp_<name>(found, args, sandboxed)`: the third
+  argument is `run_tool_call`'s reading of the calling tab
+  (`is_sandboxed=lambda found: found[1].sandboxed`), and the three
+  host-reaching tools apply the sandbox policy on it — `read_terminal` and
+  `run_in_terminal` through `mcptools.tool_shells` (a sandboxed session
+  reaches only *Sandboxed shell* pages, opening one via
+  `tab.open_panel_shell(sandboxed=True)`, never the user's own Ctrl+J
+  shell), `start_session` as above.
 - `read_terminal` — dumps the Ctrl+J panel shells' scrollback
   (`capture_contents`, tailed to `lines`, max 2000).
 - `run_in_terminal` — types a command into an idle panel shell behind
