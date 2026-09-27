@@ -18,9 +18,10 @@ launch, recorded against the session id when it resolves, kept across the
 restart, and removed when the session's transcript is forgotten. A launch
 that asks the CLI for a worktree reserves it first and types its name: the
 box holds that worktree read-write and the checkout read-only, the chip
-says so, the restart binds the same worktree again, a sibling in the
-checkout is refused, and a worktree the CLI couldn't cut puts the session
-in a box rebuilt around the checkout.
+says so, the restart binds the same worktree again — and says so when the
+worktree was reaped and couldn't be put back, in a box no wider for it — a
+sibling in the checkout is refused, and a worktree the CLI couldn't cut
+puts the session in a box rebuilt around the checkout.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \
         python3 scripts/check_sandbox_policy.py
@@ -1014,6 +1015,45 @@ def narrowed_restarted() -> bool:
     typed = tab._initial_command or ""
     check("the session is resumed", f"--resume {NARROWED}" in typed and " -w" not in typed, typed)
     check("…and up again", tab.has_running_command())
+    # The CLI reaped the worktree on its way out, and it can't be put back:
+    # the transcript records a branch the repository doesn't have and no
+    # commit to cut one from.
+    lost = f"{E2E}/narrowed-lost.jsonl"
+    record = {
+        "type": "worktree-state",
+        "worktreeSession": {
+            "worktreePath": own,
+            "worktreeBranch": sandboxplan.worktree_branch(os.path.basename(own)),
+        },
+    }
+    with open(lost, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(record) + "\n")
+    tab._transcript.set_path(lost)
+    check("the worktree is there, and empty", os.path.isdir(own) and os.listdir(own) == [], own)
+    check("the second restart starts", tab.restart_sandboxed())
+    GLib.timeout_add(5000, narrowed_lost)
+    return GLib.SOURCE_REMOVE
+
+
+def narrowed_lost() -> bool:
+    tab = state["narrow"]
+    own = state["own"]
+    text = " ".join(tab._visible_screen_text().split())
+    check("a worktree that couldn't be put back is said", "couldn't be recreated" in text, text[-400:])
+    seen = in_checkout()
+    check("the fake bwrap saw the relaunch all the same", len(seen) == 3, len(seen))
+    args = seen[-1] if seen else []
+    check("…in a box no wider than it was", (CHECKOUT, CHECKOUT) in after(args, "--ro-bind"), args)
+    check(
+        "…the checkout never read-write",
+        (CHECKOUT, CHECKOUT) not in after(args, "--bind") + after(args, "--bind-try"),
+        args,
+    )
+    check("…around the worktree's directory", (own, own) in after(args, "--bind"), args)
+    typed = tab._initial_command or ""
+    check("the session is resumed", f"--resume {NARROWED}" in typed and " -w" not in typed, typed)
+    check("…and up again", tab.has_running_command())
+    tab._transcript.set_path(None)
     # The CLI leaves, as it does when it can't cut the worktree.
     tab.feed_child_text("\x03")
     GLib.timeout_add(1500, narrowed_fallback)
@@ -1041,7 +1081,7 @@ def narrowed_fell_back() -> bool:
     check("whose workspace is the checkout", bool(doc) and doc["workspace"] == CHECKOUT, doc and doc["workspace"])
     check("…not narrowed", bool(doc) and sandboxplan.plan_launch_dir(doc) is None)
     seen = in_checkout()
-    check("the fake bwrap saw the launch", len(seen) == 3, len(seen))
+    check("the fake bwrap saw the launch", len(seen) == 4, len(seen))
     args = seen[-1] if seen else []
     check("the checkout is bound read-write", (CHECKOUT, CHECKOUT) in after(args, "--bind"), args)
     check("…and the worktree not at all", not any(own == a for a in args), args)

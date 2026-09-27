@@ -2141,7 +2141,11 @@ class TerminalTab(Gtk.Box):
                 self.feed_message(_("recreating removed worktree {path}").format(path=worktree))
 
                 def recreate() -> None:
-                    recreate_worktree(state)
+                    if not recreate_worktree(state):
+                        # An emptied directory a box left behind reads as
+                        # reaped too, and is still there: gone, so that the
+                        # fallback below sees a worktree that isn't.
+                        sandboxplan.release_worktree(worktree)
                     # Back to the directory the tab was handed once it exists
                     # again — an agent that had moved into a subdirectory of
                     # the worktree resumes there — and to the worktree itself
@@ -2439,18 +2443,31 @@ class TerminalTab(Gtk.Box):
             )
 
             def recreate() -> None:
-                recreate_worktree(state)
-                GLib.idle_add(self._type_restart, priority=GLib.PRIORITY_DEFAULT)
+                lost = not recreate_worktree(state)
+                GLib.idle_add(self._type_restart, lost, priority=GLib.PRIORITY_DEFAULT)
 
             threading.Thread(target=recreate, daemon=True).start()
             return GLib.SOURCE_REMOVE
         return self._type_restart()
 
-    def _type_restart(self) -> bool:
+    def _type_restart(self, lost: bool = False) -> bool:
+        """Type the resume. *lost* is a reaped worktree that couldn't be
+        put back: the box is built as it was all the same — around the
+        directory, which the plan makes again, with the checkout read-only
+        — and says what the session is about to find. Never around the
+        checkout instead: a restart doesn't widen what a session can
+        write."""
         if self.get_root() is None or self._restart_ticks is None:
             self._restart_ticks = None
             return GLib.SOURCE_REMOVE
         self._restart_ticks = None
+        if lost:
+            self.feed_message(
+                _("warning: the worktree {path} couldn't be recreated — it is empty, "
+                  "and the repository is read-only inside the sandbox").format(
+                    path=display_path(self._reserved_worktree)
+                )
+            )
         # The launch cwd, not the agent's last one: a resume re-enters a
         # worktree the transcript records by itself, and the CLI has to
         # start where it was launched — the checkout — to find it. A

@@ -293,9 +293,20 @@ a plan adopted from a parent):
   can't write — so the worktree is put back first
   (`sessions.recreatable_worktree` / `recreate_worktree`, off the main
   loop), then `_type_restart` launches from the launch cwd with the same
-  worktree bound again. **Resume** from the sidebar is as it was: the
-  cwd is the worktree, the box is the worktree and the common git
-  directory, the checkout absent.
+  worktree bound again. **A worktree that couldn't be put back**
+  (`recreate_worktree` returned False: no branch left and no base
+  commit recorded, or git failed) is not something the directory can
+  say — `reserve_worktree(cwd, name)` makes it again, empty, and
+  succeeds — so the thread hands its result to `_type_restart(lost)`,
+  which warns (*couldn't be recreated — it is empty, and the repository
+  is read-only inside the sandbox*) and launches in the same narrowed
+  box. Never in one rebuilt around the checkout: a restart doesn't
+  widen what a session can write. **Resume** from the sidebar is as it
+  was: the cwd is the worktree, the box is the worktree and the common
+  git directory, the checkout absent. There (`_spawn`) a failed
+  recreate removes the emptied directory (`release_worktree`), so
+  `_finish_spawn`'s directory check falls back to the repository with
+  its usual warning instead of starting in an empty directory.
 - **What the CLI's removal of a worktree leaves.** From inside, `git
   worktree remove --force` empties the directory and drops the
   registration, fails on the directory itself (a mount point under a
