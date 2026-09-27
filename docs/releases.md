@@ -117,7 +117,9 @@ downloads of each version, see the
 - **Sandboxing is packaged.** The `.deb`, the RPM and the AUR recipe
   recommend `bubblewrap`, so an install brings it along where the
   distribution allows; the docs name it beside libspelling and GStreamer
-  as the third optional dependency.
+  as the third optional dependency. They recommend `bindfs` and `fuse3`
+  too, which is what an allowed directory is mounted into a running
+  session with (on Arch, `bindfs` is in the AUR).
 - **What a sandboxed session may ask Collins to do.** From inside a box,
   `run_in_terminal` and `read_terminal` reach only sandboxed shells —
   opening one when none is idle — never your own; `start_session`

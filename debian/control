@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-12. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 
 Source: collins
 Section: utils
@@ -39,6 +39,9 @@ Architecture: all
 # bubblewrap is Recommends: it is what a sandboxed session's box is built
 # with, and without it Collins says so in Preferences and launches every
 # session unsandboxed, which is what it did before the feature existed.
+# bindfs and fuse3 (fusermount3) are Recommends too: with them a directory
+# allowed to a sandboxed session reaches it while it runs; without either
+# the grant applies at the session's next restart, and Preferences says so.
 Depends: ${python3:Depends},
          ${misc:Depends},
          python3-gi,
@@ -51,7 +54,9 @@ Depends: ${python3:Depends},
 Recommends: gir1.2-spelling-1,
             gir1.2-gstreamer-1.0,
             gir1.2-gst-plugins-base-1.0,
-            bubblewrap
+            bubblewrap,
+            bindfs,
+            fuse3
 Description: native GTK4 desktop app to manage Claude Code sessions
  Collins browses every Claude Code session on your machine in a
  sidebar grouped by project, lets you name and star them, and resumes any of

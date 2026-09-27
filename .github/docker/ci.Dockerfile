@@ -17,7 +17,7 @@
 # tags are still there. Nothing rebuilds on its own, so bump the date below to
 # pick up package updates.
 #
-# refreshed: 2026-08-28
+# refreshed: 2026-09-27
 #
 # ubuntu:26.04 (resolute) is the default base: the containered jobs run on the
 # newest supported stack (GTK 4.22, adw 1.9, Python 3.14) — the one
@@ -71,6 +71,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # e2e: the real box check (check_sandbox_launch.py), which skips with a
     # printed reason where the container can't give bwrap a user namespace
     bubblewrap \
+    # e2e: what a live grant is mounted with. The container has no FUSE to
+    # mount through, so the checks print their live parts as skipped; the
+    # packages are here so the names in debian/control stay installable
+    bindfs fuse3 \
   && rm -rf /var/lib/apt/lists/*
 USER runner
 
@@ -92,7 +96,7 @@ RUN dnf install -y \
     python3-devel pyproject-rpm-macros python3-setuptools python3-wheel python3-pip \
     desktop-file-utils appstream \
     python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling \
-    python3-markdown-it-py python3-linkify-it-py bubblewrap \
+    python3-markdown-it-py python3-linkify-it-py bubblewrap bindfs fuse3 \
   && dnf clean all
 # Root here, but the runner checks the workspace out as uid 1001, and git
 # refuses to touch a repository someone else owns ("dubious ownership") --

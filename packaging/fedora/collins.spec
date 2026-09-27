@@ -51,6 +51,9 @@ BuildRequires:  appstream
 # (pure Python) render pull request bodies as real markdown blocks.
 # bubblewrap builds a sandboxed session's box; without it Collins says so in
 # Preferences and every session launches unsandboxed, as before the feature.
+# bindfs and fuse3 (fusermount3) let a directory allowed to a sandboxed
+# session reach it while it runs; without either the grant applies at the
+# session's next restart. bindfs is in EPEL on RHEL 10, fuse3 in its BaseOS.
 Requires:       python3-gobject
 Requires:       gtk4 >= 4.10
 Requires:       libadwaita >= 1.5
@@ -62,6 +65,8 @@ Recommends:     libspelling
 Recommends:     gstreamer1
 Recommends:     gstreamer1-plugins-base
 Recommends:     bubblewrap
+Recommends:     bindfs
+Recommends:     fuse3
 
 %description
 Collins browses every Claude Code session on your machine in a sidebar
@@ -121,6 +126,8 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 * Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
 - Recommends bubblewrap: a session can be run inside a filesystem sandbox.
   Without it every session runs unsandboxed and Preferences says why.
+- Recommends bindfs and fuse3: a directory allowed to a sandboxed session
+  reaches it while it runs. Without them it applies at the next restart.
 
 * Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.3-1
 - A native git page beside each session (diffs, staging, notes, commits and

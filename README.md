@@ -94,17 +94,17 @@ All rebindable from the sidebar menu → *Keyboard Bindings*. The defaults (the 
 
 ## Requirements
 
-Python ≥ 3.10, GTK ≥ 4.10, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject, and markdown-it-py with linkify-it-py (the PR page's markdown parser) — all from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box. GStreamer (the core typelib plus the base plugins) is optional too: with it Collins plays the notification sound, without it the desktop's beep stands in. bubblewrap is optional as well: with it a session can run inside a filesystem sandbox, without it every session runs unsandboxed and Preferences says why. The `.deb` and the `.rpm` only *recommend* those three.
+Python ≥ 3.10, GTK ≥ 4.10, libadwaita ≥ 1.5, VTE (GTK 4 build), GtkSourceView 5, PyGObject, and markdown-it-py with linkify-it-py (the PR page's markdown parser) — all from your distro's packages. libspelling is optional: with it the prompt composer gets spell-check, without it the composer is a plain text box. GStreamer (the core typelib plus the base plugins) is optional too: with it Collins plays the notification sound, without it the desktop's beep stands in. bubblewrap is optional as well: with it a session can run inside a filesystem sandbox, without it every session runs unsandboxed and Preferences says why. So are bindfs and fuse3 (`fusermount3`): with them a directory allowed to a sandboxed session reaches it while it runs, without either it applies at the session's next restart (on Arch, bindfs is in the AUR). The `.deb` and the `.rpm` only *recommend* those five.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 bubblewrap
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 bubblewrap bindfs fuse3
 
 # Fedora
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base bubblewrap
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base bubblewrap bindfs fuse3
 
 # Arch
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs bubblewrap
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs bubblewrap fuse3
 ```
 
 Plus the [`claude` CLI](https://claude.com/claude-code) on your `PATH` — Collins is a tool for Claude specifically.
