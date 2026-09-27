@@ -936,3 +936,51 @@ def test_new_command_worktree_flag(monkeypatch):
     claude = ClaudeProvider()
     assert claude.new_command(SessionOptions(worktree=True)) == "/usr/bin/claude -w"
     assert claude.new_command(SessionOptions()) == "/usr/bin/claude"
+
+
+def test_sandbox_prefix_names_the_launcher_by_file(monkeypatch):
+    """A sandboxed launch types `<python> <…>/collins/sandboxrun.py <plan> --`
+    before the CLI: the launcher by file, never `-m collins.sandboxrun` —
+    the tab's shell has no PYTHONPATH for a checkout, and an installed
+    collins would shadow it. The plan path is quoted, and no plan (bwrap
+    missing) means no prefix at all."""
+    import sys
+
+    from collins.providers import SessionOptions, sandboxrun_path
+
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    claude = ClaudeProvider()
+    launcher = sandboxrun_path()
+    assert launcher.endswith("/collins/sandboxrun.py")
+    assert os.path.isfile(launcher)
+    opts = SessionOptions(sandbox=True, sandbox_plan="/run/user/1/collins/x/sandbox/p q.json")
+    assert claude.new_command(opts) == (
+        f"{sys.executable} {launcher} '/run/user/1/collins/x/sandbox/p q.json' -- /usr/bin/claude"
+    )
+    assert "-m collins.sandboxrun" not in claude.new_command(opts)
+    assert claude.sandbox_prefix(SessionOptions(sandbox=True)) == ""
+    assert claude.sandbox_prefix(None) == ""
+
+
+def test_resume_keeps_the_permission_mode_of_a_sandboxed_session(monkeypatch):
+    """A sticky-sandboxed resume runs with the same prompts-off mode its
+    first launch did: --permission-mode rides after --resume, inside the
+    wrapper; --continue takes it the same way (via session_flags, since the
+    tab types it as an override). Nothing else in the options applies to an
+    existing conversation."""
+    from collins.providers import SessionOptions
+
+    monkeypatch.setattr(shutil, "which", lambda cli: f"/usr/bin/{cli}")
+    monkeypatch.setattr(ClaudeProvider, "background_agents", lambda self, include_finished=False: [])
+    claude = ClaudeProvider()
+    opts = SessionOptions(
+        sandbox=True, sandbox_plan="/p.json", permission_mode="bypassPermissions", model="opus"
+    )
+    assert claude.resume_command("abc", options=opts) == (
+        f"{claude.sandbox_prefix(opts)}/usr/bin/claude --resume abc --permission-mode bypassPermissions"
+    )
+    assert claude.session_flags(opts) == " --permission-mode bypassPermissions"
+    assert claude.session_flags(SessionOptions(sandbox=True)) == ""
+    assert claude.session_flags(None) == ""
+    assert claude.resume_command("abc") == "/usr/bin/claude --resume abc"
+    assert claude.continue_command(opts) == "/usr/bin/claude --continue"

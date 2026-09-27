@@ -74,7 +74,11 @@ class NewChatView(Gtk.Box):
     passed straight through (ComposerView says what each is for).
     *worktree_default* is the project's effective "new sessions use a
     worktree" value, which the checkbox starts on; *is_git* False leaves the
-    checkbox out — the flag has no meaning outside a checkout. *model* is
+    checkbox out — the flag has no meaning outside a checkout.
+    *sandbox_default* and *sandbox_available* are the Sandboxed box's pair
+    on the same terms: the project's effective "new sessions are sandboxed"
+    value, and whether a box can be built here at all (sandboxplan.
+    available), without which the checkbox is left out. *model* is
     the ``--model`` the tab was opened with (a start_session caller's pick,
     "" for none), which the picker starts on; *pick_model* False leaves the
     picker out — the provider has no model flag. *effort* and *pick_effort*
@@ -83,10 +87,10 @@ class NewChatView(Gtk.Box):
 
     __gsignals__ = {
         # The Send: the prompt ("" = an empty session, nothing typed in),
-        # whether the worktree box is ticked, the model to launch with
-        # ("" = the CLI's default, nothing passed), and the effort level
-        # likewise.
-        "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, str, str)),
+        # whether the worktree box is ticked, whether the Sandboxed box is,
+        # the model to launch with ("" = the CLI's default, nothing
+        # passed), and the effort level likewise.
+        "send-requested": (GObject.SignalFlags.RUN_FIRST, None, (str, bool, bool, str, str)),
         # The text, the checkbox, the model or the effort changed — what the
         # draft's keeper debounces.
         "changed": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -104,11 +108,14 @@ class NewChatView(Gtk.Box):
         pick_model: bool = True,
         effort: str = "",
         pick_effort: bool = True,
+        sandbox_default: bool = False,
+        sandbox_available: bool = False,
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("new-chat")
         self._cwd = cwd
         self._worktree_touched = False
+        self._sandbox_touched = False
         self._model = (model or "").strip()
         self._pick_model = bool(pick_model)
         self._effort = (effort or "").strip()
@@ -206,6 +213,21 @@ class NewChatView(Gtk.Box):
         self._worktree.connect("toggled", self._on_worktree_toggled)
         self.composer.add_row_option(self._worktree)
 
+        # Beside it, the sandbox: the same short-label-and-tooltip shape,
+        # shown only where a box can be built (Preferences says why not).
+        self._sandbox = Gtk.CheckButton(label=_("Sandboxed"))
+        self._sandbox.set_valign(Gtk.Align.CENTER)
+        self._sandbox.set_tooltip_text(
+            _(
+                "Run the session in a bubblewrap sandbox: this project read-write, "
+                "~/.claude and toolchain caches shared, the rest of the disk absent"
+            )
+        )
+        self._sandbox.set_active(bool(sandbox_default) and bool(sandbox_available))
+        self._sandbox.set_visible(bool(sandbox_available))
+        self._sandbox.connect("toggled", self._on_sandbox_toggled)
+        self.composer.add_row_option(self._sandbox)
+
         clamp = Adw.Clamp(child=column, maximum_size=_CLAMP_PX, tightening_threshold=_CLAMP_PX)
         clamp.set_vexpand(True)
         clamp.set_valign(Gtk.Align.FILL)
@@ -246,6 +268,40 @@ class NewChatView(Gtk.Box):
         # became an explicit choice the draft record must keep.
         toggles = self._worktree.get_active() != bool(choice)
         self._worktree.set_active(bool(choice))
+        if not toggles:
+            self.emit("changed")
+
+    def set_sandbox_available(self, available: bool, default: bool) -> None:
+        """The probe's verdict landed after this screen was built: show (or
+        hide) the Sandboxed box, and — unless the user already touched it —
+        start it on the project's *default*."""
+        self._sandbox.set_visible(bool(available))
+        if not self._sandbox_touched:
+            self._sandbox.set_active(bool(default) and bool(available))
+
+    def sandbox_choice(self) -> bool | None:
+        """The Sandboxed box as the user left it, or None while it still
+        follows the project's default (what the draft record keeps). Kept
+        while the box is hidden too — see set_sandbox_choice."""
+        return self._sandbox.get_active() if self._sandbox_touched else None
+
+    def sandbox(self) -> bool:
+        """Whether the Sandboxed box is ticked right now (False with no box)."""
+        return self._sandbox.get_visible() and self._sandbox.get_active()
+
+    def set_sandbox_choice(self, choice: bool | None) -> None:
+        """Put a kept draft's Sandboxed box back, on set_worktree_choice's
+        terms — hidden box or not. A screen built before the probe's
+        verdict has no box yet, and the verdict landing must not put the
+        project's default over the choice (set_sandbox_available keeps a
+        touched box); a machine that can't build a box keeps the choice for
+        one that can. Nothing launches boxed off a hidden box: sandbox()
+        and newchat.effective_sandbox both read it as off."""
+        if choice is None:
+            return
+        self._sandbox_touched = True
+        toggles = self._sandbox.get_active() != bool(choice)
+        self._sandbox.set_active(bool(choice))
         if not toggles:
             self.emit("changed")
 
@@ -290,6 +346,10 @@ class NewChatView(Gtk.Box):
 
     def _on_worktree_toggled(self, *_a) -> None:
         self._worktree_touched = True
+        self.emit("changed")
+
+    def _on_sandbox_toggled(self, *_a) -> None:
+        self._sandbox_touched = True
         self.emit("changed")
 
     def _on_text_changed(self, *_a) -> None:
@@ -352,7 +412,9 @@ class NewChatView(Gtk.Box):
         # line of spaces.
         if not text.strip():
             text = ""
-        self.emit("send-requested", text, self.worktree(), self.model(), self.effort())
+        self.emit(
+            "send-requested", text, self.worktree(), self.sandbox(), self.model(), self.effort()
+        )
 
 
 def is_git_checkout(cwd: str) -> bool:

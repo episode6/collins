@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-09. Full change history: git log for this file.
+# fork. Last modified: 2026-09-11. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -47,6 +47,7 @@ from . import (
     proctree,
     providers,
     remoteimages,
+    sandboxplan,
     statusicon,
     tokenrefresh,
     tooltipmute,
@@ -54,6 +55,7 @@ from . import (
     updatecheck,
     welcome,
 )
+from . import terminal as terminal_mod
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .copylabel import open_uri
 from .i18n import _
@@ -1952,6 +1954,7 @@ class App(Adw.Application):
         self.store.start()
 
         self._start_mcp_service()
+        self._start_sandbox_support()
 
         focus = Gio.SimpleAction.new("focus-session", GLib.VariantType("s"))
         focus.connect("activate", self._on_focus_session)
@@ -2472,6 +2475,36 @@ class App(Adw.Application):
         self._mcp_service = service
         providers.MCP_CONFIG_PATH = config
 
+    def _start_sandbox_support(self) -> None:
+        """Find out, off the main loop, whether sandboxed sessions can be
+        launched here (bubblewrap on PATH and a namespace probe that
+        passes — sandboxplan.probe), and hand the tabs their plan maker.
+        The verdict is cached for the run; a launch that comes before it
+        lands probes synchronously once."""
+        app_id = self.get_application_id()
+        state = self.state
+        terminal_mod.SANDBOX_PLANNER = lambda cwd: sandboxplan.prepare_launch(cwd, app_id, state)
+        # Plans a previous run never released (a tab destroyed before its
+        # shell's exit landed): all this app id's, and bwrap read each one
+        # at exec, so nothing running misses it.
+        swept = sandboxplan.sweep_plans(app_id)
+        if swept:
+            logging.getLogger(__name__).info("sandbox: swept %d stale plan file(s)", swept)
+        # The UI reads the cached verdict and never blocks on the probe: a
+        # new-chat screen opened before it lands hides its Sandboxed box
+        # until this callback puts it back.
+        sandboxplan.probe_async(
+            lambda _reason: GLib.idle_add(
+                self._on_sandbox_probe_landed, priority=GLib.PRIORITY_DEFAULT
+            )
+        )
+
+    def _on_sandbox_probe_landed(self) -> bool:
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.refresh_sandbox_availability()
+        return GLib.SOURCE_REMOVE
+
     def do_shutdown(self) -> None:
         # Stops accepting and unlinks the socket; mcp.json stays behind on
         # purpose — the app-id-keyed path is stable across restarts, so a
@@ -2539,6 +2572,10 @@ class App(Adw.Application):
                 "run_in_terminal": self._mcp_run_in_terminal,
             },
             is_enabled=self._mcp_tool_enabled,
+            # A sandboxed session's tab: the tools that reach the host (the
+            # user's own panel shell, a sibling in a cwd of the agent's
+            # choosing) are refused for it — see mcptools.SANDBOX_HOST_TOOLS.
+            is_sandboxed=lambda found: found[1].sandboxed,
         )
 
     def _mcp_set_session_title(self, found, args: dict) -> tuple[bool, str]:
@@ -2948,13 +2985,22 @@ class App(Adw.Application):
         # None) for any cwd that isn't a Claude-managed worktree.
         cwd = worktree_project_root(cwd) or cwd
 
+        # Whether the sibling runs inside a sandbox: the project's default
+        # for new sessions, as any new session follows it. (The parent's
+        # own box is inherited by a later change; a sibling spawned from a
+        # sandboxed tab today follows the same default.) A sandboxed sibling
+        # is what bypassPermissions is for — the box bounds it, not the
+        # prompt — so bypass is granted to one, explicit or inherited.
+        sandboxed = window._sandbox_for_new_session(cwd)
+
         mode = args.get("permission_mode")
         if mode:
             # The provider's own modes, minus bypass: handing a sibling
             # bypassPermissions is privilege the user never saw, and the only
             # human gate on this call is the caller's own MCP permission prompt.
             allowed = {value for value, _label in provider.permission_modes()}
-            allowed.discard("bypassPermissions")
+            if not sandboxed:
+                allowed.discard("bypassPermissions")
             if mode not in allowed:
                 if mode == "bypassPermissions":
                     return False, (
@@ -2970,7 +3016,9 @@ class App(Adw.Application):
             # CLI now (shift+tab changes included), read off its transcript —
             # not whatever flag this tab launched with. bypassPermissions is
             # capped, junk is dropped; see inherited_permission_mode.
-            mode = mcptools.inherited_permission_mode(tab.current_permission_mode())
+            mode = mcptools.inherited_permission_mode(
+                tab.current_permission_mode(), sandboxed=sandboxed
+            )
 
         model = args.get("model")
         if model:
@@ -2998,6 +3046,8 @@ class App(Adw.Application):
 
         worktree = args.get("worktree")  # bool, or None to use the project default
         options = SessionOptions(model=model, effort=effort, permission_mode=mode or "")
+        if sandboxed:
+            options = window._sandboxed_options(options)
         # A missing CLI drops the new tab to a plain shell the takes_prompt poll
         # could never say yes to — a leaked shell, not a session. Refuse before
         # anything is spawned.
