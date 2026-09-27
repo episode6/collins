@@ -120,11 +120,14 @@ DEFAULT_SETTINGS = {
     # sandboxplan.available() says a box can be built.
     "sandbox_new_sessions": False,
     # Whether a sandboxed session's permission mode defaults to
-    # bypassPermissions — the point of the box: a yolo session that can't
-    # reach ~/.ssh. Read by MainWindow._sandboxed_options for every
-    # sandboxed launch: the new-chat Send, a resume or --continue of a
-    # sticky-sandboxed session, and the start_session tool's sibling.
-    "sandbox_bypass_permissions": True,
+    # bypassPermissions: a yolo session that can't reach ~/.ssh. Off by
+    # default — with no prompt the box is the only barrier, and it bounds
+    # the filesystem, not everything the host later runs (the repository's
+    # .git/config, the toolchain directories, the workspace itself). Read
+    # by MainWindow._sandboxed_options for every sandboxed launch: the
+    # new-chat Send, a resume or --continue of a sticky-sandboxed session,
+    # and the start_session tool's sibling.
+    "sandbox_bypass_permissions": False,
     # Hand the host's GitHub CLI login into sandboxed sessions: ~/.config/gh
     # bound read-only and the token (`gh auth token`) passed in as GH_TOKEN
     # by sandboxrun. Off, gh inside is logged out and HTTPS pushes through
@@ -134,10 +137,13 @@ DEFAULT_SETTINGS = {
     # file is bound in and the variable survives the scrub, so ssh inside
     # signs with keys the box never sees. Read by sandboxplan.gather_inputs.
     "sandbox_share_ssh": False,
-    # Let sandboxed sessions write ~/.claude/settings.json (and
-    # settings.local.json, ~/.claude/plugins, a real-file claude launcher):
-    # needed for /model and /effort to persist their defaults from inside,
-    # at the cost that a hook written there runs in every later session,
+    # Let sandboxed sessions write what the host's other sessions and
+    # commands run: ~/.claude/settings.json (and settings.local.json, the
+    # plugins, skills, commands and agents directories, CLAUDE.md, a
+    # real-file claude launcher), the repository's .git/hooks and
+    # ~/.local/bin. Needed for /model and /effort to persist their
+    # defaults from inside and for installing a hook or a tool from there,
+    # at the cost that what is written runs in every later session,
     # sandboxed or not. Off, they are bound read-only over themselves, and
     # a symlinked settings.json refuses the box. Read by
     # sandboxplan.gather_inputs.

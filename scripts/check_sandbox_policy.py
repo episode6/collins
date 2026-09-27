@@ -125,6 +125,10 @@ for path in (
     f"{HOME}/.ssh", _PROJECT,
 ):
     os.makedirs(path, exist_ok=True)
+# A dotfiles setup: the user's instructions are a symlink, which no bind can
+# hold read-only. The chip says so.
+os.makedirs(f"{HOME}/.claude", exist_ok=True)
+os.symlink(f"{E2E}/dotfiles/AGENTS.md", f"{HOME}/.claude/CLAUDE.md")
 with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
     fh.write("{}")
 with open(f"{_PROJECT}/{ORIGIN}.jsonl", "w", encoding="utf-8") as fh:
@@ -150,6 +154,9 @@ with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
                 "gh_welcome_dismissed": True,
                 "title_model": "none",
                 "sandbox_new_sessions": True,
+                # Off by default; on here, since the mode a box hands its
+                # session and its sibling is what the checks below read.
+                "sandbox_bypass_permissions": True,
             },
             "sandboxed_sessions": {ORIGIN: ORIGIN_BOX},
             "sandbox_grants": {ORIGIN_BOX: [OTHER], STALE_KEY: [PINNED]},
@@ -463,7 +470,13 @@ def grants() -> bool:
     check("…under their own heading", "New sessions of this project" in texts, texts)
     shares_off = "GitHub CLI login: not shared" in texts and "SSH agent: not shared" in texts
     check("the chip says the shares are off", shares_off, texts)
-    check("the chip says settings.json is protected", "~/.claude/settings.json: protected" in texts, texts)
+    check("the chip says settings and hooks are read-only", "Settings and hooks: read-only" in texts, texts)
+    unpinned = [t for t in texts if t.startswith("Writable, a symlink: ")]
+    check(
+        "…and names the one that couldn't be: the symlinked CLAUDE.md",
+        len(unpinned) == 1 and unpinned[0].endswith("/.claude/CLAUDE.md"),
+        unpinned,
+    )
     names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
     check("…Allow a directory…", "Allow a directory…" in names, names)
     check("…and a sandboxed shell", "Sandboxed shell" in names, names)

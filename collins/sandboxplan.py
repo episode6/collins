@@ -30,7 +30,8 @@
 #
 # The Collins-specific additions (the CLI's own directory, the interpreter
 # prefix, the shim's package, the MCP config and socket, the sandbox home,
-# the grants, the shares and the settings-file protection) are this fork's.
+# the grants, the shares, the settings-file protection and the other
+# read-only pins over what the host runs) are this fork's.
 
 """The mount plan for a sandboxed session: what bubblewrap is told to bind
 where, as pure path arithmetic (see ~/specs/collins/sandboxed-sessions.md).
@@ -199,8 +200,14 @@ RW_HOME_ALWAYS: tuple[str, ...] = (
     ".cache/ms-playwright",
     ".cache/sccache",
     ".cache/ccache",
-    ".local/bin",
 )
+
+# On the host's PATH, so whatever sits here runs outside the box the next
+# time its name is typed: shared read-only, so the host's tools work inside
+# and none can be replaced or repointed from there (an install into it from
+# inside fails). Read-write, as aibox has it, only when the settings switch
+# says the hook surface is editable.
+HOST_BIN_HOME: tuple[str, ...] = (".local/bin",)
 
 # Secrets, masked with a deeper mount wherever a shared tree would reach
 # them: /dev/null over a file, an empty tmpfs over a directory. Also what a
@@ -268,11 +275,34 @@ SCRUB_ENV: tuple[str, ...] = ("SSH_AUTH_SOCK", "SSH_AGENT_PID", "GPG_AGENT_INFO"
 # destination), so the plan is refused rather than built unprotected.
 PROTECTED_SETTINGS: tuple[str, ...] = (".claude/settings.json", ".claude/settings.local.json")
 
-# Directories under ~/.claude that carry code the host's next session runs
-# (plugin hooks), pinned read-only on the same switch when they exist as
-# real directories. The CLI's plugin installs fail inside, like its
-# self-update; both come from the host.
-PROTECTED_CLAUDE_DIRS: tuple[str, ...] = (".claude/plugins",)
+# Directories under ~/.claude that carry code or instructions the host's
+# next session runs (plugin hooks, skills, slash commands, subagents),
+# pinned read-only on the same switch when they exist as real directories.
+# The CLI's plugin installs fail inside, like its self-update; both come
+# from the host. One that doesn't exist can be created from inside (bwrap
+# would create the destination, in the user's own ~/.claude), and one that
+# is a symlink can't be pinned: noted in the plan, stated in the docs.
+PROTECTED_CLAUDE_DIRS: tuple[str, ...] = (
+    ".claude/plugins",
+    ".claude/skills",
+    ".claude/commands",
+    ".claude/agents",
+)
+
+# The user's own instructions, read by every session: pinned like the
+# directories above, and with the same two gaps. Unlike settings.json a
+# symlinked one does not refuse the plan — nothing in it is executed, and
+# a dotfiles setup would lose every sandboxed launch to it.
+PROTECTED_CLAUDE_FILES: tuple[str, ...] = (".claude/CLAUDE.md",)
+
+# What is pinned inside the enclosing repository's git directory (and a
+# linked worktree's common one), which is otherwise shared read-write:
+# the hooks the host's next `git commit` or `git checkout` there would
+# run. They still run inside; installing one from inside fails. The
+# config beside them stays writable — branch tracking is written there —
+# so `core.hooksPath` can still point git somewhere else: this narrows
+# the way out, it does not close it.
+PROTECTED_GIT_DIRS: tuple[str, ...] = ("hooks",)
 
 
 class PlanRefused(Exception):
@@ -489,20 +519,36 @@ class Plan:
     args: list[str] = field(default_factory=list)
     sources: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    # (destination, writable) of every mount, in the order they land.
+    mounts: list[tuple[str, bool]] = field(default_factory=list)
 
     def ro(self, src: str, dest: str | None = None, required: bool = False) -> None:
         self.args += ["--ro-bind" if required else "--ro-bind-try", src, dest or src]
         self.sources.append(src)
+        self.mounts.append((dest or src, False))
 
     def rw(self, src: str, dest: str | None = None, required: bool = False) -> None:
         self.args += ["--bind" if required else "--bind-try", src, dest or src]
         self.sources.append(src)
+        self.mounts.append((dest or src, True))
 
     def tmpfs(self, dest: str) -> None:
         self.args += ["--tmpfs", dest]
+        self.mounts.append((dest, True))
 
     def mask_file(self, dest: str) -> None:
         self.args += ["--ro-bind", "/dev/null", dest]
+        self.mounts.append((dest, False))
+
+    def writable(self, path: str) -> bool:
+        """Whether *path* can be written inside the box as the plan stands:
+        the last mount that holds it — a later one lands on top — is a
+        read-write one. False for a path no mount reaches."""
+        verdict = False
+        for dest, writable in self.mounts:
+            if _within(dest, path):
+                verdict = writable
+        return verdict
 
     def remount_ro(self, dest: str) -> None:
         """The topmost mount at *dest* made read-only, and only it: unlike
@@ -607,6 +653,11 @@ def build_plan(inputs: Inputs) -> dict:
         plan.rw(os.path.join(home, rel))
     for rel in RW_HOME_ALWAYS:
         plan.rw(os.path.join(home, rel))
+    for rel in HOST_BIN_HOME:
+        if inputs.protect_settings:
+            plan.ro(os.path.join(home, rel))
+        else:
+            plan.rw(os.path.join(home, rel))
 
     # Collins' own pieces the session needs, *before* the workspace: a
     # workspace that overlaps one of these (a checkout of Collins itself,
@@ -677,6 +728,15 @@ def build_plan(inputs: Inputs) -> dict:
     docker_sock = _docker_socket(inputs.docker_host)
     if docker_sock and plan.carried(docker_sock, None):
         plan.mask_file(docker_sock)
+    # What the switch asked to have pinned and no bind can pin — a symlink:
+    # bwrap can't bind over one, and the link itself stays replaceable from
+    # inside. Recorded for the chip (plan_unpinned), beside the note.
+    unpinned: list[str] = []
+
+    def not_pinned(path: str, what: str) -> None:
+        unpinned.append(path)
+        plan.notes.append(f"{what} is a symlink: not pinned")
+
     if inputs.protect_settings:
         for rel in PROTECTED_SETTINGS:
             full = os.path.join(home, rel)
@@ -688,16 +748,45 @@ def build_plan(inputs: Inputs) -> dict:
                 plan.ro(full, required=True)
         for rel in PROTECTED_CLAUDE_DIRS:
             full = os.path.join(home, rel)
-            if os.path.isdir(full) and not os.path.islink(full):
+            if os.path.islink(full):
+                not_pinned(full, f"~/{rel}")
+            elif os.path.isdir(full):
                 plan.ro(full, required=True)
+        for rel in PROTECTED_CLAUDE_FILES:
+            full = os.path.join(home, rel)
+            if os.path.islink(full):
+                not_pinned(full, f"~/{rel}")
+            elif os.path.isfile(full):
+                plan.ro(full, required=True)
+        # The hooks of the repository the session works in, which its git
+        # directory's read-write bind carries: the host's next git command
+        # there runs them. A linked worktree's are its common git dir's
+        # (its own `.git` is a file).
+        for git_dir in (os.path.join(root, ".git") if root else None, common):
+            if not git_dir or os.path.islink(git_dir) or not os.path.isdir(git_dir):
+                continue
+            for name in PROTECTED_GIT_DIRS:
+                full = os.path.join(git_dir, name)
+                if not valid_path(full):
+                    continue
+                if os.path.islink(full):
+                    not_pinned(full, full)
+                elif os.path.isdir(full):
+                    plan.ro(full, required=True)
         # The `claude` the host's next session runs: pinned when it is a
-        # real file in a shared tree. The native installer's launcher is a
-        # symlink in ~/.local/bin (shared read-write), which no bind can
-        # pin — noted, and stated in the docs.
+        # real file in a tree the box can write. One in ~/.local/bin is
+        # held by that directory's own read-only bind, symlink or not (the
+        # native installer's is one); a symlink in any other shared tree
+        # can't be pinned by a bind — noted, and stated in the docs.
         launcher = inputs.claude_launcher
-        if launcher and valid_path(launcher) and plan.carried(launcher, None):
+        if (
+            launcher
+            and valid_path(launcher)
+            and plan.carried(launcher, None)
+            and plan.writable(launcher)
+        ):
             if os.path.islink(launcher):
-                plan.notes.append(f"claude launcher {launcher} is a symlink: not pinned")
+                not_pinned(launcher, f"claude launcher {launcher}")
             elif os.path.isfile(launcher):
                 plan.ro(launcher, required=True)
 
@@ -752,6 +841,7 @@ def build_plan(inputs: Inputs) -> dict:
             "share_gh": bool(inputs.share_gh),
             "share_ssh": bool(inputs.share_ssh and ssh_sock),
             "protect_settings": bool(inputs.protect_settings),
+            "unpinned": unpinned,
             "box": inputs.box,
             "carrier": carrier,
             "anchors": [[host_dir, dest] for host_dir, dest in anchors],
@@ -1456,6 +1546,22 @@ def load_plan(path: str | None) -> dict | None:
         if not isinstance(pair, list) or len(pair) != 2 or not all(valid_path(p) for p in pair):
             return None
     return plan
+
+
+# The most paths plan_unpinned hands a surface: the tables name fewer.
+MAX_UNPINNED = 16
+
+
+def plan_unpinned(plan: dict) -> list[str]:
+    """What the box built from *plan* was asked to hold read-only and
+    couldn't — each a symlink, which the session can replace. Read off the
+    launched plan for the chip; a plan that doesn't say (an earlier
+    build's), or says it in another shape, has none."""
+    inputs = plan.get("inputs")
+    listed = inputs.get("unpinned") if isinstance(inputs, dict) else None
+    if not isinstance(listed, list):
+        return []
+    return [p for p in listed if valid_path(p)][:MAX_UNPINNED]
 
 
 def plan_reaches(plan: dict, path: str) -> str:

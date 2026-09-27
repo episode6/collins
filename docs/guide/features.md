@@ -1057,7 +1057,7 @@ flipped the switch is refused if it calls it anyway.
   filesystem sandbox: the project (its enclosing repository's `.git` and
   `.claude` included, so a worktree launch works) is read-write, `~/.claude`
   and the toolchain caches (`~/.cargo`, `~/.npm`, `~/.gradle`, `~/.m2`,
-  `~/.cache/uv`, `~/.local/bin`, …) are shared, the system is read-only,
+  `~/.cache/uv`, …) are shared, `~/.local/bin` and the system are read-only,
   and everything else on disk — `~/.ssh`, `~/.config/gh`, the keyring, the
   other checkouts — is absent. `$HOME` inside is a directory of the
   session's own, `~/.local/share/collins/sandbox/<box id>/home`: seeded
@@ -1070,22 +1070,43 @@ flipped the switch is refused if it calls it anyway.
   derived data, and a transcript restored from the trash resumes in a
   fresh home). Before every launch Collins clears what stands in a
   mount's way in that home, a symlink above all: one planted there would
-  otherwise stop the next launch. Inside, the session starts with permission prompts off
-  (`--permission-mode bypassPermissions`; a preference) — that is the point:
-  a session that can't reach your credentials can be left alone. The
+  otherwise stop the next launch. Permission prompts stay on inside unless
+  **Skip permission prompts inside** is switched on (`--permission-mode
+  bypassPermissions`; off by default): with no prompt the box is the only
+  barrier, and what it does not bound is listed below. The
   boundary is the filesystem and the unix sockets that live on it, not the
   network: the CLI needs the API, and `~/.claude` is shared and writable
-  (transcripts, the OAuth token, todos). The box bounds the filesystem, not
-  the hook surface: `~/.claude/settings.json`, `settings.local.json` (when
-  it exists — a missing one can be created), `~/.claude/plugins` and a
-  `claude` launcher that is a real file are bound read-only over themselves
-  so an agent inside can't plant a hook there that runs in your next
-  unsandboxed session — `/model` and `/effort` then hold for the session
-  only, as the CLI itself says, and a symlinked `settings.json` (a dotfiles
-  setup) refuses the box until the edit switch below is on. What can't be
-  protected: a project's own `.claude/settings.json` sits inside the
-  workspace, and the native installer's `~/.local/bin/claude` symlink sits
-  in a shared tree and can be repointed. Inside the box, the session tools
+  (transcripts, the OAuth token, todos). **The box keeps an unattended
+  agent away from your credentials and your other checkouts. It does not
+  contain a hostile one**: some of what a session can write is run outside
+  the box later, by you or by your next session. The part of that which
+  can be pinned is bound read-only over itself: `~/.claude/settings.json`
+  and `settings.local.json`, `~/.claude/plugins`, `skills`, `commands`,
+  `agents` and `CLAUDE.md`, the repository's `.git/hooks` (for a linked
+  worktree, its common git directory's), `~/.local/bin` — which is on your
+  `PATH` — and a `claude` launcher that is a real file in a writable tree.
+  Hooks and tools still run inside; installing one from inside fails
+  (`pre-commit install`, `uv tool install`, `pipx install`), `/model` and
+  `/effort` hold for the session only, as the CLI itself says, and a
+  symlinked `settings.json` (a dotfiles setup) refuses the box until the
+  switch below is on. One switch, **Let sandboxed sessions write settings
+  and hooks**, hands all of it back. What stays writable from inside and
+  runs on the host, switch or no switch: the workspace itself (its
+  scripts and build files, its own `.claude/settings.json`, a hooks
+  directory it carries such as `.husky`) — and a session started in a new
+  worktree has the whole repository for a workspace, its other worktrees
+  included; the repository's `.git/config`, where `core.hooksPath`,
+  `core.sshCommand`, `core.fsmonitor` and the aliases live — it is left
+  writable because branch tracking (`git push -u`) is written there, so
+  the pin on `.git/hooks` narrows that way out without closing it; the
+  hooks of a nested repository, a submodule or an allowed directory; the
+  toolchain directories a build needs writable (`~/.cargo/bin`,
+  `~/.gradle/init.d`, the artifacts cached in `~/.m2` and `~/.npm`,
+  `~/.local/share/pnpm`, a version manager's shims); and in `~/.claude`,
+  any of the pinned names that doesn't exist yet (a missing `CLAUDE.md`
+  or `commands` can be created) or is a symlink (the link can be
+  replaced; the Sandboxed chip names each one it couldn't pin). Read what
+  a sandboxed session changed before you run it. Inside the box, the session tools
   that show you things (`open_in_editor`, `show_diff`, `show_image`,
   `notify_user`, …) work as ever; the three that reach the host apply a
   policy instead: `run_in_terminal` and `read_terminal` see only
@@ -1104,7 +1125,8 @@ flipped the switch is refused if it calls it anyway.
   A **Sandboxed** chip (a shield) leads the footer of a sandboxed tab and
   is absent everywhere else: it shows what the box was *launched* with —
   the workspace, whether the GitHub CLI login and the SSH agent went in,
-  whether `~/.claude/settings.json` is protected — and two lists. The
+  whether settings and hooks are read-only, and any of them that stayed
+  writable because it is a symlink — and two lists. The
   **allowed directories** are this session's, *for this session only*:
   each with a remove button, plus *Allow a directory…* through the folder
   chooser. A
@@ -1311,7 +1333,7 @@ the **Model list** row, which is free — followed by a switch for each of the
 **built-in MCP tools** the agent can call, the **status icon**, **Reopen the
 last session**, a **Sandbox** group — **Sandbox new sessions**, **Skip
 permission prompts inside**, **Share GitHub CLI login**, **Share SSH
-agent**, **Let sandboxed sessions edit ~/.claude/settings.json**, and a
+agent**, **Let sandboxed sessions write settings and hooks**, and a
 status row saying whether bubblewrap was found and whether allowed
 directories reach a running session — what to do **when quitting with running sessions** (ask /
 exit / background / hide) and **when archiving a running session** (ask /

@@ -96,6 +96,13 @@ GRANTED = f"{E2E}/dev/lib"
 OTHER = f"{E2E}/dev/secret-project"
 SECRET = f"{HOME}/.ssh"
 SETTINGS = f"{HOME}/.claude/settings.json"
+# What the host runs later, pinned read-only inside (sandboxplan's
+# PROTECTED_* tables and HOST_BIN_HOME).
+HOOK = f"{WORKSPACE}/.git/hooks/pre-commit"
+GIT_CONFIG = f"{WORKSPACE}/.git/config"
+SKILLS = f"{HOME}/.claude/skills"
+INSTRUCTIONS = f"{HOME}/.claude/CLAUDE.md"
+HOST_BIN = f"{HOME}/.local/bin"
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -138,6 +145,16 @@ with open(f"{SECRET}/id_ed25519", "w", encoding="utf-8") as fh:
     fh.write("PRIVATE KEY\n")
 with open(SETTINGS, "w", encoding="utf-8") as fh:
     fh.write('{"model": "opus"}\n')
+for path in (os.path.dirname(HOOK), SKILLS, HOST_BIN):
+    os.makedirs(path, exist_ok=True)
+with open(HOOK, "w", encoding="utf-8") as fh:
+    fh.write("#!/bin/sh\necho hook-ran\n")
+os.chmod(HOOK, 0o755)
+with open(GIT_CONFIG, "w", encoding="utf-8") as fh:
+    fh.write("[core]\n")
+with open(INSTRUCTIONS, "w", encoding="utf-8") as fh:
+    fh.write("the user's own\n")
+os.symlink("/bin/true", f"{HOST_BIN}/tool")
 
 state = AppState()
 host = sandboxplan.SandboxHost(os.environ["COLLINS_APP_ID"], state, state.state_file())
@@ -179,6 +196,17 @@ echo other=$(cat {OTHER}/secret.txt 2>/dev/null || echo MISSING)
 echo ssh=$(ls {SECRET} 2>/dev/null || echo MISSING)
 echo settings=$(cat {SETTINGS} 2>/dev/null || echo MISSING)
 echo settings_write=$(echo x >> {SETTINGS} 2>/dev/null && echo yes || echo no)
+echo hook_runs=$({HOOK} 2>/dev/null || echo no)
+echo hook_write=$(echo x >> {HOOK} 2>/dev/null && echo yes || echo no)
+echo hook_add=$(touch {os.path.dirname(HOOK)}/post-checkout 2>/dev/null && echo yes || echo no)
+echo hooks_move=$(mv {os.path.dirname(HOOK)} {os.path.dirname(HOOK)}-aside 2>/dev/null && echo yes || echo no)
+echo git_config_write=$(echo x >> {GIT_CONFIG} 2>/dev/null && echo yes || echo no)
+echo skills_write=$(mkdir {SKILLS}/planted 2>/dev/null && echo yes || echo no)
+echo instructions=$(cat {INSTRUCTIONS} 2>/dev/null || echo MISSING)
+echo instructions_write=$(echo x >> {INSTRUCTIONS} 2>/dev/null && echo yes || echo no)
+echo host_bin_runs=$({HOST_BIN}/tool 2>/dev/null && echo yes || echo no)
+echo host_bin_repoint=$(ln -sfn /bin/false {HOST_BIN}/tool 2>/dev/null && echo yes || echo no)
+echo host_bin_add=$(touch {HOST_BIN}/planted 2>/dev/null && echo yes || echo no)
 echo collins_config=$(ls {E2E}/config 2>/dev/null || echo MISSING)
 echo collins_state=$(ls {E2E}/state 2>/dev/null || echo MISSING)
 echo plan=$(test -e {plan_path} && echo PRESENT || echo MISSING)
@@ -230,6 +258,26 @@ else:
     check("~/.ssh is absent", inside.get("ssh") == "MISSING", inside.get("ssh"))
     check("~/.claude/settings.json is readable", '"model"' in inside.get("settings", ""), inside.get("settings"))
     check("…and not writable", inside.get("settings_write") == "no", inside.get("settings_write"))
+    # What the host runs later: there, working, and not the box's to change.
+    check("the repository's hook runs inside", inside.get("hook_runs") == "hook-ran", inside.get("hook_runs"))
+    check("…and can't be rewritten", inside.get("hook_write") == "no", inside.get("hook_write"))
+    check("…nor one added beside it", inside.get("hook_add") == "no", inside.get("hook_add"))
+    check("…nor the hooks directory moved aside", inside.get("hooks_move") == "no", inside.get("hooks_move"))
+    check(
+        "the git config beside them stays writable",
+        inside.get("git_config_write") == "yes",
+        inside.get("git_config_write"),
+    )
+    check("~/.claude/skills can't be written", inside.get("skills_write") == "no", inside.get("skills_write"))
+    check(
+        "~/.claude/CLAUDE.md is readable",
+        inside.get("instructions") == "the user's own",
+        inside.get("instructions"),
+    )
+    check("…and not writable", inside.get("instructions_write") == "no", inside.get("instructions_write"))
+    check("a tool in ~/.local/bin runs inside", inside.get("host_bin_runs") == "yes", inside.get("host_bin_runs"))
+    check("…and can't be repointed", inside.get("host_bin_repoint") == "no", inside.get("host_bin_repoint"))
+    check("…nor one added beside it", inside.get("host_bin_add") == "no", inside.get("host_bin_add"))
     check("Collins' config is absent", inside.get("collins_config") == "MISSING", inside.get("collins_config"))
     check("Collins' state is absent", inside.get("collins_state") == "MISSING", inside.get("collins_state"))
     check("the plan file itself is absent", inside.get("plan") == "MISSING", inside.get("plan"))
@@ -302,6 +350,15 @@ check("the write from inside reached the workspace", os.path.exists(f"{WORKSPACE
 check("…and the granted directory", os.path.exists(f"{GRANTED}/written-inside"))
 with open(SETTINGS, encoding="utf-8") as fh:
     check("settings.json is unchanged on the host", fh.read().strip() == '{"model": "opus"}')
+with open(HOOK, encoding="utf-8") as fh:
+    check("the hook is unchanged on the host", fh.read() == "#!/bin/sh\necho hook-ran\n")
+check("…alone in its directory", os.listdir(os.path.dirname(HOOK)) == ["pre-commit"])
+check(
+    "~/.local/bin holds what it held",
+    os.listdir(HOST_BIN) == ["tool"] and os.readlink(f"{HOST_BIN}/tool") == "/bin/true",
+    os.listdir(HOST_BIN),
+)
+check("nothing was planted in ~/.claude/skills", os.listdir(SKILLS) == [])
 check(
     "each box's home holds its own file",
     os.path.exists(f"{sandboxplan.box_home(BOX)}/written-in-the-first")

@@ -62,7 +62,8 @@ def test_every_sandbox_setting_has_its_default():
         if key != "status":
             assert key in DEFAULT_SETTINGS, key
     assert DEFAULT_SETTINGS["sandbox_new_sessions"] is False
-    assert DEFAULT_SETTINGS["sandbox_bypass_permissions"] is True
+    # Off until asked for: with no prompt the box is the only barrier.
+    assert DEFAULT_SETTINGS["sandbox_bypass_permissions"] is False
     assert DEFAULT_SETTINGS["sandbox_share_gh"] is False
     assert DEFAULT_SETTINGS["sandbox_share_ssh"] is False
     assert DEFAULT_SETTINGS["sandbox_settings_editable"] is False
