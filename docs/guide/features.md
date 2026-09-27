@@ -1240,7 +1240,10 @@ flipped the switch is refused if it calls it anyway.
   can push as you, signing with keys it never sees). *Tools a sandboxed
   session may call* holds a switch per session tool: the default for
   every sandboxed session that has no switch of its own for that tool,
-  running ones included. The checkbox and the
+  running ones included. A row is greyed, and says so, while its tool is
+  switched off for every session under *Built-in MCP tools* — as the
+  chip greys its check; the row keeps its value for when the tool comes
+  back. The checkbox and the
   project-menu item appear only where bubblewrap is installed and user
   namespaces work; the Preferences group is always there, its switches
   insensitive and its status row saying which is missing — and, where a

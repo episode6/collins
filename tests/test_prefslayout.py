@@ -64,6 +64,10 @@ def test_every_sandbox_setting_has_its_default():
         if key not in ("status", "sandbox_tools"):
             assert key in DEFAULT_SETTINGS, key
     assert prefslayout.SANDBOX_ROWS[-2:] == ("sandbox_tools", "status")
+    # The expander's rows follow the switches of the Built-in MCP tools
+    # group (a tool off for every session is off inside a box, and its row
+    # says so), which the dialog therefore has to have built first.
+    assert prefslayout.GROUPS.index("mcp_tools") < prefslayout.GROUPS.index("sandbox")
     offered = sorted(
         key[len("sandbox_tool_"):]
         for key, on in DEFAULT_SETTINGS.items()

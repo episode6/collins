@@ -441,7 +441,25 @@ def build_sandbox_tool_rows(
         row.set_active(state.get_setting(mcptools.sandbox_tool_setting_key(name)) is True)
         row.connect("notify::active", on_tool_changed, name)
         rows[name] = row
+    sync_sandbox_tool_rows(rows, state)
     return rows
+
+
+# What a sandbox tool's row says in place of its own line while the tool is
+# switched off for every session: its switch decides nothing until then.
+SANDBOX_TOOL_UNAVAILABLE = N_("Switched off for every session under Built-in MCP tools")
+
+
+def sync_sandbox_tool_rows(rows: dict[str, Adw.SwitchRow], state: AppState) -> None:
+    """Grey each sandbox tool row whose tool is switched off for every
+    session (build_mcp_rows' switch, which wins inside a box too), and say
+    so where its own line was — as the Sandboxed chip greys its check. The
+    row keeps its value: what it says comes back with the tool. Called
+    when the rows are built and whenever one of the other switches moves."""
+    for name, row in rows.items():
+        available = bool(state.get_setting(mcptools.tool_setting_key(name)))
+        row.set_sensitive(available)
+        row.set_subtitle(mcp_tool_label(name)[1] if available else _(SANDBOX_TOOL_UNAVAILABLE))
 
 
 def build_mcp_rows(

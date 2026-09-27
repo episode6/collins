@@ -522,7 +522,7 @@ def tools() -> bool:
         run.set_active(True)
     check("switched on in the chip, it is the box's own switch", host.tool_overrides(box) == {"run_in_terminal": True}, host.tool_overrides(box))
     check("…in state.json, under the box", AppState().get_sandbox_tools(box) == {"run_in_terminal": True})
-    check("…and offered", offered_to(caller) == [*OFFERED[:4], *OFFERED[4:], "run_in_terminal"], offered_to(caller))
+    check("…and offered", offered_to(caller) == [*OFFERED, "run_in_terminal"], offered_to(caller))
     got = call_from(caller, "run_in_terminal", {"command": "echo offered-now"})
     check("the call goes through, into a sandboxed shell", got == (True, "Running in Sandboxed shell 1."), got)
     got = call_from(caller, "read_terminal", {})

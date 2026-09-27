@@ -1287,6 +1287,11 @@ def test_run_tool_call_refuses_a_tool_the_caller_isnt_offered():
     )
     assert (ok, message) == (False, mcptools.sandbox_disabled_error("run_in_terminal"))
     assert "run_in_terminal" in message and "sandboxed session" in message
+    # The agent may relay it: the places it names are called what the
+    # window calls them.
+    assert "Sandboxed chip → Session tools" in message
+    assert "Preferences → Sandbox → Tools a sandboxed session may call" in message
+    assert "Preferences → Built-in MCP tools" in mcptools.disabled_error("run_in_terminal")
     assert ran == []
     ok, _message = mcptools.run_tool_call(
         "set_session_title", {"title": "hi"}, find_tab=lambda: "boxed", handlers=handlers,

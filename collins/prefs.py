@@ -749,6 +749,17 @@ class PreferencesDialog(Adw.Dialog):
         self._sandbox_tool_rows = tokensettings.build_sandbox_tool_rows(state, self._on_change)
         for row in self._sandbox_tool_rows.values():
             tools_row.add_row(row)
+        # A tool switched off for every session is off inside a box too:
+        # its row here follows that switch, which sits in a group of this
+        # same dialog (built before this one: prefslayout.GROUPS) and
+        # writes its setting before this handler hears of it.
+        for row in getattr(self, "_mcp_tool_rows", {}).values():
+            row.connect(
+                "notify::active",
+                lambda *_a: tokensettings.sync_sandbox_tool_rows(
+                    self._sandbox_tool_rows, self._state
+                ),
+            )
         group.add(
             _searchable(
                 tools_row, "tools", "mcp", "session tools", *self._sandbox_tool_rows

@@ -712,7 +712,17 @@ flag"** — so nothing about it is the caller's to say:
   template** — unlike a project's default grants: changing one moves
   every box that has no switch of its own for that tool, running ones
   included. A switch off in *Built-in MCP tools* (`mcp_tool_<name>`) is
-  off inside a box whatever either layer says (`host.tool_available`).
+  off inside a box whatever either layer says (`host.tool_available`),
+  and **both surfaces show it**: the chip greys the check, and
+  Preferences greys the tool's Sandbox row and puts
+  `tokensettings.SANDBOX_TOOL_UNAVAILABLE` where its own line was
+  (`sync_sandbox_tool_rows`, run when the rows are built and on every
+  `notify::active` of a *Built-in MCP tools* row — which is why
+  `mcp_tools` has to come before `sandbox` in `prefslayout.GROUPS`). The
+  row keeps its value. The two refusals an agent reads,
+  `mcptools.disabled_error` and `sandbox_disabled_error`, name those
+  places as the window does (*Built-in MCP tools*, *Session tools*,
+  *Tools a sandboxed session may call*); a test holds the strings.
 - **A box's switches are the session's and go with the box**, like its
   grants: `forget_box` and `prune_grants` drop them, entries not keyed
   by a box id or naming no known tool are dropped on load, and

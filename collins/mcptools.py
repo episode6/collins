@@ -816,8 +816,10 @@ def enabled_tools(is_enabled: Callable[[str], bool]) -> list[dict]:
 
 
 def disabled_error(name: str) -> str:
-    """The agent-facing refusal for a tool the user has switched off."""
-    return f"{name} is turned off in Collins (Preferences → Session tools)"
+    """The agent-facing refusal for a tool the user has switched off. It
+    names the group as Preferences does (tokensettings.MCP_TITLE): the
+    agent may well relay it."""
+    return f"{name} is turned off in Collins (Preferences → Built-in MCP tools)"
 
 
 # -- the tools of a sandboxed session -----------------------------------------------
@@ -895,10 +897,13 @@ def sandbox_tool_enabled(name: str, default: object, overrides: object) -> bool:
 
 def sandbox_disabled_error(name: str) -> str:
     """The agent-facing refusal for a tool this sandboxed session is not
-    offered."""
+    offered. It names the two places that decide it as the window does —
+    the chip's *Session tools*, the Preferences row — since the agent may
+    well relay it."""
     return (
         f"{name} is turned off for this sandboxed session in Collins "
-        "(the Sandboxed chip → Tools)"
+        "(the Sandboxed chip → Session tools, or Preferences → Sandbox → "
+        "Tools a sandboxed session may call)"
     )
 
 
