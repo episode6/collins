@@ -7,15 +7,18 @@ description: >-
   command starts with (sandboxrun.py), SessionOptions.sandbox and the
   provider wrapper, the box every sandboxed session has for itself (its own
   sandbox home, a carrier and anchors, a lease; made, scrubbed, swept and
-  removed by file descriptor), the sticky session-to-box map and
+  removed by file descriptor), live grants (sandboxgrants.py: a directory
+  allowed while a session runs, mounted into the running box with bindfs
+  and fusermount3 on one worker thread), the sticky session-to-box map and
   per-project override in state.json, the new-chat Sandboxed checkbox,
   trust mirroring into the sandbox home, the /bg and attach refusals, the
   Preferences group and the bwrap probe, and what the box does and does not
   contain. Use when changing anything about sandboxed launches, the plan's
-  tables or ordering, the boxes on disk, grants, the two shares, or
-  debugging a session that came up unsandboxed, a shim that can't reach
-  Collins from inside, a box that wasn't removed, or a settings.json write
-  that failed with EBUSY.
+  tables or ordering, the boxes on disk, grants and how they reach a
+  running session, the two shares, or debugging a session that came up
+  unsandboxed, a shim that can't reach Collins from inside, a grant stuck
+  on "after restart", a mount left behind, a box that wasn't removed, or a
+  settings.json write that failed with EBUSY.
 ---
 
 # Sandboxed sessions
@@ -110,8 +113,8 @@ resolver binds the tab. The **carrier** and the **anchors** are empty
 host directories bound into the box and remounted read-only there
 (`Plan.remount_ro`), which is what lets a mount the *host* makes in one
 propagate into the running box while the box itself can write none of
-them; nothing mounts there yet (live grants are the next PR of the
-stack). `anchor_roots()` is every real directory in `/` not in
+them: where a live grant is mounted (below). `anchor_roots()` is every
+real directory in `/` not in
 `NEVER_ANCHORED` (`/mnt`, `/media`, `/srv`, a machine's own `/data`);
 `_kept_anchors` drops one whose destination the plan binds itself (the
 workspace, a grant, the repository's `.git` / `.claude`, one of Collins'
@@ -284,16 +287,131 @@ left run (`_model_sep` follows it), shown by `_sync_sandbox_chip` exactly
 when `tab.sandboxed and tab.sandbox_plan_path` — never on an unsandboxed
 tab. Filled on every `show` from the *launched* plan (`load_plan`, never
 re-derived): the workspace, the two shares' state, settings protection;
-then the host's grants for the workspace, each with a remove button and an
-"after restart" tag when the launched plan lacks it, *Allow a directory…*
+then the host's grants for the project, one row each by
+`GrantMounts.status`:
+
+| The grant is | Row | Remove button |
+| --- | --- | --- |
+| `STATIC` | the path | yes |
+| `LIVE` | the path, *live* (tooltip: mounted, a restart makes it a plain bind; and where it answers when it isn't linked) | yes |
+| `PENDING` | the path, *after restart* (tooltip: the reason) | yes |
+| `LEAVING` | the path, dimmed, *until restart* | no |
+
+— the state's grants, then the `LEAVING` ones from the launched plan.
+With no `GrantMounts`, one that isn't `capable()`, or a box it doesn't
+know, the rows are drawn from the launched plan alone (nothing, or *after
+restart*). *Allow a directory…*
 (`Gtk.FileDialog.select_folder`, modal, closes the popover — so the verdict
-goes out as a toast either way: `host.allow`'s reason, or "Allowed … —
-restart the session to apply"), *Restart to apply* when `can_restart_
-sandboxed()` and `host.plan_stale`, and *Sandboxed shell*. The chip knows
-no tab or app: it takes callables (`plan_path`, `host`, `can_restart`,
+goes out as a toast either way) is `allow_directory`: `host.allow`, whose
+refusal is a toast and ends there; then `grants.allow(workspace, path,
+done)`, and one toast when `done` lands, by this tab's own `Delivery` —
+"Allowed {path}" (live and linked), "… — inside the sandbox at {inside}"
+(live, not linked), "… — restart the session to apply" (pending). The
+remove button is `host.revoke` then `grants.revoke`, and the popover is
+drawn again when that lands. `done` runs on the grants' worker thread:
+`_land` puts it on the main loop with `GLib.idle_add(...,
+priority=GLib.PRIORITY_DEFAULT)` — an idle-priority landing starves under
+Xvfb, and a chip stuck on *after restart* after a delivery that worked is
+that. *Restart to apply* is offered when `can_restart_
+sandboxed()` and `host.plan_stale(plan, workspace,
+live=grants.live_paths(box))`, and *Sandboxed shell* closes the list. The
+chip knows
+no tab or app: it takes callables (`plan_path`, `host`, `grants`, `box`,
+`can_restart`,
 `on_restart`, `on_open_shell`, `on_toast`); the tab's `"toast"` signal
 reaches `MainWindow._on_tab_toast` (markup-escaped, over the sidebar's
 toast overlay).
+
+**Live grants (`sandboxgrants.py`, GTK-free).** One `GrantMounts(host)`
+per app instance, handed to the tabs as `terminal.SANDBOX_GRANTS`; it owns
+every mount this instance made.
+
+- **One worker thread**, `sandbox-grants`, fed by a queue and alive until
+  `shutdown()`. Every spawn, mount and unmount runs on it: that serialises
+  them, and it is the thread `PR_SET_PDEATHSIG` ties the servers to —
+  **never spawn `bindfs` from anywhere else**, a short-lived thread's
+  exit would take the mount with it. `register(plan)` / `unregister(box,
+  wait=)` follow a box's life, `allow` / `revoke(workspace, path, done)`
+  a grant's; each queues and returns. `done(list[Delivery])` is called on
+  the worker thread. `status`, `delivery`, `live_paths`, `registered` read
+  a table under a lock and never block.
+- **`capable()`** is `""` or the reason, settled once: `bindfs not
+  installed` (`COLLINS_BINDFS`, else PATH), `fusermount3 not installed`
+  (`COLLINS_FUSERMOUNT`, else PATH), `FUSE is not available` (no
+  `/dev/fuse`), `mounts don't propagate from the sandbox directory` (the
+  mount holding the sandbox root — the longest mount point in
+  `/proc/self/mountinfo` that is a prefix of it — has no `shared:`
+  field). Nothing short of mounting knows whether a mount will be
+  *permitted*; a refused one is a `PENDING` delivery with bindfs's own
+  first line of stderr.
+- **Delivering one grant to one box**: `capable()`, then `guard_path`
+  again (as `build_plan` does for a static grant), then `place()`. Under
+  `$HOME`: the mount point is `<carrier>/<slot>` (`slot_name`: the last
+  component made safe, cut to 40, then 8 hex of the path's SHA-256),
+  `inside` is `/run/collins/grants/<slot>`, and a link is wanted at
+  `<box home>/<path relative to $HOME>` — unless a mount of the box's
+  plan covers that spot, where a link would sit unseen. Under an anchor
+  the box emitted: `<anchor's host dir>/<rest>`, `inside` is the path
+  itself, no link. Anything else: `PENDING`, "can't be added to a running
+  sandbox". Then the mount point is made by file descriptor
+  (`_make_point`), a stale mount there unmounted, and `bindfs -f
+  --no-allow-other -o fsname=collins:<pid> <path> <mount point>` spawned;
+  `mountinfo` is polled every 10 ms for the point with type
+  `fuse.bindfs`, 5 s at most. The server exiting, or the timeout, is
+  `PENDING` with its reason, the child stopped and anything that
+  half-appeared unmounted.
+- **The link** (`_make_link`) is walked from the box's home down by file
+  descriptor, each component opened relative to the last with
+  `O_NOFOLLOW | O_DIRECTORY`, what is missing created. At the last
+  component a symlink is replaced, an empty directory removed and
+  replaced, a missing name created. Anything else in the way, or a
+  component that is not a directory, leaves the grant `LIVE` with
+  `linked` False — it answers at `inside` only.
+- **Revoking**: the link goes (only while it still is a symlink whose
+  target is this grant's `inside`), `fusermount3 -u -z`, the server's own
+  exit for 1 s, `SIGTERM`, 2 s, `SIGKILL`, then `rmdir` of the mount
+  point. Where the grant is static nothing can be done to the running
+  box: `LEAVING`.
+- **`register`** delivers every grant the state holds for the box's
+  project that its plan lacks — nothing for an ordinary launch, the
+  grants made since for a sibling on a plan derived earlier; a box
+  registered again has what was live in it unmounted first.
+  **`unregister(box, done=)`** unmounts everything live in the box; the
+  restart needs the home clear before the next plan is prepared, and a
+  box can't be removed before its mounts are gone, but **the main loop
+  waits for neither**: a server a process inside still held a file of
+  takes seconds to end, several of them several times that. The tab
+  unregisters through `_unregister_sandbox_box(then)` and goes on from
+  `done` — the restart lands `_relaunch_sandboxed` with `GLib.idle_add`
+  at default priority, the shell's exit releases the lease and discards
+  the box from the worker. `unregister(box, wait=True)` still exists and
+  says whether the unmounts finished in time; `_release_sandbox_plan`
+  calls it for a box that is, by then, already unknown.
+  **`sweep_mounts()`** at startup, before
+  `sweep_boxes`, unmounts every `fuse.bindfs` mount under the sandbox
+  root whose source is `collins:<pid>` with no such process.
+  **`shutdown()`** from `App.do_shutdown`.
+- **A sibling can't start inside a directory its parent holds only
+  live** (`SandboxHost.derive(..., live=grants.live_paths(parent box))`):
+  its plan is the parent's as launched. Once up it registers like any
+  box and receives the project's newer grants live.
+
+**The invariants** — the first three are never loosened to make
+something work:
+
+1. A mount Collins makes lands only in a box's `grants/` or `anchors/`.
+   Never under a `home/`, never on a path any box can write.
+2. Every write and every removal under a `home/` goes by file descriptor
+   with `O_NOFOLLOW`; a symlink there is unlinked or replaced, never
+   followed.
+3. Nothing is deleted through a mount: a box with a mount under it is
+   not removed, and a removal that meets another device stops.
+4. Only `<root>/<32 hex>` is ever removed.
+5. A grant that can't be delivered live is `PENDING`, never an error and
+   never a guess: the restart applies it.
+6. `bindfs` is spawned only by the `sandbox-grants` thread.
+7. A sandboxed session never launches unsandboxed because of anything
+   here.
 
 **Restart to apply** (`TerminalTab.restart_sandboxed`): the CLI's exit
 keystroke, a `_RESTART_POLL_MS` poll that answers the worktree keep/remove
@@ -404,8 +522,35 @@ switches go insensitive and its status row says why.
 
 - Unprivileged userns is AppArmor-restricted: bwrap works through Ubuntu's
   shipped profile, but nothing inside can mount and the host can't `setns`
-  into the mount namespace. Live grants (aibox's broker/launcher) are
-  impossible here; a grant applies at the next launch.
+  into the mount namespace. aibox's way of granting live (its broker and
+  launcher, mounting from inside) is impossible here; Collins mounts on
+  the host instead.
+- **The mount point must not be agent-writable, and `/proc/self/fd`
+  does not fix that.** libfuse's `fusermount.c` runs `realpath()` on the
+  mount point's parent — which turns a magic link back into a path
+  string — and then `lstat`s and `chdir`s to that *string* before
+  mounting on `.`. An agent that swaps a component for a symlink between
+  the two lands the mount on a host directory of its choosing, and the
+  mount's content is the granted directory, which the agent writes:
+  `<some repo>/.git/hooks` shadowed by a granted directory called `hooks`
+  is code execution outside the box. Hence the carrier and the anchors,
+  and a symlink — whose creation *is* race-free — for the real path.
+- **Revoke has to end the server.** `fusermount3 -u -z` took 2.7 ms and
+  the mount was gone inside 20 ms later, `bindfs -f` exiting by itself;
+  with a process inside holding a file open the lazy unmount still
+  removed the mount at once, but `bindfs` stayed up serving that file
+  until `SIGTERM` (the holder's next read: `ENOTCONN`).
+- **`PR_SET_PDEATHSIG` cleans up after a crash**, and is tied to the
+  *thread* that forked: after `SIGKILL` to the spawning process the
+  mount was gone within 20 ms.
+- **Ubuntu confines `fusermount3` to a few places**
+  (`/etc/apparmor.d/fusermount3`): under `@{HOME}/**/`, `/mnt/`,
+  `/run/user/<uid>/**/`, `/media/**/` and `/tmp/**/`. The default sandbox
+  root is under `$HOME`; an `XDG_DATA_HOME` outside it makes every live
+  mount fail, which is `PENDING` with bindfs's message.
+- Measured in the checks on this machine: a grant mounted in about
+  17 ms, readable inside the running box 20 to 40 ms later, gone 20 ms
+  after a revoke that took 5 ms.
 - **A home per box isolates a mount the host makes** (measured
   2026-09-27, scripts in `~/specs/collins/assets/sandbox-live-grants/`).
   Two boxes, each with its own home and carrier: a `bindfs` mount made on
@@ -480,6 +625,13 @@ and so do the boxes: ids, anchors and their two drop rules, `scrub_home`
 on real trees (the planted link's target must survive), `remove_box`
 with the mount table and `stat` injected (`mounts=`, `stat_fn=`),
 `discard_box`, the lease, the sweep and its owner;
+`tests/test_sandboxgrants.py` holds the live grants over a fake spawn, a
+fake mount table and a fake clock (`GrantMounts(host, spawn=, mountinfo=,
+run=, clock=, sleep=, pid_alive=, bindfs=, fusermount=, fuse_device=)`),
+the link on real trees, and one test over **real** bindfs and two real
+boxes that skips where `capable()` or the probe says no — it prints what
+it measured, and cleans every mount before pytest's own cleanup could
+delete through one;
 the session → box map in `tests/test_state.py`,
 the policy helpers (`tool_shells`, `sibling_sandboxed`, the handler flag)
 in `tests/test_mcptools.py`, `inner_shell_pid` in `tests/test_proctree.py`
@@ -489,7 +641,12 @@ launched sandboxed through a **fake** `COLLINS_BWRAP` (records the
 `--args` payload, execs the command; answers the probe with exit 0),
 driving the chip, the sandboxed shell, both terminal tools from the box,
 a grant → stale → restart → relaunch with the grant, and a sibling
-derived / refused. Staged under `~/.cache/collins-e2e` with `HOME` moved
+derived / refused — all with `COLLINS_BINDFS=/nonexistent`, so a grant
+waits for the restart; then a last pass with the override gone and a
+fresh `GrantMounts` in the app's place, where a directory allowed through
+`chip.allow_directory` is tagged *live*, asks for no restart, and leaves
+through its remove button (the fake bwrap builds no box, but the mount
+and the link are made on the host all the same). Staged under `~/.cache/collins-e2e` with `HOME` moved
 into the scratch tree — `/tmp` is shared into every box, so a scratch
 tree there trips the protect-check, and a real home would get the
 `RW_HOME_ALWAYS` directories. `scripts/check_sandbox_launch.py` is the
@@ -500,12 +657,22 @@ sibling, `~/.ssh`, Collins' own state and the plan file itself absent,
 `settings.json` read-only, `/usr` read-only, its own pid namespace, the
 carrier and `/mnt` there and unwritable, the sandbox root absent — and a
 second box for a second workspace, blind to the first's home, workspace
-and grant. It is
+and grant — and the **live section**: both boxes kept running on a
+command loop, a directory allowed, readable at its real path in the
+first within 2 s, the second blind to it, revoked, gone. It is
 the only proof that bwrap *accepts* a generated plan, and it exits 77
 (`run_e2e`'s skip) with a printed reason where no box can be built — a CI
-container may have no user namespace to give. Any probe or e2e run needs a fresh `COLLINS_APP_ID` and
+container may have no user namespace to give. Both checks print their
+live part as *SKIP* and still pass where `capable()` says no, or where
+the first delivery comes back `PENDING` (a container with the tools and
+nothing to mount with); on a development machine they must run. Any
+probe or e2e run needs a fresh `COLLINS_APP_ID` and
 `COLLINS_SANDBOX_ROOT` beside the usual scratch tree, staged under
-`~/.cache/collins-e2e`.
+`~/.cache/collins-e2e` — under `$HOME`, where AppArmor lets `fusermount3`
+mount. **After anything that mounts, look at `/proc/self/mountinfo`
+before deleting a scratch tree, and never delete through a mount**: both
+checks' `clear_tree` unmounts what is left and leaves the tree alone if
+anything still is.
 
 Related: `collins-terminal-tab`, `collins-sessions-and-sidebar`,
 `collins-session-mcp-tools`, `collins-preferences-keybindings-i18n`.

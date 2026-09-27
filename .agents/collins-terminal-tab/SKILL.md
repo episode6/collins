@@ -37,7 +37,13 @@ already launched in, else freshly minted) — or adopts the plan and box
 the options already carry (a sibling's derived ones) — `Provider.
 sandbox_prefix` prepends the wrapper (and the tab appends
 `provider.session_flags` — the permission mode — behind a `--continue`
-override), `_release_sandbox_plan` unlinks the plan and releases the
+override), `_register_sandbox_box` tells the live grants
+(`terminal.SANDBOX_GRANTS`) the box is up once the plan is settled,
+`_unregister_sandbox_box(then)` has what was mounted into it unmounted on
+the grants' worker and calls `then` when it is (the restart's relaunch,
+`_relaunch_sandboxed`, and the exit's clean-up both hang off it — the
+main loop never waits for an unmount), `_release_sandbox_plan`
+unlinks the plan and releases the
 box's lease (before a restart's rebuild and in `_on_child_exited`, which
 also asks for the box to be discarded — a no-op for one a session
 names), `tab.sandboxed` is what

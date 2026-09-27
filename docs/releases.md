@@ -88,6 +88,21 @@ downloads of each version, see the
   Collins clears what stands in a mount's way first. Allowed directories
   are now kept per project: a session resumed inside one of the
   project's worktrees shares the repository's list.
+- **Allowed directories reach a running session.** *Allow a
+  directory…* in the Sandboxed chip no longer waits for a restart: the
+  directory is mounted into the running session — and into every other
+  running sandboxed session of the same project, and no other — and its
+  row says *live*; removing it takes it out again at once, open files
+  included. A live grant is a `bindfs` mount Collins makes on the host in
+  a directory of the box that the box itself can't write, so nothing the
+  agent does decides where it lands; under your home the directory
+  answers at its real path through a link. It is a FUSE passthrough —
+  fine for a source tree, slow for a build — until the next restart makes
+  it a plain bind. Where the machine can't do it (no `bindfs`, no
+  `fusermount3`, no FUSE, mounts that don't propagate, a directory that
+  can't be placed) the grant is recorded, tagged *after restart*, and
+  *Restart to apply* applies it, as before; Preferences → Sandbox says
+  which it is, and why.
 - **The Sandboxed chip.** A shield chip leads the footer of a sandboxed
   tab: what the box was launched with (the workspace, whether the GitHub
   CLI login and the SSH agent went in, whether `~/.claude/settings.json`
@@ -95,9 +110,8 @@ downloads of each version, see the
   each with a remove button, and *Allow a directory…* through the folder
   chooser, refused with the reason when it would reach a secret,
   Collins' own state, your home or `/` — and *Restart to apply* when the
-  box the session runs in no longer matches what the settings would
-  build: the session exits cleanly and resumes in the same tab with the
-  new plan. A *Sandboxed shell* (the chip, or *New sandboxed shell* in a
+  box the session runs in doesn't hold what the settings grant: the
+  session exits cleanly and resumes in the same tab with the new plan. A *Sandboxed shell* (the chip, or *New sandboxed shell* in a
   panel tab's menu) opens a terminal inside the same box, titled as one;
   Ctrl+J still opens your own shell.
 - **Sandboxing is packaged.** The `.deb`, the RPM and the AUR recipe

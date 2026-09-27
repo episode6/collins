@@ -1093,8 +1093,12 @@ flipped the switch is refused if it calls it anyway.
   own Ctrl+J shell, and `start_session` spawns the sibling inside a box
   that reaches exactly what its parent's does — the same plan re-issued
   for the sibling's directory, around a home of the sibling's own; the
-  directory must lie inside the workspace or an allowed directory
-  (a sibling in `~/.ssh` is refused with the reason); an unsandboxed
+  directory must lie inside the workspace or an allowed directory the
+  parent was launched with
+  (a sibling in `~/.ssh` is refused with the reason, and so is one inside
+  a directory the parent holds only live — restart the parent first); the
+  sibling then receives the project's newer grants live, like any running
+  session; an unsandboxed
   sibling from a sandboxed parent is never possible, and
   `bypassPermissions` is granted to a sibling only when it is sandboxed.
   A **Sandboxed** chip (a shield) leads the footer of a sandboxed tab and
@@ -1107,9 +1111,28 @@ flipped the switch is refused if it calls it anyway.
   secret (`~/.ssh`, `~/.gnupg`, `~/.config/gh`, …), Collins' own state,
   your home or `/`, or the sandbox homes (no box is granted another's).
   Grants are per project — a session resumed inside one of the project's
-  worktrees shares the repository's list — and land in `state.json`; a
-  running box is changed by a restart, so when the plan the settings
-  would build now differs from the launched one the chip offers **Restart
+  worktrees shares the repository's list — and land in `state.json`.
+  **A directory allowed while the session runs reaches it without a
+  restart**, and so does every other running sandboxed session of the
+  same project, and no other: its row says *live*. A live grant is a FUSE
+  passthrough (`bindfs`, mounted by Collins on the host into a directory
+  of the box that the box itself can't write) — fine for reading and
+  editing a source tree, slow for a build that hammers it. Under your
+  home it answers at its real path through a link, while its physical
+  path inside is under `/run/collins/grants` (`pwd -P` says so, and `..`
+  out of it leads there, not to the real parent); under `/mnt`, `/media`,
+  `/srv` and the like it is at its real path outright. Removing a live
+  grant takes it out of the running session at once, open files
+  included. A restart turns a live grant into a plain bind at its real
+  path, which is what every grant present at a launch is — so removing
+  one of *those* takes the restart too, and its row says *until restart*
+  meanwhile. A directory allowed while no session of the project runs is
+  simply there at the next launch. Where the machine can't deliver a
+  grant live — no `bindfs` or `fusermount3`, no FUSE, mounts that don't
+  propagate, a directory elsewhere than under your home or one of those
+  roots — the row says *after restart* (its tooltip says why), and
+  whenever the box doesn't hold exactly what is granted, or a share
+  changed, the chip offers **Restart
   to apply**: the session exits cleanly and
   resumes in the same tab, in the same home, with the new plan. (A session with nothing to
   resume yet, a fork, and a session running inside another session's box
@@ -1136,7 +1159,9 @@ flipped the switch is refused if it calls it anyway.
   can push as you, signing with keys it never sees). The checkbox and the
   project-menu item appear only where bubblewrap is installed and user
   namespaces work; the Preferences group is always there, its switches
-  insensitive and its status row saying which is missing.
+  insensitive and its status row saying which is missing — and, where a
+  box can be built, whether allowed directories reach a running session
+  or apply at the next restart, and why.
 - **Folder trust is asked once, up front**: the first launch in a project
   the agent doesn't trust yet asks *Do you trust this folder?* before
   anything starts, and records the answer where the agent reads it, so the
@@ -1274,7 +1299,8 @@ the **Model list** row, which is free — followed by a switch for each of the
 last session**, a **Sandbox** group — **Sandbox new sessions**, **Skip
 permission prompts inside**, **Share GitHub CLI login**, **Share SSH
 agent**, **Let sandboxed sessions edit ~/.claude/settings.json**, and a
-status row saying whether bubblewrap was found — what to do **when quitting with running sessions** (ask /
+status row saying whether bubblewrap was found and whether allowed
+directories reach a running session — what to do **when quitting with running sessions** (ask /
 exit / background / hide) and **when archiving a running session** (ask /
 exit / background), **Archive on claude.ai too**, **Delete
 archived sessions after** (a number and a unit; 0 never), **Exact busy

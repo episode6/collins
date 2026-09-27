@@ -88,6 +88,7 @@ import subprocess
 import sys
 import threading
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -295,15 +296,18 @@ def valid_path(path: object) -> bool:
     return all(part not in (".", "..") for part in path.split("/"))
 
 
-def _within(parent: str, path: str) -> bool:
+def within(parent: str, path: str) -> bool:
     """Whether *path* is *parent* or lies under it (string arithmetic on
     normalised absolute paths; no symlink resolution here)."""
     return path == parent or path.startswith(parent.rstrip("/") + "/")
 
 
+_within = within  # for the one method whose parameter bears the name
+
+
 def _under_usr(path: str) -> bool:
     """A path the system's read-only bind already covers."""
-    return _within("/usr", path)
+    return within("/usr", path)
 
 
 # -- the boxes -------------------------------------------------------------------
@@ -554,7 +558,7 @@ def build_plan(inputs: Inputs) -> dict:
         raise PlanRefused(f"the grant carrier is not a usable path: {carrier!r}")
     if inputs.box and not valid_box_id(inputs.box):
         raise PlanRefused(f"not a sandbox box id: {inputs.box!r}")
-    if _within(ws, sandbox_root) or _within(sandbox_root, ws):
+    if within(ws, sandbox_root) or within(sandbox_root, ws):
         raise PlanRefused("the sandbox homes and the workspace must not nest")
     # The workspace is a read-write bind like any grant, and is held to the
     # same rule: never a secret, an ancestor of one, or $HOME and above.
@@ -700,7 +704,7 @@ def build_plan(inputs: Inputs) -> dict:
     # whatever carried it — the workspace, a grant, a share.
     for path in protected:
         for src in plan.sources:
-            if _within(src, path):
+            if within(src, path):
                 raise PlanRefused(f"{path} must stay outside the sandbox, but {src} carries it")
 
     # After the last mount: bwrap has made every mount point a static bind
@@ -788,7 +792,7 @@ def _kept_anchors(
     for host_dir, dest in inputs.anchors:
         if not valid_path(host_dir) or not valid_path(dest) or dest == "/":
             continue
-        if dest in taken or dest in seen or any(_within(dest, p) for p in before):
+        if dest in taken or dest in seen or any(within(dest, p) for p in before):
             continue
         seen.add(dest)
         kept.append((host_dir, dest))
@@ -812,18 +816,18 @@ def guard_sensitive(
         return "the whole filesystem"
     if path == home:
         return "the home directory itself"
-    if _within(path, home):
+    if within(path, home):
         return "an ancestor of the home directory"
     for rel in SENSITIVE_HOME:
         secret = os.path.join(home, rel)
-        if _within(path, secret) or _within(secret, path):
+        if within(path, secret) or within(secret, path):
             return f"reaches {secret}"
     # Before the protected paths, which name the root too: this is the
     # reason worth reading.
-    if sandbox_root and (_within(path, sandbox_root) or _within(sandbox_root, path)):
+    if sandbox_root and (within(path, sandbox_root) or within(sandbox_root, path)):
         return "reaches the sandbox homes"
     for kept in protected:
-        if _within(path, kept) or _within(kept, path):
+        if within(path, kept) or within(kept, path):
             return f"reaches {kept}"
     return ""
 
@@ -856,7 +860,7 @@ def guard_path(
             if not os.path.islink(secret):
                 continue
             target = os.path.realpath(secret)
-            if _within(candidate, target) or _within(target, candidate):
+            if within(candidate, target) or within(target, candidate):
                 return f"reaches {secret}"
     return ""
 
@@ -918,7 +922,7 @@ def resolved_claude() -> tuple[str, str] | None:
         return None
     real = os.path.realpath(found)
     native = os.path.join(str(Path.home()), ".local", "share", "claude")
-    if _within(native, real):
+    if within(native, real):
         return real, native
     return real, os.path.dirname(real)
 
@@ -1115,7 +1119,7 @@ def release_plan(path: str | None) -> None:
 
 # -- a box on disk: made, scrubbed, leased, removed --------------------------------
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 _BIND_FLAGS = ("--bind", "--bind-try", "--ro-bind", "--ro-bind-try")
 
@@ -1139,13 +1143,13 @@ def make_box(
         os.makedirs(path, mode=0o700, exist_ok=True)
         os.chmod(path, 0o700)
     for path in anchors:
-        if not _within(os.path.join(top, "anchors"), path) or not valid_path(path):
+        if not within(os.path.join(top, "anchors"), path) or not valid_path(path):
             raise PlanRefused(f"an anchor outside its box: {path!r}")
         os.makedirs(path, mode=0o700, exist_ok=True)
     return top
 
 
-def _plan_mounts(args: list[str]) -> list[tuple[str, str | None]]:
+def plan_mounts(args: list[str]) -> list[tuple[str, str | None]]:
     """(destination, source) of every bind in a plan's arguments, in order;
     the source is None for a tmpfs."""
     mounts: list[tuple[str, str | None]] = []
@@ -1176,18 +1180,18 @@ def scrub_home(home_dir: str, plan: dict, home: str) -> list[str]:
     notes: list[str] = []
     home = home.rstrip("/") or "/"
     try:
-        top = os.open(home_dir, _DIR_FLAGS)
+        top = os.open(home_dir, DIR_FLAGS)
     except OSError:
         return notes
     covered: list[str] = []
     try:
-        for dest, src in _plan_mounts(list(plan.get("bwrap_args") or [])):
-            if not valid_path(dest) or dest == home or not _within(home, dest):
+        for dest, src in plan_mounts(list(plan.get("bwrap_args") or [])):
+            if not valid_path(dest) or dest == home or not within(home, dest):
                 continue
             if src is not None and not os.path.exists(src):
                 continue  # a -try bind bwrap skips; a required one it reports
             wants_dir = src is None or os.path.isdir(src)
-            if any(dest != other and _within(other, dest) for other in covered):
+            if any(dest != other and within(other, dest) for other in covered):
                 # Inside an earlier mount: the mount point is in that
                 # mount's source, not in this home.
                 continue
@@ -1222,7 +1226,7 @@ def _scrub_path(top: int, parts: list[str], wants_dir: bool, dest: str, notes: l
                     os.unlink(name, dir_fd=fd)
                     notes.append(f"removed a file in the way of {dest}")
                     return
-                deeper = os.open(name, _DIR_FLAGS, dir_fd=fd)
+                deeper = os.open(name, DIR_FLAGS, dir_fd=fd)
                 os.close(fd)
                 fd = deeper
                 continue
@@ -1272,7 +1276,7 @@ def lease_live(lease: dict | None) -> bool:
     return lease is not None and os.path.exists(f"/proc/{lease['pid']}")
 
 
-def _unescape_mount(field_: str) -> str:
+def unescape_mount(field_: str) -> str:
     """A mountinfo path field with its octal escapes (`\\040` for a space)
     undone."""
     if "\\" not in field_:
@@ -1303,7 +1307,7 @@ def mount_points(text: str | None = None) -> list[str]:
     for line in text.splitlines():
         fields = line.split(" ")
         if len(fields) > 4:
-            points.append(_unescape_mount(fields[4]))
+            points.append(unescape_mount(fields[4]))
     return points
 
 
@@ -1330,7 +1334,7 @@ def _walk_box(fd: int, dev: int, stat_fn, remove: bool) -> None:
             if remove:
                 os.unlink(name, dir_fd=fd)
             continue
-        child = os.open(name, _DIR_FLAGS, dir_fd=fd)
+        child = os.open(name, DIR_FLAGS, dir_fd=fd)
         try:
             if os.fstat(child).st_dev != dev:
                 raise _OtherDevice(name)
@@ -1371,7 +1375,7 @@ def remove_box(box: str, mounts=None, stat_fn=None) -> bool:
         return False
     spellings = {top, os.path.realpath(top)}
     for point in points:
-        if any(_within(spelled, point) for spelled in spellings):
+        if any(within(spelled, point) for spelled in spellings):
             log.warning("sandbox: %s holds a mount (%s); not removing it", top, point)
             return False
     stat_fn = stat_fn or os.stat
@@ -1383,7 +1387,7 @@ def remove_box(box: str, mounts=None, stat_fn=None) -> bool:
         return False
     try:
         try:
-            fd = os.open(box, _DIR_FLAGS, dir_fd=root_fd)
+            fd = os.open(box, DIR_FLAGS, dir_fd=root_fd)
         except OSError:
             return False
         try:
@@ -1466,7 +1470,7 @@ def plan_reaches(plan: dict, path: str) -> str:
     candidates = {path, os.path.realpath(path)}
     for root in roots:
         for spelled in {root, os.path.realpath(root)}:
-            if any(_within(spelled, c) for c in candidates):
+            if any(within(spelled, c) for c in candidates):
                 return ""
     return (
         f"{path} is outside the sandbox's workspace {inputs['workspace']} and its "
@@ -1498,7 +1502,7 @@ def derive_plan(plan: dict, cwd: str, box: str) -> dict:
     own_dir = os.path.join(os.path.dirname(parent_dir), box)
 
     def moved(path):
-        if isinstance(path, str) and _within(parent_dir, path):
+        if isinstance(path, str) and within(parent_dir, path):
             return own_dir + path[len(parent_dir) :]
         return path
 
@@ -1689,7 +1693,7 @@ class SandboxHost:
         if reason:
             return reason
         ws = os.path.realpath(workspace)
-        if _within(ws, path) or _within(ws, os.path.realpath(path)):
+        if within(ws, path) or within(ws, os.path.realpath(path)):
             return "already inside the workspace"
         if not os.path.isdir(path):
             return "not a directory"
@@ -1714,12 +1718,18 @@ class SandboxHost:
         grants = [g for g in self.state.get_sandbox_grants(key) if g != path]
         self.state.set_sandbox_grants(key, grants)
 
-    def plan_stale(self, plan_path: str | None, workspace: str) -> bool:
+    def plan_stale(
+        self, plan_path: str | None, workspace: str, live: Iterable[str] = ()
+    ) -> bool:
         """Whether a box launched from *plan_path* differs from the one the
-        state would build for *workspace* now — a grant added or removed,
-        a share or the settings switch flipped — so the chip can offer a
-        restart. False when either side can't be read: a box that can't be
-        rebuilt has nothing to restart into."""
+        state would build for *workspace* now, so the chip can offer a
+        restart: a share or the settings switch flipped, or the state's
+        grants are not exactly the plan's static grants plus the ones
+        mounted into the running box since (*live*,
+        sandboxgrants.GrantMounts.live_paths) — a grant still waiting for
+        the restart, or a static one taken back. False when either side
+        can't be read: a box that can't be rebuilt has nothing to restart
+        into."""
         launched = load_plan(plan_path)
         if launched is None:
             return False
@@ -1730,16 +1740,26 @@ class SandboxHost:
         except (PlanRefused, OSError, ValueError):
             return False
         before, now = launched["inputs"], current["inputs"]
-        return any(before.get(key) != now.get(key) for key in POLICY_INPUTS)
+        if any(before.get(key) != now.get(key) for key in POLICY_INPUTS if key != "grants"):
+            return True
+        holds = {*before.get("grants", []), *(os.path.normpath(path) for path in live)}
+        return set(now.get("grants", [])) != holds
 
-    def derive(self, plan_path: str | None, cwd: str) -> tuple[str | None, str, str]:
+    def derive(
+        self, plan_path: str | None, cwd: str, live: Iterable[str] = ()
+    ) -> tuple[str | None, str, str]:
         """A sibling's launch inside the box *plan_path* describes, starting
         in *cwd*: (its plan file, its box id, "") — or (None, "", the
         reason) when the parent's plan can't be read or *cwd* lies outside
         it. The sibling gets a box of its own (derive_plan): minted,
         created, its home seeded and folder trust mirrored for *cwd*,
         scrubbed, and held. The caller's tab adopts the plan and the box,
-        and releases both."""
+        and releases both.
+
+        *live* is what the parent holds mounted since its launch
+        (GrantMounts.live_paths): the sibling's plan is the parent's as
+        launched, so it can't *start* inside such a directory — it would
+        have no mount to start in — and the refusal says so."""
         parent = load_plan(plan_path)
         if parent is None:
             return None, "", "the parent session's sandbox plan can't be read"
@@ -1747,6 +1767,14 @@ class SandboxHost:
         try:
             derived = derive_plan(parent, cwd, box)
         except PlanRefused as err:
+            candidates = {cwd, os.path.realpath(cwd)}
+            for path in live:
+                for spelled in {path, os.path.realpath(path)}:
+                    if any(within(spelled, candidate) for candidate in candidates):
+                        return None, "", (
+                            f"{cwd} was allowed while the parent session was running; "
+                            "restart the parent session to start a sibling there"
+                        )
             return None, "", str(err)
         self._count(box)  # held before it is there to be swept
         try:

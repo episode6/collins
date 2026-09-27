@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     sandboxchip,
+    sandboxgrants,
     sandboxplan,
     themes,
     transcriptlinks,
@@ -235,6 +236,13 @@ def _within(root: str, path: str) -> bool:
 # providers.MCP_CONFIG_PATH; None means every sandboxed decision degrades
 # to an unsandboxed launch that says so.
 SANDBOX_HOST: sandboxplan.SandboxHost | None = None
+
+# The live grants of this instance (sandboxgrants.GrantMounts): every box a
+# tab launches registers with it, so a directory allowed while the session
+# runs is mounted into the running box, and unregisters before its plan is
+# rebuilt and when its shell exits. Set by the app beside SANDBOX_HOST;
+# None means a grant applies at the next restart, as a static bind.
+SANDBOX_GRANTS: sandboxgrants.GrantMounts | None = None
 
 # The restart the footer chip's "Restart to apply" runs: the CLI is asked
 # to exit (its Ctrl+C Ctrl+C), nudged again when it hasn't gone, and the
@@ -2342,6 +2350,21 @@ class TerminalTab(Gtk.Box):
                 )
                 return GLib.SOURCE_REMOVE
             return GLib.SOURCE_CONTINUE
+        # The shell has the terminal back. What was mounted into the old
+        # box goes first — the next plan is prepared in a home with its
+        # links gone — and that is the grants' worker's job, not the main
+        # loop's: a bindfs server a process inside still held a file of
+        # takes seconds to end. The relaunch lands when it is done;
+        # _restart_ticks stays set meanwhile, so no second restart starts.
+        self._unregister_sandbox_box(
+            lambda: GLib.idle_add(self._relaunch_sandboxed, priority=GLib.PRIORITY_DEFAULT)
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _relaunch_sandboxed(self) -> bool:
+        if self.get_root() is None or self._restart_ticks is None:
+            self._restart_ticks = None
+            return GLib.SOURCE_REMOVE
         self._restart_ticks = None
         # The launch cwd, not the agent's last one: a resume re-enters a
         # worktree the transcript records by itself, and the plan's
@@ -2376,6 +2399,7 @@ class TerminalTab(Gtk.Box):
                 # The box the deriver minted and holds for this tab
                 # (SandboxHost.derive): released with the plan.
                 self._sandbox_box = options.sandbox_box
+                self._register_sandbox_box()
                 return options
             if options.sandbox_box and SANDBOX_HOST is not None:
                 # The deriver's hold, with no plan left to adopt: the
@@ -2390,6 +2414,7 @@ class TerminalTab(Gtk.Box):
             self._sandbox_plan_path = plan
             self._sandbox_plan_adopted = False
             self._sandbox_box = box
+            self._register_sandbox_box()
             return replace(options, sandbox_plan=plan, sandbox_box=box)
         if SANDBOX_HOST is not None:
             # Whatever the attempt left on disk, unless a session names it.
@@ -2403,23 +2428,65 @@ class TerminalTab(Gtk.Box):
             options, sandbox=False, sandbox_plan="", sandbox_box="", permission_mode=mode
         )
 
+    def _register_sandbox_box(self) -> None:
+        """Tell the live grants this tab's box is up on the plan just
+        settled: what the project was granted since the plan was built
+        reaches it (a sibling on a plan derived earlier), and what is
+        granted from here on does. The registration lasts as long as the
+        plan path — past the CLI's exit, while the tab's shell lives — since
+        a sandboxed panel shell binds the same home and carrier."""
+        if SANDBOX_GRANTS is not None:
+            SANDBOX_GRANTS.register(sandboxplan.load_plan(self._sandbox_plan_path))
+
+    def _unregister_sandbox_box(self, then) -> None:
+        """Have what was mounted into this tab's box while it ran unmounted,
+        and call *then()* once it is — on the grants' worker thread, or
+        here and now when there is nothing to unmount. Never waits: the
+        main loop goes on, and *then* lands itself where it needs to be."""
+        if SANDBOX_GRANTS is None or not self._sandbox_box:
+            then()
+            return
+        SANDBOX_GRANTS.unregister(self._sandbox_box, done=lambda _gone: then())
+
     def _release_sandbox_plan(self) -> None:
-        """Let go of the plan file and of the box's lease — before a
-        restart's rebuild and at the shell's exit. The box id stays: a
-        restart launches in the same home."""
-        if self._sandbox_plan_path is not None and self._sandbox_box and SANDBOX_HOST is not None:
-            SANDBOX_HOST.release(self._sandbox_box)
+        """Let go of the plan file, of what was mounted into the box while
+        it ran, and of the box's lease — before a launch builds the next
+        plan. The box id stays: a restart launches in the same home.
+
+        Both callers that can have anything mounted — the restart and the
+        shell's exit — unregister the box first and come here from its
+        callback (_unregister_sandbox_box), so the wait below is for a box
+        that is already unknown and returns at once. It stays as the
+        guarantee that no plan is prepared over a box still registered."""
+        if self._sandbox_plan_path is not None and self._sandbox_box:
+            if SANDBOX_GRANTS is not None:
+                SANDBOX_GRANTS.unregister(self._sandbox_box, wait=True)
+            if SANDBOX_HOST is not None:
+                SANDBOX_HOST.release(self._sandbox_box)
         sandboxplan.release_plan(self._sandbox_plan_path)
         self._sandbox_plan_path = None
 
     def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
-        # The shell is gone, and the box with it (--die-with-parent).
-        self._release_sandbox_plan()
-        if self._sandbox_box and SANDBOX_HOST is not None:
+        # The shell is gone, and the box with it (--die-with-parent). What
+        # was mounted into it goes on the grants' worker, and the rest
+        # follows from there: the main loop waits for none of it.
+        box, host = self._sandbox_box, SANDBOX_HOST
+        held = self._sandbox_plan_path is not None and bool(box)
+        sandboxplan.release_plan(self._sandbox_plan_path)
+        self._sandbox_plan_path = None
+
+        def gone() -> None:
+            if host is None or not box:
+                return
+            if held:
+                host.release(box)
             # Nothing happens to a box a session names. This removes the
             # box of a launch that never produced a transcript, and of a
-            # fork whose id never resolved.
-            SANDBOX_HOST.discard_box_async(self._sandbox_box)
+            # fork whose id never resolved — once nothing is mounted in
+            # it: a box with a mount under it is never removed.
+            host.discard_box_async(box)
+
+        self._unregister_sandbox_box(gone)
         self.emit("process-exited", status)
 
     # -- copy & paste ------------------------------------------------------
@@ -2609,6 +2676,8 @@ class TerminalTab(Gtk.Box):
         self._sandbox_chip = sandboxchip.SandboxChip(
             plan_path=lambda: self._sandbox_plan_path,
             host=lambda: SANDBOX_HOST,
+            grants=lambda: SANDBOX_GRANTS,
+            box=lambda: self._sandbox_box,
             can_restart=self.can_restart_sandboxed,
             on_restart=self.restart_sandboxed,
             on_open_shell=self.open_sandboxed_shell,

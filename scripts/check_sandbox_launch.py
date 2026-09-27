@@ -18,6 +18,14 @@ namespaces restricted — the shape of a CI container. The unit suite carries
 the plan generator's own coverage (it is pure path arithmetic), so a skip
 here costs nothing but this one proof.
 
+**The live section** then allows a directory while two boxes *run*
+(collins.sandboxgrants, a real `bindfs` through the real `fusermount3`):
+readable at its real path inside the box it was allowed for within two
+seconds, absent from the other, gone again on revoke. It is printed as
+skipped — and the check still passes — where the machine can't deliver a
+grant live: `GrantMounts.capable()` says why, or the first mount is
+refused (a container with the tools and no FUSE to mount with).
+
 Staged under ~/.cache rather than /tmp, like the policy check: /tmp is
 shared read-write into every box, and Collins' own state in a scratch tree
 there would trip the plan's protect-check.
@@ -29,6 +37,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 SKIP_EXIT = 77  # scripts/run_e2e.py reads this as "skipped", not "passed"
 
@@ -36,9 +46,37 @@ REAL_HOME = os.path.expanduser("~")
 STAGE = os.path.join(REAL_HOME, ".cache", "collins-e2e")
 os.makedirs(STAGE, exist_ok=True)
 E2E = tempfile.mkdtemp(prefix="sandbox-launch-", dir=STAGE)
+
+
+def mounts_under(tree: str) -> list[str]:
+    """Every mount point at or under *tree*, deepest first."""
+    found = []
+    with open("/proc/self/mountinfo", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            fields = line.split(" ")
+            if len(fields) > 4:
+                point = fields[4].replace("\\040", " ")
+                if point == tree or point.startswith(tree + "/"):
+                    found.append(point)
+    return sorted(found, key=len, reverse=True)
+
+
+def clear_tree() -> None:
+    """Remove the scratch tree — never through a mount: a bindfs mount in
+    it *is* the granted directory. Whatever is still mounted is unmounted
+    first, and a tree that still holds a mount is left where it is."""
+    for point in mounts_under(E2E):
+        subprocess.run(["fusermount3", "-u", "-z", point], check=False, capture_output=True)
+    left = mounts_under(E2E)
+    if left:
+        print(f"not removing {E2E}: still mounted: {left}", file=sys.stderr)
+        return
+    shutil.rmtree(E2E, True)
+
+
 # ~/.cache outlives the run, so the tree goes however the check ends: a
 # skip, a failed check, bwrap outliving the timeout, any exception on the way.
-atexit.register(shutil.rmtree, E2E, True)
+atexit.register(clear_tree)
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 HOME = f"{E2E}/home"
 
@@ -61,7 +99,7 @@ SETTINGS = f"{HOME}/.claude/settings.json"
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from collins import providers, sandboxplan  # noqa: E402
+from collins import providers, sandboxgrants, sandboxplan  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
 PASSED = 0
@@ -261,6 +299,170 @@ check(
 )
 check("the real home has neither", not os.path.exists(f"{HOME}/written-in-the-first"))
 check("nothing was written into the carrier", os.listdir(sandboxplan.box_carrier(BOX)) == [])
+
+# ---- the live section: a directory allowed while the boxes run ------------------
+
+LIVE = f"{HOME}/dev/live lib"  # under $HOME, and a space in its name
+LOOP = """
+cd "$1" || exit 9
+touch ready
+n=1
+while [ ! -e stop ]; do
+    if [ -e "cmd$n" ]; then
+        sh "cmd$n" > "out$n.tmp" 2>&1
+        mv "out$n.tmp" "out$n"
+        n=$((n + 1))
+    fi
+    sleep 0.02
+done
+"""
+
+
+class RunningBox:
+    """A box that stays up — the session — taking commands through a
+    directory of its workspace."""
+
+    def __init__(self, plan: str, workspace: str) -> None:
+        self.dir = f"{workspace}/live-check"
+        os.makedirs(self.dir, exist_ok=True)
+        argv = [sys.executable, providers.sandboxrun_path(), plan, "--"]
+        self.proc = subprocess.Popen(
+            [*argv, "/bin/sh", "-c", LOOP, "loop", self.dir],
+            stdin=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        self.n = 0
+        deadline = time.monotonic() + 15
+        while not os.path.exists(f"{self.dir}/ready"):
+            if self.proc.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(self.proc.stderr.read().decode(errors="replace")[-400:])
+            time.sleep(0.02)
+
+    def run(self, script: str) -> str:
+        self.n += 1
+        with open(f"{self.dir}/cmd.tmp", "w", encoding="utf-8") as fh:
+            fh.write(script)
+        os.rename(f"{self.dir}/cmd.tmp", f"{self.dir}/cmd{self.n}")
+        deadline = time.monotonic() + 10
+        while not os.path.exists(f"{self.dir}/out{self.n}"):
+            if time.monotonic() > deadline:
+                return "TIMEOUT"
+            time.sleep(0.02)
+        with open(f"{self.dir}/out{self.n}", encoding="utf-8") as fh:
+            return fh.read().strip()
+
+    def until(self, script: str, want: str, seconds: float = 2.0) -> float | None:
+        """How long until *script* answers *want* inside; None if never."""
+        start = time.monotonic()
+        while time.monotonic() - start < seconds:
+            if self.run(script) == want:
+                return time.monotonic() - start
+            time.sleep(0.02)
+        return None
+
+    def stop(self) -> None:
+        with open(f"{self.dir}/stop", "w", encoding="utf-8"):
+            pass
+        try:
+            self.proc.wait(5)
+        except subprocess.TimeoutExpired:
+            self.proc.kill()
+            self.proc.wait(5)
+
+
+def ask(method, *args) -> list:
+    """One of the live grants' queued operations, waited for."""
+    got: list = []
+    landed = threading.Event()
+    method(*args, lambda delivered: (got.extend(delivered), landed.set()))
+    landed.wait(20)
+    return got
+
+
+def live_section() -> None:
+    grants = sandboxgrants.GrantMounts(host)
+    boxes: list[RunningBox] = []
+    try:
+        reason = grants.capable()
+        if reason:
+            print(f"SKIP  the live section: {reason}", flush=True)
+            return
+        os.makedirs(LIVE, exist_ok=True)
+        with open(f"{LIVE}/hello.txt", "w", encoding="utf-8") as fh:
+            fh.write("from the host\n")
+        first = RunningBox(plan_path, WORKSPACE)
+        boxes.append(first)
+        second = RunningBox(second_path, SECOND)
+        boxes.append(second)
+        grants.register(sandboxplan.load_plan(plan_path))
+        grants.register(sandboxplan.load_plan(second_path))
+        read = f'cat "{LIVE}/hello.txt" 2>/dev/null || echo MISSING'
+        absent = first.run(read) == "MISSING" and second.run(read) == "MISSING"
+        refusal = host.allow(WORKSPACE, LIVE)
+        started = time.monotonic()
+        delivered = ask(grants.allow, WORKSPACE, LIVE)
+        took = time.monotonic() - started
+        own = next((d for d in delivered if d.box == BOX), None)
+        if own is None or own.status != sandboxgrants.LIVE:
+            why = own.reason if own is not None else "nothing was delivered"
+            print(f"SKIP  the live section: the grant couldn't be mounted here: {why}", flush=True)
+            return
+        print(f"  --  live: two boxes running, {LIVE} allowed to the first's project", flush=True)
+        check("the directory is in neither box before it is allowed", absent)
+        check("the guard allows it", refusal == "", refusal)
+        check("it is delivered to the first box, and only to it", [d.box for d in delivered] == [BOX])
+        check("…live, at its real path", own.linked and own.inside.startswith(CARRIER + "/"), own)
+        seen = first.until(read, "from the host")
+        check("the file is readable at its real path inside within 2 s", seen is not None, seen)
+        if seen is not None:
+            print(
+                f"  --  live: mounted in {took * 1000:.0f} ms, "
+                f"readable inside {seen * 1000:.0f} ms after that",
+                flush=True,
+            )
+        where = first.run(f'cd "{LIVE}" && pwd && pwd -P').splitlines()
+        check("its physical path is in the carrier", where == [LIVE, own.inside], where)
+        wrote = first.run(f'echo inside > "{LIVE}/from-box.txt" && echo wrote')
+        check("it is writable inside", wrote == "wrote", wrote)
+        check("…and the write is the host's", os.path.exists(f"{LIVE}/from-box.txt"))
+        made = first.run(f"mkdir {CARRIER}/mine 2>/dev/null && echo made || echo refused")
+        check("the carrier itself still can't be written", made == "refused", made)
+        check("the second box is blind to it", second.run(read) == "MISSING")
+        entries = second.run(f"ls -A {CARRIER} | wc -l")
+        check("…its carrier empty", entries == "0", entries)
+        check("the grant is live in the first box", grants.status(BOX, LIVE) == sandboxgrants.LIVE)
+        check("…so the box is not stale", not host.plan_stale(plan_path, WORKSPACE, live=grants.live_paths(BOX)))
+        check("…though its plan alone would be", host.plan_stale(plan_path, WORKSPACE))
+        points = [p for p in mounts_under(E2E)]
+        expected = f"{sandboxplan.box_carrier(BOX)}/{sandboxgrants.slot_name(LIVE)}"
+        check("one mount on the host, in the first box's carrier", points == [expected], points)
+        check("a box with a mount under it is never removed", sandboxplan.remove_box(BOX) is False)
+        check("…nor anything in the granted directory", os.path.exists(f"{LIVE}/hello.txt"))
+        host.revoke(WORKSPACE, LIVE)
+        started = time.monotonic()
+        ask(grants.revoke, WORKSPACE, LIVE)
+        took = time.monotonic() - started
+        gone = first.until(read, "MISSING")
+        check("revoked, it is gone inside within 2 s", gone is not None, gone)
+        if gone is not None:
+            print(
+                f"  --  live: revoked in {took * 1000:.0f} ms, gone inside {gone * 1000:.0f} ms after that",
+                flush=True,
+            )
+        there = first.run(f'test -e "{LIVE}" && echo there || echo absent')
+        check("…the real path with it", there == "absent", there)
+        check("nothing is left mounted", mounts_under(E2E) == [], mounts_under(E2E))
+        check("the granted directory itself is untouched", os.path.exists(f"{LIVE}/from-box.txt"))
+    finally:
+        for box in boxes:
+            box.stop()
+        grants.shutdown()
+
+
+if second_path:
+    live_section()
+check("nothing is mounted under the scratch tree", mounts_under(E2E) == [], mounts_under(E2E))
+
 sandboxplan.release_plan(plan_path)
 sandboxplan.release_plan(second_path)
 check("the plan file is released", not os.path.exists(plan_path))
