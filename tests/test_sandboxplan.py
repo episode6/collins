@@ -1243,11 +1243,24 @@ class _GrantState:
     def __init__(self, grants=None, boxes=(), **settings):
         self.grants = dict(grants or {})
         self.defaults = {}
+        self.tools = {}
         self.boxes = set(boxes)
         self._settings = settings
 
     def sandbox_boxes(self):
         return set(self.boxes)
+
+    def get_sandbox_tools(self, box):
+        return dict(self.tools.get(box) or {})
+
+    def set_sandbox_tools(self, box, switches):
+        if switches:
+            self.tools[box] = dict(switches)
+        else:
+            self.tools.pop(box, None)
+
+    def sandbox_tool_boxes(self):
+        return set(self.tools)
 
     def get_sandbox_grants(self, box):
         return list(self.grants.get(box) or [])
@@ -2681,6 +2694,144 @@ def test_discard_box_async_runs_off_the_calling_thread(monkeypatch, tmp_path, ho
     assert not box.exists()
     host.discard_box_async("not a box")  # nothing started
     assert seen == ["sandbox-discard"]
+
+
+# ---- the session tools a box's session is offered -------------------------------
+
+
+def _tool_state(**settings):
+    """A state whose settings are the defaults for the two kinds of tool
+    switch, with *settings* over them."""
+    from collins import mcptools
+
+    return _SessionState(
+        **{
+            **mcptools.default_tool_settings(),
+            **mcptools.default_sandbox_tool_settings(),
+            **settings,
+        }
+    )
+
+
+def test_a_box_is_offered_the_defaults_until_it_has_a_switch_of_its_own(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    state = _tool_state()
+    host = _host(monkeypatch, tmp_path, home, state)
+    on = [name for name in sandboxplan.mcptools.tool_names() if host.tool_enabled(BOX, name)]
+    assert sorted(on) == sorted(sandboxplan.mcptools.SANDBOX_DEFAULT_TOOLS)
+    assert host.tool_overrides(BOX) == {}
+    assert host.set_tool(BOX, "run_in_terminal", True) == ""
+    assert host.set_tool(BOX, "show_diff", False) == ""
+    assert host.tool_enabled(BOX, "run_in_terminal") is True
+    assert host.tool_enabled(BOX, "show_diff") is False
+    assert state.tools == {BOX: {"run_in_terminal": True, "show_diff": False}}
+    # One session's, and no other's: a box beside it, and one not made yet.
+    assert host.tool_enabled(OTHER_BOX, "run_in_terminal") is False
+    assert host.tool_enabled(OTHER_BOX, "show_diff") is True
+    assert host.tool_enabled(THIRD_BOX, "run_in_terminal") is False
+    # A default that changes reaches the boxes with no switch for the
+    # tool, and leaves the one that has.
+    state._settings["sandbox_tool_run_in_terminal"] = True
+    state._settings["sandbox_tool_show_diff"] = False
+    state._settings["sandbox_tool_attach_pr"] = False
+    assert host.tool_enabled(OTHER_BOX, "run_in_terminal") is True
+    assert host.tool_enabled(OTHER_BOX, "show_diff") is False
+    assert host.tool_enabled(BOX, "attach_pr") is False
+    state._settings["sandbox_tool_run_in_terminal"] = False
+    assert host.tool_enabled(BOX, "run_in_terminal") is True  # its own switch
+    # Refusals: a tool the table doesn't have, a box that isn't one.
+    assert host.set_tool(BOX, "no_such_tool", True) == "no such tool: no_such_tool"
+    assert host.set_tool("", "show_diff", False) == "this session has no sandbox yet"
+    assert host.set_tool("../etc", "show_diff", False) != ""
+    assert host.tool_enabled("", "show_diff") is False  # the default, now off
+    assert host.tool_enabled("", "open_in_editor") is True
+    assert host.tool_enabled(BOX, "no_such_tool") is False
+    assert state.tools == {BOX: {"run_in_terminal": True, "show_diff": False}}
+    # Back to the defaults, whatever they come to say.
+    host.reset_tools(BOX)
+    assert state.tools == {}
+    assert host.tool_enabled(BOX, "run_in_terminal") is False
+    # The switch every session has is the host's to report, not to apply.
+    assert host.tool_available("show_diff") is True
+    state._settings["mcp_tool_show_diff"] = False
+    assert host.tool_available("show_diff") is False
+
+
+def test_tool_switches_leave_the_state_with_their_box(monkeypatch, tmp_path, home, fresh_probe):
+    state = _tool_state()
+    host = _host(monkeypatch, tmp_path, home, state)
+    monkeypatch.setattr(host, "discard_box_async", lambda box: None)
+    host.set_tool(BOX, "run_in_terminal", True)
+    host.set_tool(OTHER_BOX, "read_terminal", True)
+    state.sessions = {"sid": OTHER_BOX}  # a session names the second
+    host.forget_box(BOX)
+    host.forget_box(OTHER_BOX)
+    assert state.tools == {OTHER_BOX: {"read_terminal": True}}
+    # At startup: the switches of a box no session names and that is gone.
+    # (The fixture's own box is on disk, and so kept.)
+    gone = "1" * 32
+    host.set_tool(BOX, "run_in_terminal", True)
+    host.set_tool(gone, "start_session", True)
+    assert host.prune_grants() == 1
+    assert state.tools == {
+        OTHER_BOX: {"read_terminal": True},
+        BOX: {"run_in_terminal": True},
+    }
+
+
+def test_a_sibling_is_offered_the_defaults_less_what_its_parent_was_denied(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    """A session must not come by a tool through a sibling it spawned: what
+    the parent was denied, the sibling is denied. What the parent was
+    *given* beyond the defaults is the parent's alone."""
+    ws = home / "work" / "repo"
+    state = _tool_state()
+    host = _host(monkeypatch, tmp_path, home, state)
+    parent = host.prepare_launch(str(ws), BOX)
+    host.set_tool(BOX, "attach_pr", False)
+    host.set_tool(BOX, "run_in_terminal", True)
+    path, box, reason = host.derive(parent, str(ws))
+    assert path is not None and reason == ""
+    assert state.tools[box] == {"attach_pr": False}
+    assert host.tool_enabled(box, "attach_pr") is False
+    assert host.tool_enabled(box, "run_in_terminal") is False
+    assert host.tool_enabled(box, "show_diff") is True
+    # The parent's list is as it was.
+    assert state.tools[BOX] == {"attach_pr": False, "run_in_terminal": True}
+
+
+def test_a_fork_and_a_takeover_start_with_the_sessions_switches(
+    monkeypatch, tmp_path, home, fresh_probe
+):
+    ws = home / "work" / "repo"
+    state = _tool_state()
+    host = _host(monkeypatch, tmp_path, home, state)
+    host.set_tool(BOX, "run_in_terminal", True)
+    host.set_tool(BOX, "show_image", False)
+    # A fork: a copy, taken once.
+    host.copy_tools(BOX, OTHER_BOX)
+    assert state.tools[OTHER_BOX] == {"run_in_terminal": True, "show_image": False}
+    host.set_tool(BOX, "read_terminal", True)
+    assert "read_terminal" not in state.tools[OTHER_BOX]
+    host.copy_tools(BOX, BOX)  # nothing to copy onto itself
+    host.copy_tools("nope", OTHER_BOX)
+    host.copy_tools(BOX, "nope")
+    assert state.tools[OTHER_BOX] == {"run_in_terminal": True, "show_image": False}
+    # A --continue tab that lands on a session with a box: its box takes
+    # the session's switches over, under what was switched in the tab's
+    # own chip meanwhile; the old box's go with it.
+    state.sessions = {"sid": BOX}
+    monkeypatch.setattr(host, "discard_box_async", lambda box: None)
+    host.set_tool(THIRD_BOX, "show_image", True)
+    assert host.settle_box("sid", THIRD_BOX, str(ws), owed=True) is True
+    assert state.tools[THIRD_BOX] == {
+        "run_in_terminal": True,
+        "read_terminal": True,
+        "show_image": True,
+    }
+    assert BOX not in state.tools
 
 
 # ---- a launch narrowed to its worktree ---------------------------------------

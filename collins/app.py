@@ -2476,7 +2476,7 @@ class App(Adw.Application):
         app_id = self.get_application_id()
         service = mcpserver.SessionToolService(
             mcptools.socket_path(app_id),
-            list_tools=lambda: mcptools.enabled_tools(self._mcp_tool_enabled),
+            list_tools=self._mcp_list_tools,
             dispatch=self._mcp_dispatch,
         )
         try:
@@ -2583,6 +2583,34 @@ class App(Adw.Application):
         a running session at all depends on this being asked again."""
         return bool(self.state.get_setting(mcptools.tool_setting_key(name)))
 
+    def _mcp_tool_offered(self, found, name: str) -> bool:
+        """Whether the calling tab's session is offered the tool: always,
+        for an unsandboxed one; for a sandboxed one, what its box's
+        switches and the defaults for sandboxed sessions say
+        (SandboxHost.tool_enabled). Whether the tab is sandboxed, and
+        which box is its, are Collins' own records of the launch — the
+        caller is only ever the pid the kernel named."""
+        _window, tab = found
+        if not tab.sandboxed:
+            return True
+        host = terminal_mod.SANDBOX_HOST
+        if host is None:
+            return mcptools.sandbox_tool_enabled(
+                name, self.state.get_setting(mcptools.sandbox_tool_setting_key(name)), {}
+            )
+        return host.tool_enabled(tab.sandbox_box, name)
+
+    def _mcp_list_tools(self, pid: int) -> list[dict]:
+        """The tools the session whose shim is *pid* is told about: the ones
+        switched on, less — for a sandboxed session — the ones it isn't
+        offered. A caller no tab owns gets the first list; it can call
+        none of them."""
+        found = self._mcp_tab_for_pid(pid)
+        return mcptools.enabled_tools(
+            lambda name: self._mcp_tool_enabled(name)
+            and (found is None or self._mcp_tool_offered(found, name))
+        )
+
     def _mcp_tab_for_pid(self, shim_pid: int) -> tuple[MainWindow, TerminalTab] | None:
         """The window and tab whose terminal the calling shim descends from.
 
@@ -2633,6 +2661,9 @@ class App(Adw.Application):
             # that reach the host apply the sandbox policy on it (see the
             # notes above mcptools.run_tool_call).
             is_sandboxed=lambda found: found[1].sandboxed,
+            # And what that tab's session is offered at all: a sandboxed
+            # one has a list of its own, by its box.
+            is_offered=self._mcp_tool_offered,
         )
 
     def _mcp_set_session_title(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:

@@ -158,7 +158,22 @@ downloads of each version, see the
   as the third optional dependency. They recommend `bindfs` and `fuse3`
   too, which is what an allowed directory is mounted into a running
   session with (on Arch, `bindfs` is in the AUR).
+- **A sandboxed session is offered six session tools, and you decide
+  the rest.** Every session tool runs in Collins, outside the box, so a
+  sandboxed session is offered only the ones that put something in front
+  of you — `set_session_title`, `open_in_editor`, `show_diff`,
+  `show_image`, `notify_user`, `attach_pr`. The terminal tools,
+  `start_session` and the tools that read or mark the git page are off
+  inside a box until you switch them on: for every sandboxed session
+  under *Tools a sandboxed session may call* in Preferences → Sandbox, or
+  for one session under *Session tools* in its Sandboxed chip. Which list
+  a call is held to is Collins' own record of the tab the caller runs
+  under, never anything the call says, and a tool that is off is refused
+  before anything runs. A session's switches are its own and go with it;
+  a fork starts with its origin's, and a sibling on the defaults less
+  what its parent was denied.
 - **What a sandboxed session may ask Collins to do.** From inside a box,
+  and once they are switched on,
   `run_in_terminal` and `read_terminal` reach only sandboxed shells —
   opening one when none is idle — never your own; `start_session`
   spawns the sibling inside a box that reaches what its parent's does

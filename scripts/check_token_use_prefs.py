@@ -259,7 +259,12 @@ def step_search() -> bool:
         ),
         # Not read_terminal: the group's description names it, and a group
         # whose own text matches keeps every row, by design.
-        ("run_in_terminal", ["Run commands in the terminal panel"]),
+        # …and the Sandbox group's expander, which holds a switch for the
+        # same tool: what a sandboxed session is offered.
+        (
+            "run_in_terminal",
+            ["Run commands in the terminal panel", "Tools a sandboxed session may call"],
+        ),
     ):
         entry.set_text(query)
         dialog._apply_filter()

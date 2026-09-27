@@ -80,14 +80,17 @@ SANDBOX_SEARCH_TERMS: tuple[str, ...] = (
 )
 
 # The Sandbox group's rows, top to bottom, by the setting each one writes;
-# "status" is the row under them that writes nothing (whether a box can be
-# built here, and why not).
+# "sandbox_tools" is the expander holding one switch per session tool
+# ("sandbox_tool_<name>", what a sandboxed session is offered by default),
+# and "status" the row under them that writes nothing (whether a box can
+# be built here, and why not).
 SANDBOX_ROWS: tuple[str, ...] = (
     "sandbox_new_sessions",
     "sandbox_bypass_permissions",
     "sandbox_share_gh",
     "sandbox_share_ssh",
     "sandbox_settings_editable",
+    "sandbox_tools",
     "status",
 )
 

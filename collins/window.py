@@ -1797,6 +1797,8 @@ class MainWindow(Adw.ApplicationWindow):
                 grants = self.state.get_sandbox_grants(origin) if origin else []
                 if grants:
                     self.state.set_sandbox_grants(box, grants)
+                # And of the session tools it is offered, likewise.
+                host.copy_tools(origin, box)
             elif not box:
                 # The session's own box is its $HOME, as it left it. One
                 # with none yet (recorded before the boxes, or its

@@ -116,6 +116,8 @@ PINNED = f"{E2E}/dev/pinned"  # a project default the first session never held
 # A repository's main checkout, for the launch that asks for a worktree.
 CHECKOUT = f"{E2E}/dev/gamma"
 NARROWED = "22222222-3333-4444-5555-666666666666"
+# A project pinned unsandboxed: its sessions are offered every tool.
+PLAIN = f"{E2E}/dev/plain"
 SHIM = f"{E2E}/bin/claude"
 FAKE_BWRAP = os.environ["COLLINS_BWRAP"]
 FAKE_LOG = os.environ["SANDBOX_FAKE_LOG"]
@@ -131,7 +133,7 @@ _PROJECT = f"{E2E}/projects/" + "".join(c if c.isalnum() else "-" for c in TRUST
 
 for path in (
     f"{E2E}/projects", f"{E2E}/chats", f"{E2E}/bin", HOME, SUB, OTHER, LIVE, EXTRA, PINNED,
-    f"{HOME}/.ssh", _PROJECT, f"{CHECKOUT}/.git",
+    f"{HOME}/.ssh", _PROJECT, f"{CHECKOUT}/.git", PLAIN,
 ):
     os.makedirs(path, exist_ok=True)
 # A dotfiles setup: the user's instructions are a symlink, which no bind can
@@ -167,7 +169,11 @@ with open(f"{E2E}/config/collins/state.json", "w", encoding="utf-8") as fh:
                 # session and its sibling is what the checks below read.
                 "sandbox_bypass_permissions": True,
             },
+            "project_sandbox": {"plain": False},
             "sandboxed_sessions": {ORIGIN: ORIGIN_BOX},
+            # The earlier session was let into the terminal panel, and
+            # kept from showing images: what a fork of it starts with.
+            "sandbox_tools": {ORIGIN_BOX: {"read_terminal": True, "show_image": False}},
             "sandbox_grants": {ORIGIN_BOX: [OTHER], STALE_KEY: [PINNED]},
         },
         fh,
@@ -221,7 +227,15 @@ gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from collins import i18n, panellayout, sandboxgrants, sandboxplan, terminal, trust  # noqa: E402
+from collins import (  # noqa: E402
+    i18n,
+    mcptools,
+    panellayout,
+    sandboxgrants,
+    sandboxplan,
+    terminal,
+    trust,
+)
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -283,6 +297,7 @@ def labels(widget) -> list[str]:
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(TRUSTED)
 trust.trust_dir(CHECKOUT)
+trust.trust_dir(PLAIN)
 app = App()
 
 tries = 0
@@ -434,7 +449,152 @@ def shells_up() -> bool:
         {"kind": "shell", "hist": boxed.hist, "sandboxed": True} in kinds,
         kinds,
     )
-    return grants()
+    return tools()
+
+
+OFFERED = ["set_session_title", "open_in_editor", "show_diff", "show_image", "notify_user", "attach_pr"]
+
+
+def offered_to(tab) -> list[str]:
+    """What the session in *tab* is told it may call: the list the socket
+    serves the pid of a process under the tab's shell."""
+    return [tool["name"] for tool in app._mcp_list_tools(tab._child_pid)]
+
+
+def call_from(tab, tool: str, args: dict):
+    """One tool call as the dispatcher sees it arrive from *tab*: by pid,
+    through every gate — not the handler alone."""
+    return app._mcp_dispatch(tab._child_pid, tool, args)
+
+
+def tools() -> bool:
+    """What a sandboxed session may call is a list of its own, kept by
+    Collins against the session's box and asked at the dispatcher."""
+    caller = state["caller"]
+    host = terminal.SANDBOX_HOST
+    box = caller.sandbox_box
+    check("the pid of the session's shell resolves to its tab", app._mcp_tab_for_pid(caller._child_pid) == found())
+    check("a sandboxed session is offered six tools", offered_to(caller) == OFFERED, offered_to(caller))
+    shells = len(caller.panel_shells())
+    refused = {
+        "run_in_terminal": {"command": "echo out-of-the-box"},
+        "read_terminal": {},
+        "start_session": {"prompt": "hi"},
+        "diff_context": {},
+        "annotate_diff": {"notes": [{"file": "a", "line": 1, "summary": "s"}]},
+        "clear_diff_marks": {},
+    }
+    for tool, args in refused.items():
+        got = call_from(caller, tool, args)
+        check(
+            f"{tool} from the box is refused at the dispatcher",
+            got == (False, mcptools.sandbox_disabled_error(tool)),
+            got,
+        )
+    check("…and nothing was opened for it", len(caller.panel_shells()) == shells, caller.panel_shells())
+    got = call_from(caller, "set_session_title", {"title": "hi"})
+    check(
+        "a tool it is offered reaches its handler",
+        isinstance(got, tuple) and "turned off" not in got[1],
+        got,
+    )
+    # A call says nothing about what its caller is offered.
+    got = call_from(caller, "run_in_terminal", {"command": "echo x", "sandboxed": False})
+    check("an argument that claims otherwise is a schema error", got[0] is False and "turned off" not in got[1], got)
+    chip = caller._sandbox_chip
+    chip._rebuild()
+    texts = labels(chip._content)
+    check("the chip counts the tools, folded away", "Session tools: 6 of 13 on" in texts, texts)
+    check("…with no check on show until it is unfolded", buttons_of(chip._content, Gtk.CheckButton) == [])
+    # An expander holds its child only while it is open.
+    chip._tools_expanded = True
+    chip._rebuild()
+    boxes = {
+        b.get_label(): b for b in buttons_of(chip._content, Gtk.CheckButton)
+    }
+    check("the chip has a check per tool", len(boxes) == len(mcptools.TOOLS), sorted(boxes))
+    on = sorted(label for label, b in boxes.items() if b.get_active())
+    check("…six of them set", len(on) == 6, on)
+    run = boxes.get("Run commands in the terminal panel")
+    check("…and the terminal's is not", run is not None and not run.get_active())
+    # Switched on in the chip: this session's box, and at once for a call.
+    if run is not None:
+        run.set_active(True)
+    check("switched on in the chip, it is the box's own switch", host.tool_overrides(box) == {"run_in_terminal": True}, host.tool_overrides(box))
+    check("…in state.json, under the box", AppState().get_sandbox_tools(box) == {"run_in_terminal": True})
+    check("…and offered", offered_to(caller) == [*OFFERED[:4], *OFFERED[4:], "run_in_terminal"], offered_to(caller))
+    got = call_from(caller, "run_in_terminal", {"command": "echo offered-now"})
+    check("the call goes through, into a sandboxed shell", got == (True, "Running in Sandboxed shell 1."), got)
+    got = call_from(caller, "read_terminal", {})
+    check("the tool beside it is still refused", got == (False, mcptools.sandbox_disabled_error("read_terminal")), got)
+    # Switched off for every session, it is off in the box whatever the box says.
+    win_state().set_setting("mcp_tool_run_in_terminal", False)
+    got = call_from(caller, "run_in_terminal", {"command": "echo nope"})
+    check("a tool off in Preferences is off in the box too", got == (False, mcptools.disabled_error("run_in_terminal")), got)
+    check("…and not offered", "run_in_terminal" not in offered_to(caller))
+    chip._rebuild()
+    run = {b.get_label(): b for b in buttons_of(chip._content, Gtk.CheckButton)}.get(
+        "Run commands in the terminal panel"
+    )
+    check("…its check greyed", run is not None and not run.get_sensitive() and not run.get_active())
+    win_state().set_setting("mcp_tool_run_in_terminal", True)
+    # The default for sandboxed sessions moves the boxes with no switch of
+    # their own for the tool, and only those.
+    win_state().set_setting("sandbox_tool_show_image", False)
+    check("a default switched off reaches the session", "show_image" not in offered_to(caller), offered_to(caller))
+    win_state().set_setting("sandbox_tool_run_in_terminal", False)
+    check("…and leaves its own switch alone", "run_in_terminal" in offered_to(caller))
+    win_state().set_setting("sandbox_tool_show_image", True)
+    chip._rebuild()
+    names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
+    check("the chip offers the defaults back", "Use the defaults" in names, names)
+    chip.reset_tools()
+    check("back on the defaults", host.tool_overrides(box) == {} and offered_to(caller) == OFFERED, offered_to(caller))
+    # What the session is denied, a sibling it spawns is denied (siblings()).
+    check("the session is denied a tool it had", chip.set_tool("attach_pr", False))
+    check("…which it is no longer offered", "attach_pr" not in offered_to(caller))
+    launch_unsandboxed()
+    return GLib.SOURCE_REMOVE
+
+
+def buttons_of(widget, kind) -> list:
+    found_ = []
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, kind):
+            found_.append(child)
+        found_.extend(buttons_of(child, kind))
+        child = child.get_next_sibling()
+    return found_
+
+
+def launch_unsandboxed() -> None:
+    """A session outside any box, in a project pinned that way: it is
+    offered every tool, as it always was."""
+    win = state["win"]
+    before = {win.tab_view.get_nth_page(i).get_child() for i in range(win.tab_view.get_n_pages())}
+    win.start_background_session(PLAIN)
+    ticks = {"n": 0}
+
+    def up() -> bool:
+        ticks["n"] += 1
+        for i in range(win.tab_view.get_n_pages()):
+            tab = win.tab_view.get_nth_page(i).get_child()
+            if tab not in before and getattr(tab, "_child_pid", None):
+                check("a session of a project pinned unsandboxed has no box", not tab.sandboxed)
+                every = [tool["name"] for tool in mcptools.TOOLS]
+                check("…and is offered every tool", offered_to(tab) == every, offered_to(tab))
+                got = call_from(tab, "read_terminal", {})
+                check("…the terminal's included", isinstance(got, tuple) and got[0] is True, got)
+                grants()
+                return GLib.SOURCE_REMOVE
+        if ticks["n"] > 100:
+            check("an unsandboxed session launched", False, "no tab spawned a shell")
+            grants()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    GLib.timeout_add(100, up)
 
 
 def grants() -> bool:
@@ -653,6 +813,10 @@ def sibling_up(before: int) -> bool:
         host = terminal.SANDBOX_HOST
         # Its parent was launched with the first grant, and has lost it
         # since; the sibling holds what the parent was launched with.
+        # What its parent was denied, the sibling is denied; the rest are
+        # the defaults.
+        check("the sibling is denied the tool its parent was", host.tool_overrides(own) == {"attach_pr": False}, host.tool_overrides(own))
+        check("…and offered the other five", offered_to(sibling) == [n for n in OFFERED if n != "attach_pr"], offered_to(sibling))
         check("the parent's own list is empty by now", host.grants(caller.sandbox_box) == [])
         check("the sibling's list is its parent's launch-time grants", host.grants(own) == [OTHER], host.grants(own))
         chip = sibling._sandbox_chip
@@ -804,6 +968,7 @@ def second_up(second) -> None:
     doc = sandboxplan.load_plan(second.sandbox_plan_path)
     check("…in the same workspace", bool(doc) and doc["inputs"]["workspace"] == TRUSTED)
     check("a session launched afterwards starts with none", host.grants(box) == [], host.grants(box))
+    check("…and with the six tools, its neighbour's switches being its neighbour's", offered_to(second) == OFFERED and host.tool_overrides(box) == {}, offered_to(second))
     check("…its plan binds nothing of the first's", bool(doc) and doc["inputs"]["grants"] == [])
     check("…not by any other name either", bool(doc) and not any(EXTRA in a for a in doc["bwrap_args"]))
     mine, defaults = chip_rows(second)
@@ -913,6 +1078,13 @@ def forked() -> None:
     box = fork.launch_options.sandbox_box
     check("the window minted the fork's box", sandboxplan.valid_box_id(box) and box != ORIGIN_BOX, box)
     check("the fork's list equals its origin's at the fork", host.grants(box) == [OTHER], host.grants(box))
+    check(
+        "…and so do the tools it is offered",
+        host.tool_overrides(box) == {"read_terminal": True, "show_image": False},
+        host.tool_overrides(box),
+    )
+    host.set_tool(ORIGIN_BOX, "start_session", True)
+    check("…a copy: the origin's next switch is the origin's", "start_session" not in host.tool_overrides(box))
     check("the origin still names its own box", AppState().sandbox_box(ORIGIN) == ORIGIN_BOX)
     # The origin is allowed another: the fork's list stays put.
     check("the origin is allowed another", host.allow(ORIGIN_BOX, TRUSTED, EXTRA) == "")

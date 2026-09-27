@@ -1183,6 +1183,166 @@ def test_run_tool_call_hands_every_handler_the_sandbox_flag():
     assert asked == []
 
 
+# ---- the tools of a sandboxed session -----------------------------------------
+
+_OFFERED_IN_A_BOX = [
+    "set_session_title",
+    "open_in_editor",
+    "show_diff",
+    "show_image",
+    "notify_user",
+    "attach_pr",
+]
+_NOT_OFFERED_IN_A_BOX = [
+    "diff_context",
+    "annotate_diff",
+    "highlight_diff",
+    "clear_diff_marks",
+    "start_session",
+    "read_terminal",
+    "run_in_terminal",
+]
+
+
+def test_a_sandboxed_session_is_offered_six_tools_by_default():
+    """The ones that put something in front of the user. What reads the
+    host back to the agent, writes to it or starts another agent is off
+    until the user turns it on."""
+    assert sorted(mcptools.SANDBOX_DEFAULT_TOOLS) == sorted(_OFFERED_IN_A_BOX)
+    names = list(mcptools.tool_names())
+    assert names == [tool["name"] for tool in mcptools.TOOLS]
+    assert sorted(names) == sorted(_OFFERED_IN_A_BOX + _NOT_OFFERED_IN_A_BOX)
+    defaults = mcptools.default_sandbox_tool_settings()
+    assert defaults == {
+        **{f"sandbox_tool_{name}": True for name in _OFFERED_IN_A_BOX},
+        **{f"sandbox_tool_{name}": False for name in _NOT_OFFERED_IN_A_BOX},
+    }
+    from collins import state
+
+    for key, value in defaults.items():
+        assert state.DEFAULT_SETTINGS[key] is value, key
+    # Beside the switch every session has, never instead of it.
+    for name in names:
+        assert mcptools.sandbox_tool_setting_key(name) != mcptools.tool_setting_key(name)
+        assert state.DEFAULT_SETTINGS[mcptools.tool_setting_key(name)] is True
+
+
+def test_a_tool_added_to_the_table_is_off_inside_a_box(monkeypatch):
+    added = {"name": "brand_new", "description": "x", "inputSchema": {"type": "object"}}
+    monkeypatch.setattr(mcptools, "TOOLS", [*mcptools.TOOLS, added])
+    assert mcptools.default_sandbox_tool_settings()["sandbox_tool_brand_new"] is False
+
+
+def test_a_boxes_own_switch_beats_the_default():
+    enabled = mcptools.sandbox_tool_enabled
+    assert enabled("show_diff", True, {}) is True
+    assert enabled("run_in_terminal", False, {}) is False
+    assert enabled("show_diff", True, {"show_diff": False}) is False
+    assert enabled("run_in_terminal", False, {"run_in_terminal": True}) is True
+    # Another tool's switch says nothing about this one.
+    assert enabled("read_terminal", False, {"run_in_terminal": True}) is False
+    # A default that isn't True is off; a switch that isn't a boolean, or
+    # overrides that aren't a map, are no switch at all.
+    for junk in (None, 1, "true", "yes", [True]):
+        assert enabled("show_diff", junk, {}) is False, junk
+        assert enabled("run_in_terminal", False, {"run_in_terminal": junk}) is False, junk
+        assert enabled("show_diff", True, {"show_diff": junk}) is True, junk
+        assert enabled("run_in_terminal", False, junk) is False, junk
+    # A name the table doesn't have is never on.
+    assert enabled("no_such_tool", True, {"no_such_tool": True}) is False
+
+
+def test_tool_overrides_keeps_known_tools_and_booleans():
+    raw = {
+        "run_in_terminal": True,
+        "show_diff": False,
+        "no_such_tool": True,
+        "read_terminal": "yes",
+        "start_session": 1,
+        7: True,
+    }
+    assert mcptools.tool_overrides(raw) == {"run_in_terminal": True, "show_diff": False}
+    for junk in (None, [], "nope", 7, True):
+        assert mcptools.tool_overrides(junk) == {}
+
+
+def test_run_tool_call_refuses_a_tool_the_caller_isnt_offered():
+    """What a caller is offered is asked of Collins' own record of it —
+    `is_offered(found, tool)`, the tab the pid resolved to — once the
+    caller is known, and before any handler runs."""
+    ran = []
+    asked = []
+    handlers = {
+        name: (lambda found, args, sandboxed, name=name: ran.append(name) or (True, "ran"))
+        for name in ("run_in_terminal", "set_session_title")
+    }
+
+    def is_offered(found, tool):
+        asked.append((found, tool))
+        return found != "boxed" or tool == "set_session_title"
+
+    ok, message = mcptools.run_tool_call(
+        "run_in_terminal", {"command": "ls"}, find_tab=lambda: "boxed", handlers=handlers,
+        is_sandboxed=lambda found: True, is_offered=is_offered,
+    )
+    assert (ok, message) == (False, mcptools.sandbox_disabled_error("run_in_terminal"))
+    assert "run_in_terminal" in message and "sandboxed session" in message
+    assert ran == []
+    ok, _message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"}, find_tab=lambda: "boxed", handlers=handlers,
+        is_offered=is_offered,
+    )
+    assert ok and ran == ["set_session_title"]
+    ok, _message = mcptools.run_tool_call(
+        "run_in_terminal", {"command": "ls"}, find_tab=lambda: "plain", handlers=handlers,
+        is_offered=is_offered,
+    )
+    assert ok and ran == ["set_session_title", "run_in_terminal"]
+    assert asked == [
+        ("boxed", "run_in_terminal"),
+        ("boxed", "set_session_title"),
+        ("plain", "run_in_terminal"),
+    ]
+
+
+def test_run_tool_call_asks_what_is_offered_after_everything_else():
+    """Arguments, then the switch every session has, then who is calling:
+    a bad call, a tool switched off and an unowned caller are each told
+    what they always were, and the caller's list is never asked."""
+    asked = []
+
+    def is_offered(found, tool):
+        asked.append(tool)
+        return False
+
+    handlers = {"set_session_title": _rename_ok}
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {}, find_tab=lambda: "boxed", handlers=handlers,
+        is_offered=is_offered,
+    )
+    assert ok is False and "title" in message
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"}, find_tab=lambda: "boxed", handlers=handlers,
+        is_enabled=lambda _name: False, is_offered=is_offered,
+    )
+    assert (ok, message) == (False, mcptools.disabled_error("set_session_title"))
+    ok, message = mcptools.run_tool_call(
+        "set_session_title", {"title": "hi"}, find_tab=lambda: None, handlers=handlers,
+        is_offered=is_offered,
+    )
+    assert (ok, message) == (False, mcptools.NOT_FROM_TAB_ERROR)
+    assert asked == []
+    # A call carries nothing that says what its caller is offered: an
+    # argument that tries is a schema error like any other.
+    for smuggled in ({"sandboxed": False}, {"sandbox": False}, {"offered": True}):
+        ok, message = mcptools.run_tool_call(
+            "set_session_title", {"title": "hi", **smuggled}, find_tab=lambda: "boxed",
+            handlers=handlers, is_offered=is_offered,
+        )
+        assert ok is False and message != mcptools.sandbox_disabled_error("set_session_title")
+    assert asked == []
+
+
 class _Shell:
     def __init__(self, number, sandboxed=False, sandbox_plan=None):
         self.number = number

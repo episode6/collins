@@ -7,7 +7,7 @@ bounded by `mcptools`; the protocol is three ops — a `hello` carrying the
 shim's pid (the only session identity there is), then `list` and `call`
 round-trips correlated by id.
 
-The service knows no tools and no widgets: it takes injected `list_tools()`
+The service knows no tools and no widgets: it takes injected `list_tools(pid)`
 and `dispatch(pid, tool, args)` callables, so the whole connection machinery
 is testable headless — CI has Gio/GLib but no GTK stack (tests/conftest.py).
 Everything runs on the GLib main loop; Gio's async socket API means no
@@ -65,7 +65,10 @@ class _Client:
 class SessionToolService:
     """Owns the listening socket and every live shim connection.
 
-    `list_tools()` returns the MCP tool table to serve; `dispatch(pid, tool,
+    `list_tools(pid)` returns the MCP tool table to serve the peer at *pid*
+    — a sandboxed session is offered a list of its own, and who is asking
+    is the kernel's word (`SO_PEERCRED`), as it is for a call;
+    `dispatch(pid, tool,
     args)` runs one call and returns `(ok, text)` — the success message or the
     error string — or a `mcptools.DeferredResult` it will resolve with that
     pair later. Both are invoked on the GLib main loop.
@@ -74,7 +77,7 @@ class SessionToolService:
     def __init__(
         self,
         socket_path: str,
-        list_tools: Callable[[], list],
+        list_tools: Callable[[int], list],
         dispatch: Callable[[int, str, object], mcptools.ToolResult],
     ) -> None:
         self._path = socket_path
@@ -215,7 +218,7 @@ class SessionToolService:
             return None
         op = message.get("op")
         if op == "list":
-            return {"id": rid, "ok": True, "tools": self._list_tools()}
+            return {"id": rid, "ok": True, "tools": self._list_tools(client.pid)}
         if op == "call":
             tool = message.get("tool")
             if not isinstance(tool, str) or not tool:

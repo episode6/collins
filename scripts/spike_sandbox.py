@@ -572,7 +572,7 @@ def own_service() -> tuple[str, str, str]:
     }
     service = mcpserver.SessionToolService(
         mcptools.socket_path(app_id),
-        list_tools=lambda: [tool],
+        list_tools=lambda _pid: [tool],
         # A real dispatch would walk /proc from this pid to a tab; here the
         # pid itself is the evidence (it must be a host pid, not the
         # sandbox's).

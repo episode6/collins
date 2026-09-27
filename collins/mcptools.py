@@ -820,6 +820,88 @@ def disabled_error(name: str) -> str:
     return f"{name} is turned off in Collins (Preferences → Session tools)"
 
 
+# -- the tools of a sandboxed session -----------------------------------------------
+#
+# Every tool runs on the host, as the user, outside the box of the session
+# that called it. So a sandboxed session is offered a list of its own, and
+# a short one: the tools that put something in front of the user. The ones
+# that read the host back to the agent (the terminal panel, the git page's
+# content), that write to it (marks on the git page, commands in a shell)
+# or that start another agent are off until the user turns them on — for
+# all sandboxed sessions in Preferences, or for one in its Sandboxed chip.
+#
+# Which list a call is held to is Collins' own reading of the caller: the
+# tab the kernel-verified pid of the peer resolves to, whether that tab was
+# launched in a box, and which box. Nothing in a call says so, and nothing
+# a session sends can change it.
+
+# What a sandboxed session may call unless the user says otherwise.
+SANDBOX_DEFAULT_TOOLS: tuple[str, ...] = (
+    "set_session_title",
+    "open_in_editor",
+    "show_diff",
+    "show_image",
+    "notify_user",
+    "attach_pr",
+)
+
+
+def tool_names() -> tuple[str, ...]:
+    """Every tool's name, in the table's order."""
+    return tuple(tool["name"] for tool in TOOLS)
+
+
+def sandbox_tool_setting_key(name: str) -> str:
+    """The settings key holding whether sandboxed sessions are offered the
+    tool *name* by default — beside `tool_setting_key`, which is whether
+    any session is."""
+    return f"sandbox_tool_{name}"
+
+
+def default_sandbox_tool_settings() -> dict[str, bool]:
+    """Every tool's default for a sandboxed session: on for
+    SANDBOX_DEFAULT_TOOLS, off for the rest — a tool added to the table is
+    off inside a box until it is put on that list. state.DEFAULT_SETTINGS
+    folds this in."""
+    return {
+        sandbox_tool_setting_key(name): name in SANDBOX_DEFAULT_TOOLS for name in tool_names()
+    }
+
+
+def tool_overrides(raw: object) -> dict[str, bool]:
+    """One box's own switches out of whatever was stored for it: tool name
+    → on or off, for names the table has and values that are booleans.
+    Anything else is dropped."""
+    if not isinstance(raw, dict):
+        return {}
+    known = set(tool_names())
+    return {
+        name: on for name, on in raw.items() if name in known and isinstance(on, bool)
+    }
+
+
+def sandbox_tool_enabled(name: str, default: object, overrides: object) -> bool:
+    """Whether a sandboxed session is offered the tool *name*: its box's
+    own switch when it has one, else the default for sandboxed sessions.
+    A name the table doesn't have is never on, and a default that isn't
+    `True` is off."""
+    if name not in tool_names():
+        return False
+    own = tool_overrides(overrides).get(name)
+    if own is not None:
+        return own
+    return default is True
+
+
+def sandbox_disabled_error(name: str) -> str:
+    """The agent-facing refusal for a tool this sandboxed session is not
+    offered."""
+    return (
+        f"{name} is turned off for this sandboxed session in Collins "
+        "(the Sandboxed chip → Tools)"
+    )
+
+
 def validate_args(name: str, args: object) -> str | None:
     """An error message when *args* doesn't satisfy *name*'s schema, else None.
 
@@ -1554,9 +1636,10 @@ def run_tool_call(
     handlers,
     is_enabled: Callable[[str], bool] | None = None,
     is_sandboxed: Callable[[object], bool] | None = None,
+    is_offered: Callable[[object, str], bool] | None = None,
 ) -> ToolResult:
     """One tool call's skeleton: validate, check the switch, resolve identity,
-    run the handler.
+    check what this caller is offered, run the handler.
 
     The branching lives here, GTK-free, so CI can pin its order and error
     strings; app.py supplies the halves that need widgets or settings —
@@ -1575,6 +1658,12 @@ def run_tool_call(
     exist. The sandbox flag is Collins' own reading of the tab, never the
     caller's word, and every handler gets it: the policy is theirs to
     apply (see the sandbox policy notes above).
+
+    `is_offered(found, tool)` is the caller's own list — a sandboxed
+    session's, by its box (see the notes above SANDBOX_DEFAULT_TOOLS) —
+    asked once the caller is known and before any handler runs: a tool the
+    session isn't offered is refused here whatever list it was handed at
+    its launch. Omitted means every caller is offered every tool.
     """
     error = validate_args(tool, args)
     if error is not None:
@@ -1584,6 +1673,8 @@ def run_tool_call(
     found = find_tab()
     if found is None:
         return False, NOT_FROM_TAB_ERROR
+    if is_offered is not None and not is_offered(found, tool):
+        return False, sandbox_disabled_error(tool)
     handler = handlers.get(tool)
     if handler is None:  # a TOOLS entry whose handler hasn't landed
         return False, f"Unknown tool: {tool}"

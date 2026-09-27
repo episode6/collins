@@ -186,7 +186,9 @@ that dialog has been answered.
   `show_image`, `notify_user`, `attach_pr`, `start_session`,
   `read_terminal`, `run_in_terminal` — and a session sees exactly the ones
   you left on (`diff_context` sends the diff's text into the conversation
-  when the agent asks for the patches).
+  when the agent asks for the patches). A sandboxed session sees fewer:
+  six by default, the ones Preferences → Sandbox and its own Sandboxed
+  chip leave on.
 
 The **Model list** row beside the pickers is the odd one out: a Models API
 query that spends no tokens, which its subtitle says.
