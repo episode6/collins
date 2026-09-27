@@ -95,6 +95,10 @@ CHECK_SECONDS = {
     "check_panel_bg_tab_width.py": 1.9,
     "check_notify_badge.py": 1.2,
     "check_editor_narrow.py": 1.1,
+    # Skips in CI's container (no user namespace for bubblewrap), so its
+    # weight is what a skip costs; a machine that can build a box spends
+    # about as long on the boxes and the live grant. (The refresh script
+    # rewrites the table and drops this: put it back by hand.)
     "check_sandbox_launch.py": 1.0,
     "check_panel_layout.py": 0.7,
     "check_composer_spelling_optional.py": 0.5,
