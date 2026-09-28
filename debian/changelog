@@ -1,3 +1,9 @@
+collins (0.1.5) UNRELEASED; urgency=medium
+
+  * Next release, in development.
+
+ -- Geoff Hackett <ghackett@episode6.com>  Sun, 27 Sep 2026 20:45:00 -0400
+
 collins (0.1.4) UNRELEASED; urgency=medium
 
   * New recommended dependency bubblewrap: a session can be run inside a
