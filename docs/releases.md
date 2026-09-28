@@ -36,7 +36,7 @@ downloads of each version, see the
 
 ## Changelog
 
-### v0.1.4 — UNRELEASED
+### v0.1.4 — 2026-09-27
 
 - **Clone a repository as a project.** The sidebar's Add project button
   is now a menu: *Open folder…* is the old folder picker, and *Clone
