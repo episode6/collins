@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-09. Full change history: git log for this file.
+# fork. Last modified: 2026-09-27. Full change history: git log for this file.
 """Generate per-language .po files and compile .mo into the package.
 
 Run from the repo root:  python3 po/generate.py
@@ -1656,10 +1656,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Minden változatlan sor kibontása',
         'Expand the unchanged lines above the hunk':
             'A hunk feletti változatlan sorok kibontása',
-        'Expand {n} lines down':
-            '{n} sor kibontása lefelé',
-        'Expand {n} lines up':
-            '{n} sor kibontása felfelé',
         'FILES':
             'FÁJLOK',
         'Filter files':
@@ -1924,8 +1920,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Git munkafában lévő munkamenet archiválásakor',
         "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
             'Kerüljön-e a munkamenet munkafája a kukába, miután leállt; a Visszavonás a munkamenettel együtt hozza vissza',
-        'Widen the page to show the panels':
-            'Szélesítse az oldalt a panelek megjelenítéséhez',
         'Wrap instead of scrolling each hunk sideways':
             'Sortörés az egyes hunkok oldalirányú görgetése helyett',
         'Wrap long lines':
@@ -1946,8 +1940,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'almodul',
         'a symbolic link':
             'szimbolikus link',
-        'all':
-            'mind',
         'an addition':
             'hozzáadás',
         'annotate_diff — note cards under a hunk, anchored to a line of the diff':
@@ -2138,6 +2130,302 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'A(z) „{subject}” fordítva kerül alkalmazásra. Commitolja a revertet úgy, ahogy a `git revert` tenné, vagy hagyja a fordított módosítást stage-elve a munkafában (`--no-commit`), hogy Ön szerkessze és commitolja.',
         '⋯ {n} unchanged lines':
             '⋯ {n} változatlan sor',
+        '<repository>':
+            '<tároló>',
+        'A clone address: it is cloned as typed':
+            'Klónozási cím: úgy klónozódik, ahogy beírta',
+        "A file is in the way: part of that path isn't a folder":
+            'Egy fájl útban van: az útvonal egy része nem mappa',
+        'A new folder, cloned from {origin} with {tool}':
+            'Új mappa, klónozva innen: {origin}, ezzel: {tool}',
+        "A sandboxed session can't be backgrounded — the CLI's daemon would run it outside the sandbox":
+            'Homokozós munkamenet nem küldhető a háttérbe — a CLI démonja a homokozón kívül futtatná',
+        'Add project → Clone repository starts in {folder}':
+            'Projekt hozzáadása → Tároló klónozása itt kezd: {folder}',
+        'Allow a directory':
+            'Könyvtár engedélyezése',
+        'Allow a directory…':
+            'Könyvtár engedélyezése…',
+        'Allow in new sessions of this project':
+            'Engedélyezés a projekt új munkameneteiben',
+        'Allowed directories':
+            'Engedélyezett könyvtárak',
+        'Allowed directories apply at the next restart — {reason}':
+            'Az engedélyezett könyvtárak a következő újraindításkor lépnek életbe — {reason}',
+        'Allowed directories reach a running session':
+            'Az engedélyezett könyvtárak elérik a futó munkamenetet',
+        'Allowed in new sessions of this project':
+            'Engedélyezve a projekt új munkameneteiben',
+        'Allowed {path}':
+            'Engedélyezve: {path}',
+        'Allowed {path} — inside the sandbox at {inside}':
+            'Engedélyezve: {path} — a homokozóban itt: {inside}',
+        'Allowed {path} — restart the session to apply':
+            'Engedélyezve: {path} — az alkalmazáshoz indítsa újra a munkamenetet',
+        'Back to the diff':
+            'Vissza a diffhez',
+        'Bubblewrap':
+            'Bubblewrap',
+        "Can't allow {path}: {reason}":
+            'Nem engedélyezhető: {path}: {reason}',
+        "Can't change {name}: {reason}":
+            'Nem módosítható: {name}: {reason}',
+        "Can't make {path} a default: {reason}":
+            'Nem lehet alapértelmezett: {path}: {reason}',
+        'Checking whether a sandbox can be built here…':
+            'Annak ellenőrzése, hogy itt építhető-e homokozó…',
+        'Choose the folder new clones go in':
+            'Az új klónok mappájának kiválasztása',
+        'Choose the folder to clone into':
+            'A klónozás célmappájának kiválasztása',
+        'Clone':
+            'Klónozás',
+        'Clone Repository':
+            'Tároló klónozása',
+        'Clone into':
+            'Klónozás ide',
+        'Clone into needs a full path, like ~/dev':
+            'A „Klónozás ide” teljes útvonalat kér, például ~/dev',
+        'Clone repositories into':
+            'Tárolók klónozása ide',
+        'Clone repository…':
+            'Tároló klónozása…',
+        'Cloning…':
+            'Klónozás…',
+        "Couldn't open {path} with the default app":
+            'A(z) {path} nem nyitható meg az alapértelmezett alkalmazással',
+        "Couldn't open {path} with {app}":
+            'A(z) {path} nem nyitható meg ezzel: {app}',
+        "Couldn't read the index for {path}":
+            'A(z) {path} indexe nem olvasható',
+        "Couldn't resolve {path}: {reason}":
+            'A(z) {path} nem oldható fel: {reason}',
+        'Destination':
+            'Cél',
+        'Discard file…':
+            'Fájl elvetése…',
+        'Draw lines that differ only in whitespace as unchanged':
+            'A csak szóközökben eltérő sorok változatlanként jelennek meg',
+        'Every tool runs outside the box. The Sandboxed chip changes the list for one session':
+            'Minden eszköz a dobozon kívül fut. A Homokozó chip egy munkamenetre módosítja a listát',
+        'Every unmerged file is replaced with the {side} version and staged as resolved (`git checkout --{side}` then `git add`, one file at a time). Edits made to the conflict markers are lost.':
+            'Minden egyesítetlen fájl a(z) {side} változatra cserélődik, és feloldottként stage-elődik (`git checkout --{side}`, majd `git add`, fájlonként). A konfliktusjelölőkön végzett módosítások elvesznek.',
+        'FUSE is not available':
+            'A FUSE nem érhető el',
+        'Filter your repositories, or paste a clone address':
+            'Szűrje a tárolóit, vagy illesszen be egy klónozási címet',
+        'Fold the unchanged lines back up':
+            'A változatlan sorok visszacsukása',
+        'For this session only':
+            'Csak ehhez a munkamenethez',
+        'GitHub CLI login: not shared':
+            'GitHub CLI-bejelentkezés: nincs megosztva',
+        'GitHub CLI login: shared':
+            'GitHub CLI-bejelentkezés: megosztva',
+        'Hide whitespace changes':
+            'Szóközváltozások elrejtése',
+        'Inside the sandbox at {inside}':
+            'A homokozóban itt: {inside}',
+        'Install the GitHub CLI (gh) to list your repositories. Any clone address still works':
+            'Telepítse a GitHub CLI-t (gh) a tárolói listázásához. Bármely klónozási cím továbbra is működik',
+        'Let sandboxed sessions write settings and hooks':
+            'A homokozós munkamenetek írhatják a beállításokat és a hookokat',
+        'Loading your repositories…':
+            'Tárolók betöltése…',
+        'Mounted into the running session. Restart the session to make it a plain bind.':
+            'A futó munkamenetbe csatolva. Indítsa újra a munkamenetet, hogy egyszerű bind csatolás legyen belőle.',
+        'New sandboxed shell':
+            'Új homokozós shell',
+        'New sessions are sandboxed':
+            'Az új munkamenetek homokozóban futnak',
+        'New sessions of this project':
+            'A projekt új munkamenetei',
+        'No repositories match':
+            'Nincs egyező tároló',
+        'None — the workspace only':
+            'Semmi — csak a munkaterület',
+        'Not in your list; {repo} is cloned from GitHub as typed':
+            'Nincs a listájában; a(z) {repo} úgy klónozódik a GitHubról, ahogy beírta',
+        'Nothing is unmerged: reloading':
+            'Nincs egyesítetlen fájl: újratöltés',
+        'Off is refused at once; on reaches the session when it restarts':
+            'A kikapcsolás azonnal elutasít; a bekapcsolás a munkamenet újraindításakor ér célba',
+        'Offer this session what Preferences → Sandbox offers sandboxed sessions':
+            'A munkamenetnek azt kínálja, amit a Beállítások → Homokozó a homokozós munkameneteknek',
+        "Open a shell inside this session's sandbox":
+            'Shell megnyitása a munkamenet homokozójában',
+        'Open folder…':
+            'Mappa megnyitása…',
+        'Ours':
+            'Ours',
+        'Ours is {ours}. Theirs is {theirs}.':
+            'Ours: {ours}. Theirs: {theirs}.',
+        'Pick a repository, or paste a clone address':
+            'Válasszon tárolót, vagy illesszen be egy klónozási címet',
+        'Read-only: {path}':
+            'Csak olvasható: {path}',
+        'Resolve all':
+            'Összes feloldása',
+        'Resolve all conflicts':
+            'Az összes konfliktus feloldása',
+        'Resolve all {count} conflicts with {side}?':
+            'Mind a(z) {count} konfliktust feloldja ezzel: {side}?',
+        'Resolve every unmerged file with one side and stage it as resolved':
+            'Minden egyesítetlen fájl feloldása az egyik oldallal, és stage-elése feloldottként',
+        'Resolve the conflict with {side}?':
+            'Feloldja a konfliktust ezzel: {side}?',
+        'Resolve with ours':
+            'Feloldás az ours oldallal',
+        'Resolve with theirs':
+            'Feloldás a theirs oldallal',
+        'Resolve {path} with ours?':
+            'Feloldja a(z) {path} fájlt az ours oldallal?',
+        'Resolve {path} with theirs?':
+            'Feloldja a(z) {path} fájlt a theirs oldallal?',
+        'Resolved {count} conflicts with {side}: removed':
+            '{count} konfliktus feloldva ezzel: {side}: eltávolítva',
+        'Resolved {count} conflicts with {side}: staged':
+            '{count} konfliktus feloldva ezzel: {side}: stage-elve',
+        'Resolved {count} conflicts with {side}: {staged} staged, {removed} removed':
+            '{count} konfliktus feloldva ezzel: {side}: {staged} stage-elve, {removed} eltávolítva',
+        'Resolved {path} with {side}: removed':
+            'A(z) {path} feloldva ezzel: {side}: eltávolítva',
+        'Resolved {path} with {side}: staged':
+            'A(z) {path} feloldva ezzel: {side}: stage-elve',
+        'Restart to apply':
+            'Újraindítás az alkalmazáshoz',
+        'Run each new session in a bubblewrap box: the project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent. Right-click a project header to override per project':
+            'Minden új munkamenet bubblewrap-dobozban fut: a projekt írható, a ~/.claude és az eszközlánc-gyorsítótárak megosztva, a lemez többi része hiányzik. Egy projektfejlécre jobb gombbal kattintva projektenként felülbírálható',
+        'Run gh auth login to list your repositories. Any clone address still works':
+            'Futtassa a gh auth login parancsot a tárolói listázásához. Bármely klónozási cím továbbra is működik',
+        'Run the session in a bubblewrap sandbox: this project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent':
+            'A munkamenet bubblewrap-homokozóban fut: ez a projekt írható, a ~/.claude és az eszközlánc-gyorsítótárak megosztva, a lemez többi része hiányzik',
+        'SSH agent: not shared':
+            'SSH-ügynök: nincs megosztva',
+        'SSH agent: shared':
+            'SSH-ügynök: megosztva',
+        'Sandbox':
+            'Homokozó',
+        'Sandbox new sessions':
+            'Új munkamenetek homokozóban',
+        'Sandboxed':
+            'Homokozóban',
+        'Sandboxed sessions start with --permission-mode bypassPermissions: the box is then the only barrier':
+            'A homokozós munkamenetek --permission-mode bypassPermissions módban indulnak: ekkor a doboz az egyetlen korlát',
+        'Sandboxed shell':
+            'Homokozós shell',
+        'Sandboxed shell {number}':
+            'Homokozós shell {number}',
+        'Session tools: {on} of {all} on':
+            'Munkamenet-eszközök: {all} közül {on} bekapcsolva',
+        'Settings and hooks: read-only':
+            'Beállítások és hookok: csak olvasható',
+        'Settings and hooks: writable':
+            'Beállítások és hookok: írható',
+        'Share GitHub CLI login':
+            'GitHub CLI-bejelentkezés megosztása',
+        'Share SSH agent':
+            'SSH-ügynök megosztása',
+        'Skip permission prompts inside':
+            'Engedélykérések kihagyása odabent',
+        'Something is already there. Choose another folder to clone into':
+            'Ott már van valami. Válasszon másik célmappát a klónozáshoz',
+        'Stop allowing this directory':
+            'A könyvtár engedélyezésének megszüntetése',
+        'Stop allowing this directory in new sessions':
+            'A könyvtár engedélyezésének megszüntetése az új munkamenetekben',
+        'Stopped at {path} after {done} resolved: {reason}':
+            'Megállt itt: {path}, {done} feloldás után: {reason}',
+        'Switched off for every session under Built-in MCP tools':
+            'Minden munkamenetre kikapcsolva a Beépített MCP-eszközök alatt',
+        'The agent inside holds your GitHub token (as GH_TOKEN); without it, gh is logged out and HTTPS pushes fail':
+            'A bent lévő ügynök megkapja a GitHub-tokenjét (GH_TOKEN-ként); nélküle a gh kijelentkezett, és a HTTPS-pushok sikertelenek',
+        'The agent socket goes in: the agent inside can sign with your keys — push as you — without seeing them':
+            'Az ügynök socketje bekerül: a bent lévő ügynök aláírhat az Ön kulcsaival — pusholhat Önként — anélkül, hogy látná őket',
+        'The clone failed (exit status {code})':
+            'A klónozás sikertelen (kilépési kód: {code})',
+        "The sandbox changed since this session started — this session can't apply it from here":
+            'A homokozó megváltozott a munkamenet indulása óta — ez a munkamenet innen nem tudja alkalmazni',
+        "The sandbox plan for this session can't be read":
+            'A munkamenet homokozótervét nem lehet beolvasni',
+        'The session runs in a box built before the grants or shares changed; exit it and resume it here with the new plan':
+            'A munkamenet egy olyan dobozban fut, amely az engedélyek vagy megosztások módosítása előtt épült; lépjen ki belőle, és folytassa itt az új tervvel',
+        'Theirs':
+            'Theirs',
+        'This session runs inside a sandbox — click to see what is inside':
+            'Ez a munkamenet homokozóban fut — kattintson, hogy lássa, mi van benne',
+        'Tools a sandboxed session may call':
+            'Eszközök, amelyeket egy homokozós munkamenet hívhat',
+        'Use the defaults':
+            'Az alapértelmezések használata',
+        'Use the home folder':
+            'A saját mappa használata',
+        'Writable, a symlink: {path}':
+            'Írható, szimbolikus link: {path}',
+        'after restart':
+            'újraindítás után',
+        'archived':
+            'archivált',
+        'bindfs not installed':
+            'a bindfs nincs telepítve',
+        'bubblewrap found and user namespaces work: sessions can be sandboxed':
+            'a bubblewrap megvan, és a felhasználói névterek működnek: a munkamenetek homokozóban futhatnak',
+        'bubblewrap not installed — install the bubblewrap package to sandbox sessions':
+            'a bubblewrap nincs telepítve — telepítse a bubblewrap csomagot a munkamenetek homokozóban futtatásához',
+        'fork':
+            'fork',
+        'fusermount3 not installed':
+            'a fusermount3 nincs telepítve',
+        "gh couldn't list your repositories. Any clone address still works":
+            'a gh nem tudta listázni a tárolóit. Bármely klónozási cím továbbra is működik',
+        'gh lists no repositories for this account':
+            'a gh nem listáz tárolót ehhez a fiókhoz',
+        'live':
+            'élő',
+        "mounts don't propagate from the sandbox directory":
+            'a csatolások nem terjednek tovább a homokozó könyvtárából',
+        'no sandbox plan for this session — the shell was not started':
+            'nincs homokozóterv ehhez a munkamenethez — a shell nem indult el',
+        'ours':
+            'ours',
+        'private':
+            'privát',
+        "restarting the session with the sandbox's new plan":
+            'a munkamenet újraindítása a homokozó új tervével',
+        "the session didn't exit, so the sandbox wasn't restarted — exit it and resume it yourself to apply the change":
+            'a munkamenet nem lépett ki, így a homokozó nem indult újra — lépjen ki belőle, és folytassa saját maga a módosítás alkalmazásához',
+        "the session's sandbox was restarted — this shell still runs in the box it was opened in, and the agent can no longer reach it":
+            'a munkamenet homokozója újraindult — ez a shell még abban a dobozban fut, amelyben megnyílt, és az ügynök már nem éri el',
+        'theirs':
+            'theirs',
+        'until restart':
+            'újraindításig',
+        "user namespaces are restricted on this system, so bubblewrap can't build a sandbox":
+            'a felhasználói névterek korlátozottak ezen a rendszeren, így a bubblewrap nem tud homokozót építeni',
+        'warning: no sandbox could be built here — starting the session unsandboxed':
+            'figyelem: itt nem építhető homokozó — a munkamenet homokozó nélkül indul',
+        "warning: the worktree {path} can't be put in the sandbox — the repository is read-only inside it":
+            'figyelem: a(z) {path} munkafa nem tehető a homokozóba — a tároló csak olvasható benne',
+        "warning: the worktree {path} couldn't be recreated — it is empty, and the repository is read-only inside the sandbox":
+            'figyelem: a(z) {path} munkafát nem sikerült újra létrehozni — üres, és a tároló csak olvasható a homokozóban',
+        '{app} is not installed':
+            'A(z) {app} nincs telepítve',
+        "{folder} doesn't exist yet and will be created":
+            'A(z) {folder} még nem létezik, és létre lesz hozva',
+        '{name} is switched off for every session in Preferences':
+            'A(z) {name} minden munkamenetre ki van kapcsolva a Beállításokban',
+        '{path} is not unmerged: reloading':
+            'A(z) {path} nem egyesítetlen: újratöltés',
+        '{path} is replaced with the {side} version and staged as resolved (`git checkout --{side} -- {path} && git add -- {path}`). Edits made to the conflict markers are lost.':
+            'A(z) {path} a(z) {side} változatra cserélődik, és feloldottként stage-elődik (`git checkout --{side} -- {path} && git add -- {path}`). A konfliktusjelölőkön végzett módosítások elvesznek.',
+        '{side} has no version of this file: resolving with it removes {path} from the working tree and the index (`git rm -- {path}`).':
+            'A(z) {side} oldalon nincs ilyen fájl: a vele való feloldás eltávolítja a(z) {path} fájlt a munkafából és az indexből (`git rm -- {path}`).',
+        '{side} has no version of {listed}: resolving removes it from the working tree and the index (`git rm`).':
+            'A(z) {side} oldalon nincs ilyen: {listed}: a feloldás eltávolítja a munkafából és az indexből (`git rm`).',
+        '{side} has no version of {listed}: resolving removes them from the working tree and the index (`git rm`).':
+            'A(z) {side} oldalon nincsenek ezek: {listed}: a feloldás eltávolítja őket a munkafából és az indexből (`git rm`).',
+        "~/.claude settings, skills, commands, agents and CLAUDE.md, the repository's git hooks, ~/.local/bin. Needed for /model and /effort to persist inside and for a symlinked settings.json; what is written there runs in every session":
+            'A ~/.claude beállításai, skilljei, parancsai, ügynökei és CLAUDE.md fájlja, a tároló git hookjai, ~/.local/bin. Szükséges ahhoz, hogy a /model és az /effort megmaradjon odabent, és egy szimbolikus linkkel mutatott settings.json-hoz; ami oda íródik, minden munkamenetben lefut',
     },
     "de": {
         'Before you start':
@@ -3786,10 +4074,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Jede unveränderte Zeile ausklappen',
         'Expand the unchanged lines above the hunk':
             'Die unveränderten Zeilen über dem Hunk ausklappen',
-        'Expand {n} lines down':
-            '{n} Zeilen nach unten ausklappen',
-        'Expand {n} lines up':
-            '{n} Zeilen nach oben ausklappen',
         'FILES':
             'DATEIEN',
         'Filter files':
@@ -4054,8 +4338,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Beim Archivieren einer Sitzung in einem Git-Worktree',
         "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
             'Ob der Worktree der Sitzung in den Papierkorb verschoben wird, sobald sie beendet ist; Rückgängig holt ihn mit der Sitzung zurück',
-        'Widen the page to show the panels':
-            'Die Seite verbreitern, um die Panels zu zeigen',
         'Wrap instead of scrolling each hunk sideways':
             'Umbrechen, statt jeden Hunk seitwärts zu scrollen',
         'Wrap long lines':
@@ -4076,8 +4358,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'ein Submodul',
         'a symbolic link':
             'ein symbolischer Link',
-        'all':
-            'alle',
         'an addition':
             'eine Hinzufügung',
         'annotate_diff — note cards under a hunk, anchored to a line of the diff':
@@ -4268,6 +4548,302 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             '„{subject}“ wird umgekehrt angewendet. Den Revert committen, wie `git revert` es täte, oder die umgekehrte Änderung gestaged im Arbeitsbaum lassen (`--no-commit`), um sie selbst zu bearbeiten und zu committen.',
         '⋯ {n} unchanged lines':
             '⋯ {n} unveränderte Zeilen',
+        '<repository>':
+            '<Repository>',
+        'A clone address: it is cloned as typed':
+            'Eine Klon-Adresse: sie wird wie eingegeben geklont',
+        "A file is in the way: part of that path isn't a folder":
+            'Eine Datei steht im Weg: ein Teil dieses Pfads ist kein Ordner',
+        'A new folder, cloned from {origin} with {tool}':
+            'Ein neuer Ordner, geklont von {origin} mit {tool}',
+        "A sandboxed session can't be backgrounded — the CLI's daemon would run it outside the sandbox":
+            'Eine Sitzung in der Sandbox kann nicht in den Hintergrund geschickt werden — der Daemon der CLI würde sie außerhalb der Sandbox ausführen',
+        'Add project → Clone repository starts in {folder}':
+            'Projekt hinzufügen → Repository klonen beginnt in {folder}',
+        'Allow a directory':
+            'Verzeichnis erlauben',
+        'Allow a directory…':
+            'Verzeichnis erlauben…',
+        'Allow in new sessions of this project':
+            'In neuen Sitzungen dieses Projekts erlauben',
+        'Allowed directories':
+            'Erlaubte Verzeichnisse',
+        'Allowed directories apply at the next restart — {reason}':
+            'Erlaubte Verzeichnisse gelten ab dem nächsten Neustart — {reason}',
+        'Allowed directories reach a running session':
+            'Erlaubte Verzeichnisse erreichen eine laufende Sitzung',
+        'Allowed in new sessions of this project':
+            'In neuen Sitzungen dieses Projekts erlaubt',
+        'Allowed {path}':
+            '{path} erlaubt',
+        'Allowed {path} — inside the sandbox at {inside}':
+            '{path} erlaubt — in der Sandbox unter {inside}',
+        'Allowed {path} — restart the session to apply':
+            '{path} erlaubt — die Sitzung neu starten, um es anzuwenden',
+        'Back to the diff':
+            'Zurück zum Diff',
+        'Bubblewrap':
+            'Bubblewrap',
+        "Can't allow {path}: {reason}":
+            '{path} kann nicht erlaubt werden: {reason}',
+        "Can't change {name}: {reason}":
+            '{name} kann nicht geändert werden: {reason}',
+        "Can't make {path} a default: {reason}":
+            '{path} kann nicht zur Vorgabe werden: {reason}',
+        'Checking whether a sandbox can be built here…':
+            'Prüfe, ob hier eine Sandbox gebaut werden kann…',
+        'Choose the folder new clones go in':
+            'Ordner für neue Klone wählen',
+        'Choose the folder to clone into':
+            'Zielordner für den Klon wählen',
+        'Clone':
+            'Klonen',
+        'Clone Repository':
+            'Repository klonen',
+        'Clone into':
+            'Klonen nach',
+        'Clone into needs a full path, like ~/dev':
+            '„Klonen nach“ braucht einen vollständigen Pfad, etwa ~/dev',
+        'Clone repositories into':
+            'Repositorys klonen nach',
+        'Clone repository…':
+            'Repository klonen…',
+        'Cloning…':
+            'Wird geklont…',
+        "Couldn't open {path} with the default app":
+            '{path} konnte nicht mit der Standard-App geöffnet werden',
+        "Couldn't open {path} with {app}":
+            '{path} konnte nicht mit {app} geöffnet werden',
+        "Couldn't read the index for {path}":
+            'Der Index für {path} konnte nicht gelesen werden',
+        "Couldn't resolve {path}: {reason}":
+            '{path} konnte nicht aufgelöst werden: {reason}',
+        'Destination':
+            'Ziel',
+        'Discard file…':
+            'Datei verwerfen…',
+        'Draw lines that differ only in whitespace as unchanged':
+            'Zeilen, die sich nur im Leerraum unterscheiden, als unverändert darstellen',
+        'Every tool runs outside the box. The Sandboxed chip changes the list for one session':
+            'Jedes Werkzeug läuft außerhalb der Box. Der Sandbox-Chip ändert die Liste für eine Sitzung',
+        'Every unmerged file is replaced with the {side} version and staged as resolved (`git checkout --{side}` then `git add`, one file at a time). Edits made to the conflict markers are lost.':
+            'Jede ungemergte Datei wird durch die {side}-Version ersetzt und als aufgelöst gestagt (`git checkout --{side}`, dann `git add`, Datei für Datei). Änderungen an den Konfliktmarkern gehen verloren.',
+        'FUSE is not available':
+            'FUSE ist nicht verfügbar',
+        'Filter your repositories, or paste a clone address':
+            'Ihre Repositorys filtern oder eine Klon-Adresse einfügen',
+        'Fold the unchanged lines back up':
+            'Die unveränderten Zeilen wieder einklappen',
+        'For this session only':
+            'Nur für diese Sitzung',
+        'GitHub CLI login: not shared':
+            'GitHub-CLI-Anmeldung: nicht geteilt',
+        'GitHub CLI login: shared':
+            'GitHub-CLI-Anmeldung: geteilt',
+        'Hide whitespace changes':
+            'Leerraumänderungen ausblenden',
+        'Inside the sandbox at {inside}':
+            'In der Sandbox unter {inside}',
+        'Install the GitHub CLI (gh) to list your repositories. Any clone address still works':
+            'Installieren Sie die GitHub CLI (gh), um Ihre Repositorys aufzulisten. Jede Klon-Adresse funktioniert weiterhin',
+        'Let sandboxed sessions write settings and hooks':
+            'Sandbox-Sitzungen Einstellungen und Hooks schreiben lassen',
+        'Loading your repositories…':
+            'Ihre Repositorys werden geladen…',
+        'Mounted into the running session. Restart the session to make it a plain bind.':
+            'In die laufende Sitzung eingehängt. Starten Sie die Sitzung neu, um daraus einen einfachen Bind-Mount zu machen.',
+        'New sandboxed shell':
+            'Neue Sandbox-Shell',
+        'New sessions are sandboxed':
+            'Neue Sitzungen laufen in der Sandbox',
+        'New sessions of this project':
+            'Neue Sitzungen dieses Projekts',
+        'No repositories match':
+            'Keine passenden Repositorys',
+        'None — the workspace only':
+            'Keine — nur der Arbeitsbereich',
+        'Not in your list; {repo} is cloned from GitHub as typed':
+            'Nicht in Ihrer Liste; {repo} wird wie eingegeben von GitHub geklont',
+        'Nothing is unmerged: reloading':
+            'Nichts ist ungemergt: wird neu geladen',
+        'Off is refused at once; on reaches the session when it restarts':
+            'Aus wird sofort verweigert; An erreicht die Sitzung bei ihrem Neustart',
+        'Offer this session what Preferences → Sandbox offers sandboxed sessions':
+            'Dieser Sitzung anbieten, was Einstellungen → Sandbox den Sandbox-Sitzungen anbietet',
+        "Open a shell inside this session's sandbox":
+            'Eine Shell in der Sandbox dieser Sitzung öffnen',
+        'Open folder…':
+            'Ordner öffnen…',
+        'Ours':
+            'Ours',
+        'Ours is {ours}. Theirs is {theirs}.':
+            'Ours ist {ours}. Theirs ist {theirs}.',
+        'Pick a repository, or paste a clone address':
+            'Wählen Sie ein Repository oder fügen Sie eine Klon-Adresse ein',
+        'Read-only: {path}':
+            'Schreibgeschützt: {path}',
+        'Resolve all':
+            'Alle auflösen',
+        'Resolve all conflicts':
+            'Alle Konflikte auflösen',
+        'Resolve all {count} conflicts with {side}?':
+            'Alle {count} Konflikte mit {side} auflösen?',
+        'Resolve every unmerged file with one side and stage it as resolved':
+            'Jede ungemergte Datei mit einer Seite auflösen und als aufgelöst stagen',
+        'Resolve the conflict with {side}?':
+            'Den Konflikt mit {side} auflösen?',
+        'Resolve with ours':
+            'Mit ours auflösen',
+        'Resolve with theirs':
+            'Mit theirs auflösen',
+        'Resolve {path} with ours?':
+            '{path} mit ours auflösen?',
+        'Resolve {path} with theirs?':
+            '{path} mit theirs auflösen?',
+        'Resolved {count} conflicts with {side}: removed':
+            '{count} Konflikte mit {side} aufgelöst: entfernt',
+        'Resolved {count} conflicts with {side}: staged':
+            '{count} Konflikte mit {side} aufgelöst: gestagt',
+        'Resolved {count} conflicts with {side}: {staged} staged, {removed} removed':
+            '{count} Konflikte mit {side} aufgelöst: {staged} gestagt, {removed} entfernt',
+        'Resolved {path} with {side}: removed':
+            '{path} mit {side} aufgelöst: entfernt',
+        'Resolved {path} with {side}: staged':
+            '{path} mit {side} aufgelöst: gestagt',
+        'Restart to apply':
+            'Zum Anwenden neu starten',
+        'Run each new session in a bubblewrap box: the project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent. Right-click a project header to override per project':
+            'Jede neue Sitzung in einer Bubblewrap-Box ausführen: das Projekt mit Schreibzugriff, ~/.claude und Toolchain-Caches geteilt, der Rest der Festplatte nicht vorhanden. Ein Rechtsklick auf einen Projektkopf überschreibt es pro Projekt',
+        'Run gh auth login to list your repositories. Any clone address still works':
+            'Führen Sie gh auth login aus, um Ihre Repositorys aufzulisten. Jede Klon-Adresse funktioniert weiterhin',
+        'Run the session in a bubblewrap sandbox: this project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent':
+            'Die Sitzung in einer Bubblewrap-Sandbox ausführen: dieses Projekt mit Schreibzugriff, ~/.claude und Toolchain-Caches geteilt, der Rest der Festplatte nicht vorhanden',
+        'SSH agent: not shared':
+            'SSH-Agent: nicht geteilt',
+        'SSH agent: shared':
+            'SSH-Agent: geteilt',
+        'Sandbox':
+            'Sandbox',
+        'Sandbox new sessions':
+            'Neue Sitzungen in der Sandbox ausführen',
+        'Sandboxed':
+            'In der Sandbox',
+        'Sandboxed sessions start with --permission-mode bypassPermissions: the box is then the only barrier':
+            'Sandbox-Sitzungen starten mit --permission-mode bypassPermissions: die Box ist dann die einzige Barriere',
+        'Sandboxed shell':
+            'Sandbox-Shell',
+        'Sandboxed shell {number}':
+            'Sandbox-Shell {number}',
+        'Session tools: {on} of {all} on':
+            'Sitzungswerkzeuge: {on} von {all} an',
+        'Settings and hooks: read-only':
+            'Einstellungen und Hooks: schreibgeschützt',
+        'Settings and hooks: writable':
+            'Einstellungen und Hooks: beschreibbar',
+        'Share GitHub CLI login':
+            'GitHub-CLI-Anmeldung teilen',
+        'Share SSH agent':
+            'SSH-Agent teilen',
+        'Skip permission prompts inside':
+            'Berechtigungsabfragen darin überspringen',
+        'Something is already there. Choose another folder to clone into':
+            'Dort liegt bereits etwas. Wählen Sie einen anderen Zielordner für den Klon',
+        'Stop allowing this directory':
+            'Dieses Verzeichnis nicht mehr erlauben',
+        'Stop allowing this directory in new sessions':
+            'Dieses Verzeichnis in neuen Sitzungen nicht mehr erlauben',
+        'Stopped at {path} after {done} resolved: {reason}':
+            'Bei {path} angehalten, nachdem {done} aufgelöst waren: {reason}',
+        'Switched off for every session under Built-in MCP tools':
+            'Für jede Sitzung unter Eingebaute MCP-Werkzeuge ausgeschaltet',
+        'The agent inside holds your GitHub token (as GH_TOKEN); without it, gh is logged out and HTTPS pushes fail':
+            'Der Agent darin erhält Ihr GitHub-Token (als GH_TOKEN); ohne es ist gh abgemeldet und HTTPS-Pushes schlagen fehl',
+        'The agent socket goes in: the agent inside can sign with your keys — push as you — without seeing them':
+            'Der Agent-Socket kommt hinein: Der Agent darin kann mit Ihren Schlüsseln signieren — als Sie pushen —, ohne sie zu sehen',
+        'The clone failed (exit status {code})':
+            'Das Klonen ist fehlgeschlagen (Exit-Status {code})',
+        "The sandbox changed since this session started — this session can't apply it from here":
+            'Die Sandbox hat sich seit dem Start dieser Sitzung geändert — diese Sitzung kann das von hier aus nicht anwenden',
+        "The sandbox plan for this session can't be read":
+            'Der Sandbox-Plan für diese Sitzung kann nicht gelesen werden',
+        'The session runs in a box built before the grants or shares changed; exit it and resume it here with the new plan':
+            'Die Sitzung läuft in einer Box, die vor der Änderung der Freigaben gebaut wurde; beenden Sie sie und setzen Sie sie hier mit dem neuen Plan fort',
+        'Theirs':
+            'Theirs',
+        'This session runs inside a sandbox — click to see what is inside':
+            'Diese Sitzung läuft in einer Sandbox — klicken, um zu sehen, was darin ist',
+        'Tools a sandboxed session may call':
+            'Werkzeuge, die eine Sandbox-Sitzung aufrufen darf',
+        'Use the defaults':
+            'Die Vorgaben verwenden',
+        'Use the home folder':
+            'Den Home-Ordner verwenden',
+        'Writable, a symlink: {path}':
+            'Beschreibbar, ein Symlink: {path}',
+        'after restart':
+            'nach Neustart',
+        'archived':
+            'archiviert',
+        'bindfs not installed':
+            'bindfs nicht installiert',
+        'bubblewrap found and user namespaces work: sessions can be sandboxed':
+            'bubblewrap gefunden und User-Namespaces funktionieren: Sitzungen können in einer Sandbox laufen',
+        'bubblewrap not installed — install the bubblewrap package to sandbox sessions':
+            'bubblewrap nicht installiert — installieren Sie das Paket bubblewrap, um Sitzungen in einer Sandbox auszuführen',
+        'fork':
+            'Fork',
+        'fusermount3 not installed':
+            'fusermount3 nicht installiert',
+        "gh couldn't list your repositories. Any clone address still works":
+            'gh konnte Ihre Repositorys nicht auflisten. Jede Klon-Adresse funktioniert weiterhin',
+        'gh lists no repositories for this account':
+            'gh listet für dieses Konto keine Repositorys',
+        'live':
+            'live',
+        "mounts don't propagate from the sandbox directory":
+            'Mounts werden aus dem Sandbox-Verzeichnis nicht weitergegeben',
+        'no sandbox plan for this session — the shell was not started':
+            'kein Sandbox-Plan für diese Sitzung — die Shell wurde nicht gestartet',
+        'ours':
+            'ours',
+        'private':
+            'privat',
+        "restarting the session with the sandbox's new plan":
+            'die Sitzung wird mit dem neuen Plan der Sandbox neu gestartet',
+        "the session didn't exit, so the sandbox wasn't restarted — exit it and resume it yourself to apply the change":
+            'die Sitzung wurde nicht beendet, daher wurde die Sandbox nicht neu gestartet — beenden Sie sie und setzen Sie sie selbst fort, um die Änderung anzuwenden',
+        "the session's sandbox was restarted — this shell still runs in the box it was opened in, and the agent can no longer reach it":
+            'die Sandbox der Sitzung wurde neu gestartet — diese Shell läuft noch in der Box, in der sie geöffnet wurde, und der Agent erreicht sie nicht mehr',
+        'theirs':
+            'theirs',
+        'until restart':
+            'bis zum Neustart',
+        "user namespaces are restricted on this system, so bubblewrap can't build a sandbox":
+            'User-Namespaces sind auf diesem System eingeschränkt, daher kann bubblewrap keine Sandbox bauen',
+        'warning: no sandbox could be built here — starting the session unsandboxed':
+            'Warnung: hier konnte keine Sandbox gebaut werden — die Sitzung startet ohne Sandbox',
+        "warning: the worktree {path} can't be put in the sandbox — the repository is read-only inside it":
+            'Warnung: der Worktree {path} kann nicht in die Sandbox gelegt werden — das Repository ist darin schreibgeschützt',
+        "warning: the worktree {path} couldn't be recreated — it is empty, and the repository is read-only inside the sandbox":
+            'Warnung: der Worktree {path} konnte nicht neu angelegt werden — er ist leer, und das Repository ist in der Sandbox schreibgeschützt',
+        '{app} is not installed':
+            '{app} ist nicht installiert',
+        "{folder} doesn't exist yet and will be created":
+            '{folder} existiert noch nicht und wird angelegt',
+        '{name} is switched off for every session in Preferences':
+            '{name} ist in den Einstellungen für jede Sitzung ausgeschaltet',
+        '{path} is not unmerged: reloading':
+            '{path} ist nicht ungemergt: wird neu geladen',
+        '{path} is replaced with the {side} version and staged as resolved (`git checkout --{side} -- {path} && git add -- {path}`). Edits made to the conflict markers are lost.':
+            '{path} wird durch die {side}-Version ersetzt und als aufgelöst gestagt (`git checkout --{side} -- {path} && git add -- {path}`). Änderungen an den Konfliktmarkern gehen verloren.',
+        '{side} has no version of this file: resolving with it removes {path} from the working tree and the index (`git rm -- {path}`).':
+            '{side} hat keine Version dieser Datei: Das Auflösen damit entfernt {path} aus dem Arbeitsverzeichnis und dem Index (`git rm -- {path}`).',
+        '{side} has no version of {listed}: resolving removes it from the working tree and the index (`git rm`).':
+            '{side} hat keine Version von {listed}: Das Auflösen entfernt sie aus dem Arbeitsverzeichnis und dem Index (`git rm`).',
+        '{side} has no version of {listed}: resolving removes them from the working tree and the index (`git rm`).':
+            '{side} hat keine Version von {listed}: Das Auflösen entfernt sie aus dem Arbeitsverzeichnis und dem Index (`git rm`).',
+        "~/.claude settings, skills, commands, agents and CLAUDE.md, the repository's git hooks, ~/.local/bin. Needed for /model and /effort to persist inside and for a symlinked settings.json; what is written there runs in every session":
+            '~/.claude-Einstellungen, Skills, Befehle, Agents und CLAUDE.md, die Git-Hooks des Repositorys, ~/.local/bin. Nötig, damit /model und /effort darin bestehen bleiben, und für eine per Symlink verknüpfte settings.json; was dort geschrieben wird, läuft in jeder Sitzung',
     },
     "es": {
         'Before you start':
@@ -5913,10 +6489,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Expandir todas las líneas sin cambios',
         'Expand the unchanged lines above the hunk':
             'Expandir las líneas sin cambios encima del hunk',
-        'Expand {n} lines down':
-            'Expandir {n} líneas hacia abajo',
-        'Expand {n} lines up':
-            'Expandir {n} líneas hacia arriba',
         'FILES':
             'ARCHIVOS',
         'Filter files':
@@ -6181,8 +6753,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Al archivar una sesión en un worktree de git',
         "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
             'Si mover el worktree de la sesión a la papelera cuando se haya detenido; Deshacer lo recupera junto con la sesión',
-        'Widen the page to show the panels':
-            'Ensancha la página para mostrar los paneles',
         'Wrap instead of scrolling each hunk sideways':
             'Ajustar las líneas en lugar de desplazar cada hunk lateralmente',
         'Wrap long lines':
@@ -6203,8 +6773,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'un submódulo',
         'a symbolic link':
             'un enlace simbólico',
-        'all':
-            'todo',
         'an addition':
             'una adición',
         'annotate_diff — note cards under a hunk, anchored to a line of the diff':
@@ -6395,6 +6963,302 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             '«{subject}» se aplica a la inversa. Haz commit de la reversión como lo haría `git revert`, o deja el cambio inverso preparado en el árbol de trabajo (`--no-commit`) para editarlo y hacer commit tú mismo.',
         '⋯ {n} unchanged lines':
             '⋯ {n} líneas sin cambios',
+        '<repository>':
+            '<repositorio>',
+        'A clone address: it is cloned as typed':
+            'Una dirección de clonado: se clona tal como se escribió',
+        "A file is in the way: part of that path isn't a folder":
+            'Un archivo estorba: parte de esa ruta no es una carpeta',
+        'A new folder, cloned from {origin} with {tool}':
+            'Una carpeta nueva, clonada de {origin} con {tool}',
+        "A sandboxed session can't be backgrounded — the CLI's daemon would run it outside the sandbox":
+            'Una sesión en sandbox no puede pasar a segundo plano: el daemon de la CLI la ejecutaría fuera del sandbox',
+        'Add project → Clone repository starts in {folder}':
+            'Añadir proyecto → Clonar repositorio empieza en {folder}',
+        'Allow a directory':
+            'Permitir un directorio',
+        'Allow a directory…':
+            'Permitir un directorio…',
+        'Allow in new sessions of this project':
+            'Permitir en las sesiones nuevas de este proyecto',
+        'Allowed directories':
+            'Directorios permitidos',
+        'Allowed directories apply at the next restart — {reason}':
+            'Los directorios permitidos se aplican en el próximo reinicio: {reason}',
+        'Allowed directories reach a running session':
+            'Los directorios permitidos llegan a una sesión en ejecución',
+        'Allowed in new sessions of this project':
+            'Permitido en las sesiones nuevas de este proyecto',
+        'Allowed {path}':
+            '{path} permitido',
+        'Allowed {path} — inside the sandbox at {inside}':
+            '{path} permitido: dentro del sandbox en {inside}',
+        'Allowed {path} — restart the session to apply':
+            '{path} permitido: reinicia la sesión para aplicarlo',
+        'Back to the diff':
+            'Volver al diff',
+        'Bubblewrap':
+            'Bubblewrap',
+        "Can't allow {path}: {reason}":
+            'No se puede permitir {path}: {reason}',
+        "Can't change {name}: {reason}":
+            'No se puede cambiar {name}: {reason}',
+        "Can't make {path} a default: {reason}":
+            'No se puede hacer de {path} un valor predeterminado: {reason}',
+        'Checking whether a sandbox can be built here…':
+            'Comprobando si aquí se puede crear un sandbox…',
+        'Choose the folder new clones go in':
+            'Elige la carpeta donde van los clones nuevos',
+        'Choose the folder to clone into':
+            'Elige la carpeta donde clonar',
+        'Clone':
+            'Clonar',
+        'Clone Repository':
+            'Clonar repositorio',
+        'Clone into':
+            'Clonar en',
+        'Clone into needs a full path, like ~/dev':
+            '«Clonar en» necesita una ruta completa, como ~/dev',
+        'Clone repositories into':
+            'Clonar repositorios en',
+        'Clone repository…':
+            'Clonar repositorio…',
+        'Cloning…':
+            'Clonando…',
+        "Couldn't open {path} with the default app":
+            'No se pudo abrir {path} con la aplicación predeterminada',
+        "Couldn't open {path} with {app}":
+            'No se pudo abrir {path} con {app}',
+        "Couldn't read the index for {path}":
+            'No se pudo leer el índice de {path}',
+        "Couldn't resolve {path}: {reason}":
+            'No se pudo resolver {path}: {reason}',
+        'Destination':
+            'Destino',
+        'Discard file…':
+            'Descartar archivo…',
+        'Draw lines that differ only in whitespace as unchanged':
+            'Mostrar como sin cambios las líneas que solo difieren en espacios en blanco',
+        'Every tool runs outside the box. The Sandboxed chip changes the list for one session':
+            'Cada herramienta se ejecuta fuera de la caja. El chip Sandbox cambia la lista para una sesión',
+        'Every unmerged file is replaced with the {side} version and staged as resolved (`git checkout --{side}` then `git add`, one file at a time). Edits made to the conflict markers are lost.':
+            'Cada archivo sin fusionar se sustituye por la versión {side} y se prepara como resuelto (`git checkout --{side}` y luego `git add`, archivo por archivo). Se pierden las ediciones hechas en los marcadores de conflicto.',
+        'FUSE is not available':
+            'FUSE no está disponible',
+        'Filter your repositories, or paste a clone address':
+            'Filtra tus repositorios o pega una dirección de clonado',
+        'Fold the unchanged lines back up':
+            'Volver a plegar las líneas sin cambios',
+        'For this session only':
+            'Solo para esta sesión',
+        'GitHub CLI login: not shared':
+            'Sesión de GitHub CLI: no compartida',
+        'GitHub CLI login: shared':
+            'Sesión de GitHub CLI: compartida',
+        'Hide whitespace changes':
+            'Ocultar cambios de espacios en blanco',
+        'Inside the sandbox at {inside}':
+            'Dentro del sandbox en {inside}',
+        'Install the GitHub CLI (gh) to list your repositories. Any clone address still works':
+            'Instala la GitHub CLI (gh) para listar tus repositorios. Cualquier dirección de clonado sigue funcionando',
+        'Let sandboxed sessions write settings and hooks':
+            'Permitir que las sesiones en sandbox escriban ajustes y hooks',
+        'Loading your repositories…':
+            'Cargando tus repositorios…',
+        'Mounted into the running session. Restart the session to make it a plain bind.':
+            'Montado en la sesión en ejecución. Reinicia la sesión para convertirlo en un bind simple.',
+        'New sandboxed shell':
+            'Nueva shell en sandbox',
+        'New sessions are sandboxed':
+            'Las sesiones nuevas van en sandbox',
+        'New sessions of this project':
+            'Sesiones nuevas de este proyecto',
+        'No repositories match':
+            'Ningún repositorio coincide',
+        'None — the workspace only':
+            'Ninguno: solo el espacio de trabajo',
+        'Not in your list; {repo} is cloned from GitHub as typed':
+            'No está en tu lista; {repo} se clona de GitHub tal como se escribió',
+        'Nothing is unmerged: reloading':
+            'No hay nada sin fusionar: recargando',
+        'Off is refused at once; on reaches the session when it restarts':
+            'Desactivar se rechaza al instante; activar llega a la sesión cuando se reinicia',
+        'Offer this session what Preferences → Sandbox offers sandboxed sessions':
+            'Ofrecer a esta sesión lo que Preferencias → Sandbox ofrece a las sesiones en sandbox',
+        "Open a shell inside this session's sandbox":
+            'Abrir una shell dentro del sandbox de esta sesión',
+        'Open folder…':
+            'Abrir carpeta…',
+        'Ours':
+            'Ours',
+        'Ours is {ours}. Theirs is {theirs}.':
+            'Ours es {ours}. Theirs es {theirs}.',
+        'Pick a repository, or paste a clone address':
+            'Elige un repositorio o pega una dirección de clonado',
+        'Read-only: {path}':
+            'Solo lectura: {path}',
+        'Resolve all':
+            'Resolver todo',
+        'Resolve all conflicts':
+            'Resolver todos los conflictos',
+        'Resolve all {count} conflicts with {side}?':
+            '¿Resolver los {count} conflictos con {side}?',
+        'Resolve every unmerged file with one side and stage it as resolved':
+            'Resolver cada archivo sin fusionar con un lado y prepararlo como resuelto',
+        'Resolve the conflict with {side}?':
+            '¿Resolver el conflicto con {side}?',
+        'Resolve with ours':
+            'Resolver con ours',
+        'Resolve with theirs':
+            'Resolver con theirs',
+        'Resolve {path} with ours?':
+            '¿Resolver {path} con ours?',
+        'Resolve {path} with theirs?':
+            '¿Resolver {path} con theirs?',
+        'Resolved {count} conflicts with {side}: removed':
+            '{count} conflictos resueltos con {side}: eliminados',
+        'Resolved {count} conflicts with {side}: staged':
+            '{count} conflictos resueltos con {side}: preparados',
+        'Resolved {count} conflicts with {side}: {staged} staged, {removed} removed':
+            '{count} conflictos resueltos con {side}: {staged} preparados, {removed} eliminados',
+        'Resolved {path} with {side}: removed':
+            '{path} resuelto con {side}: eliminado',
+        'Resolved {path} with {side}: staged':
+            '{path} resuelto con {side}: preparado',
+        'Restart to apply':
+            'Reiniciar para aplicar',
+        'Run each new session in a bubblewrap box: the project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent. Right-click a project header to override per project':
+            'Ejecutar cada sesión nueva en una caja de bubblewrap: el proyecto con escritura, ~/.claude y las cachés de herramientas compartidos, el resto del disco ausente. Haz clic derecho en la cabecera de un proyecto para cambiarlo por proyecto',
+        'Run gh auth login to list your repositories. Any clone address still works':
+            'Ejecuta gh auth login para listar tus repositorios. Cualquier dirección de clonado sigue funcionando',
+        'Run the session in a bubblewrap sandbox: this project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent':
+            'Ejecutar la sesión en un sandbox de bubblewrap: este proyecto con escritura, ~/.claude y las cachés de herramientas compartidos, el resto del disco ausente',
+        'SSH agent: not shared':
+            'Agente SSH: no compartido',
+        'SSH agent: shared':
+            'Agente SSH: compartido',
+        'Sandbox':
+            'Sandbox',
+        'Sandbox new sessions':
+            'Sesiones nuevas en sandbox',
+        'Sandboxed':
+            'En sandbox',
+        'Sandboxed sessions start with --permission-mode bypassPermissions: the box is then the only barrier':
+            'Las sesiones en sandbox empiezan con --permission-mode bypassPermissions: la caja es entonces la única barrera',
+        'Sandboxed shell':
+            'Shell en sandbox',
+        'Sandboxed shell {number}':
+            'Shell en sandbox {number}',
+        'Session tools: {on} of {all} on':
+            'Herramientas de sesión: {on} de {all} activadas',
+        'Settings and hooks: read-only':
+            'Ajustes y hooks: solo lectura',
+        'Settings and hooks: writable':
+            'Ajustes y hooks: con escritura',
+        'Share GitHub CLI login':
+            'Compartir la sesión de GitHub CLI',
+        'Share SSH agent':
+            'Compartir el agente SSH',
+        'Skip permission prompts inside':
+            'Omitir las solicitudes de permiso dentro',
+        'Something is already there. Choose another folder to clone into':
+            'Ya hay algo ahí. Elige otra carpeta donde clonar',
+        'Stop allowing this directory':
+            'Dejar de permitir este directorio',
+        'Stop allowing this directory in new sessions':
+            'Dejar de permitir este directorio en las sesiones nuevas',
+        'Stopped at {path} after {done} resolved: {reason}':
+            'Detenido en {path} tras {done} resueltos: {reason}',
+        'Switched off for every session under Built-in MCP tools':
+            'Desactivada para todas las sesiones en Herramientas MCP integradas',
+        'The agent inside holds your GitHub token (as GH_TOKEN); without it, gh is logged out and HTTPS pushes fail':
+            'El agente de dentro recibe tu token de GitHub (como GH_TOKEN); sin él, gh no tiene sesión y los push por HTTPS fallan',
+        'The agent socket goes in: the agent inside can sign with your keys — push as you — without seeing them':
+            'El socket del agente entra: el agente de dentro puede firmar con tus claves —hacer push como tú— sin verlas',
+        'The clone failed (exit status {code})':
+            'El clonado falló (código de salida {code})',
+        "The sandbox changed since this session started — this session can't apply it from here":
+            'El sandbox cambió desde que empezó esta sesión: esta sesión no puede aplicarlo desde aquí',
+        "The sandbox plan for this session can't be read":
+            'No se puede leer el plan de sandbox de esta sesión',
+        'The session runs in a box built before the grants or shares changed; exit it and resume it here with the new plan':
+            'La sesión se ejecuta en una caja creada antes de que cambiaran los permisos o lo compartido; sal de ella y reanúdala aquí con el plan nuevo',
+        'Theirs':
+            'Theirs',
+        'This session runs inside a sandbox — click to see what is inside':
+            'Esta sesión se ejecuta dentro de un sandbox: haz clic para ver qué hay dentro',
+        'Tools a sandboxed session may call':
+            'Herramientas que puede llamar una sesión en sandbox',
+        'Use the defaults':
+            'Usar los valores predeterminados',
+        'Use the home folder':
+            'Usar la carpeta personal',
+        'Writable, a symlink: {path}':
+            'Con escritura, un enlace simbólico: {path}',
+        'after restart':
+            'tras reiniciar',
+        'archived':
+            'archivado',
+        'bindfs not installed':
+            'bindfs no está instalado',
+        'bubblewrap found and user namespaces work: sessions can be sandboxed':
+            'bubblewrap encontrado y los espacios de nombres de usuario funcionan: las sesiones pueden ir en sandbox',
+        'bubblewrap not installed — install the bubblewrap package to sandbox sessions':
+            'bubblewrap no está instalado: instala el paquete bubblewrap para ejecutar sesiones en sandbox',
+        'fork':
+            'fork',
+        'fusermount3 not installed':
+            'fusermount3 no está instalado',
+        "gh couldn't list your repositories. Any clone address still works":
+            'gh no pudo listar tus repositorios. Cualquier dirección de clonado sigue funcionando',
+        'gh lists no repositories for this account':
+            'gh no lista ningún repositorio para esta cuenta',
+        'live':
+            'en vivo',
+        "mounts don't propagate from the sandbox directory":
+            'los montajes no se propagan desde el directorio del sandbox',
+        'no sandbox plan for this session — the shell was not started':
+            'no hay plan de sandbox para esta sesión: la shell no se inició',
+        'ours':
+            'ours',
+        'private':
+            'privado',
+        "restarting the session with the sandbox's new plan":
+            'reiniciando la sesión con el plan nuevo del sandbox',
+        "the session didn't exit, so the sandbox wasn't restarted — exit it and resume it yourself to apply the change":
+            'la sesión no salió, así que el sandbox no se reinició: sal de ella y reanúdala tú para aplicar el cambio',
+        "the session's sandbox was restarted — this shell still runs in the box it was opened in, and the agent can no longer reach it":
+            'el sandbox de la sesión se reinició: esta shell sigue en la caja en la que se abrió y el agente ya no puede alcanzarla',
+        'theirs':
+            'theirs',
+        'until restart':
+            'hasta reiniciar',
+        "user namespaces are restricted on this system, so bubblewrap can't build a sandbox":
+            'los espacios de nombres de usuario están restringidos en este sistema, así que bubblewrap no puede crear un sandbox',
+        'warning: no sandbox could be built here — starting the session unsandboxed':
+            'aviso: aquí no se pudo crear ningún sandbox; la sesión se inicia sin sandbox',
+        "warning: the worktree {path} can't be put in the sandbox — the repository is read-only inside it":
+            'aviso: el worktree {path} no se puede meter en el sandbox; el repositorio es de solo lectura dentro',
+        "warning: the worktree {path} couldn't be recreated — it is empty, and the repository is read-only inside the sandbox":
+            'aviso: no se pudo volver a crear el worktree {path}; está vacío y el repositorio es de solo lectura dentro del sandbox',
+        '{app} is not installed':
+            '{app} no está instalado',
+        "{folder} doesn't exist yet and will be created":
+            '{folder} aún no existe y se creará',
+        '{name} is switched off for every session in Preferences':
+            '{name} está desactivada para todas las sesiones en Preferencias',
+        '{path} is not unmerged: reloading':
+            '{path} no está sin fusionar: recargando',
+        '{path} is replaced with the {side} version and staged as resolved (`git checkout --{side} -- {path} && git add -- {path}`). Edits made to the conflict markers are lost.':
+            '{path} se sustituye por la versión {side} y se prepara como resuelto (`git checkout --{side} -- {path} && git add -- {path}`). Se pierden las ediciones hechas en los marcadores de conflicto.',
+        '{side} has no version of this file: resolving with it removes {path} from the working tree and the index (`git rm -- {path}`).':
+            '{side} no tiene versión de este archivo: resolver con él elimina {path} del árbol de trabajo y del índice (`git rm -- {path}`).',
+        '{side} has no version of {listed}: resolving removes it from the working tree and the index (`git rm`).':
+            '{side} no tiene versión de {listed}: resolver lo elimina del árbol de trabajo y del índice (`git rm`).',
+        '{side} has no version of {listed}: resolving removes them from the working tree and the index (`git rm`).':
+            '{side} no tiene versión de {listed}: resolver los elimina del árbol de trabajo y del índice (`git rm`).',
+        "~/.claude settings, skills, commands, agents and CLAUDE.md, the repository's git hooks, ~/.local/bin. Needed for /model and /effort to persist inside and for a symlinked settings.json; what is written there runs in every session":
+            'Los ajustes, skills, comandos, agentes y CLAUDE.md de ~/.claude, los hooks de git del repositorio, ~/.local/bin. Necesario para que /model y /effort persistan dentro y para un settings.json enlazado simbólicamente; lo que se escribe ahí se ejecuta en todas las sesiones',
     },
     "fr": {
         'Before you start':
@@ -8041,10 +8905,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'Développer toutes les lignes inchangées',
         'Expand the unchanged lines above the hunk':
             'Développer les lignes inchangées au-dessus du hunk',
-        'Expand {n} lines down':
-            'Développer {n} lignes vers le bas',
-        'Expand {n} lines up':
-            'Développer {n} lignes vers le haut',
         'FILES':
             'FICHIERS',
         'Filter files':
@@ -8309,8 +9169,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "À l'archivage d'une session dans un worktree git",
         "Whether to move the session's worktree to the trash once it has stopped; Undo brings it back with the session":
             "Mettre ou non le worktree de la session à la corbeille une fois qu'elle s'est arrêtée ; Annuler le ramène avec la session",
-        'Widen the page to show the panels':
-            'Élargir la page pour afficher les panneaux',
         'Wrap instead of scrolling each hunk sideways':
             'Renvoyer à la ligne au lieu de faire défiler chaque hunk latéralement',
         'Wrap long lines':
@@ -8331,8 +9189,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             'un sous-module',
         'a symbolic link':
             'un lien symbolique',
-        'all':
-            'tout',
         'an addition':
             'un ajout',
         'annotate_diff — note cards under a hunk, anchored to a line of the diff':
@@ -8523,13 +9379,309 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
             "« {subject} » est appliqué à l'envers. Validez le rétablissement comme `git revert` le ferait, ou laissez la modification inverse indexée dans l'arbre de travail (`--no-commit`) pour la modifier et la valider vous-même.",
         '⋯ {n} unchanged lines':
             '⋯ {n} lignes inchangées',
+        '<repository>':
+            '<dépôt>',
+        'A clone address: it is cloned as typed':
+            'Une adresse de clonage : elle est clonée telle que saisie',
+        "A file is in the way: part of that path isn't a folder":
+            "Un fichier gêne : une partie de ce chemin n'est pas un dossier",
+        'A new folder, cloned from {origin} with {tool}':
+            'Un nouveau dossier, cloné depuis {origin} avec {tool}',
+        "A sandboxed session can't be backgrounded — the CLI's daemon would run it outside the sandbox":
+            "Une session en bac à sable ne peut pas passer en arrière-plan — le démon de la CLI l'exécuterait hors du bac à sable",
+        'Add project → Clone repository starts in {folder}':
+            'Ajouter un projet → Cloner un dépôt commence dans {folder}',
+        'Allow a directory':
+            'Autoriser un répertoire',
+        'Allow a directory…':
+            'Autoriser un répertoire…',
+        'Allow in new sessions of this project':
+            'Autoriser dans les nouvelles sessions de ce projet',
+        'Allowed directories':
+            'Répertoires autorisés',
+        'Allowed directories apply at the next restart — {reason}':
+            "Les répertoires autorisés s'appliquent au prochain redémarrage — {reason}",
+        'Allowed directories reach a running session':
+            'Les répertoires autorisés atteignent une session en cours',
+        'Allowed in new sessions of this project':
+            'Autorisé dans les nouvelles sessions de ce projet',
+        'Allowed {path}':
+            '{path} autorisé',
+        'Allowed {path} — inside the sandbox at {inside}':
+            '{path} autorisé — dans le bac à sable sous {inside}',
+        'Allowed {path} — restart the session to apply':
+            "{path} autorisé — redémarrez la session pour l'appliquer",
+        'Back to the diff':
+            'Retour au diff',
+        'Bubblewrap':
+            'Bubblewrap',
+        "Can't allow {path}: {reason}":
+            "Impossible d'autoriser {path} : {reason}",
+        "Can't change {name}: {reason}":
+            'Impossible de modifier {name} : {reason}',
+        "Can't make {path} a default: {reason}":
+            'Impossible de faire de {path} une valeur par défaut : {reason}',
+        'Checking whether a sandbox can be built here…':
+            'Vérification de la possibilité de créer un bac à sable ici…',
+        'Choose the folder new clones go in':
+            'Choisir le dossier des nouveaux clones',
+        'Choose the folder to clone into':
+            'Choisir le dossier où cloner',
+        'Clone':
+            'Cloner',
+        'Clone Repository':
+            'Cloner un dépôt',
+        'Clone into':
+            'Cloner dans',
+        'Clone into needs a full path, like ~/dev':
+            '« Cloner dans » demande un chemin complet, comme ~/dev',
+        'Clone repositories into':
+            'Cloner les dépôts dans',
+        'Clone repository…':
+            'Cloner un dépôt…',
+        'Cloning…':
+            'Clonage…',
+        "Couldn't open {path} with the default app":
+            "Impossible d'ouvrir {path} avec l'application par défaut",
+        "Couldn't open {path} with {app}":
+            "Impossible d'ouvrir {path} avec {app}",
+        "Couldn't read the index for {path}":
+            "Impossible de lire l'index pour {path}",
+        "Couldn't resolve {path}: {reason}":
+            'Impossible de résoudre {path} : {reason}',
+        'Destination':
+            'Destination',
+        'Discard file…':
+            'Abandonner le fichier…',
+        'Draw lines that differ only in whitespace as unchanged':
+            'Afficher comme inchangées les lignes qui ne diffèrent que par les espaces',
+        'Every tool runs outside the box. The Sandboxed chip changes the list for one session':
+            "Chaque outil s'exécute hors de la boîte. La puce Bac à sable modifie la liste pour une session",
+        'Every unmerged file is replaced with the {side} version and staged as resolved (`git checkout --{side}` then `git add`, one file at a time). Edits made to the conflict markers are lost.':
+            'Chaque fichier non fusionné est remplacé par la version {side} et indexé comme résolu (`git checkout --{side}` puis `git add`, un fichier à la fois). Les modifications faites aux marqueurs de conflit sont perdues.',
+        'FUSE is not available':
+            "FUSE n'est pas disponible",
+        'Filter your repositories, or paste a clone address':
+            'Filtrez vos dépôts ou collez une adresse de clonage',
+        'Fold the unchanged lines back up':
+            'Replier les lignes inchangées',
+        'For this session only':
+            'Pour cette session uniquement',
+        'GitHub CLI login: not shared':
+            'Connexion GitHub CLI : non partagée',
+        'GitHub CLI login: shared':
+            'Connexion GitHub CLI : partagée',
+        'Hide whitespace changes':
+            "Masquer les changements d'espaces",
+        'Inside the sandbox at {inside}':
+            'Dans le bac à sable sous {inside}',
+        'Install the GitHub CLI (gh) to list your repositories. Any clone address still works':
+            'Installez la GitHub CLI (gh) pour lister vos dépôts. Toute adresse de clonage fonctionne toujours',
+        'Let sandboxed sessions write settings and hooks':
+            'Laisser les sessions en bac à sable écrire les réglages et les hooks',
+        'Loading your repositories…':
+            'Chargement de vos dépôts…',
+        'Mounted into the running session. Restart the session to make it a plain bind.':
+            'Monté dans la session en cours. Redémarrez la session pour en faire un simple montage bind.',
+        'New sandboxed shell':
+            'Nouveau shell en bac à sable',
+        'New sessions are sandboxed':
+            'Les nouvelles sessions sont en bac à sable',
+        'New sessions of this project':
+            'Nouvelles sessions de ce projet',
+        'No repositories match':
+            'Aucun dépôt ne correspond',
+        'None — the workspace only':
+            "Aucun — l'espace de travail seulement",
+        'Not in your list; {repo} is cloned from GitHub as typed':
+            'Absent de votre liste ; {repo} est cloné depuis GitHub tel que saisi',
+        'Nothing is unmerged: reloading':
+            "Rien n'est non fusionné : rechargement",
+        'Off is refused at once; on reaches the session when it restarts':
+            'Désactiver est refusé aussitôt ; activer atteint la session à son redémarrage',
+        'Offer this session what Preferences → Sandbox offers sandboxed sessions':
+            'Proposer à cette session ce que Préférences → Bac à sable propose aux sessions en bac à sable',
+        "Open a shell inside this session's sandbox":
+            'Ouvrir un shell dans le bac à sable de cette session',
+        'Open folder…':
+            'Ouvrir un dossier…',
+        'Ours':
+            'Ours',
+        'Ours is {ours}. Theirs is {theirs}.':
+            'Ours est {ours}. Theirs est {theirs}.',
+        'Pick a repository, or paste a clone address':
+            'Choisissez un dépôt ou collez une adresse de clonage',
+        'Read-only: {path}':
+            'Lecture seule : {path}',
+        'Resolve all':
+            'Tout résoudre',
+        'Resolve all conflicts':
+            'Résoudre tous les conflits',
+        'Resolve all {count} conflicts with {side}?':
+            'Résoudre les {count} conflits avec {side} ?',
+        'Resolve every unmerged file with one side and stage it as resolved':
+            "Résoudre chaque fichier non fusionné avec un côté et l'indexer comme résolu",
+        'Resolve the conflict with {side}?':
+            'Résoudre le conflit avec {side} ?',
+        'Resolve with ours':
+            'Résoudre avec ours',
+        'Resolve with theirs':
+            'Résoudre avec theirs',
+        'Resolve {path} with ours?':
+            'Résoudre {path} avec ours ?',
+        'Resolve {path} with theirs?':
+            'Résoudre {path} avec theirs ?',
+        'Resolved {count} conflicts with {side}: removed':
+            '{count} conflits résolus avec {side} : supprimés',
+        'Resolved {count} conflicts with {side}: staged':
+            '{count} conflits résolus avec {side} : indexés',
+        'Resolved {count} conflicts with {side}: {staged} staged, {removed} removed':
+            '{count} conflits résolus avec {side} : {staged} indexés, {removed} supprimés',
+        'Resolved {path} with {side}: removed':
+            '{path} résolu avec {side} : supprimé',
+        'Resolved {path} with {side}: staged':
+            '{path} résolu avec {side} : indexé',
+        'Restart to apply':
+            'Redémarrer pour appliquer',
+        'Run each new session in a bubblewrap box: the project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent. Right-click a project header to override per project':
+            "Exécuter chaque nouvelle session dans une boîte bubblewrap : le projet en écriture, ~/.claude et les caches des outils partagés, le reste du disque absent. Clic droit sur l'en-tête d'un projet pour le changer par projet",
+        'Run gh auth login to list your repositories. Any clone address still works':
+            'Lancez gh auth login pour lister vos dépôts. Toute adresse de clonage fonctionne toujours',
+        'Run the session in a bubblewrap sandbox: this project read-write, ~/.claude and toolchain caches shared, the rest of the disk absent':
+            'Exécuter la session dans un bac à sable bubblewrap : ce projet en écriture, ~/.claude et les caches des outils partagés, le reste du disque absent',
+        'SSH agent: not shared':
+            'Agent SSH : non partagé',
+        'SSH agent: shared':
+            'Agent SSH : partagé',
+        'Sandbox':
+            'Bac à sable',
+        'Sandbox new sessions':
+            'Nouvelles sessions en bac à sable',
+        'Sandboxed':
+            'En bac à sable',
+        'Sandboxed sessions start with --permission-mode bypassPermissions: the box is then the only barrier':
+            'Les sessions en bac à sable démarrent avec --permission-mode bypassPermissions : la boîte est alors la seule barrière',
+        'Sandboxed shell':
+            'Shell en bac à sable',
+        'Sandboxed shell {number}':
+            'Shell en bac à sable {number}',
+        'Session tools: {on} of {all} on':
+            'Outils de session : {on} sur {all} activés',
+        'Settings and hooks: read-only':
+            'Réglages et hooks : lecture seule',
+        'Settings and hooks: writable':
+            'Réglages et hooks : en écriture',
+        'Share GitHub CLI login':
+            'Partager la connexion GitHub CLI',
+        'Share SSH agent':
+            "Partager l'agent SSH",
+        'Skip permission prompts inside':
+            "Ignorer les demandes d'autorisation à l'intérieur",
+        'Something is already there. Choose another folder to clone into':
+            "Quelque chose s'y trouve déjà. Choisissez un autre dossier où cloner",
+        'Stop allowing this directory':
+            'Ne plus autoriser ce répertoire',
+        'Stop allowing this directory in new sessions':
+            'Ne plus autoriser ce répertoire dans les nouvelles sessions',
+        'Stopped at {path} after {done} resolved: {reason}':
+            'Arrêté à {path} après {done} résolus : {reason}',
+        'Switched off for every session under Built-in MCP tools':
+            'Désactivé pour toutes les sessions sous Outils MCP intégrés',
+        'The agent inside holds your GitHub token (as GH_TOKEN); without it, gh is logged out and HTTPS pushes fail':
+            "L'agent à l'intérieur détient votre jeton GitHub (en GH_TOKEN) ; sans lui, gh est déconnecté et les push HTTPS échouent",
+        'The agent socket goes in: the agent inside can sign with your keys — push as you — without seeing them':
+            "Le socket de l'agent entre : l'agent à l'intérieur peut signer avec vos clés — pousser en votre nom — sans les voir",
+        'The clone failed (exit status {code})':
+            'Le clonage a échoué (code de sortie {code})',
+        "The sandbox changed since this session started — this session can't apply it from here":
+            "Le bac à sable a changé depuis le début de cette session — cette session ne peut pas l'appliquer d'ici",
+        "The sandbox plan for this session can't be read":
+            'Le plan du bac à sable de cette session est illisible',
+        'The session runs in a box built before the grants or shares changed; exit it and resume it here with the new plan':
+            'La session tourne dans une boîte construite avant le changement des autorisations ou des partages ; quittez-la et reprenez-la ici avec le nouveau plan',
+        'Theirs':
+            'Theirs',
+        'This session runs inside a sandbox — click to see what is inside':
+            "Cette session s'exécute dans un bac à sable — cliquez pour voir ce qu'il contient",
+        'Tools a sandboxed session may call':
+            "Outils qu'une session en bac à sable peut appeler",
+        'Use the defaults':
+            'Utiliser les valeurs par défaut',
+        'Use the home folder':
+            'Utiliser le dossier personnel',
+        'Writable, a symlink: {path}':
+            'En écriture, un lien symbolique : {path}',
+        'after restart':
+            'après redémarrage',
+        'archived':
+            'archivé',
+        'bindfs not installed':
+            "bindfs n'est pas installé",
+        'bubblewrap found and user namespaces work: sessions can be sandboxed':
+            'bubblewrap trouvé et les espaces de noms utilisateur fonctionnent : les sessions peuvent être en bac à sable',
+        'bubblewrap not installed — install the bubblewrap package to sandbox sessions':
+            "bubblewrap n'est pas installé — installez le paquet bubblewrap pour mettre les sessions en bac à sable",
+        'fork':
+            'fork',
+        'fusermount3 not installed':
+            "fusermount3 n'est pas installé",
+        "gh couldn't list your repositories. Any clone address still works":
+            "gh n'a pas pu lister vos dépôts. Toute adresse de clonage fonctionne toujours",
+        'gh lists no repositories for this account':
+            'gh ne liste aucun dépôt pour ce compte',
+        'live':
+            'en direct',
+        "mounts don't propagate from the sandbox directory":
+            'les montages ne se propagent pas depuis le répertoire du bac à sable',
+        'no sandbox plan for this session — the shell was not started':
+            "aucun plan de bac à sable pour cette session — le shell n'a pas été lancé",
+        'ours':
+            'ours',
+        'private':
+            'privé',
+        "restarting the session with the sandbox's new plan":
+            'redémarrage de la session avec le nouveau plan du bac à sable',
+        "the session didn't exit, so the sandbox wasn't restarted — exit it and resume it yourself to apply the change":
+            "la session ne s'est pas terminée, le bac à sable n'a donc pas été redémarré — quittez-la et reprenez-la vous-même pour appliquer le changement",
+        "the session's sandbox was restarted — this shell still runs in the box it was opened in, and the agent can no longer reach it":
+            "le bac à sable de la session a été redémarré — ce shell tourne encore dans la boîte où il a été ouvert, et l'agent ne peut plus l'atteindre",
+        'theirs':
+            'theirs',
+        'until restart':
+            "jusqu'au redémarrage",
+        "user namespaces are restricted on this system, so bubblewrap can't build a sandbox":
+            'les espaces de noms utilisateur sont restreints sur ce système, bubblewrap ne peut donc pas créer de bac à sable',
+        'warning: no sandbox could be built here — starting the session unsandboxed':
+            "avertissement : aucun bac à sable n'a pu être créé ici — la session démarre sans bac à sable",
+        "warning: the worktree {path} can't be put in the sandbox — the repository is read-only inside it":
+            'avertissement : le worktree {path} ne peut pas être placé dans le bac à sable — le dépôt y est en lecture seule',
+        "warning: the worktree {path} couldn't be recreated — it is empty, and the repository is read-only inside the sandbox":
+            "avertissement : le worktree {path} n'a pas pu être recréé — il est vide, et le dépôt est en lecture seule dans le bac à sable",
+        '{app} is not installed':
+            "{app} n'est pas installé",
+        "{folder} doesn't exist yet and will be created":
+            "{folder} n'existe pas encore et sera créé",
+        '{name} is switched off for every session in Preferences':
+            '{name} est désactivé pour toutes les sessions dans les Préférences',
+        '{path} is not unmerged: reloading':
+            "{path} n'est pas non fusionné : rechargement",
+        '{path} is replaced with the {side} version and staged as resolved (`git checkout --{side} -- {path} && git add -- {path}`). Edits made to the conflict markers are lost.':
+            '{path} est remplacé par la version {side} et indexé comme résolu (`git checkout --{side} -- {path} && git add -- {path}`). Les modifications faites aux marqueurs de conflit sont perdues.',
+        '{side} has no version of this file: resolving with it removes {path} from the working tree and the index (`git rm -- {path}`).':
+            "{side} n'a pas de version de ce fichier : résoudre avec lui supprime {path} de l'arbre de travail et de l'index (`git rm -- {path}`).",
+        '{side} has no version of {listed}: resolving removes it from the working tree and the index (`git rm`).':
+            "{side} n'a pas de version de {listed} : la résolution le supprime de l'arbre de travail et de l'index (`git rm`).",
+        '{side} has no version of {listed}: resolving removes them from the working tree and the index (`git rm`).':
+            "{side} n'a pas de version de {listed} : la résolution les supprime de l'arbre de travail et de l'index (`git rm`).",
+        "~/.claude settings, skills, commands, agents and CLAUDE.md, the repository's git hooks, ~/.local/bin. Needed for /model and /effort to persist inside and for a symlinked settings.json; what is written there runs in every session":
+            "Les réglages, skills, commandes, agents et CLAUDE.md de ~/.claude, les hooks git du dépôt, ~/.local/bin. Nécessaire pour que /model et /effort persistent à l'intérieur et pour un settings.json en lien symbolique ; ce qui y est écrit s'exécute dans chaque session",
     },
 }
 
 _HEADER = (
     "# Modified from the original agent-session-manager\n"
     "# (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett\n"
-    "# fork. Last modified: 2026-09-08. Full change history: git log for this file.\n"
+    "# fork. Last modified: 2026-09-27. Full change history: git log for this file.\n"
     "# Generated by po/generate.py — do not edit by hand.\n"
     'msgid ""\n'
     'msgstr ""\n'
