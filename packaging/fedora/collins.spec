@@ -15,7 +15,7 @@
 # build bumps it to 2, and the next version bump resets it.
 
 Name:           collins
-Version:        0.1.4
+Version:        0.1.5
 Release:        1%{?dist}
 Summary:        Native GTK4 desktop app to manage Claude Code sessions
 License:        GPL-3.0-or-later AND CC0-1.0 AND MIT
@@ -123,7 +123,15 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 # docs/releases.md. Dates are the release branch's cut date, like
 # debian/changelog's.
 %changelog
-* Tue Sep 08 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
+* Sun Sep 27 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.5-1
+- Next release, in development.
+
+* Sun Sep 27 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
+- Sandboxed sessions in a bubblewrap box (a home per session, settings and
+  hooks read-only, a worktree session narrowed to its worktree, directories
+  allowed live, six session tools by default), cloning a repository as a
+  project, and git page additions (one-button gap unfolds, notes outside
+  hunks, hide whitespace, resolve all conflicts, a narrow layout).
 - Recommends bubblewrap: a session can be run inside a filesystem sandbox.
   Without it every session runs unsandboxed and Preferences says why.
 - Recommends bindfs and fuse3: a directory allowed to a sandboxed session
