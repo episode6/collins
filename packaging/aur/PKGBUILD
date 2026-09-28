@@ -5,7 +5,7 @@
 # Maintainer: episode6 <support@episode6.com>
 # Contributor: Máté Molnár <molnar.mate@zengo.eu> (original agent-session-manager)
 pkgname=collins
-pkgver=0.1.3
+pkgver=0.1.4
 pkgrel=1
 pkgdesc="Native GTK4 desktop app to manage and resume Claude Code sessions"
 arch=('any')

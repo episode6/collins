@@ -8,8 +8,30 @@ collins (0.1.4) UNRELEASED; urgency=medium
     a sandboxed session reaches it while it runs, mounted into the
     running box. Without them the directory applies at the session's
     next restart, and Preferences says why.
+  * Sandboxed sessions: a Sandboxed checkbox on the new-chat screen (and a
+    per-project default) runs the session in a bubblewrap box with a home
+    of its own, settings, hooks and ~/.local/bin held read-only, and
+    permission prompts kept on. A worktree session writes only its
+    worktree. A footer chip shows what the box holds, allows directories
+    to the running session and restarts it into a new plan; a sandboxed
+    shell opens inside the same box.
+  * A sandboxed session is offered six session tools; the terminal tools,
+    start_session and the git-page readers are switches in Preferences and
+    in the chip, and reach only sandboxed shells and sandboxed siblings.
+  * Add project clones a repository: a dialog filters what gh lists for
+    you or takes any clone address, into a Clone repositories into folder.
+  * The git page: one unfold button per gap and a fold button to take them
+    back, notes on lines outside every hunk, Hide whitespace changes, a
+    working-tree context menu on the files list, Resolve all conflicts, a
+    Default app row under Open In… (the editor's files get it too), and
+    the panels on a narrow page.
+  * The PR page names its repository in its header, and in its tab when
+    the PR is from another repository.
+  * Fixes: right-click menus no longer open short with a scrollbar; the
+    Caffeine button's right-click menu no longer brings up the window
+    menu on GNOME Wayland; Add to chat works on the new-chat screen.
 
- -- Geoff Hackett <ghackett@episode6.com>  Tue, 08 Sep 2026 20:00:00 -0400
+ -- Geoff Hackett <ghackett@episode6.com>  Sun, 27 Sep 2026 20:45:00 -0400
 
 collins (0.1.3) UNRELEASED; urgency=medium
 

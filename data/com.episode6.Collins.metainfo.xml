@@ -2,7 +2,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-08. Full change history: git log for this file.
+fork. Last modified: 2026-09-27. Full change history: git log for this file.
 -->
 <component type="desktop-application">
   <id>com.episode6.Collins</id>
@@ -74,6 +74,20 @@ fork. Last modified: 2026-09-08. Full change history: git log for this file.
   <translation type="gettext">collins</translation>
 
   <releases>
+    <release version="0.1.4" date="2026-09-27">
+      <description>
+        <p>Sandboxed sessions, cloning a repository, and a roomier git page.</p>
+        <ul>
+          <li>Run a session inside a bubblewrap sandbox: the project writable, your credentials and other checkouts absent, a home of its own, settings and hooks read-only, and a worktree session narrowed to its worktree</li>
+          <li>A footer chip shows what the sandbox holds, allows a directory to the running session, and restarts it into a new plan; a sandboxed shell opens inside the same box</li>
+          <li>A sandboxed session is offered six session tools; the rest are switches in Preferences and in the chip</li>
+          <li>Add project can clone a repository, picked from your GitHub repositories or any clone address</li>
+          <li>The git page unfolds a gap with one button and folds it back, takes notes outside the hunks, hides whitespace changes, resolves every conflict at once, and fits a narrow window</li>
+          <li>The pull request page names its repository</li>
+          <li>Right-click menus open at their full height</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.3" date="2026-09-08">
       <description>
         <p>A git page beside every session, pull requests as real markdown, and quieter finishes.</p>
