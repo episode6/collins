@@ -21,6 +21,9 @@ user's MCP servers stay behind, their `mcpServers` entries are dropped
 from the copied config, and `spawn_cli` starts the CLI with
 `--strict-mcp-config`: a probe starts none of the user's servers, so it
 cannot refresh (and so rotate) a token the guard above never looked at.
+Nor does any other way in: `cli_env` drops every `ANTHROPIC_*` variable
+(an API key, a token, a base URL), so the copied login is the one account
+a probe can spend from.
 """
 
 import fcntl
@@ -44,6 +47,10 @@ LOGIN_KEY = "claudeAiOauth"
 # What a project entry of ~/.claude.json says about MCP servers.
 MCP_PROJECT_KEYS = ("mcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers", "mcpContextUris")
 NO_USER_MCP = "--strict-mcp-config"
+# What cli_env keeps out of a probe's environment: the CLI's own switches,
+# what marks a process as an agent's child, Collins' overrides, and every
+# other way to authenticate than the login in the isolated HOME.
+SCRUBBED_PREFIXES = ("CLAUDE", "AI_AGENT", "COLLINS", "PROBE", "ANTHROPIC")
 
 # VTE 0.84's answers to what the CLI asks at startup (spec F8).
 VTE_ANSWERS = (
@@ -81,6 +88,16 @@ def make_home(parent: str | None = None, trust: tuple[str, ...] = ()) -> str:
             "`claude` once for real first."
         )
     home = tempfile.mkdtemp(prefix="spike-home-", dir=parent)
+    try:
+        _fill_home(home, trust)
+    except BaseException:
+        # Half a home holds a copy of the login: never leave one behind.
+        shutil.rmtree(home, ignore_errors=True)
+        raise
+    return home
+
+
+def _fill_home(home: str, trust: tuple[str, ...]) -> None:
     os.chmod(home, 0o700)
     os.makedirs(os.path.join(home, ".claude"), mode=0o700)
     work = os.path.join(home, "work")
@@ -102,7 +119,6 @@ def make_home(parent: str | None = None, trust: tuple[str, ...] = ()) -> str:
         entry = projects.setdefault(os.path.realpath(path), {})
         entry["hasTrustDialogAccepted"] = True
     _write_private(os.path.join(home, ".claude.json"), config)
-    return home
 
 
 def _write_private(path: str, data: dict) -> None:
@@ -143,7 +159,7 @@ def cli_env(home: str, fullscreen: bool | None = None, term_program: str = "kitt
     env = {
         k: v
         for k, v in os.environ.items()
-        if not k.startswith(("CLAUDE", "AI_AGENT", "COLLINS", "PROBE"))
+        if not k.startswith(SCRUBBED_PREFIXES)
     }
     env["HOME"] = home
     if fullscreen is not None:
@@ -162,6 +178,34 @@ def set_size(fd: int, rows: int, cols: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
+def exec_or_die(argv: list, env: dict | None = None, cwd: str | None = None) -> None:
+    """In a forked child: become *argv*, or exit. A child whose exec failed
+    must never return into the parent's Python, where it would run the rest
+    of the harness a second time."""
+    try:
+        if cwd is not None:
+            os.chdir(cwd)
+        if env is None:
+            os.execvp(argv[0], argv)
+        else:
+            os.execvpe(argv[0], argv, env)
+    except BaseException:
+        pass
+    finally:
+        os._exit(127)
+
+
+def start_time(pid: int) -> str | None:
+    """When *pid* started, in the kernel's clock ticks since boot (field 22
+    of /proc/<pid>/stat): with the pid, the name of one process, where the
+    pid alone can come round again."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rpartition(")")[2].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
 def spawn_cli(env: dict, cwd: str, rows: int = 40, cols: int = 120, argv=("claude",)):
     """Fork `claude` on a fresh pty, with none of the user's MCP servers.
     Returns (pid, master fd)."""
@@ -170,8 +214,7 @@ def spawn_cli(env: dict, cwd: str, rows: int = 40, cols: int = 120, argv=("claud
         argv.insert(1, NO_USER_MCP)
     pid, fd = pty.fork()
     if pid == 0:
-        os.chdir(cwd)
-        os.execvpe(argv[0], argv, env)
+        exec_or_die(argv, env, cwd)
     set_size(fd, rows, cols)
     return pid, fd
 

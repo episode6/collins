@@ -6,18 +6,27 @@ and hands the master to a "service" over a Unix socket with SCM_RIGHTS. The
 service is then killed and replaced while the child keeps writing.
 
     python3 scripts/spike_split_6_keeper.py [--scratch DIR] [--no-systemd]
+    python3 scripts/spike_split_6_keeper.py --only counter --repeat 20
 
-Cases, each printed as a finding:
+Cases, each printed as a finding (`--only` names in the second column):
 
   yes      `yes` behind the pty, the service killed with SIGKILL: is the
            writer blocked in write(), how many bytes did the kernel take
            before it blocked, does it resume under a new service.
   counter  a shell printing 1, 2, 3, ...: the ring two services wrote, one
-           after the other, is compared byte for byte with the stream. Once
-           with the kill falling wherever it falls; once with the service
-           dying between its read() and its write to the ring; once more
-           that way with the kernel's buffer full, so that the read that is
-           lost is as large as a read gets.
+           after the other, is compared byte for byte with the stream.
+           `counter`: the kill falls wherever it falls. It passes when the
+           ring is the stream whole, and when it is the stream less one run
+           of bytes cut out exactly where the dead service's part ends: the
+           kill fell between a read and that read's write to the ring. The
+           dead service's own note of what it had read (`--journal`) says
+           whether it got as far as knowing about that read. `--repeat`
+           gives the rate, which is this harness's and says nothing of a
+           service written otherwise.
+           `counter-worst`: the service dies between its read() and its
+           write to the ring, on purpose. `counter-worst-full`: the same
+           with the kernel's buffer full, so that the read that is lost is
+           as large as a read gets.
   winch    resize through the keeper with no service alive, resize from the
            service on the fd it was handed, tcgetpgrp and the file status
            flags on that fd, the child's session and controlling terminal
@@ -165,7 +174,7 @@ class Guard:
     """A detached process that kills what this script registered, at the
     deadline or as soon as the script says it is done."""
 
-    def __init__(self, scratch: str):
+    def __init__(self, scratch: str, life: float = LIFE_S):
         self.pids = os.path.join(scratch, "guard.pids")
         self.done = os.path.join(scratch, "guard.done")
         open(self.pids, "w").close()
@@ -176,7 +185,7 @@ class Guard:
         os.setsid()
         if os.fork():
             os._exit(0)
-        deadline = time.monotonic() + LIFE_S
+        deadline = time.monotonic() + life
         # Done when told so, and when the scratch directory went away under it.
         while time.monotonic() < deadline and not os.path.exists(self.done) and os.path.exists(self.pids):
             time.sleep(0.25)
@@ -348,7 +357,10 @@ def keeper_main(args) -> int:
 def service_main(args) -> int:
     """Gets a master from the keeper, reads it, appends what it read to the
     ring. `--die-after-read N` is the worst case: it dies holding the Nth
-    chunk, read from the kernel and written nowhere."""
+    chunk, read from the kernel and written nowhere. With `--journal` it
+    notes how many bytes it has read, after each read and before that read
+    goes to the ring, so that what it died holding can be read off two
+    files: the journal's count less the ring's size."""
     os.chdir(args.dir)
     sock = dial()
     if args.spawn:
@@ -377,6 +389,8 @@ def service_main(args) -> int:
     except ChildProcessError as err:
         status["waitpid"] = f"refused: {err}"
     ring = os.open(args.ring, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600) if args.ring else None
+    journal = os.open(args.journal, os.O_WRONLY | os.O_CREAT, 0o600) if args.journal else None
+    taken = 0
     status.update(reads=0, bytes=0, max_read=0, end=None)
     write_json(args.status, status)
     stop = []
@@ -413,6 +427,9 @@ def service_main(args) -> int:
                 status["end"] = "read returned 0 bytes"
                 break
             status["reads"] += 1
+            taken += len(data)
+            if journal is not None:
+                os.pwrite(journal, struct.pack(">Q", taken), 0)
             if args.die_after_read and status["reads"] == args.die_after_read:
                 status["died_holding"] = len(data)
                 write_json(args.status, status)
@@ -432,11 +449,13 @@ def service_main(args) -> int:
 
 
 class Run:
-    def __init__(self, scratch: str):
+    def __init__(self, scratch: str, life: float = LIFE_S):
         self.scratch = scratch
-        self.guard = Guard(scratch)
+        self.guard = Guard(scratch, life)
         self.procs: list[subprocess.Popen] = []
         self.findings: list[str] = []
+        self.outcomes: list[str] = []
+        self.no_journal = False
         self.failures: list[str] = []
 
     def say(self, text: str) -> None:
@@ -618,6 +637,42 @@ def as_read(written: int) -> int:
         total += size
 
 
+def differences(data: bytes, expected: bytes, limit: int = 6) -> list[dict]:
+    """Where a ring leaves the stream, and how: each entry is one place, with
+    the ring's offset, the stream's offset there, and what it takes to get
+    the two back in step (bytes of the stream missing from the ring, bytes
+    of the ring that the stream had already given, or neither found)."""
+    found = []
+    at = ahead = 0  # ring offset, and how far the stream is ahead of the ring
+    while at < len(data) and len(found) < limit:
+        rest = data[at:]
+        want = expected[at + ahead : at + ahead + len(rest)]
+        if rest == want:
+            break
+        first = next(i for i, (a, b) in enumerate(zip(rest, want, strict=False)) if a != b)
+        here = at + first
+        probe = data[here : here + 64]
+        low = max(0, here + ahead - 262144)
+        where = expected.find(probe, low, here + ahead + 262144 + len(probe))
+        entry = {
+            "ring_offset": here,
+            "stream_offset": here + ahead,
+            "ring": data[max(0, here - 24) : here + 24],
+            "stream": expected[max(0, here + ahead - 24) : here + ahead + 24],
+        }
+        if where < 0 or len(probe) < 64:
+            entry["kind"] = "altered, or out of step by more than 256 KiB"
+            found.append(entry)
+            break
+        shift = where - (here + ahead)
+        entry["kind"] = "missing" if shift > 0 else "doubled"
+        entry["bytes"] = abs(shift)
+        found.append(entry)
+        ahead += shift
+        at = here
+    return found
+
+
 def case_counter(run: Run, worst: bool, delay: float = 0.0) -> None:
     name = "counter-worst-full" if delay else "counter-worst" if worst else "counter"
     if delay:
@@ -631,6 +686,11 @@ def case_counter(run: Run, worst: bool, delay: float = 0.0) -> None:
     with contextlib.suppress(FileNotFoundError):
         os.unlink(ring)
     argv = ["--spawn", json.dumps(["sh", "-c", COUNTER]), "--ring", ring]
+    journal = None if run.no_journal else f"{ring}.read-by-a"
+    if journal is not None:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(journal)
+        argv += ["--journal", journal]
     if worst:
         argv += ["--die-after-read", "200", "--die-delay", str(delay)]
     first, status = run.service(f"{name}-a", *argv)
@@ -658,7 +718,7 @@ def case_counter(run: Run, worst: bool, delay: float = 0.0) -> None:
     run.kill(second, signal.SIGTERM)
     with open(ring, "rb") as f:
         data = f.read()
-    expected = counter_stream(len(data) + held)
+    expected = counter_stream(len(data) + held + 524288)
     run.say(
         f"  ring: {len(data)} bytes, {size_at_death} of them service A's; A's largest read {max_read}, "
         f"B's {read_json(status_b).get('max_read')}"
@@ -675,10 +735,71 @@ def case_counter(run: Run, worst: bool, delay: float = 0.0) -> None:
             f"bytes {size_at_death} to {after} of the stream are in no ring",
         )
     else:
-        run.check(
-            "byte for byte: the ring is the stream, nothing missing, nothing twice",
-            data == expected[: len(data)],
+        # The kill fell where it fell. Two outcomes are what the design
+        # promises: the ring is the stream whole, or it is the stream with
+        # one run of bytes cut out exactly where service A's part ends, which
+        # is a read A took from the kernel and did not live to write down.
+        # Anything else is a failure, and says where.
+        noted = None
+        if journal is not None:
+            with contextlib.suppress(OSError, struct.error), open(journal, "rb") as f:
+                noted = struct.unpack(">Q", f.read(8))[0] - size_at_death
+        rest = len(data) - size_at_death
+        places = differences(data, expected)
+        cut = places[0]["bytes"] if len(places) == 1 and places[0]["kind"] == "missing" else 0
+        one_cut = (
+            cut > 0
+            and data[:size_at_death] == expected[:size_at_death]
+            and data[size_at_death:] == expected[size_at_death + cut : size_at_death + cut + rest]
         )
+        if journal is not None:
+            run.say(f"  by its own note service A had read {noted} bytes that it had not written to the ring")
+        if not places and not noted:
+            outcome = "whole"
+            run.check("byte for byte: the ring is the stream, nothing missing, nothing twice", True)
+        elif one_cut and noted == cut:
+            outcome = f"one read lost, {cut} bytes, noted by A as read"
+            run.check(
+                "byte for byte: the ring is the stream with one read of service A's cut out at its death",
+                True,
+                f"bytes {size_at_death} to {size_at_death + cut} of the stream are in no ring; "
+                f"A had noted reading exactly {cut} bytes more than it wrote",
+            )
+        elif one_cut and not noted and cut <= 65536:
+            outcome = f"one read lost, {cut} bytes, not noted by A"
+            run.check(
+                "byte for byte: the ring is the stream with one run cut out where service A's part ends",
+                True,
+                f"bytes {size_at_death} to {size_at_death + cut} of the stream are in no ring; A "
+                + (
+                    "kept no note"
+                    if journal is None
+                    else "had not noted them: it died inside read(), or before its next instruction"
+                ),
+            )
+        else:
+            outcome = (
+                "NEITHER: "
+                + (
+                    "; ".join(
+                        f"{place['kind']} {place.get('bytes', '?')} at ring offset {place['ring_offset']} "
+                        f"({place['ring_offset'] - size_at_death:+d} from the end of A's part)"
+                        for place in places
+                    )
+                    or "nothing differs"
+                )
+                + f", A's note says {noted}"
+            )
+            run.check("the ring is the stream whole, or with one read of service A's cut out", False, outcome)
+        for place in places:
+            run.say(
+                f"  the ring leaves the stream at ring offset {place['ring_offset']} (stream offset "
+                f"{place['stream_offset']}; service A's part ends at {size_at_death}): "
+                f"{place['kind']}, {place.get('bytes', '?')} bytes"
+            )
+            run.say(f"    ring   there: {place['ring']!r}")
+            run.say(f"    stream there: {place['stream']!r}")
+        run.outcomes.append(outcome)
     with contextlib.suppress(ProcessLookupError):
         os.kill(child, signal.SIGKILL)
     run.stop_keeper(keeper)
@@ -842,7 +963,21 @@ def orchestrate(args) -> int:
     os.makedirs(scratch, mode=0o700, exist_ok=True)
     os.chmod(scratch, 0o700)
     os.chdir(scratch)
-    run = Run(scratch)
+    cases = {
+        "yes": lambda: case_yes(run),
+        "counter": lambda: case_counter(run, worst=False),
+        "counter-worst": lambda: case_counter(run, worst=True),
+        "counter-worst-full": lambda: case_counter(run, worst=True, delay=0.5),
+        "winch": lambda: case_winch(run),
+        "orphan": lambda: case_orphan(run),
+        "systemd": lambda: (case_systemd(run, "process"), case_systemd(run, "control-group")),
+    }
+    chosen = [args.only] if args.only else list(cases)
+    if args.no_systemd or not shutil.which("systemd-run"):
+        chosen = [name for name in chosen if name != "systemd"]
+    life = LIFE_S + 8 * args.repeat * len(chosen)
+    run = Run(scratch, life)
+    run.no_journal = args.no_journal
 
     def ended(signum, frame):
         raise SystemExit(f"stopped by signal {signum}")
@@ -851,18 +986,12 @@ def orchestrate(args) -> int:
     # to the guard, a unit to systemd and the scratch directory to nobody.
     for sig in (signal.SIGTERM, signal.SIGALRM, signal.SIGHUP):
         signal.signal(sig, ended)
-    signal.alarm(LIFE_S)
+    signal.alarm(int(life))
     print(f"kernel {os.uname().release}, Python {sys.version.split()[0]}, scratch {scratch}")
     try:
-        case_yes(run)
-        case_counter(run, worst=False)
-        case_counter(run, worst=True)
-        case_counter(run, worst=True, delay=0.5)
-        case_winch(run)
-        case_orphan(run)
-        if not args.no_systemd and shutil.which("systemd-run"):
-            case_systemd(run, "process")
-            case_systemd(run, "control-group")
+        for _ in range(args.repeat):
+            for name in chosen:
+                cases[name]()
     finally:
         for proc in run.procs:
             if proc.poll() is None:
@@ -874,6 +1003,10 @@ def orchestrate(args) -> int:
             # it was given keeps its rings and logs.
             os.chdir("/")
             shutil.rmtree(scratch, ignore_errors=True)
+    if run.outcomes:
+        print(f"\ncounter, the service killed at an arbitrary moment, {len(run.outcomes)} run(s):")
+        for outcome in sorted(set(run.outcomes)):
+            print(f"  {run.outcomes.count(outcome)} x {outcome}")
     if run.failures:
         print("\nNOT CONFIRMED: " + "; ".join(run.failures))
         return 1
@@ -887,6 +1020,12 @@ def main() -> int:
     parser.add_argument("role", nargs="?", default="run", choices=("run", "keeper", "service"))
     parser.add_argument("--scratch", help="scratch directory (default: a fresh temp dir)")
     parser.add_argument("--no-systemd", action="store_true", help="skip the transient unit cases")
+    parser.add_argument(
+        "--only",
+        choices=("yes", "counter", "counter-worst", "counter-worst-full", "winch", "orphan", "systemd"),
+        help="run this case alone",
+    )
+    parser.add_argument("--repeat", type=int, default=1, help="run the chosen cases this many times")
     parser.add_argument("--dir")
     parser.add_argument("--life", type=float, default=60)
     parser.add_argument("--status")
@@ -898,6 +1037,12 @@ def main() -> int:
     parser.add_argument("--nonblock", action="store_true")
     parser.add_argument("--die-after-read", type=int)
     parser.add_argument("--die-delay", type=float, default=0.0)
+    parser.add_argument("--journal")
+    parser.add_argument(
+        "--no-journal",
+        action="store_true",
+        help="counter: service A keeps no note of what it read (one system call less per read)",
+    )
     args = parser.parse_args()
     if args.role == "keeper":
         return keeper_main(args)

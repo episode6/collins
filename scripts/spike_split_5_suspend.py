@@ -763,8 +763,9 @@ def by_hand(args, base: str) -> int:
     print(versions())
     try:
         if args.ssh:
-            sent = ssh(args.ssh, f"mkdir -p -m 700 {REMOTE_DIR} && cat > {REMOTE_DIR}/spike.py && "
-                       f"rm -f {REMOTE_DIR}/*.log && cd {REMOTE_DIR} && pwd", stdin=open(SELF))  # fmt: skip
+            with open(SELF) as me:
+                sent = ssh(args.ssh, f"mkdir -p -m 700 {REMOTE_DIR} && cat > {REMOTE_DIR}/spike.py && "
+                           f"rm -f {REMOTE_DIR}/*.log && cd {REMOTE_DIR} && pwd", stdin=me)  # fmt: skip
             if sent.returncode != 0:
                 raise SystemExit(f"ssh {args.ssh} failed ({sent.returncode}): {sent.stderr.strip()}")
             remote = sent.stdout.strip().splitlines()[-1]

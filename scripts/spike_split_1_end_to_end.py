@@ -209,11 +209,11 @@ def run_server(args) -> int:
             pid, fd = pty.fork()
             if pid == 0:
                 tail = " >/dev/null" if args.child == "sink" else ""
-                os.execvp("sh", ["sh", "-c", "stty raw -echo; exec cat" + tail])
+                common.exec_or_die(["sh", "-c", "stty raw -echo; exec cat" + tail])
             common.set_size(fd, rows, cols)
         state["pid"], state["fd"] = pid, fd
         with open(args.log + ".pid", "w") as f:
-            f.write(str(pid))
+            f.write(f"{pid} {common.start_time(pid) or ''}")
         os.set_blocking(fd, False)
         note("spawn", child=args.child, cols=cols, rows=rows)
         state["watch"] = GLib.io_add_watch(
@@ -1125,15 +1125,24 @@ def stop_server(server, pid_path, patience: float = 15.0) -> None:
                 server.wait()
     try:
         with open(pid_path) as f:
-            child = int(f.read())
-    except (OSError, ValueError):
+            words = f.read().split()
+        child, started = int(words[0]), (words[1] if len(words) > 1 else None)
+    except (OSError, ValueError, IndexError):
+        return
+    if started is None or common.start_time(child) != started:
+        # Gone, or the pid is somebody else's by now: nothing of ours to wait
+        # for and nothing of ours to kill.
+        try:
+            os.unlink(pid_path)
+        except OSError:
+            pass
         return
     # The killed server's master closed with it, so the child has its
     # SIGHUP already; give it the time leave() would have.
     deadline = time.monotonic() + 6
     while time.monotonic() < deadline and os.path.exists(f"/proc/{child}"):
         time.sleep(0.1)
-    if os.path.exists(f"/proc/{child}"):
+    if common.start_time(child) == started:
         try:
             os.killpg(child, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
@@ -1153,10 +1162,19 @@ def run_scenario(name, scratch, runtime, turn, bound) -> dict:
     for path in (log_path, results_path):
         if os.path.exists(path):
             os.unlink(path)
-    home = None
     child = name if name in ("cat", "sink") else "claude"
-    if child == "claude":
-        home = common.make_home(parent=scratch)
+    home = common.make_home(parent=scratch) if child == "claude" else None
+    try:
+        return _run_scenario(name, scratch, turn, bound, child, home, socket_path, log_path, results_path)
+    finally:
+        if home:
+            common.remove_home(home)
+        if os.path.exists(socket_path):
+            os.unlink(socket_path)
+
+
+def _run_scenario(name, scratch, turn, bound, child, home, socket_path, log_path, results_path):
+    runtime = os.path.dirname(socket_path)
     me = os.path.abspath(__file__)
     server_cmd = [
         sys.executable, me, "--server", "--socket", socket_path, "--log", log_path,
@@ -1201,10 +1219,6 @@ def run_scenario(name, scratch, runtime, turn, bound) -> dict:
                 out["server"] = json.load(f)
     finally:
         stop_server(server, log_path + ".pid")
-        if home:
-            common.remove_home(home)
-        if os.path.exists(socket_path):
-            os.unlink(socket_path)
     return out
 
 

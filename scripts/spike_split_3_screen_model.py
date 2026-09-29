@@ -39,6 +39,7 @@ exits 0, saying what it lacked when it could not run.
 from __future__ import annotations
 
 import codecs
+import hashlib
 import json
 import os
 import re
@@ -86,6 +87,11 @@ TOKEN = re.compile(
 )
 # What an escape sequence cut by a read boundary can look like. Anything
 # else after an ESC is malformed, and the ESC is dropped on its own.
+# Known gap, left for termstream (PR-1.1): only a malformed sequence that
+# runs to the end of a feed is noted. One in the middle of a buffer is
+# stepped past by the scan with no note and no census entry, and the split
+# feeds of compare_one cut well-formed sequences only. The CLI and VTE's
+# own output are well-formed, so nothing measured here depends on it.
 PARTIAL = re.compile(
     r"\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*|\][^\x07\x1b]*\x1b?|[P_^X][^\x1b]*\x1b?|[\x20-\x2f]*)\Z"
 )
@@ -1043,6 +1049,9 @@ class Screen:
         tail = [cell for cell in line[column:] if cell is not None and cell[0].strip()]
         return bool(tail) and all(cell[2][0] & FAINT for cell in tail)
 
+    # The two reads below have no caller in this file. They are the rest of
+    # the spec's ScreenPort (section 3.5), kept so the prototype shows the
+    # whole read surface PR-1.2 has to offer.
     def first_column(self) -> tuple[str, ...]:
         return tuple((line[0][0] if line[0] is not None else "") for line in self.grid.lines)
 
@@ -1839,6 +1848,23 @@ def run_vte(jobs: list[tuple[str, bytes]], done, read_cells: bool = True) -> int
     return 0
 
 
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def inside_a_checkout(directory: str) -> str | None:
+    """The repository *directory* lies in, if any. Recordings hold paths
+    (and, from a real HOME, more): they are kept out of every checkout."""
+    path = os.path.realpath(directory)
+    while True:
+        if os.path.exists(os.path.join(path, ".git")):
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+
+
 def vte(directory: str) -> int:
     if not have_display():
         print("vte: no display (run under with-headless-display.sh); nothing read")
@@ -1848,8 +1874,12 @@ def vte(directory: str) -> int:
         print("vte: no recordings in", directory)
         return 0
 
+    digests = {name: digest(data) for name, data in jobs}
+
     def done(name, dump, commits):
         dump["commits"] = commits
+        # Which bytes this dump is of: compare refuses another recording's.
+        dump["sha256"] = digests.get(name)
         with open(os.path.join(directory, name + ".vte.json"), "w") as f:
             json.dump(dump, f, ensure_ascii=False)
         print(
@@ -2101,6 +2131,7 @@ def compare(directory: str, verbose: bool) -> int:
         return 0
     results = []
     missing = 0
+    stale = []
     for name, data in jobs:
         path = os.path.join(directory, name + ".vte.json")
         if not os.path.exists(path):
@@ -2108,9 +2139,18 @@ def compare(directory: str, verbose: bool) -> int:
             continue
         with open(path) as f:
             dump = json.load(f)
+        if dump.get("sha256") != digest(data):
+            stale.append(name)
+            continue
         results.append(compare_one(name, data, dump, verbose))
     if missing:
         print(f"compare: {missing} scenarios have no VTE dump (run `vte`)")
+    if stale:
+        print(
+            f"compare: {len(stale)} VTE dumps are of other bytes than the recording beside them "
+            f"and were not compared (run `vte` again): {', '.join(stale[:6])}"
+            + (" …" if len(stale) > 6 else "")
+        )
     if not results:
         return 0
     print(
@@ -2261,6 +2301,12 @@ def main(argv: list[str]) -> int:
         print(f"{mode}: name the recordings directory")
         return 0
     directory = argv[2]
+    if mode in ("record", "synth"):
+        checkout = inside_a_checkout(directory)
+        if checkout:
+            print(f"{mode}: {directory} is inside the checkout {checkout}; recordings hold paths "
+                  "and are kept out of every repository. Name a scratch directory.")  # fmt: skip
+            return 2
     if mode == "record":
         return record(directory, argv[3:])
     if mode == "synth":
