@@ -13,9 +13,11 @@ Cases, each printed as a finding:
            writer blocked in write(), how many bytes did the kernel take
            before it blocked, does it resume under a new service.
   counter  a shell printing 1, 2, 3, ...: the ring two services wrote, one
-           after the other, is checked for gaps and duplicates. Once with
-           the kill falling wherever it falls, once with the service dying
-           between its read() and its write to the ring (the worst case).
+           after the other, is compared byte for byte with the stream. Once
+           with the kill falling wherever it falls; once with the service
+           dying between its read() and its write to the ring; once more
+           that way with the kernel's buffer full, so that the read that is
+           lost is as large as a read gets.
   winch    resize through the keeper with no service alive, resize from the
            service on the fd it was handed, tcgetpgrp and the file status
            flags on that fd, the child's session and controlling terminal
@@ -175,7 +177,8 @@ class Guard:
         if os.fork():
             os._exit(0)
         deadline = time.monotonic() + LIFE_S
-        while time.monotonic() < deadline and not os.path.exists(self.done):
+        # Done when told so, and when the scratch directory went away under it.
+        while time.monotonic() < deadline and not os.path.exists(self.done) and os.path.exists(self.pids):
             time.sleep(0.25)
         self.sweep()
         os._exit(0)
@@ -188,8 +191,11 @@ class Guard:
 
     def sweep(self) -> list[int]:
         killed = []
-        with open(self.pids) as f:
-            entries = [line.split() for line in f if line.strip()]
+        try:
+            with open(self.pids) as f:
+                entries = [line.split() for line in f if line.strip()]
+        except OSError:
+            return killed
         for pid, started in entries:
             stat = proc_stat(int(pid))
             if stat is None or stat["starttime"] != int(started):
@@ -392,6 +398,10 @@ def service_main(args) -> int:
             except OSError as err:
                 status["size_set"] = f"failed: {err}"
         if ready:
+            if args.die_delay and status["reads"] + 1 == args.die_after_read:
+                # Let the kernel fill up first, so the read that is lost is
+                # as large as one read gets.
+                time.sleep(args.die_delay)
             try:
                 data = os.read(fd, 65536)
             except BlockingIOError:
@@ -585,51 +595,44 @@ def case_yes(run: Run) -> None:
     run.stop_keeper(keeper)
 
 
-def audit_ring(path: str) -> dict:
-    """The counter's ring: the numbers in order, where they break."""
-    with open(path, "rb") as f:
-        data = f.read()
-    lines = data.split(b"\r\n")
-    tail = lines.pop()
-    gaps, dups, broken = [], [], []
-    last = 0
-    for line in lines:
-        if not line.isdigit():
-            broken.append(line[:40])
-            continue
-        n = int(line)
-        if n == last + 1:
-            last = n
-        elif n > last + 1:
-            gaps.append((last, n))
-            last = n
-        else:
-            dups.append(n)
-    return {
-        "bytes": len(data),
-        "lines": len(lines),
-        "last": last,
-        "gaps": gaps,
-        "dups": dups,
-        "broken": broken,
-        "tail": tail,
-    }
+def counter_stream(size: int) -> bytes:
+    """What a reader of the counter's pty gets, at least `size` bytes of it:
+    1, 2, 3, ... with the line discipline's CR LF after each."""
+    parts, total, n = [], 0, 0
+    while total < size:
+        n += 1
+        parts.append(b"%d\r\n" % n)
+        total += len(parts[-1])
+    return b"".join(parts)
 
 
-def case_counter(run: Run, worst: bool) -> None:
-    name = "counter-worst" if worst else "counter"
-    run.say(
-        "\n== counter, the service dies between read() and the ring"
-        if worst
-        else "\n== counter: a numbered stream across the service's death"
-    )
+def as_read(written: int) -> int:
+    """Bytes a reader gets for the first `written` bytes the counter wrote
+    (whole lines, LF each): one more per line."""
+    total = n = 0
+    while True:
+        size = len(str(n + 1)) + 1
+        if total + size > written:
+            return total + n
+        n += 1
+        total += size
+
+
+def case_counter(run: Run, worst: bool, delay: float = 0.0) -> None:
+    name = "counter-worst-full" if delay else "counter-worst" if worst else "counter"
+    if delay:
+        run.say("\n== counter, the service dies between read() and the ring, the read a large one")
+    elif worst:
+        run.say("\n== counter, the service dies between read() and the ring")
+    else:
+        run.say("\n== counter: a numbered stream across the service's death")
     keeper = run.keeper()
     ring = os.path.join(run.scratch, f"{name}.ring")
     with contextlib.suppress(FileNotFoundError):
         os.unlink(ring)
     argv = ["--spawn", json.dumps(["sh", "-c", COUNTER]), "--ring", ring]
     if worst:
-        argv += ["--die-after-read", "200"]
+        argv += ["--die-after-read", "200", "--die-delay", str(delay)]
     first, status = run.service(f"{name}-a", *argv)
     child = read_json(status)["pid"]
     if worst:
@@ -637,52 +640,44 @@ def case_counter(run: Run, worst: bool) -> None:
     else:
         time.sleep(0.7)
         run.kill(first)
-    held = read_json(status).get("died_holding")
+    held = read_json(status).get("died_holding") or 0
     size_at_death = os.path.getsize(ring)
     took = run.blocked(child)
     run.check("the child blocked", took is not None, f"after {took:.2f} s" if took is not None else "")
     written = wchar(child)
     run.say(f"  /proc/{child}/syscall: {proc_text(child, 'syscall').split()[:2]} (1 is write, fd 1)")
     max_read = read_json(status).get("max_read")
+    if written is not None:
+        run.say(
+            f"  blocked, the child had finished writing {written} bytes, {as_read(written)} as read; "
+            f"service A had taken {size_at_death + held} of them: the kernel held "
+            f"{as_read(written) - size_at_death - held} bytes (to within the line being written)"
+        )
     second, status_b = run.service(f"{name}-b", "--adopt", "1", "--ring", ring)
     time.sleep(0.7)
     run.kill(second, signal.SIGTERM)
-    audit = audit_ring(ring)
+    with open(ring, "rb") as f:
+        data = f.read()
+    expected = counter_stream(len(data) + held)
     run.say(
-        f"  ring: {audit['bytes']} bytes, {audit['lines']} lines, last number {audit['last']}; "
-        f"{size_at_death} bytes were A's; A's largest read {max_read}, "
+        f"  ring: {len(data)} bytes, {size_at_death} of them service A's; A's largest read {max_read}, "
         f"B's {read_json(status_b).get('max_read')}"
     )
-    if written is not None:
-        # What the child had written when it blocked, as the ring would hold
-        # it: every line two bytes longer than the child wrote it... one
-        # byte: LF became CR LF.
-        with open(ring, "rb") as f:
-            data = f.read()
-        lines = line_bytes = 0
-        for line in data.split(b"\r\n"):
-            if line_bytes + len(line) + 1 > written:
-                break
-            line_bytes += len(line) + 1
-            lines += 1
-        in_ring = line_bytes + lines
-        run.say(
-            f"  when it blocked the child had finished writing {written} bytes, {lines} lines; the "
-            f"kernel held {in_ring - size_at_death - (held or 0)} bytes (as read) for the next reader"
-        )
     if worst:
-        lost = sum(len(str(n)) + 2 for a, b in audit["gaps"] for n in range(a + 1, b))
         run.say(f"  service A died holding a read of {held} bytes")
+        rest = len(data) - size_at_death
+        after = size_at_death + held
         run.check(
-            "exactly that read is missing from the ring, and nothing else",
-            len(audit["gaps"]) <= 1 and not audit["dups"] and abs(lost - (held or 0)) <= 16,
-            f"gaps {audit['gaps']}, about {lost} bytes of numbers missing, broken lines {audit['broken']}",
+            "byte for byte: the ring is the stream with exactly that read cut out of it",
+            held > 0
+            and data[:size_at_death] == expected[:size_at_death]
+            and data[size_at_death:] == expected[after : after + rest],
+            f"bytes {size_at_death} to {after} of the stream are in no ring",
         )
     else:
         run.check(
-            "no number missing, none twice",
-            not audit["gaps"] and not audit["dups"] and not audit["broken"],
-            f"gaps {audit['gaps']} dups {audit['dups']} broken {audit['broken']}",
+            "byte for byte: the ring is the stream, nothing missing, nothing twice",
+            data == expected[: len(data)],
         )
     with contextlib.suppress(ProcessLookupError):
         os.kill(child, signal.SIGKILL)
@@ -847,13 +842,22 @@ def orchestrate(args) -> int:
     os.makedirs(scratch, mode=0o700, exist_ok=True)
     os.chmod(scratch, 0o700)
     os.chdir(scratch)
-    signal.alarm(LIFE_S)
     run = Run(scratch)
+
+    def ended(signum, frame):
+        raise SystemExit(f"stopped by signal {signum}")
+
+    # The default for these is to die where it stands, leaving the children
+    # to the guard, a unit to systemd and the scratch directory to nobody.
+    for sig in (signal.SIGTERM, signal.SIGALRM, signal.SIGHUP):
+        signal.signal(sig, ended)
+    signal.alarm(LIFE_S)
     print(f"kernel {os.uname().release}, Python {sys.version.split()[0]}, scratch {scratch}")
     try:
         case_yes(run)
         case_counter(run, worst=False)
         case_counter(run, worst=True)
+        case_counter(run, worst=True, delay=0.5)
         case_winch(run)
         case_orphan(run)
         if not args.no_systemd and shutil.which("systemd-run"):
@@ -865,6 +869,11 @@ def orchestrate(args) -> int:
                 run.kill(proc)
         left = run.guard.finish()
         print(f"\ncleanup: {len(left)} process(es) had to be killed at the end: {left}")
+        if not args.scratch:
+            # A directory this script made is this script's to remove; one
+            # it was given keeps its rings and logs.
+            os.chdir("/")
+            shutil.rmtree(scratch, ignore_errors=True)
     if run.failures:
         print("\nNOT CONFIRMED: " + "; ".join(run.failures))
         return 1
@@ -888,6 +897,7 @@ def main() -> int:
     parser.add_argument("--cols", type=int)
     parser.add_argument("--nonblock", action="store_true")
     parser.add_argument("--die-after-read", type=int)
+    parser.add_argument("--die-delay", type=float, default=0.0)
     args = parser.parse_args()
     if args.role == "keeper":
         return keeper_main(args)

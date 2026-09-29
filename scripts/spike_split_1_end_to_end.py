@@ -18,6 +18,9 @@ Scenarios:
   cat      the child is `cat` on a raw pty: transport latency with no CLI
            in the way, how VTE encodes keys before and after the CLI's
            keyboard modes, bracketed paste small and large, mouse reports.
+  sink     the child is `cat >/dev/null`: nothing comes back, so the
+           terminal paints nothing while the pointer moves. The mouse report
+           rate against the rate the motion was injected at.
   pass     a real `claude` starts; the server forwards its queries and
            answers nothing (the first version's design).
   answer   the server answers the queries and still forwards them: what a
@@ -45,6 +48,7 @@ The `strip` scenario spends ONE real turn ("count from 1 to 80 ...") unless
 """
 
 import argparse
+import base64
 import json
 import os
 import pty
@@ -204,9 +208,12 @@ def run_server(args) -> int:
         else:
             pid, fd = pty.fork()
             if pid == 0:
-                os.execvp("sh", ["sh", "-c", "stty raw -echo; exec cat"])
+                tail = " >/dev/null" if args.child == "sink" else ""
+                os.execvp("sh", ["sh", "-c", "stty raw -echo; exec cat" + tail])
             common.set_size(fd, rows, cols)
         state["pid"], state["fd"] = pid, fd
+        with open(args.log + ".pid", "w") as f:
+            f.write(str(pid))
         os.set_blocking(fd, False)
         note("spawn", child=args.child, cols=cols, rows=rows)
         state["watch"] = GLib.io_add_watch(
@@ -322,10 +329,31 @@ def run_server(args) -> int:
     os.chmod(args.socket, 0o600)  # F7: created 0775 under the default umask
     # F7: never server.get_uris() on a Unix listener.
 
-    signal.signal(signal.SIGTERM, lambda *a: GLib.idle_add(finish, priority=GLib.PRIORITY_DEFAULT))
+    # Every way out goes through finish(), which leaves the CLI with
+    # Ctrl+C Ctrl+C and reaps it before this process ends: the driver
+    # removes the isolated HOME only after that. The signals are GLib
+    # sources, not Python handlers, which would wait for the interpreter to
+    # get a turn while the loop sleeps in poll().
+    def on_signal(number):
+        note("signal", number=number)
+        finish()
+        return GLib.SOURCE_REMOVE
+
+    try:
+        gi.require_version("GLibUnix", "2.0")
+        from gi.repository import GLibUnix
+
+        add_signal = GLibUnix.signal_add
+    except (ImportError, ValueError):
+        add_signal = GLib.unix_signal_add
+    for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        add_signal(GLib.PRIORITY_DEFAULT, number, on_signal, number)
     GLib.timeout_add_seconds(args.bound, lambda: finish() or False)
     print("listening", flush=True)
-    loop.run()
+    try:
+        loop.run()
+    finally:
+        finish()
     return 0
 
 
@@ -341,8 +369,9 @@ def headless_bus_address() -> str | None:
     display and nothing else: the command's own session bus is still the
     user's, where org.gnome.Mutter.RemoteDesktop is the user's live desktop.
     The compositor is found by the display name on its command line, and its
-    bus read off its environment. None when there is no such process or when
-    its bus is the one this process is on."""
+    bus read off its environment. None when there is no such process, when
+    its bus does not answer, or when its bus is the session bus (by address
+    or by the id the bus gives for itself)."""
     display = os.environ.get("WAYLAND_DISPLAY", "")
     if not display.startswith("collins-e2e-"):
         return None
@@ -367,8 +396,48 @@ def headless_bus_address() -> str | None:
                 mine = os.environ.get("DBUS_SESSION_BUS_ADDRESS", "")
                 if not address or address.split(",")[0] == mine.split(",")[0]:
                     return None
-                return address
+                return address if is_another_bus(address) else None
     return None
+
+
+def bus_id(connection) -> str:
+    reply = connection.call_sync(
+        "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetId",
+        None, None, 0, 3000, None,
+    )  # fmt: skip
+    return reply.unpack()[0]
+
+
+def is_another_bus(address: str) -> bool:
+    """True only when the bus at `address` answers and is not the session bus.
+
+    Addresses are compared as strings first, but a string says little: the
+    session bus is found without DBUS_SESSION_BUS_ADDRESS too (through
+    $XDG_RUNTIME_DIR/bus), and one bus has many spellings. So both are asked
+    who they are (org.freedesktop.DBus.GetId). The found bus not answering
+    is a refusal; the session bus not answering leaves nothing to collide
+    with. Asking sends no input anywhere."""
+    from gi.repository import Gio, GLib
+
+    try:
+        found = Gio.DBusConnection.new_for_address_sync(
+            address,
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT
+            | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            None,
+            None,
+        )
+        found_id = bus_id(found)
+        found.close_sync(None)
+    except GLib.Error:
+        return False
+    if not found_id:
+        return False
+    try:
+        session_id = bus_id(Gio.bus_get_sync(Gio.BusType.SESSION))
+    except GLib.Error:
+        return True
+    return session_id != found_id
 
 
 class Input:
@@ -610,33 +679,42 @@ def run_viewer(args) -> int:
         yield from sleep(150)
         return ctx["pointer"]
 
-    def sweep(term, inp, px_per_s, seconds):
+    def sweep(term, inp, px_per_s, seconds, every_ms=8):
         """Move the pointer back and forth along one row at a steady speed,
-        a step every 8 ms like a 125 Hz mouse."""
+        a step every 8 ms like a 125 Hz mouse (or every `every_ms`). What
+        was injected is counted, so the report rate can be read against it."""
         cell_w = term.get_char_width()
         width = term.get_column_count() * cell_w
         n_commits, n_out = len(ctx["commits"]), len(ctx["out"])
-        step = px_per_s * 0.008
         direction = 1
         x = ctx["pointer"][0] if ctx["pointer"] else 100
-        start = time.monotonic()
+        start = last = time.monotonic()
         travelled = 0.0
+        injected = 0
         while time.monotonic() - start < seconds:
+            yield from sleep(every_ms)
+            now = time.monotonic()
+            step = px_per_s * (now - last)  # by the clock, so the speed holds at any rate
+            last = now
             if x + direction * step > width - 20 or x + direction * step < 20:
                 direction = -direction
             inp.motion(direction * step, 0)
+            injected += 1
             x += direction * step
             travelled += step
-            yield from sleep(8)
         elapsed = time.monotonic() - start
         yield from sleep(200)
         sent = commit_bytes(n_commits)
         reports = re.findall(rb"\x1b\[<(\d+);(\d+);(\d+)[Mm]", sent)
+        repeats = sum(1 for a, b in zip(reports, reports[1:], strict=False) if a == b)
         return {
             "px_per_s": px_per_s,
             "seconds": round(elapsed, 2),
+            "injected_motions": injected,
+            "injected_per_s": round(injected / elapsed, 1),
             "cells_crossed": round(travelled / cell_w),
             "reports": len(reports),
+            "reports_same_cell_as_the_one_before": repeats,
             "commits": len(ctx["commits"]) - n_commits,
             "bytes": len(sent),
             "bytes_per_s": round(len(sent) / elapsed),
@@ -701,6 +779,34 @@ def run_viewer(args) -> int:
             "numbers_after": numbers(after)[:3] + numbers(after)[-1:],
         }
 
+    def osc52(term):
+        """Does VTE act on OSC 52 fed to it: a clipboard write, then a
+        clipboard read, then DSR 5 as a sentinel so the silence is bounded."""
+        marker = "spike-split-1-osc52"
+        payload = base64.b64encode(marker.encode())
+        n_commits = len(ctx["commits"])
+        paint(b"\x1b]52;c;" + payload + b"\x07" + b"\x1b]52;c;?\x07" + b"\x1b[5n")
+        yield from until(lambda: b"\x1b[0n" in commit_bytes(n_commits), 3000)
+        yield from sleep(300)
+        holder = {}
+
+        def got(clipboard, result):
+            try:
+                holder["text"] = clipboard.read_text_finish(result)
+            except GLib.Error as err:
+                holder["error"] = err.message
+
+        term.get_clipboard().read_text_async(None, got)
+        yield from until(lambda: bool(holder), 3000)
+        sent = commit_bytes(n_commits)
+        return {
+            "committed": sent.decode("latin-1").encode("unicode_escape").decode(),
+            "answered_the_read": b"\x1b]52;" in sent,
+            "sentinel_answered": b"\x1b[0n" in sent,
+            "clipboard_holds_the_write": holder.get("text") == marker,
+            "clipboard": holder.get("text") if "text" in holder else holder.get("error", "no reply"),
+        }
+
     def paste(term, text):
         n_commits, n_out = len(ctx["commits"]), len(ctx["out"])
         term.paste_text(text)
@@ -748,6 +854,7 @@ def run_viewer(args) -> int:
         steps["paste_small"] = yield from paste(term, "first line\nsecond line")
         steps["paste_100k"] = yield from paste(term, ("0123456789abcdef" * 64 + "\n") * 100)
         term.reset(True, True)
+        steps["osc52"] = yield from osc52(term)
         paint(b"\x1b[?1003h\x1b[?1006h")
         yield from sleep(300)
         cell_w, cell_h = term.get_char_width(), term.get_char_height()
@@ -755,11 +862,31 @@ def run_viewer(args) -> int:
         steps["motion"] = []
         for speed in (200, 800, 2500):
             steps["motion"].append((yield from sweep(term, inp, speed, 2.0)))
+        # The same middle speed injected faster and slower: is the report
+        # rate the injection's, or a ceiling further down?
+        steps["motion_by_injection_rate"] = []
+        for every_ms in (2, 4, 16, 33):
+            fact = yield from sweep(term, inp, 800, 2.0, every_ms=every_ms)
+            steps["motion_by_injection_rate"].append(fact)
         steps["wheel"] = yield from wheel(term, inp, -3)
         steps["drag"] = yield from drag(term, inp, shift=False)
         paint(b"some words to select in the terminal, more than thirty cells of them\r\n" * 8)
         yield from sleep(300)
         steps["shift_drag"] = yield from drag(term, inp, shift=True)
+
+    def scenario_sink(term, inp):
+        # Nothing comes back, so the terminal has nothing to paint while the
+        # pointer moves: the state a CLI that ignores hover leaves it in.
+        steps = results["steps"]
+        yield from sleep(500)
+        paint(b"\x1b[?1003h\x1b[?1006h")
+        yield from sleep(300)
+        cell_w, cell_h = term.get_char_width(), term.get_char_height()
+        steps["pointer"] = yield from home_pointer(term, inp, 20 * cell_w, 10.5 * cell_h)
+        steps["motion_by_injection_rate"] = []
+        for every_ms in (1, 2, 4, 8, 16):
+            fact = yield from sweep(term, inp, 800, 2.0, every_ms=every_ms)
+            steps["motion_by_injection_rate"].append(fact)
 
     def scenario_startup(term, inp):
         yield from quiet(2000, 30000)
@@ -937,6 +1064,7 @@ def run_viewer(args) -> int:
             term.grab_focus()
             scenario = {
                 "cat": scenario_cat,
+                "sink": scenario_sink,
                 "pass": scenario_startup,
                 "answer": scenario_startup,
                 "misorder": scenario_startup,
@@ -979,6 +1107,44 @@ def run_viewer(args) -> int:
 # --------------------------------------------------------------------------
 
 
+def stop_server(server, pid_path, patience: float = 15.0) -> None:
+    """Wait for the server to leave its child and go; ask it to (SIGTERM,
+    which it answers by leaving the CLI with Ctrl+C Ctrl+C) when it has not.
+    Only a server that ignores that is killed, and then the child it left
+    behind is waited for too, so the HOME is never removed under a CLI that
+    is still writing its records."""
+    if server.poll() is None:
+        try:
+            server.wait(timeout=patience)
+        except subprocess.TimeoutExpired:
+            server.terminate()
+            try:
+                server.wait(timeout=patience)
+            except subprocess.TimeoutExpired:
+                server.kill()
+                server.wait()
+    try:
+        with open(pid_path) as f:
+            child = int(f.read())
+    except (OSError, ValueError):
+        return
+    # The killed server's master closed with it, so the child has its
+    # SIGHUP already; give it the time leave() would have.
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline and os.path.exists(f"/proc/{child}"):
+        time.sleep(0.1)
+    if os.path.exists(f"/proc/{child}"):
+        try:
+            os.killpg(child, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        time.sleep(0.3)
+    try:
+        os.unlink(pid_path)
+    except OSError:
+        pass
+
+
 def run_scenario(name, scratch, runtime, turn, bound) -> dict:
     """One server, one viewer, one child. Returns what both wrote down."""
     socket_path = os.path.join(runtime, f"{name}.sock")
@@ -988,7 +1154,7 @@ def run_scenario(name, scratch, runtime, turn, bound) -> dict:
         if os.path.exists(path):
             os.unlink(path)
     home = None
-    child = "cat" if name == "cat" else "claude"
+    child = name if name in ("cat", "sink") else "claude"
     if child == "claude":
         home = common.make_home(parent=scratch)
     me = os.path.abspath(__file__)
@@ -1026,14 +1192,7 @@ def run_scenario(name, scratch, runtime, turn, bound) -> dict:
                 out["viewer_stderr"] = err.read().decode(errors="replace")[-600:]
         except subprocess.TimeoutExpired:
             out["viewer_exit"] = "timeout"
-        try:
-            server.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            server.terminate()
-            try:
-                server.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                server.kill()
+        stop_server(server, log_path + ".pid")
         if os.path.exists(results_path):
             with open(results_path) as f:
                 out["viewer"] = json.load(f)
@@ -1041,8 +1200,7 @@ def run_scenario(name, scratch, runtime, turn, bound) -> dict:
             with open(log_path) as f:
                 out["server"] = json.load(f)
     finally:
-        if server.poll() is None:
-            server.kill()
+        stop_server(server, log_path + ".pid")
         if home:
             common.remove_home(home)
         if os.path.exists(socket_path):
@@ -1109,15 +1267,32 @@ def verdicts(runs) -> list:
                 f"{total['median']}, p95 {total['p95']}, max {total['max']} (n={total['n']}); "
                 f"of that the child took {child['mean'] if child else '?'} ms."
             )
-    for name in ("cat", "strip"):
+    for name in ("cat", "sink", "strip"):
         motion = steps(name).get("motion")
         if motion:
             rates = ", ".join(f"{m['bytes_per_s']} B/s at {m['px_per_s']} px/s" for m in motion)
             reports = sum(m["reports"] for m in motion)
             cells = sum(m["cells_crossed"] for m in motion)
+            repeats = sum(m["reports_same_cell_as_the_one_before"] for m in motion)
+            injected = sum(m["injected_motions"] for m in motion)
             lines.append(
                 f"Pointer motion ({name}): mouse reports arrive through `commit`: {rates}; "
-                f"{reports} reports for {cells} cells crossed."
+                f"{injected} motions injected, {reports} reports, {cells} cells crossed, "
+                f"{repeats} reports naming the same cell as the report before."
+            )
+        by_rate = steps(name).get("motion_by_injection_rate")
+        if by_rate:
+            pairs = ", ".join(
+                f"{m['injected_per_s']}/s in -> {m['reports_per_s']}/s out ({m['bytes_per_s']} B/s)"
+                for m in by_rate
+            )
+            lines.append(f"Report rate against injection rate ({name}, 800 px/s): {pairs}.")
+        fact = steps(name).get("osc52")
+        if fact:
+            lines.append(
+                f"OSC 52 fed to VTE ({name}): clipboard holds the write "
+                f"{fact['clipboard_holds_the_write']}, the read was answered "
+                f"{fact['answered_the_read']}, committed {fact['committed']!r}."
             )
         for key in ("paste_small", "paste_100k", "paste_2000"):
             fact = steps(name).get(key)
@@ -1193,6 +1368,10 @@ def versions() -> dict:
 
 
 def run_driver(args) -> int:
+    def terminated(*_args):
+        raise SystemExit(143)
+
+    signal.signal(signal.SIGTERM, terminated)
     found = versions()
     show("versions", found)
     if "missing" in found:
@@ -1214,10 +1393,12 @@ def run_driver(args) -> int:
         prefix="collins-spike-split1-", dir=os.environ.get("XDG_RUNTIME_DIR") or None
     )
     os.chmod(runtime, 0o700)
-    names = args.only.split(",") if args.only else ["cat", "pass", "answer", "misorder", "strip"]
+    names = ["cat", "sink", "pass", "answer", "misorder", "strip"]
+    if args.only:
+        names = args.only.split(",")
     if not common.have_cli():
         print("no `claude` or no login here: only the `cat` scenario runs")
-        names = [n for n in names if n == "cat"]
+        names = [n for n in names if n in ("cat", "sink")]
     failed = False
     runs = {}
     try:
@@ -1267,10 +1448,12 @@ def main() -> int:
     parser.add_argument("--log")
     parser.add_argument("--results")
     parser.add_argument("--home")
-    parser.add_argument("--child", default="cat", choices=("cat", "claude"))
+    parser.add_argument("--child", default="cat", choices=("cat", "sink", "claude"))
     parser.add_argument("--queries", default="strip", choices=("pass", "answer", "strip"))
     parser.add_argument(
-        "--scenario", default="cat", choices=("cat", "pass", "answer", "misorder", "strip")
+        "--scenario",
+        default="cat",
+        choices=("cat", "sink", "pass", "answer", "misorder", "strip"),
     )
     parser.add_argument("--classic", action="store_true", help="do not force fullscreen mode")
     parser.add_argument("--misorder", action="store_true", help="answer DA1 before what preceded it")

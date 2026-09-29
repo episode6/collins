@@ -35,8 +35,19 @@ Found on 2026-09-29, CLI 2.1.285, VTE 0.84:
 - The turn itself is written with relative cursor moves counted in rows of
   the grid it was written for. Replayed into a narrower terminal, about 40
   of the count's 120 lines were overwritten, and the CLI's repaint after the
-  resize does not bring them back. Replayed at the grid it was written for
-  and resized afterwards, the terminal holds what today's terminal holds.
+  resize does not bring them back. At the same width or wider, and at any
+  height, the turn replayed whole.
+- A repaint is written from home for the height of its day. A ring holding
+  one, replayed into a shorter terminal, left 10 lines doubled; into a
+  taller one, 10 missing and 2 doubled.
+- Replaying at the grid the bytes were written for and resizing afterwards
+  costs what a resize costs a terminal anyway (here 1 line doubled going
+  narrower, 3 lost going shorter). That a VTE with a child does the same
+  was not measured: "live" below is a childless VTE resized where the pty
+  was, so a pinned replay matching it is the same feeds in the same order.
+
+Exit status: 0 when it ran or had nothing to run on; 3 when the recording
+ran past WATCHDOG_S (the CLI is left and the isolated HOME removed first).
 """
 
 import argparse
@@ -57,7 +68,13 @@ HEADLESS = os.path.join(REPO, ".agents", "capture-screenshots", "scripts", "with
 COUNT = 120
 PROMPT = f"count from 1 to {COUNT}, one number per line, nothing else"
 COLS, ROWS = 120, 40
+# The recording at its slowest: three mode launches (about 12 s each), the
+# start (9), the turn (150 at most), six steps (3.5 each), the exit (4), so
+# some 220 s. The VTE half is bounded apart from it, so a full run is over
+# inside WATCHDOG_S + VTE_TIMEOUT_S whatever happens.
 WATCHDOG_S = 300
+VTE_TIMEOUT_S = 160
+ARGV = ("claude", "--strict-mcp-config", "--model", "haiku")
 
 # What each step does to the terminal, in order. (name, action, cols, rows):
 # the size is the one in force once the step has been taken.
@@ -140,15 +157,28 @@ def config_keys(home: str) -> dict:
     }
 
 
+class Watchdog(Exception):
+    """The recording ran past its bound. Raised from the alarm, not exited
+    on, so every `finally` on the way out runs: the CLI is left and the
+    isolated HOME, which holds a copy of the login, is removed."""
+
+
+def alarm(*_args) -> None:
+    raise Watchdog()
+
+
 def probe_mode(home: str, flicker: str | None) -> dict:
     """One launch, no prompt: which screen the CLI chose with
     CLAUDE_CODE_NO_FLICKER set to `flicker` (None: unset)."""
     env = common.cli_env(home)
+    env.pop("CLAUDE_CODE_NO_FLICKER", None)
     if flicker is not None:
         env["CLAUDE_CODE_NO_FLICKER"] = flicker
-    pid, fd = common.spawn_cli(env, cwd=common.workdir(home), rows=ROWS, cols=COLS)
-    got = common.drain(fd, 7, quiet_after=2.5)
-    common.leave(pid, fd)
+    pid, fd = common.spawn_cli(env, cwd=common.workdir(home), rows=ROWS, cols=COLS, argv=ARGV[:2])
+    try:
+        got = common.drain(fd, 7, quiet_after=2.5)
+    finally:
+        common.leave(pid, fd)
     return {
         "CLAUDE_CODE_NO_FLICKER": flicker,
         "alternate screen": b"\x1b[?1049h" in got,
@@ -167,16 +197,23 @@ def record(out: str, modes: bool) -> bool:
         return False
     os.makedirs(out, exist_ok=True)
     home = common.make_home(parent=out)
-    manifest = {"cli": cli_version(), "prompt": PROMPT, "cols": COLS, "rows": ROWS}
+    manifest = {
+        "cli": cli_version(),
+        "prompt": PROMPT,
+        "cols": COLS,
+        "rows": ROWS,
+        # What the recorded session was launched with, so a recording says
+        # for itself how it came to be in the mode it is in.
+        "recorded_with": {"CLAUDE_CODE_NO_FLICKER": "0", "argv": list(ARGV)},
+    }
+    pid = fd = None
     try:
         if modes:
             manifest["mode_probes"] = [probe_mode(home, value) for value in (None, "0", "1")]
             manifest["config_keys"] = config_keys(home)
         env = common.cli_env(home)
         env["CLAUDE_CODE_NO_FLICKER"] = "0"  # classic, whatever the gates say
-        pid, fd = common.spawn_cli(
-            env, cwd=common.workdir(home), rows=ROWS, cols=COLS, argv=("claude", "--model", "haiku")
-        )
+        pid, fd = common.spawn_cli(env, cwd=common.workdir(home), rows=ROWS, cols=COLS, argv=ARGV)
         segments = []
 
         def keep(name: str, action: str, cols: int, rows: int, data: bytes) -> None:
@@ -197,10 +234,18 @@ def record(out: str, modes: bool) -> bool:
             else:
                 common.set_size(fd, rows, cols)
             keep(name, action, cols, rows, common.drain(fd, 3.5))
-        keep("exit", "Ctrl+C Ctrl+C", COLS, ROWS, common.leave(pid, fd))
+        left, pid = pid, None
+        keep("exit", "Ctrl+C Ctrl+C", COLS, ROWS, common.leave(left, fd))
         manifest["segments"] = segments
     finally:
-        common.remove_home(home)
+        # Whatever ended the recording, the alarm included: leave the CLI the
+        # way a person does, then take the copy of the login away.
+        signal.alarm(0)
+        try:
+            if pid is not None:
+                common.leave(pid, fd)
+        finally:
+            common.remove_home(home)
     with open(os.path.join(out, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
     return True
@@ -342,6 +387,41 @@ def scenarios(manifest: dict) -> list[tuple[str, list[tuple]]]:
                 [("size", wide, tall), ("feed", "start", "turn"), ("read", "replayed")],
             )
         )
+    # A ring that holds one of the CLI's repaints (home, then 40 rows), into
+    # a terminal with another number of rows: the turn's relative moves do
+    # not care how tall the terminal is, a paint from home does.
+    painted = ("start", "turn", "resize-back")
+    short = by_name["resize-rows-only"]
+    found.append(
+        (
+            "replay: turn and a 40-row repaint at the client's 120x30, then the repaint for 120x30",
+            [
+                ("size", short["cols"], short["rows"]),
+                ("feed", *painted),
+                ("read", "replayed"),
+                ("feed", "resize-rows-only"),
+                ("read", "repainted"),
+            ],
+        )
+    )
+    found.append(
+        (
+            "replay: turn and a 40-row repaint at the pty's 120x40, then resize to 120x30 and the repaint",
+            [
+                ("size", cols, rows),
+                ("feed", *painted),
+                ("size", short["cols"], short["rows"]),
+                ("feed", "resize-rows-only"),
+                ("read", "repainted"),
+            ],
+        )
+    )
+    found.append(
+        (
+            "replay: turn and a 40-row repaint at the client's 120x50",
+            [("size", cols, 50), ("feed", *painted), ("read", "replayed")],
+        )
+    )
     return found
 
 
@@ -459,7 +539,7 @@ def vte(out: str) -> dict | None:
     try:
         subprocess.run(
             ["bash", HEADLESS, sys.executable, os.path.abspath(__file__), "--vte-child", out],
-            timeout=160,
+            timeout=VTE_TIMEOUT_S,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -477,7 +557,12 @@ def vte(out: str) -> dict | None:
     print()
     print("A childless VTE 0.84 fed the recording. Columns: grid, lines held (scrollback and")
     print(f"screen), lines of the count held (of {COUNT}), doubled, missing, rule lines, and lines")
-    print("that differ from the live terminal at the same point.")
+    print("that differ from the 'live' scenario at the same point.")
+    print("Held, doubled and missing are counted against what the turn is known to have said,")
+    print("which no terminal had a hand in. 'live' is this harness's stand-in for today's tab:")
+    print("the same kind of VTE, fed the same bytes, resized where the pty was. No tab with a")
+    print("child was measured, and a replay 'at the pty's grid, then resize' is the same feeds")
+    print("and resizes in the same order, so its 0 says VTE is deterministic, not more.")
     for name, reads in results.items():
         print(f"  {name}")
         for read in reads:
@@ -533,14 +618,18 @@ def findings(found: dict, held: dict | None) -> None:
         return
     live = held.get("live") or []
     worst = max((len(read["doubled"]) for read in live), default=0)
-    print(f"  today's terminal, resized as it went: at worst {worst} lines of the count held twice")
+    lost = max((len(read["missing"]) for read in live), default=0)
+    print(
+        f"  a VTE resized as the pty was (the stand-in for today's tab): at worst {worst} lines "
+        f"of the count held twice and {lost} missing"
+    )
     for name, reads in held.items():
         if name == "live" or not reads:
             continue
         last = reads[-1]
         against = ""
         if last["differs"] is not None:
-            against = f", {last['differs']} lines differ from the live terminal"
+            against = f", {last['differs']} lines differ from the stand-in"
         print(f"  {name}: {len(last['doubled'])} doubled, {len(last['missing'])} missing{against}")
 
 
@@ -554,12 +643,24 @@ def main() -> int:
     args = parser.parse_args()
     if args.vte_child:
         return vte_main(args.vte_child)
-    signal.signal(signal.SIGALRM, lambda *_: os._exit(3))
-    signal.alarm(WATCHDOG_S)
     out = args.recordings
     if out is None:
         out = args.out or tempfile.mkdtemp(prefix="spike-split-2-")
-        if not record(out, modes=not args.no_modes):
+        # The alarm bounds the recording alone and is lifted in record()'s
+        # `finally`; the VTE half has its own bound (VTE_TIMEOUT_S).
+        signal.signal(signal.SIGALRM, alarm)
+        signal.alarm(WATCHDOG_S)
+        try:
+            recorded = record(out, modes=not args.no_modes)
+        except Watchdog:
+            print(
+                f"the recording ran past {WATCHDOG_S} s and was stopped; the CLI was left and "
+                "the isolated HOME removed. Nothing was measured."
+            )
+            return 3
+        finally:
+            signal.alarm(0)
+        if not recorded:
             return 0
         print(f"recorded into {out} (one real turn spent); not for committing")
     elif not os.path.exists(os.path.join(out, "manifest.json")):

@@ -274,8 +274,10 @@ def differences(original: dict, copy: dict) -> dict:
                 kind = "background"
             elif a[4] != b[4]:
                 kind = "attributes"
-            else:
+            elif a[5] != b[5]:
                 kind = "underline style"
+            else:
+                kind = "underline colour"
             cells[kind] += 1
             if len(examples) < 4:
                 examples.append(f"{kind} at ({x},{y}): original {a!r}, snapshot {b!r}")
@@ -334,6 +336,7 @@ def main(argv: list[str]) -> int:
 
     jobs = []
     sizes = {}
+    hidden = {}
     lost: Counter = Counter()
     seconds = 0.0
     for index, (name, data) in enumerate(scenarios):
@@ -348,6 +351,7 @@ def main(argv: list[str]) -> int:
         seconds += time.perf_counter() - started
         lost.update(could_not)
         sizes[name] = (len(data), len(snap))
+        hidden[name] = model.unseen(screen)
         jobs.append((name + "|snapshot", snap))
         if not screen.on_alt and screen.scrollback:
             jobs.append((name + "|history", snapshot(screen, history=True)[0]))
@@ -361,11 +365,12 @@ def main(argv: list[str]) -> int:
 
     print(
         f"{'scenario':<38} {'stream':>6} {'snap':>5} {'rows':>4} {'cursor':>6} {'cells':>5} "
-        f"{'grammar':>7} {'wraps':>5} {'history':>7}  | then {'rows':>4} {'cursor':>6} {'cells':>5} "
-        f"{'grammar':>7} {'wraps':>5}"
+        f"{'grammar':>7} {'wraps':>5} {'history':>7} {'unseen':>6}  | then {'rows':>4} {'cursor':>6} "
+        f"{'cells':>5} {'grammar':>7} {'wraps':>5}"
     )
     totals: Counter = Counter()
     kinds: Counter = Counter()
+    unseen: Counter = Counter()
     for name, _ in scenarios:
         copy = results.get(name + "|snapshot")
         if copy is None:
@@ -396,11 +401,15 @@ def main(argv: list[str]) -> int:
         print(
             f"{name:<38} {stream:>6} {size:>5} {len(diff['rows']):>4} {YES[diff['cursor']]:>6} "
             f"{sum(diff['cells'].values()):>5} {YES[diff['grammar']]:>7} {YES[diff['wraps']]:>5} "
-            f"{YES[history]:>7}  | then {tail}"
+            f"{YES[history]:>7} {sum(hidden[name].values()):>6}  | then {tail}"
         )
         totals["scenarios"] += 1
         totals["exact"] += diff["exact"]
+        totals["exact, with cells unseen"] += diff["exact"] and bool(hidden[name])
+        unseen.update(hidden[name])
         kinds.update(diff["cells"])
+        for what, count in hidden[name].items():
+            print(f"      not evidence for {count} cells {what}: VTE's reads cannot show them")
         if verbose or not diff["exact"]:
             explain("", diff, originals[name], copy)
         if after is not None and (verbose or not after["exact"]):
@@ -409,6 +418,12 @@ def main(argv: list[str]) -> int:
         f"\n{totals['exact']} of {totals['scenarios']} snapshots give a VTE that reads exactly as the "
         "original's: text, cursor, every drawn cell, wrapped rows, the grammar's reads."
     )
+    if totals["exact, with cells unseen"]:
+        print(
+            f"{totals['exact, with cells unseen']} of those hold cells VTE's reads cannot show, and are "
+            "no evidence that a snapshot carries them:\n  "
+            + "\n  ".join(f"{count} cells {what}" for what, count in unseen.items())
+        )
     print(
         f"{totals['then exact']} of {totals['then']} still do after the session's next bytes are fed "
         "on top of the snapshot."
@@ -426,8 +441,9 @@ def main(argv: list[str]) -> int:
         "\nstream, snap: bytes of the original output and of the snapshot. rows, cells: differing.\n"
         "grammar: takes_prompt, entered_prompt and the dim tail, read off the snapshot's VTE.\n"
         "wraps: one read of the whole screen, in which rows that wrapped run together.\n"
-        "Not comparable through VTE's reads, so not measured: cells erased with a background\n"
-        "past the last written cell of a row, blink, conceal, overline, the underline's colour,\n"
+        "unseen: cells of the prototype's screen holding what VTE's reads cannot show (erased\n"
+        "with a background past a row's last written cell, concealed, an underline colour with\n"
+        "no underline). Also not measured:\n"
         "hyperlinks (OSC 8; the prototype keeps none), the modes the stream filter's tracker owns."
     )
     return 0

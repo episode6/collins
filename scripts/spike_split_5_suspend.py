@@ -68,12 +68,20 @@ from dataclasses import dataclass
 SELF = os.path.abspath(__file__)
 API_SOCK = "api.sock"
 FWD_SOCK = "fwd.sock"
+SERVER_PID = "server.pid"
 PATH = "/api/ws"
 MAX_PAYLOAD = 16 * 1024 * 1024
-SSH_OPTIONS = (
-    "-o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o BatchMode=yes"
-).split()
+# Every ssh this script runs is a connection of its own. Under a user's
+# ControlMaster / ControlPersist the forward would live in the mux master:
+# killing the ssh that asked for it would kill nothing, and the ServerAlive
+# options would be the master's, not these.
+SSH_OWN = "-o BatchMode=yes -o ControlMaster=no -o ControlPath=none".split()
+SSH_FORWARD = "-o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3".split()
 REMOTE_DIR = ".cache/collins-spike5"
+# For pkill -f on the far side, written so that it cannot match the command
+# line of the shell that carries it.
+REMOTE_PATTERN = "[.]cache/collins-spike5/spike[.]py"
+SLEEP_WAIT_S = 90  # how long --real-suspend waits, awake, for the machine to sleep
 
 
 def clocks() -> dict:
@@ -203,14 +211,17 @@ def server_main(args) -> int:
     os.umask(old)
     os.chmod(API_SOCK, 0o600)
     log("listening", mode=oct(os.stat(API_SOCK).st_mode & 0o777))
+    with open(SERVER_PID, "w") as f:
+        f.write(f"{os.getpid()}\n")
     GLib.timeout_add(args.frame_ms, tick, priority=GLib.PRIORITY_DEFAULT)
     GLib.timeout_add(1000, report, priority=GLib.PRIORITY_DEFAULT)
     GLib.timeout_add_seconds(int(args.life), loop.quit, priority=GLib.PRIORITY_DEFAULT)
     on_sigterm(loop.quit)
     loop.run()
     log("exit", sent=state["seq"], acked=state["acked"], max_rss_kib=state["rss"])
-    with contextlib.suppress(FileNotFoundError):
-        os.unlink(API_SOCK)
+    for name in (API_SOCK, SERVER_PID):
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(name)
     return 0
 
 
@@ -384,7 +395,8 @@ class Guard:
         if os.fork():
             os._exit(0)
         deadline = time.monotonic() + life
-        while time.monotonic() < deadline and not os.path.exists(self.done):
+        # Done when told so, and when the scratch directory went away under it.
+        while time.monotonic() < deadline and not os.path.exists(self.done) and os.path.exists(self.pids):
             time.sleep(0.25)
         self.sweep()
         os._exit(0)
@@ -397,8 +409,11 @@ class Guard:
 
     def sweep(self) -> list[int]:
         killed = []
-        with open(self.pids) as f:
-            entries = [line.split() for line in f if line.strip()]
+        try:
+            with open(self.pids) as f:
+                entries = [line.split() for line in f if line.strip()]
+        except OSError:
+            return killed
         for pid, started in entries:
             if proc_start(int(pid)) != int(started):
                 continue
@@ -596,8 +611,8 @@ def stand_ins(args, base: str) -> int:
     if args.only:
         scenarios = [sc for sc in scenarios if args.only in sc.name]
     life = dark + freeze + 90
-    signal.alarm(int(life))
     guard = Guard(base, life)
+    signal.alarm(int(life))
     print(versions())
     print(f"dark for {dark:.0f} s, frozen or blipped for {freeze:.0f} s; {len(scenarios)} scenarios at once")
     out: dict = {}
@@ -670,9 +685,52 @@ def stand_ins(args, base: str) -> int:
 
 def ssh(target: str, command: str, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", target, command],
+        ["ssh", *SSH_OWN, target, command],
         capture_output=True, text=True, stdin=kwargs.pop("stdin", subprocess.DEVNULL), timeout=60, **kwargs,
     )  # fmt: skip
+
+
+def remote_cleanup_command() -> str:
+    """What the far side's shell runs at the end: stop the service by the pid
+    it recorded (only if that pid still is this script), fall back to a
+    pattern when there is no record, and remove the directory whatever
+    happened before."""
+    return (
+        f"pid=$(cat {REMOTE_DIR}/{SERVER_PID} 2>/dev/null); "
+        'case "$pid" in '
+        f"''|*[!0-9]*) pkill -u \"$(id -u)\" -f '{REMOTE_PATTERN}' ;; "
+        "*) if grep -qa 'spike[.]py' \"/proc/$pid/cmdline\" 2>/dev/null; "
+        'then kill "$pid"; fi ;; '
+        "esac; "
+        f"rm -rf {REMOTE_DIR}"
+    )
+
+
+def forward_gone(path: str, seconds: float = 5.0) -> bool:
+    """True once nothing answers on the forward's local socket. A killed ssh
+    leaves the socket file behind, and it refuses."""
+
+    def refused() -> bool:
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        probe.settimeout(1)
+        try:
+            probe.connect(path)
+        except (ConnectionRefusedError, FileNotFoundError):
+            return True
+        except OSError:
+            return False
+        finally:
+            probe.close()
+        return False
+
+    return wait_for(refused, seconds)
+
+
+def asleep_for(before: dict) -> float:
+    """Seconds this machine has slept since `before`: CLOCK_BOOTTIME counts
+    them, CLOCK_MONOTONIC does not."""
+    now = clocks()
+    return (now["boot"] - now["mono"]) - (before["boot"] - before["mono"])
 
 
 def confirm_suspend(args) -> None:
@@ -711,7 +769,7 @@ def by_hand(args, base: str) -> int:
                 raise SystemExit(f"ssh {args.ssh} failed ({sent.returncode}): {sent.stderr.strip()}")
             remote = sent.stdout.strip().splitlines()[-1]
             server = [
-                "ssh", "-o", "BatchMode=yes", args.ssh,
+                "ssh", *SSH_OWN, args.ssh,
                 f"python3 {shlex.quote(remote)}/spike.py server --dir {shlex.quote(remote)} "
                 f"--life {int(life)} --keepalive {keep[0]} --pong {keep[1]}",
             ]  # fmt: skip
@@ -719,7 +777,8 @@ def by_hand(args, base: str) -> int:
             time.sleep(3)
             forward = [
                 "ssh",
-                *SSH_OPTIONS,
+                *SSH_OWN,
+                *SSH_FORWARD,
                 "-N",
                 "-L",
                 f"{directory}/{FWD_SOCK}:{remote}/{API_SOCK}",
@@ -727,7 +786,8 @@ def by_hand(args, base: str) -> int:
             ]
             if len(f"{directory}/{FWD_SOCK}") > 100:
                 raise SystemExit("the scratch path is too long for a socket; pass a short --scratch")
-            procs.append(subprocess.Popen(forward, stdin=subprocess.DEVNULL))
+            forwarder = subprocess.Popen(forward, stdin=subprocess.DEVNULL)
+            procs.append(forwarder)
             sock = FWD_SOCK
         else:
             procs.append(
@@ -752,11 +812,32 @@ def by_hand(args, base: str) -> int:
             confirm_suspend(args)
             before = clocks()
             subprocess.run(["systemctl", "suspend"], check=True)
-            print("suspending; this line is followed by what happened after the wake")
-            wait_for(lambda: clocks()["boot"] - clocks()["mono"] > before["boot"] - before["mono"] + 2, life)
+            print(
+                f"asked for suspend; waiting up to {SLEEP_WAIT_S} s of time awake for this machine to have "
+                "slept\n(CLOCK_BOOTTIME running ahead of CLOCK_MONOTONIC). The next line is printed "
+                "after the wake.",
+                flush=True,
+            )
+            if not wait_for(lambda: asleep_for(before) > 2, SLEEP_WAIT_S):
+                print(
+                    f"VOID: {SLEEP_WAIT_S} s later this machine has not slept ({asleep_for(before):.1f} s "
+                    "asleep). logind took the request\nand nothing happened (an inhibitor, a lid "
+                    "policy); nothing was measured."
+                )
+                return 1
+            print(f"awake again after {asleep_for(before):.1f} s asleep")
         elif args.ssh and not args.observe_only:
             print("killing the ssh forward")
-            procs[1].kill()
+            forwarder.kill()
+            forwarder.wait(10)
+            if not forward_gone(os.path.join(directory, FWD_SOCK)):
+                print(
+                    "VOID: the ssh that was killed is gone and the forward still answers, so something "
+                    "else holds it\n(a connection-sharing master this script could not opt out of?). "
+                    "What the WebSocket saw says nothing\nabout a forward dying; nothing was measured."
+                )
+                return 1
+            print("the forward is gone: its local socket refuses")
         print(f"watching for {args.observe} s; pull the cable or close the lid now if that is the test")
         wait_for(lambda: client.poll() is not None, args.observe)
         after = clocks()
@@ -782,9 +863,12 @@ def by_hand(args, base: str) -> int:
         for proc in procs:
             if proc.poll() is None:
                 proc.terminate()
+        for proc in procs:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(5)
         if args.ssh:
             with contextlib.suppress(Exception):
-                ssh(args.ssh, f"pkill -f {REMOTE_DIR}/spike.py; rm -rf {REMOTE_DIR}")
+                ssh(args.ssh, remote_cleanup_command())
         guard.finish()
     return 0
 
@@ -818,9 +902,23 @@ def main() -> int:
     base = args.scratch or tempfile.mkdtemp(prefix="collins-spike5-", dir=os.environ.get("XDG_RUNTIME_DIR"))
     os.makedirs(base, mode=0o700, exist_ok=True)
     os.chmod(base, 0o700)
-    if args.ssh or args.real_suspend:
-        return by_hand(args, base)
-    return stand_ins(args, base)
+
+    def ended(signum, frame):
+        raise SystemExit(f"stopped by signal {signum}")
+
+    # The default for both is to die where it stands, leaving the children
+    # to the guard and the scratch directory to nobody.
+    for sig in (signal.SIGTERM, signal.SIGALRM, signal.SIGHUP):
+        signal.signal(sig, ended)
+    try:
+        if args.ssh or args.real_suspend:
+            return by_hand(args, base)
+        return stand_ins(args, base)
+    finally:
+        if not args.scratch:
+            # A directory this script made is this script's to remove; one
+            # it was given keeps its logs.
+            shutil.rmtree(base, ignore_errors=True)
 
 
 if __name__ == "__main__":

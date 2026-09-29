@@ -7,6 +7,7 @@ what the spec's sequence list is missing; it decides nothing about design.
     spike_split_3_screen_model.py synth   DIR
     spike_split_3_screen_model.py vte     DIR      (needs a display)
     spike_split_3_screen_model.py compare DIR [-v]
+    spike_split_3_screen_model.py dialogs [DIR]
     spike_split_3_screen_model.py widths           (needs a display)
 
 `record` runs a real `claude` in an isolated HOME and writes one stream per
@@ -23,8 +24,10 @@ modes: no turn). With none named it records `classic fullscreen worktree`.
 lean on, and what VTE does with each operation while a wrap is pending.
 `vte` feeds every scenario to a VTE with no child and dumps rows, cursor and,
 cell by cell, what was drawn. `compare` feeds the same bytes to the prototype
-and prints the parity table, the census of sequences, and the speed. `widths`
-asks VTE for the width of every assigned code point and compares it with the
+and prints the parity table, the census of sequences, and the speed.
+`dialogs` shows what the recorder would answer to each permission dialog: the
+recorded ones in DIR, and hand-made ones it has to decline. `widths` asks VTE
+for the width of every assigned code point and compares it with the
 prototype's rule.
 
 Recordings hold paths of the machine they were made on: DIR is scratch, and
@@ -1207,7 +1210,7 @@ def record_turns(
     session = None
     try:
         # The user's config may start sessions in a mode that asks nothing.
-        argv = ("claude", "--permission-mode", "default")
+        argv = ("claude", "--strict-mcp-config", "--permission-mode", "default")
         session = Session(common, mode_env(common, home, mode), common.workdir(home), argv)
         print(f"recording {name} in {home}", flush=True)
         if not session.pump(until=_at_prompt, quiet=2.0, limit=40):
@@ -1250,22 +1253,183 @@ def record_boxes(session: Session) -> int:
     return 1
 
 
+DIALOG_FILE = "a.txt"
+DIALOG_QUESTIONS = {
+    "Create file": "Do you want to create {}?",
+    "Edit file": "Do you want to make this edit to {}?",
+}
+DIALOG_TOOLS = {"Create file": "Write", "Edit file": "Update"}
+
+
+def dialog_verdict(rows: list[str], cols: int, title: str, filename: str = DIALOG_FILE) -> str:
+    """Why the permission dialog on screen must not be answered yes, or ""
+    when it is the one the recorder asked for and nothing else: the tool
+    named by `title`, on `filename` and no other path, in the tool call's
+    own line and in the dialog both, the plain Yes selected. In the
+    recorded dialogs the CLI names a file of the directory it runs in by
+    its bare name, so a bare name is taken for a file in the throwaway work
+    directory; anything with a directory in it is declined. How the CLI
+    names a file outside that directory was never recorded."""
+    asked = [y for y, row in enumerate(rows) if "Do you want to" in row]
+    if not asked:
+        return "no dialog on screen"
+    question = asked[-1]
+    rules = [y for y in range(question) if rows[y] and set(rows[y]) == {"─"} and len(rows[y]) == cols]
+    if not rules:
+        return "no rule above the question"
+    calls = [row.strip() for row in rows[: rules[-1]] if row.startswith("● ")]
+    call = f"● {DIALOG_TOOLS[title]}({filename})"
+    if not calls or calls[-1] != call:
+        return f"the tool call is {calls[-1] if calls else None!r}, not {call!r}"
+    body = [row.strip() for row in rows[rules[-1] + 1 : question] if row.strip()]
+    if len(body) < 2:
+        return "no title and path above the question"
+    if body[0] != title:
+        return f"the dialog is {body[0]!r}, not {title!r}"
+    if body[1] != filename:
+        return f"the dialog names {body[1]!r}, not {filename!r}"
+    if rows[question].strip() != DIALOG_QUESTIONS[title].format(filename):
+        return f"the question is {rows[question].strip()!r}"
+    selected = [row.strip() for row in rows[question + 1 :] if row.strip().startswith("❯")]
+    if selected != ["❯ 1. Yes"]:
+        return f"the selected answer is {selected!r}, not the plain Yes"
+    return ""
+
+
+def answer_dialog(session: Session, title: str, mark: str) -> bool:
+    """Mark and accept the dialog when it is the expected one; decline it
+    with Escape, and mark nothing, when it is anything else."""
+    why = dialog_verdict(session.screen.rows_text(), session.screen.cols, title)
+    if why:
+        session.show(f"{mark} not captured, the dialog was declined: {why}")
+        session.type("\x1b")
+        return False
+    session.mark(mark)
+    session.type("\r")
+    return True
+
+
 def record_dialogs(session: Session) -> int:
     session.screen.progress_seen = False
-    session.type("create a.txt containing the single line hi, then use the Edit tool to change hi to bye\r")
+    session.type(
+        f"create {DIALOG_FILE} containing the single line hi, "
+        "then use the Edit tool to change hi to bye\r"
+    )
     dialog = _has("Do you want to")
-    if session.pump(until=dialog, quiet=1.0, limit=90):
-        session.mark("permission")
-        session.type("\r")
+    if not session.pump(until=dialog, quiet=1.0, limit=90):
+        session.show("no permission dialog")
+    elif answer_dialog(session, "Create file", "permission"):
         session.pump(until=lambda screen: not dialog(screen), quiet=0.2, limit=10)
         if session.pump(until=dialog, quiet=1.0, limit=90):
-            session.mark("permission-diff")
-            session.type("\r")
-    else:
-        session.show("no permission dialog")
-    done = session.pump(until=_turn_done, quiet=1.5, limit=120)
-    session.mark("tool-diff" if done else "tool-diff-timeout")
+            if not answer_dialog(session, "Edit file", "permission-diff"):
+                session.pump(until=_at_prompt, quiet=1.5, limit=30)
+                return 1
+        done = session.pump(until=_turn_done, quiet=1.5, limit=120)
+        session.mark("tool-diff" if done else "tool-diff-timeout")
+        return 1
+    session.pump(until=_at_prompt, quiet=1.5, limit=30)
     return 1
+
+
+def dialog_probe(title: str, path: str, question: str, selected: int = 1, tool: str = "") -> str:
+    """A hand-made dialog in the CLI's layout, as a stream."""
+    options = ("Yes", "Yes, and switch to accept edits for this session (shift+tab)", "No")
+    tool = tool or f"{DIALOG_TOOLS[title]}({path})"
+    rows = [f"● {tool}", "", "─" * COLS, f" {title}", f" {path}", "╌" * COLS, "  1 hi", "╌" * COLS]
+    rows.append(f" {question}")
+    for number, option in enumerate(options, 1):
+        rows.append(f" {'❯' if number == selected else ' '} {number}. {option}")
+    rows += ["", " Esc to cancel · Tab to amend"]
+    return "".join(f"\x1b[{y + 3};1H{row}" for y, row in enumerate(rows))
+
+
+# (what it is, the title the recorder expects, the stream, whether to accept)
+DIALOG_PROBES = (
+    (
+        "the recorder's own file",
+        "Create file",
+        dialog_probe("Create file", "a.txt", "Do you want to create a.txt?"),
+        True,
+    ),
+    (
+        "an absolute path",
+        "Create file",
+        dialog_probe("Create file", "/home/someone/.bashrc", "Do you want to create .bashrc?"),
+        False,
+    ),
+    (
+        "the same name in another directory",
+        "Create file",
+        dialog_probe("Create file", "../a.txt", "Do you want to create a.txt?"),
+        False,
+    ),
+    (
+        "the same name under the home directory",
+        "Edit file",
+        dialog_probe("Edit file", "~/a.txt", "Do you want to make this edit to a.txt?"),
+        False,
+    ),
+    (
+        "another tool",
+        "Create file",
+        dialog_probe("Bash command", "rm -rf a.txt", "Do you want to proceed?", tool="Bash(rm -rf a.txt)"),
+        False,
+    ),
+    (
+        "an edit where a create was expected",
+        "Create file",
+        dialog_probe("Edit file", "a.txt", "Do you want to make this edit to a.txt?"),
+        False,
+    ),
+    (
+        "the right file, the session-wide answer selected",
+        "Create file",
+        dialog_probe("Create file", "a.txt", "Do you want to create a.txt?", selected=2),
+        False,
+    ),
+    (
+        "a tool call on another path than the dialog shows",
+        "Create file",
+        dialog_probe("Create file", "a.txt", "Do you want to create a.txt?", tool="Write(/etc/a.txt)"),
+        False,
+    ),
+    (
+        "a question that names another file than the path row",
+        "Create file",
+        dialog_probe("Create file", "a.txt", "Do you want to create b.txt?"),
+        False,
+    ),
+)
+
+
+def dialogs(directory: str | None) -> int:
+    """What the recorder would answer: the recorded dialogs (accepted, or
+    the recordings could not have been made by it) and the hand-made ones."""
+    wrong = 0
+    expected = {"permission": "Create file", "permission-diff": "Edit file"}
+    found = scenarios(directory) if directory and os.path.isdir(directory) else []
+    recorded = [(name, data) for name, data in found if name.rpartition(".")[2] in expected]
+    if not recorded:
+        print("dialogs: no recorded permission dialogs to check; the hand-made ones only")
+    for name, data in recorded:
+        screen = Screen()
+        feed_chunked(screen, data)
+        why = dialog_verdict(screen.rows_text(), screen.cols, expected[name.rpartition(".")[2]])
+        print(f"  recorded   {name:<34} {'accepted' if not why else 'DECLINED: ' + why}")
+        wrong += bool(why)
+    for what, title, stream, accept in DIALOG_PROBES:
+        screen = Screen()
+        screen.feed(stream.encode())
+        why = dialog_verdict(screen.rows_text(), screen.cols, title)
+        verdict = "accepted" if not why else "declined: " + why
+        right = accept == (not why)
+        print(f"  hand-made  {what:<52} {verdict}{'' if right else '   <- WRONG'}")
+        wrong += not right
+    print(
+        f"dialogs: {len(recorded)} recorded and {len(DIALOG_PROBES)} hand-made, "
+        f"{wrong} answered other than they should be"
+    )
+    return 0
 
 
 def record_worktree(common, directory: str, mode: str) -> None:
@@ -1299,7 +1463,8 @@ def record_worktree(common, directory: str, mode: str) -> None:
     home = common.make_home(parent=directory, trust=(repo,))
     session = None
     try:
-        session = Session(common, mode_env(common, home, mode), repo, ("claude", "-w", "spike"))
+        argv = ("claude", "--strict-mcp-config", "-w", "spike")
+        session = Session(common, mode_env(common, home, mode), repo, argv)
         print(f"recording worktree-{mode} in {home}", flush=True)
         if not session.pump(until=_at_prompt, quiet=2.0, limit=40):
             session.show("the prompt never came up")
@@ -1425,6 +1590,11 @@ SYNTHETIC = {
     "backspace-wrap": "A" * 120 + "\x08\x08X\r\n" + "B" * 120 + "C\x08\x08\x08Y",
     "charset-line-drawing": f"{E}(0lqqk{E}(B plain {E})0\x0elqqk\x0f plain",
     "shell-wrap": "$ " + "long " * 40 + "\r\n" + "日本" * 70 + "\r\nend",
+    "erase-inside-row": f"{E}[44m{E}[5X{E}[0m{E}[8Cx\r\nab{E}[41m{E}[3X{E}[0m{E}[6Cy\r\n"
+    f"{E}[42mabc{E}[1K{E}[0m{E}[10Gz",
+    "decorations": f"{E}[58:2::200:100:50m{E}[4mcoloured{E}[0m {E}[58:5:196;4:3mcube{E}[0m "
+    f"{E}[53mover{E}[0m {E}[5mblink{E}[0m {E}[8mhidden{E}[0m {E}[4;58;2;17;34;51msemi{E}[0m "
+    f"{E}[58:2::1:2:3mno line{E}[0m",
 }
 
 # What VTE does with an operation that arrives while the wrap is pending:
@@ -1487,7 +1657,15 @@ def synth(directory: str) -> int:
 CELL_FONT = re.compile(r'<font color="#([0-9A-Fa-f]{6})"')
 CELL_BACK = re.compile(r"background-color:#([0-9A-Fa-f]{6})")
 CELL_STYLE = re.compile(r"text-decoration-style:(\w+)")
-CELL_TAGS = (("b", "<b>"), ("i", "<i>"), ("u", "<u "), ("s", "<strike>"))
+CELL_LINE = re.compile(r"text-decoration-color:#([0-9A-Fa-f]{6})")
+CELL_TAGS = (
+    ("b", "<b>"),
+    ("i", "<i>"),
+    ("u", "<u "),
+    ("s", "<strike>"),
+    ("o", "text-decoration-line:overline"),
+    ("k", "<blink>"),
+)
 
 
 def have_display() -> bool:
@@ -1499,17 +1677,15 @@ def read_range(term, fmt, row0, col0, row1, col1) -> str:
     return (got[0] if isinstance(got, tuple) else got) or ""
 
 
-def dump_terminal(term, Vte, screen_row: int) -> dict:
+def dump_terminal(term, Vte, cursor: tuple[int, int], top: int) -> dict:
     """Rows, cursor and drawn cells of a VTE, plus the reads terminal.py
-    makes. `screen_row` is the cursor's row on the screen, as VTE's own
-    cursor position report gave it: VTE counts rows from the top of its
-    scrollback, and nothing else says where the screen starts (the scroll
-    adjustment lags, and on the alternate screen it is not the answer)."""
+    makes. VTE counts rows from the top of its scrollback: `cursor` is where
+    the stream left the cursor and `top` the screen's first row, both by
+    that count and both VTE's own (see run_vte)."""
     from collins import providers, vtehtml
 
     cols, rows = term.get_column_count(), term.get_row_count()
-    column, abs_row = term.get_cursor_position()
-    top = abs_row - screen_row
+    column, abs_row = cursor
     row_text = []
     cells = []
     for y in range(rows):
@@ -1526,6 +1702,7 @@ def dump_terminal(term, Vte, screen_row: int) -> dict:
             fg = CELL_FONT.search(html)
             bg = CELL_BACK.search(html)
             style = CELL_STYLE.search(html)
+            line = CELL_LINE.search(html)
             drawn.append(
                 [
                     x,
@@ -1534,6 +1711,7 @@ def dump_terminal(term, Vte, screen_row: int) -> dict:
                     bg.group(1).upper() if bg else None,
                     "".join(flag for flag, tag in CELL_TAGS if tag in html),
                     style.group(1) if style else "",
+                    line.group(1).upper() if line else None,
                 ]
             )
         cells.append(drawn)
@@ -1615,30 +1793,38 @@ def run_vte(jobs: list[tuple[str, bytes]], done, read_cells: bool = True) -> int
             name, data = queue.pop(0)
             term = fresh(window)
             state["commits"].clear()
-            # VTE's cursor report counts from the scroll region's top in
-            # origin mode. Whether the stream left that mode on is the one
-            # thing the harness takes from the prototype.
-            probe = Screen()
-            probe.feed(data)
-            offset = probe.grid.top if probe.origin else 0
+            seen = {}
 
             def feed():
                 term.feed(data)
+                state["waiting"] = parsed
+                term.feed(b"\x1b[5n")
+                return GLib.SOURCE_REMOVE
+
+            def parsed():
+                # Where the stream left the cursor, and what it made VTE
+                # say. Then the screen's first row, from VTE alone: with
+                # origin mode off, home is the screen's first cell wherever
+                # the scroll region is, and the cursor's row there is that
+                # row by VTE's count. (A cursor report would do on the main
+                # screen, but it counts from the region's top in origin
+                # mode, and nothing of the prototype's may be used to undo
+                # that.) No cell changes; the cursor was read before.
+                seen["cursor"] = tuple(term.get_cursor_position())
+                seen["commits"] = list(state["commits"])
                 state["waiting"] = read
-                term.feed(b"\x1b[6n\x1b[5n")
+                term.feed(b"\x1b[?6l\x1b[H\x1b[5n")
                 return GLib.SOURCE_REMOVE
 
             def read():
                 grid = (term.get_column_count(), term.get_row_count())
-                commits = list(state["commits"])
                 if grid != (COLS, ROWS):
                     print(f"{name}: the grid is {grid}, not {(COLS, ROWS)}; nothing read")
                 elif not read_cells:
-                    done(name, None, commits)
+                    done(name, None, seen["commits"])
                 else:
-                    reports = re.findall(r"\x1b\[(\d+);\d+R", "".join(commits))
-                    screen_row = int(reports[-1]) - 1 + offset if reports else 0
-                    done(name, dump_terminal(term, Vte, screen_row), commits)
+                    top = term.get_cursor_position()[1]
+                    done(name, dump_terminal(term, Vte, seen["cursor"], top), seen["commits"])
                 GLib.timeout_add(10, next_job, priority=GLib.PRIORITY_DEFAULT)
                 return GLib.SOURCE_REMOVE
 
@@ -1680,8 +1866,18 @@ def vte(directory: str) -> int:
 YES = {True: "yes", False: "NO", None: "-"}
 DEFAULT_FG = bytes(FOREGROUND).hex().upper()
 DEFAULT_BG = bytes(BACKGROUND).hex().upper()
-FLAG_BITS = (("b", BOLD), ("i", ITALIC), ("u", UNDERLINE_MASK), ("s", STRIKE))
+FLAG_BITS = (
+    ("b", BOLD),
+    ("i", ITALIC),
+    ("u", UNDERLINE_MASK),
+    ("s", STRIKE),
+    ("o", OVERLINE),
+    ("k", BLINK),
+)
 UNDERLINES = ("", "solid", "double", "wavy", "dotted", "dashed")
+# VTE keeps an underline's colour in fewer bits than it was given in
+# (measured: 7;8;9 comes back as 08 0C 08, 200;100;50 within a step of 16).
+UNDERLINE_COLOUR_STEP = 16
 
 
 def blank(cell) -> bool:
@@ -1706,8 +1902,41 @@ def model_cells(screen: Screen, row: int) -> dict[int, tuple]:
     return out
 
 
-def near(a: str, b: str) -> bool:
-    return all(abs(int(a[i : i + 2], 16) - int(b[i : i + 2], 16)) <= 1 for i in (0, 2, 4))
+def near(a: str, b: str, step: int = 1) -> bool:
+    return all(abs(int(a[i : i + 2], 16) - int(b[i : i + 2], 16)) <= step for i in (0, 2, 4))
+
+
+def unseen(screen: Screen) -> Counter:
+    """The cells of the screen that hold something none of VTE's reads can
+    show, by what it is. A scenario that matches is no evidence for these.
+
+    Measured on VTE 0.84: a cell erased with a background reads as a space
+    with that background when something written follows it on the row, and
+    as nothing at all when nothing does; concealed text reads as plain
+    text. (Blink, overline and an underline's colour do show in the HTML
+    read, and are compared.)"""
+    counts: Counter = Counter()
+    for line in screen.grid.lines:
+        end = len(line)
+        while end and blank(line[end - 1]):
+            end -= 1
+        for cell in line[end:]:
+            if cell is not None and cell[2][2] is not None:
+                counts["erased with a background, past the row's last written cell"] += 1
+        for cell in line[:end]:
+            if cell is None or not cell[0].strip():
+                continue
+            if cell[2][0] & CONCEAL:
+                counts["concealed"] += 1
+            if cell[2][3] is not None and not cell[2][0] & UNDERLINE_MASK:
+                counts["an underline colour with no underline"] += 1
+    return counts
+
+
+def from_outside(name: str) -> bool:
+    session = name.rpartition(".")[0]
+    known = (*RECORDINGS, "worktree-classic", "worktree-fullscreen")
+    return not session.startswith("synth-") and session not in known
 
 
 def compare_cells(screen: Screen, dump: dict) -> tuple[Counter, list[str]]:
@@ -1721,7 +1950,7 @@ def compare_cells(screen: Screen, dump: dict) -> tuple[Counter, list[str]]:
                 counts["text"] += 1
                 continue
             text, pen = mine[x]
-            _, _, fg, bg, flags, style = theirs[x]
+            _, _, fg, bg, flags, style, line = theirs[x]
             fg, bg = fg or DEFAULT_FG, bg or DEFAULT_BG
             want_fg, want_bg = drawn_colours(pen)
             shown = bool(text.strip())
@@ -1742,6 +1971,18 @@ def compare_cells(screen: Screen, dump: dict) -> tuple[Counter, list[str]]:
                     notes.append(
                         f"attr at ({x},{y}) {text!r}: VTE {flags!r} {style!r}, "
                         f"model {want_flags!r} {want_style!r}"
+                    )
+            want_line = None
+            if shown and pen[0] & UNDERLINE_MASK and pen[3] is not None:
+                want_line = bytes(palette_rgb(pen[3]) if isinstance(pen[3], int) else pen[3]).hex().upper()
+            if shown and (
+                (want_line is None) != (line is None)
+                or (want_line and not near(line, want_line, UNDERLINE_COLOUR_STEP))
+            ):
+                counts["attr"] += 1
+                if len(notes) < 6:
+                    notes.append(
+                        f"underline colour at ({x},{y}) {text!r}: VTE {line}, model {want_line}"
                     )
     return counts, notes
 
@@ -1791,6 +2032,8 @@ def compare_one(name: str, data: bytes, dump: dict, verbose: bool) -> dict:
         "history": history,
         "wraps": wraps,
         "census": screen.census,
+        "unseen": unseen(screen),
+        "outside": from_outside(name),
     }
     if verbose or exact:
         for row in exact[:8]:
@@ -1812,6 +2055,8 @@ def compare_one(name: str, data: bytes, dump: dict, verbose: bool) -> dict:
         )
     if not wraps:
         notes.append("the rows that run into the next (soft wraps) are not VTE's")
+    for what, count in result["unseen"].items():
+        notes.append(f"not evidence for {count} cells {what}: VTE's reads cannot show them")
     result["notes"] = notes
     return result
 
@@ -1871,34 +2116,56 @@ def compare(directory: str, verbose: bool) -> int:
     print(
         f"{'scenario':<38} {'bytes':>6} {'on':>4} {'rows':>5} {'cursor':>6} {'text':>5} {'faint':>5} "
         f"{'colour':>6} {'attr':>5} {'tail':>4} {'bits':>4} {'takes':>5} {'entered':>7} "
-        f"{'wraps':>5} {'hist':>4} {'split':>5}"
+        f"{'wraps':>5} {'hist':>4} {'split':>5} {'unseen':>6}"
     )
     clean = 0
+    partly = 0
+    hidden: Counter = Counter()
+    outside = sorted({r["name"].rpartition(".")[0] for r in results if r["outside"]})
     for r in results:
         c = r["counts"]
+        name = r["name"] + (" †" if r["outside"] else "")
         print(
-            f"{r['name']:<38} {r['bytes']:>6} {'alt' if r['alt'] else 'main':>4} "
+            f"{name:<38} {r['bytes']:>6} {'alt' if r['alt'] else 'main':>4} "
             f"{r['rows']}/{r['rows_exact']:<3} {YES[r['cursor']]:>6} {c['text']:>5} {c['faint']:>5} "
             f"{c['colour']:>6} {c['attr']:>5} {YES[r['tail']]:>4} {YES[r['tail_bits']]:>4} "
             f"{YES[r['takes']]:>5} {YES[r['entered']]:>7} {YES[r['wraps']]:>5} "
-            f"{YES[r['history']]:>4} {YES[r['split']]:>5}"
+            f"{YES[r['history']]:>4} {YES[r['split']]:>5} {sum(r['unseen'].values()):>6}"
         )
         for note in r["notes"]:
             print("      " + note[:200])
-        clean += (
+        same = (
             not r["rows_exact"]
             and not sum(c.values())
             and all(r[key] for key in ("cursor", "tail", "takes", "entered", "split", "wraps"))
             and r["history"] is not False
         )
+        clean += same
+        partly += same and bool(r["unseen"])
+        hidden.update(r["unseen"])
     print(
-        f"\n{clean} of {len(results)} scenarios read the same in the prototype and in VTE.\n"
+        f"\n{clean} of {len(results)} scenarios read the same in the prototype and in VTE, in "
+        "everything VTE's reads show."
+    )
+    if partly:
+        print(
+            f"{partly} of those hold cells VTE's reads cannot show, and are no evidence for them:\n  "
+            + "\n  ".join(f"{count} cells {what}" for what, count in hidden.items())
+        )
+    if outside:
+        print(
+            f"† {', '.join(outside)}: not one of the recorder's sessions. `record` as it stands "
+            "cannot make it;\n  it is a recording from outside it, compared like the others."
+        )
+    print(
         "rows: differing after rstrip / differing exactly. text, faint, colour, attr: cells, of\n"
-        "every cell VTE drew something in. tail: tail_is_faint against vtehtml.is_dim_run at the\n"
+        "every cell VTE drew something in (attr: bold, italic, underline and its style and colour,\n"
+        "strike, overline, blink). tail: tail_is_faint against vtehtml.is_dim_run at the\n"
         "cursor; bits: the same with the faint bit alone. takes, entered: the grammar over the\n"
         "prototype's rows against the grammar over VTE's, read the way terminal.py reads.\n"
         "wraps: one read of the whole screen (rows that wrapped run together). hist: the text\n"
-        "that scrolled off. split: fed a byte at a time and seven at a time, the same screen."
+        "that scrolled off. split: fed a byte at a time and seven at a time, the same screen.\n"
+        "unseen: cells holding what VTE's reads cannot show."
     )
     census: Counter = Counter()
     ignored: Counter = Counter()
@@ -1953,8 +2220,7 @@ def widths() -> int:
     def done(name, dump, commits):
         start = int(name)
         chunk = points[start : start + batch]
-        # The last report is the harness's own.
-        replies = re.findall(r"\x1b\[(\d+);(\d+)R", "".join(commits))[:-1]
+        replies = re.findall(r"\x1b\[(\d+);(\d+)R", "".join(commits))
         if len(replies) != len(chunk):
             print(f"widths: batch {name} answered {len(replies)} of {len(chunk)}")
             return
@@ -1983,12 +2249,14 @@ def widths() -> int:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[1] not in ("record", "synth", "vte", "compare", "widths"):
+    if len(argv) < 2 or argv[1] not in ("record", "synth", "vte", "compare", "dialogs", "widths"):
         print(__doc__)
         return 0
     mode = argv[1]
     if mode == "widths":
         return widths()
+    if mode == "dialogs":
+        return dialogs(argv[2] if len(argv) > 2 else None)
     if len(argv) < 3:
         print(f"{mode}: name the recordings directory")
         return 0

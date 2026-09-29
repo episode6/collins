@@ -15,6 +15,12 @@ The login is copied, not shared. A probe that ran long enough for the CLI
 to refresh its token would leave the user's own copy stale, so `make_home`
 refuses when the token is within MIN_TOKEN_MINUTES of expiring and
 `remove_home` says so when the copy changed underneath it.
+
+Only the CLI's own login crosses into the copy. The credentials of the
+user's MCP servers stay behind, their `mcpServers` entries are dropped
+from the copied config, and `spawn_cli` starts the CLI with
+`--strict-mcp-config`: a probe starts none of the user's servers, so it
+cannot refresh (and so rotate) a token the guard above never looked at.
 """
 
 import fcntl
@@ -33,6 +39,11 @@ import time
 MIN_TOKEN_MINUTES = 30
 REAL_HOME = os.path.expanduser("~")
 CREDENTIALS = os.path.join(".claude", ".credentials.json")
+# The one key of the credentials file a probe needs: the CLI's own login.
+LOGIN_KEY = "claudeAiOauth"
+# What a project entry of ~/.claude.json says about MCP servers.
+MCP_PROJECT_KEYS = ("mcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers", "mcpContextUris")
+NO_USER_MCP = "--strict-mcp-config"
 
 # VTE 0.84's answers to what the CLI asks at startup (spec F8).
 VTE_ANSWERS = (
@@ -74,19 +85,30 @@ def make_home(parent: str | None = None, trust: tuple[str, ...] = ()) -> str:
     os.makedirs(os.path.join(home, ".claude"), mode=0o700)
     work = os.path.join(home, "work")
     os.makedirs(work)
-    shutil.copyfile(os.path.join(REAL_HOME, CREDENTIALS), os.path.join(home, CREDENTIALS))
-    os.chmod(os.path.join(home, CREDENTIALS), 0o600)
+    with open(os.path.join(REAL_HOME, CREDENTIALS)) as f:
+        login = {LOGIN_KEY: json.load(f)[LOGIN_KEY]}
+    _write_private(os.path.join(home, CREDENTIALS), login)
     with open(os.path.join(REAL_HOME, ".claude.json")) as f:
         config = json.load(f)
-    projects = config.setdefault("projects", {})
+    config.pop("mcpServers", None)
+    projects = config.get("projects")
+    if not isinstance(projects, dict):
+        projects = config["projects"] = {}
+    for entry in projects.values():
+        if isinstance(entry, dict):
+            for key in MCP_PROJECT_KEYS:
+                entry.pop(key, None)
     for path in (work, *trust):
         entry = projects.setdefault(os.path.realpath(path), {})
         entry["hasTrustDialogAccepted"] = True
-    target = os.path.join(home, ".claude.json")
-    with open(target, "w") as f:
-        json.dump(config, f)
-    os.chmod(target, 0o600)
+    _write_private(os.path.join(home, ".claude.json"), config)
     return home
+
+
+def _write_private(path: str, data: dict) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f)
 
 
 def workdir(home: str) -> str:
@@ -97,17 +119,17 @@ def remove_home(home: str) -> None:
     """Remove an isolated HOME, saying so first if the CLI refreshed the
     login inside it (the user's own copy is then the stale one)."""
     try:
-        with open(os.path.join(home, CREDENTIALS), "rb") as f:
-            copy = f.read()
-        with open(os.path.join(REAL_HOME, CREDENTIALS), "rb") as f:
-            real = f.read()
+        with open(os.path.join(home, CREDENTIALS)) as f:
+            copy = json.load(f).get(LOGIN_KEY)
+        with open(os.path.join(REAL_HOME, CREDENTIALS)) as f:
+            real = json.load(f).get(LOGIN_KEY)
         if copy != real:
             print(
                 "WARNING: the login changed inside the isolated HOME (or outside it) "
                 "during this probe; if `claude` asks to log in again, that is why.",
                 file=sys.stderr,
             )
-    except OSError:
+    except (OSError, ValueError, AttributeError):
         pass
     shutil.rmtree(home, ignore_errors=True)
 
@@ -141,11 +163,15 @@ def set_size(fd: int, rows: int, cols: int) -> None:
 
 
 def spawn_cli(env: dict, cwd: str, rows: int = 40, cols: int = 120, argv=("claude",)):
-    """Fork `claude` on a fresh pty. Returns (pid, master fd)."""
+    """Fork `claude` on a fresh pty, with none of the user's MCP servers.
+    Returns (pid, master fd)."""
+    argv = list(argv)
+    if os.path.basename(argv[0]) == "claude" and NO_USER_MCP not in argv:
+        argv.insert(1, NO_USER_MCP)
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(cwd)
-        os.execvpe(argv[0], list(argv), env)
+        os.execvpe(argv[0], argv, env)
     set_size(fd, rows, cols)
     return pid, fd
 
