@@ -83,6 +83,19 @@ display name is unique per invocation. If a headless compositor isn't available
 it warns and falls back to the current display, so the capture still succeeds,
 just visibly.
 
+**The command gets the headless display, not the headless bus.** The shell
+has a session bus of its own, but the wrapped command still runs with the
+user's `DBUS_SESSION_BUS_ADDRESS`. Anything that reaches "the compositor" over
+D-Bus — `org.gnome.Mutter.RemoteDesktop` (synthesized keys and pointer),
+`org.gnome.Shell.Screenshot`, `org.gnome.Mutter.ScreenCast` — therefore
+reaches the **user's live desktop**: synthesized input is typed into whatever
+they have focused. A script that needs those finds the headless shell by its
+process (`gnome-shell --headless --wayland-display=$WAYLAND_DISPLAY`), reads
+`DBUS_SESSION_BUS_ADDRESS` from its `/proc/<pid>/environ`, connects to that
+address, and refuses to run when it is missing or equal to its own
+(`scripts/spike_split_1_end_to_end.py`'s `headless_bus_address` is the
+pattern).
+
 `HEADLESS_SIZE` sets the virtual monitor (default `1920x1200`). Keep it
 comfortably larger than the window you're capturing — the compositor constrains
 a window to its monitor, so a monitor the same size as the window yields a
