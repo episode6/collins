@@ -683,6 +683,11 @@ def test_gitloads_stands_alone():
         if isinstance(node, ast.Import):
             imported.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            imported.add(node.module or "")
-    assert not {name for name in imported if name.startswith("gi")}
-    assert imported == {"__future__", "os", "re", "subprocess", "collections.abc", "dataclasses", "i18n"}
+            if node.module:
+                imported.add(node.module)
+            else:  # `from . import gitops`: the runner, imported at call time
+                imported.update(alias.name for alias in node.names)
+    assert not {name for name in imported if name == "gi" or name.startswith("gi.")}
+    assert imported == {
+        "__future__", "os", "re", "subprocess", "collections.abc", "dataclasses", "i18n", "gitops"
+    }

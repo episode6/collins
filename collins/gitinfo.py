@@ -8,8 +8,9 @@ its trunk (`default_branch`) or the repository's page on GitHub
 `git` processes spawned — cheap enough for the tab footer's 2s poll, and for
 a context menu that asks on every right-click. Asking whether the tree is
 dirty (`has_changes`, `change_summary`) or which entries are ignored
-(`ignored_names`) can't be answered that way, so those shell out and are only
-ever asked on demand.
+(`ignored_names`) can't be answered that way, so those run git — through
+gitops' runner (`run_git`, `run_git_bytes`), like every other git call — and
+are only ever asked on demand.
 
 The git page (gitpage) reads the same files for its freshness check: where
 the working tree root is (`repo_root`), when the index last moved
@@ -30,7 +31,6 @@ from __future__ import annotations
 import logging
 import re
 import shutil
-import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -278,21 +278,15 @@ def _status_porcelain(cwd: str | Path | None) -> str | None:
     a run longer than _STATUS_TIMEOUT_S."""
     if not cwd or not Path(cwd).is_dir():
         return None
-    git = shutil.which("git")
-    if git is None:
+    if shutil.which("git") is None:
         return None
-    try:
-        result = subprocess.run(
-            [git, "--no-optional-locks", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=_STATUS_TIMEOUT_S,
-            cwd=str(cwd),
-        )
-    except (OSError, subprocess.SubprocessError) as err:
-        log.debug("gitinfo: git status in %s failed: %s", cwd, err)
+    from . import gitops  # at call time: gitops imports this module
+
+    result = gitops.run_git(cwd, ["--no-optional-locks", "status", "--porcelain"], timeout=_STATUS_TIMEOUT_S)
+    if not result.ok:
+        log.debug("gitinfo: git status in %s failed: %s", cwd, gitops.first_line(result.stderr))
         return None
-    return result.stdout if result.returncode == 0 else None
+    return result.stdout
 
 
 def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
@@ -314,24 +308,25 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
     """
     if not directory or not names or not _in_repository(Path(directory)):
         return set()
-    git = shutil.which("git")
-    if git is None:
+    if shutil.which("git") is None:
         return set()
+    from . import gitops  # at call time: gitops imports this module
+
     try:
-        result = subprocess.run(
-            [git, "--no-optional-locks", "check-ignore", "-z", "--stdin"],
-            input="\0".join(names) + "\0",
-            capture_output=True,
-            text=True,
-            timeout=_IGNORE_TIMEOUT_S,
-            cwd=str(directory),
-        )
-    except (OSError, subprocess.SubprocessError, UnicodeError) as err:
+        stdin = ("\0".join(names) + "\0").encode("utf-8")
+    except UnicodeError as err:  # a name that isn't text (surrogate-escaped bytes)
         log.debug("gitinfo: git check-ignore in %s failed: %s", directory, err)
         return set()
+    result = gitops.run_git_bytes(
+        directory,
+        ["--no-optional-locks", "check-ignore", "-z", "--stdin"],
+        stdin=stdin,
+        timeout=_IGNORE_TIMEOUT_S,
+    )
     # 0 = some ignored, 1 = none ignored; anything else (128: not a repo,
-    # bad input) means "don't know", which reads the same as "none".
-    if result.returncode != 0:
+    # bad input) means "don't know", which reads the same as "none" — and
+    # so does a git that couldn't be run at all (a timeout, not on PATH).
+    if not result.ok:
         return set()
     return {name for name in result.stdout.split("\0") if name}
 

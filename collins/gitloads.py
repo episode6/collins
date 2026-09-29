@@ -18,9 +18,10 @@ its `what` argument and the repo-relative file path it hands the view
 (show_diff_load, diff_file_path), and the three git calls behind them —
 commit_subject for a commit's name, commit_message for the whole of it (the
 page's commit card: sha, author, date, subject and body, each bounded),
-resolve_commit for the sha a ref means right now — each one subprocess on
-a worker thread with commit_subject's three answers (a value, None for
-"git says no", "" for "git couldn't be asked").
+resolve_commit for the sha a ref means right now — each one git call on
+a worker thread (commit_message through gitops.run_git), commit_subject
+and resolve_commit with three answers (a value, None for "git says no",
+"" for "git couldn't be asked").
 
 Preferences → Git arrives as the whole settings dict and normalises into
 an Options (from_settings): the layout (one of LAYOUTS), the untracked
@@ -298,14 +299,13 @@ def commit_message(
     body last so a huge one can't hide the others."""
     if not cwd or not safe_ref(ref):
         return None
-    argv = ["git", "log", "-1", f"--format={_COMMIT_FORMAT}", f"{ref}^{{commit}}", "--"]
-    try:
-        result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
+    from . import gitops  # at call time: gitops imports this module
+
+    argv = ["log", "-1", f"--format={_COMMIT_FORMAT}", f"{ref}^{{commit}}", "--"]
+    result = gitops.run_git(cwd, argv, run=run, timeout=timeout)
+    if not result.ok:
         return None
-    if getattr(result, "returncode", 1) != 0:
-        return None
-    parts = (result.stdout or "").split("\0", 4)
+    parts = result.stdout.split("\0", 4)
     if len(parts) != 5:
         return None
     sha, author, authored_at, subject, body = parts

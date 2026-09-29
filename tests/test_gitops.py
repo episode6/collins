@@ -94,6 +94,122 @@ def test_run_git_never_raises():
     )
 
 
+# -- the stragglers: git run elsewhere goes through the runner --------------------
+
+_RUNNERS = {"run_git": gitops.run_git, "run_git_bytes": gitops.run_git_bytes}
+
+
+def _recording_run(answer):
+    """A `run` that records argv and kwargs and answers *answer* — or
+    raises it, when it is an exception."""
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    run.calls = calls
+    return run
+
+
+def _spy(monkeypatch, name: str, run=None) -> list:
+    """Wrap gitops.<name> (run_git / run_git_bytes) so the test sees every
+    call go through it; *run*, when given, replaces subprocess.run in it.
+    A second spy on the same name replaces the first rather than wrapping
+    it."""
+    real = _RUNNERS[name]
+    seen = []
+
+    def spy(*args, **kwargs):
+        seen.append((args, kwargs))
+        if run is not None:
+            kwargs["run"] = run
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(gitops, name, spy)
+    return seen
+
+
+def test_commit_message_goes_through_the_runner(monkeypatch):
+    from collins import gitloads
+
+    seen = _spy(monkeypatch, "run_git")
+    run = _recording_run(_Result(0, f"{SHA_A}\0Ada\x002026-09-07T10:00:00+02:00\0Subject\0Body\n"))
+    message = gitloads.commit_message("/repo", "HEAD", run=run)
+    assert message is not None and message.sha == SHA_A and message.body == "Body"
+    assert len(seen) == 1 and seen[0][1]["run"] is run
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "log", "-1", "--format=%H%x00%an%x00%aI%x00%s%x00%b", "HEAD^{commit}", "--"]
+    assert kwargs["cwd"] == "/repo" and kwargs["text"] and kwargs["capture_output"]
+    assert kwargs["timeout"] == gitloads.GIT_TIMEOUT_S
+    gitloads.commit_message("/repo", "HEAD", run=run, timeout=1.5)
+    assert run.calls[1][1]["timeout"] == 1.5
+    # The failure shape is unchanged: None for git saying no and for a git
+    # that couldn't be run at all.
+    for answer in (
+        _Result(128, "", "fatal: bad revision"),
+        FileNotFoundError("git"),
+        subprocess.TimeoutExpired("git", 1),
+    ):
+        assert gitloads.commit_message("/repo", "HEAD", run=_recording_run(answer)) is None
+
+
+def test_status_porcelain_goes_through_the_runner(tmp_path, monkeypatch):
+    """has_changes and change_summary read one `git status` through
+    run_git, with gitinfo's own 2 s budget."""
+    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: "/usr/bin/git")
+    run = _recording_run(_Result(0, "M  a.txt\n?? b.txt\n"))
+    seen = _spy(monkeypatch, "run_git", run)
+    assert gitinfo.has_changes(tmp_path) is True
+    assert gitinfo.change_summary(tmp_path) == (True, True)
+    assert len(seen) == 2
+    for argv, kwargs in run.calls:
+        assert argv == ["git", "--no-optional-locks", "status", "--porcelain"]
+        assert kwargs["cwd"] == str(tmp_path) and kwargs["text"] and kwargs["capture_output"]
+        assert kwargs["timeout"] == gitinfo._STATUS_TIMEOUT_S
+        assert "env" not in kwargs
+    for answer in (
+        _Result(128, "", "fatal: not a git repository"),
+        FileNotFoundError("git"),
+        subprocess.TimeoutExpired("git", 2.0),
+    ):
+        _spy(monkeypatch, "run_git", _recording_run(answer))
+        assert gitinfo.has_changes(tmp_path) is False
+        assert gitinfo.change_summary(tmp_path) == (False, False)
+
+
+def test_ignored_names_goes_through_the_bytes_runner(tmp_path, monkeypatch):
+    """ignored_names hands check-ignore its NUL-framed names on stdin
+    through run_git_bytes, with gitinfo's own 0.5 s budget; exit 1 (none
+    ignored), a refusal and a git that couldn't be run all read as none."""
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: "/usr/bin/git")
+    run = _recording_run(_Result(0, b"junk\0build\0", b""))
+    seen = _spy(monkeypatch, "run_git_bytes", run)
+    assert gitinfo.ignored_names(tmp_path, ["a.txt", "junk", "build"]) == {"junk", "build"}
+    assert len(seen) == 1
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "--no-optional-locks", "check-ignore", "-z", "--stdin"]
+    assert kwargs["cwd"] == str(tmp_path) and kwargs["capture_output"] and "text" not in kwargs
+    assert kwargs["input"] == b"a.txt\0junk\0build\0"
+    assert kwargs["timeout"] == gitinfo._IGNORE_TIMEOUT_S
+    for answer in (
+        _Result(1, b"", b""),
+        _Result(128, b"", b"fatal: not a git repository"),
+        FileNotFoundError("git"),
+        subprocess.TimeoutExpired("git", 0.5),
+    ):
+        _spy(monkeypatch, "run_git_bytes", _recording_run(answer))
+        assert gitinfo.ignored_names(tmp_path, ["junk"]) == set()
+    # A name that isn't text never reaches git, as before.
+    run = _recording_run(_Result(0, b"", b""))
+    _spy(monkeypatch, "run_git_bytes", run)
+    assert gitinfo.ignored_names(tmp_path, ["bad\udcff"]) == set()
+    assert run.calls == []
+
+
 def test_first_line():
     assert gitops.first_line("error: bad\nhint: more\n") == "error: bad"
     assert gitops.first_line("\n\n  spaced  \nnext") == "spaced"

@@ -919,8 +919,10 @@ right-click: `current_branch`, `default_branch`, `github_url`, `repo_root`,
 `refs_signature` (mtimes of `packed-refs` and every directory under
 `refs/heads` and `refs/remotes`, so a branch written anywhere or a push
 moves it), `git_dir`, `parent_branch`. Anything that needs `git`
-(`has_changes`, `change_summary`, `ignored_names`) shells out and is asked
-on demand only.
+(`has_changes`, `change_summary`, `ignored_names`) runs it through
+`gitops.run_git` / `run_git_bytes` (imported at call time: `gitops`
+imports `gitinfo`) with its own timeouts, and is asked on demand only.
+`gitloads.commit_message` goes through `gitops.run_git` the same way.
 
 ## Footguns
 
