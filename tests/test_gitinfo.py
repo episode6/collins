@@ -1,7 +1,8 @@
 """Tests for gitinfo: current_branch, default_branch and github_url, which are
 pure filesystem parsing and need no git, the git page's readers (repo_root,
 index_mtime, head_sha, resolve_branch, tree_signature — files only, too), and
-has_changes/change_summary/ignored_names, the calls that shell out to it."""
+has_changes/change_summary/ignored_names, the calls that run git (through
+gitops' runner; tests/test_gitops.py pins that routing)."""
 
 import os
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from collins import gitops
 from collins.gitinfo import (
     change_summary,
     current_branch,
@@ -352,6 +354,13 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
+def _runner_uses(monkeypatch, run) -> None:
+    """gitinfo runs git through gitops' runner: hand it *run* in place of
+    subprocess.run for this test."""
+    real = gitops.run_git
+    monkeypatch.setattr(gitops, "run_git", lambda *args, **kwargs: real(*args, **{**kwargs, "run": run}))
+
+
 @pytest.fixture
 def repo(tmp_path):
     """A real repository with one commit in it, and a clean tree."""
@@ -434,7 +443,7 @@ def test_a_git_that_never_answers(repo, monkeypatch):
     def timeout(*_args, **_kwargs):
         raise subprocess.TimeoutExpired("git", 2.0)
 
-    monkeypatch.setattr("collins.gitinfo.subprocess.run", timeout)
+    _runner_uses(monkeypatch, timeout)
     assert has_changes(repo) is False
 
 
@@ -973,5 +982,5 @@ def test_change_summary_when_git_never_answers(repo, monkeypatch):
     def timeout(*_args, **_kwargs):
         raise subprocess.TimeoutExpired("git", 2.0)
 
-    monkeypatch.setattr("collins.gitinfo.subprocess.run", timeout)
+    _runner_uses(monkeypatch, timeout)
     assert change_summary(repo) == (False, False)

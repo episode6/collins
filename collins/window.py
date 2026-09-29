@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-09-29. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from . import (
     dialogs,
     footerapps,
     gitloads,
+    gitops,
     is_debug_app_id,
     keybindings,
     keymap,
@@ -6300,7 +6301,8 @@ class MainWindow(Adw.ApplicationWindow):
         the network, and a checkout of a large tree isn't instant either —
         and hand the outcome back to the main loop: *done* with git's stdout
         on success, an error dialog titled *failed_title* with git's stderr
-        (or stdout, or the exit status, whichever has words) otherwise.
+        (or stdout, or "git failed", whichever has words) otherwise. The run
+        goes through gitops.run_git, like every other git call.
 
         Anything interactive is cut off up front: there is no terminal here
         to answer a username prompt, so GIT_TERMINAL_PROMPT=0 turns one into
@@ -6308,32 +6310,22 @@ class MainWindow(Adw.ApplicationWindow):
         and GIT_EDITOR=true does the same for any editor git finds a reason to
         launch.
         """
-        git = shutil.which("git")
-        if git is None:
+        if shutil.which("git") is None:
             dialogs.error_dialog(self, failed_title, _("git was not found on PATH."))
             return
 
         def work() -> None:
-            try:
-                result = subprocess.run(
-                    [git, *args],
-                    capture_output=True,
-                    text=True,
-                    timeout=_GIT_TIMEOUT_S,
-                    cwd=cwd,
-                    env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
-                )
-            except (OSError, subprocess.SubprocessError) as err:
-                GLib.idle_add(dialogs.error_dialog, self, failed_title, str(err))
-                return
-            if result.returncode == 0:
+            result = gitops.run_git(
+                cwd,
+                args,
+                timeout=_GIT_TIMEOUT_S,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_EDITOR": "true"},
+            )
+            if result.ok:
                 GLib.idle_add(done, result.stdout)
             else:
-                detail = (
-                    result.stderr.strip()
-                    or result.stdout.strip()
-                    or _("git exited with status {code}").format(code=result.returncode)
-                )
+                # A git that couldn't be run carries the reason in stderr.
+                detail = result.stderr.strip() or result.stdout.strip() or _("git failed")
                 GLib.idle_add(dialogs.error_dialog, self, failed_title, detail)
 
         threading.Thread(target=work, daemon=True).start()
