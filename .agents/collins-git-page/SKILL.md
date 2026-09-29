@@ -423,6 +423,23 @@ takes filesystem paths and stays bare); patch reads are binary
 nothing; `--3way` implies `--index`, so a three-way revert also stages, and
 a conflicting one exits 1 having changed the tree.
 
+**Three runners, and nothing else runs git.** `run_git` (text, `env=`
+for the no-editor runs), `run_git_bytes` (binary stdin and capture,
+decoded with replacement, `ok_statuses`) → `GitResult(ok, stdout, stderr,
+unreachable)`, and `run_git_blob` (binary capture, stdout kept raw) →
+`BlobResult(ok, data, stderr, unreachable)` — `file_at`'s read, since
+the decode would change an image or a non-UTF-8 file; a stdout that
+isn't bytes is `b""` and not ok. **`unreachable` is True only where the
+runner couldn't run git at all** (no cwd, `OSError`, a timeout or any
+`SubprocessError`); every other construction leaves it False, so it is
+the one way to tell "git couldn't be asked" from "git said no" —
+`commit_subject` / `resolve_commit` answer `""` for the first and None
+for the second. `gitloads`, `gitinfo`, `file_at` and `window._run_git`
+(the project row's pull and checkout) all go through these; `gitloads`
+and `gitinfo` import `gitops` at call time (`gitops` imports both). A
+new git call goes through one of the three too: they are the seam the
+split's remote transport replaces.
+
 **`gitloads.py` is the `Loaded` vocabulary**: `MODES` / `DEFAULT_MODE`,
 `SHOW_KEY` / `RANGE_KEY`, `safe_ref` (the one rule for a ref that goes on
 an argv or into a title), `is_show` / `show_ref`, the fifth `Loaded`
@@ -435,7 +452,9 @@ integers), `initial_mode`, `encode_state` / `decode_state` /
 git calls behind a commit's name (`commit_subject`, `commit_message` —
 one `git log -1 --format=%H%x00%an%x00%aI%x00%s%x00%b` into a
 `CommitMessage`, every field bounded, the body at
-`COMMIT_BODY_MAX_CHARS` — and `resolve_commit`, `GIT_TIMEOUT_S`),
+`COMMIT_BODY_MAX_CHARS` — and `resolve_commit`, `GIT_TIMEOUT_S`; each
+one `gitops.run_git`, `commit_subject` and `resolve_commit` answering
+the value, None for "git says no" and `""` for `GitResult.unreachable`),
 `Options.from_settings` →
 `Options(layout, untracked, log_page, line_numbers, wrap, word_diff,
 hide_whitespace)` with
@@ -922,7 +941,7 @@ moves it), `git_dir`, `parent_branch`. Anything that needs `git`
 (`has_changes`, `change_summary`, `ignored_names`) runs it through
 `gitops.run_git` / `run_git_bytes` (imported at call time: `gitops`
 imports `gitinfo`) with its own timeouts, and is asked on demand only.
-`gitloads.commit_message` goes through `gitops.run_git` the same way.
+`gitloads`' three git calls go through `gitops.run_git` the same way.
 
 ## Footguns
 

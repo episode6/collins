@@ -25,12 +25,14 @@ working tree's status in the same call — re-reads one file's patch at
 action time (file_patch), fetches a blob for a gap or an image (file_at,
 side_ref), and carries gitpatch's plans out (apply_patch with its
 `--3way` retry, stage_paths, unstage_paths, checkout_paths). Its watch
-compares tree_state_signature. Every runner takes *run*
-(subprocess.run by default) and a timeout — gitloads.commit_subject's shape
-— passes *cwd*, captures both streams as text, catches OSError and
-SubprocessError, and never raises: a git that is missing, slow or
-refuses answers a GitResult that says so, and the caller decides what to
-tell the user. The argv builders are separate from the runners so the
+compares tree_state_signature. Every git call in the app's git page,
+gitinfo and gitloads goes through one of three runners — run_git (text),
+run_git_bytes (binary, decoded) and run_git_blob (binary, raw bytes, for
+file_at) — and every runner takes *run* (subprocess.run by default) and a
+timeout, passes *cwd*, catches OSError and SubprocessError, and never
+raises: a git that is missing, slow or refuses answers a GitResult (a
+BlobResult) that says so — *unreachable* when it couldn't be run at all —
+and the caller decides what to tell the user. The argv builders are separate from the runners so the
 unit tests pin them without git (tests/test_gitops.py), and the runners
 are exercised against a temp repository when git is on PATH.
 
@@ -180,11 +182,28 @@ MAX_CONFLICT_DIFFS = 200
 class GitResult:
     """What one git invocation came back with. *ok* is "exit status 0";
     a git that couldn't be run at all is ok=False with the reason in
-    *stderr*."""
+    *stderr* and *unreachable* True — set only by the runners (run_git,
+    run_git_bytes) for no cwd, no git on PATH, a timeout or any other
+    OSError / SubprocessError, so a caller can tell "git couldn't be asked"
+    from "git said no" (gitloads.commit_subject's "" and None). Every other
+    construction leaves it False: git answered."""
 
     ok: bool
     stdout: str
     stderr: str
+    unreachable: bool = False
+
+
+@dataclass(frozen=True)
+class BlobResult:
+    """What run_git_blob came back with: GitResult's shape with the stdout
+    kept as raw bytes (*data*) — a blob is a binary transfer, never text
+    — and *stderr* decoded. *unreachable* as GitResult's."""
+
+    ok: bool
+    data: bytes
+    stderr: str
+    unreachable: bool = False
 
 
 def first_line(text: str | None) -> str:
@@ -206,17 +225,17 @@ def run_git(
     """`git *argv` in *cwd*, both streams captured as text, as a GitResult.
     *env* replaces the environment when given (the continue runners' one
     without an editor). Never raises: no cwd, no git on PATH, a timeout
-    and any other SubprocessError come back ok=False with the exception's
-    text as stderr."""
+    and any other SubprocessError come back ok=False, unreachable=True,
+    with the exception's text as stderr."""
     if not cwd:
-        return GitResult(False, "", "no working directory")
+        return GitResult(False, "", "no working directory", unreachable=True)
     kwargs = {"env": env} if env is not None else {}
     try:
         result = run(
             ["git", *argv], cwd=str(cwd), capture_output=True, text=True, timeout=timeout, **kwargs
         )
     except (OSError, subprocess.SubprocessError) as err:
-        return GitResult(False, "", str(err) or err.__class__.__name__)
+        return GitResult(False, "", str(err) or err.__class__.__name__, unreachable=True)
     return GitResult(
         getattr(result, "returncode", 1) == 0, result.stdout or "", result.stderr or ""
     )
@@ -239,16 +258,45 @@ def run_git_bytes(
     and a partial patch of it is refused by apply's context check — the
     file-grain mutations take no patch and are unaffected). *ok_statuses*
     says which exit statuses count as ok: `diff --no-index` exits 1 when
-    the two differ, which is the answer wanted. Never raises."""
+    the two differ, which is the answer wanted. Never raises; a git that
+    couldn't be run is unreachable, as run_git's."""
     if not cwd:
-        return GitResult(False, "", "no working directory")
+        return GitResult(False, "", "no working directory", unreachable=True)
     try:
         result = run(["git", *argv], cwd=str(cwd), input=stdin, capture_output=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as err:
-        return GitResult(False, "", str(err) or err.__class__.__name__)
+        return GitResult(False, "", str(err) or err.__class__.__name__, unreachable=True)
     return GitResult(
         getattr(result, "returncode", 1) in tuple(ok_statuses),
         _decode(result.stdout),
+        _decode(result.stderr),
+    )
+
+
+def run_git_blob(
+    cwd: str | Path | None,
+    argv: Sequence[str],
+    run=subprocess.run,
+    timeout: float = GIT_TIMEOUT_S,
+) -> BlobResult:
+    """`git *argv` in *cwd* with stdout kept as raw bytes, as a BlobResult —
+    for a blob (file_at: an image, a CRLF file, non-UTF-8 content), which
+    run_git_bytes' decode would change. *data* is b"" when the run gave no
+    stdout or a stdout that isn't bytes, and such a run is not ok either
+    (an empty blob is b"" *and* ok); *stderr* is decoded. A separate
+    runner and type rather than a bytes field on GitResult: a GitResult is
+    text all through, a blob is a binary transfer. Never raises; a git
+    that couldn't be run is unreachable, as run_git's."""
+    if not cwd:
+        return BlobResult(False, b"", "no working directory", unreachable=True)
+    try:
+        result = run(["git", *argv], cwd=str(cwd), capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as err:
+        return BlobResult(False, b"", str(err) or err.__class__.__name__, unreachable=True)
+    raw = isinstance(result.stdout, bytes)
+    return BlobResult(
+        getattr(result, "returncode", 1) == 0 and raw,
+        result.stdout if raw else b"",
         _decode(result.stderr),
     )
 
@@ -1317,7 +1365,7 @@ def file_at(
     show <ref>:path` for a revision. None when there is no such file there
     (a new file's old side, a deleted file's new side), the blob is over
     MAX_BLOB_BYTES, the ref or path isn't safe, or git couldn't be
-    asked."""
+    asked. The git read goes through run_git_blob, bytes untouched."""
     if not safe_path(path):
         return None
     root = _root(cwd)
@@ -1334,13 +1382,10 @@ def file_at(
             return None
     if ref != INDEX_REF and not gitloads.safe_ref(ref):
         return None
-    try:
-        result = run(["git", *file_at_argv(ref, path)], cwd=root, capture_output=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
+    result = run_git_blob(root, file_at_argv(ref, path), run=run, timeout=timeout)
+    if not result.ok:
         return None
-    if getattr(result, "returncode", 1) != 0 or not isinstance(result.stdout, bytes):
-        return None
-    return result.stdout if len(result.stdout) <= MAX_BLOB_BYTES else None
+    return result.data if len(result.data) <= MAX_BLOB_BYTES else None
 
 
 def merge_base(

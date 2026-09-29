@@ -96,7 +96,12 @@ def test_run_git_never_raises():
 
 # -- the stragglers: git run elsewhere goes through the runner --------------------
 
-_RUNNERS = {"run_git": gitops.run_git, "run_git_bytes": gitops.run_git_bytes}
+_RUNNERS = {
+    "run_git": gitops.run_git,
+    "run_git_bytes": gitops.run_git_bytes,
+    "run_git_blob": gitops.run_git_blob,
+}
+_UNREACHABLE = (FileNotFoundError("git"), subprocess.TimeoutExpired("git", 1))
 
 
 def _recording_run(answer):
@@ -130,6 +135,115 @@ def _spy(monkeypatch, name: str, run=None) -> list:
 
     monkeypatch.setattr(gitops, name, spy)
     return seen
+
+
+def test_runners_flag_a_git_that_could_not_be_run():
+    """unreachable is True only when git couldn't be run at all — no cwd,
+    OSError, a timeout — and False for any answer git gave."""
+    for runner in (gitops.run_git, gitops.run_git_bytes, gitops.run_git_blob):
+        assert runner(None, ["log"], run=_recording_run(_Result(0, b""))).unreachable
+        assert runner("", ["log"], run=_recording_run(_Result(0, b""))).unreachable
+        for answer in _UNREACHABLE:
+            result = runner("/repo", ["log"], run=_recording_run(answer))
+            assert not result.ok and result.unreachable and result.stderr
+        refused = runner("/repo", ["log"], run=_recording_run(_Result(128, b"", b"fatal: no")))
+        assert not refused.ok and not refused.unreachable
+        answered = runner("/repo", ["log"], run=_recording_run(_Result(0, b"x", b"")))
+        assert answered.ok and not answered.unreachable
+    # Every other construction reads as "git answered".
+    assert not gitops.GitResult(False, "", "refused").unreachable
+    assert not gitops.BlobResult(False, b"", "refused").unreachable
+
+
+def test_run_git_blob_keeps_the_bytes():
+    """stdout comes back raw — a CRLF and a non-UTF-8 byte untouched —
+    with stderr decoded; a stdout that isn't bytes is b"" and not ok."""
+    run = _recording_run(_Result(0, b"a\r\nb\xff\x00", b"warn\xff\n"))
+    result = gitops.run_git_blob(Path("/repo"), ["show", "HEAD:x"], run=run, timeout=7.0)
+    assert result == gitops.BlobResult(True, b"a\r\nb\xff\x00", "warn�\n")
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "show", "HEAD:x"]
+    assert kwargs["cwd"] == "/repo" and kwargs["capture_output"] and kwargs["timeout"] == 7.0
+    assert "text" not in kwargs and "input" not in kwargs
+    assert gitops.run_git_blob("/repo", ["show"], run=_recording_run(_Result(0, b""))) == (
+        gitops.BlobResult(True, b"", "")
+    )
+    for stdout in (None, "text"):
+        odd = gitops.run_git_blob("/repo", ["show"], run=_recording_run(_Result(0, stdout)))
+        assert odd == gitops.BlobResult(False, b"", "")
+    refused = gitops.run_git_blob("/repo", ["show"], run=_recording_run(_Result(128, b"", b"fatal: bad")))
+    assert refused == gitops.BlobResult(False, b"", "fatal: bad")
+
+
+def test_commit_subject_goes_through_the_runner(monkeypatch):
+    from collins import gitloads
+
+    seen = _spy(monkeypatch, "run_git")
+    run = _recording_run(_Result(0, "Wire the mode switch\nmore\n"))
+    assert gitloads.commit_subject("/repo", SHA_A, run=run) == "Wire the mode switch"
+    assert len(seen) == 1 and seen[0][1]["run"] is run
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "log", "-1", "--format=%s", f"{SHA_A}^{{commit}}", "--"]
+    assert kwargs["cwd"] == "/repo" and kwargs["text"] and kwargs["capture_output"]
+    assert kwargs["timeout"] == gitloads.GIT_TIMEOUT_S
+    gitloads.commit_subject("/repo", SHA_A, run=run, timeout=1.5)
+    assert run.calls[1][1]["timeout"] == 1.5
+    # The three answers: None for git saying no, "" for a git that couldn't
+    # be asked, and None without a call for no cwd.
+    assert gitloads.commit_subject("/repo", SHA_A, run=_recording_run(_Result(128, "", "fatal: bad"))) is None
+    for answer in _UNREACHABLE:
+        assert gitloads.commit_subject("/repo", SHA_A, run=_recording_run(answer)) == ""
+    silent = _recording_run(_Result(0, "x\n"))
+    assert gitloads.commit_subject(None, SHA_A, run=silent) is None
+    assert gitloads.commit_subject("/repo", "-x", run=silent) is None
+    assert silent.calls == []
+
+
+def test_resolve_commit_goes_through_the_runner(monkeypatch):
+    from collins import gitloads
+
+    seen = _spy(monkeypatch, "run_git")
+    run = _recording_run(_Result(0, f"{SHA_B}\n"))
+    assert gitloads.resolve_commit("/repo", "HEAD~2", run=run) == SHA_B
+    assert len(seen) == 1 and seen[0][1]["run"] is run
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "rev-parse", "--verify", "--quiet", "HEAD~2^{commit}"]
+    assert kwargs["cwd"] == "/repo" and kwargs["text"] and kwargs["capture_output"]
+    assert kwargs["timeout"] == gitloads.GIT_TIMEOUT_S
+    gitloads.resolve_commit("/repo", "HEAD", run=run, timeout=2.5)
+    assert run.calls[1][1]["timeout"] == 2.5
+    assert gitloads.resolve_commit("/repo", "gone", run=_recording_run(_Result(1, "", ""))) is None
+    for answer in _UNREACHABLE:
+        assert gitloads.resolve_commit("/repo", "HEAD", run=_recording_run(answer)) == ""
+    silent = _recording_run(_Result(0, f"{SHA_B}\n"))
+    assert gitloads.resolve_commit(None, "HEAD", run=silent) is None
+    assert gitloads.resolve_commit("", "HEAD", run=silent) is None
+    assert silent.calls == []
+
+
+def test_file_at_goes_through_the_blob_runner(tmp_path, monkeypatch):
+    """file_at's git read is one run_git_blob: the bytes come back as git
+    wrote them, and every None it answered before still stands."""
+    root = str(tmp_path)  # no repository: _root falls back to the cwd itself
+    seen = _spy(monkeypatch, "run_git_blob")
+    run = _recording_run(_Result(0, b"one\r\ntwo\xff\n"))
+    assert gitops.file_at(root, "HEAD", "img.bin", run=run) == b"one\r\ntwo\xff\n"
+    assert len(seen) == 1 and seen[0][1]["run"] is run
+    argv, kwargs = run.calls[0]
+    assert argv == ["git", "show", "HEAD:img.bin"]
+    assert kwargs["cwd"] == root and kwargs["capture_output"] and "text" not in kwargs
+    assert kwargs["timeout"] == gitops.DIFF_TIMEOUT_S
+    assert gitops.file_at(root, gitops.INDEX_REF, "img.bin", run=run) == b"one\r\ntwo\xff\n"
+    assert run.calls[1][0] == ["git", "show", ":img.bin"]
+    gitops.file_at(root, "HEAD", "img.bin", run=run, timeout=3.0)
+    assert run.calls[2][1]["timeout"] == 3.0
+    assert gitops.file_at(root, "HEAD", "n.txt", run=_recording_run(_Result(128, b"", b"fatal: no"))) is None
+    for answer in _UNREACHABLE:
+        assert gitops.file_at(root, "HEAD", "n.txt", run=_recording_run(answer)) is None
+    assert gitops.file_at(root, "HEAD", "n.txt", run=_recording_run(_Result(0, "text"))) is None
+    monkeypatch.setattr(gitops, "MAX_BLOB_BYTES", 4)
+    assert gitops.file_at(root, "HEAD", "big", run=_recording_run(_Result(0, b"12345"))) is None
+    assert gitops.file_at(root, "HEAD", "fits", run=_recording_run(_Result(0, b"1234"))) == b"1234"
 
 
 def test_commit_message_goes_through_the_runner(monkeypatch):

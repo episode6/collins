@@ -18,10 +18,10 @@ its `what` argument and the repo-relative file path it hands the view
 (show_diff_load, diff_file_path), and the three git calls behind them —
 commit_subject for a commit's name, commit_message for the whole of it (the
 page's commit card: sha, author, date, subject and body, each bounded),
-resolve_commit for the sha a ref means right now — each one git call on
-a worker thread (commit_message through gitops.run_git), commit_subject
-and resolve_commit with three answers (a value, None for "git says no",
-"" for "git couldn't be asked").
+resolve_commit for the sha a ref means right now — each one
+gitops.run_git call on a worker thread, commit_subject and resolve_commit
+with three answers (a value, None for "git says no", "" for "git couldn't
+be asked": GitResult.unreachable).
 
 Preferences → Git arrives as the whole settings dict and normalises into
 an Options (from_settings): the layout (one of LAYOUTS), the untracked
@@ -89,7 +89,8 @@ _MAX_REF_LEN = 128
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 _SHORT_SHA_LEN = 7
 # commit_subject's `git log -1`, resolve_commit's `git rev-parse`: one
-# subprocess each, on a worker thread, against a repository that is there.
+# gitops.run_git call each, on a worker thread, against a repository that
+# is there.
 GIT_TIMEOUT_S = 5.0
 
 # Keyvals and modifier bits as integers rather than Gdk constants: this
@@ -240,27 +241,29 @@ def commit_subject(
     cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
 ) -> str | None:
     """The subject line of the commit *ref* names in the repository at *cwd*
-    — `git log -1 --format=%s <ref>^{commit} --`, one subprocess, meant for
-    the page's worker threads (the poll itself never runs git).
+    — `git log -1 --format=%s <ref>^{commit} --`, one gitops.run_git call,
+    meant for the page's worker threads (the poll itself never runs git).
 
     Three answers: the subject (maybe empty) when git resolved the ref; None
     when git answered that it names no commit (the one answer a restored
     {"show": sha} whose commit was rebased away falls back on); "" when git
-    couldn't be asked at all (not on PATH, no cwd, a timeout) — the ref is
-    not disproven, only unnamed. A real commit with an empty subject
-    (`--allow-empty-message`) also answers "", so callers must not read ""
-    as "git was unreachable" — today none does; both mean "no subject to
-    show". An unsafe *ref* is None without a call."""
+    couldn't be asked at all (not on PATH, a timeout: the runner's
+    GitResult.unreachable) — the ref is not disproven, only unnamed. A real
+    commit with an empty subject (`--allow-empty-message`) also answers "",
+    so callers must not read "" as "git was unreachable" — today none does;
+    both mean "no subject to show". No cwd or an unsafe *ref* is None
+    without a call."""
     if not cwd or not safe_ref(ref):
         return None
-    argv = ["git", "log", "-1", "--format=%s", f"{ref}^{{commit}}", "--"]
-    try:
-        result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
+    from . import gitops  # at call time: gitops imports this module
+
+    argv = ["log", "-1", "--format=%s", f"{ref}^{{commit}}", "--"]
+    result = gitops.run_git(cwd, argv, run=run, timeout=timeout)
+    if result.unreachable:
         return ""
-    if getattr(result, "returncode", 1) != 0:
+    if not result.ok:
         return None
-    lines = (result.stdout or "").strip().splitlines()
+    lines = result.stdout.strip().splitlines()
     return lines[0].strip() if lines else ""
 
 
@@ -373,25 +376,27 @@ def resolve_commit(
     cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
 ) -> str | None:
     """The full sha of the commit *ref* names in the repository at *cwd* —
-    `git rev-parse --verify --quiet <ref>^{commit}`, one subprocess, for
-    show_diff's worker thread: a load is asked for by sha, so a branch
-    name or `HEAD~2` handed to the tool lands as the commit it meant at
-    the time, and persists as one.
+    `git rev-parse --verify --quiet <ref>^{commit}`, one gitops.run_git
+    call, for show_diff's worker thread: a load is asked for by sha, so a
+    branch name or `HEAD~2` handed to the tool lands as the commit it
+    meant at the time, and persists as one.
 
     The same three answers as commit_subject: the sha when git resolved
-    the ref; None when git says it names no commit (or *ref* isn't safe to
-    ask about); "" when git couldn't be asked at all (not on PATH, no cwd,
-    a timeout)."""
+    the ref; None when git says it names no commit (or there is no cwd, or
+    *ref* isn't safe to ask about — both answered without a call); "" when
+    git couldn't be asked at all (not on PATH, a timeout: the runner's
+    GitResult.unreachable)."""
     if not cwd or not safe_ref(ref):
         return None
-    argv = ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]
-    try:
-        result = run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
+    from . import gitops  # at call time: gitops imports this module
+
+    argv = ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]
+    result = gitops.run_git(cwd, argv, run=run, timeout=timeout)
+    if result.unreachable:
         return ""
-    if getattr(result, "returncode", 1) != 0:
+    if not result.ok:
         return None
-    sha = (result.stdout or "").strip()
+    sha = result.stdout.strip()
     return sha if safe_ref(sha) else None
 
 
