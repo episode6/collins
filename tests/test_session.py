@@ -28,6 +28,11 @@ from collins.service.session import (
     Session,
 )
 
+# GLib's priorities (session.py's GLib, so the test needs no gi import of
+# its own): a timeout's, and an idle's when none is given.
+PRIORITY_DEFAULT = session_mod.GLib.PRIORITY_DEFAULT
+PRIORITY_DEFAULT_IDLE = session_mod.GLib.PRIORITY_DEFAULT_IDLE
+
 PROMPT = "❯\xa0"
 COLS = 80
 SHELL_PID = 4242
@@ -36,23 +41,37 @@ AGENT_PGRP = 5151
 
 class FakeScheduler:
     """A main loop with a hand-wound clock: `advance(ms)` runs everything
-    due by then, in time order (ties in the order they were added), with
-    GLib's repeat-while-True contract. Background work runs inline."""
+    due by then, in time order, then by GLib priority (a timeout and a
+    PRIORITY_DEFAULT idle ahead of a default-idle one), then in the order
+    they were added — with GLib's repeat-while-True contract. Every idle is
+    recorded with its priority (`idles`), so a landing that must not be
+    starved can be checked for PRIORITY_DEFAULT. Background work runs
+    inline."""
 
     def __init__(self) -> None:
         self.now = 0
         self.wall = 1_000_000.0  # what time() answers: seconds, set by hand
         self._seq = 0
-        self._queue: list[tuple[int, int, int, object, tuple]] = []
+        # (due, priority, seq, interval, fn, args)
+        self._queue: list[tuple[int, int, int, int, object, tuple]] = []
+        self.idles: list[tuple[str, int]] = []  # (callback name, priority)
         self.monitors: dict[str, object] = {}
 
-    def timeout_add(self, ms, fn, *args):
+    def _add(self, ms, priority, fn, args):
         self._seq += 1
-        self._queue.append((self.now + ms, self._seq, ms, fn, args))
+        self._queue.append((self.now + ms, priority, self._seq, ms, fn, args))
         return self._seq
 
-    def idle_add(self, fn, *args, priority=None):
-        return self.timeout_add(0, fn, *args)
+    def timeout_add(self, ms, fn, *args):
+        return self._add(ms, PRIORITY_DEFAULT, fn, args)
+
+    def idle_add(self, fn, *args, priority=PRIORITY_DEFAULT_IDLE):
+        self.idles.append((getattr(fn, "__name__", repr(fn)), priority))
+        return self._add(0, priority, fn, args)
+
+    def idle_priority(self, name: str) -> int:
+        """The priority the last idle named *name* was added at."""
+        return next(p for n, p in reversed(self.idles) if n == name)
 
     def background(self, fn, *args):
         fn(*args)
@@ -82,13 +101,12 @@ class FakeScheduler:
             due = [item for item in self._queue if item[0] <= until]
             if not due:
                 break
-            item = min(due, key=lambda it: (it[0], it[1]))
+            item = min(due, key=lambda it: (it[0], it[1], it[2]))
             self._queue.remove(item)
-            when, _seq, interval, fn, args = item
+            when, priority, _seq, interval, fn, args = item
             self.now = when
             if fn(*args):
-                self._seq += 1
-                self._queue.append((self.now + interval, self._seq, interval, fn, args))
+                self._add(interval, priority, fn, args)
         self.now = until
 
     def run_all(self, limit_ms: int = 60_000) -> None:
@@ -1340,3 +1358,72 @@ def test_a_nudge_skips_a_closed_tab_and_an_exited_cli(rig):
     term.foreground = AGENT_PGRP
     session.nudge_exit()
     assert term.writes == ["\x03\x03"]
+
+
+# -- landing priorities ------------------------------------------------------------------
+
+
+def test_the_fake_runs_default_priority_idles_first():
+    clock = FakeScheduler()
+    order = []
+    clock.idle_add(lambda: order.append("idle"))
+    clock.idle_add(lambda: order.append("default"), priority=PRIORITY_DEFAULT)
+    clock.advance(0)
+    assert order == ["default", "idle"]
+
+
+def test_gate_resetting_landings_are_never_starvable(launch, tmp_path, monkeypatch):
+    """CLAUDE.md's main-loop rule: a landing that resets a gate or advances
+    a pipeline runs at PRIORITY_DEFAULT (CI's Xvfb starves default-idle
+    forever). These are the ones the session marks so."""
+    from collins.providers import SessionOptions
+
+    box_host = FakeSandboxHost(tmp_path)
+    session, term, host, clock = launch(
+        options=SessionOptions(sandbox=True), sandbox_host=lambda: box_host, session_id="sid"
+    )
+
+    # The transcript read's landing, which resets the update gate.
+    session.request_update()
+    assert clock.idle_priority("_apply_update") == PRIORITY_DEFAULT
+
+    # A sandboxed fallback without its worktree, once the box is unmounted.
+    session.reserved_worktree = str(tmp_path / "wt")
+    session.relaunch_without_worktree()
+    assert clock.idle_priority("_type_without_worktree") == PRIORITY_DEFAULT
+
+    # The restart: the relaunch once the box is unmounted, and the resume
+    # once a reaped worktree has been put back.
+    session.spawn(str(tmp_path), "sid")
+    _spawned(session, term)
+    session.restart_sandboxed()
+    term.foreground = SHELL_PID
+    clock.advance(session_mod.RESTART_POLL_MS)
+    assert clock.idle_priority("_relaunch_sandboxed") == PRIORITY_DEFAULT
+    session.reserved_worktree = str(tmp_path / "wt")
+    monkeypatch.setattr(
+        session_mod, "recreatable_worktree",
+        lambda path, wt: {"worktreePath": session.reserved_worktree},
+    )
+    monkeypatch.setattr(session_mod, "recreate_worktree", lambda state: True)
+    session.restart_ticks = 1
+    session._relaunch_sandboxed()
+    assert clock.idle_priority("_type_restart") == PRIORITY_DEFAULT
+
+    # The shell's exit: the box released and forgotten.
+    session.shell_exited(0)
+    assert clock.idle_priority("gone") == PRIORITY_DEFAULT
+
+
+def test_the_recreated_worktree_spawn_lands_at_default_idle(launch, tmp_path, monkeypatch):
+    """The one pipeline landing still at default-idle, as in the base
+    (PR-1.7 rewrites the path at PRIORITY_DEFAULT): pinned so the change is
+    a deliberate one."""
+    session, _term, _host, clock = launch(session_id="sid")
+    monkeypatch.setattr(
+        session_mod, "recreatable_worktree",
+        lambda path, cwd: {"worktreePath": str(tmp_path / "wt")},
+    )
+    monkeypatch.setattr(session_mod, "recreate_worktree", lambda state: True)
+    session.spawn(str(tmp_path), "sid")
+    assert clock.idle_priority("_finish_spawn") == PRIORITY_DEFAULT_IDLE
