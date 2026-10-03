@@ -79,6 +79,8 @@ CHECK_SECONDS = {
     "check_worktree_fallback.py": 7.2,
     "check_pr_body_blocks.py": 7.0,
     "check_git_prefs.py": 6.5,
+    # Not yet timed on CI: 4.0 s on a dev box under the headless shell.
+    "check_termstream_answers.py": 6.0,
     "check_composer_paste.py": 6.0,
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,
