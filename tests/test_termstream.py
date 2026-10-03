@@ -1,7 +1,10 @@
 """termstream: the pty stream filter, query responder and mode tracker
 (split-service spec §3.3, PR-1.1)."""
 
+import os
 import random
+import subprocess
+import sys
 import time
 
 import pytest
@@ -559,3 +562,18 @@ def test_tokens_kinds():
     ]
     assert tokens[2].numbers() == [1, 2]
     assert Csi(CSI + b"38:2::1m", b"", b"38:2::1", b"", ord("m")).numbers() is None
+
+
+def test_the_service_loads_no_gi():
+    # conftest blocks only the widget libraries; a stray GLib import in the
+    # service would pass the suite, so look in a fresh interpreter.
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    code = (
+        "import sys; import collins.service.termstream; "
+        "print(sorted(m for m in sys.modules if m == 'gi' or m.startswith('gi.')))"
+    )
+    env = dict(os.environ, PYTHONPATH=root)
+    out = subprocess.run(
+        [sys.executable, "-c", code], cwd=root, env=env, capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "[]"

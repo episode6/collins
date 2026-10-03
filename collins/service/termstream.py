@@ -124,43 +124,29 @@ over; §3.18's "8 MB/s tokenizer" holds for the filter on the worst shape.
 
 Choices the spec left to this module
 ------------------------------------
-- **Progress and Bell are forwarded.** §3.1's "one stream": clients get
-  everything but the answered queries, so a client's VTE still rings and
-  still shows progress as a tab does today; the events are in addition, for
-  the service's own detection (§3.6).
+- **Progress and Bell are forwarded** (§3.1's one stream); the events are
+  in addition, for the service's own detection (§3.6).
 - **Known-silent queries are stripped** (``CSI ? u``, ``CSI 16 t``,
-  ``CSI ? 4 m``, ENQ, the APC graphics query): VTE answers them with
-  nothing, so a client would too, and forwarding them would only make a
-  non-VTE client answer something the service did not say.
-- **8-bit C1.** A raw byte 0x80 to 0x9F is text (in UTF-8 it is a
-  continuation byte or invalid, and VTE 0.84 answers nothing to a raw
-  ``0x9B 6 n``, measured). A C1 control *encoded* in UTF-8 (``C2 9B``) is
-  also text here, although VTE does execute it (measured: ``C2 9B 6 n`` is
-  answered). The CLI never sends one; such a query reaches the client and is
-  answered late, the unknown-query path.
-- **The palette a program sets is not answered by the service.** After an
-  OSC 4 / 10 / 11 / 12 that sets a colour, queries for that colour pass
-  through to the client (whose VTE applied the set) until OSC 104 / 110 /
-  111 / 112 or RIS resets it. The service answers only colours it knows.
-- **The OSC 12 answer** is the cursor colour when the client set one, else
-  the foreground (VTE does the same, measured).
-- **The scheme** (``CSI ? 996 n``) is `TerminalState.dark` when the client
-  said, else whether the background's luminance is below one half (VTE
-  answered light for #fafafa and dark for #1e1e1e and black).
-- **CPR at a pending wrap** reports the last column (VTE: ``1;120R`` after a
-  character lands in column 120), so the column is clamped to the grid; in
-  origin mode the row is counted from the scroll region's top, as VTE does.
-- **The preamble's alternate screen is optional** (``screen=False``):
-  re-asserting ``?1049h`` on a terminal already on the alternate screen
-  clears it, so a redraw that switches screens itself leaves it out.
-  ``?3`` (DECCOLM, a resize) and ``?1048`` (save cursor, an action) are
-  tracked but never re-asserted; ``?25`` is re-asserted last.
-- **Bounds** (rule 5): at most 256 distinct modes VTE does not know are
-  tracked, and mode numbers above 65535 are ignored (VTE clamps them); the
-  kitty stack holds 32 entries and evicts the oldest, as kitty does; a CSI
-  or ESC sequence longer than 4096 bytes is malformed and becomes `Bad`.
-- **Tokens include the stripped queries**: a screen model ignores them, and
-  the token list stays the whole stream.
+  ``CSI ? 4 m``, ENQ, the APC graphics query), since VTE answers nothing.
+- **8-bit C1 is text**: a raw 0x80 to 0x9F byte, and a C1 control encoded
+  in UTF-8 too (VTE executes the latter; the CLI never sends one).
+- **A colour the program set** (OSC 4 / 10 / 11 / 12) is left to the
+  client: its queries pass through until OSC 104 / 110 / 111 / 112 or RIS.
+- **OSC 12** answers the cursor colour, else the foreground, as VTE does.
+- **The scheme** is `TerminalState.dark`, else whether the background's
+  luminance is below one half.
+- **CPR** clamps the column to the grid (a pending wrap reports the last
+  column) and counts rows from the scroll region's top in origin mode.
+- **The preamble's screen switch is optional** (``screen=False``), since
+  ``?1049h`` on the alternate screen clears it; ``?3`` and ``?1048`` are
+  never re-asserted; ``?25`` goes last.
+- **Bounds** (rule 5): 256 distinct modes VTE does not know; the kitty
+  stack holds 32 and evicts the oldest; a CSI or ESC sequence past 4096
+  bytes is `Bad`.
+- **Passed through, not answered:** DECRQM with an empty parameter or a
+  mode above 65535 (VTE would answer, clamping the mode; the client's VTE
+  does), and a mode above 65535 is not tracked.
+- **Tokens include the stripped queries**; a screen model ignores them.
 """
 
 from __future__ import annotations
