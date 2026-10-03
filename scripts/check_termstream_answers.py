@@ -107,18 +107,35 @@ def check(name, ok, detail=""):
 
 
 window = Gtk.Window()
+window.set_default_size(1600, 1000)
 window.present()
 commits: list[bytes] = []
 context = GLib.MainContext.default()
 
 
 def fresh_terminal():
-    """A new childless VTE at 120x40 in the window, its commits collected."""
+    """A new childless VTE at 120x40 in the window, its commits collected.
+
+    VTE resizes its grid to its allocation, and a resize resets the scroll
+    region: under CI's Xvfb a terminal swapped into the window came up at
+    24x11, so an origin-mode cursor report lost its region. Aligned to the
+    start of a larger window it keeps the grid it was given (F2), and the
+    grid is waited for before anything is fed."""
     terminal = Vte.Terminal()
     terminal.set_size(120, 40)
+    terminal.set_halign(Gtk.Align.START)
+    terminal.set_valign(Gtk.Align.START)
     terminal.connect("commit", lambda _t, text, _size: commits.append(text.encode()))
     window.set_child(terminal)
-    pump_until(lambda: terminal.get_mapped() and terminal.get_char_width() > 0)
+    pump_until(
+        lambda: terminal.get_mapped()
+        and terminal.get_char_width() > 0
+        and (terminal.get_column_count(), terminal.get_row_count()) == (120, 40)
+    )
+    pump_until(lambda: False, timeout=0.1)
+    grid = (terminal.get_column_count(), terminal.get_row_count())
+    if grid != (120, 40):
+        check("a fresh terminal holds 120x40", False, f"grid {grid}")
     return terminal
 
 
