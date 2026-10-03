@@ -102,6 +102,14 @@ via `--mcp-config`) relays MCP over a Unix socket to `mcpserver.py`
 schemas, framing and runtime paths; the handlers live in `app.py`. Session
 identity is the shim's kernel-verified pid walked up `/proc` to a tab.
 
+**The service/client API (in progress).** The split into a headless
+`collins-service` and a GTK client (`~/specs/collins/split-service-and-client.md`)
+starts with `collins/api/protocol.py`: GTK-free and stdlib-only, the message
+table of the API (types, direction, fields and bounds), `validate` /
+`validate_response`, JSON framing, the 16-byte binary header and the
+`PROTOCOL` / `MIN_PROTOCOL` window, modelled on `mcptools`. Nothing uses it
+yet.
+
 **Everything Claude-shaped runs on the CLI's own login.** Titles
 (`titles.py`), project icons (`icongen.py`) and login repair
 (`tokenrefresh.py`) are headless `claude -p` runs. The usage panel
@@ -230,6 +238,7 @@ spec's `%changelog`.
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
+| Service/client API: the message table, validation, framing, binary header, protocol version | `api/protocol` | `collins-session-mcp-tools` (for now) |
 | Pull requests: status, hub, detail page, body markdown, actions, menus, gh setup | `prstatus` `prstore` `prdetail` `practions` `prmenu` `prview` `mdblocks` `mdwidgets` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
 | The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info, the panels' model and git runners | `gitpage` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitmodel` `gitops` `commitcard` `gitoperation` `keyedslots` `imagediff` | `collins-git-page` |
 | Editor panel: file tree, quick open, pop-out, narrow mode | `editor` `editorfiles` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
