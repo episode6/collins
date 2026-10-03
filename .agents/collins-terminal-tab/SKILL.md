@@ -24,6 +24,68 @@ a shell), `linkpatterns.py` / `transcriptlinks.py` (what counts as a link),
 mode, attachments), `vtehtml.py` (reading dim text back out of VTE),
 `proctree.py` (`/proc` walks), `taborder.py` (tabs follow the sidebar order).
 
+## `Session` and its ports (where the logic lives now)
+
+Since PR-1.6 of the split (`~/specs/collins/split-service-and-client.md`
+§3.5) the tab is a widget around a **`Session`**
+(`collins/service/session.py`, GTK-free: GLib/Gio only), one per tab as
+`tab.session`. Read the rest of this skill with that in mind — the
+mechanisms are unchanged, but most of the methods it names are the
+session's now:
+
+| Lives in `Session` | Stays in `TerminalTab` / `MainWindow` |
+| --- | --- |
+| identity: `session_id`, `fork`, `provider`, `options`, `command_override`, `cwd` | widgets, overlays, dialogs, the footer, the dock, the editor |
+| launch: `spawn`, `_finish_spawn`, `_launch_command`, `agent_environment` (was `_agent_tab_environment`), the sandbox plan (`_sandbox_options`, `_reserve_worktree`, `_register/_unregister_sandbox_box`, `_release_sandbox_plan`, `shell_exited`), `_check_worktree_launch` / `relaunch_without_worktree`, `restart_sandboxed` and its poll, the new-chat prompt poll | `spawn_async` on the tab's own VTE (`_TabHost.spawn_shell`), `_on_spawned` handing the pid to the pty port |
+| reads: `takes_prompt`, `entered_prompt`, `prompt_block`, `unstarted_thread` (minus the new-chat screen), `visible_screen_text`, `worktree_exit_prompt_keystrokes`, `screen_first_column` | `_mention_leading_space` / `_row_text` (Add to chat) |
+| writes: `inject_prompt(_unfocused)`, `switch_model/effort`, the open-cut (`begin_cut` → settle → apply → verify), `send_composed`, `restore_draft` (paste-back), `foreign_paste_in_box` | the composer widget, its open/close/dock, the stash (`_stash_draft`) |
+| `/proc`: `candidate_pids`, `agent_is_running`, `agent_pid`, `has_running_command`, `current_agent_cwd`, `has_background_descendant`, `owns_pid_ancestors` | — |
+| transcript: the `TranscriptModel`, its monitor/poll/debounce, `request_update` and its landing, the PRs it tracks (`tracked_prs`, `restored_prs`, `attached_prs`), the resolver (`start_resolver`, `arm_resolver`), `current_model/effort/permission_mode`, `finish_witness` | chips, labels, attachments, the editor's agent files (`_on_transcript_landed`, `_on_transcript_reset`) |
+| activity: `echo_gate`, `spinner`, `progress`, `finish_ledger`, `redraw_counts` | the `ActivityTracker`, ids, unread — `MainWindow` reads the watches through `_session_of(page)` (its per-page watch dicts are gone) |
+| the cwd poll (`start_cwd_poll`, mapped-only) and `settle_cwd` (the follow debounce) | what following means (`_maybe_follow_editor`, the shells' offer) |
+| the close's keystrokes and polls: `begin_close`, the nudges, the worktree "keep", the shell's exit, the force budgets (`CLOSE_POLL_MS`, `EXIT_*`, `BG_*`, `SHELL_EXIT_TICKS`), `end_close`, `nudge_exit` | every decision about a close (`_graceful_close`, the asks, `_close_confirmed` passed in as the force) |
+
+Constants moved with their code and lost their underscore
+(`PROMPT_SUBMIT_MS`, `CUT_*`, `RESTART_*`, `WORKTREE_LAUNCH_*`,
+`NEW_CHAT_*`, `CWD_POLL_MS`, `EDITOR_FOLLOW_TICKS`, `MAX_PR_CHIPS`, ...);
+`terminal._bracketed_paste` and `terminal._agent_tab_environment` stay as
+aliases.
+
+**The ports** (`collins/service/ports.py`, `typing.Protocol`s):
+`PtyPort` — `write`, `resize`, `child_pid`, `foreground_pgrp`;
+`ScreenPort` — `rows`, `cursor`, `columns`, `tail_is_faint`,
+`first_column`, `capture_contents`, plus three a moved reader needed
+(`row_count` for the echo gate's grid, `row_text` for `takes_prompt`'s one
+line read on every key press, `visible_text` for the worktree matchers that
+read soft-wrapped lines whole). Row indices are relative to the screen's
+cursor-anchored first row. Today they are `terminal.VtePtyPort` and
+`terminal.VteScreenPort`, adapters over the tab's own `Vte.Terminal` making
+exactly the reads the tab always made; later swaps put `PtyServer` and
+`termscreen` behind the same ports.
+
+**How the tab talks to it.** Down: every old name on the tab is a forwarder
+(`tab.takes_prompt()`, `tab.session_id` — settable —, `tab._options`,
+`tab._child_pid`, `tab._initial_command`, `tab.finish_ledger`, ...), so the
+window, the app and the e2e checks didn't change. Up: the session reports
+through a `SessionHost` listener (`alive`, `mapped`, `paint`,
+`focus_terminal`, `spawn_shell`, `session_resolved`, `transcript_landed`,
+`process_exited`, ...) which `terminal._TabHost` implements, mostly by
+emitting the tab's existing signals. A composer's open-cut reaches the
+composer through a `CutSink` (`terminal._ComposerCut`: `alive`, `seed`,
+`refuse`).
+
+**Testing a state machine.** `tests/test_session.py` builds a `Session`
+over fakes: a `FakeTerminal` that is both ports and models just enough of
+the CLI's input box (`❯`+NBSP, typed text, DEL, bracketed pastes and their
+fold into `[Pasted text #N]`, Enter, echo lag), a `FakeHost` recorder, and
+a `FakeScheduler` whose clock `advance(ms)` winds by hand (GLib's
+repeat-while-True contract, ties in insertion order, background work run
+inline, a `monitor_file` the test can fire). `/proc` is faked by
+monkeypatching `session.proctree.agent_descendant_cwd` (agent running or
+not) and `os.getpgid`. New launch, cut, switch, close or resolver behaviour
+gets its test there — fast, no display — and its e2e check only when
+something about VTE or a real CLI is the point.
+
 ## Spawn, resume, attach
 
 A **sandboxed** launch (`SessionOptions.sandbox`) types
@@ -63,7 +125,7 @@ tab's short message to the window's toast overlay. See
 A tab spawns the user's `$SHELL` (via `Vte.Terminal.spawn_async`) in the
 session's resume cwd — the **last** cwd its transcript recorded, mapped back
 through worktree recovery — with the environment from
-`_agent_tab_environment()` (the app's env plus `ConEmuANSI=ON` and
+`agent_environment()` (`service/session.py`; the app's env plus `ConEmuANSI=ON` and
 `TERM_PROGRAM=kitty`, which are the two spoofs that make the CLI emit
 ST-terminated OSC 9;4 progress that VTE parses; they fail soft). Then it
 types the provider's command: `claude --resume <id>` (or `--fork-session`,
@@ -118,7 +180,7 @@ Everything here is probed CLI behaviour (2.1.2xx), encoded in
 - Clearing the box: Down × rows-below, Ctrl+E, one backspace per character,
   in one write (`clear_prompt_keys`) — never Esc Esc, which interrupts a turn.
 - `inject_prompt(text)` types the text and sends the `\r` in a **second
-  write a beat later** (`_PROMPT_SUBMIT_MS`): a Return inside a chunk the CLI
+  write a beat later** (`PROMPT_SUBMIT_MS`): a Return inside a chunk the CLI
   reads as a paste is a newline, not a submit. `inject_prompt_unfocused`
   wraps multi-line text in a bracketed paste (`_bracketed_paste`, stripping
   `\r` and any paste-end marker). A paste over 800 chars or more than two line
@@ -158,13 +220,15 @@ closes without asking. Any new discard-on-close state must be gated at all
 entry points: `_close_tab_direct`, `_ask_editor_then_tab_close`,
 `_begin_quit_flow`.
 
-`_graceful_close` feeds the provider's exit (`\x03\x03`) or `/bg\r`, hands the
-screen to a neighbouring tab, and polls: `_poll_graceful` re-nudges at
-`_EXIT_NUDGE_TICKS`/`_BG_NUDGE_TICKS` (a mid-turn agent spends the first
+`_graceful_close` decides on the provider's exit (`\x03\x03`) or `/bg\r`,
+hands the screen to a neighbouring tab, and starts
+`tab.session.begin_close`, which feeds it and polls (`_poll_close`, until
+the window's final close calls `end_close`): it re-nudges at
+`EXIT_NUDGE_TICKS`/`BG_NUDGE_TICKS` (a mid-turn agent spends the first
 Ctrl+C Ctrl+C interrupting itself), answers the CLI's "keep or remove this
 worktree?" dialog with keep (`worktree_exit_prompt_keystrokes`), and
-force-closes at the tick budget. Once the CLI is gone `_poll_shell_exit`
-feeds `shellinput.shell_command("exit\r")` — the `" \x15"` line reset first,
+force-closes at the tick budget (the window's `_close_confirmed`, handed
+in). Once the CLI is gone `_poll_shell_exit` feeds `shellinput.shell_command("exit\r")` — the `" \x15"` line reset first,
 because a shell inherits input the CLI never read (VTE mouse reports), and a
 bare kill-line at column 0 rings the bell — and force-closes if the shell
 ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close

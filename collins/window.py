@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-29. Full change history: git log for this file.
+# fork. Last modified: 2026-10-02. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -67,9 +67,6 @@ from .activity import (
     PROGRESS_IDLE_S,
     ActivityTracker,
     BackgroundBusyWatch,
-    EchoGate,
-    ProgressWatch,
-    SpinnerWatch,
 )
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
@@ -107,6 +104,7 @@ from .providers import SessionOptions, available_providers, default_provider, ge
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
 from .replayview import ReplayTab
+from .service import session as live_session
 from .sessions import (
     Session,
     export_markdown,
@@ -120,7 +118,6 @@ from .sessions import (
     trash_worktree,
     worktree_project_root,
 )
-from .shellinput import shell_command
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
 from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects
@@ -179,22 +176,10 @@ _BG_QUEUE_WAIT_MS = 5000
 _BG_QUEUE_POLL_MS = 500
 _BG_QUEUE_ITEM_TIMEOUT_S = 20
 
-# Graceful-close poll: how often to check whether the CLI has released the
-# terminal, when to re-ask it to leave (see _poll_graceful), and how many
-# ticks to allow before the force-close safety net. A plain exit gets a short
-# budget — the user already said to end the session, so a CLI that hasn't
-# gone by then gets terminated rather than holding the tab (or a quit)
-# hostage. A /bg handoff keeps a much longer one: forking the background
-# agent takes real time, and force-closing mid-handoff risks stranding it.
-_CLOSE_POLL_MS = 300
-_EXIT_NUDGE_TICKS = (5,)  # ~1.5s
-_EXIT_FORCE_TICKS = 10  # ~3s
-_BG_NUDGE_TICKS = (8, 24)  # ~2.4s / ~7.2s
-_BG_FORCE_TICKS = 40  # ~12s
-# ...and the budget the shell gets to act on the exit that follows the CLI's
-# own, counted from when it was fed. A shell has nothing to wind down, so this
-# is short: it is a safety net for an exit that never ran, not a wait.
-_SHELL_EXIT_TICKS = 6  # ~1.8s
+# The graceful close's poll — how often it checks whether the CLI has
+# released the terminal, when it re-asks, and the force-close budgets of a
+# plain exit and a /bg handoff — is the session's (Session.begin_close and
+# the CLOSE_* / EXIT_* / BG_* / SHELL_EXIT_TICKS beside it).
 
 # Bare modifiers and locks: presses VTE sends nothing to the child for. They
 # don't count as "typing into the terminal" when a keystroke clears the
@@ -243,13 +228,10 @@ class _TabWiring(NamedTuple):
 class _CarriedPage(NamedTuple):
     """A page's per-window bookkeeping, packed up for the window it is moving
     to (see MainWindow.hand_over_page). Everything here is keyed by page in the
-    window that holds it, so it has to travel by hand — the watches most of
-    all: recreating them mid-turn would lose the busy state they hold and drop
-    the session's pole until its next burst of output."""
+    window that holds it, so it has to travel by hand. (The activity watches
+    don't: they are the tab's session's own — Session.echo_gate, .spinner,
+    .progress — and ride along inside the tab, busy state and all.)"""
 
-    echo_gate: EchoGate | None
-    spinner: SpinnerWatch | None
-    progress: ProgressWatch | None
     fresh_spawn: bool
     baseline: set[str] | None
     base_title: str | None
@@ -344,9 +326,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
-        self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
+        # Graceful closes in progress (their polls are the tabs' sessions':
+        # Session.begin_close), and which of them are /bg handoffs.
+        self._closing_pages: set[Adw.TabPage] = set()
         self._bg_closing: set[Adw.TabPage] = set()  # closing page is a /bg handoff, not an exit
-        self._shell_exiting: dict[Adw.TabPage, int] = {}  # shell told to exit -> ticks since
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
@@ -483,16 +466,12 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_busy = BackgroundBusyWatch()
         self._bg_busy_poll: int | None = None
         self._bg_busy_fetching = False  # one CLI call in flight at a time
-        # Per tab, the filter that keeps a terminal's answers to the app (an
-        # echoed keystroke, a redraw after a tab switch or a resize) from
-        # reading as the agent working.
-        self._echo_gates: dict[Adw.TabPage, EchoGate] = {}
-        # Each tab's spinner-motion detector, sampled alongside the gate in
-        # _on_terminal_output (see SpinnerWatch).
-        self._spinner_watches: dict[Adw.TabPage, SpinnerWatch] = {}
-        # Each tab's progress-termprop interpreter — the agent's own busy
-        # signal, fed by _on_progress_termprop (see ProgressWatch).
-        self._progress_watches: dict[Adw.TabPage, ProgressWatch] = {}
+        # Each tab's activity watches are its session's (_session_of): the
+        # echo gate that keeps a terminal's answers to the app (an echoed
+        # keystroke, a redraw after a tab switch or a resize) from reading as
+        # the agent working, the spinner-motion detector sampled alongside it
+        # in _on_terminal_output, and the progress-termprop interpreter fed
+        # by _on_progress_termprop — see activity.py.
         # Tabs that spawned their CLI fresh instead of attaching to an
         # existing session: no agent can be mid-turn in one before its first
         # submit, so even the ungated pole starters hold through the startup
@@ -2573,11 +2552,6 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.append(tab)
         page.set_title(title)
         page.set_tooltip(tooltip)
-        gate = EchoGate()
-        self._echo_gates[page] = gate
-        self._spinner_watches[page] = SpinnerWatch()
-        if PROGRESS_HINT_TERMPROP is not None:
-            self._progress_watches[page] = ProgressWatch()
         if tab.session_id is None:
             # A new session or a --continue: the CLI is being spawned right
             # now, so nothing can be mid-turn behind it (unlike a tab bound
@@ -3300,9 +3274,6 @@ class MainWindow(Adw.ApplicationWindow):
         # copies of the ones the destination keeps, and unwired the tab —
         # this pop finds nothing left for it.)
         self._tab_wiring.pop(page, None)
-        self._echo_gates.pop(page, None)
-        self._spinner_watches.pop(page, None)
-        self._progress_watches.pop(page, None)
         self._fresh_spawns.discard(page)
         self._cancel_new_chat_save(page)
         self._discarding_drafts.discard(page)
@@ -3750,7 +3721,7 @@ class MainWindow(Adw.ApplicationWindow):
             else:
                 exit_text = tab.provider.background_exit()
         if exit_text:
-            self._bg_closing.add(page)  # a handoff: _poll_graceful allows it more time
+            self._bg_closing.add(page)  # a handoff: the close poll allows it more time
             self._watch_background_fork(tab)
             # Show the yellow guide line as soon as the tab closes, and keep the
             # row unopenable until the detach is confirmed (or times out). The
@@ -3762,14 +3733,14 @@ class MainWindow(Adw.ApplicationWindow):
         if not exit_text:
             self._close_confirmed(page)
             return
-        self._closing_pages[page] = 0
+        self._closing_pages.add(page)
         self._leave_closing_tab(page)
-        # Raw keystrokes, exactly as the provider spells them: a control byte
-        # for Claude's Ctrl+C Ctrl+C, and for a typed command like /bg the
-        # Enter that submits it — carriage return in a raw-mode TUI, not
-        # newline.
-        tab.feed_child_text(exit_text)
-        GLib.timeout_add(_CLOSE_POLL_MS, self._poll_graceful, page, tab)
+        # The keystrokes and the poll that follows them — nudges, the
+        # worktree dialog's answer, the shell's exit, the force-close
+        # budgets — are the session's.
+        tab.session.begin_close(
+            exit_text, page in self._bg_closing, lambda: self._close_confirmed(page)
+        )
 
     def _leave_closing_tab(self, page: Adw.TabPage) -> None:
         """Hand the screen to a neighbouring tab as *page* starts draining.
@@ -3999,78 +3970,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _nudge_cli_exit(self, tab: TerminalTab) -> bool:
         """The CLI was asked to leave (by its exit keystroke or /bg) yet still
         owns the tab's terminal — typically parked on its session-list screen.
-        Feed the exit keystroke to dismiss it so the pending close can finish.
-        A no-op when the CLI already exited (then the keystroke would only
-        reach the shell, which the close is about to end anyway)."""
-        if tab.get_root() is not None and tab.has_running_command():
-            exit_text = tab.provider.graceful_exit()
-            if exit_text:
-                tab.feed_child_text(exit_text)
+        Feed the exit keystroke to dismiss it so the pending close can finish
+        (Session.nudge_exit; a no-op once the CLI has exited)."""
+        tab.session.nudge_exit()
         return GLib.SOURCE_REMOVE
-
-    def _poll_graceful(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
-        if page not in self._closing_pages:
-            return GLib.SOURCE_REMOVE  # already closed
-        # Once the shell has been told to exit the CLI is behind us for good:
-        # keep taking this branch rather than dropping back into the nudges
-        # below, which would aim a CLI's exit keystroke at a bare shell.
-        if page in self._shell_exiting or not tab.has_running_command():
-            return self._poll_shell_exit(page, tab)
-        self._closing_pages[page] += 1
-        backgrounding = page in self._bg_closing
-        accept = tab.worktree_exit_prompt_keystrokes()
-        if accept:
-            # Ctrl+C Ctrl+C landed on Claude's own "keep or remove this
-            # worktree?" dialog rather than exiting outright. Answer it —
-            # "keep", its default and first item, since a close initiated by
-            # closing the tab is never a signal to throw the worktree away —
-            # instead of re-nudging with more Ctrl+C below, which the dialog
-            # would read as a menu keystroke, not the exit it means at the
-            # terminal prompt.
-            tab.feed_child_text(accept)
-        # One ask doesn't always land. A mid-turn agent spends the first
-        # Ctrl+C Ctrl+C interrupting itself and clearing its input box rather
-        # than exiting, and /bg sometimes drops the CLI to its session-list
-        # screen instead (seen with tabs attached to a detached session) —
-        # either would hang the close until the force-close below. A CLI still
-        # owning the terminal this long after being asked to leave is the
-        # tell: ask again — early enough on the exit path to still beat its
-        # shorter force-close budget. Safe for a merely-slow exit too — the
-        # extra input queues behind the pending command and is discarded when
-        # the CLI exits.
-        elif self._closing_pages[page] in (_BG_NUDGE_TICKS if backgrounding else _EXIT_NUDGE_TICKS):
-            self._nudge_cli_exit(tab)
-        if self._closing_pages[page] >= (_BG_FORCE_TICKS if backgrounding else _EXIT_FORCE_TICKS):
-            self._close_confirmed(page)
-            return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
-
-    def _poll_shell_exit(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
-        """The CLI is gone and the tab's shell has the terminal back. Ending
-        that shell is what closes the tab, so ask it to exit — once — and hold
-        the poll open until it does.
-
-        The exit goes through shellinput.shell_command, which clears the
-        shell's input line first: the shell can inherit input the CLI never
-        read, and a bare "exit" landing on top of it joins into one unknown
-        command (``35;3;25Mexit``, from a real close) that the shell survives,
-        stranding the tab on a terminal full of "command not found". See
-        shellinput for the whole of the reasoning, the queued mouse reports
-        that cause it, and why the reset carries a leading space.
-
-        A shell that still hasn't gone by _SHELL_EXIT_TICKS gets force-closed
-        rather than left behind: input can always arrive after the line reset
-        too, and this poll is the last thing watching the tab."""
-        ticks = self._shell_exiting.get(page, 0)
-        if ticks == 0:
-            # child-exited closes the tab
-            tab.feed_child_text(shell_command("exit\r"))
-        elif ticks >= _SHELL_EXIT_TICKS:
-            log.info("close: shell ignored its exit; force-closing the tab")
-            self._close_confirmed(page)
-            return GLib.SOURCE_REMOVE
-        self._shell_exiting[page] = ticks + 1
-        return GLib.SOURCE_CONTINUE
 
     def _chain(self, session_id: str) -> set[str]:
         """Every id a row's conversation has run under — its own and each /bg
@@ -4603,8 +4506,9 @@ class MainWindow(Adw.ApplicationWindow):
             # are not a new one — the same quiet window a termprop clear
             # opens, which an attached background agent never gets to send.
             page = self._page_for(session_id)
-            if page is not None and (watch := self._progress_watches.get(page)) is not None:
-                watch.turn_ended()
+            session = self._session_of(page) if page is not None else None
+            if session is not None and session.progress is not None:
+                session.progress.turn_ended()
             self._activity.finish(session_id, grace_s=PROGRESS_FINISH_GRACE_S)
         return GLib.SOURCE_REMOVE
 
@@ -4625,12 +4529,10 @@ class MainWindow(Adw.ApplicationWindow):
         """
         if page not in self._fresh_spawns:
             return False
-        gate = self._echo_gates.get(page)
-        if gate is None or gate.armed:
+        session = self._session_of(page)
+        if session is None or session.echo_gate.armed:
             return False
         tab = page.get_child()
-        if not isinstance(tab, TerminalTab):
-            return False
         seen = tab.background_descendant_cmdlines()
         captured = self._baseline_captures.setdefault(page, set())
         if seen - captured:
@@ -4665,9 +4567,9 @@ class MainWindow(Adw.ApplicationWindow):
         text = text or ""
         if "\r" in text:
             self._absorb_baseline(page)  # no-op unless pristine (armed gates bail)
-        gate = self._echo_gates.get(page)
-        if gate is not None:
-            gate.poked(text)
+        session = self._session_of(page)
+        if session is not None:
+            session.echo_gate.poked(text)
 
     # -- pre-emptive /bg status ----------------------------------------------
 
@@ -4758,6 +4660,12 @@ class MainWindow(Adw.ApplicationWindow):
             return tab.session_id
         return None
 
+    def _session_of(self, page: Adw.TabPage) -> live_session.Session | None:
+        """The session behind a page's tab — whose activity watches this
+        window feeds and reads — or None for a page that isn't a session tab."""
+        tab = page.get_child()
+        return tab.session if isinstance(tab, TerminalTab) else None
+
     def _on_terminal_key_pressed(
         self, _controller, keyval: int, _keycode: int, state: Gdk.ModifierType, page: Adw.TabPage
     ) -> bool:
@@ -4785,8 +4693,8 @@ class MainWindow(Adw.ApplicationWindow):
         # The baseline's last-instant snapshot rides the same edge (see
         # _on_terminal_commit; armed gates make it a no-op).
         self._absorb_baseline(page)
-        if (gate := self._echo_gates.get(page)) is not None:
-            gate.arm()
+        if (session := self._session_of(page)) is not None:
+            session.echo_gate.arm()
         for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
             if tracked:
                 self._activity.mark(tracked)
@@ -4814,8 +4722,12 @@ class MainWindow(Adw.ApplicationWindow):
         spawns those sources wait for the gate too; the first submit arms it
         for the life of the tab, releasing them for good.
         """
-        gate = self._echo_gates.get(page)
-        return page in self._fresh_spawns and gate is not None and not gate.armed
+        session = self._session_of(page)
+        return (
+            page in self._fresh_spawns
+            and session is not None
+            and not session.echo_gate.armed
+        )
 
     def _on_progress_termprop(self, terminal, name: str, page: Adw.TabPage) -> None:
         """The agent's own busy signal: VTE parsed an OSC 9;4 progress change.
@@ -4833,7 +4745,8 @@ class MainWindow(Adw.ApplicationWindow):
             return
         if not self.state.get_setting("progress_termprop"):
             return
-        watch = self._progress_watches.get(page)
+        session = self._session_of(page)
+        watch = session.progress if session is not None else None
         if watch is None:
             return
         ok, hint = terminal.get_termprop_int(name)
@@ -4886,30 +4799,14 @@ class MainWindow(Adw.ApplicationWindow):
         # placeholder row until the store discovers the session, and marking
         # only the session id would leave that row (the only one on screen)
         # sitting still through the turn that is writing the transcript.
-        gate = self._echo_gates.get(page)
-        agent_output = gate is None or gate.counts(
-            (terminal.get_column_count(), terminal.get_row_count())
-        )
-        # Second opinion, gate or no gate: motion in the screen's first column
-        # is the agent's own spinner (or its output scrolling through), however
-        # the redraw showing it was caused — see SpinnerWatch. Sampled even
-        # when the gate already said yes, so the watch always has a fresh
-        # baseline to compare the next redraw against — and even while a
-        # fresh spawn's startup hold discounts the verdict (_startup_held):
-        # a spawning CLI's welcome paint animates too, and it is no turn.
-        watch = self._spinner_watches.get(page)
-        if watch is not None and watch.due():
-            tab = page.get_child()
-            if isinstance(tab, TerminalTab) and (reading := tab.screen_first_column()) is not None:
-                spinning = watch.sample(*reading) and not self._startup_held(page)
-                agent_output = spinning or agent_output
-        # Unless the agent itself just called the turn over: these redraws are
-        # its trailing repaints (the prompt box returning, the indicator
-        # fading), and starting a pole on them would blip the instant-down the
-        # termprop finish just delivered. See ProgressWatch.quiet.
-        progress = self._progress_watches.get(page)
-        if progress is not None and progress.quiet():
-            agent_output = False
+        #
+        # The verdict itself is the session's (Session.redraw_counts): the
+        # echo gate, then the spinner's second opinion — sampled even while a
+        # fresh spawn's startup hold (_startup_held) discounts it — then the
+        # quiet the agent's own turn-end opens. See activity.py.
+        session = self._session_of(page)
+        agent_output = session is None or session.redraw_counts(self._startup_held(page))
+        progress = session.progress if session is not None else None
         # While the agent's own hint reads busy, a redraw mark carries the
         # termprop's window, not the terminal's short one. The latest mark
         # decides the deadline, so redraws on IDLE_S would cut the agent's
@@ -5801,9 +5698,6 @@ class MainWindow(Adw.ApplicationWindow):
         tab = page.get_child()
         session_id = self._session_id_of(page)
         carried = _CarriedPage(
-            echo_gate=self._echo_gates.get(page),
-            spinner=self._spinner_watches.get(page),
-            progress=self._progress_watches.get(page),
             fresh_spawn=page in self._fresh_spawns,
             baseline=self._baseline_captures.get(page),
             base_title=self._base_titles.pop(page, None),
@@ -5850,10 +5744,6 @@ class MainWindow(Adw.ApplicationWindow):
         hand_over_page): its watches carry on where they left off, and the tab
         is wired to this window as if it had been opened in it."""
         tab = page.get_child()
-        self._echo_gates[page] = carried.echo_gate or EchoGate()
-        self._spinner_watches[page] = carried.spinner or SpinnerWatch()
-        if PROGRESS_HINT_TERMPROP is not None:
-            self._progress_watches[page] = carried.progress or ProgressWatch()
         if carried.fresh_spawn:
             self._fresh_spawns.add(page)
         if carried.baseline is not None:
@@ -6010,9 +5900,10 @@ class MainWindow(Adw.ApplicationWindow):
                 view.close_page_finish(page, False)  # keep the tab until it exits cleanly
                 return True
         self._confirmed_closes.discard(page)
-        self._closing_pages.pop(page, None)
+        self._closing_pages.discard(page)
         self._bg_closing.discard(page)
-        self._shell_exiting.pop(page, None)
+        if isinstance(tab, TerminalTab):
+            tab.session.end_close()  # its close poll, if one was running, ends here
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
@@ -6031,7 +5922,6 @@ class MainWindow(Adw.ApplicationWindow):
             self._settle_archived_worktree(archive_session_id)
         self._base_titles.pop(page, None)
         self._pending_resolved.pop(page, None)
-        self._echo_gates.pop(page, None)
         if isinstance(tab, TerminalTab):
             # Before the placeholder goes: the draft is filed under the id it
             # carries. What is kept keeps its sidebar row (see the sidebar's
