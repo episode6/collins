@@ -118,7 +118,6 @@ from .sessions import (
     trash_worktree,
     worktree_project_root,
 )
-from .shellinput import shell_command
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
 from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
 from .store import SessionStore, emptied_projects
@@ -177,22 +176,10 @@ _BG_QUEUE_WAIT_MS = 5000
 _BG_QUEUE_POLL_MS = 500
 _BG_QUEUE_ITEM_TIMEOUT_S = 20
 
-# Graceful-close poll: how often to check whether the CLI has released the
-# terminal, when to re-ask it to leave (see _poll_graceful), and how many
-# ticks to allow before the force-close safety net. A plain exit gets a short
-# budget — the user already said to end the session, so a CLI that hasn't
-# gone by then gets terminated rather than holding the tab (or a quit)
-# hostage. A /bg handoff keeps a much longer one: forking the background
-# agent takes real time, and force-closing mid-handoff risks stranding it.
-_CLOSE_POLL_MS = 300
-_EXIT_NUDGE_TICKS = (5,)  # ~1.5s
-_EXIT_FORCE_TICKS = 10  # ~3s
-_BG_NUDGE_TICKS = (8, 24)  # ~2.4s / ~7.2s
-_BG_FORCE_TICKS = 40  # ~12s
-# ...and the budget the shell gets to act on the exit that follows the CLI's
-# own, counted from when it was fed. A shell has nothing to wind down, so this
-# is short: it is a safety net for an exit that never ran, not a wait.
-_SHELL_EXIT_TICKS = 6  # ~1.8s
+# The graceful close's poll — how often it checks whether the CLI has
+# released the terminal, when it re-asks, and the force-close budgets of a
+# plain exit and a /bg handoff — is the session's (Session.begin_close and
+# the CLOSE_* / EXIT_* / BG_* / SHELL_EXIT_TICKS beside it).
 
 # Bare modifiers and locks: presses VTE sends nothing to the child for. They
 # don't count as "typing into the terminal" when a keystroke clears the
@@ -339,9 +326,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._restore_window_geometry()
         self._pages: dict[str, Adw.TabPage] = {}  # session_id -> open tab
         self._confirmed_closes: set[Adw.TabPage] = set()
-        self._closing_pages: dict[Adw.TabPage, int] = {}  # graceful close in progress -> attempts
+        # Graceful closes in progress (their polls are the tabs' sessions':
+        # Session.begin_close), and which of them are /bg handoffs.
+        self._closing_pages: set[Adw.TabPage] = set()
         self._bg_closing: set[Adw.TabPage] = set()  # closing page is a /bg handoff, not an exit
-        self._shell_exiting: dict[Adw.TabPage, int] = {}  # shell told to exit -> ticks since
         self._close_asking: set[Adw.TabPage] = set()  # busy-tab confirm dialog open
         self._close_ok: set[Adw.TabPage] = set()  # user okayed closing the busy tab
         self._bg_ok: set[Adw.TabPage] = set()  # user chose to background the agent instead
@@ -3733,7 +3721,7 @@ class MainWindow(Adw.ApplicationWindow):
             else:
                 exit_text = tab.provider.background_exit()
         if exit_text:
-            self._bg_closing.add(page)  # a handoff: _poll_graceful allows it more time
+            self._bg_closing.add(page)  # a handoff: the close poll allows it more time
             self._watch_background_fork(tab)
             # Show the yellow guide line as soon as the tab closes, and keep the
             # row unopenable until the detach is confirmed (or times out). The
@@ -3745,14 +3733,14 @@ class MainWindow(Adw.ApplicationWindow):
         if not exit_text:
             self._close_confirmed(page)
             return
-        self._closing_pages[page] = 0
+        self._closing_pages.add(page)
         self._leave_closing_tab(page)
-        # Raw keystrokes, exactly as the provider spells them: a control byte
-        # for Claude's Ctrl+C Ctrl+C, and for a typed command like /bg the
-        # Enter that submits it — carriage return in a raw-mode TUI, not
-        # newline.
-        tab.feed_child_text(exit_text)
-        GLib.timeout_add(_CLOSE_POLL_MS, self._poll_graceful, page, tab)
+        # The keystrokes and the poll that follows them — nudges, the
+        # worktree dialog's answer, the shell's exit, the force-close
+        # budgets — are the session's.
+        tab.session.begin_close(
+            exit_text, page in self._bg_closing, lambda: self._close_confirmed(page)
+        )
 
     def _leave_closing_tab(self, page: Adw.TabPage) -> None:
         """Hand the screen to a neighbouring tab as *page* starts draining.
@@ -3982,78 +3970,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _nudge_cli_exit(self, tab: TerminalTab) -> bool:
         """The CLI was asked to leave (by its exit keystroke or /bg) yet still
         owns the tab's terminal — typically parked on its session-list screen.
-        Feed the exit keystroke to dismiss it so the pending close can finish.
-        A no-op when the CLI already exited (then the keystroke would only
-        reach the shell, which the close is about to end anyway)."""
-        if tab.get_root() is not None and tab.has_running_command():
-            exit_text = tab.provider.graceful_exit()
-            if exit_text:
-                tab.feed_child_text(exit_text)
+        Feed the exit keystroke to dismiss it so the pending close can finish
+        (Session.nudge_exit; a no-op once the CLI has exited)."""
+        tab.session.nudge_exit()
         return GLib.SOURCE_REMOVE
-
-    def _poll_graceful(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
-        if page not in self._closing_pages:
-            return GLib.SOURCE_REMOVE  # already closed
-        # Once the shell has been told to exit the CLI is behind us for good:
-        # keep taking this branch rather than dropping back into the nudges
-        # below, which would aim a CLI's exit keystroke at a bare shell.
-        if page in self._shell_exiting or not tab.has_running_command():
-            return self._poll_shell_exit(page, tab)
-        self._closing_pages[page] += 1
-        backgrounding = page in self._bg_closing
-        accept = tab.worktree_exit_prompt_keystrokes()
-        if accept:
-            # Ctrl+C Ctrl+C landed on Claude's own "keep or remove this
-            # worktree?" dialog rather than exiting outright. Answer it —
-            # "keep", its default and first item, since a close initiated by
-            # closing the tab is never a signal to throw the worktree away —
-            # instead of re-nudging with more Ctrl+C below, which the dialog
-            # would read as a menu keystroke, not the exit it means at the
-            # terminal prompt.
-            tab.feed_child_text(accept)
-        # One ask doesn't always land. A mid-turn agent spends the first
-        # Ctrl+C Ctrl+C interrupting itself and clearing its input box rather
-        # than exiting, and /bg sometimes drops the CLI to its session-list
-        # screen instead (seen with tabs attached to a detached session) —
-        # either would hang the close until the force-close below. A CLI still
-        # owning the terminal this long after being asked to leave is the
-        # tell: ask again — early enough on the exit path to still beat its
-        # shorter force-close budget. Safe for a merely-slow exit too — the
-        # extra input queues behind the pending command and is discarded when
-        # the CLI exits.
-        elif self._closing_pages[page] in (_BG_NUDGE_TICKS if backgrounding else _EXIT_NUDGE_TICKS):
-            self._nudge_cli_exit(tab)
-        if self._closing_pages[page] >= (_BG_FORCE_TICKS if backgrounding else _EXIT_FORCE_TICKS):
-            self._close_confirmed(page)
-            return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
-
-    def _poll_shell_exit(self, page: Adw.TabPage, tab: TerminalTab) -> bool:
-        """The CLI is gone and the tab's shell has the terminal back. Ending
-        that shell is what closes the tab, so ask it to exit — once — and hold
-        the poll open until it does.
-
-        The exit goes through shellinput.shell_command, which clears the
-        shell's input line first: the shell can inherit input the CLI never
-        read, and a bare "exit" landing on top of it joins into one unknown
-        command (``35;3;25Mexit``, from a real close) that the shell survives,
-        stranding the tab on a terminal full of "command not found". See
-        shellinput for the whole of the reasoning, the queued mouse reports
-        that cause it, and why the reset carries a leading space.
-
-        A shell that still hasn't gone by _SHELL_EXIT_TICKS gets force-closed
-        rather than left behind: input can always arrive after the line reset
-        too, and this poll is the last thing watching the tab."""
-        ticks = self._shell_exiting.get(page, 0)
-        if ticks == 0:
-            # child-exited closes the tab
-            tab.feed_child_text(shell_command("exit\r"))
-        elif ticks >= _SHELL_EXIT_TICKS:
-            log.info("close: shell ignored its exit; force-closing the tab")
-            self._close_confirmed(page)
-            return GLib.SOURCE_REMOVE
-        self._shell_exiting[page] = ticks + 1
-        return GLib.SOURCE_CONTINUE
 
     def _chain(self, session_id: str) -> set[str]:
         """Every id a row's conversation has run under — its own and each /bg
@@ -5980,9 +5900,10 @@ class MainWindow(Adw.ApplicationWindow):
                 view.close_page_finish(page, False)  # keep the tab until it exits cleanly
                 return True
         self._confirmed_closes.discard(page)
-        self._closing_pages.pop(page, None)
+        self._closing_pages.discard(page)
         self._bg_closing.discard(page)
-        self._shell_exiting.pop(page, None)
+        if isinstance(tab, TerminalTab):
+            tab.session.end_close()  # its close poll, if one was running, ends here
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)

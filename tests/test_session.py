@@ -1005,3 +1005,338 @@ def test_a_move_settles_once(rig, tmp_path):
     assert session.settle_cwd(str(root), str(root)) is None  # back home: no move
     assert session.settle_cwd(str(worktree), str(root)) is None
     assert session.settle_cwd(str(worktree), str(root)) == scope  # a new move
+
+
+# -- launching -------------------------------------------------------------------------
+
+
+class LaunchClaude(ClaudeProvider):
+    """Claude Code with commands that don't depend on PATH."""
+
+    def new_command(self, options=None):
+        flags = " -w" if options is not None and options.worktree else ""
+        return "claude" + flags
+
+    def resume_command(self, session_id, fork=False, options=None):
+        return f"claude --resume {session_id}"
+
+
+class FakeSandboxHost:
+    """sandboxplan.SandboxHost's launch half: boxes minted, plans written to
+    *root*, leases and forgets recorded."""
+
+    def __init__(self, root) -> None:
+        self.root = root
+        self.calls: list[tuple] = []
+        self.plans = 0
+
+    def mint_box(self, workspace, seed=True):
+        self.calls.append(("mint", workspace, seed))
+        return "box-1"
+
+    def prepare_launch(self, cwd, box, worktree=""):
+        self.plans += 1
+        path = self.root / f"plan-{self.plans}.json"
+        path.write_text("{}")
+        self.calls.append(("prepare", cwd, box, worktree))
+        return str(path)
+
+    def release(self, box):
+        self.calls.append(("release", box))
+
+    def forget_box(self, box):
+        self.calls.append(("forget", box))
+
+
+@pytest.fixture
+def launch(agent, tmp_path):
+    def make(**kwargs):
+        term = FakeTerminal()
+        term.pid = None  # nothing spawned yet
+        host = FakeHost()
+        host.spawns = []
+        host.spawn_shell = lambda cwd, env: host.spawns.append((cwd, env))
+        host.sandbox_changed = lambda: host.events.append(("sandbox",))
+        host.mark_stale_shells = lambda: host.events.append(("stale",))
+        host.process_exited = lambda status: host.events.append(("exited", status))
+        clock = FakeScheduler()
+        session = Session(
+            provider=LaunchClaude(), pty=term, screen=term, host=host, scheduler=clock, **kwargs
+        )
+        return session, term, host, clock
+
+    return make
+
+
+def _spawned(session, term) -> None:
+    """What the tab does once VTE says the shell is up."""
+    term.pid = SHELL_PID
+    session.shell_spawned()
+
+
+def test_a_fresh_launch_spawns_the_shell_and_types_the_command(launch, tmp_path):
+    session, term, host, clock = launch(cwd=str(tmp_path))
+    session.spawn(str(tmp_path), None)
+    assert len(host.spawns) == 1
+    cwd, env = host.spawns[0]
+    assert cwd == str(tmp_path)
+    assert "ConEmuANSI=ON" in env and "TERM_PROGRAM=kitty" in env
+    assert term.writes == []
+    _spawned(session, term)
+    assert term.writes == ["claude\n"]
+    assert session.initial_command == "claude"
+
+
+def test_the_progress_spoof_can_be_off(launch, tmp_path):
+    session, _term, host, _clock = launch(progress_env=False)
+    session.spawn(str(tmp_path), None)
+    assert host.spawns[0][1] is None
+
+
+def test_a_missing_directory_falls_back_home_and_says_so(launch, tmp_path):
+    session, _term, host, _clock = launch()
+    gone = str(tmp_path / "gone")
+    session.spawn(gone, None)
+    assert host.spawns[0][0] == str(session_mod.Path.home())
+    assert any("no longer exists" in line for line in host.painted())
+    assert session.cwd == str(session_mod.Path.home())
+
+
+def test_a_resume_types_the_resume(launch, tmp_path):
+    session, term, host, _clock = launch(session_id="abc", cwd=str(tmp_path))
+    session.spawn(str(tmp_path), "abc")
+    _spawned(session, term)
+    assert term.writes == ["claude --resume abc\n"]
+    assert not session.worktree_launch
+
+
+def test_a_failed_worktree_launch_is_retyped_without_it(launch, tmp_path, agent):
+    from collins.providers import SessionOptions
+
+    session, term, host, clock = launch(options=SessionOptions(worktree=True))
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    assert term.writes == ["claude -w\n"]
+    assert session.worktree_launch
+    clock.advance(session_mod.WORKTREE_LAUNCH_POLL_MS)
+    assert len(term.writes) == 1  # nothing on screen yet
+    agent["running"] = False
+    term.screen_text_extra = "\nError creating worktree: not trusted"
+    clock.advance(session_mod.WORKTREE_LAUNCH_POLL_MS)
+    assert term.writes[-1] == "claude\n"
+    assert not session.options.worktree
+    assert not session.worktree_launch
+    assert any("couldn't create a worktree" in line for line in host.painted())
+
+
+def test_an_error_quoted_by_a_running_agent_is_never_typed_over(launch, tmp_path):
+    from collins.providers import SessionOptions
+
+    session, term, host, clock = launch(options=SessionOptions(worktree=True))
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    term.screen_text_extra = "\nError creating worktree: as quoted in a reply"
+    clock.advance(session_mod.WORKTREE_LAUNCH_POLL_MS * (session_mod.WORKTREE_LAUNCH_POLL_TICKS + 2))
+    assert term.writes == ["claude -w\n"]
+    assert not session.worktree_launch  # the watch ran out: the launch worked
+
+
+def test_the_new_chat_prompt_goes_in_at_the_empty_box(launch, tmp_path):
+    session, term, host, clock = launch()
+    session.hold_new_chat_prompt("hello there")
+    session.spawn(str(tmp_path), None)
+    session.start_new_chat_prompt_poll()
+    clock.advance(session_mod.NEW_CHAT_PROMPT_POLL_MS)
+    assert term.submitted == []  # no shell yet: no box
+    _spawned(session, term)
+    term.box = term.shown = ""  # the CLI is up, at its empty box
+    term.writes.clear()
+    clock.advance(session_mod.NEW_CHAT_PROMPT_POLL_MS + PROMPT_SUBMIT_MS)
+    assert term.submitted == ["hello there"]
+    assert session.new_chat_prompt is None
+    assert ("focus",) in host.events
+
+
+def test_a_new_chat_prompt_the_agent_never_took_is_stashed(launch, tmp_path, agent):
+    session, term, host, clock = launch()
+    session.hold_new_chat_prompt("keep me")
+    session.spawn(str(tmp_path), None)
+    _spawned(session, term)
+    term.box = term.shown = "x"  # never an empty box
+    agent["running"] = False
+    term.foreground = SHELL_PID  # the shell owns the terminal: the CLI left
+    session.start_new_chat_prompt_poll()
+    clock.advance(session_mod.NEW_CHAT_PROMPT_POLL_MS * session_mod.NEW_CHAT_IDLE_SHELL_TICKS)
+    assert host.stashed == ["keep me"]
+    assert any("didn't start" in line for line in host.painted())
+
+
+# -- the sandbox -------------------------------------------------------------------------
+
+
+def test_a_sandboxed_launch_writes_its_plan_and_registers(launch, tmp_path):
+    from collins.providers import SessionOptions
+
+    box_host = FakeSandboxHost(tmp_path)
+    session, term, host, clock = launch(
+        options=SessionOptions(sandbox=True), sandbox_host=lambda: box_host
+    )
+    session.spawn(str(tmp_path), None)
+    assert session.sandboxed
+    assert session.sandbox_box == "box-1"
+    assert session.sandbox_plan_path and os.path.isfile(session.sandbox_plan_path)
+    assert session.options.sandbox_plan == session.sandbox_plan_path
+    assert ("mint", str(tmp_path), True) in box_host.calls
+    assert ("sandbox",) in host.events
+
+
+def test_no_box_means_an_unsandboxed_launch_without_bypass(launch, tmp_path):
+    from collins.providers import SessionOptions
+
+    session, _term, host, _clock = launch(
+        options=SessionOptions(sandbox=True, permission_mode="bypassPermissions")
+    )
+    session.spawn(str(tmp_path), None)
+    assert not session.sandboxed
+    assert session.options.permission_mode == ""
+    assert any("no sandbox could be built" in line for line in host.painted())
+
+
+def test_the_restart_resumes_in_a_rebuilt_box(launch, tmp_path, agent):
+    from collins.providers import SessionOptions
+
+    box_host = FakeSandboxHost(tmp_path)
+    session, term, host, clock = launch(
+        options=SessionOptions(sandbox=True),
+        sandbox_host=lambda: box_host,
+        session_id="sid",
+    )
+    session.spawn(str(tmp_path), "sid")
+    _spawned(session, term)
+    first_plan = session.sandbox_plan_path
+    assert session.can_restart_sandboxed()
+    assert session.restart_sandboxed()
+    assert not session.can_restart_sandboxed()  # one at a time
+    assert term.writes[-1] == "\x03\x03"
+    clock.advance(session_mod.RESTART_POLL_MS)
+    term.foreground = SHELL_PID  # the CLI exits
+    clock.advance(session_mod.RESTART_POLL_MS)
+    assert term.writes[-1] == "claude --resume sid\n"
+    assert ("stale",) in host.events
+    assert session.sandbox_plan_path != first_plan
+    assert not os.path.exists(first_plan)
+    assert session.restart_ticks is None
+
+
+def test_a_restart_that_never_exits_gives_up(launch, tmp_path):
+    from collins.providers import SessionOptions
+
+    box_host = FakeSandboxHost(tmp_path)
+    session, term, host, clock = launch(
+        options=SessionOptions(sandbox=True), sandbox_host=lambda: box_host, session_id="s"
+    )
+    session.spawn(str(tmp_path), "s")
+    _spawned(session, term)
+    session.restart_sandboxed()
+    clock.advance(session_mod.RESTART_POLL_MS * session_mod.RESTART_GIVE_UP_TICKS)
+    nudges = [w for w in term.writes if w == "\x03\x03"]
+    assert len(nudges) == 1 + len(session_mod.RESTART_NUDGE_TICKS)
+    assert any("wasn't restarted" in line for line in host.painted())
+    assert session.can_restart_sandboxed()
+
+
+def test_the_shells_exit_releases_the_box(launch, tmp_path):
+    from collins.providers import SessionOptions
+
+    box_host = FakeSandboxHost(tmp_path)
+    session, term, host, clock = launch(
+        options=SessionOptions(sandbox=True), sandbox_host=lambda: box_host
+    )
+    session.spawn(str(tmp_path), None)
+    plan = session.sandbox_plan_path
+    session.shell_exited(0)
+    assert not os.path.exists(plan)
+    assert host.events[-1] == ("exited", 0)
+    clock.advance(0)
+    assert ("release", "box-1") in box_host.calls and ("forget", "box-1") in box_host.calls
+
+
+# -- closing -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def closing(rig):
+    session, term, host, clock = rig
+    forced = []
+    return session, term, host, clock, forced
+
+
+def test_a_close_exits_and_nudges_on_budget(closing):
+    session, term, host, clock, forced = closing
+    session.begin_close("\x03\x03", False, lambda: forced.append(True))
+    assert term.writes == ["\x03\x03"]
+    clock.advance(session_mod.CLOSE_POLL_MS * session_mod.EXIT_NUDGE_TICKS[0])
+    assert term.writes == ["\x03\x03", "\x03\x03"]  # the nudge
+    clock.advance(session_mod.CLOSE_POLL_MS * session_mod.EXIT_FORCE_TICKS)
+    assert forced == [True]
+    pending = clock.pending()
+    clock.advance(session_mod.CLOSE_POLL_MS * 5)
+    assert forced == [True] and clock.pending() == pending
+
+
+def test_a_handoff_gets_the_longer_budget(closing):
+    session, term, host, clock, forced = closing
+    session.begin_close("/bg\r", True, lambda: forced.append(True))
+    clock.advance(session_mod.CLOSE_POLL_MS * session_mod.EXIT_FORCE_TICKS)
+    assert forced == []
+    clock.advance(session_mod.CLOSE_POLL_MS * session_mod.BG_FORCE_TICKS)
+    assert forced == [True]
+    nudges = [w for w in term.writes if w == "\x03\x03"]
+    assert len(nudges) == len(session_mod.BG_NUDGE_TICKS)
+
+
+def test_the_worktree_dialog_is_answered_keep(closing):
+    session, term, host, clock, forced = closing
+    term.screen_text_extra = "\n ❯ Keep worktree\n   Remove worktree"
+    session.begin_close("\x03\x03", False, lambda: forced.append(True))
+    clock.advance(session_mod.CLOSE_POLL_MS)
+    assert term.writes[-1] == "\r"
+
+
+def test_the_shell_is_told_to_exit_once_then_forced(closing):
+    from collins.shellinput import shell_command
+
+    session, term, host, clock, forced = closing
+    session.begin_close("\x03\x03", False, lambda: forced.append(True))
+    term.foreground = SHELL_PID  # the CLI is gone
+    clock.advance(session_mod.CLOSE_POLL_MS)
+    assert term.writes[-1] == shell_command("exit\r")
+    term.foreground = AGENT_PGRP  # even if something takes the terminal again
+    clock.advance(session_mod.CLOSE_POLL_MS * (session_mod.SHELL_EXIT_TICKS - 1))
+    assert forced == []
+    clock.advance(session_mod.CLOSE_POLL_MS)
+    assert term.writes.count(shell_command("exit\r")) == 1
+    assert "\x03\x03" not in term.writes[1:]  # never a CLI's exit at the shell
+    assert forced == [True]
+
+
+def test_end_close_stops_the_poll(closing):
+    session, term, host, clock, forced = closing
+    session.begin_close("\x03\x03", False, lambda: forced.append(True))
+    session.end_close()
+    clock.advance(session_mod.CLOSE_POLL_MS * 50)
+    assert forced == [] and term.writes == ["\x03\x03"]
+
+
+def test_a_nudge_skips_a_closed_tab_and_an_exited_cli(rig):
+    session, term, host, _clock = rig
+    host.is_alive = False
+    session.nudge_exit()
+    assert term.writes == []
+    host.is_alive = True
+    term.foreground = SHELL_PID
+    session.nudge_exit()
+    assert term.writes == []
+    term.foreground = AGENT_PGRP
+    session.nudge_exit()
+    assert term.writes == ["\x03\x03"]

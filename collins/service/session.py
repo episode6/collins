@@ -2,25 +2,33 @@
 """A session tab's logic, out of the widget: `Session`.
 
 `terminal.TerminalTab` used to be both the widget and everything the widget's
-terminal was *for* — reading the agent's input box, typing into it, cutting a
-prompt out of it for the composer. Those state machines could only be tested
-by driving a real VTE behind a fake CLI. `Session` holds them now, GTK-free,
-and reaches its terminal through two ports (`ports.PtyPort` to write,
-`ports.ScreenPort` to read; spec §3.5). `TerminalTab` builds one per tab over
-adapters on its own `Vte.Terminal` (`terminal.VtePtyPort`,
-`terminal.VteScreenPort`) and keeps every public name it had as a forwarder,
-so nothing that talks to a tab had to change.
+terminal was *for* — launching the agent, reading its input box, typing into
+it, cutting a prompt out of it for the composer, finding its transcript,
+telling a working agent from an idle one, closing it. Those state machines
+could only be tested by driving a real VTE behind a fake CLI. `Session`
+holds them now, GTK-free, and reaches its terminal through two ports
+(`ports.PtyPort` to write, `ports.ScreenPort` to read; spec §3.5).
+`TerminalTab` builds one per tab over adapters on its own `Vte.Terminal`
+(`terminal.VtePtyPort`, `terminal.VteScreenPort`) and keeps every public
+name it had as a forwarder, so nothing that talks to a tab had to change.
 
 What lives here:
 
 - the session's identity as launched: id, fork, provider, options, the
   command override, the directory it was handed;
+- launching: the command typed into the shell (resume, fresh, override),
+  the environment the shell spawns with, a reaped worktree put back first,
+  the sandbox plan settled at the last moment (adopted, minted, narrowed to
+  a reserved worktree, or dropped with a warning), the live grants told,
+  a `-w` launch watched for the CLI's own failure and retyped without it,
+  the new-chat screen's prompt typed once the CLI is at its box, the
+  sandbox chip's restart, and the clean-up when the shell exits;
 - reading the agent's input box: `takes_prompt`, `entered_prompt`,
-  `prompt_block`, the visible screen, the worktree-exit dialog, the screen's
-  first column;
+  `prompt_block`, `unstarted_thread`, the visible screen, the
+  worktree-exit dialog, the screen's first column;
 - writing to it: `inject_prompt` (and its unfocused, bracketed-paste
   sibling), the model and effort switches, the composer's open-cut with its
-  settle and verify rounds, and the close's paste-back;
+  settle and verify rounds, the composer's send, and the close's paste-back;
 - the process questions those writes are gated on: whether the agent is
   running, its pid, whether something other than the shell owns the
   terminal — and the rest of the /proc walks: the agent's cwd, what runs
@@ -33,39 +41,53 @@ What lives here:
 - activity: the echo gate, the spinner watch, the progress watch and the
   finish ledger the window's ActivityTracker is fed through, and the
   redraw verdict they give;
-- the cwd poll and the settling of a move the editor follows.
+- the cwd poll and the settling of a move the editor follows;
+- the close flows' keystrokes and polls: the exit (or /bg) fed, the nudges,
+  the worktree dialog answered "keep", the shell's own exit, the
+  force-close budgets — the window decides when and how to close, and is
+  called back when a budget runs out.
 
 What stays in the tab: every widget, overlay, dialog and the footer, the
-composer itself (the cut reaches it through a `CutSink`), the dock.
+composer itself (the cut reaches it through a `CutSink`), the dock, and the
+spawning of the shell on its own terminal (`SessionHost.spawn_shell`). What
+stays in the window: the ActivityTracker the watches feed, and every
+decision about a close.
 
 The host. A Session tells its tab what happened, and asks it the few things
 only a widget knows, through a `SessionHost` — a plain listener object
 (`typing.Protocol`), chosen over GObject signals so a test can hand in a
 recorder and read back exactly what was asked and painted, in order, with no
 main loop. The tab implements it with a small private adapter
-(`terminal._TabHost`) so the tab's own namespace stays the tab's.
+(`terminal._TabHost`) so the tab's own namespace stays the tab's; it turns
+the session's reports into the tab's existing GObject signals
+("session-resolved", "fork-resolved", "process-exited", ...).
 
-The scheduler. Every timer, idle and thread goes through a `Scheduler`
-(`GLibScheduler` by default: `GLib.timeout_add`, `GLib.idle_add`, a daemon
-thread). A test passes a fake whose clock it advances by hand, so a state
-machine whose steps are 50 ms to 1.5 s apart runs in microseconds and in a
-fixed order (tests/test_session.py has the fake). The delays and the
-priorities are the ones the tab always used — the PRIORITY_DEFAULT landings
-included, which CI's Xvfb would otherwise starve.
+The scheduler. Every timer, idle, thread and file monitor goes through a
+`Scheduler` (`GLibScheduler` by default: `GLib.timeout_add`,
+`GLib.idle_add`, a daemon thread, a `Gio.FileMonitor`; `time()` for the
+wall clock the resolver compares mtimes with). A test passes a fake whose
+clock it advances by hand, so a state machine whose steps are 50 ms to
+1.5 s apart runs in microseconds and in a fixed order (tests/test_session.py
+has the fake). The delays and the priorities are the ones the tab always
+used — the PRIORITY_DEFAULT landings included, which CI's Xvfb would
+otherwise starve.
 """
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from collections.abc import Callable, Collection
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Protocol
 
 from gi.repository import Gio, GLib
 
-from .. import activity, composerkeys, editorfiles, proctree
+from .. import activity, composerkeys, editorfiles, proctree, sandboxplan
+from ..formatting import display_path
 from ..gitinfo import current_branch
 from ..i18n import _
 from ..providers import EnteredPrompt, Provider
@@ -77,9 +99,17 @@ from ..prstatus import (
     invalidate,
     merge_ordered,
 )
-from ..sessions import worktree_shares_project
+from ..sessions import (
+    recreatable_worktree,
+    recreate_worktree,
+    worktree_project_root,
+    worktree_shares_project,
+)
+from ..shellinput import shell_command
 from ..transcript import TranscriptModel
 from .ports import PtyPort, ScreenPort
+
+log = logging.getLogger(__name__)
 
 # The transcript tail: how long a burst of file-change events is let settle
 # before the read, and the backstop poll for a monitor that missed one.
@@ -102,6 +132,46 @@ CWD_POLL_MS = 2000
 # around a CLI starting, exiting or being forked, and still lands inside the
 # pause after a worktree is entered.
 EDITOR_FOLLOW_TICKS = 2
+# The new-chat screen's Send: how often the session asks whether the CLI it
+# just spawned is at an empty input box yet, for how long before the prompt is
+# stashed as a composer draft instead (a `-w` launch cuts a worktree first,
+# and a cold start on a slow disk takes a while), and after how many ticks a
+# shell sitting idle at its prompt — the command exited at once — is read as
+# "the agent isn't coming" rather than waited out (see _new_chat_prompt_tick).
+NEW_CHAT_PROMPT_POLL_MS = 300
+NEW_CHAT_PROMPT_TICKS = 300  # ~90s
+NEW_CHAT_IDLE_SHELL_TICKS = 20  # ~6s
+# How a worktree launch that never started is caught (see
+# _check_worktree_launch): poll the screen for the CLI's own error line, from
+# the moment the command is typed until the agent has plainly come up. The
+# failure is printed within a second — the budget only has to outlast a slow
+# machine's shell startup, and a launch still on its feet at the end of it is
+# one that worked.
+WORKTREE_LAUNCH_POLL_MS = 500
+WORKTREE_LAUNCH_POLL_TICKS = 30  # ~15s
+# The restart the footer chip's "Restart to apply" runs: the CLI is asked
+# to exit (its Ctrl+C Ctrl+C), nudged again when it hasn't gone, and the
+# session is resumed in the same shell once it has — same rhythm as the
+# graceful close, minus the shell exit at the end.
+RESTART_POLL_MS = 300
+RESTART_NUDGE_TICKS = (5, 15)
+RESTART_GIVE_UP_TICKS = 40
+# Graceful-close poll: how often to check whether the CLI has released the
+# terminal, when to re-ask it to leave (see _poll_close), and how many
+# ticks to allow before the force-close safety net. A plain exit gets a short
+# budget — the user already said to end the session, so a CLI that hasn't
+# gone by then gets terminated rather than holding the tab (or a quit)
+# hostage. A /bg handoff keeps a much longer one: forking the background
+# agent takes real time, and force-closing mid-handoff risks stranding it.
+CLOSE_POLL_MS = 300
+EXIT_NUDGE_TICKS = (5,)  # ~1.5s
+EXIT_FORCE_TICKS = 10  # ~3s
+BG_NUDGE_TICKS = (8, 24)  # ~2.4s / ~7.2s
+BG_FORCE_TICKS = 40  # ~12s
+# ...and the budget the shell gets to act on the exit that follows the CLI's
+# own, counted from when it was fed. A shell has nothing to wind down, so this
+# is short: it is a safety net for an exit that never ran, not a wait.
+SHELL_EXIT_TICKS = 6  # ~1.8s
 
 # How long an injected prompt is left sitting in the input before the Return
 # that sends it (see inject_prompt). Long enough that the CLI has stopped
@@ -126,6 +196,42 @@ CUT_SETTLE_MS = 50
 CUT_SETTLE_READS = 4
 CUT_SETTLE_TRIES = 12
 CUT_VERIFY_MS = (150, 400, 900)
+
+
+def _within(root: str, path: str) -> bool:
+    """Whether *path* is *root* itself or something under it. Purely lexical."""
+    root, path = os.path.normpath(root), os.path.normpath(path)
+    return path == root or path.startswith(root + os.sep)
+
+
+def agent_environment() -> list[str]:
+    """The environment an agent's shell spawns with: the app's own, plus
+    what makes Claude Code announce its progress to a VTE terminal.
+
+    The CLI (verified on 2.1.220 by reading the bundle) only emits its OSC 9;4
+    progress sequences for terminals it recognizes — ConEmu env vars, ghostty,
+    iTerm2 — and VTE announces itself through none of those, so a stock tab
+    gets no progress at all. Worse, it terminates the sequence with BEL for
+    every terminal but kitty, and VTE deliberately parses only ST-terminated
+    OSC 9;4. Two declarations bridge that:
+
+    - ``ConEmuANSI=ON`` — the announcement ConEmu's own docs define for "this
+      terminal speaks ConEmu's OSC extensions", which OSC 9;4 is. The CLI's
+      terminal-name detection checks VTE_VERSION first, so it still knows it
+      is in a VTE terminal; this flips only the emission gate.
+    - ``TERM_PROGRAM=kitty`` — the sole thing the CLI conditions on kitty is
+      the OSC terminator (ST, the one VTE accepts). TERM is untouched, so
+      terminfo, shell integration, and the tools that probe for real kitty
+      (KITTY_WINDOW_ID, TERM=xterm-kitty) all see an ordinary xterm.
+
+    Both are spoofs of terminal *detection*, not of behaviour, and they fail
+    soft: a CLI update that stops honoring them just stops emitting progress,
+    and the inferred activity sources carry the pole exactly as before.
+    See specs/collins/progress-termprop-activity.md for the full findings.
+    """
+    env = dict(os.environ)
+    env.update(ConEmuANSI="ON", TERM_PROGRAM="kitty")
+    return [f"{k}={v}" for k, v in env.items()]
 
 
 def bracketed_paste(text: str) -> str:
@@ -272,6 +378,27 @@ class SessionHost(Protocol):
         """One tick of the cwd poll: where the agent is working now."""
         ...
 
+    def spawn_shell(self, cwd: str, env: list[str] | None) -> None:
+        """Spawn the user's shell on the pty in *cwd* (*env* the whole
+        environment, or None to inherit), and call `Session.shell_spawned`
+        once it is up — or paint why it isn't. The pty is the host's: it
+        spawns, the session types."""
+        ...
+
+    def sandbox_changed(self) -> None:
+        """The launch settled (or dropped) its sandbox plan: what shows it
+        follows."""
+        ...
+
+    def mark_stale_shells(self) -> None:
+        """A sandbox restart is typing its resume: say so in every sandboxed
+        panel shell still running in the box the session had before."""
+        ...
+
+    def process_exited(self, status: int) -> None:
+        """The shell on the pty exited with *status* (what closes the tab)."""
+        ...
+
 
 class CutSink(Protocol):
     """Where an open-cut lands: the composer that asked for it."""
@@ -309,11 +436,21 @@ class Session:
         cwd: str | None = None,
         jsonl_path: str | Path | None = None,
         progress: bool = True,
+        progress_env: bool = True,
+        sandbox_host: Callable[[], sandboxplan.SandboxHost | None] = lambda: None,
+        sandbox_grants: Callable[[], Any] = lambda: None,
         scheduler: Scheduler | None = None,
     ) -> None:
         """*progress* says whether the terminal parses the agent's own
         progress announcements (VTE's termprop; a VTE too old has none), so
-        whether there is a `ProgressWatch` to feed."""
+        whether there is a `ProgressWatch` to feed; *progress_env* whether
+        the shell spawns with the declarations that coax them out of the CLI
+        (`agent_environment`) — decided at spawn time, so a toggle
+        mid-session can't half-apply to a shell that inherited the other
+        choice. *sandbox_host* and *sandbox_grants* answer the app's
+        sandboxplan.SandboxHost and sandboxgrants.GrantMounts, read at each
+        use (None: every sandboxed decision degrades to an unsandboxed
+        launch that says so, and grants apply at the next restart)."""
         self.provider = provider
         self.pty = pty
         self.screen = screen
@@ -407,6 +544,58 @@ class Session:
         self._follow_pending: str | None = None
         self._follow_ticks = 0
         self._follow_settled: str | None = None
+        # Whether the shells open beside a new-chat screen are owed the offer
+        # to follow the session into its worktree (the tab's
+        # _maybe_offer_shells_follow); a launch that drops its worktree
+        # disarms it.
+        self.shells_follow_armed = False
+
+        # Launching. The command typed into the shell (None for a plain
+        # shell); a `-w` launch still watched for an early failure, and how
+        # many times it has looked (see _check_worktree_launch); the
+        # new-chat screen's prompt waiting for the CLI to take it (see
+        # _new_chat_prompt_tick).
+        self.progress_env = progress_env
+        self.initial_command: str | None = None
+        self.worktree_launch = False
+        self.worktree_launch_ticks = 0
+        self.new_chat_prompt: str | None = None
+        self.new_chat_ticks = 0
+
+        # The sandbox: where the host and the live grants are read from; the
+        # plan file a sandboxed launch typed (sandboxplan.prepare_launch),
+        # unlinked when the shell exits — the box is gone by then; whether
+        # that plan came from another session (a start_session sibling
+        # adopts its parent's, derived for its own directory): a box this
+        # session cannot rebuild by itself, so it never offers the chip's
+        # restart (see can_restart_sandboxed); the box that plan was built
+        # for (sandboxplan.box_dir — the session's own $HOME): the one the
+        # options named, else minted at the first launch and kept across
+        # restarts; whether that box was minted with no grants because the
+        # session could not know whose it would be (a --continue launch):
+        # the window settles what it starts with when the session resolves;
+        # the worktree directory made on the host for a sandboxed `-w`
+        # launch (sandboxplan.reserve_worktree), which its box is narrowed
+        # to — kept across restarts, tidied when the shell exits; and the
+        # chip's restart in flight: its poll's tick count, None while none is.
+        self._sandbox_host = sandbox_host
+        self._sandbox_grants = sandbox_grants
+        self.sandbox_plan_path: str | None = None
+        self.sandbox_plan_adopted = False
+        self.sandbox_box = ""
+        self.sandbox_defaults_owed = False
+        self.reserved_worktree = ""
+        self.restart_ticks: int | None = None
+
+        # The graceful close in flight (see begin_close): whether one is,
+        # its poll's tick count, whether it is a /bg handoff, what forces
+        # the tab shut when a budget runs out, and the ticks since the shell
+        # was told to exit (None until it has been).
+        self.closing = False
+        self._close_ticks = 0
+        self._close_backgrounding = False
+        self._force_close: Callable[[], Any] = lambda: None
+        self._shell_exit_ticks: int | None = None
 
     # -- writing to the pty ---------------------------------------------------
 
@@ -1592,3 +1781,705 @@ class Session:
             return None
         self._follow_settled = cwd
         return scope
+
+    # -- launching ---------------------------------------------------------------
+
+    @property
+    def sandboxed(self) -> bool:
+        """Whether this session's agent runs inside a sandbox — as launched,
+        not as the settings now say. What the /bg and attach guards ask."""
+        return bool(self.options and self.options.sandbox)
+
+    def take_sandbox_defaults_owed(self) -> bool:
+        """Whether this session's box is still owed its first grants — it was
+        minted for a --continue launch, with none — and no longer after
+        this call: the window asks once, when the session resolves."""
+        owed, self.sandbox_defaults_owed = self.sandbox_defaults_owed, False
+        return owed
+
+    def hold_new_chat_prompt(self, prompt: str) -> None:
+        """The new-chat screen's Send handed over *prompt* (or "" for an
+        Empty Session): typed once the CLI is at its input box
+        (`start_new_chat_prompt_poll`)."""
+        self.new_chat_prompt = prompt or None
+        self.new_chat_ticks = 0
+
+    def start_new_chat_prompt_poll(self) -> None:
+        self.scheduler.timeout_add(NEW_CHAT_PROMPT_POLL_MS, self._new_chat_prompt_tick)
+
+    def _new_chat_prompt_tick(self) -> bool:
+        """Wait out the agent's start, then send the screen's prompt.
+
+        Three ways to stop, and only the first sends: the CLI is at an
+        empty input box (`takes_prompt`); the shell has been sitting idle at
+        its own prompt for a while — the agent command exited at once (not
+        installed, refused to start) and no worktree relaunch is still being
+        watched for (`_check_worktree_launch` retypes it in the same shell);
+        or the wait ran out. The two failures stash the prompt as the tab's
+        composer draft (`SessionHost.stash_draft`), where the next composer
+        to open there — or the next visit to this session — gets it back:
+        the text was the user's, and the screen it was typed on is gone.
+        """
+        prompt = self.new_chat_prompt
+        if prompt is None or not self.host.alive():
+            return GLib.SOURCE_REMOVE
+        self.new_chat_ticks += 1
+        if self.takes_prompt():
+            self.new_chat_prompt = None
+            self.inject_prompt(prompt)
+            return GLib.SOURCE_REMOVE
+        idle_shell = (
+            self.new_chat_ticks >= NEW_CHAT_IDLE_SHELL_TICKS
+            and self.pty.child_pid() is not None
+            and not self.worktree_launch
+            and not self.has_running_command()
+        )
+        if not idle_shell and self.new_chat_ticks < NEW_CHAT_PROMPT_TICKS:
+            return GLib.SOURCE_CONTINUE
+        self.new_chat_prompt = None
+        self.host.paint(_("the agent didn't start — your prompt is kept in the composer"))
+        self.host.stash_draft(prompt)
+        return GLib.SOURCE_REMOVE
+
+    def spawn(self, cwd: str | None, session_id: str | None) -> None:
+        """Start the user's shell in *cwd* with the agent command typed in:
+        the resume of *session_id*, or a fresh session.
+
+        A resumed session whose worktree the CLI reaped when it last exited
+        (it deletes untouched ones) gets the worktree back first: resuming
+        without it would relocate the session out of the worktree for good —
+        it re-enters one it can still find, wherever the shell starts."""
+        if session_id is not None:
+            state = recreatable_worktree(self.transcript.path, cwd or "")
+            if state is not None:
+                # Recreate it first — same path, branch, base commit — so the
+                # resume lands back where the session left off. Off the main
+                # loop: `worktree add` checks out a whole working tree.
+                # Until it finishes, readers see the worktree cwd and no
+                # initial command, same as a tab whose shell hasn't spawned.
+                worktree = str(state["worktreePath"])
+                self.cwd = worktree
+                self.initial_command = None
+                self.host.paint(_("recreating removed worktree {path}").format(path=worktree))
+
+                def recreate() -> None:
+                    if not recreate_worktree(state):
+                        # An emptied directory a box left behind reads as
+                        # reaped too, and is still there: gone, so that the
+                        # fallback below sees a worktree that isn't.
+                        sandboxplan.release_worktree(worktree)
+                    # Back to the directory the tab was handed once it exists
+                    # again — an agent that had moved into a subdirectory of
+                    # the worktree resumes there — and to the worktree itself
+                    # for a tab handed somewhere outside it (the repository
+                    # root a session started in before entering the worktree).
+                    # _finish_spawn re-checks the directory; on failure it
+                    # falls back with its usual warning.
+                    inside = cwd is not None and _within(worktree, cwd) and Path(cwd).is_dir()
+                    self.scheduler.idle_add(
+                        self._finish_spawn, cwd if inside else worktree, session_id
+                    )
+
+                self.scheduler.background(recreate)
+                return
+        self._finish_spawn(cwd, session_id)
+
+    def _finish_spawn(self, cwd: str | None, session_id: str | None) -> None:
+        if cwd is None or not Path(cwd).is_dir():
+            if cwd is not None:
+                # A worktree that couldn't be put back still belongs to a
+                # repository: start there rather than in HOME, which is where
+                # the CLI relocates the session anyway.
+                root = worktree_project_root(cwd)
+                fallback = root if root and Path(root).is_dir() else str(Path.home())
+                self.host.paint(
+                    _("warning: project dir {cwd} no longer exists, starting in {fallback}").format(
+                        cwd=cwd, fallback=fallback
+                    )
+                )
+                cwd = fallback
+            else:
+                cwd = str(Path.home())
+        self.cwd = cwd
+
+        # Run the user's interactive shell and type the agent command into it,
+        # so aliases/env apply and the tab drops to a prompt when the agent exits.
+        # The tab closes when the *shell* exits.
+        self.initial_command = None
+        command = self._launch_command(cwd, session_id)
+        if command is None:
+            self.host.paint(
+                _("warning: `{cli}` not found in PATH — starting a plain shell").format(
+                    cli=self.provider.cli
+                )
+            )
+        else:
+            self.initial_command = command
+            # A fresh launch that asked for a worktree is the one launch that
+            # can die before the agent ever draws a frame, and the session is
+            # what notices (see _check_worktree_launch). Resumes and command
+            # overrides don't cut worktrees, so they have nothing to watch.
+            self.worktree_launch = (
+                session_id is None
+                and self.command_override is None
+                and bool(self.options and self.options.worktree)
+            )
+        # Inherit, plus the progress-OSC coaxing — unless the experimental
+        # setting is off, in which case a plain inherited environment.
+        self.host.spawn_shell(cwd, agent_environment() if self.progress_env else None)
+
+    def shell_spawned(self) -> None:
+        """The shell is up on the pty (its pid is the pty's now): type the
+        agent command, and start watching a worktree launch."""
+        if self.initial_command:
+            self.write_text(f"{self.initial_command}\n")
+        if self.worktree_launch:
+            self.worktree_launch_ticks = 0
+            self.scheduler.timeout_add(WORKTREE_LAUNCH_POLL_MS, self._check_worktree_launch)
+
+    def _check_worktree_launch(self) -> bool:
+        """Catch a worktree launch that never started, and start the session
+        without the worktree instead.
+
+        `claude -w` cuts the worktree before it starts a session, and when it
+        can't it prints one line and exits (see
+        Provider.worktree_launch_failed). Nothing downstream notices: the
+        shell is alive, so the tab stays open; no session is ever created, so
+        the transcript resolver polls on forever and the sidebar keeps a "New
+        Thread" placeholder that never resolves. All the user sees is a shell
+        prompt where their session should be.
+
+        The fallback is the session they asked for, minus the part that
+        failed: the same command in the same directory, without the worktree
+        flag. It is typed into the same shell, visibly, so what happened
+        reads off the terminal itself.
+
+        Two things have to be true before anything is typed: the error is on
+        screen, and the CLI is not running. The second is what makes a false
+        positive harmless — a screen that merely quotes the error while an
+        agent is up (its own scrollback discussing this very code, say) is
+        never typed into.
+        """
+        if not self.host.alive() or not self.worktree_launch:
+            return GLib.SOURCE_REMOVE
+        self.worktree_launch_ticks += 1
+        if self.worktree_launch_ticks > WORKTREE_LAUNCH_POLL_TICKS:
+            self.worktree_launch = False  # long since up; nothing failed
+            return GLib.SOURCE_REMOVE
+        if not self.provider.worktree_launch_failed(self.visible_screen_text()):
+            return GLib.SOURCE_CONTINUE
+        if self.agent_is_running():
+            return GLib.SOURCE_CONTINUE
+        self.worktree_launch = False
+        self.relaunch_without_worktree()
+        return GLib.SOURCE_REMOVE
+
+    def relaunch_without_worktree(self) -> None:
+        """Type the same new-session command again with the worktree dropped.
+        The session's own options lose the flag too, so anything that later
+        asks what this session was started with is told what actually ran.
+
+        A sandboxed launch that was narrowed to the worktree gets a box
+        built again first: the one it has holds the checkout read-only,
+        which is no place to start a session in."""
+        narrowed = self._drop_reserved_worktree()
+        self.shells_follow_armed = False  # no worktree to follow into
+        if narrowed and self.options is not None and self.options.sandbox:
+            self._unregister_sandbox_box(
+                lambda: self.scheduler.idle_add(
+                    self._type_without_worktree, True, priority=GLib.PRIORITY_DEFAULT
+                )
+            )
+            return
+        self._type_without_worktree(False)
+
+    def _drop_reserved_worktree(self) -> bool:
+        """Forget the worktree this launch asked for — the flag, the name
+        and the reserved directory, which is tidied off the main loop — and
+        say whether one had been reserved."""
+        if self.options is not None:
+            self.options = replace(self.options, worktree=False, worktree_name="")
+        reserved, self.reserved_worktree = self.reserved_worktree, ""
+        if reserved:
+            self.scheduler.background(sandboxplan.retire_worktree, reserved)
+        return bool(reserved)
+
+    def _type_without_worktree(self, rebuild: bool) -> bool:
+        if not self.host.alive():
+            return GLib.SOURCE_REMOVE
+        if rebuild:
+            self.options = self._sandbox_options(self.cwd or str(Path.home()), fresh=True)
+            self.host.sandbox_changed()
+        command = self.provider.new_command(self.options)
+        if command is None:  # the CLI vanished from PATH between the two launches
+            return GLib.SOURCE_REMOVE
+        self.host.paint(
+            _("couldn't create a worktree — starting the session in {cwd} instead").format(
+                cwd=display_path(self.cwd or "")
+            )
+        )
+        self.initial_command = command
+        self.write_text(f"{command}\n")
+        return GLib.SOURCE_REMOVE
+
+    def _launch_command(self, cwd: str, session_id: str | None, restart: bool = False) -> str | None:
+        """The agent command to type into the shell for a launch in *cwd*:
+        the command override (a --continue, or a check script's stand-in),
+        the resume for *session_id*, or a fresh start — with the sandbox
+        settled first, since the plan is a function of the settled cwd (a
+        recreated worktree included) and is written here, at the last
+        moment. None with no CLI.
+
+        *restart* turns the first two around: a --continue session that has
+        since resolved its id resumes *that* session rather than whatever
+        is newest in the directory now. Only the sandbox restart passes it;
+        an initial spawn honours the override it was handed."""
+        if self.options is not None and self.options.sandbox:
+            fresh = session_id is None and self.command_override is None
+            self.options = self._sandbox_options(cwd, fresh=fresh)
+        self.host.sandbox_changed()
+        resume_first = restart and session_id is not None
+        if self.command_override is not None and not resume_first:
+            # The wrapper in front, and the flags an existing conversation
+            # takes from the settled options (the permission mode) behind —
+            # settled, so a box that couldn't be built never leaves a
+            # bypass flag typed.
+            return (
+                self.provider.sandbox_prefix(self.options)
+                + self.command_override
+                + self.provider.session_flags(self.options)
+            )
+        if session_id is not None:
+            return self.provider.resume_command(session_id, fork=self.fork, options=self.options)
+        return self.provider.new_command(self.options)
+
+    # -- the sandbox ------------------------------------------------------------
+
+    def can_restart_sandboxed(self) -> bool:
+        """Whether *Restart to apply* is on offer: a sandboxed session with a
+        conversation to resume and a box of its own to rebuild.
+
+        Never a fork, whose own id the session doesn't hold (a resume would
+        fork the origin a second time). Never before the session knows what
+        to resume — a session whose id the transcript resolver hasn't bound
+        yet would be *replaced* by a fresh one, not restarted. And never
+        for a session running a plan derived from another session's (a
+        start_session sibling): the box it holds was built for its
+        parent's workspace, and a restart rebuilds for this session's own
+        cwd, which would silently narrow it."""
+        return (
+            self.sandboxed
+            and not self.fork
+            and not self.sandbox_plan_adopted
+            and (self.session_id is not None or self.command_override is not None)
+            and self.restart_ticks is None
+        )
+
+    def restart_sandboxed(self) -> bool:
+        """The footer chip's *Restart to apply*: ask the CLI to exit
+        (its Ctrl+C Ctrl+C), and once the shell has the terminal back,
+        resume this session in it with a plan rebuilt from the state now —
+        the grants added or removed, the shares flipped since the launch.
+        The same shell, the same tab, the same row: only the box changes.
+        False when nothing can be restarted (an unsandboxed session, a
+        fork, one already restarting)."""
+        if not self.can_restart_sandboxed():
+            return False
+        self.restart_ticks = 0
+        if self.has_running_command():
+            exit_text = self.provider.graceful_exit()
+            if exit_text:
+                self.write_text(exit_text)
+        self.scheduler.timeout_add(RESTART_POLL_MS, self._poll_restart)
+        return True
+
+    def _poll_restart(self) -> bool:
+        if not self.host.alive() or self.restart_ticks is None:
+            self.restart_ticks = None
+            return GLib.SOURCE_REMOVE
+        self.restart_ticks += 1
+        if self.has_running_command():
+            accept = self.worktree_exit_prompt_keystrokes()
+            if accept:
+                # The exit landed on the CLI's "keep or remove this
+                # worktree?" dialog: keep, as the window's close does.
+                self.write_text(accept)
+            elif self.restart_ticks in RESTART_NUDGE_TICKS:
+                # A mid-turn agent spends the first ask interrupting itself.
+                exit_text = self.provider.graceful_exit()
+                if exit_text:
+                    self.write_text(exit_text)
+            if self.restart_ticks >= RESTART_GIVE_UP_TICKS:
+                self.restart_ticks = None
+                self.host.paint(
+                    _("the session didn't exit, so the sandbox wasn't restarted — "
+                      "exit it and resume it yourself to apply the change")
+                )
+                return GLib.SOURCE_REMOVE
+            return GLib.SOURCE_CONTINUE
+        # The shell has the terminal back. What was mounted into the old
+        # box goes first — the next plan is prepared in a home with its
+        # links gone — and that is the grants' worker's job, not the main
+        # loop's: a bindfs server a process inside still held a file of
+        # takes seconds to end. The relaunch lands when it is done;
+        # restart_ticks stays set meanwhile, so no second restart starts.
+        self._unregister_sandbox_box(
+            lambda: self.scheduler.idle_add(
+                self._relaunch_sandboxed, priority=GLib.PRIORITY_DEFAULT
+            )
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _relaunch_sandboxed(self) -> bool:
+        if not self.host.alive() or self.restart_ticks is None:
+            self.restart_ticks = None
+            return GLib.SOURCE_REMOVE
+        state = (
+            recreatable_worktree(self.transcript.path, self.reserved_worktree)
+            if self.reserved_worktree
+            else None
+        )
+        if state is not None and state.get("worktreePath") == self.reserved_worktree:
+            # The CLI reaped the worktree as it exited (an untouched one
+            # goes without a question), and the resume would leave the
+            # session in the checkout, which this box holds read-only. Put
+            # it back first, as a resume from the sidebar does (spawn) —
+            # off the main loop, and restart_ticks stays set meanwhile.
+            self.host.paint(
+                _("recreating removed worktree {path}").format(
+                    path=display_path(self.reserved_worktree)
+                )
+            )
+
+            def recreate() -> None:
+                lost = not recreate_worktree(state)
+                self.scheduler.idle_add(
+                    self._type_restart, lost, priority=GLib.PRIORITY_DEFAULT
+                )
+
+            self.scheduler.background(recreate)
+            return GLib.SOURCE_REMOVE
+        return self._type_restart()
+
+    def _type_restart(self, lost: bool = False) -> bool:
+        """Type the resume. *lost* is a reaped worktree that couldn't be
+        put back: the box is built as it was all the same — around the
+        directory, which the plan makes again, with the checkout read-only
+        — and says what the session is about to find. Never around the
+        checkout instead: a restart doesn't widen what a session can
+        write."""
+        if not self.host.alive() or self.restart_ticks is None:
+            self.restart_ticks = None
+            return GLib.SOURCE_REMOVE
+        self.restart_ticks = None
+        if lost:
+            self.host.paint(
+                _("warning: the worktree {path} couldn't be recreated — it is empty, "
+                  "and the repository is read-only inside the sandbox").format(
+                    path=display_path(self.reserved_worktree)
+                )
+            )
+        # The launch cwd, not the agent's last one: a resume re-enters a
+        # worktree the transcript records by itself, and the CLI has to
+        # start where it was launched — the checkout — to find it. A
+        # launch narrowed to its worktree binds that worktree again
+        # (_sandbox_options); any other has it inside its workspace.
+        command = self._launch_command(self.cwd or str(Path.home()), self.session_id, restart=True)
+        if command is None:
+            return GLib.SOURCE_REMOVE
+        self.host.mark_stale_shells()
+        self.host.paint(_("restarting the session with the sandbox's new plan"))
+        self.initial_command = command
+        self.write_text(f"{command}\n")
+        return GLib.SOURCE_REMOVE
+
+    def _sandbox_options(self, cwd: str, fresh: bool = False):
+        """The launch options with the sandbox plan written for *cwd* — or,
+        when no box can be built here (bubblewrap missing, a refused
+        workspace), the same options with the sandbox dropped: an
+        unsandboxed launch that says so on screen, and never one that keeps
+        a bypass mode the box was the justification for.
+
+        *fresh* is a new session's launch, the one that can ask the CLI
+        for a worktree: the session reserves the directory first, so the
+        box is narrowed to it (_reserve_worktree)."""
+        options = self.options
+        host = self._sandbox_host()
+        if options.sandbox_plan and options.sandbox_plan != self.sandbox_plan_path:
+            # A plan settled by the caller — a sibling spawned from inside
+            # a sandboxed session inherits its parent's exact box
+            # (sandboxplan.derive_plan) rather than one built from the
+            # settings now. Adopted: this session releases it when its
+            # shell exits, like one it wrote itself.
+            self._release_sandbox_plan()
+            if os.path.isfile(options.sandbox_plan):
+                self.sandbox_plan_path = options.sandbox_plan
+                self.sandbox_plan_adopted = True
+                # The box the deriver minted and holds for this session
+                # (SandboxHost.derive): released with the plan.
+                self.sandbox_box = options.sandbox_box
+                self._register_sandbox_box()
+                return options
+            if options.sandbox_box and host is not None:
+                # The deriver's hold, with no plan left to adopt: the
+                # launch below takes this session's own.
+                host.release(options.sandbox_box)
+        self._release_sandbox_plan()
+        if fresh and options.worktree and host is not None:
+            options = self._reserve_worktree(cwd, options)
+        elif self.reserved_worktree:
+            # A restart: the worktree the session has, made again if it is
+            # gone — a bind needs a source. One that can't be leaves the
+            # box with the checkout read-only, never with it writable.
+            name = os.path.basename(self.reserved_worktree)
+            if sandboxplan.reserve_worktree(cwd, name) is None:
+                self.host.paint(
+                    _("warning: the worktree {path} can't be put in the sandbox — "
+                      "the repository is read-only inside it").format(
+                        path=display_path(self.reserved_worktree)
+                    )
+                )
+        worktree = self.reserved_worktree
+        # The session's own box, else the one this session already launched
+        # in (a restart keeps the home), else a fresh one — which starts with
+        # its project's default grants, unless this is a --continue launch:
+        # that one can't know which session it will land on, and takes its
+        # grants when it resolves (MainWindow._on_session_resolved).
+        box = options.sandbox_box or self.sandbox_box
+        if not box and host is not None:
+            seeded = self.command_override is None
+            # Seeded against what the session can write: a default inside
+            # the checkout is not "already inside" a worktree's box.
+            box = host.mint_box(worktree or cwd, seed=seeded)
+            self.sandbox_defaults_owed = not seeded
+        plan = host.prepare_launch(cwd, box, worktree=worktree) if host is not None else None
+        if plan:
+            self.sandbox_plan_path = plan
+            self.sandbox_plan_adopted = False
+            self.sandbox_box = box
+            self._register_sandbox_box()
+            return replace(options, sandbox_plan=plan, sandbox_box=box)
+        if host is not None:
+            # Whatever the attempt left, on disk and of grants, unless a
+            # session names the box.
+            host.forget_box(box)
+        self.sandbox_box = ""
+        self.sandbox_defaults_owed = False
+        self.host.paint(
+            _("warning: no sandbox could be built here — starting the session unsandboxed")
+        )
+        mode = "" if options.permission_mode == "bypassPermissions" else options.permission_mode
+        return replace(
+            options, sandbox=False, sandbox_plan="", sandbox_box="", permission_mode=mode
+        )
+
+    def _reserve_worktree(self, cwd: str, options):
+        """*options* for a sandboxed launch that asks the CLI for a
+        worktree, with the worktree settled first: the CLI makes it after
+        it has started, inside the box, and a box binds only what is there
+        when it is built. So the session picks the name and makes the
+        directory, and the box holds that one worktree read-write and the
+        checkout read-only.
+
+        Where the launch is in a repository's main checkout and the
+        directory can't be made, the session starts without a worktree
+        and says so — never in a box that holds the whole repository
+        writable for the sake of a worktree. Anywhere else (a checkout
+        that is itself a linked worktree) the launch is as it was."""
+        if sandboxplan.worktree_base(os.path.realpath(cwd)) is None:
+            return options
+        reserved = sandboxplan.reserve_worktree(cwd)
+        if reserved is None:
+            self.shells_follow_armed = False
+            self.host.paint(
+                _("couldn't create a worktree — starting the session in {cwd} instead").format(
+                    cwd=display_path(cwd)
+                )
+            )
+            return replace(options, worktree=False, worktree_name="")
+        name, self.reserved_worktree = reserved
+        return replace(options, worktree_name=name)
+
+    def _register_sandbox_box(self) -> None:
+        """Tell the live grants this session's box is up on the plan just
+        settled, so what this session is allowed from here on reaches it
+        while it runs. The registration lasts as long as the plan path —
+        past the CLI's exit, while the shell lives — since a sandboxed
+        panel shell binds the same home and carrier."""
+        grants = self._sandbox_grants()
+        if grants is not None:
+            grants.register(sandboxplan.load_plan(self.sandbox_plan_path))
+
+    def _unregister_sandbox_box(self, then: Callable[[], Any]) -> None:
+        """Have what was mounted into this session's box while it ran
+        unmounted, and call *then()* once it is — on the grants' worker
+        thread, or here and now when there is nothing to unmount. Never
+        waits: the main loop goes on, and *then* lands itself where it needs
+        to be."""
+        grants = self._sandbox_grants()
+        if grants is None or not self.sandbox_box:
+            then()
+            return
+        grants.unregister(self.sandbox_box, done=lambda _gone: then())
+
+    def _release_sandbox_plan(self) -> None:
+        """Let go of the plan file, of what was mounted into the box while
+        it ran, and of the box's lease — before a launch builds the next
+        plan. The box id stays: a restart launches in the same home.
+
+        Both callers that can have anything mounted — the restart and the
+        shell's exit — unregister the box first and come here from its
+        callback (_unregister_sandbox_box), so the wait below is for a box
+        that is already unknown and returns at once. It stays as the
+        guarantee that no plan is prepared over a box still registered."""
+        if self.sandbox_plan_path is not None and self.sandbox_box:
+            grants = self._sandbox_grants()
+            if grants is not None:
+                grants.unregister(self.sandbox_box, wait=True)
+            host = self._sandbox_host()
+            if host is not None:
+                host.release(self.sandbox_box)
+        sandboxplan.release_plan(self.sandbox_plan_path)
+        self.sandbox_plan_path = None
+
+    def shell_exited(self, status: int) -> None:
+        """The shell is gone, and the box with it (--die-with-parent). What
+        was mounted into it goes on the grants' worker, and the rest
+        follows from there: the main loop waits for none of it. Then the
+        tab hears the exit (`SessionHost.process_exited`)."""
+        box, host = self.sandbox_box, self._sandbox_host()
+        held = self.sandbox_plan_path is not None and bool(box)
+        sandboxplan.release_plan(self.sandbox_plan_path)
+        self.sandbox_plan_path = None
+        if self.reserved_worktree:
+            # What the CLI's own removal of the worktree couldn't finish
+            # from inside the box: the emptied directory, and its branch.
+            # A worktree with anything in it is left as it is.
+            self.scheduler.background(sandboxplan.retire_worktree, self.reserved_worktree)
+
+        def gone() -> bool:
+            if host is not None and box:
+                if held:
+                    host.release(box)
+                # Nothing happens to a box a session names. This forgets
+                # the box of a launch that never produced a transcript,
+                # and of a fork whose id never resolved — its grants with
+                # it — once nothing is mounted in it: a box with a mount
+                # under it is never removed.
+                host.forget_box(box)
+            return GLib.SOURCE_REMOVE
+
+        # On the main loop, where the state is written: the grants' worker
+        # only says when.
+        self._unregister_sandbox_box(
+            lambda: self.scheduler.idle_add(gone, priority=GLib.PRIORITY_DEFAULT)
+        )
+        self.host.process_exited(status)
+
+    # -- closing ----------------------------------------------------------------
+
+    def begin_close(
+        self, exit_text: str, backgrounding: bool, force_close: Callable[[], Any]
+    ) -> None:
+        """The graceful close, once the window has settled how: feed
+        *exit_text* (the provider's exit, or its /bg when *backgrounding*)
+        and poll until the shell — and with it the tab — is gone, calling
+        *force_close* when a budget runs out.
+
+        Raw keystrokes, exactly as the provider spells them: a control byte
+        for Claude's Ctrl+C Ctrl+C, and for a typed command like /bg the
+        Enter that submits it — carriage return in a raw-mode TUI, not
+        newline. A plain exit gets a short budget — the user already said to
+        end the session, so a CLI that hasn't gone by then gets terminated
+        rather than holding the tab (or a quit) hostage. A /bg handoff keeps
+        a much longer one: forking the background agent takes real time, and
+        force-closing mid-handoff risks stranding it.
+
+        The window calls `end_close` when the page finally goes, which is
+        what stops the poll."""
+        self.closing = True
+        self._close_ticks = 0
+        self._close_backgrounding = backgrounding
+        self._force_close = force_close
+        self.write_text(exit_text)
+        self.scheduler.timeout_add(CLOSE_POLL_MS, self._poll_close)
+
+    def end_close(self) -> None:
+        """The page this session's tab sat in is closed: no poll goes on."""
+        self.closing = False
+        self._shell_exit_ticks = None
+
+    def _poll_close(self) -> bool:
+        if not self.closing:
+            return GLib.SOURCE_REMOVE  # already closed
+        # Once the shell has been told to exit the CLI is behind us for good:
+        # keep taking this branch rather than dropping back into the nudges
+        # below, which would aim a CLI's exit keystroke at a bare shell.
+        if self._shell_exit_ticks is not None or not self.has_running_command():
+            return self._poll_shell_exit()
+        self._close_ticks += 1
+        backgrounding = self._close_backgrounding
+        accept = self.worktree_exit_prompt_keystrokes()
+        if accept:
+            # Ctrl+C Ctrl+C landed on Claude's own "keep or remove this
+            # worktree?" dialog rather than exiting outright. Answer it —
+            # "keep", its default and first item, since a close initiated by
+            # closing the tab is never a signal to throw the worktree away —
+            # instead of re-nudging with more Ctrl+C below, which the dialog
+            # would read as a menu keystroke, not the exit it means at the
+            # terminal prompt.
+            self.write_text(accept)
+        # One ask doesn't always land. A mid-turn agent spends the first
+        # Ctrl+C Ctrl+C interrupting itself and clearing its input box rather
+        # than exiting, and /bg sometimes drops the CLI to its session-list
+        # screen instead (seen with tabs attached to a detached session) —
+        # either would hang the close until the force-close below. A CLI still
+        # owning the terminal this long after being asked to leave is the
+        # tell: ask again — early enough on the exit path to still beat its
+        # shorter force-close budget. Safe for a merely-slow exit too — the
+        # extra input queues behind the pending command and is discarded when
+        # the CLI exits.
+        elif self._close_ticks in (BG_NUDGE_TICKS if backgrounding else EXIT_NUDGE_TICKS):
+            self.nudge_exit()
+        if self._close_ticks >= (BG_FORCE_TICKS if backgrounding else EXIT_FORCE_TICKS):
+            self._force_close()
+            return GLib.SOURCE_REMOVE
+        return GLib.SOURCE_CONTINUE
+
+    def _poll_shell_exit(self) -> bool:
+        """The CLI is gone and the shell has the terminal back. Ending that
+        shell is what closes the tab, so ask it to exit — once — and hold
+        the poll open until it does.
+
+        The exit goes through shellinput.shell_command, which clears the
+        shell's input line first: the shell can inherit input the CLI never
+        read, and a bare "exit" landing on top of it joins into one unknown
+        command (``35;3;25Mexit``, from a real close) that the shell survives,
+        stranding the tab on a terminal full of "command not found". See
+        shellinput for the whole of the reasoning, the queued mouse reports
+        that cause it, and why the reset carries a leading space.
+
+        A shell that still hasn't gone by SHELL_EXIT_TICKS gets force-closed
+        rather than left behind: input can always arrive after the line reset
+        too, and this poll is the last thing watching the tab."""
+        ticks = self._shell_exit_ticks or 0
+        if ticks == 0:
+            # the shell's exit closes the tab
+            self.write_text(shell_command("exit\r"))
+        elif ticks >= SHELL_EXIT_TICKS:
+            log.info("close: shell ignored its exit; force-closing the tab")
+            self._force_close()
+            return GLib.SOURCE_REMOVE
+        self._shell_exit_ticks = ticks + 1
+        return GLib.SOURCE_CONTINUE
+
+    def nudge_exit(self) -> None:
+        """The CLI was asked to leave (by its exit keystroke or /bg) yet still
+        owns the terminal — typically parked on its session-list screen.
+        Feed the exit keystroke to dismiss it so a pending close can finish.
+        A no-op when the CLI already exited (then the keystroke would only
+        reach the shell, which the close is about to end anyway)."""
+        if self.host.alive() and self.has_running_command():
+            exit_text = self.provider.graceful_exit()
+            if exit_text:
+                self.write_text(exit_text)
