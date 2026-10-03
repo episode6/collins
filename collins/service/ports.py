@@ -116,5 +116,8 @@ class ScreenPort(Protocol):
         remove this worktree?" dialog are matched against this text
         (providers.ClaudeProvider.worktree_launch_failed /
         worktree_exit_prompt), and rows re-joined with newlines would split
-        a wrapped line the matchers read whole."""
+        a wrapped line the matchers read whole. A screen model without
+        reflow implements it by joining rows on their per-row wrap flags
+        (termscreen keeps one per row): a wrapped row joins the next with
+        nothing, any other with a newline."""
         ...

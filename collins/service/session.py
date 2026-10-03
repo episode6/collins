@@ -307,7 +307,28 @@ class GLibScheduler:
 
 
 class SessionHost(Protocol):
-    """What a Session tells its tab, and the few things it asks of it."""
+    """What a Session tells its tab, and the few things it asks of it.
+
+    The surface sorts into three kinds, which is how it splits when the
+    session moves into the service (spec §3.5 swaps 2 and 3, PR-1.7 and
+    PR-1.10):
+
+    - Facts about the client, which the service will need handed in as
+      request fields: `composer_open` (read in `_post_switch` to pick the
+      "type straight in" path; it will ride the `switch` request) and
+      `mapped` (gates the cwd poll and the resolver's background budget;
+      headless, every pty counts as mapped, per §3.6). `alive` is the
+      session's own lifetime there, not a client fact.
+    - Reactions that become events to the active client: `refocus_composer`,
+      `resend_composed`, `stash_draft`, `focus_terminal`, `paint`,
+      `transcript_landed`, `session_resolved`, `fork_resolved`,
+      `cwd_polled`, `sandbox_changed`, `mark_stale_shells`,
+      `process_exited` (and `transcript_reset`, `transcript_landed`'s
+      twin).
+    - Things the service itself will do: `spawn_shell` (becomes
+      `PtyServer.spawn`) and `shown_prs` (service state: the PRs shown are
+      the ones the service last handed out).
+    """
 
     def alive(self) -> bool:
         """Whether the tab is still in a window — False once it has been
@@ -1876,6 +1897,8 @@ class Session:
                     # _finish_spawn re-checks the directory; on failure it
                     # falls back with its usual warning.
                     inside = cwd is not None and _within(worktree, cwd) and Path(cwd).is_dir()
+                    # Default-idle as in the base, though it advances the
+                    # spawn; PR-1.7 rewrites this path at PRIORITY_DEFAULT.
                     self.scheduler.idle_add(
                         self._finish_spawn, cwd if inside else worktree, session_id
                     )
