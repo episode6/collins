@@ -11,6 +11,7 @@ main loop is `FakeScheduler`, whose clock the test advances by hand.
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -40,8 +41,10 @@ class FakeScheduler:
 
     def __init__(self) -> None:
         self.now = 0
+        self.wall = 1_000_000.0  # what time() answers: seconds, set by hand
         self._seq = 0
         self._queue: list[tuple[int, int, int, object, tuple]] = []
+        self.monitors: dict[str, object] = {}
 
     def timeout_add(self, ms, fn, *args):
         self._seq += 1
@@ -53,6 +56,22 @@ class FakeScheduler:
 
     def background(self, fn, *args):
         fn(*args)
+
+    def time(self):
+        return self.wall
+
+    def monitor_file(self, path, on_changed):
+        scheduler = self
+
+        class Monitor:
+            cancelled = False
+
+            def cancel(self):
+                self.cancelled = True
+                scheduler.monitors.pop(path, None)
+
+        self.monitors[path] = on_changed
+        return Monitor()
 
     def pending(self) -> int:
         return len(self._queue)
@@ -197,6 +216,12 @@ class FakeHost:
         self.is_alive = True
         self.composer_is_open = False
         self.stashed: list[str] = []
+        self.is_mapped = True
+        self.chips: list = []
+        self.landed: list[tuple] = []
+        self.resolved: list[str] = []
+        self.forks: list[str] = []
+        self.cwds: list = []
 
     def alive(self):
         return self.is_alive
@@ -218,6 +243,29 @@ class FakeHost:
 
     def stash_draft(self, text):
         self.stashed.append(text)
+
+    def mapped(self):
+        return self.is_mapped
+
+    def shown_prs(self):
+        return self.chips
+
+    def transcript_reset(self):
+        self.events.append(("reset",))
+        self.chips = []
+
+    def transcript_landed(self, prs, lookup_empty):
+        self.landed.append((list(prs), lookup_empty))
+        self.chips = list(prs)
+
+    def session_resolved(self, session_id):
+        self.resolved.append(session_id)
+
+    def fork_resolved(self, session_id):
+        self.forks.append(session_id)
+
+    def cwd_polled(self, cwd):
+        self.cwds.append(cwd)
 
     def painted(self) -> list[str]:
         return [e[1] for e in self.events if e[0] == "paint"]
@@ -663,3 +711,297 @@ def test_a_folded_paste_back_is_recorded_and_cut_back_whole(rig):
     assert sink.seeded == [draft]
     assert session.pasted_back == {}
     assert term.box == ""
+
+
+# -- the transcript resolver --------------------------------------------------------
+
+
+class DirClaude(ClaudeProvider):
+    """Claude Code with its transcripts read from plain directories: one per
+    cwd, under *root*, named as the CLI names them."""
+
+    def __init__(self, root) -> None:
+        self.root = root
+
+    def _dir(self, cwd):
+        return self.root / cwd.strip("/").replace("/", "-")
+
+    def transcripts_for_cwd(self, cwd):
+        directory = self._dir(cwd)
+        return sorted(directory.glob("*.jsonl")) if directory.is_dir() else []
+
+    def write(self, cwd, name, mtime=None):
+        directory = self._dir(cwd)
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{name}.jsonl"
+        path.write_text("")
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        return path
+
+
+@pytest.fixture
+def resolving(agent, tmp_path, monkeypatch):
+    """A fresh session (no id) over a DirClaude provider, its transcript
+    tail kept off the disk's real update thread."""
+    provider = DirClaude(tmp_path)
+    term = FakeTerminal()
+    host = FakeHost()
+    clock = FakeScheduler()
+    monkeypatch.setattr(session_mod.proctree, "process_cwd", lambda pid: None)
+    session = Session(provider=provider, pty=term, screen=term, host=host, scheduler=clock)
+    return session, provider, host, clock
+
+
+def test_a_fresh_session_binds_to_the_transcript_it_writes(resolving):
+    session, provider, host, clock = resolving
+    provider.write("/proj", "old-session")
+    session.start_resolver("/proj")
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert host.resolved == []  # the one already there is somebody else's
+    path = provider.write("/proj", "new-session")
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert host.resolved == ["new-session"]
+    assert session.session_id == "new-session"
+    assert session.transcript_path == str(path)
+    pending = clock.pending()
+    clock.advance(session_mod.RESOLVER_POLL_MS * 3)
+    assert host.resolved == ["new-session"]  # resolved once, and the poll is gone
+    assert clock.pending() <= pending
+
+
+def test_a_continue_adopts_the_newest_existing_transcript(resolving):
+    session, provider, host, clock = resolving
+    session.command_override = "claude --continue"
+    provider.write("/proj", "older", mtime=1000)
+    provider.write("/proj", "newest", mtime=2000)
+    session.start_resolver("/proj")
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert host.resolved == ["newest"]
+
+
+def test_a_sandboxed_fork_reports_its_id_and_stays_bound(resolving):
+    session, provider, host, clock = resolving
+    session.session_id = "original"
+    session.fork = True
+    session.fork_resolve = True
+    session.start_resolver("/proj")
+    provider.write("/proj", "the-fork")
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert host.forks == ["the-fork"]
+    assert host.resolved == []
+    assert session.session_id == "original"
+    assert session.transcript_path is None
+
+
+def test_a_resolved_session_never_arms(resolving):
+    session, provider, host, clock = resolving
+    session.session_id = "known"
+    session.start_resolver("/proj")
+    assert clock.pending() == 0
+
+
+def test_a_background_tab_pauses_and_resumes_on_map(resolving):
+    session, provider, host, clock = resolving
+    host.is_mapped = False
+    session.start_resolver("/proj")
+    clock.advance(session_mod.RESOLVER_POLL_MS * (session_mod.RESOLVER_BACKGROUND_TICKS + 1))
+    assert clock.pending() == 0  # paused
+    provider.write("/proj", "arrived-meanwhile")
+    session.arm_resolver()  # the tab is shown again
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    # Re-arming re-baselines: what appeared during the pause is not ours.
+    assert host.resolved == []
+    provider.write("/proj", "ours")
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert host.resolved == ["ours"]
+
+
+def test_a_foreground_tab_polls_on(resolving):
+    session, provider, host, clock = resolving
+    session.start_resolver("/proj")
+    clock.advance(session_mod.RESOLVER_POLL_MS * (session_mod.RESOLVER_BACKGROUND_TICKS + 5))
+    assert clock.pending() == 1
+
+
+def test_a_closed_tab_stops_resolving(resolving):
+    session, provider, host, clock = resolving
+    session.start_resolver("/proj")
+    host.is_alive = False
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert clock.pending() == 0
+
+
+def test_the_resolver_follows_into_a_worktree_but_not_into_its_past(
+    resolving, agent, monkeypatch
+):
+    session, provider, host, clock = resolving
+    worktree = "/proj/.claude/worktrees/w1"
+    monkeypatch.setattr(
+        session_mod.proctree, "agent_descendant_cwd", lambda pid, cli: worktree
+    )
+    monkeypatch.setattr(session_mod, "worktree_shares_project", lambda live, cwd: True)
+    armed = clock.wall
+    provider.write(worktree, "recycled", mtime=armed - 60)  # an older session's
+    session.start_resolver("/proj")
+    provider.write(worktree, "ours", mtime=armed + 1)  # born in the same tick
+    clock.advance(session_mod.RESOLVER_POLL_MS)
+    assert host.resolved == ["ours"]
+
+
+def test_unstarted_thread_is_a_fresh_empty_session(resolving):
+    session, provider, host, clock = resolving
+    assert not session.unstarted_thread()  # never resolving: not a new thread
+    session.start_resolver("/proj")
+    assert session.unstarted_thread()
+    session.pty.write(b"typed")
+    assert not session.unstarted_thread()
+
+
+# -- the transcript tail --------------------------------------------------------------
+
+
+def _transcript(tmp_path, *entries):
+    path = tmp_path / "t.jsonl"
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
+    return path
+
+
+def _reply(model="claude-opus-4-8", text="done"):
+    return {
+        "type": "assistant",
+        "cwd": "/proj",
+        "timestamp": "2026-06-01T10:00:05.000Z",
+        "message": {"role": "assistant", "model": model, "content": [{"type": "text", "text": text}]},
+    }
+
+
+def test_a_transcript_read_lands_and_arms_the_ledger(rig, tmp_path):
+    session, _term, host, clock = rig
+    path = _transcript(tmp_path, _reply())
+    session.set_transcript_path(path)
+    assert host.events[0] == ("reset",)
+    assert str(path) in clock.monitors
+    clock.advance(0)  # the landing (background work runs inline here)
+    assert host.landed == [([], False)]
+    assert session.finish_ledger.armed
+    assert session.current_model() == "claude-opus-4-8"
+
+
+def test_the_monitor_debounces_into_one_read(rig, tmp_path):
+    session, _term, host, clock = rig
+    path = _transcript(tmp_path, _reply())
+    session.set_transcript_path(path)
+    clock.advance(0)
+    on_changed = clock.monitors[str(path)]
+    for _ in range(5):
+        on_changed()
+    clock.advance(session_mod.TRANSCRIPT_DEBOUNCE_MS)
+    assert len(host.landed) == 2
+
+
+def test_the_poll_stops_with_the_tab(rig, tmp_path):
+    session, _term, host, clock = rig
+    session.set_transcript_path(_transcript(tmp_path, _reply()))
+    clock.advance(session_mod.PROMPT_POLL_MS)
+    landed = len(host.landed)
+    assert landed >= 2
+    host.is_alive = False
+    clock.advance(session_mod.PROMPT_POLL_MS * 3)
+    assert len(host.landed) == landed
+
+
+def test_a_read_in_flight_carries_a_discover_to_the_next(rig, tmp_path, monkeypatch):
+    session, _term, host, clock = rig
+    looked = []
+    monkeypatch.setattr(session, "_look_up_branch_pr", lambda: looked.append(1))
+    session.set_transcript_path(_transcript(tmp_path, _reply()))
+    # The read the path started hasn't landed: the click waits for it.
+    session.request_update(discover=True)
+    assert looked == []
+    clock.advance(0)
+    session.request_update()
+    assert looked == [1]
+    clock.advance(0)
+    assert host.landed[-1] == ([], True)  # looked, and found nothing
+
+
+def test_attached_and_restored_prs_join_the_tracked_list(rig, tmp_path, monkeypatch):
+    from collins.prstatus import PullRequest, to_records
+
+    monkeypatch.setattr(session_mod, "enrich", lambda pr: pr)
+    session, _term, host, clock = rig
+    session.set_transcript_path(_transcript(tmp_path, _reply()))
+    clock.advance(0)
+    attached = PullRequest(url="https://github.com/o/r/pull/2", number=2)
+    assert session.attach_pr(attached)
+    assert not session.attach_pr(attached)
+    clock.advance(0)
+    assert [pr.url for pr in host.landed[-1][0]] == [attached.url]
+    restored = PullRequest(url="https://github.com/o/r/pull/1", number=1)
+    session.restore_prs(to_records([restored]))
+    clock.advance(0)
+    # The saved order puts the restored one first.
+    assert [pr.url for pr in host.landed[-1][0]] == [restored.url, attached.url]
+    session.set_transcript_path(None)
+    assert session.tracked_prs == {} and session.restored_prs == []
+
+
+# -- activity -------------------------------------------------------------------------
+
+
+def test_redraws_count_only_once_a_turn_was_asked_for(rig):
+    session, _term, _host, _clock = rig
+    assert not session.redraw_counts(startup_held=False)
+    session.echo_gate.arm()
+    assert session.redraw_counts(startup_held=False)
+
+
+def test_a_progress_quiet_overrules_the_redraw(rig):
+    session, _term, _host, _clock = rig
+    session.echo_gate.arm()
+    assert session.progress.reading(1) == "mark"
+    assert session.progress.reading(0) == "finish"
+    assert not session.redraw_counts(startup_held=False)
+
+
+def test_a_session_without_termprops_has_no_progress_watch(agent):
+    term = FakeTerminal()
+    session = Session(
+        provider=ClaudeProvider(), pty=term, screen=term, host=FakeHost(),
+        scheduler=FakeScheduler(), progress=False,
+    )
+    assert session.progress is None
+
+
+# -- the cwd poll and follow ------------------------------------------------------------
+
+
+def test_the_cwd_poll_ticks_while_mapped(rig, agent):
+    session, _term, host, clock = rig
+    session.start_cwd_poll()
+    assert host.cwds == ["/work"]
+    clock.advance(session_mod.CWD_POLL_MS * 2)
+    assert host.cwds == ["/work"] * 3
+    host.is_mapped = False
+    clock.advance(session_mod.CWD_POLL_MS * 3)
+    assert len(host.cwds) == 3
+    host.is_mapped = True
+    session.start_cwd_poll()  # the next map
+    clock.advance(session_mod.CWD_POLL_MS)
+    assert len(host.cwds) == 5
+
+
+def test_a_move_settles_once(rig, tmp_path):
+    session, _term, _host, _clock = rig
+    root = tmp_path / "repo"
+    worktree = root / ".claude" / "worktrees" / "w1"
+    worktree.mkdir(parents=True)
+    assert session.settle_cwd(str(worktree), str(root)) is None  # first sight
+    scope = session.settle_cwd(str(worktree), str(root))
+    assert scope is not None
+    assert session.settle_cwd(str(worktree), str(root)) is None  # acted on already
+    assert session.settle_cwd(str(root), str(root)) is None
+    assert session.settle_cwd(str(root), str(root)) is None  # back home: no move
+    assert session.settle_cwd(str(worktree), str(root)) is None
+    assert session.settle_cwd(str(worktree), str(root)) == scope  # a new move

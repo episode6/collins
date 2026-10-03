@@ -90,12 +90,8 @@ from .providers import (  # noqa: E402
 from .prstatus import (  # noqa: E402
     PullRequest,
     describe,
-    discover_pr,
-    enrich,
-    from_records,
     invalidate,
     known,
-    merge_ordered,
     parse_pr_url,
     to_records,
 )
@@ -105,19 +101,10 @@ from .sessions import (  # noqa: E402
     recreatable_worktree,
     recreate_worktree,
     worktree_project_root,
-    worktree_shares_project,
 )
 from .shellinput import shell_command  # noqa: E402
 from .transcript import TranscriptModel  # noqa: E402
 
-_TRANSCRIPT_DEBOUNCE_MS = 400
-_PROMPT_POLL_MS = 1000  # backstop poll for detecting the agent's prompts
-_CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
-# How many consecutive cwd polls a new working directory has to survive before
-# the editor follows it (see _maybe_follow_editor). Two is enough to ride out
-# the flap around a CLI starting, exiting or being forked, and still lands
-# inside the pause after a worktree is entered.
-_EDITOR_FOLLOW_TICKS = 2
 # How a worktree launch that never started is caught (see
 # _check_worktree_launch): poll the screen for the CLI's own error line, from
 # the moment the command is typed until the agent has plainly come up. The
@@ -142,12 +129,6 @@ _NEW_CHAT_PROMPT_POLL_MS = 300
 _NEW_CHAT_PROMPT_TICKS = 300  # ~90s
 _NEW_CHAT_IDLE_SHELL_TICKS = 20  # ~6s
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
-# A session links every PR that passes through its tool output, including ones
-# it only read, so the row is bounded: it tracks (and saves, and refreshes) the
-# newest this many, and a session that busy has stopped caring about its first.
-# How many of them are on screen is a question of width, not of this (see
-# PrChipRow).
-_MAX_PR_CHIPS = 20
 _PR_CHIP_SPACING = 8  # between chips; their own parts sit 4 apart
 # How long a coming-back-into-view refresh (window refocused, tab selected)
 # vouches for the chips before another one is allowed to hit `gh` again.
@@ -1019,6 +1000,27 @@ class _TabHost:
     def stash_draft(self, text: str) -> None:
         self._tab._stash_draft(text)
 
+    def mapped(self) -> bool:
+        return self._tab.get_mapped()
+
+    def shown_prs(self) -> list[PullRequest]:
+        return self._tab._footer_prs
+
+    def transcript_reset(self) -> None:
+        self._tab._on_transcript_reset()
+
+    def transcript_landed(self, prs: list[PullRequest], lookup_empty: bool) -> None:
+        self._tab._on_transcript_landed(prs, lookup_empty)
+
+    def session_resolved(self, session_id: str) -> None:
+        self._tab.emit("session-resolved", session_id)
+
+    def fork_resolved(self, session_id: str) -> None:
+        self._tab.emit("fork-resolved", session_id)
+
+    def cwd_polled(self, cwd: str | None) -> None:
+        self._tab._on_cwd_polled(cwd)
+
 
 class _ComposerCut:
     """The `service.session.CutSink` an open-cut lands in: the composer
@@ -1528,7 +1530,7 @@ class TerminalTab(Gtk.Box):
         # nothing.
         "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
         # Emitted each time a transcript read lands on the main loop (see
-        # _apply_update), so a finish edge the window is holding for the
+        # _on_transcript_landed), so a finish edge the window is holding for the
         # transcript's word (MainWindow._hold_finish) can be judged the
         # moment the word arrives rather than when its window runs out.
         "transcript-updated": (GObject.SignalFlags.RUN_FIRST, None, ()),
@@ -1602,6 +1604,9 @@ class TerminalTab(Gtk.Box):
             options=options,
             command_override=command_override,
             cwd=cwd,
+            jsonl_path=jsonl_path,
+            # A VTE too old for termprops has no progress hint to watch.
+            progress=PROGRESS_HINT_TERMPROP is not None,
         )
         # The plan file a sandboxed launch typed (sandboxplan.prepare_launch),
         # unlinked when the shell exits — the box is gone by then.
@@ -1637,24 +1642,13 @@ class TerminalTab(Gtk.Box):
         # Whether the shells open beside the screen are owed the offer to
         # follow the session into its worktree (see _maybe_offer_shells_follow).
         self._shells_follow_armed = False
-        self._transcript_monitor: Gio.FileMonitor | None = None
-        self._transcript_refresh_source: int | None = None
-        self._poll_source: int | None = None
-        self._resolver_source: int | None = None
-        self._resolver_attempts = 0
-        self._resolver_cwd: str | None = None  # set iff this tab resolves its own transcript
-        self._baselined_dirs: set[str] = set()  # dirs whose pre-existing transcripts are excluded
-        self._known_transcripts: set[Path] = set()  # transcripts predating this tab
-        self._resolver_armed_at = 0.0  # wall-clock time polling (re)started
         # The sandbox chip's restart in flight: its poll's tick count, None
         # while none is (see restart_sandboxed).
         self._restart_ticks: int | None = None
-        self._fork_resolve = False  # a sandboxed fork: report the new id, don't bind to it
         # A `-w` launch this tab is still watching for an early failure, and
         # how many times it has looked (see _check_worktree_launch).
         self._worktree_launch = False
         self._worktree_launch_ticks = 0
-        self._updating = False  # an off-thread transcript parse is in flight
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
         # register themselves the first time they map, which is after this
@@ -1961,13 +1955,6 @@ class TerminalTab(Gtk.Box):
         )
         self._editor.connect("add-to-chat", self._on_editor_add_to_chat)
         self._editor.connect("root-changed", self._on_editor_root_changed)
-        # Following the agent's working directory (see _maybe_follow_editor):
-        # the cwd it has to hold still at, how many polls it has held it for,
-        # and the last one already acted on — offered and declined counts as
-        # acted on, so a banner ignored doesn't come back every two seconds.
-        self._editor_follow_pending: str | None = None
-        self._editor_follow_ticks = 0
-        self._editor_follow_settled: str | None = None
         # The editor paned's counterpart to the dock's sizers — one fixed key,
         # since the editor column only ever has the one position. Its
         # size-changed re-emits as editor-size-changed (minus the key).
@@ -1990,18 +1977,9 @@ class TerminalTab(Gtk.Box):
         self._footer_branch: str | None = None
         self._footer_model: str | None = None  # model id, as the transcript writes it
         self._footer_effort: str | None = None  # effort level, likewise
-        # Every PR this session has opened, oldest first: url -> PR with the
-        # last status known for it (see _collect_prs). Replaced wholesale,
-        # never mutated in place — the update thread reads it while the main
-        # loop writes it.
-        self._tracked_prs: dict[str, PullRequest] = {}
-        self._restored_prs: list[PullRequest] = []  # this session's, from a previous run
-        # PRs the session named itself, via the attach_pr tool. Folded into
-        # every collection rather than written into _tracked_prs, which an
-        # in-flight update replaces wholesale when it lands (see attach_pr).
-        # Replaced wholesale too, for the same thread-safety reason.
-        self._attached_prs: dict[str, PullRequest] = {}
-        self._footer_prs: list[PullRequest] = []  # what the chips currently show
+        # What the chips currently show — the newest of the PRs the session
+        # tracks (Session.tracked_prs), with their status.
+        self._footer_prs: list[PullRequest] = []
         self._saved_pr_records: list[dict] = []  # last records written to the hub
         # The app-wide PR hub (see prstore), handed over by the window as the
         # tab is added. The tab writes its footer list through it and follows
@@ -2026,16 +2004,8 @@ class TerminalTab(Gtk.Box):
         self._scanned_attachments: list[attachrecords.Attachment] = []
         self._struck_attachments: set[str] = set()  # removed from the panel by hand
         self._saved_attachment_records: list[dict] = []  # last records handed to the window
-        self._pr_discover = False  # a click's search, waiting for a free tick
         self._pr_focus_refresh_at = 0  # last time coming into view forced a refetch
-        self._cwd_refresh_source: int | None = None
         self.append(self._build_footer())
-
-        self._transcript = TranscriptModel(jsonl_path)
-        # Whether this tab's finish edges are real turns ending, judged off
-        # the transcript above (see activity.FinishLedger); armed by the first
-        # read that lands (_apply_update), asked by the window at each edge.
-        self.finish_ledger = activity.FinishLedger()
 
         # The terminal.* chords — copy, paste, find, newline, zoom — read
         # by hand rather than as GTK shortcuts (see keymap.KeyMatcher).
@@ -2057,7 +2027,7 @@ class TerminalTab(Gtk.Box):
             # too, or resuming the fork's own row later runs unboxed. The
             # same resolver finds its transcript and reports the id on
             # "fork-resolved" instead of binding the tab to it.
-            self._fork_resolve = True
+            self.session.fork_resolve = True
             self._start_transcript_resolver(cwd)
 
     # -- the session, forwarded ------------------------------------------------
@@ -2111,6 +2081,21 @@ class TerminalTab(Gtk.Box):
     @_child_pid.setter
     def _child_pid(self, value: int | None) -> None:
         self._pty.pid = value
+
+    @property
+    def _transcript(self) -> TranscriptModel:
+        return self.session.transcript
+
+    @property
+    def finish_ledger(self) -> activity.FinishLedger:
+        """Whether this tab's finish edges are real turns ending, judged off
+        the transcript (see activity.FinishLedger); armed by the first read
+        that lands, asked by the window at each edge."""
+        return self.session.finish_ledger
+
+    @property
+    def _resolver_cwd(self) -> str | None:
+        return self.session.resolver_cwd
 
     @property
     def _pasted_back(self) -> dict[str, str]:
@@ -3216,24 +3201,15 @@ class TerminalTab(Gtk.Box):
         footer.append(toggle_btn)
         footer.append(self._git_toggle_btn)
         footer.append(self._editor_toggle_btn)
-        # Poll only while on screen; refresh immediately on every tab switch.
-        self.connect("map", lambda *_: self._start_cwd_refresh())
+        # Poll only while on screen; refresh immediately on every tab switch
+        # (Session.start_cwd_poll, whose every reading lands in
+        # _on_cwd_polled).
+        self.connect("map", lambda *_: self.session.start_cwd_poll())
         return footer
 
-    def _start_cwd_refresh(self) -> None:
-        self._refresh_cwd_label()
-        if self._cwd_refresh_source is None:
-            self._cwd_refresh_source = GLib.timeout_add(_CWD_POLL_MS, self._cwd_tick)
-
-    def _cwd_tick(self) -> bool:
-        if not self.get_mapped():  # hidden/closed tab → resume on next map
-            self._cwd_refresh_source = None
-            return GLib.SOURCE_REMOVE
-        self._refresh_cwd_label()
-        return GLib.SOURCE_CONTINUE
-
-    def _refresh_cwd_label(self) -> None:
-        cwd = self.current_agent_cwd()
+    def _on_cwd_polled(self, cwd: str | None) -> None:
+        """One tick of the session's cwd poll: the footer's cwd and branch,
+        the editor following a move, and the git page's freshness check."""
         self._maybe_follow_editor(cwd)
         if cwd != self._footer_cwd:
             self._footer_cwd = cwd
@@ -3266,43 +3242,25 @@ class TerminalTab(Gtk.Box):
     def _maybe_follow_editor(self, cwd: str | None) -> None:
         """Keep the editor pointed at wherever the agent is actually working.
 
-        Rides the footer's cwd poll rather than adding one of its own — the
-        value is already in hand — but acts on far less of it: the agent's cwd
-        is read from a live process tree, and it flaps. A worktree launch moves
-        it before the first prompt; a restarted background job forks a fresh
-        process at the old directory; between the CLI exiting and the shell
-        being read the fallback answer is the directory the tab started in. So
-        a new directory has to hold still across consecutive polls before it
-        counts as a move, and each settled answer is acted on exactly once —
-        an offer the user ignored must not come back every two seconds.
-
-        Where the agent went decides how far this goes: still inside the same
-        project (a worktree, most often) and the editor simply follows;
-        anywhere else and it only offers. See `editorfiles.follow_scope`."""
+        Rides the cwd poll, and acts only on a move that has held still
+        across polls, once (`Session.settle_cwd`, which says why). Where the
+        agent went decides how far this goes: still inside the same project
+        (a worktree, most often) and the editor simply follows; anywhere
+        else and it only offers. See `editorfiles.follow_scope`."""
         root = str(self._editor.root)
-        if cwd != self._editor_follow_pending:
-            self._editor_follow_pending = cwd
-            self._editor_follow_ticks = 1
+        scope = self.session.settle_cwd(cwd, root)
+        if scope is None:
             return
-        self._editor_follow_ticks += 1
-        if self._editor_follow_ticks < _EDITOR_FOLLOW_TICKS or cwd == self._editor_follow_settled:
-            return
-        scope = editorfiles.follow_scope(root, cwd)
-        if scope is editorfiles.FollowScope.NONE:
-            # Back where it already was — including the fallback the tab
-            # started at, which is how leaving a worktree usually reads.
-            self._editor_follow_settled = None
-            return
-        self._editor_follow_settled = cwd
         if scope is editorfiles.FollowScope.AUTO:
             self._editor.request_root(cwd)
         else:
             self._editor.offer_root(cwd)
         # The shells' offer rides the same settled move, whichever scope the
-        # editor gave it: NONE above is never a worktree (it means "not a
-        # move at all" — no cwd, a missing directory, or the root itself),
-        # and a worktree under the repository is AUTO, so every move the
-        # launch could have made reaches here.
+        # editor gave it: NONE (which settle_cwd answers None for) is never
+        # a worktree (it means "not a move at all" — no cwd, a missing
+        # directory, or the root itself), and a worktree under the
+        # repository is AUTO, so every move the launch could have made
+        # reaches here.
         self._maybe_offer_shells_follow(cwd)
 
     def _maybe_offer_shells_follow(self, cwd: str) -> None:
@@ -3655,7 +3613,7 @@ class TerminalTab(Gtk.Box):
 
         Adoption deliberately leaves `_saved_pr_records` alone — what the tab
         will actually show isn't known until the update `restore_prs` requests
-        merges the adopted list with its own sources (`_collect_prs`) — so
+        merges the adopted list with its own sources (`Session._collect_prs`) — so
         that update ends in one more `set_records`. When the merge changed
         nothing, the hub's equality guard makes that write the no-op it
         deserves to be: no disk, no signal, one spare comparison."""
@@ -3706,54 +3664,18 @@ class TerminalTab(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     def restore_prs(self, records: object) -> None:
-        """Re-adopt the PRs saved for this session.
+        """Re-adopt the PRs saved for this session (`Session.restore_prs`).
 
         The window calls this once the tab's session is known, and the hub's
         session-changed calls it again for every list somebody else writes
-        while the tab is open. The transcript's own pr-links come back on the
-        next poll anyway, but a PR a branch lookup found is written down
-        nowhere else, and a PR that was already merged shows its mark before
-        any `gh` call goes out.
-        """
-        restored = from_records(records)
-        if not restored:
-            return
-        self._restored_prs = restored
-        self._merge_restored()
-        self._request_update()
+        while the tab is open."""
+        self.session.restore_prs(records)
 
     def attach_pr(self, pr: PullRequest) -> bool:
         """Adopt a PR named from outside the transcript — the attach_pr
-        session tool. False when the tab already tracks it.
-
-        Kept in a dict of its own rather than written into _tracked_prs: an
-        update already in flight when the call lands replaces that wholesale,
-        so a direct write could be lost. _collect_prs folds these in on every
-        pass instead, and the update requested here gets the new chip its
-        title and status.
-        """
-        if pr.url in self._tracked_prs or pr.url in self._attached_prs:
-            return False
-        self._attached_prs = {**self._attached_prs, pr.url: pr}
-        self._request_update()
-        return True
-
-    def _merge_restored(self) -> None:
-        """Put this session's restored PRs back at the head of the tracked list.
-
-        Replayed after every update lands, not just once: an update that was
-        already in flight when the window restored (opening a tab starts one
-        immediately) would otherwise finish and overwrite the restore with the
-        list it had snapshotted before it. The saved order decides where a PR
-        the transcript never mentions belongs; the live copy of one it does
-        mention wins on everything except its place in the row.
-        """
-        if not self._restored_prs:
-            return
-        live = list(self._tracked_prs.values())
-        merged = {pr.url: pr for pr in merge_ordered(self._restored_prs, live)}
-        merged.update({pr.url: pr for pr in live})  # positions keep, values don't
-        self._tracked_prs = merged
+        session tool. False when the session already tracks it
+        (`Session.attach_pr`)."""
+        return self.session.attach_pr(pr)
 
     # -- attachments --------------------------------------------------------
 
@@ -3814,7 +3736,7 @@ class TerminalTab(Gtk.Box):
 
     def _harvest_attachments(self) -> None:
         """Take the images the last transcript update noticed. On the main
-        loop, from `_apply_update`, with the scan itself already done on the
+        loop, from `_on_transcript_landed`, with the scan itself already done on the
         update thread."""
         scanned = self._transcript.attachments()
         if scanned == self._scanned_attachments:
@@ -5194,12 +5116,7 @@ class TerminalTab(Gtk.Box):
         either."""
         if self._new_chat is not None:
             return True
-        return (
-            self._resolver_cwd is not None
-            and self.session_id is None
-            and self._command_override is None
-            and self.takes_prompt()
-        )
+        return self.session.unstarted_thread()
 
     def _visible_screen_text(self) -> str:
         """Everything on the terminal's visible screen, as plain text
@@ -5217,378 +5134,78 @@ class TerminalTab(Gtk.Box):
         return self.session.screen_first_column()
 
     # -- transcript --------------------------------------------------------
+    #
+    # The tail itself — the file monitor, the poll, the off-thread parse, the
+    # PRs it collects — and the resolver are the session's; what lands is
+    # shown here (_on_transcript_reset, _on_transcript_landed).
 
     def set_transcript_path(self, jsonl_path: str | Path | None) -> None:
         """Tail a transcript for what the tab reads out of it (touched files,
         pull requests). Used on resume, and again once a brand-new session's
-        file appears on disk."""
-        self._transcript.set_path(jsonl_path)
-        # Another session's PRs (and another session's model); re-read from the
-        # new transcript below, and the PRs restored again by the window once
-        # this tab's session is known.
-        self._tracked_prs = {}
-        self._restored_prs = []
-        # Another session's images too, restored again the same way. The
-        # sightings this tab collected itself stay: they were shown in this
-        # tab's window, whichever transcript it was pointed at at the time.
+        file appears on disk (`Session.set_transcript_path`)."""
+        self.session.set_transcript_path(jsonl_path)
+
+    def _on_transcript_reset(self) -> None:
+        """The session was pointed at another transcript: another session's
+        images go — restored again the same way as its PRs, by the window
+        once this tab's session is known; the sightings this tab collected
+        itself stay, they were shown in this tab's window whichever
+        transcript it was pointed at at the time — and so do the chips and
+        the model and effort the old one named."""
         self._restored_attachments = []
         self._refresh_pr_chips([])
         self._refresh_model_label()
         self._refresh_effort_label()
-        self._watch_transcript(jsonl_path)
 
-    @property
-    def transcript_path(self) -> str | None:
-        """The transcript this tab is tailing, or None."""
-        path = self._transcript.path
-        return str(path) if path else None
-
-    def finish_witness(self) -> tuple[tuple[int, int], int | None]:
-        """What the transcript says right now, for the finish ledger: its
-        stamp (turn ends and replies parsed so far) and the file's size on
-        disk (None without a file) — the second witness the ledger's final
-        verdict weighs. A `stat` on the main thread: cheap, and read at the
-        edge itself rather than off the last landing, so growth the parser
-        hasn't seen yet still shows."""
-        size = None
-        path = self._transcript.path
-        if path is not None:
-            try:
-                size = path.stat().st_size
-            except OSError:
-                size = None
-        return self._transcript.stamp, size
-
-    def request_transcript_update(self) -> None:
-        """Re-read the transcript now rather than at the next poll — asked by
-        a finish edge the window is holding for the transcript's word. A read
-        already in flight is enough: its landing is the word."""
-        self._request_update()
-
-    def relocate_transcript(self, jsonl_path: str | Path) -> None:
-        """Follow this tab's transcript to a new path.
-
-        Entering a git worktree makes the CLI re-key the session's transcript
-        under a project directory named for the new working directory, which
-        moves the file out from under the monitor watching it. Nothing about
-        the session changed, so unlike `set_transcript_path` this keeps the
-        chips and everything already parsed — it only re-aims the tail and the
-        monitor at where the file lives now.
-        """
-        self._transcript.relocate(jsonl_path)
-        self._watch_transcript(jsonl_path)
-
-    def _watch_transcript(self, jsonl_path: str | Path | None) -> None:
-        """Point the file monitor at *jsonl_path* and kick off a read."""
-        if self._transcript_monitor is not None:
-            self._transcript_monitor.cancel()
-            self._transcript_monitor = None
-        if jsonl_path:
-            try:
-                gfile = Gio.File.new_for_path(str(jsonl_path))
-                self._transcript_monitor = gfile.monitor_file(Gio.FileMonitorFlags.NONE, None)
-                self._transcript_monitor.connect("changed", self._on_transcript_event)
-            except GLib.Error:
-                self._transcript_monitor = None
-            self._ensure_poll()
-            self._request_update()
-
-    def _ensure_poll(self) -> None:
-        if self._poll_source is None:
-            self._poll_source = GLib.timeout_add(_PROMPT_POLL_MS, self._poll)
-
-    def _poll(self) -> bool:
-        if self.get_root() is None:  # tab closed/detached → stop ticking
-            self._poll_source = None
-            return GLib.SOURCE_REMOVE
-        self._request_update()
-        return GLib.SOURCE_CONTINUE
-
-    def _on_transcript_event(self, *_args) -> None:
-        if self._transcript_refresh_source is not None:
-            return
-        self._transcript_refresh_source = GLib.timeout_add(
-            _TRANSCRIPT_DEBOUNCE_MS, self._debounced_update
-        )
-
-    def _debounced_update(self) -> bool:
-        self._transcript_refresh_source = None
-        self._request_update()
-        return GLib.SOURCE_REMOVE
-
-    def _request_update(self, discover: bool = False) -> None:
-        """Parse newly-appended transcript bytes off the main thread (big
-        tool-result lines would otherwise freeze the UI), then check on idle.
-
-        `discover` asks the branch which PR it has. It is only ever set by the
-        footer's refresh button; a request that arrives while one is running is
-        carried to the next poll rather than dropped, so the click always gets
-        its lookup.
-        """
-        if self._updating:
-            self._pr_discover = self._pr_discover or discover
-            return
-        self._updating = True
-        looking = discover or self._pr_discover
-        self._pr_discover = False
-
-        def work() -> None:
-            try:
-                self._transcript.update()
-            except Exception:
-                pass
-            found = self._look_up_branch_pr() if looking else None
-            try:
-                tracked = self._collect_prs(found)
-                # reads the gh status cache, so it belongs on this thread too;
-                # a session with no linked PR touches no files at all
-                prs = [self._enriched(pr) for pr in tracked[-_MAX_PR_CHIPS:]]
-            except Exception:
-                tracked, prs = None, self._footer_prs  # leave the chips as they are
-            # PRIORITY_DEFAULT, not the idle default: this landing is what
-            # resets _updating, and a default-idle callback can be starved
-            # indefinitely by a busy frame clock (GTK's layout/paint phases
-            # outrank it) — under CI's Xvfb it never ran at all, wedging the
-            # gate and dropping every later update. A timeout-priority landing
-            # cannot be starved by redraw.
-            GLib.idle_add(
-                self._apply_update,
-                prs,
-                looking and found is None,
-                tracked,
-                priority=GLib.PRIORITY_DEFAULT,
-            )
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _collect_prs(self, found: PullRequest | None) -> list[PullRequest]:
-        """Every PR this tab knows about, oldest first. On the update thread.
-
-        Four sources, in the order a PR can first be known from them: the list
-        restored from a previous run, the transcript's pr-links, the PRs the
-        session attached itself (the attach_pr tool), and whatever the refresh
-        button just found on the branch. A URL is only ever added — a PR the
-        session opened stays on the row once the branch has moved on, which is
-        the whole point of showing all of them.
-
-        Uncapped, and it must stay that way even though the row isn't: cap the
-        list here and the PRs trimmed off the front would come back from the
-        transcript on the next poll — as the *newest* entries — and the row
-        would spin.
-        """
-        try:
-            links = self._transcript.pull_requests()
-        except Exception:
-            links = []
-        collected = merge_ordered(self._tracked_prs.values(), links)
-        for attached in self._attached_prs.values():
-            if all(pr.url != attached.url for pr in collected):
-                collected.append(attached)
-        if found is not None and all(pr.url != found.url for pr in collected):
-            collected.append(found)  # a PR nothing else knows about: it is the newest
-        return collected
-
-    def _enriched(self, pr: PullRequest) -> PullRequest:
-        """*pr* with its title and CI status, fetching them when due.
-
-        A merged PR that already has a title is left alone: it has no checks
-        left to run and shows no badge anyway, so an old chip on a long-lived
-        session never costs another `gh` call. One with no title still asks
-        once — the PR menu has a line to fill, and a list saved before
-        Collins knew about titles has nothing in it.
-        """
-        return pr if pr.merged and pr.title else (enrich(pr) or pr)
-
-    def _look_up_branch_pr(self) -> PullRequest | None:
-        """The refresh button's own path to a PR: whatever branch is checked out
-        right now, then gh. Runs on the update thread.
-
-        cwd and branch are re-read here rather than taken from the footer's 2s
-        poll, so a click straight after a checkout asks about the branch the user
-        is actually on instead of the one the last tick happened to see.
-
-        Every chip already on the row is marked due first, so one click
-        refreshes the lot — status is the other half of what the button is for,
-        and a branch that turns up nothing still leaves the row up to date.
-        """
-        for pr in self._footer_prs:
-            if not pr.merged:
-                invalidate(pr.url)
-        cwd = self.current_agent_cwd()
-        try:
-            return discover_pr(cwd, current_branch(cwd))
-        except Exception:
-            return None
-
-    def _apply_update(
-        self,
-        prs: list[PullRequest] | None = None,
-        lookup_empty: bool = False,
-        tracked: list[PullRequest] | None = None,
-    ) -> bool:
-        """Land an update's results on the main loop.
-
-        *prs* is what the row shows (the newest _MAX_PR_CHIPS, with status);
-        *tracked* is everything the tab knows about, which is what the next
-        collection starts from — None when the update failed and the row is
-        being left alone.
-        """
-        self._updating = False
+    def _on_transcript_landed(self, prs: list[PullRequest], lookup_empty: bool) -> None:
+        """A transcript read landed: *prs* is what the chips show (the newest
+        MAX_PR_CHIPS the session tracks, with status), *lookup_empty* a
+        branch lookup that found nothing."""
         self._pr_refresh_btn.set_sensitive(True)
-        if not self.finish_ledger.armed and self._transcript.loaded:
-            # The first full read: where finishes are measured from. A tab
-            # whose file never appears (a CLI with transcript saving off, a
-            # fresh spawn before its resolver binds) stays unarmed, and its
-            # edges pass as they always have.
-            self.finish_ledger.arm(*self.finish_witness())
         # Same pane object wherever it lives (in-tab or popped out).
         self._editor.set_agent_files(self._transcript.touched_files())
         self._harvest_attachments()
         self._refresh_model_label()
         self._refresh_effort_label()
-        if tracked is not None:
-            # The shown ones come back with status, and they keep it: it is
-            # what the chips fall back to when a poll brings nothing new (a
-            # failed fetch, or no fetch at all), and what gets saved for the
-            # next run. A fetch that does land replaces it wholesale.
-            shown = {pr.url: pr for pr in prs or []}
-            self._tracked_prs = {pr.url: shown.get(pr.url, pr) for pr in tracked}
-            self._merge_restored()
-        self._refresh_pr_chips(prs or [])
+        self._refresh_pr_chips(prs)
         if lookup_empty:  # even with PRs still showing: none of them is this branch's
             self._sync_pr_refresh_tooltip(not_found=True)
         self.emit("transcript-updated")
-        return GLib.SOURCE_REMOVE
+
+    @property
+    def transcript_path(self) -> str | None:
+        """The transcript this tab is tailing, or None."""
+        return self.session.transcript_path
+
+    def finish_witness(self) -> tuple[tuple[int, int], int | None]:
+        """What the transcript says right now, for the finish ledger
+        (`Session.finish_witness`)."""
+        return self.session.finish_witness()
+
+    def request_transcript_update(self) -> None:
+        """Re-read the transcript now rather than at the next poll — asked by
+        a finish edge the window is holding for the transcript's word. A read
+        already in flight is enough: its landing is the word."""
+        self.session.request_update()
+
+    def _request_update(self, discover: bool = False) -> None:
+        """Ask the session for a transcript read (`Session.request_update`);
+        *discover* also asks the branch which PR it has."""
+        self.session.request_update(discover)
+
+    def relocate_transcript(self, jsonl_path: str | Path) -> None:
+        """Follow this tab's transcript to a new path — the CLI moved it on
+        worktree entry (`Session.relocate_transcript`)."""
+        self.session.relocate_transcript(jsonl_path)
 
     def _start_transcript_resolver(self, cwd: str | None) -> None:
+        """Find the new session's transcript (`Session.start_resolver`):
+        polled for as long as the tab is in the foreground, paused after ~3
+        min in the background, resumed whenever the tab is brought back."""
         if not cwd:
             return
-        self._resolver_cwd = cwd
-        # The transcript only appears once the first prompt is sent, which can
-        # be arbitrarily long after the tab opens. Poll for as long as the tab
-        # is in the foreground; in the background allow ~3 min before pausing,
-        # and resume whenever the tab is brought back.
-        self.connect("map", lambda *_: self._arm_transcript_resolver())
-        self._arm_transcript_resolver()
-
-    def _arm_transcript_resolver(self) -> None:
-        if self._resolver_cwd is None or (self.session_id is not None and not self._fork_resolve):
-            return  # never started for this tab, or already resolved
-        self._resolver_attempts = 0
-        if self._resolver_source is not None:
-            return  # already polling; just refresh the background budget
-        # A brand-new session must attach to a transcript that appeared while
-        # polling: the newest one *existing* at (re)start belongs to some other
-        # session — a submitted prompt creates the file well within the ~3 min
-        # background budget, so anything from a pause can't be ours either.
-        # `--continue` (command_override) reuses the newest existing
-        # transcript, which is exactly the session it resumes.
-        self._known_transcripts = (
-            set(self.provider.transcripts_for_cwd(self._resolver_cwd))
-            if self._command_override is None
-            else set()
-        )
-        self._baselined_dirs = {self._resolver_cwd}
-        # Stamp the instant polling *first* starts, before any prompt has
-        # created a transcript. A worktree we later follow into may hold
-        # transcripts from an older, recycled session, but those predate this
-        # moment; a transcript stamped after it is our own (see
-        # _resolve_transcript). Anchor it to the first arm only: a backgrounded
-        # tab that pauses unresolved (~3 min) and resumes on re-map re-runs
-        # this and re-baselines its worktree — pushing arm time forward here
-        # would let that re-baseline exclude our own transcript if the agent
-        # had since gone quiet (mtime now behind a later arm time), the very
-        # failure this gate exists to prevent.
-        if not self._resolver_armed_at:
-            self._resolver_armed_at = time.time()
-        self._resolver_source = GLib.timeout_add(1500, self._resolve_transcript)
-
-    def _predates_resolver(self, path: Path) -> bool:
-        """Whether `path` was last written before this resolver armed — i.e.
-        belongs to an older session, not one this tab is waiting on. A file we
-        can't stat is treated as *not* predating, so a transient error never
-        baselines out (and thus loses) a transcript that might be ours."""
-        try:
-            return path.stat().st_mtime < self._resolver_armed_at
-        except OSError:
-            return False
-
-    def _resolve_transcript(self) -> bool:
-        if self.get_root() is None:
-            self._resolver_source = None
-            return GLib.SOURCE_REMOVE
-        cands = [
-            p
-            for p in self.provider.transcripts_for_cwd(self._resolver_cwd)
-            if p not in self._known_transcripts
-        ]
-        # A worktree launch (claude -w) moves the agent into a worktree under
-        # the launch dir before the first prompt, and its transcript is keyed
-        # by the *worktree's* cwd — the launch dir's key never sees it. Follow
-        # the agent into any worktree of this tab's own project, with the same
-        # baseline discipline as the launch dir: the CLI recycles unchanged
-        # worktrees, so a transcript from an older, recycled session may sit
-        # in a worktree we follow into, and we must not attach to that.
-        #
-        # But baseline out only transcripts that predate this resolver: a fast
-        # `claude -w` writes its first transcript line within ~1s of creating
-        # the worktree, tighter than our 1.5s poll, so the tick that first
-        # sees the moved cwd can *also* see our own just-born transcript
-        # already present. Excluding everything present at that moment (the
-        # old behavior) would swallow it and the tab would never bind. An
-        # older session's transcript predates _resolver_armed_at; our own is
-        # stamped after it.
-        #
-        # worktree_shares_project matches on the *project root*, not the launch
-        # dir: when this tab was itself launched from inside a worktree (a
-        # background session spawned by an agent already in one), git roots the
-        # new worktree at the main repo, so live's root is that repo while the
-        # launch dir is the caller's worktree — both collapse to the same root.
-        live = self.current_agent_cwd()
-        if live and live != self._resolver_cwd and worktree_shares_project(
-            live, self._resolver_cwd
-        ):
-            if live not in self._baselined_dirs:
-                self._baselined_dirs.add(live)
-                if self._command_override is None:
-                    self._known_transcripts |= {
-                        p
-                        for p in self.provider.transcripts_for_cwd(live)
-                        if self._predates_resolver(p)
-                    }
-            cands += [
-                p
-                for p in self.provider.transcripts_for_cwd(live)
-                if p not in self._known_transcripts
-            ]
-        try:
-            path = max(cands, key=lambda p: p.stat().st_mtime, default=None)
-        except OSError:
-            path = None
-        if path is not None:
-            if self._fork_resolve:
-                # A sandboxed fork: the new conversation's id, reported and
-                # nothing more — the tab stays bound to the original.
-                self._fork_resolve = False
-                forked = self.provider.session_id_for_transcript(path)
-                if forked and forked != self.session_id:
-                    self.emit("fork-resolved", forked)
-                self._resolver_source = None
-                return GLib.SOURCE_REMOVE
-            self.set_transcript_path(str(path))
-            if self.session_id is None:
-                self.session_id = self.provider.session_id_for_transcript(path)
-                self.emit("session-resolved", self.session_id)
-            self._resolver_source = None
-            return GLib.SOURCE_REMOVE
-        if self.get_mapped():
-            self._resolver_attempts = 0  # foreground tab: keep polling indefinitely
-        else:
-            self._resolver_attempts += 1
-            if self._resolver_attempts > 120:  # ~3 min in the background: pause until next map
-                self._resolver_source = None
-                return GLib.SOURCE_REMOVE
-        return GLib.SOURCE_CONTINUE
+        self.connect("map", lambda *_: self.session.arm_resolver())
+        self.session.start_resolver(cwd)
 
     # -- secondary terminal panel ------------------------------------------
 
@@ -5668,7 +5285,7 @@ class TerminalTab(Gtk.Box):
         recently, fronting it when it is already open.
 
         The footer's chip row is the list and it runs oldest first (see
-        `_collect_prs`), so the last of them is the newest thing this session
+        `Session._collect_prs`), so the last of them is the newest thing this session
         got itself involved with — the same PR a tab with
         `open_pr_panel_on_attach` on would have opened by itself. False when
         the session has no pull request at all yet, which the caller says out
@@ -6247,55 +5864,24 @@ class TerminalTab(Gtk.Box):
         return self.session.candidate_pids()
 
     def current_agent_cwd(self) -> str | None:
-        """Best-effort cwd of what's running in the agent terminal: the
-        foreground process if any (the agent may have cd'd into a worktree),
-        else the shell, else the directory the tab started in.
-
-        Each candidate's agent descendants are searched before falling back
-        to the candidate itself; see `_candidate_pids`.
-        """
-        cli = getattr(self.provider, "cli", "") or ""
-        for pid in self._candidate_pids():
-            cwd = proctree.agent_descendant_cwd(pid, cli)
-            if cwd is not None:
-                return cwd
-            cwd = proctree.process_cwd(pid)
-            if cwd is not None:
-                return cwd
-        return self._cwd
+        """Best-effort cwd of what's running in the agent terminal
+        (`Session.current_agent_cwd`)."""
+        return self.session.current_agent_cwd()
 
     def current_permission_mode(self) -> str:
-        """Best-effort permission mode of the agent in this tab right now:
-        the last mode its transcript recorded (the CLI stamps every user
-        turn, and every shift+tab change, with one), else the mode the tab
-        was launched with, else "" — the CLI's default. What start_session
-        inherits into a spawned sibling."""
-        mode = self._transcript.permission_mode()
-        if mode:
-            return mode
-        return self._options.permission_mode if self._options else ""
+        """Best-effort permission mode of the agent in this tab right now
+        (`Session.current_permission_mode`)."""
+        return self.session.current_permission_mode()
 
     def current_model(self) -> str:
-        """Best-effort model of the agent in this tab right now: the one its
-        transcript recorded on the last reply (a full id; ``/model`` and
-        fast-mode switches included), else the --model the tab was launched
-        with, else "" — the CLI's configured default. What start_session
-        inherits into a spawned sibling."""
-        model = self._transcript.model()
-        if model:
-            return model
-        return self._options.model if self._options else ""
+        """Best-effort model of the agent in this tab right now
+        (`Session.current_model`)."""
+        return self.session.current_model()
 
     def current_effort(self) -> str:
-        """Best-effort effort level of the agent in this tab right now: the
-        one its transcript stamped on the last reply (``/effort`` switches
-        included), else the --effort the tab was launched with, else "" —
-        the CLI's configured default. What start_session inherits into a
-        spawned sibling."""
-        effort = self._transcript.effort()
-        if effort:
-            return effort
-        return self._options.effort if self._options else ""
+        """Best-effort effort level of the agent in this tab right now
+        (`Session.current_effort`)."""
+        return self.session.current_effort()
 
     def _agent_is_running(self) -> bool:
         """Whether the provider's CLI is alive in this terminal right now
@@ -6303,41 +5889,19 @@ class TerminalTab(Gtk.Box):
         return self.session.agent_is_running()
 
     def owns_pid_ancestors(self, ancestors: set[int]) -> bool:
-        """Whether one of *ancestors* is a process this tab's terminal runs.
-
-        *ancestors* is a pid plus its whole parent chain (proctree.
-        ancestor_pids) — how a session MCP tool call is traced back to the
-        tab whose shell spawned its `claude`: the shim that sent it is a
-        child of that CLI, so the tab's own processes sit in its ancestry.
-        Both candidate ends are tested (see `_candidate_pids`); a daemon-
-        hosted process descends from systemd instead, matches no tab
-        anywhere, and gets the dispatcher's clean identity error.
-        """
-        return any(pid in ancestors for pid in self._candidate_pids())
+        """Whether one of *ancestors* is a process this tab's terminal runs
+        (`Session.owns_pid_ancestors`)."""
+        return self.session.owns_pid_ancestors(ancestors)
 
     def has_background_descendant(self, ignore: Collection[str] = frozenset()) -> bool:
-        """Whether the agent has something still running below it right now —
-        a tool call in flight, or a background job (a dev server, a long
-        build) it started and left running. An extra "still working" signal
-        for a session whose terminal has otherwise gone quiet; see
-        `ActivityTracker` in activity.py.
-
-        *ignore* is the session's plumbing baseline — cmdlines of the MCP
-        servers the CLI keeps alive for its whole life, which are children of
-        the agent but never work (see proctree.has_live_descendant)."""
-        cli = getattr(self.provider, "cli", "") or ""
-        return any(proctree.has_live_descendant(pid, cli, ignore) for pid in self._candidate_pids())
+        """Whether the agent has something still running below it right now
+        (`Session.has_background_descendant`)."""
+        return self.session.has_background_descendant(ignore)
 
     def background_descendant_cmdlines(self) -> set[str]:
         """The cmdlines of everything running directly below this tab's agent
-        right now. Sampled while nothing has ever been submitted to a freshly
-        spawned tab, this is the agent's own plumbing — the baseline
-        `has_background_descendant` is later told to ignore."""
-        cli = getattr(self.provider, "cli", "") or ""
-        cmdlines: set[str] = set()
-        for pid in self._candidate_pids():
-            cmdlines |= proctree.descendant_cmdlines(pid, cli)
-        return cmdlines
+        right now (`Session.background_descendant_cmdlines`)."""
+        return self.session.background_descendant_cmdlines()
 
     # -- helpers -----------------------------------------------------------
 

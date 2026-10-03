@@ -1672,7 +1672,7 @@ def sweep(targets: Iterable[tuple[str, list[PullRequest], str | None]]) -> dict[
         log.info("prstatus: swept %s branch(es), %s with a PR", len(branches), len(found))
 
     # A discovered PR is the newest thing that session knows about, exactly as
-    # it is for a tab (see TerminalTab._collect_prs) — appended, never
+    # it is for a tab (see Session._collect_prs) — appended, never
     # replacing, so a session keeps the PRs it opened earlier.
     collected = {
         session_id: (
