@@ -468,6 +468,28 @@ def test_the_preamble_order_and_what_it_repeats():
         + CSI + b"=1u" + CSI + b">3u" + CSI + b">4;1m" + ESC + b")0" + b"\x0e" + CSI + b"?25l"
     )  # fmt: skip
     assert StreamFilter().preamble() == b""
+    # a redraw from the screen model sets the region itself (shared by both screens)
+    assert CSI + b"3;20r" not in f.preamble(screen=False)
+    assert CSI + b"?2004h" in f.preamble(screen=False)
+
+
+def test_the_fast_path_bounds_a_sequence_too():
+    """A CSI or ESC sequence past SEQUENCE_MAX is `Bad` whichever path cut
+    it (found by PR-1.2's review: the fast path handed a 5003-byte CSI to
+    the responder, whose int() of 5000 digits raised)."""
+    from collins.service.termstream import SEQUENCE_MAX, Bad
+
+    huge = CSI + b"9" * 5000 + b"H"
+    tokens = Tokenizer().feed(huge)
+    assert all(isinstance(t, Bad) for t in tokens[:1])
+    assert sum(len(t.raw) for t in tokens) == len(huge)
+    assert all(len(t.raw) <= SEQUENCE_MAX for t in tokens)
+    f = StreamFilter()
+    out = f.feed(huge + b"x")
+    assert out.replies == []
+    assert out.forward.endswith(b"x")
+    esc = ESC + b" " * 5000 + b"F"
+    assert all(len(t.raw) <= SEQUENCE_MAX for t in Tokenizer().feed(esc))
 
 
 def test_decrqm_follows_the_tracker():
