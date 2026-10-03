@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-27. Full change history: git log for this file.
+fork. Last modified: 2026-10-02. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -37,6 +37,12 @@ downloads of each version, see the
 ## Changelog
 
 ### v0.1.5 — UNRELEASED
+
+- **Closing a worktree session answers the CLI's exit dialog again.**
+  Claude Code 2.1.285 numbers the dialog's items (`❯ 1. Keep worktree`),
+  which the graceful close no longer recognised, so closing a worktree tab
+  waited on a dialog it would have answered before. Both the numbered and
+  the older layout are recognised now.
 
 ### v0.1.4 — 2026-09-27
 
