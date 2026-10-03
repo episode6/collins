@@ -152,6 +152,8 @@ def state_for_vte() -> TerminalState:
     )
 
 
+VTE_VERSION = (Vte.get_major_version(), Vte.get_minor_version(), Vte.get_micro_version())
+print("VTE {}.{}.{}".format(*VTE_VERSION), flush=True)
 term = fresh_terminal()
 base_state = state_for_vte()
 check(
@@ -249,13 +251,16 @@ for label, setup in (
     term.feed(setup)
     pump_until(lambda: False, timeout=0.05)
     column, row = term.get_cursor_position()
+    grid = (term.get_column_count(), term.get_row_count())
+    region = vte_answers(DCS + b"$qr" + ST)
     expected = vte_answers(CSI + b"6n" + CSI + b"?6n")
     state = state_for_vte()
     state.cursor = (column, row)
     f = StreamFilter(state)
     f.feed(setup)
     got = f.feed(CSI + b"6n" + CSI + b"?6n").replies
-    check(f"cursor report, {label}", got == expected, f"{got!r} != VTE {expected!r} (cursor {column},{row})")
+    detail = f"{got!r} != VTE {expected!r} (cursor {column},{row}, grid {grid}, region {region!r})"
+    check(f"cursor report, {label}", got == expected, detail)
 
 # -- a round closed by DA1, in the order asked (F11)
 ROUND = (
