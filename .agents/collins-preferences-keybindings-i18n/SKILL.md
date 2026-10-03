@@ -25,9 +25,23 @@ a new key exists in every install. Migrations live in `AppState._load`
 `panel_states` shape) — one-shot, on read. Tests use the `app_state`
 fixture, which isolates the config dir.
 
+Since the state split (the service-and-client spec, §3.8) a setting lives
+on one of two sides: `state.SERVICE_SETTINGS` (what the Collins service
+does: which `claude`, launches, titles, archiving, the sandbox, the tools,
+the git page's reading of the repository) stays in `state.json`;
+`state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, the
+tray, Caffeine, the composer's, editor's and git page's looks, which
+notifications this screen shows) lives in `ui-state.json` beside it,
+written by `uistate.UiState` through `AppState`. `get_setting` /
+`set_setting` route, so no call site cares; `prefslayout.GROUP_SIDES`
+records which side each group is on (several are "mixed" until PR-3.3
+regroups the dialog into "This device" and "Service" headings).
+
 To add a setting:
 
-1. The `DEFAULT_SETTINGS` entry with its comment.
+1. The `DEFAULT_SETTINGS` entry with its comment, and its name in
+   `SERVICE_SETTINGS` or `DEVICE_SETTINGS` (`tests/test_state_split.py`
+   fails until it is on exactly one side).
 2. A row in `prefs.PreferencesDialog` in the right `_build_*_group`; groups
    are `_SearchableGroup`s built in `prefslayout.GROUPS` order (the Token use
    group sits directly under General, and `TOKEN_USE_ROWS` pins its rows —

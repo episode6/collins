@@ -74,7 +74,12 @@ quit flows. There can be several windows; a tab can move between them.
 transcripts; `providers.py` wraps the `claude` CLI (commands, prompt-line
 grammar, background agents); `state.py` is `AppState` — the one writer of
 `~/.config/collins/state.json`, with `DEFAULT_SETTINGS` as the settings
-catalogue; `store.py` is `SessionStore`, the single source of truth between
+catalogue, and the owner of `uistate.UiState`, the one writer of
+`ui-state.json` beside it (the state split of the service-and-client spec:
+`state.json` is what the service keeps, `ui-state.json` what this device
+keeps; `SERVICE_SETTINGS` / `DEVICE_SETTINGS` say which side a setting
+lives on, and every read and write goes through `AppState`'s one API, which
+routes); `store.py` is `SessionStore`, the single source of truth between
 disk and UI (threaded scans, `Gio.FileMonitor`s, grouping, every state
 mutation), which the sidebar and windows observe via `refreshed`, `busy-changed`
 and per-item `SessionItem` property notifications (`models.py`).
@@ -125,7 +130,8 @@ directly. No separate API key exists anywhere.
 
 | What | Where |
 | --- | --- |
-| Names, favorites, archived, project order, settings, panel layouts, editor state, PR records, attachments, drafts, notifications | `~/.config/collins/state.json` (`AppState`, synchronous atomic writes) |
+| The service's half: names, favorites, archived, project order, PR records, attachments, drafts, notifications, the service id, and the settings in `state.SERVICE_SETTINGS` | `~/.config/collins/state.json` (`AppState`, synchronous atomic writes) |
+| This device's half: the settings in `state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, tray, Caffeine, composer, editor and git-page looks), and per service: panel layouts, editor states, the last active session | `~/.config/collins/ui-state.json` (`uistate.UiState`, written through `AppState`; `state.json.pre-split` is the one-time backup the first start after the split leaves) |
 | Headless-run scratch cwd | `~/.config/collins/title-scratch/<uuid>` |
 | Panel shell scrollback | `~/.local/state/collins/panel_history/<session>[.<ordinal>].txt` |
 | Chats virtual project | `~/.local/share/collins/chats/` |
@@ -161,7 +167,9 @@ Diagnostics: `COLLINS_LOG=INFO`, `COLLINS_SHIM_LOG=<file>`,
   Wayland backend; schedule such opens on a `timeout_add`, and open them with
   `focus=False` so the keyboard stays where it was.
 - **Settings.** A new setting is one entry in `state.DEFAULT_SETTINGS` (with a
-  comment saying what it does and where it is read), a row in `prefs.py`
+  comment saying what it does and where it is read), its name in
+  `state.SERVICE_SETTINGS` or `state.DEVICE_SETTINGS` (which file it lives
+  in; `tests/test_state_split.py` fails until it is on a side), a row in `prefs.py`
   placed per `prefslayout.GROUPS`, search words if its row's text doesn't
   carry them, and a mention in `docs/guide/features.md`. Read settings via
   `state.get_setting`; the file writes every default back, so a new key exists

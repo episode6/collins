@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-27. Full change history: git log for this file.
+fork. Last modified: 2026-10-02. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -208,9 +208,18 @@ toggle. *Archive on claude.ai too* in Preferences turns it off.
 ## App state
 
 Custom names, generated titles, emoji, favorites, archived sessions, project
-order, panel layouts, unsent composer drafts, window geometry, and preferences
-are stored separately in `~/.config/collins/state.json`; the headless
-runs' scratch directory is `~/.config/collins/title-scratch/` beside it.
+order, unsent composer drafts, pull request records, the sandbox's records
+and the preferences that say what Collins does for your sessions (which
+`claude` it runs, titles, launches, archiving, the session tools) are stored
+separately in `~/.config/collins/state.json`. What describes this computer
+— window geometry, the sidebar's width, fonts, themes, keybindings, sounds,
+the status icon, Caffeine, the composer's, editor's and git page's
+appearance, and each session's dock layout and editor state — is in
+`ui-state.json` beside it. The first launch of a version with two files
+moves the keys over and keeps a copy of the old file as
+`state.json.pre-split`, which an older version can be pointed back at by
+renaming it over `state.json`. The headless runs' scratch directory is
+`~/.config/collins/title-scratch/` beside them.
 The terminal panel's per-session scrollback lives in
 `~/.local/state/collins/panel_history/` (one file per panel tab), and the
 sidebar's Chats project in `~/.local/share/collins/chats/`. Each sandboxed
