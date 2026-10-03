@@ -34,7 +34,8 @@ SPEC_SERVICE_SETTINGS = {
 
 # The spec's §3.8 service top-level keys that the code writes. The spec also
 # names "hidden" and "hidden_projects" (pre-rename spellings AppState only
-# ever reads) and "diff_notes", "pending_diffs", "ptys" (later PRs').
+# ever reads) and "diff_notes", "pending_diffs" (later PRs'). "ptys" is the
+# pty table PR-1.5 added; a migrated file gains it with its empty default.
 SERVICE_RECORDS = {
     "service_id", "names", "generated_names", "cli_titles", "emojis", "favorites",
     "archived", "archived_at", "archived_projects", "project_worktree",
@@ -42,8 +43,9 @@ SERVICE_RECORDS = {
     "sandbox_project_grants", "sandbox_tools", "project_order",
     "virtual_projects", "expanded_groups", "session_prs", "session_attachments",
     "session_drafts", "new_chat_drafts", "process_baselines", "session_forwards",
-    "pending_detaches", "notifications", "settings",
+    "pending_detaches", "ptys", "notifications", "settings",
 }
+NEW_SERVICE_RECORDS = {"service_id", "ptys"}  # not in a v0.1.4 file
 
 # Every settings key v0.1.4 wrote, frozen as a literal: the migration
 # fixture is built from this list, not from DEFAULT_SETTINGS, so a key the
@@ -289,7 +291,7 @@ def test_first_start_migrates_with_every_key_accounted_for(app_state, v014):
     block = ui["services"][state.service_id]
     # The service file: the original's top-level keys less the device's,
     # plus the id.
-    assert set(service) == (set(v014) - set(uistate.DEVICE_RECORDS)) | {"service_id"}
+    assert set(service) == (set(v014) - set(uistate.DEVICE_RECORDS)) | NEW_SERVICE_RECORDS
     assert set(service) == SERVICE_RECORDS
     assert service["service_id"] == state.service_id
     # Every setting of the original is in exactly one file.

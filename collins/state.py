@@ -798,6 +798,13 @@ class AppState:
         # evidence needed to finish the pairing after a restart (see
         # MainWindow._replay_pending_detaches).
         self.pending_detaches: dict[str, dict] = {}
+        # The pty table (split-service spec §3.8): pty id (as a string, JSON
+        # keys) -> the row the service's PtyServer keeps for a live pty
+        # (kind, session, cwd, pid, cols, rows, box, plan, options). Written
+        # by the server through set_pty / remove_pty; a row outlives nothing:
+        # a restarted service (before the keeper, PR-3.6) finds no live pty
+        # behind it and clears it.
+        self.ptys: dict[str, dict] = {}
         # The notification history, newest first, as notifycenter records
         # ({id, session_id, title, project, kind, body, when, read, count}).
         # Messages and bells only — a finished run's synthetic row stands for
@@ -940,6 +947,10 @@ class AppState:
         self.pending_detaches = {
             k: v for k, v in (data.get("pending_detaches") or {}).items() if isinstance(v, dict)
         }
+        self.ptys = {
+            k: v for k, v in (data.get("ptys") or {}).items()
+            if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
+        }
         self.notifications = notifycenter.clean_records(data.get("notifications"))
         settings = dict(data.get("settings") or {})
         # Read-time, one-way migration of the auto_title_sessions switch the
@@ -1047,6 +1058,7 @@ class AppState:
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
+            "ptys": self.ptys,
             "notifications": self.notifications,  # newest first; never sort
             "settings": {
                 k: v for k, v in self.settings.items()
@@ -1486,6 +1498,27 @@ class AppState:
 
     def get_pending_detaches(self) -> dict[str, dict]:
         return dict(self.pending_detaches)
+
+    # -- the pty table (§3.8)
+
+    def set_pty(self, pty_id: int, row: dict | None) -> None:
+        """A pty's row as the service's PtyServer reports it; None removes
+        it (the pty exited)."""
+        key = str(int(pty_id))
+        if row is None:
+            if self.ptys.pop(key, None) is None:
+                return
+        else:
+            if self.ptys.get(key) == row:
+                return
+            self.ptys[key] = dict(row)
+        self.save()
+
+    def remove_pty(self, pty_id: int) -> None:
+        self.set_pty(pty_id, None)
+
+    def get_ptys(self) -> dict[int, dict]:
+        return {int(k): dict(v) for k, v in self.ptys.items()}
 
     def get_process_baseline(self, session_id: str) -> set[str]:
         """The plumbing cmdlines captured for this session, empty when none

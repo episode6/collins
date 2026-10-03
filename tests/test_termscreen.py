@@ -3,6 +3,7 @@ rules of split-service spec §3.3 (F13, F14)."""
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -773,3 +774,83 @@ def test_throughput_is_a_thousand_times_the_cli():
         screen.feed(tokenizer.feed(data[i : i + 65536]))
     elapsed = time.perf_counter() - start
     assert len(data) / elapsed > 1_000_000  # over 1 MB/s, two hundred times the CLI
+
+
+# -- the saved model and the byte budget (PR-1.5)
+
+
+def test_dump_and_load_round_trip_the_whole_model():
+    screen = feed(
+        b"\x1b[31mred\x1b[0m\thello \xe6\x97\xa5\xe6\x9c\xac\r\n" + b"line\r\n" * 50
+        + b"\x1b7\x1b[?6h\x1b[3;10r\x1b[?1049h\x1b[2Jalt \x1b[4:3m\x1b[38;2;1;2;3mx",
+        cols=30,
+        rows=8,
+    )
+    data = screen.dump()
+    again = json.loads(json.dumps(data))
+    loaded = Screen.load(again)
+    assert loaded.dump() == data
+    assert loaded.snapshot() == screen.snapshot()
+    assert loaded.rows() == screen.rows()
+    assert list(loaded.scrollback) == list(screen.scrollback)
+    assert (loaded.top, loaded.bottom, loaded.on_alt, loaded.origin) == (2, 7, True, True)
+    # A pen names the table once: a screen of one pen is one entry.
+    assert len(data["pens"]) == len({tuple(map(str, pen)) for pen in data["pens"]})
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda d: d.clear(),
+        lambda d: d.update(format=2),
+        lambda d: d.update(cols=0),
+        lambda d: d.update(cols="12"),
+        lambda d: d.update(pens="x"),
+        lambda d: d.update(pens=[[1, 2, 3]]),
+        lambda d: d.update(pens=[[0, 300, None, None]]),
+        lambda d: d["main"].update(x=99),
+        lambda d: d["main"].update(pen=500),
+        lambda d: d["main"]["lines"].pop(),
+        lambda d: d["main"]["lines"][0].append(None),
+        lambda d: d["main"]["lines"][0].__setitem__(0, ["x" * 40, 1, 0]),
+        lambda d: d.update(top=5, bottom=2),
+        lambda d: d.update(tabs=[1000]),
+        lambda d: d.update(charsets=["BB", "B"]),
+        lambda d: d.update(scrollback=[[["a", 1, 99]]], scrollback_wrapped=[False]),
+        lambda d: d.update(scrollback=[[["a", 1, 0]]], scrollback_wrapped=[]),
+        lambda d: d.update(on_alt="yes"),
+    ],
+)
+def test_load_refuses_a_damaged_model(mutate):
+    data = feed(b"abc\r\ndef", cols=10, rows=3).dump()
+    mutate(data)
+    with pytest.raises(ValueError):
+        Screen.load(data)
+
+
+def test_load_takes_no_other_type():
+    for bad in (None, [], "x", 3):
+        with pytest.raises(ValueError):
+            Screen.load(bad)
+
+
+def test_the_scrollback_byte_budget_evicts_the_oldest_rows():
+    screen = Screen(20, 3, scrollback=1000, scrollback_bytes=300)
+    tokenizer = termstream.Tokenizer()
+    screen.feed(tokenizer.feed(b"".join(b"row %03d\r\n" % i for i in range(100))))
+    assert screen.scrollback_bytes <= 300
+    assert len(screen.scrollback) < 97  # the row count alone would have kept 97
+    assert screen.scrollback_bytes == sum(termscreen._runs_cost(r) for r in screen.scrollback)
+    texts = [termscreen._runs_text(r) for r in screen.scrollback]
+    assert texts[-1] == "row 097" and texts == sorted(texts)  # the newest kept, in order
+    # ED 3 blanks the rows and the cost with them.
+    screen.feed(tokenizer.feed(b"\x1b[3J"))
+    assert screen.scrollback_bytes == 0
+
+
+def test_the_row_count_and_the_budget_agree_on_what_is_kept():
+    screen = Screen(20, 3, scrollback=5, scrollback_bytes=10**6)
+    tokenizer = termstream.Tokenizer()
+    screen.feed(tokenizer.feed(b"".join(b"r%d\r\n" % i for i in range(20))))
+    assert len(screen.scrollback) == 5
+    assert screen.scrollback_bytes == sum(termscreen._runs_cost(r) for r in screen.scrollback)

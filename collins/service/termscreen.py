@@ -110,9 +110,15 @@ Pens are interned (one tuple per distinct pen, `_intern`), so a cell costs
 its tuple and its text. Measured 2026-10-02 with `tracemalloc`, a screen
 and a full scrollback of 10 000 rows: plain text rows 4.5 MiB; twenty
 coloured runs a row (a diff-like paint) 29 MiB; a different pen on every
-cell 113 MiB, the worst case a program can make. A byte budget for the
-scrollback, if one is wanted, is PR-1.5's (the pty server owns the
-model's lifetime); the row count is the bound here.
+cell 113 MiB, the worst case a program can make. So the scrollback has a
+byte budget as well as its row count (`SCROLLBACK_BYTES`, 8 MiB: a row
+costs its text's characters plus `RUN_COST` per run; the oldest rows go
+first, as they do when the row count is reached), which holds the full
+10 000 rows of anything the CLI paints and stops the worst case at a few
+thousand. `dump()` / `load()` are the saved model file the pty server
+writes (`ptyserver`): a JSON document, `MODEL_FORMAT`, with a pen table
+and every cell and scrollback run naming its pen by index, validated
+field by field on the way back in.
 
 The redraw
 ----------
@@ -161,6 +167,16 @@ from ..vtehtml import _is_scaled_down
 from .termstream import Bad, Control, Csi, Esc, Str, Text, Token
 
 SCROLLBACK_ROWS = 10_000
+# The scrollback's byte budget (PR-1.5): a row costs its text's characters
+# plus `RUN_COST` per run (a pen's share), and the oldest rows go when the
+# sum passes the budget, as they do when the row count does. 8 MiB holds
+# the full 10 000 rows of anything the CLI paints (the memory table in
+# the docstring) and stops a program that fills every cell with its own
+# pen at a few thousand rows.
+SCROLLBACK_BYTES = 8 * 1024 * 1024
+RUN_COST = 8
+# The saved model's format version (`Screen.dump` / `Screen.load`).
+MODEL_FORMAT = 1
 # The grid a pty is spawned with when no client says otherwise (§3.3). The
 # bounds are the protocol's: a grid outside them is clamped, never built.
 DEFAULT_COLS, DEFAULT_ROWS = 120, 40
@@ -455,6 +471,11 @@ def _runs_text(runs: tuple) -> str:
     return "".join(run[0] for run in runs)
 
 
+def _runs_cost(runs: tuple) -> int:
+    """What a scrollback row costs against the byte budget."""
+    return sum(len(run[0]) + RUN_COST for run in runs)
+
+
 # ----------------------------------------------------------------- screen
 
 
@@ -463,9 +484,16 @@ class Screen:
     `apply`; read it with `rows`, `cursor`, `tail_is_faint`,
     `first_column`, `capture_contents`; redraw it with `snapshot`."""
 
-    def __init__(self, cols: int = DEFAULT_COLS, rows: int = DEFAULT_ROWS, scrollback: int = SCROLLBACK_ROWS):
+    def __init__(
+        self,
+        cols: int = DEFAULT_COLS,
+        rows: int = DEFAULT_ROWS,
+        scrollback: int = SCROLLBACK_ROWS,
+        scrollback_bytes: int = SCROLLBACK_BYTES,
+    ):
         self.cols, self.rows_count = _clamp_grid(cols, rows)
-        self._scrollback_max = scrollback
+        self._scrollback_max = max(1, scrollback)
+        self._scrollback_budget = max(1, scrollback_bytes)
         self._init_state()
 
     def _init_state(self) -> None:
@@ -479,6 +507,7 @@ class Screen:
         self.top, self.bottom = 0, rows - 1
         self.scrollback: deque[tuple] = deque(maxlen=self._scrollback_max)
         self.scrollback_wrapped: deque[bool] = deque(maxlen=self._scrollback_max)
+        self.scrollback_bytes = 0  # what the rows cost against the budget
         self.autowrap = True
         self.origin = False
         self.insert = False
@@ -601,6 +630,178 @@ class Screen:
         while rows and not rows[-1]:
             rows.pop()
         return "\n".join(rows)
+
+    # -- the saved model (PR-1.5)
+
+    def dump(self) -> dict:
+        """The whole model as JSON data, `MODEL_FORMAT`: what the pty server
+        writes to a pty's saved model file (§3.10). `load` reads it back
+        into a fresh model with the same cells, cursor, pens, tabs, modes
+        and scrollback. Pens are a table; cells and runs name them by index,
+        so a screen full of one pen costs one entry."""
+        pens: dict = {}
+
+        def index(pen) -> int:
+            known = pens.get(pen)
+            if known is None:
+                known = pens[pen] = len(pens)
+            return known
+
+        def grid_data(grid: Grid) -> dict:
+            lines = []
+            for line in grid.lines:
+                lines.append([None if cell is None else [cell[0], cell[1], index(cell[2])] for cell in line])
+            saved = None
+            if grid.saved is not None:
+                x, y, pending, pen, origin = grid.saved
+                saved = [x, y, pending, index(pen), origin]
+            return {
+                "lines": lines,
+                "wrapped": list(grid.wrapped),
+                "x": grid.x,
+                "y": grid.y,
+                "pending": grid.pending,
+                "pen": index(grid.pen),
+                "saved": saved,
+                "used": grid.used,
+            }
+
+        main = grid_data(self.main)
+        alt = grid_data(self.alt)
+        scrollback = [[[text, width, index(pen)] for text, width, pen in runs] for runs in self.scrollback]
+        return {
+            "format": MODEL_FORMAT,
+            "cols": self.cols,
+            "rows": self.rows_count,
+            "scrollback_rows": self._scrollback_max,
+            "scrollback_budget": self._scrollback_budget,
+            "on_alt": self.on_alt,
+            "top": self.top,
+            "bottom": self.bottom,
+            "autowrap": self.autowrap,
+            "origin": self.origin,
+            "insert": self.insert,
+            "tabs": sorted(self.tabs),
+            "charsets": list(self.charsets),
+            "shift": self.shift,
+            "last_char": self.last_char,
+            "pens": [_pen_data(pen) for pen in pens],
+            "main": main,
+            "alt": alt,
+            "scrollback": scrollback,
+            "scrollback_wrapped": list(self.scrollback_wrapped),
+        }
+
+    @classmethod
+    def load(cls, data: object) -> Screen:
+        """A model from `dump`'s data. Everything is validated (rule 5: the
+        file is read from disk, and a service after an upgrade may read a
+        file an older one wrote): a wrong shape, a bound exceeded or an
+        unknown format raises `ValueError`, and the caller starts fresh."""
+        if not isinstance(data, dict) or data.get("format") != MODEL_FORMAT:
+            raise ValueError("not a saved model")
+        cols, rows = _clamp_grid(_int(data.get("cols"), 1, MAX_COLS), _int(data.get("rows"), 1, MAX_ROWS))
+        max_rows = _int(data.get("scrollback_rows"), 1, 1_000_000)
+        budget = _int(data.get("scrollback_budget"), 1, 2**40)
+        pens_data = data.get("pens")
+        if not isinstance(pens_data, list) or len(pens_data) > _PENS_MAX:
+            raise ValueError("pens")
+        pens = [_intern(_pen_from(item)) for item in pens_data]
+
+        def pen_at(index) -> Pen:
+            if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(pens):
+                raise ValueError("pen index")
+            return pens[index]
+
+        def cell_from(item):
+            if item is None:
+                return None
+            if not isinstance(item, list) or len(item) != 3:
+                raise ValueError("cell")
+            text, width, pen = item
+            if not isinstance(text, str) or len(text) > 1 + COMBINING_MAX:
+                raise ValueError("cell text")
+            return (text, _int(width, 0, cols), pen_at(pen))
+
+        def grid_from(item, grid: Grid) -> None:
+            if not isinstance(item, dict):
+                raise ValueError("grid")
+            lines = item.get("lines")
+            wrapped = item.get("wrapped")
+            if not isinstance(lines, list) or len(lines) != rows:
+                raise ValueError("lines")
+            if not isinstance(wrapped, list) or len(wrapped) != rows:
+                raise ValueError("wrapped")
+            if not all(isinstance(w, bool) for w in wrapped):
+                raise ValueError("wrapped")
+            new_lines = []
+            for line in lines:
+                if not isinstance(line, list) or len(line) != cols:
+                    raise ValueError("line")
+                new_lines.append([cell_from(cell) for cell in line])
+            grid.lines = new_lines
+            grid.wrapped = list(wrapped)
+            grid.x = _int(item.get("x"), 0, cols - 1)
+            grid.y = _int(item.get("y"), 0, rows - 1)
+            grid.pending = _bool(item.get("pending"))
+            grid.pen = pen_at(item.get("pen"))
+            grid.used = _int(item.get("used"), 0, rows)
+            saved = item.get("saved")
+            if saved is not None:
+                if not isinstance(saved, list) or len(saved) != 5:
+                    raise ValueError("saved")
+                x, y, pending, pen, origin = saved
+                grid.saved = (
+                    _int(x, 0, cols - 1), _int(y, 0, rows - 1), _bool(pending), pen_at(pen), _bool(origin),
+                )
+
+        screen = cls(cols, rows, max_rows, budget)
+        grid_from(data.get("main"), screen.main)
+        grid_from(data.get("alt"), screen.alt)
+        screen.on_alt = _bool(data.get("on_alt"))
+        screen.grid = screen.alt if screen.on_alt else screen.main
+        top = _int(data.get("top"), 0, rows - 1)
+        bottom = _int(data.get("bottom"), 0, rows - 1)
+        if top > bottom:
+            raise ValueError("region")
+        screen.top, screen.bottom = top, bottom
+        screen.autowrap = _bool(data.get("autowrap"))
+        screen.origin = _bool(data.get("origin"))
+        screen.insert = _bool(data.get("insert"))
+        tabs = data.get("tabs")
+        if not isinstance(tabs, list) or len(tabs) > cols:
+            raise ValueError("tabs")
+        screen.tabs = {_int(stop, 0, cols - 1) for stop in tabs}
+        charsets = data.get("charsets")
+        if not isinstance(charsets, list) or len(charsets) != 2 or not all(
+            isinstance(c, str) and len(c) == 1 for c in charsets
+        ):
+            raise ValueError("charsets")
+        screen.charsets = list(charsets)
+        screen.shift = _int(data.get("shift"), 0, 1)
+        last_char = data.get("last_char")
+        if not isinstance(last_char, str) or len(last_char) > 1 + COMBINING_MAX:
+            raise ValueError("last_char")
+        screen.last_char = last_char
+        scrollback = data.get("scrollback")
+        wrapped = data.get("scrollback_wrapped")
+        if not isinstance(scrollback, list) or len(scrollback) > max_rows:
+            raise ValueError("scrollback")
+        if not isinstance(wrapped, list) or len(wrapped) != len(scrollback):
+            raise ValueError("scrollback_wrapped")
+        for runs, wrap in zip(scrollback, wrapped, strict=True):
+            if not isinstance(runs, list) or len(runs) > cols:
+                raise ValueError("row")
+            row = []
+            for run in runs:
+                if not isinstance(run, list) or len(run) != 3:
+                    raise ValueError("run")
+                text, width, pen = run
+                if not isinstance(text, str) or len(text) > cols * (1 + COMBINING_MAX):
+                    raise ValueError("run text")
+                row.append((text, _int(width, 0, cols), pen_at(pen)))
+            screen._append_scrollback(tuple(row), _bool(wrap))
+        return screen
 
     # -- resize (no reflow, D19)
 
@@ -766,8 +967,19 @@ class Screen:
     # -- movement and scrolling
 
     def _push_scrollback(self, line: list, wrapped: bool) -> None:
-        self.scrollback.append(_line_runs(line))
+        self._append_scrollback(_line_runs(line), wrapped)
+
+    def _append_scrollback(self, runs: tuple, wrapped: bool) -> None:
+        scrollback = self.scrollback
+        if len(scrollback) == scrollback.maxlen:
+            self.scrollback_bytes -= _runs_cost(scrollback[0])
+        scrollback.append(runs)
         self.scrollback_wrapped.append(wrapped)
+        self.scrollback_bytes += _runs_cost(runs)
+        # The byte budget: the oldest rows go first, as with the row count.
+        while self.scrollback_bytes > self._scrollback_budget and len(scrollback) > 1:
+            self.scrollback_bytes -= _runs_cost(scrollback.popleft())
+            self.scrollback_wrapped.popleft()
 
     def _linefeed(self) -> None:
         grid = self.grid
@@ -1010,6 +1222,7 @@ class Screen:
             self.scrollback_wrapped.clear()
             self.scrollback.extend([()] * count)
             self.scrollback_wrapped.extend([False] * count)
+            self.scrollback_bytes = 0
             return
         if mode == 0:
             self._erase(grid.lines[grid.y], grid.x, cols)
@@ -1441,6 +1654,46 @@ class Screen:
             out.append(f"\x1b[{grid.y + 1};{grid.x + 1}H")
         out.append(pen_sgr(grid.pen))
         return "".join(out)
+
+
+def _pen_data(pen: Pen) -> list:
+    """A pen as JSON data: the attribute bits and three colours, each None,
+    a palette index or an ``[r, g, b]`` list."""
+    attrs, fg, bg, ul = pen
+    return [attrs, _colour_data(fg), _colour_data(bg), _colour_data(ul)]
+
+
+def _colour_data(colour):
+    return list(colour) if isinstance(colour, tuple) else colour
+
+
+def _pen_from(item: object) -> Pen:
+    if not isinstance(item, list) or len(item) != 4:
+        raise ValueError("pen")
+    attrs, fg, bg, ul = item
+    return (_int(attrs, 0, 0xFFFF), _colour_from(fg), _colour_from(bg), _colour_from(ul))
+
+
+def _colour_from(item: object):
+    if item is None:
+        return None
+    if isinstance(item, int) and not isinstance(item, bool):
+        return _int(item, 0, 255)
+    if isinstance(item, list) and len(item) == 3:
+        return tuple(_int(c, 0, 255) for c in item)
+    raise ValueError("colour")
+
+
+def _int(value: object, low: int, high: int) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        raise ValueError("number")
+    return value
+
+
+def _bool(value: object) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("flag")
+    return value
 
 
 def _cut_wide(line: list, cols: int) -> None:

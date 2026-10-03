@@ -1575,3 +1575,17 @@ def test_sandbox_state_survives_junk_on_disk(app_state):
     for junk in ("nope", 7, None, True):
         app_state._STATE_FILE.write_text(json.dumps({"sandboxed_sessions": junk}))
         assert app_state.AppState().sandboxed_sessions == {}
+
+
+def test_the_pty_table_is_written_and_read_back(app_state):
+    state = app_state.AppState()
+    state.set_pty(3, {"kind": "shell", "cwd": "/tmp", "cols": 80, "rows": 24, "pid": 100})
+    state.set_pty(7, {"kind": "agent", "cwd": "/tmp", "cols": 120, "rows": 40, "session": "s1"})
+    again = app_state.AppState()
+    assert again.get_ptys() == {
+        3: {"kind": "shell", "cwd": "/tmp", "cols": 80, "rows": 24, "pid": 100},
+        7: {"kind": "agent", "cwd": "/tmp", "cols": 120, "rows": 40, "session": "s1"},
+    }
+    again.remove_pty(3)
+    again.remove_pty(99)  # nothing to do, nothing written
+    assert app_state.AppState().get_ptys() == {7: again.get_ptys()[7]}

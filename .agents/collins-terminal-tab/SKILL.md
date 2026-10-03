@@ -405,6 +405,76 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   `check_termscreen_parity.py --write` under the headless display to
   regenerate the goldens from VTE, and run the unit suite.
 
+## The service's pty server (ptyserver)
+
+`collins/service/ptyserver.py` (GLib only, nothing from GTK; not yet wired
+into the app) is the table of terminals the service will own, one `Pty`
+per agent session and per panel shell (spec §3.3, PR-1.5).
+
+- **Lifetime.** `PtyServer.spawn(kind, argv, cwd, env, cols, rows, …)`
+  does `os.openpty()`, sets the window size on the slave, forks, and in the
+  child `os.login_tty` (a new session, the slave its controlling terminal)
+  then `execvpe` with the caller's environment plus `TERM`, `COLORTERM`,
+  `VTE_VERSION` and the two progress spoofs (`ConEmuANSI=ON`,
+  `TERM_PROGRAM=kitty`). The master is non-blocking and read on a
+  `GLib.io_add_watch` at `PRIORITY_DEFAULT`; each read goes through the
+  pty's `StreamFilter` (which feeds the `Screen`), the replies are written
+  back, the forward bytes go to every sink, the stream events to the
+  server's `on_event` listener. A `GLib.child_watch_add` reaps the child;
+  the master is drained to EIO, the model saved, every sink sent
+  `{"t": "pty-exited", "pty", "status"}` (the exit code, or minus the
+  signal), the row removed. `close()` is SIGHUP plus the master closed;
+  `shutdown()` saves and closes everything (Phase 1: stopping the service
+  ends every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
+  `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7.
+- **Attach and the redraw.** `attach(pty, sink, cols, rows)` sends
+  `Screen.snapshot()` with the tracker's `preamble(screen=False)` in
+  frames of at most `protocol.MAX_PAYLOAD`, every one flagged `REDRAW`,
+  the last `REDRAW_END`, then live output with flags 0. The reply is
+  `attach`'s: the grid the redraw was painted at, `active`, `sized_for`.
+  A sink is any object with `send_output(bytes, flags)` and
+  `send_event(dict)`; `drop_queued()` and a `device` attribute are
+  optional; sinks are keyed by identity.
+- **The active client owns the size** (D1): the last sink to type
+  (`write(…, sink=)`) or take focus (`focus(…, True)`), the first to
+  attach when none. Its resize applies (`TIOCSWINSZ`, the model, the
+  filter's grid); another sink's is remembered and applied when it becomes
+  active; `resize(pty, cols, rows)` with no sink is the service's own.
+  An attaching sink that is active and differs in grid is applied before
+  its redraw, so the redraw is painted at its size.
+- **Two queues.** Every write to the pty is queued behind a writability
+  watch, one queue per pty, replies ahead of typing, bounded at
+  `INPUT_QUEUE_BYTES` (1 MiB): beyond it a client's input is dropped and
+  counted (`Pty.dropped_input`), never blocked on (F11's deadlock).
+  Output per sink is counted (`protocol.QUEUE_BYTES`, 4 MiB) and the
+  transport reports what it wrote out with `drained(pty, sink, n)`; a
+  sink that would pass the bound is not sent the backlog: its
+  `drop_queued()` is called, the count reset, and a fresh redraw follows.
+  A transport treats a redraw's first frame as "discard what is still
+  queued for this pty".
+- **`paint(pty, text)`** is rule 2's inserted text: fed to the model and
+  sent to the sinks as if the child had written it, not through the
+  responder.
+- **The saved model.** `Screen.dump()` as JSON (`MODEL_FORMAT` 1: a pen
+  table, cells and scrollback runs naming pens by index; `Screen.load`
+  validates every field and bound and raises on anything off) is written
+  atomically to `$XDG_STATE_HOME/collins/pty/<id>.model` at most every
+  `SAVE_INTERVAL_MS` while output arrives, at exit and at shutdown;
+  `COLLINS_PTY_STATE_DIR` overrides the directory (tests, captures).
+  `PtyServer.load_model(path)` gives the `Screen` or None. The scrollback
+  has a byte budget as well as its row count (`termscreen.SCROLLBACK_BYTES`,
+  8 MiB of text plus `RUN_COST` per run; the oldest rows go first).
+- **The `ptys` table.** The server's `record(pty_id, row | None)` callable
+  (the app will pass `AppState.set_pty`) keeps a row per live pty in
+  `state.json` (§3.8): kind, session, cwd, pid, cols, rows, box, plan,
+  options. Removed when the pty exits.
+- **Testing.** `tests/test_ptyserver.py` runs real children (`cat` put in
+  raw mode from the master side, `sh -c`, `true`) under the default GLib
+  main context iterated by hand (`pump`), GTK-free; a 100 KB write against
+  an echoing child, the overflow redraw, the fd count after 200 spawns and
+  the ten-thousand-row redraw (measured, in the module docstring) are all
+  there.
+
 ## Footguns
 
 - Redraws the app causes (typing a command, `feed_message`) look like agent
