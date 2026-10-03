@@ -137,9 +137,11 @@ Choices the spec left to this module
   luminance is below one half.
 - **CPR** clamps the column to the grid (a pending wrap reports the last
   column) and counts rows from the scroll region's top in origin mode.
-- **The preamble's screen switch is optional** (``screen=False``), since
-  ``?1049h`` on the alternate screen clears it; ``?3`` and ``?1048`` are
-  never re-asserted; ``?25`` goes last.
+- **The preamble's screen switch and scroll region are optional**
+  (``screen=False``, for a redraw from `termscreen`, which paints the
+  screens and sets the region, shared by both screens in VTE, itself),
+  since ``?1049h`` on the alternate screen clears it; ``?3`` and ``?1048``
+  are never re-asserted; ``?25`` goes last.
 - **Bounds** (rule 5): 256 distinct modes VTE does not know; the kitty
   stack holds 32 and evicts the oldest; a CSI or ESC sequence past 4096
   bytes is `Bad`.
@@ -373,8 +375,14 @@ class Tokenizer:
             elif kind == "c0":
                 out.append(Control(buf[pos:end]))
             elif kind == "csi":
-                prefix, params, intermediates = m.group("csi_m", "csi_p", "csi_i")
                 raw = buf[pos:end]
+                if len(raw) > SEQUENCE_MAX:
+                    # The slow path's bound, kept here too: a CSI past it is
+                    # `Bad`, never handed to a handler as one sequence.
+                    out.append(Bad(raw[:SEQUENCE_MAX]))
+                    pos += SEQUENCE_MAX
+                    continue
+                prefix, params, intermediates = m.group("csi_m", "csi_p", "csi_i")
                 out.append(Csi(raw, prefix, params, intermediates, raw[-1]))
             elif kind == "osc" or kind == "str":
                 if end - pos - len(m.group(kind)) >= STRING_MAX:
@@ -391,6 +399,10 @@ class Tokenizer:
                     out.append(Str(raw, _STR_KINDS[raw[1]], m.group("str_b"), b"\x1b\\", True))
             elif kind == "esc":
                 raw = buf[pos:end]
+                if len(raw) > SEQUENCE_MAX:
+                    out.append(Bad(raw[:SEQUENCE_MAX]))
+                    pos += SEQUENCE_MAX
+                    continue
                 out.append(Esc(raw, m.group("esc_i"), raw[-1]))
             else:  # esc1
                 raw = buf[pos:end]
@@ -724,9 +736,11 @@ class ModeTracker:
 
     def preamble(self, screen: bool = True) -> bytes:
         """The sequences that bring a fresh terminal to the tracked state:
-        the alternate screen (unless ``screen`` is False), the modes, the
-        scroll region, the kitty flags, modifyOtherKeys, the character sets,
-        cursor visibility."""
+        the alternate screen and the scroll region (unless ``screen`` is
+        False: a redraw from the screen model paints the screens and sets
+        the region itself, `termscreen.Screen.snapshot`), the modes, the
+        kitty flags, modifyOtherKeys, the character sets, cursor
+        visibility."""
         out = bytearray()
         if screen and self.alt_screen:
             out += b"\x1b[?%dh" % self.alt_mode
@@ -736,7 +750,7 @@ class ModeTracker:
         for mode, value in self.ansi.items():
             if value != _default(VTE_ANSI_MODES, mode):
                 out += b"\x1b[%d%c" % (mode, 0x68 if value else 0x6C)
-        if self.scroll_region is not None:
+        if screen and self.scroll_region is not None:
             out += b"\x1b[%d;%dr" % self.scroll_region
         if self.kitty_base:
             out += b"\x1b[=%du" % self.kitty_base
