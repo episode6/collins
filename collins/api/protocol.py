@@ -122,7 +122,12 @@ each taken from the code the message replaces:
   bounded JSON objects: `prstatus.from_record` re-validates them on arrival.
 - `notify` carries a `notifycenter.Notification` record with the body as
   `msgid` and `args` (§3.13, §3.14); the record's id rides as
-  `notification`, since `id` on any frame makes it a request. `seen`
+  `notification`, since `id` on any frame makes it a request. This is a
+  forward shape, not a port: today's `Notification.body` is a formatted
+  string. PR-1.11 moves the producers to msgid and args (the client
+  translates with `i18n._()`), and text an agent supplied (`notify_user`)
+  crosses as its own `msgid` with no `args`, which `_()` returns
+  unchanged. `seen`
   carries notification ids and/or a session, from a client as a request and from the service to every other
   client as an event, so unread is one number everywhere.
 - `tool` is a UI-bound tool call the service hands the active client:
