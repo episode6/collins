@@ -167,7 +167,13 @@ def test_table_shapes_are_sound():
 ID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 BOX = "0123456789abcdef0123456789abcdef"
 TERM = {"vte": 8400, "fg": "#c0c0c0", "bg": "#000000", "scheme": "dark"}
-DELIVERY = {"path": "/home/u/data", "status": "live", "inside": "/home/u/data", "linked": True}
+DELIVERY = {
+    "path": "/home/u/data",
+    "status": "pending",
+    "inside": "/home/u/data",
+    "linked": True,
+    "reason": "bindfs not installed",
+}
 
 SAMPLES = {
     ("hello", p.REQUEST): {
@@ -387,9 +393,9 @@ def test_every_reply_round_trips(name):
 
 
 def test_optional_fields_may_be_left_out():
-    message = p.validate(p.request("spawn", 1, cwd="/home/u"), p.CLIENT)
+    message = p.validate(p.request("spawn", 1, kind="shell", cwd="/home/u"), p.CLIENT)
     assert isinstance(message, p.Message)
-    assert message.fields == {"cwd": "/home/u"}
+    assert message.fields == {"kind": "shell", "cwd": "/home/u"}
     assert message.get("prompt") is None
     assert message.get("prompt", "") == ""
 
@@ -672,6 +678,16 @@ def test_unknown_fields_in_list_items_are_dropped():
     reply = {**REPLIES["sandbox.grants"], "grants": [{**DELIVERY, "mounted_by": "x"}]}
     response = p.validate_response(p.reply(1, **reply), "sandbox.grants")
     assert response.fields["grants"] == [DELIVERY]
+
+
+def test_a_pending_delivery_leaves_inside_out():
+    """Delivery.inside is "" while a grant is pending; the wire omits it."""
+    pending = {"path": "/home/u/data", "status": "pending", "reason": "bindfs not installed"}
+    message = p.validate(p.event("sandbox", pty=7, delivery=pending), p.SERVICE)
+    assert isinstance(message, p.Message)
+    assert message.fields["delivery"] == pending
+    refusal = p.validate(p.event("sandbox", pty=7, delivery={**pending, "inside": ""}), p.SERVICE)
+    assert refusal.msgid == "{field} must be an absolute path"
 
 
 def test_free_json_is_kept_whole():

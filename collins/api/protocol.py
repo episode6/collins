@@ -100,12 +100,12 @@ each taken from the code the message replaces:
 - `resize`, `focus` and `theme` are events: fire and forget, and frequent.
   `focus` carries `focused`; `theme` carries `term`, hello's shape.
 - `spawn` carries `SessionOptions`' fields (bar `sandbox_plan`, which the
-  service writes), `kind` ("agent" or "shell"), `session` (the session an
+  service writes), `kind` (``agent`` or ``shell``, required), `session` (the session an
   agent resumes, the session a shell belongs to), the prompt, and the
   client's grid; its reply names the new pty and its grid.
 - `mention` carries `TerminalTab.add_file_to_chat`'s path and line range;
   `cut` is answered with the box's text (a paste Collins can't read is a
-  `refused`); `close` carries a mode: ``exit`` (the graceful exit),
+  `refused`); `close` carries a required mode: ``exit`` (the graceful exit),
   ``background`` (the /bg handoff) or ``kill`` (the force close). Hide is a
   client gesture and never reaches the service.
 - `paint` carries the text to insert into the pty's output stream, as
@@ -122,8 +122,8 @@ each taken from the code the message replaces:
   bounded JSON objects: `prstatus.from_record` re-validates them on arrival.
 - `notify` carries a `notifycenter.Notification` record with the body as
   `msgid` and `args` (§3.13, §3.14); the record's id rides as
-  `notification`, since `id` on any frame makes it a request. `seen` carries notification ids and/or
-  a session, from a client as a request and from the service to every other
+  `notification`, since `id` on any frame makes it a request. `seen`
+  carries notification ids and/or a session, from a client as a request and from the service to every other
   client as an event, so unread is one number everywhere.
 - `tool` is a UI-bound tool call the service hands the active client:
   `call` (its id), the session, the tool's name and its arguments, a JSON
@@ -131,16 +131,21 @@ each taken from the code the message replaces:
   the client. `tool-reply` is the client's event back, `call`, `ok` and
   `text`, `mcptools.run_tool_call`'s ``(ok, text)``.
 - The `sandbox.*` requests name the session's pty (the chip lives on a
-  running tab). `sandbox.grants` answers with what the chip draws;
-  `sandbox.allow` and `sandbox.revoke` take a `scope`, ``session`` (this
-  session's box) or ``project`` (the project's defaults for new sessions);
-  `sandbox.tools` sets switches (`tools`, name -> on) or `reset`s them. The
-  `sandbox` event says something changed, and carries a grant's `delivery`
-  (``sandboxgrants.Delivery``'s path, status, inside, linked) for the toast.
-- `service.restart` takes `when`, ``now`` or ``idle`` (§3.10's *Restart
-  when idle*); `service.status` answers with the version, the protocol and
+  running tab). `sandbox.grants` answers with what the chip draws, each
+  grant in ``sandboxgrants.Delivery``'s shape (path, status, inside,
+  linked, reason: why a grant is pending, the grant tag's tooltip).
+  `inside` must be absolute, so the service omits it where `Delivery`
+  holds ``""`` (a pending grant) rather than sending the empty string.
+  `sandbox.allow` and `sandbox.revoke` take a required `scope`,
+  ``session`` (this session's box) or ``project`` (the project's defaults
+  for new sessions); `sandbox.tools` sets switches (`tools`, name -> on)
+  or `reset`s them. The `sandbox` event says something changed, and
+  carries a grant's `delivery`, the same shape, for the toast.
+- `service.restart` takes a required `when`, ``now`` or ``idle`` (§3.10's
+  *Restart when idle*); `service.status` answers with the version, the protocol and
   the counts of ptys, busy sessions and clients.
-- Enumerations a client sends are closed (`choices`); strings the service
+- Enumerations a client sends are closed (`choices`) and, where a request
+  carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
   grant status) are bounded strings, mapped by the receiver.
 """
@@ -373,8 +378,9 @@ _DELIVERY = Field(
     fields={
         "path": _req(_PATH),
         "status": _req(_SHORT),
-        "inside": _PATH,
+        "inside": _PATH,  # omitted, never "", while the grant is pending
         "linked": _BOOL,
+        "reason": _NAME,  # why the grant is pending; "" or absent otherwise
     },
 )
 
@@ -503,7 +509,7 @@ _TABLE: tuple[MessageType, ...] = (
         "Start a session or a panel shell in a new pty.",
         request=_request(
             {
-                "kind": Field(K_STR, choices=frozenset({"agent", "shell"}), high=8),
+                "kind": _req(Field(K_STR, choices=frozenset({"agent", "shell"}), high=8)),
                 "cwd": _req(_PATH),
                 "session": _ID,
                 "prompt": _TEXT,
@@ -567,7 +573,7 @@ _TABLE: tuple[MessageType, ...] = (
         request=_request(
             {
                 "pty": _req(_PTY),
-                "mode": Field(K_STR, choices=frozenset({"exit", "background", "kill"}), high=16),
+                "mode": _req(Field(K_STR, choices=frozenset({"exit", "background", "kill"}), high=16)),
             }
         ),
     ),
@@ -725,7 +731,7 @@ _TABLE: tuple[MessageType, ...] = (
             {
                 "pty": _req(_PTY),
                 "path": _req(_PATH),
-                "scope": Field(K_STR, choices=frozenset({"session", "project"}), high=8),
+                "scope": _req(Field(K_STR, choices=frozenset({"session", "project"}), high=8)),
             }
         ),
     ),
@@ -736,7 +742,7 @@ _TABLE: tuple[MessageType, ...] = (
             {
                 "pty": _req(_PTY),
                 "path": _req(_PATH),
-                "scope": Field(K_STR, choices=frozenset({"session", "project"}), high=8),
+                "scope": _req(Field(K_STR, choices=frozenset({"session", "project"}), high=8)),
             }
         ),
     ),
@@ -771,7 +777,7 @@ _TABLE: tuple[MessageType, ...] = (
         "service.restart",
         "Restart the service: now, or once no session is busy.",
         request=_request(
-            {"when": Field(K_STR, choices=frozenset({"now", "idle"}), high=8)},
+            {"when": _req(Field(K_STR, choices=frozenset({"now", "idle"}), high=8))},
         ),
     ),
     MessageType(
@@ -801,10 +807,6 @@ ENVELOPE = frozenset({"t", "id", "re"})
 def type_names() -> tuple[str, ...]:
     """Every message type, in the table's order."""
     return tuple(TYPES)
-
-
-def message_type(name: str) -> MessageType | None:
-    return TYPES.get(name)
 
 
 # ---- validated messages and refusals ----------------------------------------
