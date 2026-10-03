@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-07. Full change history: git log for this file.
+fork. Last modified: 2026-10-02. Full change history: git log for this file.
 -->
 
 # Keyboard Shortcuts
@@ -83,8 +83,8 @@ sessions (`win.focus-search`), swap the panel's sides, move a panel tab to
 the other strip, focus the editor, and opening the Keyboard Bindings dialog
 itself.
 
-The bindings are stored in `~/.config/collins/state.json` under
-`settings.keybindings`, as a map of action name to a list of GTK accelerator
+The bindings are stored in `~/.config/collins/ui-state.json` (this
+computer's half of the app state) under `device.settings.keybindings`, as a map of action name to a list of GTK accelerator
 strings (`"win.close-tab": ["<Control>F4"]`; an empty list means unbound).
 
 ## Keys of the widget under the cursor

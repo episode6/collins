@@ -118,9 +118,35 @@ every install after its first save. Beyond settings it holds names,
 generated names, CLI titles, emoji, favorites, archived sessions and
 projects, project order and expansion, per-project worktree overrides,
 virtual projects, forward chains and pending detaches, process baselines,
-panel layouts, editor states, `session_prs`, `session_attachments`, composer
-drafts, new-chat drafts and notifications. Persisted state is untrusted
-input: every reader validates shape and drops what doesn't fit.
+`session_prs`, `session_attachments`, composer drafts, new-chat drafts and
+notifications, and `service_id`. Persisted state is untrusted input: every
+reader validates shape and drops what doesn't fit.
+
+**The state split** (the service-and-client spec, §3.8; PR-1.4). `state.json`
+is the *service's* half. This device's half is `ui-state.json` beside it,
+written by `uistate.UiState`, which `AppState` owns: the settings in
+`state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, tray,
+Caffeine, the composer's, editor's and git page's looks; `SERVICE_SETTINGS`
+is the rest, and the two must cover `DEFAULT_SETTINGS` exactly —
+`tests/test_state_split.py`), and under `services.<service id>` the
+per-session `panel_layout` and `editor_states` (the `AppState.panel_layouts`
+/ `editor_states` properties read that block), `last_active_session` (a
+setting in the catalogue, stored per service: `uistate.SERVICE_SCOPED_
+SETTINGS`) and the unused-yet `open_tabs`. **Nothing outside `state.py`
+knows the side**: `get_setting`, `set_setting`, `update_settings` and the
+`get_*` / `set_*` pairs route, `AppState.settings` stays the merged dict
+the window hands to `SessionOptions`, and `save()` writes `state.json`
+only — a mutator of a device record calls `_save_ui()`, and
+`forward_session` calls both. The first start after the split (a parsed
+`state.json` with no `service_id`) copies it to `state.json.pre-split`,
+moves the device keys over, mints the id and rewrites; the id is the
+marker, so the second start does nothing; an unparseable file is left
+untouched (no backup, no rewrite). A downgrade's save drops the id, and
+the next upgrade re-migrates, adopting the one service `ui-state.json`
+knows so the layouts stay reachable. The e2e scripts seed `state.json`
+without an id and are migrated on launch, which is fine: a seeded device
+key reaches `get_setting` the same way. The `app_state` fixture isolates
+both files (`_ui_state_file()` follows `_CONFIG_DIR`).
 
 ## The sidebar (`sidebar.py`)
 

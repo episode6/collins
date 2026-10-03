@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-02. Full change history: git log for this file.
 
 import json
 import time
@@ -13,6 +13,20 @@ from collins.state import (
     move_in_order,
     panel_size_key,
 )
+
+
+def _ui_block(app_state, state):
+    """This device's per-service block as it is on disk: where the panel
+    layouts and editor states live since the state split."""
+    data = json.loads(app_state._ui_state_file().read_text(encoding="utf-8"))
+    return data["services"][state.service_id]
+
+
+def _write_ui_block(app_state, state, block):
+    path = app_state._ui_state_file()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["services"][state.service_id] = block
+    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def test_roundtrip(app_state):
@@ -340,18 +354,18 @@ def test_panel_layout_none_removes_entry(app_state):
 def test_panel_layout_unchanged_is_not_rewritten(app_state):
     state = app_state.AppState()
     state.set_panel_layout("sid", _LAYOUT)
-    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    app_state._ui_state_file().unlink()  # a redundant save would recreate the file
     state.set_panel_layout("sid", json.loads(json.dumps(_LAYOUT)))  # identical layout
     state.set_panel_layout("absent", None)  # removing a missing entry
-    assert not app_state._STATE_FILE.exists()
+    assert not app_state._ui_state_file().exists()
 
 
 def test_panel_layout_ignores_corrupt_entries(app_state):
     state = app_state.AppState()
     state.set_panel_layout("good", {"mode": "bottom"})
-    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
-    data["panel_layout"]["bad"] = "not-a-dict"
-    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    block = _ui_block(app_state, state)
+    block["panel_layout"]["bad"] = "not-a-dict"
+    _write_ui_block(app_state, state, block)
     fresh = app_state.AppState()
     assert fresh.get_panel_layout("good") == {"mode": "bottom"}
     assert fresh.get_panel_layout("bad") is None
@@ -392,7 +406,8 @@ def test_panel_states_migrate_to_layouts(app_state):
     state.save()
     data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
     assert "panel_states" not in data
-    assert set(data["panel_layout"]) == {"open-sid", "closed-sid"}
+    assert "panel_layout" not in data  # the device's, since the split
+    assert set(_ui_block(app_state, state)["panel_layout"]) == {"open-sid", "closed-sid"}
 
 
 def test_panel_layout_wins_over_stale_panel_states(app_state):
@@ -437,18 +452,18 @@ def test_editor_state_unchanged_is_not_rewritten(app_state):
     state = app_state.AppState()
     snap = {"open": True, "files": ["/proj/a.py"]}
     state.set_editor_state("sid", snap)
-    app_state._STATE_FILE.unlink()  # a redundant save would recreate the file
+    app_state._ui_state_file().unlink()  # a redundant save would recreate the file
     state.set_editor_state("sid", dict(snap))  # identical snapshot
     state.set_editor_state("absent", None)  # removing a missing entry
-    assert not app_state._STATE_FILE.exists()
+    assert not app_state._ui_state_file().exists()
 
 
 def test_editor_state_ignores_corrupt_entries(app_state):
     state = app_state.AppState()
     state.set_editor_state("good", {"open": True, "files": []})
-    data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
-    data["editor_states"]["bad"] = "not-a-dict"
-    app_state._STATE_FILE.write_text(json.dumps(data), encoding="utf-8")
+    block = _ui_block(app_state, state)
+    block["editor_states"]["bad"] = "not-a-dict"
+    _write_ui_block(app_state, state, block)
     fresh = app_state.AppState()
     assert fresh.get_editor_state("good") == {"open": True, "files": []}
     assert fresh.get_editor_state("bad") is None
@@ -1044,8 +1059,10 @@ def test_old_state_without_the_model_keys_loads_the_new_defaults(app_state):
 def test_every_default_is_persisted(app_state):
     # Every default is written out on save, not only the keys that were set:
     # an install that saved under the old default carries an explicit
-    # icon_model of "" forward, keeping its auto-start.
-    app_state.AppState().set_setting("scrollback", 5000)
+    # icon_model of "" forward, keeping its auto-start. (A service key is
+    # written here: scrollback is the device's and would write the other
+    # file — tests/test_state_split.py covers that side.)
+    app_state.AppState().set_setting("welcome_seen", True)
     data = json.loads(app_state._STATE_FILE.read_text(encoding="utf-8"))
     assert data["settings"]["icon_model"] == NO_MODEL
     assert data["settings"]["title_model"] == ""

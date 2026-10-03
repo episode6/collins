@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-27. Full change history: git log for this file.
+fork. Last modified: 2026-10-02. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -37,6 +37,22 @@ downloads of each version, see the
 ## Changelog
 
 ### v0.1.5 — UNRELEASED
+
+- **App state is now two files.** `~/.config/collins/state.json` keeps what
+  describes your sessions and projects and what Collins does for them
+  (names, favorites, archives, drafts, pull request records, the sandbox,
+  and the settings for titles, launches, archiving, the git page's reading
+  of the repository, the session tools). What describes *this computer* —
+  window geometry, the sidebar's width, fonts, themes, keybindings, sounds,
+  the status icon, Caffeine, the composer's, editor's and git page's
+  appearance, and each session's dock layout and editor state — now lives
+  beside it in `ui-state.json`. The first launch moves the keys over and
+  leaves a copy of the old file as `state.json.pre-split`. Nothing changes
+  in Preferences. To go back to an earlier version, restore
+  `state.json.pre-split` over `state.json` (the older build ignores
+  `ui-state.json`); anything changed after the upgrade in the moved keys
+  is then as it was before it. Groundwork for running sessions in a
+  service separate from the window.
 
 ### v0.1.4 — 2026-09-27
 
