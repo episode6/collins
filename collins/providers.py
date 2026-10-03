@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -52,7 +52,9 @@ _PROMPT_HINT = 'Try "'
 # further up the screen, from an earlier turn that happened to discuss the
 # dialog. Requiring both close together is what `takes_prompt` does for the
 # input prompt's own marker. See ClaudeProvider.worktree_exit_prompt.
-_WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*Keep worktree\b")
+# CLI 2.1.285 numbers the items ("❯ 1. Keep worktree"); older builds draw the
+# label right after the marker. The optional "N." between the two takes both.
+_WORKTREE_EXIT_SELECTED_RE = re.compile(r"❯\s*(?:\d+\.\s*)?Keep worktree\b")
 _WORKTREE_EXIT_OTHER_OPTION = "Remove worktree"
 
 # How a `claude -w` launch refuses to start at all. The CLI cuts the worktree

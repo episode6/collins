@@ -90,6 +90,11 @@ downloads of each version, see the
   meanwhile. Note that `./start-debug` shares the real config directory,
   so a debug launch of this version migrates the real file. Groundwork for
   running sessions in a service separate from the window.
+- **Closing a worktree session answers the CLI's exit dialog again.**
+  Claude Code 2.1.285 numbers the dialog's items (`❯ 1. Keep worktree`),
+  which the graceful close no longer recognised, so closing a worktree tab
+  waited on a dialog it would have answered before. Both the numbered and
+  the older layout are recognised now.
 
 ### v0.1.4 — 2026-09-27
 
