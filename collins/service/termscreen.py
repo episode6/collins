@@ -65,7 +65,10 @@ to that against a real VTE on every fixture:
   ED 2 moves a whole screen of blank rows (``Grid.used``). ED 3 blanks
   the scrollback rows and keeps their count. The alternate screen's own
   scrolled-off rows (VTE keeps them in that screen's buffer while it is
-  up) are not kept: nothing in the app reads them.
+  up) are not kept: nothing in the app reads them; its ``used`` is inert by design, but
+  leaving it makes the main buffer hold every row up to the cursor's row
+  (measured), and a shrink that scrolls rows off the top leaves every row
+  held.
 - Tabs are tab cells: HT over never-written cells reads back as ``\\t``, an
   overwrite inside one leaves spaces before and a shorter tab after, and a
   tab cell takes no background. A tab with the wrap pending does nothing.
@@ -610,6 +613,7 @@ class Screen:
                     _cut_wide(line, cols)
                 else:
                     line.extend([None] * (cols - len(line)))
+            above = 0
             if rows < len(grid.lines):
                 # Rows scroll off the top only as far as keeping the cursor
                 # on screen needs, into the scrollback on the main screen.
@@ -627,7 +631,9 @@ class Screen:
                 grid.wrapped.extend([False] * (rows - len(grid.wrapped)))
             grid.x = min(grid.x, cols - 1)
             grid.y = min(grid.y, rows - 1)
-            grid.used = min(grid.used, rows)
+            # A shrink that scrolled rows off the top leaves every row
+            # held (VTE refills its buffer as it scrolls, measured).
+            grid.used = rows if above else min(grid.used, rows)
             if grid.pending and grid.x < cols - 1:
                 grid.pending = False
             if grid.saved is not None:
@@ -1213,6 +1219,11 @@ class Screen:
                 if mode in (1047, 1049):
                     self._clear_grid(self.alt)
                 x, y, pen = self.grid.x, self.grid.y, self.grid.pen
+                # VTE makes the main buffer hold every row up to the
+                # cursor's as it comes back (measured: ED 2 afterwards
+                # moves max(rows held, the alternate cursor's row + 1)).
+                if self.main.used <= y:
+                    self.main.used = y + 1
                 self.grid, self.on_alt = self.main, False
                 self.grid.x, self.grid.y, self.grid.pen = x, y, pen
                 self.grid.pending = False

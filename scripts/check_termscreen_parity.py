@@ -231,6 +231,8 @@ def observe(data: bytes) -> dict | None:
 def compare(name: str, got: dict, want: dict) -> None:
     keys = ("rows", "cursor", "cells", "screen_text", "history", "tail_is_dim", "takes_prompt", "entered")
     for key in keys:
+        if key not in want:
+            continue
         if got.get(key) != want.get(key):
             detail = ""
             if key == "rows":
@@ -289,21 +291,38 @@ def vte_decrqss(term, sgr: bytes) -> bytes:
     return b"".join(commits).replace(SENTINEL_ANSWER, b"")
 
 
-def grown_terminal(before: bytes, after: bytes):
-    """A 16x4 VTE fed `before`, grown to 40x4, fed `after`."""
+def resized_terminal(cols, rows, before: bytes, size, after: bytes):
+    """A VTE at `cols` x `rows` fed `before`, resized to `size`, fed `after`."""
     term = Vte.Terminal()
-    term.set_size(16, 4)
+    term.set_size(cols, rows)
     term.set_halign(Gtk.Align.START)
     term.set_valign(Gtk.Align.START)
+    term.set_scrollback_lines(termscreen.SCROLLBACK_ROWS)
     term.connect("commit", lambda _t, text, _size: commits.append(text.encode()))
     window.set_child(term)
-    pump_until(lambda: term.get_mapped() and (term.get_column_count(), term.get_row_count()) == (16, 4))
+    pump_until(lambda: term.get_mapped() and (term.get_column_count(), term.get_row_count()) == (cols, rows))
     feed_parsed(term, before)
-    term.set_size(40, 4)
-    pump_until(lambda: (term.get_column_count(), term.get_row_count()) == (40, 4))
+    term.set_size(*size)
+    pump_until(lambda: (term.get_column_count(), term.get_row_count()) == size)
     pump_until(lambda: False, timeout=0.2)
     feed_parsed(term, after)
     return term
+
+
+def resize_read(term, size) -> dict:
+    """Rows, cursor and history of a resized VTE (no cells: the pens are
+    not what a resize is about)."""
+    cols, rows = size
+    cursor = tuple(term.get_cursor_position())
+    feed_parsed(term, HOME_AND_SENTINEL)
+    top = term.get_cursor_position()[1]
+    return {
+        "rows": [
+            read_range(term, Vte.Format.TEXT, top + y, 0, top + y, cols).rstrip("\n") for y in range(rows)
+        ],
+        "cursor": [cursor[0], cursor[1] - top],
+        "history": [read_range(term, Vte.Format.TEXT, y, 0, y, cols).rstrip("\n") for y in range(top)],
+    }
 
 
 directory = os.path.join(ROOT, "tests", "fixtures", "streams")
@@ -358,20 +377,15 @@ if not only:
         want = vte_decrqss(term, sgr)
         mine = b"\x1bP1$r" + model_of(b"\x1b[" + sgr + b"m").sgr().encode() + b"m\x1b\\"
         check(f"DECRQSS SGR {sgr.decode()}", mine == want, f"model {mine!r}, VTE {want!r}")
-    before, after = scenarios.tab_grow_scenario()
-    term = grown_terminal(before, after)
-    vte_cursor = tuple(term.get_cursor_position())
-    vte_row = read_range(term, Vte.Format.TEXT, 1, 0, 1, 40).rstrip("\n")
-    screen = termscreen.Screen(16, 4)
-    tokenizer = termstream.Tokenizer()
-    screen.feed(tokenizer.feed(before))
-    screen.resize(40, 4)
-    screen.feed(tokenizer.feed(after))
-    check(
-        "tab stops after growing 16 to 40 columns",
-        screen.cursor() == vte_cursor and screen.rows()[1] == vte_row,
-        f"model {screen.cursor()} {screen.rows()[1]!r}, VTE {vte_cursor} {vte_row!r}",
-    )
+    for name, (cols, rows, before, size, after) in scenarios.RESIZE.items():
+        got = resize_read(resized_terminal(cols, rows, before, size, after), size)
+        if write:
+            written.setdefault(scenarios.golden_path(name, directory), {})["resize:" + name] = got
+            print(f"read resize:{name}", flush=True)
+        elif "resize:" + name not in goldens:
+            check(f"resize:{name}", False, "no golden; run with --write")
+        else:
+            compare(f"resize:{name}", got, goldens["resize:" + name])
 
 if write:
     for path, entries in written.items():

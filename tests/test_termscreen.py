@@ -189,8 +189,26 @@ def test_golden_however_the_stream_is_cut(name):
 def test_the_goldens_cover_every_scenario():
     missing = [name for name in NAMES if name not in GOLDENS]
     assert not missing
-    stale = [name for name in GOLDENS if name not in STREAMS]
+    missing = [name for name in scenarios.RESIZE if "resize:" + name not in GOLDENS]
+    assert not missing
+    stale = [name for name in GOLDENS if name not in STREAMS and name[7:] not in scenarios.RESIZE]
     assert not stale, "goldens with no scenario: regenerate with --write"
+
+
+@pytest.mark.parametrize("name", sorted(scenarios.RESIZE))
+def test_resize_golden(name):
+    """A resize between two feeds: rows, cursor and history as VTE's after
+    the second feed (`Grid.used` across a shrink included)."""
+    cols, rows, before, size, after = scenarios.RESIZE[name]
+    screen = feed(before, cols=cols, rows=rows)
+    screen.resize(*size)
+    tokenizer = termstream.Tokenizer()
+    screen.feed(tokenizer.feed(after))
+    screen.feed(tokenizer.flush())
+    golden = GOLDENS["resize:" + name]
+    assert screen.rows() == golden["rows"]
+    assert list(screen.cursor()) == golden["cursor"]
+    assert history(screen) == golden["history"]
 
 
 def test_the_recorded_fixtures_hold_no_user_path():
@@ -489,7 +507,7 @@ def test_resize_truncates_and_pads_without_reflow():
 
 
 def test_resize_grown_from_a_multiple_of_eight_has_every_stop():
-    before, after = scenarios.tab_grow_scenario()
+    _, _, before, _, after = scenarios.RESIZE["tab-grow-16-to-40"]
     screen = feed(before, cols=16, rows=4)
     screen.resize(40, 4)
     assert sorted(screen.tabs) == [8, 16, 24, 32]

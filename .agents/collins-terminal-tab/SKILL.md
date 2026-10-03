@@ -324,8 +324,11 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   dim tail and the grammar's reads), and `scripts/check_termscreen_parity.py`
   holds a real VTE to the same goldens under the headless display, feeds
   every scenario's `snapshot()` to a fresh VTE and holds it to the same
-  (one named exception, the F14 tab case), and compares DECRQSS answers
-  and the tab stops after a resize. Never special-case the CLI in the
+  (three named exceptions, all F14: `tabs-overwrite`, a tab that lost its
+  stop, and `pending-su` / `pending-sd`, a wrap flag on an empty row that
+  no write re-makes), and compares DECRQSS answers, the tab stops after a
+  resize, and the resize scenarios (`scenarios.RESIZE`, VTE resized
+  between two feeds). Never special-case the CLI in the
   model to make a fixture match (spec §5): escalate with the differing
   rows instead.
 - **Re-recording.** `python3 scripts/spike_split_3_screen_model.py record

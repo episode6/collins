@@ -101,6 +101,9 @@ SYNTHETIC = {
     "il-then-ed2": f"a{E}[4;1H{E}[2L{E}[2J",
     "cursor-only-then-ed2": f"a{E}[20;1H{E}[2J",
     "scrolled-then-ed2": "x\n" * 45 + f"{E}[2J",
+    # Grid.used across the alternate screen: what ED 2 moves afterwards.
+    "alt-round-trip-then-ed2": f"m0\r\nm1{E}[?1049ha0\r\na1\r\na2{E}[?1049l{E}[?1049h{E}[2J",
+    "alt-round-trip-main-ed2": f"m0\r\nm1{E}[?1049ha0\r\na1\r\na2{E}[?1049l{E}[?1049h{E}[?1049l{E}[2J",
     # Combining marks past VTE's ten are dropped.
     "combining-cap": "a" + "\u0301" * 40 + "b",
     # Parameters saturate; a colour component out of range is ignored.
@@ -225,10 +228,16 @@ def all_scenarios(directory: str = HERE) -> list[tuple[str, bytes]]:
     return recorded_scenarios(directory) + synthetic_scenarios()
 
 
-def tab_grow_scenario() -> tuple[bytes, bytes]:
-    """A screen 16 columns wide (a multiple of 8) grown to 40: the stops
-    past the old width exist (`Screen.resize`); the check resizes VTE."""
-    return b"x", b"\r\n\tA\tB\tC\tD"
+# Scenarios with a resize between two feeds: name -> (cols, rows, before,
+# (cols, rows) after the resize, after). The goldens are VTE's reads after
+# the second feed, at the second size; the check resizes VTE between them.
+RESIZE = {
+    "tab-grow-16-to-40": (16, 4, b"x", (40, 4), b"\r\n\tA\tB\tC\tD"),
+    # Grid.used after a shrink that scrolls rows off the top: three rows
+    # written on ten, the cursor on the ninth, six rows left, then ED 2.
+    "shrink-then-ed2": (20, 10, b"r0\r\nr1\r\nr2\x1b[9;1H", (20, 6), b"\x1b[2J"),
+    "shrink-written-low-then-ed2": (20, 10, b"r0\r\nr1\r\nr2\x1b[9;1Hlow", (20, 6), b"\x1b[2J"),
+}
 
 
 def merge_runs(cells: list) -> list:
