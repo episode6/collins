@@ -57,7 +57,7 @@ GROUP_SIDES: dict[str, str] = {
     "mcp_tools": "service",
     "sessions": "mixed",
     "sandbox": "service",
-    "notifications": "mixed",
+    "notifications": "device",
     "composer": "device",
     "terminal": "device",
     "footer_apps": "device",

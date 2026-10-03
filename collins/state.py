@@ -19,17 +19,34 @@ dict every reader sees.
 The migration (AppState._load): the first start after the split copies
 `state.json` to `state.json.pre-split`, moves the device keys into
 `ui-state.json` under the local service's id, mints the service id into
-`state.json` and rewrites it without them. The service id's presence is
-the marker, so a second start migrates nothing; a build from before the
-split drops the id on its next save, and the following start migrates
-again — adopting the one service `ui-state.json` already knows, so the
-layouts it kept stay reachable.
+`state.json` and rewrites it without them — `ui-state.json` first, so a
+crash between the two writes leaves a `state.json` that still migrates on
+the next start (and the merge below makes that retry harmless). The
+service id's presence is the marker, so a second start migrates nothing.
+Only the app's own instance migrates (`AppState(migrate=True)`: `main()`
+and `App.__init__`); the throwaway readers on worker threads see the
+merged view of an unsplit file and write nothing — unless one of them
+saves, in which case the migration is committed first, so a service-side
+write never strips device keys that have not reached `ui-state.json`.
+
+A build from before the split, started on a split `state.json`, runs on
+default device settings and empty layouts and saves them back without the
+id; the following start of this build migrates again, **merging**: it
+adopts the one service `ui-state.json` already knows, takes a record of
+the old file only where the file's entry is non-empty, takes a device
+setting from the file only where it differs from its default or
+`ui-state.json` never held the key, and never overwrites an existing
+`state.json.pre-split` (a timestamped sibling is written instead). What
+the old build could not have changed is therefore what `ui-state.json`
+kept. `./start-debug` shares the real config dir (it sets only the app
+id), so a debug launch of a split build migrates the real `state.json`.
 """
 
 from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import shutil
 import time
@@ -39,6 +56,8 @@ from pathlib import Path
 from . import autodelete, mcptools, newchat, notifycenter, panelhistory, panellayout, uistate
 from .claudemodels import NO_MODEL
 from .uistate import SERVICE_SCOPED_SETTINGS
+
+log = logging.getLogger(__name__)
 
 _CONFIG_BASE = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 _CONFIG_DIR = _CONFIG_BASE / "collins"
@@ -669,7 +688,17 @@ def editor_pops_out(monitor_width: int, limit: int) -> bool:
 
 
 class AppState:
-    def __init__(self) -> None:
+    def __init__(self, migrate: bool = False) -> None:
+        """*migrate*: whether this instance may perform the state split's
+        one-time migration at load (the app's own instance; see the module
+        docstring). A reader that does not migrate still sees an unsplit
+        file's device keys in its merged view, and commits the migration
+        before its first save, if it ever saves."""
+        self._migrate = migrate
+        # Set while an unsplit state.json has been read and its migration
+        # not yet written: the first write of either half commits it
+        # (ui-state.json first), whichever instance writes.
+        self._migration_pending = False
         self.names: dict[str, str] = {}
         self.generated_names: dict[str, str] = {}  # auto-generated titles (user names win)
         # The agent CLI's own name per session, as last seen in its
@@ -822,8 +851,10 @@ class AppState:
         else:
             known = self.ui.known_services()
             self.service_id = known[0] if len(known) == 1 else uistate.mint_id()
-        if migrating and _STATE_FILE.exists():
-            shutil.copy2(_STATE_FILE, _pre_split_backup())
+        # Whether ui-state.json already holds a block for this service: a
+        # re-migration after a downgrade, where the file's device keys are
+        # merged into what the block kept rather than replacing it.
+        adopted = migrating and self.ui.has_service(self.service_id)
         self.names = dict(data.get("names") or {})
         self.generated_names = dict(data.get("generated_names") or {})
         self.cli_titles = dict(data.get("cli_titles") or {})
@@ -863,10 +894,12 @@ class AppState:
         self.expanded_groups = set(data.get("expanded_groups") or [])
         block = self.ui.service(self.service_id)
         if migrating:
-            # The device records of the old file replace what the block
-            # holds: the file is the newer of the two (a build from before
-            # the split wrote it last).
-            block["panel_layout"] = {
+            # The device records of the old file: on a first migration the
+            # block is empty and takes them whole; on a re-migration (a
+            # downgrade wrote the file last, on empty layouts it then saved
+            # back) an entry of the file wins only where it is non-empty,
+            # and the block keeps the rest.
+            layouts = {
                 k: v for k, v in (data.get("panel_layout") or {}).items() if isinstance(v, dict)
             }
             # Read-time, one-way migration of the pre-tree "panel_states"
@@ -874,14 +907,16 @@ class AppState:
             # two-node tree for its mode, sized by the shell history files
             # on disk. The old key is dropped on the next save.
             for sid, old in (data.get("panel_states") or {}).items():
-                if sid in block["panel_layout"] or not isinstance(old, dict):
+                if sid in layouts or not isinstance(old, dict):
                     continue
                 entry = panellayout.from_legacy(old, panelhistory.ordinals(sid))
                 if entry:
-                    block["panel_layout"][sid] = entry
-            block["editor_states"] = {
+                    layouts[sid] = entry
+            editors = {
                 k: v for k, v in (data.get("editor_states") or {}).items() if isinstance(v, dict)
             }
+            block["panel_layout"].update({k: v for k, v in layouts.items() if v})
+            block["editor_states"].update({k: v for k, v in editors.items() if v})
         self.session_prs = {
             k: v for k, v in (data.get("session_prs") or {}).items() if isinstance(v, list)
         }
@@ -923,23 +958,55 @@ class AppState:
         settings.pop("git_theme", None)
         settings.pop("git_viewer", None)
         service_settings = {k: v for k, v in settings.items() if k not in DEVICE_SETTINGS}
+        # What ui-state.json contributes: its device keys, and any key the
+        # catalogue does not know (kept on that side, never written to
+        # state.json); a service key that found its way there is ignored,
+        # so it cannot override the service's value.
+        ui_settings = {k: v for k, v in self.ui.settings.items() if k not in SERVICE_SETTINGS}
+        self._ui_only_keys = frozenset(k for k in ui_settings if k not in DEFAULT_SETTINGS)
         if migrating:
-            # The device settings of the old file move to this device's.
+            # The device settings of the old file move to this device's. On
+            # a re-migration a value is taken from the file only where it
+            # differs from the default or ui-state.json never held the key:
+            # the downgrade ran on defaults, and a default it wrote back
+            # says nothing about what this device had chosen.
             for key, value in settings.items():
                 if key not in DEVICE_SETTINGS:
                     continue
                 if key in SERVICE_SCOPED_SETTINGS:
-                    self.ui.set_scoped(self.service_id, key, value)
-                else:
-                    self.ui.settings[key] = value
+                    if value != DEFAULT_SETTINGS.get(key) or not adopted:
+                        self.ui.set_scoped(self.service_id, key, value)
+                elif value != DEFAULT_SETTINGS.get(key) or key not in self.ui.present_keys:
+                    ui_settings[key] = value
         # The merged view every reader sees: the service's settings and
         # this device's, the latter read from ui-state.json.
-        self.settings = {**DEFAULT_SETTINGS, **service_settings, **self.ui.settings}
+        self.settings = {**DEFAULT_SETTINGS, **service_settings, **ui_settings}
         for key in SERVICE_SCOPED_SETTINGS:
             self.settings[key] = self.ui.get_scoped(self.service_id, key)
         if migrating:
-            self.save()
+            self._migration_pending = True
+            if self._migrate:
+                self._commit_migration()
+
+    def _commit_migration(self) -> None:
+        """Write the split: the backup, ui-state.json, then state.json. A
+        failure (an unwritable config dir) is logged and leaves every file
+        as it was and the merged view in memory; the next start retries."""
+        if not self._migration_pending:
+            return
+        try:
+            if _STATE_FILE.exists():
+                backup = _pre_split_backup()
+                if backup.exists():
+                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                    backup = backup.with_name(f"{backup.name}.{stamp}")
+                shutil.copy2(_STATE_FILE, backup)
+            self._migration_pending = False
             self._save_ui()
+            self.save()
+        except OSError as exc:
+            self._migration_pending = True
+            log.warning("state split not written (%s); will retry at the next start", exc)
 
     def state_file(self) -> str:
         """The file this state is read from and saved to. What the sandbox
@@ -951,6 +1018,9 @@ class AppState:
         """Write the service's half, state.json. Every mutator of a service
         key calls this; the device's half is _save_ui, and a mutator that
         touched both calls both."""
+        if self._migration_pending:
+            self._commit_migration()
+            return
         payload = {
             "service_id": self.service_id,
             "names": self.names,
@@ -978,15 +1048,21 @@ class AppState:
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
             "notifications": self.notifications,  # newest first; never sort
-            "settings": {k: v for k, v in self.settings.items() if k not in DEVICE_SETTINGS},
+            "settings": {
+                k: v for k, v in self.settings.items()
+                if k not in DEVICE_SETTINGS and k not in self._ui_only_keys
+            },
         }
         uistate.write_json_atomic(_STATE_FILE, payload)
 
     def _save_ui(self) -> None:
         """Write this device's half, ui-state.json, from the merged view."""
+        if self._migration_pending:
+            self._commit_migration()
+            return
         self.ui.settings = {
             k: v for k, v in self.settings.items()
-            if k in DEVICE_SETTINGS and k not in SERVICE_SCOPED_SETTINGS
+            if (k in DEVICE_SETTINGS and k not in SERVICE_SCOPED_SETTINGS) or k in self._ui_only_keys
         }
         for key in SERVICE_SCOPED_SETTINGS:
             self.ui.set_scoped(self.service_id, key, self.settings.get(key, DEFAULT_SETTINGS.get(key)))

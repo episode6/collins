@@ -47,12 +47,18 @@ downloads of each version, see the
   the status icon, Caffeine, the composer's, editor's and git page's
   appearance, and each session's dock layout and editor state — now lives
   beside it in `ui-state.json`. The first launch moves the keys over and
-  leaves a copy of the old file as `state.json.pre-split`. Nothing changes
+  leaves a copy of the old file as `state.json.pre-split` (never
+  overwritten: a later migration writes a dated sibling). Nothing changes
   in Preferences. To go back to an earlier version, restore
   `state.json.pre-split` over `state.json` (the older build ignores
   `ui-state.json`); anything changed after the upgrade in the moved keys
-  is then as it was before it. Groundwork for running sessions in a
-  service separate from the window.
+  is then as it was before it. An older version started on the new
+  `state.json` without that restore runs on default appearance settings
+  and empty panel layouts; coming back to this version brings yours back
+  from `ui-state.json`, keeping whatever the older version changed
+  meanwhile. Note that `./start-debug` shares the real config directory,
+  so a debug launch of this version migrates the real file. Groundwork for
+  running sessions in a service separate from the window.
 
 ### v0.1.4 — 2026-09-27
 

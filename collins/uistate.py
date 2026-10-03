@@ -48,8 +48,12 @@ checked and what does not fit is dropped.
 from __future__ import annotations
 
 import json
+import logging
+import shutil
 import uuid
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 # The top-level keys of state.json that are this device's, moved into the
 # per-service block by the migration (AppState._load) and read and written
@@ -125,6 +129,13 @@ class UiState:
         self.last_connection: str = ""
         self.client_id: str = ""
         self.services: dict[str, dict] = {}
+        # The setting keys the file actually held (as opposed to defaults
+        # filled in): what "ui-state.json lacks the key" means to the
+        # migration's merge (AppState._load).
+        self.present_keys: frozenset[str] = frozenset()
+        # Whether the file was there and could not be read as a dict: it is
+        # copied aside as <name>.corrupt before the first save overwrites it.
+        self._corrupt = False
         self._load()
 
     def _load(self) -> None:
@@ -133,12 +144,17 @@ class UiState:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 data = raw
-        except (OSError, json.JSONDecodeError):
+            else:
+                self._corrupt = True
+        except json.JSONDecodeError:
+            self._corrupt = True
+        except OSError:
             data = {}
         device = data.get("device")
         settings = device.get("settings") if isinstance(device, dict) else None
         if isinstance(settings, dict):
             self.settings = {**self._defaults, **settings}
+            self.present_keys = frozenset(k for k in settings if isinstance(k, str))
         connections = data.get("connections")
         self.connections = (
             [c for c in connections if isinstance(c, dict)] if isinstance(connections, list) else []
@@ -154,10 +170,15 @@ class UiState:
             else {}
         )
 
-    def exists(self) -> bool:
-        return self.path.exists()
-
     def save(self) -> None:
+        if self._corrupt and self.path.exists():
+            aside = self.path.with_name(self.path.name + ".corrupt")
+            try:
+                shutil.copy2(self.path, aside)
+                log.warning("ui-state.json could not be read; the old file is kept as %s", aside)
+            except OSError as exc:
+                log.warning("ui-state.json could not be read, and copying it aside failed: %s", exc)
+            self._corrupt = False
         payload = {
             "device": {"settings": {**self._defaults, **self.settings}},
             "connections": self.connections,
@@ -172,14 +193,21 @@ class UiState:
     def known_services(self) -> list[str]:
         return list(self.services)
 
+    def has_service(self, service_id: str) -> bool:
+        """Whether the file held a block for *service_id* (as opposed to
+        one service() would make on first access)."""
+        return service_id in self.services
+
     def service(self, service_id: str) -> dict:
         """The block this device keeps for *service_id*, created empty on
         first access. The dicts inside are the live ones: a caller that
         mutates them saves through the owner (AppState)."""
         block = self.services.get(service_id)
         if block is None:
-            block = {k: (dict(v) if isinstance(v, dict) else list(v)) for k, v in _BLOCK_DEFAULTS.items()}
-            block["last_active_session"] = ""
+            block = {
+                k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+                for k, v in _BLOCK_DEFAULTS.items()
+            }
             self.services[service_id] = block
         return block
 

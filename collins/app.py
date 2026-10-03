@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-02. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -1961,8 +1961,9 @@ class App(Adw.Application):
         self._caffeine_mode: str | None = None
 
         # Shared across all windows so scans/monitors aren't duplicated and
-        # state.json writes don't race.
-        self.state = AppState()
+        # state.json writes don't race. The app's own instance is the one
+        # that migrates the state split (see state.py's docstring).
+        self.state = AppState(migrate=True)
         apply_color_scheme(self.state.get_setting("color_scheme"))
         # A remembered CLI location goes on PATH before anything looks for
         # the CLI — the store's first scan is the very next line.
@@ -3633,6 +3634,6 @@ def main() -> int:
     # COLLINS_LOG=INFO (or DEBUG) surfaces diagnostic logs on the console,
     # e.g. bgstatus's watch-dir and refresh activity.
     logging.basicConfig(level=(os.environ.get("COLLINS_LOG") or "WARNING").upper())
-    i18n.init(AppState().get_setting("language"))
+    i18n.init(AppState(migrate=True).get_setting("language"))
     app = App()
     return app.run(sys.argv)

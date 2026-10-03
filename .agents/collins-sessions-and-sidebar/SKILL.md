@@ -139,14 +139,36 @@ the window hands to `SessionOptions`, and `save()` writes `state.json`
 only — a mutator of a device record calls `_save_ui()`, and
 `forward_session` calls both. The first start after the split (a parsed
 `state.json` with no `service_id`) copies it to `state.json.pre-split`,
-moves the device keys over, mints the id and rewrites; the id is the
-marker, so the second start does nothing; an unparseable file is left
-untouched (no backup, no rewrite). A downgrade's save drops the id, and
-the next upgrade re-migrates, adopting the one service `ui-state.json`
-knows so the layouts stay reachable. The e2e scripts seed `state.json`
-without an id and are migrated on launch, which is fine: a seeded device
-key reaches `get_setting` the same way. The `app_state` fixture isolates
-both files (`_ui_state_file()` follows `_CONFIG_DIR`).
+moves the device keys over, mints the id and rewrites — **`ui-state.json`
+first, then `state.json`**, so a crash between the two leaves a file that
+migrates again; the id is the marker, so the second start does nothing;
+an unparseable file is left untouched (no backup, no rewrite); an
+unwritable config dir is logged, nothing is written, the merged view
+stands in memory and the next start retries. **Only the app's own
+instance migrates** (`AppState(migrate=True)`, in `main()` and
+`App.__init__`); the throwaway readers on worker threads (titles,
+tokenrefresh, updatecheck, icongen, the dialogs) read the merged view of
+an unsplit file and write nothing — and if one of them does save, the
+migration is committed first, so a service-side write never strips
+device keys that have not reached `ui-state.json`. **A downgrade** (an
+old build run on the split file) saves `state.json` back without the id,
+on default device settings and empty layouts; the next start of this
+build re-migrates by *merging*: it adopts the one service `ui-state.json`
+knows, takes a record from the file only where the file's entry is
+non-empty, takes a device setting only where it differs from its default
+or `ui-state.json` never held the key (`UiState.present_keys`), and never
+overwrites `state.json.pre-split` (a `.<YYYYMMDD-HHMMSS>` sibling is
+written instead). Mind that `./start-debug` sets only the app id and
+shares the real config dir: a debug launch of a split build migrates the
+user's real `state.json`, and the installed pre-split build then runs on
+default device settings until the merge above brings them back. A corrupt
+`ui-state.json` is copied to `ui-state.json.corrupt` before the first save
+overwrites it. An unknown key in `ui-state.json` stays on that side
+(`_ui_only_keys`), and a service key found there is ignored. The e2e
+scripts seed `state.json` without an id and are migrated on launch,
+which is fine: a seeded device key reaches `get_setting` the same way.
+The `app_state` fixture isolates both files (`_ui_state_file()` follows
+`_CONFIG_DIR`); a test of the migration constructs `AppState(migrate=True)`.
 
 ## The sidebar (`sidebar.py`)
 
