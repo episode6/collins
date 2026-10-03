@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-02. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -100,6 +100,7 @@ from .prstatus import (  # noqa: E402
     to_records,
 )
 from .prview import PrViewPage  # noqa: E402
+from .service.session import Session, bracketed_paste  # noqa: E402
 from .sessions import (  # noqa: E402
     recreatable_worktree,
     recreate_worktree,
@@ -117,10 +118,6 @@ _CWD_POLL_MS = 2000  # footer refresh; only ticks while the tab is visible
 # the flap around a CLI starting, exiting or being forked, and still lands
 # inside the pause after a worktree is entered.
 _EDITOR_FOLLOW_TICKS = 2
-# How long an injected prompt is left sitting in the input before the Return
-# that sends it (see inject_prompt). Long enough that the CLI has stopped
-# reading the text as a paste, short enough that nobody watching sees a pause.
-_PROMPT_SUBMIT_MS = 250
 # How a worktree launch that never started is caught (see
 # _check_worktree_launch): poll the screen for the CLI's own error line, from
 # the moment the command is typed until the agent has plainly come up. The
@@ -129,23 +126,10 @@ _PROMPT_SUBMIT_MS = 250
 # one that worked.
 _WORKTREE_LAUNCH_POLL_MS = 500
 _WORKTREE_LAUNCH_POLL_TICKS = 30  # ~15s
-# The bracketed-paste control sequences (ESC[200~ … ESC[201~) that tell a
-# terminal app the text between them was pasted, not typed — so its newlines
-# stay literal instead of each submitting. See inject_prompt_unfocused.
-_PASTE_START = "\x1b[200~"
-_PASTE_END = "\x1b[201~"
-
-
-def _bracketed_paste(text: str) -> str:
-    """*text* wrapped as one bracketed paste, safe to feed to a CLI's input.
-
-    Carriage returns are normalized to newlines (a bare CR reads as Enter —
-    a submit mid-prompt), and any paste-end marker already in the text is
-    dropped so the agent's own prompt can't close the wrapper early and leave
-    its tail arriving as live keystrokes.
-    """
-    body = text.replace("\r\n", "\n").replace("\r", "\n").replace(_PASTE_END, "")
-    return f"{_PASTE_START}{body}{_PASTE_END}"
+# What a prompt is wrapped in when it must land as one paste (see
+# Session.inject_prompt_unfocused); kept under its old name here for the
+# checks that test its sanitizing directly.
+_bracketed_paste = bracketed_paste
 
 
 # The new-chat screen's Send: how often the tab asks whether the CLI it just
@@ -157,20 +141,6 @@ def _bracketed_paste(text: str) -> str:
 _NEW_CHAT_PROMPT_POLL_MS = 300
 _NEW_CHAT_PROMPT_TICKS = 300  # ~90s
 _NEW_CHAT_IDLE_SHELL_TICKS = 20  # ~6s
-# The composer's open-cut, which is a run of screen reads either side of an
-# erase (see TerminalTab._begin_cut). The read is taken once _CUT_SETTLE_READS
-# of them _CUT_SETTLE_MS apart agree — 150ms of a still input box, measured
-# against the CLI (2.1.226), which finishes echoing a burst of typing 30-100ms
-# after the last key. A box still moving after _CUT_SETTLE_TRIES of them is
-# not cut at all: erasing a read that is still catching up would take the
-# characters it hasn't shown yet with it. The erase is then checked again
-# _CUT_VERIFY_MS apart — each gap measured from the check before it, so the
-# last one lands about a second and a half after the cut — widening because a
-# busy CLI can take a while to work through a line of backspaces.
-_CUT_SETTLE_MS = 50
-_CUT_SETTLE_READS = 4
-_CUT_SETTLE_TRIES = 12
-_CUT_VERIFY_MS = (150, 400, 900)
 _PR_REFRESH_ICON_PX = 12  # the refresh button sits with them, not above them
 # A session links every PR that passes through its tool output, including ones
 # it only read, so the row is bounded: it tracks (and saves, and refreshes) the
@@ -870,10 +840,206 @@ def _has_running_command(terminal: Vte.Terminal, child_pid: int | None) -> bool:
         return False
 
 
-def _prompt_read(prompt: EnteredPrompt | None) -> tuple[str, int] | None:
-    """What two settle reads of the CLI's input box compare, so that "the
-    box is still empty" counts as agreement too (see _settle_cut)."""
-    return None if prompt is None else (prompt.text, prompt.rows_below)
+def _capture_contents(terminal: Vte.Terminal) -> str:
+    """*terminal*'s current text contents including scrollback (plain text
+    — VTE's dump carries no colors or attributes)."""
+    stream = Gio.MemoryOutputStream.new_resizable()
+    try:
+        terminal.write_contents_sync(stream, Vte.WriteFlags.DEFAULT, None)
+        stream.close(None)
+    except GLib.Error:
+        return ""
+    data = stream.steal_as_bytes().get_data()
+    return (data or b"").decode("utf-8", errors="replace")
+
+
+def _range_text(terminal: Vte.Terminal, fmt, start_row: int, start_col: int,
+                end_row: int, end_col: int) -> str:
+    """One `get_text_range_format` read, unwrapped from the tuple some VTE
+    bindings return it in; "" for nothing."""
+    text = terminal.get_text_range_format(fmt, start_row, start_col, end_row, end_col)
+    if isinstance(text, tuple):
+        text = text[0]
+    return text or ""
+
+
+class VtePtyPort:
+    """`service.ports.PtyPort` over a tab's own `Vte.Terminal`.
+
+    VTE owns the pty and spawns the child itself (`spawn_async`), so the
+    child's pid is handed in here by the tab once the spawn lands (`pid`);
+    a write is VTE's `feed_child`, which is what every keystroke the app
+    ever typed into an agent went through."""
+
+    def __init__(self, terminal: Vte.Terminal) -> None:
+        self._terminal = terminal
+        self.pid: int | None = None
+
+    def write(self, data: bytes) -> None:
+        self._terminal.feed_child(data)
+
+    def resize(self, cols: int, rows: int) -> None:
+        self._terminal.set_size(cols, rows)
+
+    def child_pid(self) -> int | None:
+        return self.pid
+
+    def foreground_pgrp(self) -> int | None:
+        pty = self._terminal.get_pty()
+        if pty is None:
+            return None
+        try:
+            return os.tcgetpgrp(pty.get_fd())
+        except OSError:
+            return None
+
+
+class VteScreenPort:
+    """`service.ports.ScreenPort` over a tab's own `Vte.Terminal`.
+
+    Every read is the one the tab always made: `get_text_range_format` on a
+    window anchored to the cursor (the screen's first row is the cursor's
+    row minus the screen's height plus one), never on the scroll position —
+    the CLI's repaint renderer leaves VTE's ring a page away from the
+    adjustment. Row indices in and out are relative to that first row; this
+    class turns them back into VTE's own. Dim text is told from typing by
+    reading the range as HTML (`vtehtml`), judged against the theme's
+    foreground, which *foreground* reads live (None while the terminal
+    follows the system colours)."""
+
+    def __init__(
+        self,
+        terminal: Vte.Terminal,
+        foreground: Callable[[], tuple[int, int, int] | None],
+    ) -> None:
+        self._terminal = terminal
+        self._foreground = foreground
+
+    def _top_row(self, cursor_row: int) -> int:
+        return max(0, cursor_row - self._terminal.get_row_count() + 1)
+
+    def cursor(self) -> tuple[int, int]:
+        column, row = self._terminal.get_cursor_position()
+        return column, row - self._top_row(row)
+
+    def columns(self) -> int:
+        return self._terminal.get_column_count()
+
+    def row_count(self) -> int:
+        return self._terminal.get_row_count()
+
+    def rows(self) -> list[str]:
+        terminal = self._terminal
+        _, cursor_row = terminal.get_cursor_position()
+        row_count = terminal.get_row_count()
+        columns = terminal.get_column_count()
+        top_row = max(0, cursor_row - row_count + 1)
+        text = _range_text(
+            terminal, Vte.Format.TEXT, top_row, 0, cursor_row + row_count, columns
+        )
+        # Soft-wrapped screen rows come back joined (as in
+        # _resolve_wrapped_at); splitting them back — by cells, since a
+        # wide character fills two — keeps the row indexing the cursor
+        # position lives in.
+        return split_screen_rows(text, columns)
+
+    def row_text(self, row: int, end_column: int) -> str:
+        _, cursor_row = self._terminal.get_cursor_position()
+        line = self._top_row(cursor_row) + row
+        return _range_text(self._terminal, Vte.Format.TEXT, line, 0, line, end_column)
+
+    def tail_is_faint(self, row: int, column: int) -> bool:
+        """Read as HTML rather than text, because dim is a thing VTE draws,
+        not a thing the line says. The range has to start at *column* for
+        that to come back at all — VTE folds the dim attribute into a colour
+        only for the run a range opens on (see vtehtml) — which suits the
+        caller: the cursor is exactly where an agent's ghost text begins."""
+        terminal = self._terminal
+        _, cursor_row = terminal.get_cursor_position()
+        line = self._top_row(cursor_row) + row
+        html = _range_text(
+            terminal, Vte.Format.HTML, line, column, line, terminal.get_column_count()
+        )
+        return vtehtml.is_dim_run(html, self._foreground())
+
+    def visible_text(self) -> str:
+        terminal = self._terminal
+        _, cursor_row = terminal.get_cursor_position()
+        top_row = self._top_row(cursor_row)
+        return _range_text(
+            terminal, Vte.Format.TEXT, top_row, 0, cursor_row, terminal.get_column_count()
+        )
+
+    def first_column(self) -> tuple[str, ...]:
+        terminal = self._terminal
+        rows = terminal.get_row_count()
+        columns = terminal.get_column_count()
+        _, cursor_row = terminal.get_cursor_position()
+        top_row = max(0, cursor_row - rows + 1)
+        text = _range_text(terminal, Vte.Format.TEXT, top_row, 0, cursor_row, columns)
+        first = [line[:1] for line in text.split("\n")][:rows]
+        first += [""] * (rows - len(first))
+        return tuple(first)
+
+    def capture_contents(self) -> str:
+        return _capture_contents(self._terminal)
+
+
+class _TabHost:
+    """The `service.session.SessionHost` a TerminalTab hands its Session:
+    what the session tells the tab, and the few things it asks of a widget.
+    A class of its own rather than the tab itself, so the tab's namespace
+    stays the tab's."""
+
+    def __init__(self, tab: TerminalTab) -> None:
+        self._tab = tab
+
+    def alive(self) -> bool:
+        return self._tab.get_root() is not None
+
+    def paint(self, text: str) -> None:
+        self._tab.feed_message(text)
+
+    def focus_terminal(self) -> None:
+        self._tab.grab_terminal_focus()
+
+    def composer_open(self) -> bool:
+        return self._tab.composer_open()
+
+    def refocus_composer(self) -> None:
+        # Popovers undo a grab made during their own action: an idle later
+        # the one that asked for the switch has closed.
+        GLib.idle_add(self._tab._refocus_composer)
+
+    def resend_composed(self) -> None:
+        tab = self._tab
+        if tab._composer is not None and tab.composer_open():
+            tab._on_composer_send(None, tab._composer.peek_text())
+
+    def stash_draft(self, text: str) -> None:
+        self._tab._stash_draft(text)
+
+
+class _ComposerCut:
+    """The `service.session.CutSink` an open-cut lands in: the composer
+    that was opened, for as long as it is still this tab's and still up."""
+
+    def __init__(self, tab: TerminalTab, composer: ComposerView) -> None:
+        self._tab = tab
+        self._composer = composer
+
+    def alive(self) -> bool:
+        return self._tab._composer is self._composer and self._tab.composer_open()
+
+    def seed(self, text: str) -> None:
+        self._composer.seed_text(text)
+
+    def refuse(self) -> None:
+        # Whatever the composer had gathered in the meantime — the stash it
+        # was seeded with, a keystroke — goes back to the stash.
+        self._tab._stash_draft(self._composer.peek_text())
+        self._tab.close_composer(restore=False)
+        self._tab.feed_message(_("Composer: the input box holds a paste Collins can't read"))
 
 
 class PrChipRow(Gtk.Widget):
@@ -1259,14 +1425,7 @@ class PanelTerminal(Gtk.Box):
     def capture_contents(self) -> str:
         """The panel's current text contents including scrollback (plain text
         — VTE's dump carries no colors or attributes)."""
-        stream = Gio.MemoryOutputStream.new_resizable()
-        try:
-            self.terminal.write_contents_sync(stream, Vte.WriteFlags.DEFAULT, None)
-            stream.close(None)
-        except GLib.Error:
-            return ""
-        data = stream.steal_as_bytes().get_data()
-        return (data or b"").decode("utf-8", errors="replace")
+        return _capture_contents(self.terminal)
 
     def apply_settings(self, settings: dict) -> None:
         font = settings.get("font") or ""
@@ -1423,11 +1582,27 @@ class TerminalTab(Gtk.Box):
         *options* carries a resumed session's sandbox decision too (see
         MainWindow.open_session): the plan is written here, at spawn."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.session_id = session_id
-        self.fork = fork
-        self.provider = provider or get_provider("claude")
-        self._options = options
-        self._command_override = command_override
+        self.terminal = Vte.Terminal()
+        # The colour plain text is drawn in, once a theme has been applied;
+        # None while the terminal is following the system colours. Read when
+        # telling an agent's dim ghost text from typing (VteScreenPort).
+        self._terminal_fg: tuple[int, int, int] | None = None
+        # The session's logic, out of the widget (see service/session.py):
+        # everything the tab's terminal is *for* — reading and writing the
+        # agent's input box — over two ports on the terminal above. The
+        # tab's names for all of it forward there.
+        self._pty = VtePtyPort(self.terminal)
+        self.session = Session(
+            provider=provider or get_provider("claude"),
+            pty=self._pty,
+            screen=VteScreenPort(self.terminal, lambda: self._terminal_fg),
+            host=_TabHost(self),
+            session_id=session_id,
+            fork=fork,
+            options=options,
+            command_override=command_override,
+            cwd=cwd,
+        )
         # The plan file a sandboxed launch typed (sandboxplan.prepare_launch),
         # unlinked when the shell exits — the box is gone by then.
         self._sandbox_plan_path: str | None = None
@@ -1451,12 +1626,6 @@ class TerminalTab(Gtk.Box):
         # Decided at spawn time, so a toggle mid-session can't half-apply to
         # a shell that inherited the other choice; new tabs pick up a change.
         self._progress_env = bool((settings or {}).get("progress_termprop", True))
-        self._child_pid: int | None = None
-        # The directory the tab was handed, until _finish_spawn settles on
-        # where the shell actually runs: what cwd readers (the dock's shells,
-        # the composer's file picker) answer with while nothing is spawned —
-        # the new-chat screen's whole life.
-        self._cwd: str | None = cwd
         # The new-chat screen, while the tab is one (None after begin_session
         # or for a tab that never was); the draft id its panel history is
         # filed under meanwhile (see _history_id); and the prompt Send handed
@@ -1493,7 +1662,6 @@ class TerminalTab(Gtk.Box):
         # calls below can never race it.
         self._root_name_links: list[_RootNameLinks] = []
 
-        self.terminal = Vte.Terminal()
         if initial_size is not None:
             # A tab whose page is never selected is never allocated, so its
             # child would otherwise come up at VTE's default 80x24 and stay
@@ -1531,10 +1699,6 @@ class TerminalTab(Gtk.Box):
 
         self._easy_copy_paste = False
         self._keys = keymap.KeyMatcher(keybindings.current())
-        # The colour plain text is drawn in, once a theme has been applied;
-        # None while the terminal is following the system colours. Read when
-        # telling an agent's dim ghost text from typing (see _tail_is_dim).
-        self._terminal_fg: tuple[int, int, int] | None = None
         self._setup_context_menu()
         self._setup_image_drop()
 
@@ -1574,22 +1738,6 @@ class TerminalTab(Gtk.Box):
         self._composer: ComposerView | None = None
         self._composer_revealer: Gtk.Revealer | None = None
         self._composer_page: ComposerPage | None = None  # set while docked
-        # The text an open-cut took out of the CLI's box and hasn't proved
-        # gone yet — what a leftover has to match before anything erases it
-        # (see _verify_cut) — and the number of the cut that took it, which
-        # anything writing to that box on its own account bumps to call the
-        # rounds still in flight off.
-        self._cut_pending: str | None = None
-        self._cut_seq = 0
-        # Whether a cut is still deciding what the box holds, and a send that
-        # arrived while it was (see _on_composer_send).
-        self._cut_settling = False
-        self._send_after_settle = False
-        # A model switch that arrived during the settle, same bargain as the
-        # held send (see switch_model).
-        # A /model or /effort switch (the command, and the chat's line for
-        # an agent that isn't running) held back by a cut still settling.
-        self._switch_after_settle: tuple[str, str] | None = None
         self._composer_enter_sends = True
         self._composer_spell_click = True
         self._composer_font = ""
@@ -1613,17 +1761,6 @@ class TerminalTab(Gtk.Box):
         # (see _stash_draft), and saved against the session by the window,
         # so it outlives the tab and the app too.
         self._composer_stash = ""
-        # What the last close's paste-back turned into on the CLI's screen:
-        # every "[Pasted text #N +M lines]" stand-in the CLI folded a piece
-        # of it into, mapped to that piece's text, so the next open can put
-        # the draft itself in the composer rather than the stand-in (see
-        # _restore_or_stash). `_paste_back_pending` holds the pieces from
-        # the moment they are fed until a screen read has said how they
-        # landed; `_paste_back_agent` is the CLI process the stand-ins
-        # belong to — their numbers start over with a new one.
-        self._pasted_back: dict[str, str] = {}
-        self._paste_back_pending: list[str] | None = None
-        self._paste_back_agent: int | None = None
 
         # The attachments handle: a slim pill on the terminal's right edge,
         # the composer button's counterpart on the other axis, opening the
@@ -1922,6 +2059,66 @@ class TerminalTab(Gtk.Box):
             # "fork-resolved" instead of binding the tab to it.
             self._fork_resolve = True
             self._start_transcript_resolver(cwd)
+
+    # -- the session, forwarded ------------------------------------------------
+    #
+    # What the tab's callers (the window, the app, the MCP handlers, the e2e
+    # checks) have always read and written on a tab, now held by its Session.
+
+    @property
+    def session_id(self) -> str | None:
+        """The session this tab runs, None until a fresh one resolves."""
+        return self.session.session_id
+
+    @session_id.setter
+    def session_id(self, value: str | None) -> None:
+        self.session.session_id = value
+
+    @property
+    def fork(self) -> bool:
+        """Whether the tab forked the session it was opened with."""
+        return self.session.fork
+
+    @property
+    def provider(self) -> Provider:
+        return self.session.provider
+
+    @property
+    def _options(self):
+        return self.session.options
+
+    @_options.setter
+    def _options(self, value) -> None:
+        self.session.options = value
+
+    @property
+    def _command_override(self) -> str | None:
+        return self.session.command_override
+
+    @property
+    def _cwd(self) -> str | None:
+        return self.session.cwd
+
+    @_cwd.setter
+    def _cwd(self, value: str | None) -> None:
+        self.session.cwd = value
+
+    @property
+    def _child_pid(self) -> int | None:
+        """The shell spawned on the agent's pty, None until it is."""
+        return self._pty.pid
+
+    @_child_pid.setter
+    def _child_pid(self, value: int | None) -> None:
+        self._pty.pid = value
+
+    @property
+    def _pasted_back(self) -> dict[str, str]:
+        return self.session.pasted_back
+
+    @property
+    def _paste_back_pending(self) -> list[str] | None:
+        return self.session.paste_back_pending
 
     # -- the new-chat screen -------------------------------------------------
 
@@ -4201,7 +4398,7 @@ class TerminalTab(Gtk.Box):
     # -- graceful close ----------------------------------------------------
 
     def feed_child_text(self, text: str) -> None:
-        self.terminal.feed_child(text.encode())
+        self.session.write_text(text)
 
     def _on_editor_add_to_chat(self, _pane, path: str, start_line: int, end_line: int) -> None:
         self.add_file_to_chat(path, start_line, end_line)
@@ -4692,8 +4889,7 @@ class TerminalTab(Gtk.Box):
         if not self.composer_open():
             return
         text = self._composer.take_text()
-        self._cut_pending = None  # the box is about to hold this text again
-        self._cut_seq += 1
+        self.session.cancel_cut()  # the box is about to hold this text again
         self._composer_revealer.set_reveal_child(False)
         if restore:
             self._restore_or_stash(text)
@@ -4705,99 +4901,17 @@ class TerminalTab(Gtk.Box):
 
         Both closes (overlaid and docked) end here so the two can't drift:
         a draft is never dropped on the floor, whichever way the panel went
-        away.
-
-        Into the box it goes as pieces, each a bracketed paste small enough
-        that the CLI shows it in full (`composerkeys.paste_pieces`) rather
-        than folding it into a "[Pasted text #N +M lines]" stand-in, which
-        the next open's cut would take at face value — the draft behind it
-        unreadable and, once the stand-in was erased, gone. Should a piece
-        be folded anyway (a CLI with other limits), a read of the box a beat
-        later writes down which stand-in holds which piece, and the next
-        open puts the piece back in the composer in the stand-in's place
-        (see `_verify_paste_back`, `_apply_cut`).
+        away. How it goes back into the box — in pieces the CLI shows in
+        full, and what a folded piece is recorded as — is the session's
+        (`Session.restore_draft`).
         """
-        if self._agent_is_running():
-            restored = composerkeys.restore_text(text)
-            if restored:
-                pieces = composerkeys.paste_pieces(restored)
-                self.feed_child_text("".join(_bracketed_paste(piece) for piece in pieces))
-                self._pasted_back = {}
-                self._paste_back_pending = pieces
-                self._paste_back_agent = self._agent_pid()
-                GLib.timeout_add(_CUT_VERIFY_MS[0], self._verify_paste_back, pieces, 0)
-            return
-        self._stash_draft(text)
-
-    def _verify_paste_back(self, pieces: list[str], index: int) -> bool:
-        """Read how a close's paste-back landed, on the cut's own verify
-        schedule: the first read that finds the box holding the pieces
-        settles it, and a beat that finds no box (the agent mid-redraw) or
-        a box that doesn't align yet (a repaint caught halfway) leaves them
-        pending for the next. Pieces still unsettled after the last beat —
-        an open's cut has emptied the box already, say — are given up on:
-        nothing is recorded, and a stand-in seen later reads as somebody
-        else's."""
-        if self._paste_back_pending is not pieces:
-            return GLib.SOURCE_REMOVE  # a later close, or an open got there first
-        prompt = self.entered_prompt()
-        if prompt is not None:
-            self._settle_paste_back(prompt.text)
-        if self._paste_back_pending is pieces:
-            if index + 1 < len(_CUT_VERIFY_MS):
-                GLib.timeout_add(
-                    _CUT_VERIFY_MS[index + 1], self._verify_paste_back, pieces, index + 1
-                )
-            else:
-                self._paste_back_pending = None
-        return GLib.SOURCE_REMOVE
-
-    def _settle_paste_back(self, screen: str) -> None:
-        """Align the pending pieces with *screen* and, if they fit, record
-        the stand-ins among them. Pieces that don't fit stay pending — the
-        read may have caught the box mid-draw — for the next read to try."""
-        pieces = self._paste_back_pending
-        if pieces is None:
-            return
-        record = composerkeys.pasted_back(screen, pieces)
-        if record is None:
-            return
-        self._pasted_back = record
-        self._paste_back_pending = None
-
-    def _expand_box_read(self, screen: str) -> str | None:
-        """*screen* (an `entered_prompt` read) with the stand-ins the last
-        paste-back left replaced by the text they hold, or None when it
-        holds a stand-in that isn't ours — what an open must not cut. A
-        record from another CLI process doesn't count: stand-in numbers
-        start over with each one."""
-        if self._paste_back_pending is not None:
-            self._settle_paste_back(screen)
-        record = self._pasted_back
-        if record and self._paste_back_agent != self._agent_pid():
-            record = {}  # the /proc walk is only paid while there is a record to scope
-        return composerkeys.expand_pasted_back(screen, record)
+        if not self.session.restore_draft(text):
+            self._stash_draft(text)
 
     def _foreign_paste_in_box(self) -> bool:
-        """Whether the CLI's box holds a paste Collins can't read (see
-        `_expand_box_read`) — asked before a composer is raised over it.
-        Pieces still unaligned after this glance are given the benefit of
-        the doubt: the cut's settled read is the one that decides."""
-        prompt = self.entered_prompt()
-        if prompt is None:
-            return False
-        expanded = self._expand_box_read(prompt.text)
-        if expanded is None and self._paste_back_pending is not None:
-            return False
-        return expanded is None
-
-    def _agent_pid(self) -> int | None:
-        cli = getattr(self.provider, "cli", "") or ""
-        for pid in self._candidate_pids():
-            agent = proctree.agent_descendant_pid(pid, cli)
-            if agent is not None:
-                return agent
-        return None
+        """Whether the CLI's box holds a paste Collins can't read — asked
+        before a composer is raised over it (`Session.foreign_paste_in_box`)."""
+        return self.session.foreign_paste_in_box()
 
     def _stash_draft(self, text: str) -> None:
         """Keep a draft the terminal wouldn't take, for the next composer.
@@ -4867,64 +4981,28 @@ class TerminalTab(Gtk.Box):
     def _on_composer_send(self, _view, text: str) -> None:
         """Send closes first, then submits — the panel is a stand-in for
         the CLI's input box, and the submitted prompt should land in view,
-        not behind a panel. Nothing but whitespace just closes. Not
-        re-gated on takes_prompt: the box was emptied at open, and anything
-        typed into the terminal since submits along with this, same as if
-        the user had pressed Enter there. It IS re-gated on the agent
-        still being in the terminal — the text-then-Return of a submit
-        aimed at a shell would *execute* the draft — and an undeliverable
+        not behind a panel. Nothing but whitespace just closes. The submit
+        itself — re-gated on the agent still being in the terminal, waiting
+        out an open-cut still settling, finishing one still proving the box
+        empty — is the session's (`Session.send_composed`); an undeliverable
         send keeps the panel up with the draft in it, losing nothing.
 
         Docked, send never closes: the page is a fixture, not a stand-in
         raised over the input box, so the buffer clears and the page stays
         for the next prompt.
-
-        A send can outrun the open-cut, which is a chain of screen reads
-        and takes a beat (see _begin_cut). Two beats to outrun, and one
-        each:
-
-        * A cut still deciding what the box holds is *waited* for, never
-          worked around — the box would otherwise keep the prompt that was
-          about to be taken out of it, and typing this one after it sends
-          the two jammed together. `_end_settling` sends for us the moment
-          it knows.
-
-        * A cut that has erased but not yet proved the box empty carries
-          its last check here: whatever it still can't account for is
-          erased first, a beat ahead of the prompt rather than in front of
-          it in the same write — a chunk opening with backspaces is a
-          chunk the CLI could read as pasted text.
         """
         docked = self._composer_page is not None
         if not text.strip():
             if not docked:
                 self.close_composer()
             return
-        if self._cut_settling:
-            self._send_after_settle = True
-            return
-        if not self._agent_is_running():
-            self.feed_message(_("Composer: the agent isn't running in this tab"))
-            return
-        leftover = (
-            self._leftover_cut_keys(self._cut_pending)
-            if self._cut_pending is not None
-            else None
-        )
-        self._cut_pending = None
-        self._cut_seq += 1  # the prompt about to be typed is not a cut's to erase
-        self._composer.set_text("")
-        if not docked:
-            self._composer_revealer.set_reveal_child(False)
-        if leftover:
-            self.feed_child_text(leftover)
-            GLib.timeout_add(_CUT_VERIFY_MS[0], self._inject_after_cut, text)
-            return
-        self.inject_prompt(text)
 
-    def _inject_after_cut(self, text: str) -> bool:
-        self.inject_prompt(text)
-        return GLib.SOURCE_REMOVE
+        def clear() -> None:
+            self._composer.set_text("")
+            if not docked:
+                self._composer_revealer.set_reveal_child(False)
+
+        self.session.send_composed(text, clear)
 
     def _sync_composer_overlay_btn(self) -> None:
         """Show the floating composer button only when it has something to do:
@@ -5007,197 +5085,17 @@ class TerminalTab(Gtk.Box):
         view.set_docked(False)
         self._composer_revealer.set_child(view)
         text = view.take_text()
-        self._cut_pending = None  # as in close_composer: the text goes back
-        self._cut_seq += 1
+        self.session.cancel_cut()  # as in close_composer: the text goes back
         self._restore_or_stash(text)
         self.grab_terminal_focus()
 
     def _begin_cut(self, composer: ComposerView) -> None:
         """Take the typed-but-unsent prompt out of the CLI's input box and
-        into *composer* — the open-cut, run as a chain of screen reads.
-
-        Both halves of it need a beat, which is why this isn't the inline
-        read `open_composer` used to do:
-
-        * The **read** is only worth trusting once the screen has stopped
-          moving. The CLI echoes what was typed a repaint later, so a
-          composer opened from the keyboard the instant a prompt was typed
-          reads a line still catching up — and erasing that read would eat
-          the characters it hadn't shown yet, which no later round can get
-          back. A run of identical reads is the settle test, and a box
-          that never settles is left alone.
-
-        * The **erase** is checked afterwards, because a read can fall
-          short of the buffer it renders even settled: an invisible
-          trailing space is dropped, and so is the space a wrap ate
-          between two long words. The erase is one backspace per character
-          read, running backwards from the end, so a read one character
-          short leaves the box holding the *first* character of the prompt
-          — which the composer's copy starts with too, so the send that
-          follows types it twice.
-
-        Nothing is cut when there is nothing to take or the provider can't
-        clear its box safely: no half-cut that leaves the text behind for
-        a send to duplicate.
-        """
-        self._cut_pending = None
-        self._cut_seq += 1
-        self._cut_settling = True
-        self._settle_cut(composer, self._cut_seq, None, 0, 0)
-
-    def _settle_cut(
-        self,
-        composer: ComposerView,
-        seq: int,
-        previous: EnteredPrompt | None,
-        agreed: int,
-        attempt: int,
-    ) -> bool:
-        """One settle read, cutting once *agreed* of them in a row match.
-
-        An empty box answers None to every read, which agrees with itself
-        like any other answer: the ordinary open settles on the fourth read
-        and cuts nothing.
-
-        Every way out of here ends the settling, because a send held back
-        for it (`_send_after_settle`) has to be let go of on all of them.
-        """
-        if not self._cut_alive(composer, seq):
-            self._end_settling()
-            return GLib.SOURCE_REMOVE
-        prompt = self.entered_prompt()
-        agreed = agreed + 1 if _prompt_read(prompt) == _prompt_read(previous) else 1
-        if agreed >= _CUT_SETTLE_READS:
-            self._apply_cut(composer, seq, prompt)
-            self._end_settling()
-            return GLib.SOURCE_REMOVE
-        if attempt >= _CUT_SETTLE_TRIES:
-            self._end_settling()  # never still: the box keeps its text
-            return GLib.SOURCE_REMOVE
-        GLib.timeout_add(
-            _CUT_SETTLE_MS, self._settle_cut, composer, seq, prompt, agreed, attempt + 1
-        )
-        return GLib.SOURCE_REMOVE
-
-    def _end_settling(self) -> None:
-        """The cut has decided; send whatever was waiting on it.
-
-        The waiting send is re-taken from the composer rather than replayed
-        from the text it carried, because a cut that landed has just seeded
-        that box: what goes out is the CLI's text and the draft written
-        under it, in the order they were written, which is what the send
-        would have carried had it come a moment later.
-
-        A model or effort switch held the same way goes first — it was asked
-        of the session the prompt is about to be sent to — unless a send is
-        waiting too, in which case the switch yields the box and re-posts
-        itself once the send has typed and submitted (a beat past the
-        send's slowest path), through the ordinary "no composer over the
-        box" road."""
-        self._cut_settling = False
-        held = self._switch_after_settle
-        self._switch_after_settle = None
-        if held is not None and not self._send_after_settle:
-            self._post_switch(*held)
-        elif held is not None:
-            GLib.timeout_add(
-                _CUT_VERIFY_MS[0] + 2 * _PROMPT_SUBMIT_MS, self._switch_after_send, held
-            )
-        if not self._send_after_settle:
-            return
-        self._send_after_settle = False
-        if self._composer is not None and self.composer_open():
-            self._on_composer_send(None, self._composer.peek_text())
-
-    def _switch_after_send(self, held: tuple[str, str]) -> bool:
-        self._post_switch(*held)
-        return GLib.SOURCE_REMOVE
-
-    def _apply_cut(
-        self, composer: ComposerView, seq: int, prompt: EnteredPrompt | None
-    ) -> None:
-        """Erase the settled read from the box, seed it into the composer,
-        and start checking that the box really emptied.
-
-        What is seeded is the read with any stand-in of ours expanded back
-        into the draft it folded (see `_restore_or_stash`); the erase still
-        works from the read as drawn, which is what the verify rounds
-        compare against — a stand-in goes on the first backspace that
-        reaches it, and the ones budgeted for its characters land on an
-        empty box. A stand-in that isn't ours lowers the composer instead:
-        the box holds a paste no read can recover, and an empty box is
-        the one thing a cut must never make of it. Whatever the composer
-        had gathered in the meantime — the stash it was seeded with, a
-        keystroke — goes back to the stash."""
-        if prompt is None or not prompt.text.strip():
-            self._pasted_back = {}  # nothing folded is left on screen
-            return
-        text = self._expand_box_read(prompt.text)
-        if text is None:
-            self._stash_draft(composer.peek_text())
-            self.close_composer(restore=False)
-            self.feed_message(_("Composer: the input box holds a paste Collins can't read"))
-            return
-        keys = self.provider.clear_prompt_keys(prompt)
-        if not keys:
-            return
-        self.feed_child_text(keys)
-        self._cut_pending = prompt.text
-        self._pasted_back = {}  # spent: the stand-ins are being erased
-        composer.seed_text(text)
-        GLib.timeout_add(_CUT_VERIFY_MS[0], self._verify_cut, composer, seq, 0)
-
-    def _verify_cut(self, composer: ComposerView, seq: int, index: int) -> bool:
-        """Re-read the box after an erase and finish the job if it fell
-        short (see _begin_cut for how it can).
-
-        Only a leftover the cut can account for is touched: the erase runs
-        backwards from the end, so whatever it failed to reach is a prefix
-        of what was read. Anything else on that line got there some other
-        way — the user typing into the terminal, the agent redrawing — and
-        is left alone, which also ends the checking.
-        """
-        if not self._cut_alive(composer, seq) or self._cut_pending is None:
-            return GLib.SOURCE_REMOVE
-        keys = self._leftover_cut_keys(self._cut_pending)
-        if keys is None:
-            self._cut_pending = None  # emptied, or not ours to erase
-            return GLib.SOURCE_REMOVE
-        self.feed_child_text(keys)
-        if index + 1 < len(_CUT_VERIFY_MS):
-            GLib.timeout_add(
-                _CUT_VERIFY_MS[index + 1], self._verify_cut, composer, seq, index + 1
-            )
-        return GLib.SOURCE_REMOVE
-
-    def _leftover_cut_keys(self, cut: str) -> str | None:
-        """Keystrokes erasing what a cut of *cut* left in the input box, or
-        None when the box is empty or holds something that cut can't
-        account for (see _verify_cut).
-
-        An erase still queued reads as the whole prompt, which is a prefix
-        of itself: the answer is another full line of backspaces, and the
-        two lines of them meet an emptied box between them — where the
-        spare ones are no-ops."""
-        left = self.entered_prompt()
-        if left is None or not left.text or not cut.startswith(left.text):
-            return None
-        return self.provider.clear_prompt_keys(left)
-
-    def _cut_alive(self, composer: ComposerView, seq: int) -> bool:
-        """Whether cut *seq* still has a composer to cut into and an agent
-        to cut from.
-
-        A composer closed mid-chain has already typed its text back into
-        the box (close_composer), and a send has just typed a prompt into
-        it — no later round of a chain may erase *those*, and bumping
-        `_cut_seq` is how each of them says so."""
-        return (
-            seq == self._cut_seq
-            and self._composer is composer
-            and self.composer_open()
-            and self._agent_is_running()
-        )
+        into *composer* — the open-cut, a chain of screen reads that settle
+        before they erase and verify after (`Session.begin_cut`). The
+        composer is reached through a `_ComposerCut` for as long as it is
+        still this tab's and still open."""
+        self.session.begin_cut(_ComposerCut(self, composer))
 
     def _pick_file_for_composer(self) -> None:
         """The composer's attach button: pick a file, landing its mention in
@@ -5239,123 +5137,26 @@ class TerminalTab(Gtk.Box):
         composer.insert_mention(reference + " ")
 
     def inject_prompt(self, text: str) -> None:
-        """Type *text* into the agent, send it, and put the tab in front.
-
-        What the PR menu's prompt actions do. Only offered while
-        `takes_prompt` says the input is empty, so nothing of the user's is
-        ever sent along with it.
-
-        The Return goes in a second write, a beat later, rather than on the
-        end of the first: an agent CLI reads a chunk arriving all at once as a
-        paste, and a Return inside a paste is a newline in the box — it left
-        the prompt typed out and waiting for someone to press enter. Arriving
-        on its own, after the input has settled, it submits.
-        """
-        self._post_prompt(text)
-        self.grab_terminal_focus()
+        """Type *text* into the agent, send it, and put the tab in front —
+        what the PR menu's prompt actions do (`Session.inject_prompt`)."""
+        self.session.inject_prompt(text)
 
     def inject_prompt_unfocused(self, text: str) -> None:
-        """Submit *text* to the agent without taking focus or the view — what
-        a background spawn does with the prompt the start_session tool handed
-        it (see App._mcp_start_session). inject_prompt's sibling, minus the
-        grab: a session no one is looking at must not pull the keyboard over.
-
-        Where inject_prompt only ever carried the PR menu's one-liners, a tool
-        prompt is arbitrary user text and often multi-line. It is wrapped in an
-        explicit bracketed paste so its newlines stay literal in the box
-        however VTE chunks the write — the CLI keeps bracketed paste on — and
-        any carriage returns (a stray submit mid-prompt) or paste-end markers
-        (an early close of the wrapper) are stripped first. The submitting
-        Return still travels on its own a beat later (_post_prompt), after the
-        paste has closed, so the whole thing lands as one turn.
-        """
-        self._post_prompt(_bracketed_paste(text))
-
-    def _post_prompt(self, text: str) -> None:
-        """Type *text* into the agent and submit it a beat later (see
-        inject_prompt for why the Return travels alone) — without touching
-        focus, for the callers that shouldn't move it (switch_model, while
-        the composer holds the keyboard)."""
-        self.feed_child_text(text)
-        GLib.timeout_add(_PROMPT_SUBMIT_MS, self._submit_prompt)
-
-    def _submit_prompt(self) -> bool:
-        self.feed_child_text("\r")
-        return GLib.SOURCE_REMOVE
+        """Submit *text* to the agent as one bracketed paste, without taking
+        focus or the view — a background spawn's start_session prompt
+        (`Session.inject_prompt_unfocused`)."""
+        self.session.inject_prompt_unfocused(text)
 
     def switch_model(self, model_id: str) -> None:
         """Post the provider's model-switch command to the chat — what a
         pick in either model menu (the footer label's, the composer's)
-        means. The command is a prompt like any other to the terminal; the
-        CLI answers it in the transcript, and the footer label follows
-        within a poll. See _post_switch for how it reaches the box."""
-        command = self.provider.model_switch_command(model_id)
-        if command is None:
-            return
-        self._post_switch(command, _("Model switch: the agent isn't running in this tab"))
+        means (`Session.switch_model`)."""
+        self.session.switch_model(model_id)
 
     def switch_effort(self, effort: str) -> None:
         """Post the provider's effort-switch command to the chat — what a
-        pick in either effort menu (the footer chip's, the composer's)
-        means, on the same terms as switch_model: the CLI answers in the
-        transcript, and the chip follows within a poll."""
-        command = self.provider.effort_switch_command(effort)
-        if command is None:
-            return
-        self._post_switch(command, _("Effort switch: the agent isn't running in this tab"))
-
-    def _post_switch(self, command: str, not_running: str) -> None:
-        """Type a switch *command* into the CLI's box — the road both
-        switch_model and switch_effort take. *not_running* is the chat's
-        line when there is no agent to type it to.
-
-        With the composer up, the CLI's box is the composer's to manage —
-        emptied by the open-cut — so the command types straight in and the
-        composer stays exactly as it was, draft and all: switching models
-        mid-draft is the point of putting a picker there. The two cut races
-        the composer's own send can hit apply unchanged (_on_composer_send
-        tells them in full): a cut still settling holds the command back
-        and _end_settling lets it go, and one still proving the box empty
-        gets finished first, a beat ahead of the command.
-
-        Without a composer the box is the user's, so the command is only
-        posted at an empty prompt — inject_prompt's own bargain — and the
-        chat says why when it isn't.
-        """
-        if not self._agent_is_running():
-            self.feed_message(not_running)
-            return
-        if self.composer_open():
-            if self._cut_settling:
-                self._switch_after_settle = (command, not_running)
-                return
-            leftover = (
-                self._leftover_cut_keys(self._cut_pending)
-                if self._cut_pending is not None
-                else None
-            )
-            self._cut_pending = None
-            self._cut_seq += 1  # the command about to be typed is not a cut's to erase
-            if leftover:
-                self.feed_child_text(leftover)
-                GLib.timeout_add(_CUT_VERIFY_MS[0], self._post_after_cut, command)
-            else:
-                self._post_prompt(command)
-            # The keyboard goes back to the draft: the popover's close is
-            # about to hand focus to the button that opened it, so the
-            # re-grab waits out that close in an idle (popovers undo a
-            # grab made during their own action).
-            GLib.idle_add(self._refocus_composer)
-            return
-        block = self.prompt_block()
-        if block:
-            self.feed_message(block)
-            return
-        self.inject_prompt(command)
-
-    def _post_after_cut(self, text: str) -> bool:
-        self._post_prompt(text)
-        return GLib.SOURCE_REMOVE
+        pick in either effort menu means (`Session.switch_effort`)."""
+        self.session.switch_effort(effort)
 
     def _refocus_composer(self) -> bool:
         if self._composer is not None and self.composer_open():
@@ -5363,79 +5164,20 @@ class TerminalTab(Gtk.Box):
         return GLib.SOURCE_REMOVE
 
     def takes_prompt(self) -> bool:
-        """Whether a prompt sent right now would land in an empty input box.
-
-        The provider reads that off the screen (see Provider.takes_prompt); all
-        this does is find what it reads — the line the cursor is on, how far
-        into it the cursor sits, and whether the rest of that line is the
-        agent's own dim ghost text — and rule out a terminal with no agent
-        left in it.
-        """
-        if self._child_pid is None:
-            return False
-        column, row = self.terminal.get_cursor_position()
-        text = self._row_text(row, self.terminal.get_column_count())
-        # What the line says is enough to say yes to an empty input, and that
-        # is the answer nearly every time this is asked; only a line that reads
-        # as written-in is worth a second look at how it was drawn.
-        if self.provider.takes_prompt(text, column):
-            return True
-        return self.provider.takes_prompt(text, column, self._tail_is_dim(row, column))
-
-    def _tail_is_dim(self, row: int, column: int) -> bool:
-        """Whether the line from *column* to the end of *row* is drawn dim.
-
-        Read as HTML rather than text, because dim is a thing VTE draws, not a
-        thing the line says. The range has to start at the cursor for that to
-        come back at all — VTE folds the dim attribute into a colour only for
-        the run a range opens on (see vtehtml) — which suits the caller: the
-        cursor is exactly where an agent's ghost text begins.
-        """
-        html = self.terminal.get_text_range_format(
-            Vte.Format.HTML, row, column, row, self.terminal.get_column_count()
-        )
-        text = html[0] if isinstance(html, tuple) else html
-        return vtehtml.is_dim_run(text or "", self._terminal_fg)
+        """Whether a prompt sent right now would land in an empty input box
+        (`Session.takes_prompt`)."""
+        return self.session.takes_prompt()
 
     def prompt_block(self) -> str:
-        """Why a prompt sent to this tab wouldn't land, or "" when it would.
-
-        The sentence a PR menu greys its prompt actions out with (see
-        prmenu.ActionHost). One line covers every no: an agent that has exited,
-        one mid-turn, one at a permission dialog and one with half a sentence
-        already typed are all "not at an empty input", and the fix for all four
-        is to look at the terminal.
-        """
-        return "" if self.takes_prompt() else _("This session isn't at an empty prompt.")
+        """Why a prompt sent to this tab wouldn't land, or "" when it would —
+        the sentence a PR menu greys its prompt actions out with
+        (`Session.prompt_block`)."""
+        return self.session.prompt_block()
 
     def entered_prompt(self) -> EnteredPrompt | None:
         """The prompt typed into the agent's input box and not yet sent, or
-        None with no agent, an empty box (takes_prompt — which also rules
-        out the box's dim ghost suggestion, indistinguishable from typed
-        text in a plain-text read), or no box on screen at all.
-
-        The screen is read the way the other readers do — one cursor-anchored
-        snapshot, never adjustment-derived grid rows (see _resolve_wrapped_at
-        for why), split back into screen rows — but reaching *past* the
-        cursor too: continuation rows sit below it whenever the cursor was
-        arrowed back up into the box.
-        """
-        if self._child_pid is None or self.takes_prompt():
-            return None
-        _, cursor_row = self.terminal.get_cursor_position()
-        row_count = self.terminal.get_row_count()
-        columns = self.terminal.get_column_count()
-        top_row = max(0, cursor_row - row_count + 1)
-        screen = self.terminal.get_text_range_format(
-            Vte.Format.TEXT, top_row, 0, cursor_row + row_count, columns
-        )
-        text = screen[0] if isinstance(screen, tuple) else screen
-        # Soft-wrapped screen rows come back joined (as in
-        # _resolve_wrapped_at); splitting them back — by cells, since a
-        # wide character fills two — keeps the row indexing the cursor
-        # position lives in.
-        rows = split_screen_rows(text or "", columns)
-        return self.provider.entered_prompt(rows, cursor_row - top_row, columns)
+        None (`Session.entered_prompt`)."""
+        return self.session.entered_prompt()
 
     def unstarted_thread(self) -> bool:
         """Whether this tab is still a New Thread with nothing in it: a
@@ -5460,51 +5202,19 @@ class TerminalTab(Gtk.Box):
         )
 
     def _visible_screen_text(self) -> str:
-        """Everything on the terminal's visible screen, as plain text.
-
-        Anchored to the cursor rather than to the scroll position, like the
-        other screen readers here: what the user has scrolled back to never
-        changes what the provider is shown. "" with no child running.
-        """
-        if self._child_pid is None:
-            return ""
-        _, cursor_row = self.terminal.get_cursor_position()
-        top_row = max(0, cursor_row - self.terminal.get_row_count() + 1)
-        screen = self.terminal.get_text_range_format(
-            Vte.Format.TEXT, top_row, 0, cursor_row, self.terminal.get_column_count()
-        )
-        text = screen[0] if isinstance(screen, tuple) else screen
-        return text or ""
+        """Everything on the terminal's visible screen, as plain text
+        (`Session.visible_screen_text`)."""
+        return self.session.visible_screen_text()
 
     def worktree_exit_prompt_keystrokes(self) -> str | None:
         """Keystrokes that accept the agent's "leaving a worktree" dialog if
-        it's showing right now, or None if it isn't (see
-        Provider.worktree_exit_prompt). The whole visible screen, not just
-        the cursor's line — this dialog is a multi-line menu, not something
-        drawn at the input prompt."""
-        if self._child_pid is None:
-            return None
-        return self.provider.worktree_exit_prompt(self._visible_screen_text())
+        it's showing right now, or None (`Session.worktree_exit_prompt_keystrokes`)."""
+        return self.session.worktree_exit_prompt_keystrokes()
 
     def screen_first_column(self) -> tuple[tuple[str, ...], tuple[int, int]] | None:
-        """The first character of each visible screen row ("" for a blank
-        one), with the (columns, rows) grid it was read at — what the
-        window's SpinnerWatch compares between samples — or None with no
-        child to be busy. Anchored to the cursor like the other screen
-        readers, so the user scrolling back never changes what is read."""
-        if self._child_pid is None:
-            return None
-        rows = self.terminal.get_row_count()
-        columns = self.terminal.get_column_count()
-        _, cursor_row = self.terminal.get_cursor_position()
-        top_row = max(0, cursor_row - rows + 1)
-        screen = self.terminal.get_text_range_format(
-            Vte.Format.TEXT, top_row, 0, cursor_row, columns
-        )
-        text = screen[0] if isinstance(screen, tuple) else screen
-        first = [line[:1] for line in (text or "").split("\n")][:rows]
-        first += [""] * (rows - len(first))
-        return tuple(first), (columns, rows)
+        """The first character of each visible screen row with the grid it
+        was read at, or None with no child (`Session.screen_first_column`)."""
+        return self.session.screen_first_column()
 
     # -- transcript --------------------------------------------------------
 
@@ -6533,23 +6243,8 @@ class TerminalTab(Gtk.Box):
             self.show_editor()
 
     def _candidate_pids(self) -> list[int]:
-        """Pids worth searching for the agent process: the terminal's
-        foreground process group leader, then the child originally spawned.
-
-        The group leader is not always the process that moves — a
-        daemon-hosted session leaves a wrapper at its head and runs the agent
-        as its child — so both ends are worth trying.
-        """
-        pids = []
-        pty = self.terminal.get_pty()
-        if pty is not None:
-            try:
-                pids.append(os.tcgetpgrp(pty.get_fd()))
-            except OSError:
-                pass
-        if self._child_pid is not None:
-            pids.append(self._child_pid)
-        return pids
+        """Pids worth searching for the agent process (`Session.candidate_pids`)."""
+        return self.session.candidate_pids()
 
     def current_agent_cwd(self) -> str | None:
         """Best-effort cwd of what's running in the agent terminal: the
@@ -6603,14 +6298,9 @@ class TerminalTab(Gtk.Box):
         return self._options.effort if self._options else ""
 
     def _agent_is_running(self) -> bool:
-        """Whether the provider's CLI is alive in this terminal right now —
-        the same descendant search current_agent_cwd runs, minus its
-        shell-cwd fallbacks. False means whatever is at the prompt is not
-        the agent (a plain shell, or something the user launched)."""
-        cli = getattr(self.provider, "cli", "") or ""
-        return any(
-            proctree.agent_descendant_cwd(pid, cli) is not None for pid in self._candidate_pids()
-        )
+        """Whether the provider's CLI is alive in this terminal right now
+        (`Session.agent_is_running`)."""
+        return self.session.agent_is_running()
 
     def owns_pid_ancestors(self, ancestors: set[int]) -> bool:
         """Whether one of *ancestors* is a process this tab's terminal runs.
@@ -6653,8 +6343,8 @@ class TerminalTab(Gtk.Box):
 
     def has_running_command(self) -> bool:
         """True when something other than the shell (e.g. claude) owns the
-        terminal's foreground."""
-        return _has_running_command(self.terminal, self._child_pid)
+        terminal's foreground (`Session.has_running_command`)."""
+        return self.session.has_running_command()
 
     def apply_settings(self, settings: dict) -> None:
         font = settings.get("font") or ""
