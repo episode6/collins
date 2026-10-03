@@ -55,6 +55,13 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 python3 scripts/run_e2e.py --list --shard 2/5       # …and its estimate; no display needed
 ```
 
+Real ptys are fine in the unit suite: `tests/test_ptyserver.py` spawns
+`cat` and `sh -c` children on ptys the server owns and iterates the
+default GLib main context by hand (its `pump`), no display, no GTK. Put the
+pty in raw mode from the master side (`tty.setraw(master)`) rather than
+with `stty` in the child: the child's `stty` races the first write, and the
+line discipline's `^[` echo of an escape then lands in the output.
+
 Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 `E F W I UP B`, `E402` ignored for `gi.require_version` ordering; UP035 means
 `Callable` comes from `collections.abc`).
