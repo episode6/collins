@@ -215,6 +215,53 @@ Tabs follow the sidebar's order (`taborder`, re-sorted on `refreshed` and
 by default. `_tab_widget(page)` finds a tab's private `AdwTab` by its `page`
 property (creation order diverges from position).
 
+## The service's stream filter (termstream)
+
+The split (`~/specs/collins/split-service-and-client.md`) moves the pty out
+of the tab into a headless service; `collins/service/termstream.py` (GTK-free,
+stdlib only, not yet wired into the app) is the first piece. One
+`StreamFilter` per pty; `feed(bytes)` returns `Filtered(forward, replies,
+tokens, events)`:
+
+- **What it strips.** Only the terminal queries in its table (F8 plus what
+  CLI 2.1.285 asks): DA1/DA2/DA3, XTVERSION, DSR 5, CPR, DECXCPR, the colour
+  scheme report, DECRQM (private and ANSI), OSC 10/11/12/4 colour queries,
+  XTGETTCAP `TN`, DECRQSS SGR, `CSI 18/14/21 t`, and the known-silent ones
+  (`CSI ? u`, `CSI 16 t`, `CSI ? 4 m`, ENQ, the APC kitty graphics query).
+  Everything else is forwarded byte for byte, OSC 9;4 progress and BEL
+  included (they also come out as `Progress` and `Bell` events, so the
+  client's VTE still rings and shows progress). A query in any other shape
+  (`CSI 23 t`, `DCS $q r ST`, an OSC 4 that also sets a colour) passes
+  through and the client's VTE answers it late, the user's decision.
+- **What it answers, and from what.** VTE 0.84's bytes, from a
+  `TerminalState` (grid, cell pixels, the active client's colours and
+  scheme, VTE version) and the `ModeTracker`; DECRQM uses VTE's own mode
+  table (a sweep of every mode 0 to 65535: which are permanent, which
+  default set). The OSC terminator is mirrored. A colour the program set
+  itself (OSC 4/10/11/12) is left to the client until it is reset. With a
+  `ScreenHook` attached the cursor is read from the screen as it stands at
+  the query.
+- **The order rule.** `replies` are in the order the queries appeared: the
+  CLI closes a round with DA1 and takes what arrived before its answer as
+  the round's answers (F11). Never answer out of order or batch by kind.
+- **The preamble.** `preamble(screen=True)` re-asserts what differs from a
+  fresh VTE: the alternate screen, the modes, the scroll region, the kitty
+  flag stack, modifyOtherKeys, the character sets, then cursor visibility.
+  Pass `screen=False` when the redraw switches screens itself:
+  `?1049h` on a VTE already on the alternate screen clears it (measured).
+  RIS resets the tracker; DECSTR resets every mode bit VTE can set, the
+  alternate-screen bits too, without leaving the alternate screen.
+- **The tokenizer** carries a sequence cut by a read, and a UTF-8 character
+  cut at the end of a text run, to the next `feed`; flushes a string open
+  at 64 KiB and passes the rest of it on; follows VTE's parser on CAN/SUB,
+  an ESC inside a sequence and C0 inside a CSI (hoisted ahead of it).
+  UTF-8-encoded C1 controls are text here although VTE executes them (the
+  CLI never sends one).
+
+`scripts/check_termstream_answers.py` compares every answer with a real
+childless VTE's; when VTE is upgraded and it fails, the responder follows
+VTE (update the tables and the module docstring's measurements).
+
 ## Footguns
 
 - Redraws the app causes (typing a command, `feed_message`) look like agent

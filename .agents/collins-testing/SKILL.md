@@ -174,6 +174,14 @@ a tab running a real CLI, kill the foreground process group
   server gates do, so a fixture always sets it.
 - Long inline shell pipelines are refused by the worktree guard; put probes
   in a scratchpad `.py`/`.sh` and run them with `PYTHONPATH=<worktree>`.
+- A check that needs only a terminal, not the app:
+  `scripts/check_termstream_answers.py` builds a childless `Vte.Terminal`
+  in a bare `Gtk.Window` (no `App`, no scratch tree) and compares
+  `collins.service.termstream`'s answers with what VTE commits. It reads
+  VTE's answers up to a sentinel (`CSI 5 n` fed last; its `CSI 0 n` is the
+  last commit), so nothing waits on a timer. `get_cursor_position()` counts
+  rows from the top of the buffer, not the screen: take a fresh terminal
+  before comparing a cursor.
 
 ## CI
 

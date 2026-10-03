@@ -107,13 +107,17 @@ via `--mcp-config`) relays MCP over a Unix socket to `mcpserver.py`
 schemas, framing and runtime paths; the handlers live in `app.py`. Session
 identity is the shim's kernel-verified pid walked up `/proc` to a tab.
 
-**The service/client API (in progress).** The split into a headless
+**The service and its API, in progress.** The split into a headless
 `collins-service` and a GTK client (`~/specs/collins/split-service-and-client.md`)
-starts with `collins/api/protocol.py`: GTK-free and stdlib-only, the message
-table of the API (types, direction, fields and bounds), `validate` /
-`validate_response`, JSON framing, the 16-byte binary header and the
-`PROTOCOL` / `MIN_PROTOCOL` window, modelled on `mcptools`. Nothing uses it
-yet.
+lands a module per PR, GTK-free and not yet wired into the app.
+`collins/api/protocol.py` (stdlib-only) is the API's message table (types,
+direction, fields and bounds), `validate` / `validate_response`, JSON
+framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
+window, modelled on `mcptools`. `collins/service/termstream.py` (stdlib
+only; nothing in `collins/service/` imports GTK) is the stream filter, query
+responder and mode tracker the service runs every pty's output through: it
+answers the terminal's queries as VTE 0.84 would, strips them from what
+clients see, and tracks the modes an attach has to re-assert.
 
 **Everything Claude-shaped runs on the CLI's own login.** Titles
 (`titles.py`), project icons (`icongen.py`) and login repair
@@ -242,11 +246,11 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store, sidebar, state.json, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `models` `state` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
+| Service (the split): the pty stream filter, query responder and mode tracker; the API's message table, validation, framing, binary header, protocol version | `service/termstream` `api/protocol` | `collins-terminal-tab` (the stream), `collins-session-mcp-tools` (the protocol) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
-| Service/client API: the message table, validation, framing, binary header, protocol version | `api/protocol` | `collins-session-mcp-tools` (for now) |
 | Pull requests: status, hub, detail page, body markdown, actions, menus, gh setup | `prstatus` `prstore` `prdetail` `practions` `prmenu` `prview` `mdblocks` `mdwidgets` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
 | The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info, the panels' model and git runners | `gitpage` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitmodel` `gitops` `commitcard` `gitoperation` `keyedslots` `imagediff` | `collins-git-page` |
 | Editor panel: file tree, quick open, pop-out, narrow mode | `editor` `editorfiles` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
