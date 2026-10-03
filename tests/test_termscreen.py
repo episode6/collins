@@ -123,15 +123,9 @@ def cells_agree(mine: list, theirs: list) -> str:
     return ""
 
 
-def history_as_vte_reads_it(screen: Screen) -> list[str]:
-    """The scrollback the way the golden holds VTE's text read of it: a
-    row that wrapped runs into the next, and blank rows at the end are
-    indistinguishable from none."""
-    text = "".join(
-        termscreen._runs_text(runs) + ("" if wrapped else "\n")
-        for runs, wrapped in zip(screen.scrollback, screen.scrollback_wrapped, strict=True)
-    ).rstrip("\n")
-    return text.split("\n") if text else []
+def history(screen: Screen) -> list[str]:
+    """The scrollback as text, row by row, as the goldens hold VTE's."""
+    return [termscreen._runs_text(runs) for runs in screen.scrollback]
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -149,7 +143,7 @@ def test_golden(name):
         assert not why, f"row {y}: {why}"
     assert screen.screen_text().rstrip("\n") == golden["screen_text"]
     if not screen.on_alt:
-        assert history_as_vte_reads_it(screen) == golden["history"]
+        assert history(screen) == golden["history"]
     x, y = screen.cursor()
     faint = screen.tail_is_faint(y, x)
     assert faint == golden["tail_is_dim"]
@@ -157,6 +151,27 @@ def test_golden(name):
     assert provider.takes_prompt(screen.row_text(y), x, faint) == golden["takes_prompt"]
     entered = provider.entered_prompt(screen.rows(), y, COLS)
     assert (None if entered is None else entered.text) == golden["entered"]
+
+
+@pytest.mark.parametrize("name", sorted(scenarios.SYNTHETIC_MARKED))
+def test_snapshot_then_the_rest_matches_the_after_golden(name):
+    """A redraw taken at the first mark, with the session's next bytes fed
+    on top, shows what the whole stream shows (what an attach mid-session
+    has to carry into the output that follows it)."""
+    first, then = scenarios.SYNTHETIC_MARKED[name]
+    at = feed(first)
+    again = feed(at.snapshot())
+    tokenizer = termstream.Tokenizer()
+    again.feed(tokenizer.feed(then.encode()))
+    again.feed(tokenizer.flush())
+    golden = GOLDENS[name + "@after"]
+    assert again.rows() == golden["rows"]
+    assert list(again.cursor()) == golden["cursor"]
+    for y in range(ROWS):
+        why = cells_agree(model_cells(again, y), golden["cells"][y])
+        assert not why, f"row {y}: {why}"
+    if not again.on_alt:
+        assert history(again) == golden["history"]
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -210,7 +225,6 @@ def test_snapshot_round_trips_into_a_fresh_model(name):
                 continue
             assert a is not None and (a[0] == "\t" or (a[0] == "" and a[1] == 0)), (y, a, b)
             assert b == (" ", 1, a[2]), (y, a, b)
-    history = lambda s: [termscreen._runs_text(r) for r in s.scrollback]  # noqa: E731
     assert history(again) == history(original)
     for a, b in zip(original.scrollback, again.scrollback, strict=True):
         assert a == b
@@ -385,15 +399,25 @@ def test_saved_cursor_is_per_screen():
     assert screen.rows()[0] == "abY"  # ESC 8 restores what ?1049h saved on the main screen
 
 
-def test_ed2_moves_the_rows_in_use_into_scrollback():
+def test_ed2_moves_the_rows_the_buffer_holds_into_scrollback():
+    """VTE moves the rows its buffer holds (written, erased or scrolled
+    onto), blank ones included, so a second ED 2 moves a whole screen; a
+    row the cursor merely sat on is not held (measured)."""
     screen = feed("".join(f"kept {i}\r\n" for i in range(1, 6)) + f"{E}[2Jafter")
-    assert [termscreen._runs_text(r) for r in screen.scrollback] == [f"kept {i}" for i in range(1, 6)]
+    assert history(screen) == [f"kept {i}" for i in range(1, 6)]
     assert screen.rows()[5] == "after"
+    assert len(feed(f"a\r\nb{E}[2J{E}[2J").scrollback) == 42
+    assert len(feed(f"a{E}[20;1H{E}[2J").scrollback) == 1
+    assert len(feed(f"a{E}[J{E}[2J").scrollback) == 40
+    assert len(feed(f"a{E}[5;1H{E}[K{E}[2J").scrollback) == 5
+    assert len(feed(f"{E}[2J").scrollback) == 1
+    assert len(feed("x\n" * 45 + f"{E}[2J").scrollback) == 46
 
 
-def test_ed3_clears_the_scrollback_and_leaves_the_cursor():
+def test_ed3_blanks_the_scrollback_and_leaves_the_cursor():
+    """VTE keeps the rows and blanks them (measured, pinned by the golden)."""
     screen = feed("".join(f"gone {i}\r\n" for i in range(1, 50)) + f"{E}[3Jstill")
-    assert not screen.scrollback
+    assert history(screen) == [""] * 10
     assert screen.rows()[-1] == "still"
 
 
@@ -449,26 +473,88 @@ def test_osc_8_and_osc_99_are_ignored():
 
 
 def test_resize_truncates_and_pads_without_reflow():
-    screen = feed("x" * 100 + "\r\nshort")
+    screen = feed("x" * 100 + f"{E}[3;8r\r\nshort")
     screen.resize(50, 10)
     assert screen.columns() == 50 and screen.row_count() == 10
     assert screen.rows()[0] == "x" * 50
     assert screen.rows()[1] == "short"
     assert screen.cursor() == (5, 1)
+    assert (screen.top, screen.bottom) == (0, 9)  # a resize clears the region
     screen.resize(120, 40)
     assert screen.rows()[0] == "x" * 50  # no reflow: the cut stays cut
     assert len(screen.rows()) == 40
-    assert screen.main.bottom == 39
+    assert screen.bottom == 39
     screen.feed(termstream.Tokenizer().feed(b"\t"))
     assert screen.cells(1)[5][1] == 3  # the stops past the old width exist again
+
+
+def test_resize_grown_from_a_multiple_of_eight_has_every_stop():
+    before, after = scenarios.tab_grow_scenario()
+    screen = feed(before, cols=16, rows=4)
+    screen.resize(40, 4)
+    assert sorted(screen.tabs) == [8, 16, 24, 32]
+    screen.feed(termstream.Tokenizer().feed(after))
+    assert screen.rows()[1] == "\tA\tB\tC\tD"
+    assert screen.cursor() == (33, 1)
 
 
 def test_resize_shorter_keeps_the_cursor_row_and_scrolls_the_top_away():
     screen = feed("".join(f"r{i}\r\n" for i in range(30)) + "here")
     assert screen.cursor() == (4, 30)
     screen.resize(120, 20)
-    assert screen.rows()[-1] == "here" or screen.rows()[screen.cursor()[1]] == "here"
+    assert screen.cursor() == (4, 19)
+    assert screen.rows()[19] == "here"
     assert termscreen._runs_text(screen.scrollback[0]) == "r0"
+    assert len(screen.scrollback) == 11
+
+
+def test_the_grid_is_clamped_to_the_protocols_bounds():
+    from collins.api.protocol import MAX_COLS, MAX_ROWS
+
+    tiny = Screen(0, 0)
+    assert (tiny.columns(), tiny.row_count()) == (1, 1)
+    tiny.feed(termstream.Tokenizer().feed("日本a".encode()))  # a wide character fills the one column
+    assert tiny.rows() == ["a"]
+    assert tiny.capture_contents() == "日\n本\na"
+    huge = Screen(10**6, 10**6)
+    assert (huge.columns(), huge.row_count()) == (MAX_COLS, MAX_ROWS)
+    huge.resize(0, 0)
+    assert (huge.columns(), huge.row_count()) == (1, 1)
+
+
+def test_parameters_saturate_and_loops_end():
+    screen = feed(f"{E}[70000;70000Hx")
+    assert screen.cursor() == (120, 39)
+    screen = feed(f"{E}[" + "9" * 1000 + ";3Hy")
+    assert screen.cursor() == (3, 39)
+    # past termstream's SEQUENCE_MAX the sequence is Bad and draws nothing
+    screen = feed(f"{E}[" + "9" * 5000 + ";3Hy")
+    assert screen.rows()[0].endswith("y")
+    screen = feed(f"a{E}[1000000000I")
+    assert screen.cursor() == (119, 0)
+    screen = feed(f"{E}[50G{E}[1000000000Z")
+    assert screen.cursor() == (0, 0)
+    screen = feed(f"a{E}[65535b")
+    assert screen.cursor() == (120, 0) and screen.rows()[0] == "a" * 120
+    screen = feed(f"{E}[38;5;99999mz{E}[38;2;300;1;1mw")
+    assert screen.cells(0)[0][2] == DEFAULT_PEN and screen.cells(0)[1][2] == DEFAULT_PEN
+
+
+def test_combining_marks_are_capped_as_vte_keeps_them():
+    screen = feed("a" + "\u0301" * 40 + "b")
+    assert screen.cells(0)[0][0] == "a" + "\u0301" * termscreen.COMBINING_MAX
+    assert screen.cursor() == (2, 0)
+
+
+def test_the_scroll_region_is_shared_by_both_screens():
+    screen = feed(scenarios.SYNTHETIC["region-across-alt"])
+    assert (screen.top, screen.bottom) == (2, 5)
+    assert screen.rows()[:7] == GOLDENS["region-across-alt"]["rows"][:7]
+    assert screen.rows()[2] == "L9"  # the region scrolled: L2 to L8 are gone
+    screen = feed(scenarios.SYNTHETIC["region-across-alt-back"])
+    assert screen.on_alt and screen.rows()[:7] == GOLDENS["region-across-alt-back"]["rows"][:7]
+    snap = screen.snapshot()
+    assert snap.count(b"\x1b[3;6r") == 1
 
 
 def test_cursor_reports_a_pending_wrap_as_the_column_count():
@@ -485,25 +571,71 @@ def test_sgr_answers_decrqss_from_the_pen():
     assert filt.feed(b"\x1b[1;31m\x1bP$qm\x1b\\").replies == [b"\x1bP1$r0;1;31m\x1b\\"]
 
 
+@pytest.mark.parametrize(
+    ("sgr", "body"),
+    [
+        ("4", "0;4"),
+        ("4:2", "0;21"),
+        ("4:3", "0;4:3"),
+        ("38;5;100", "0;38:5:100"),
+        ("38;2;10;20;30", "0;38:2::10:20:30"),
+        ("58;5;3;4", "0;4;58:5:3"),
+        ("58:2::7:8:9;4", "0;4"),  # a direct underline colour is left out
+        ("1;2;3;4;5;7;8;9;53;31;41", "0;1;2;3;4;5;7;8;9;53;31;41"),
+        ("91;104", "0;91;104"),
+    ],
+)
+def test_decrqss_takes_vtes_form(sgr, body):
+    """Measured 2026-10-02; the parity check compares the same pens with VTE."""
+    assert feed(f"{E}[{sgr}m").sgr() == body
+
+
 # ---------------------------------------------------------- the faint rule
 
 
 @pytest.mark.parametrize(
     ("sgr", "dim"),
     [
-        ("2", True),  # faint, default foreground
-        ("2;37", False),  # a palette colour is dimmed, but not the default one: another colour
+        ("2", True),  # faint, default foreground: #808080, two thirds of #C0C0C0
+        ("2;37", True),  # faint on a light palette colour: #999999 (measured dim)
+        ("2;97", False),  # #AAAAAA: too close to the foreground to be a dimming
+        ("90", True),  # no faint at all: #7F7F7F is the foreground scaled down
+        ("37", False),
+        ("2;90", False),  # #545454: scaled too far
+        ("38;2;128;128;128", True),  # a direct mid grey reads dim
+        ("2;38;5;250", True),
         ("2;38;5;240", False),
-        ("2;38;2;180;180;180", False),  # a direct colour is not dimmed at all
-        ("1;2", False),  # bold too: not one plain dim run
-        ("2;7", False),  # inverse
+        ("2;38;2;180;180;180", False),  # a direct colour VTE does not dim: #B4B4B4
+        ("2;31", False),  # a saturated colour is not a scaled foreground
+        ("2;1", False),  # bold: its own tag splits the run
+        ("2;3", False),
+        ("2;4", False),
+        ("2;9", False),
+        ("2;5", False),  # blink
+        ("2;53", False),  # overline
+        ("2;8", True),  # conceal shows as plain text
+        ("2;7", False),  # inverse: a background
         ("2;41", False),  # a background
         ("", False),
     ],
 )
 def test_tail_is_faint_answers_as_todays_html_read(sgr, dim):
+    """`vtehtml.is_dim_run` over VTE's HTML of the cursor's tail, measured
+    2026-10-02 for each pen (the goldens pin the same for the box
+    scenarios): one run, no other tag, the drawn colour a scaled-down
+    foreground."""
     screen = feed(f"❯\xa0{E}[{sgr}mTry \"fix\"{E}[0m{E}[1;3H")
     assert screen.tail_is_faint(0, 2) == dim
+
+
+def test_tail_is_faint_takes_the_clients_colours():
+    screen = feed(f"❯\xa0{E}[2mTry \"fix\"{E}[0m{E}[1;3H")
+    assert screen.tail_is_faint(0, 2, foreground=(0xDE, 0xDD, 0xDA))  # Adwaita dark's foreground
+    # faint on palette 7 draws two thirds of the client's palette entry
+    screen = feed(f"❯\xa0{E}[2;37mTry \"fix\"{E}[0m{E}[1;3H")
+    palette = list(PALETTE16)
+    palette[7] = (0x10, 0x10, 0x10)
+    assert not screen.tail_is_faint(0, 2, palette=tuple(palette))
 
 
 def test_tail_is_faint_wants_text_in_the_tail():
@@ -521,6 +653,14 @@ def test_drawn_colours_dim_the_palette_and_not_a_direct_colour():
 
 
 # ----------------------------------------------------------- the grammar
+
+
+def test_snapshot_sets_the_shared_region_once_and_the_tracker_leaves_it_out():
+    filt = termstream.StreamFilter(screen=Screen(COLS, ROWS))
+    filt.feed(f"{E}[5;10r{E}[?2004h".encode())
+    snap = filt.screen.snapshot(filt.preamble(screen=False))
+    assert snap.count(b"\x1b[5;10r") == 1
+    assert b"\x1b[?2004h" in snap
 
 
 def test_takes_prompt_and_entered_prompt_over_the_model():
@@ -564,13 +704,17 @@ def test_width_rule_matches_cell_width():
         assert sum(termscreen.char_width(c) for c in text) == cell_width(text)
 
 
-def test_width_skew_is_documented():
-    """F13: the code points the rule gets other than VTE 0.84; pinned so a
-    change to either side is deliberate."""
-    for what, start, end, vte in termscreen.WIDTH_SKEW:
-        assert what and start <= end
-        for code in (start, end):
-            assert termscreen.char_width(chr(code)) != vte, (what, hex(code))
+def test_width_skew_is_the_full_table():
+    """Every code point VTE 0.84 draws other than the rule says (473 of
+    154 998, measured with the spike's `widths` mode); pinned so a change
+    to either side is deliberate."""
+    total = 0
+    for start, end, vte in termscreen.WIDTH_SKEW:
+        assert start <= end
+        for code in range(start, end + 1):
+            assert termscreen.char_width(chr(code)) != vte, hex(code)
+            total += 1
+    assert total == 473
 
 
 # -------------------------------------------------------------- bounds
@@ -587,7 +731,7 @@ def test_the_service_loads_no_gi():
 
 def test_scrollback_is_bounded():
     screen = feed("x\r\n" * 200, cols=20, rows=5)
-    assert len(screen.scrollback) == termscreen.SCROLLBACK_ROWS or len(screen.scrollback) == 196
+    assert len(screen.scrollback) == 196
     small = Screen(20, 5, scrollback=10)
     small.feed(termstream.Tokenizer().feed(b"y\r\n" * 100))
     assert len(small.scrollback) == 10

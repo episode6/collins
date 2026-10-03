@@ -30,13 +30,22 @@ underline colour)``, kept whole so a redraw reproduces it: ``attrs`` holds
 bold, faint, italic, blink, inverse, conceal, strikethrough, overline and
 three bits of underline style; a colour is ``None`` (default), a palette
 index or an ``(r, g, b)`` tuple. Each screen has its own cursor with the
-deferred wrap, its scroll region and its saved cursor (DECSC is per screen,
-as VTE keeps it). The main screen has a scrollback of `SCROLLBACK_ROWS`
-rows, each kept as runs of ``(text, width, pen)`` so a redraw shows old
-output in its colours. Tab stops, the character sets and shift, origin,
-autowrap and insert mode are the screen's; every other mode is the
-tracker's (`termstream.ModeTracker`), whose `preamble(screen=False)` the
-caller hands to `snapshot()`.
+deferred wrap and its saved cursor (DECSC is per screen, as VTE keeps it);
+the scroll region is one for both screens (measured: a region set on the
+alternate screen still holds after ``?1049l``, and the other way round).
+The main screen has a scrollback of `SCROLLBACK_ROWS` rows, each kept as
+runs of ``(text, width, pen)`` so a redraw shows old output in its colours.
+Tab stops, the character sets and shift, origin, autowrap and insert mode
+are the screen's; every other mode is the tracker's
+(`termstream.ModeTracker`), whose `preamble(screen=False)` (no screen
+switch, no region: the redraw does both itself) the caller hands to
+`snapshot()`.
+
+Every numeric parameter saturates at `PARAM_MAX` (65535) as VTE's parser
+does, a colour component out of range leaves the colour alone, a cell
+keeps at most `COMBINING_MAX` marks, REP fills to the margin and never
+wraps, and the grid is clamped to the protocol's bounds: no stream makes
+the model loop or raise.
 
 What VTE does that the standards leave open (F13, measured)
 ----------------------------------------------------------
@@ -50,7 +59,13 @@ to that against a real VTE on every fixture:
   RI, CUP/CHA/VPA clear it and act at the last column; BS and CUB go to
   cols - 2. With DECAWM off the cursor still parks past the margin and the
   next character overwrites the last cell.
-- ED 2 on the main screen moves the rows in use into scrollback.
+- ED 2 on the main screen moves the rows VTE's buffer holds into the
+  scrollback: a row exists once something was written or erased on it or
+  the screen scrolled, not when the cursor merely sat on it, so a second
+  ED 2 moves a whole screen of blank rows (``Grid.used``). ED 3 blanks
+  the scrollback rows and keeps their count. The alternate screen's own
+  scrolled-off rows (VTE keeps them in that screen's buffer while it is
+  up) are not kept: nothing in the app reads them.
 - Tabs are tab cells: HT over never-written cells reads back as ``\\t``, an
   overwrite inside one leaves spaces before and a shorter tab after, and a
   tab cell takes no background. A tab with the wrap pending does nothing.
@@ -69,14 +84,32 @@ to that against a real VTE on every fixture:
   with VTE on 154 525 of 154 998 code points; the rest (`WIDTH_SKEW`) are
   Hangul jamo VTE draws at zero, Unicode 16's new wide characters VTE draws
   narrow, and newer combining marks.
-- `tail_is_faint` answers what today's HTML read answers (the user's
-  decision): faint with a palette or the default foreground is dim, faint
-  with a direct (truecolor) foreground is not, and the question is asked
-  of what is drawn, inverse applied after.
+- `tail_is_faint` answers what today's read answers (the user's
+  decision), and today's read is `vtehtml.is_dim_run` over VTE's HTML of
+  the row from the cursor: one run of text in one colour, no tag for bold,
+  italic, underline, strikethrough, blink, overline or a background (each
+  splits the run), and that colour the foreground scaled down (0.45 to
+  0.85, every channel alike). It is the drawn colour, not the pen's faint
+  bit: faint on the default or a light palette colour reads dim, a plain
+  mid grey (``90``, ``38;2;128;128;128``) reads dim too, faint on a dark or
+  saturated colour does not. Measured 2026-10-02, pinned by the
+  ``faint-box-*`` goldens.
 
 No reflow (D19): `resize` truncates or pads the rows of both screens and
 clears the scroll region, as xterm does; VTE rewraps, so the two disagree
-until the program repaints (the CLI repaints everything, F6).
+until the program repaints (the CLI repaints everything, F6). Rows above
+the cursor scroll into the history only as far as keeping it on screen
+needs.
+
+Memory
+------
+Pens are interned (one tuple per distinct pen, `_intern`), so a cell costs
+its tuple and its text. Measured 2026-10-02 with `tracemalloc`, a screen
+and a full scrollback of 10 000 rows: plain text rows 4.5 MiB; twenty
+coloured runs a row (a diff-like paint) 29 MiB; a different pen on every
+cell 113 MiB, the worst case a program can make. A byte budget for the
+scrollback, if one is wanted, is PR-1.5's (the pty server owns the
+model's lifetime); the row count is the bound here.
 
 The redraw
 ----------
@@ -87,11 +120,13 @@ row lets it), pushed above the screen; the main screen with absolute
 addressing and a full SGR per pen change, erased cells erased again so a
 row's text still ends where it did; when the alternate screen is up,
 ``CSI ?1049h`` and then that screen the same way (so leaving it later
-shows the main screen, not a blank); the tracker's preamble; the tab stops
-and character sets; the cursor (a pending wrap is re-made by writing the
-last column's character last); the current pen. What a redraw does not
-carry, by measurement (F14): a tab that no longer ends on a tab stop
-(spaces), a wrap flag ahead of an empty row, OSC 8 hyperlinks.
+shows the main screen, not a blank); the scroll region, once; the
+tracker's preamble; the character sets; the cursor (a pending wrap is
+re-made by writing the last column's character last); the current pen.
+The tab stops go first, so a tab cell can be written as a tab. What a
+redraw does not carry, by measurement (F14, and the parity check's
+snapshot leg): a tab that no longer ends on a tab stop (spaces), a wrap
+flag ahead of an empty row, OSC 8 hyperlinks.
 
 Throughput
 ----------
@@ -118,11 +153,20 @@ from __future__ import annotations
 import unicodedata
 from collections import deque
 
+from ..api.protocol import MAX_COLS, MAX_ROWS
+from ..vtehtml import _is_scaled_down
 from .termstream import Bad, Control, Csi, Esc, Str, Text, Token
 
 SCROLLBACK_ROWS = 10_000
-# The grid a pty is spawned with when no client says otherwise (§3.3).
+# The grid a pty is spawned with when no client says otherwise (§3.3). The
+# bounds are the protocol's: a grid outside them is clamped, never built.
 DEFAULT_COLS, DEFAULT_ROWS = 120, 40
+# VTE's parser saturates every numeric parameter here (measured: CUP
+# 70000;70000 and 65535;65535 land in the same place, a 5000-digit
+# parameter too), so no count ever exceeds it.
+PARAM_MAX = 65535
+# Combining marks VTE keeps on one cell (measured: 10, the rest dropped).
+COMBINING_MAX = 10
 
 # The colours VTE draws with by default (and the parity check sets), as 0-255.
 FOREGROUND = (0xC0, 0xC0, 0xC0)
@@ -150,14 +194,46 @@ _ZERO_WIDTH = frozenset({"Mn", "Me", "Cf"})
 _EAW = unicodedata.east_asian_width
 _CATEGORY = unicodedata.category
 
-# Code points whose width this rule gets other than VTE 0.84 does (F13: 473
-# of 154 998 assigned). Each is a range (inclusive) with what VTE draws.
+# Every assigned code point whose width this rule gets other than VTE 0.84
+# draws it: 473 of 154 998 (unicodedata 16.0.0, VTE 0.84.0, the spike's
+# `widths` mode re-run 2026-10-02). Inclusive ranges with VTE's width:
+# Hangul jamo VTE draws at zero, Unicode 16's new wide characters VTE draws
+# narrow, and newer combining marks VTE draws at one cell. A VTE or Python
+# upgrade that moves any of these fails `test_width_skew_is_the_full_table`.
 WIDTH_SKEW = (
-    ("Hangul jamo (vowels and trailing consonants, VTE draws at zero)", 0x1160, 0x11FF, 0),
-    ("Hangul jamo extended-B (VTE zero)", 0xD7B0, 0xD7FF, 0),
-    ("soft hyphen (VTE one cell)", 0x00AD, 0x00AD, 1),
-    ("Unicode 16 wide characters VTE 0.84 draws narrow", 0x1FA89, 0x1FA8F, 1),
-    ("Unicode 16 wide characters VTE 0.84 draws narrow", 0x1FADC, 0x1FADF, 1),
+    (0x00AD, 0x00AD, 1),  # SOFT HYPHEN
+    (0x0897, 0x0897, 1),  # ARABIC PEPET
+    (0x1160, 0x11FF, 0),  # HANGUL JUNGSEONG FILLER .. JONGSEONG SSANGNIEUN
+    (0x2630, 0x2637, 1),  # TRIGRAM FOR HEAVEN .. EARTH
+    (0x268A, 0x268F, 1),  # MONOGRAM FOR YANG .. DIGRAM FOR GREATER YIN
+    (0x2FFC, 0x2FFF, 1),  # IDEOGRAPHIC DESCRIPTION CHARACTER SURROUND ..
+    (0x31E4, 0x31E5, 1),  # CJK STROKE HXG, SZP
+    (0x31EF, 0x31EF, 1),  # IDEOGRAPHIC DESCRIPTION CHARACTER SUBTRACTION
+    (0x4DC0, 0x4DFF, 1),  # HEXAGRAM FOR THE CREATIVE HEAVEN .. BEFORE COMPLETION
+    (0xD7B0, 0xD7C6, 0),  # HANGUL JUNGSEONG O-YEO ..
+    (0xD7CB, 0xD7FB, 0),  # HANGUL JONGSEONG NIEUN-RIEUL ..
+    (0x10D69, 0x10D6D, 1),  # GARAY VOWEL SIGN E ..
+    (0x10EFC, 0x10EFC, 1),  # ARABIC COMBINING ALEF OVERLAY
+    (0x113BB, 0x113C0, 1),  # TULU-TIGALARI VOWEL SIGN U ..
+    (0x113CE, 0x113CE, 1),  # TULU-TIGALARI SIGN VIRAMA
+    (0x113D0, 0x113D0, 1),  # TULU-TIGALARI CONJOINER
+    (0x113D2, 0x113D2, 1),  # TULU-TIGALARI GEMINATION MARK
+    (0x113E1, 0x113E2, 1),  # TULU-TIGALARI VEDIC TONE SVARITA, ANUDATTA
+    (0x1171E, 0x1171E, 0),  # AHOM CONSONANT SIGN MEDIAL RA
+    (0x11F5A, 0x11F5A, 1),  # KAWI SIGN NUKTA
+    (0x1611E, 0x16129, 1),  # GURUNG KHEMA VOWEL SIGN AA ..
+    (0x1612D, 0x1612F, 1),  # GURUNG KHEMA SIGN ANUSVARA ..
+    (0x18CFF, 0x18CFF, 1),  # KHITAN SMALL SCRIPT CHARACTER-18CFF
+    (0x1D300, 0x1D356, 1),  # MONOGRAM FOR EARTH .. TETRAGRAM FOR FOSTERING
+    (0x1D360, 0x1D376, 1),  # COUNTING ROD UNIT DIGIT ONE ..
+    (0x1E5EE, 0x1E5EF, 1),  # OL ONAL SIGN MU, IKIR
+    (0x1FA89, 0x1FA89, 1),  # HARP
+    (0x1FA8F, 0x1FA8F, 1),  # SHOVEL
+    (0x1FABE, 0x1FABE, 1),  # LEAFLESS TREE
+    (0x1FAC6, 0x1FAC6, 1),  # FINGERPRINT
+    (0x1FADC, 0x1FADC, 1),  # ROOT VEGETABLE
+    (0x1FADF, 0x1FADF, 1),  # SPLATTER
+    (0x1FAE9, 0x1FAE9, 1),  # FACE WITH BAGS UNDER EYES
 )
 
 
@@ -235,6 +311,63 @@ def pen_sgr(pen: Pen) -> str:
     return "\x1b[" + ";".join(parts) + "m"
 
 
+# DECRQSS's order of the attributes, as VTE 0.84 reports them (measured).
+_DECRQSS_ATTRIBUTES = (
+    (BOLD, "1"), (FAINT, "2"), (ITALIC, "3"), (BLINK, "5"), (INVERSE, "7"),
+    (CONCEAL, "8"), (STRIKE, "9"), (OVERLINE, "53"),
+)  # fmt: skip
+
+
+def _decrqss_colour(value, base: int) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, tuple):
+        return [f"{base + 8}:2::{value[0]}:{value[1]}:{value[2]}"]
+    if base == 58:
+        return [f"58:5:{value}"]
+    if value < 8:
+        return [str(base + value)]
+    if value < 16:
+        return [str(base + 60 + value - 8)]
+    return [f"{base + 8}:5:{value}"]
+
+
+def pen_decrqss(pen: Pen) -> str:
+    """The body of VTE's DECRQSS SGR answer for a pen (measured 2026-10-02):
+    ``0``, the attributes in VTE's order with the underline as ``4``,
+    ``21`` or ``4:n``, then the foreground, the background and an
+    underline colour from the palette (a direct underline colour is left
+    out, as VTE leaves it)."""
+    attrs, fg, bg, ul = pen
+    parts = ["0"]
+    style = (attrs & UNDERLINE_MASK) >> UNDERLINE_SHIFT
+    for bit, code in _DECRQSS_ATTRIBUTES:
+        if attrs & bit:
+            parts.append(code)
+        if bit == ITALIC and style:
+            parts.append("4" if style == 1 else "21" if style == 2 else f"4:{style}")
+    parts += _decrqss_colour(fg, 30) + _decrqss_colour(bg, 40)
+    if isinstance(ul, int):
+        parts += _decrqss_colour(ul, 58)
+    return ";".join(parts)
+
+
+# Pens are shared between every cell drawn alike: one tuple per distinct
+# pen rather than one per cell (see the module docstring's memory table).
+# Bounded: past the cap a new pen is simply not shared.
+_PENS: dict = {DEFAULT_PEN: DEFAULT_PEN}
+_PENS_MAX = 65536
+
+
+def _intern(pen: Pen) -> Pen:
+    known = _PENS.get(pen)
+    if known is not None:
+        return known
+    if len(_PENS) < _PENS_MAX:
+        _PENS[pen] = pen
+    return pen
+
+
 def blank(cell: Cell) -> bool:
     """Never written, or erased: what VTE's text read trims from a row's end
     and gives as a space inside it."""
@@ -247,7 +380,7 @@ def blank(cell: Cell) -> bool:
 class Grid:
     """One screen's cells and the cursor that belongs to it."""
 
-    __slots__ = ("lines", "wrapped", "x", "y", "pending", "pen", "saved", "top", "bottom")
+    __slots__ = ("lines", "wrapped", "x", "y", "pending", "pen", "saved", "used")
 
     def __init__(self, cols: int, rows: int):
         self.lines: list[list] = [[None] * cols for _ in range(rows)]
@@ -256,7 +389,11 @@ class Grid:
         self.pending = False  # the deferred wrap
         self.pen = DEFAULT_PEN
         self.saved = None  # (x, y, pending, pen, origin)
-        self.top, self.bottom = 0, rows - 1
+        # How many rows VTE's buffer holds for this screen: a row exists
+        # once something was written or erased on it, or the screen
+        # scrolled; moving the cursor onto a row does not make one. ED 2
+        # moves exactly these rows into the scrollback (measured).
+        self.used = 0
 
 
 def _trim(line: list) -> int:
@@ -324,7 +461,7 @@ class Screen:
     `first_column`, `capture_contents`; redraw it with `snapshot`."""
 
     def __init__(self, cols: int = DEFAULT_COLS, rows: int = DEFAULT_ROWS, scrollback: int = SCROLLBACK_ROWS):
-        self.cols, self.rows_count = cols, rows
+        self.cols, self.rows_count = _clamp_grid(cols, rows)
         self._scrollback_max = scrollback
         self._init_state()
 
@@ -334,6 +471,9 @@ class Screen:
         self.alt = Grid(cols, rows)
         self.grid = self.main
         self.on_alt = False
+        # One scroll region for both screens, as VTE keeps it (measured: a
+        # region set on the alternate screen still holds after ?1049l).
+        self.top, self.bottom = 0, rows - 1
         self.scrollback: deque[tuple] = deque(maxlen=self._scrollback_max)
         self.scrollback_wrapped: deque[bool] = deque(maxlen=self._scrollback_max)
         self.autowrap = True
@@ -371,9 +511,9 @@ class Screen:
         return (self.cols if grid.pending else grid.x), grid.y
 
     def sgr(self) -> str:
-        """The DECRQSS SGR answer's body for the current pen, in the form
-        VTE builds it (a reset, then each attribute, then the colours)."""
-        return pen_sgr(self.grid.pen)[2:-1]
+        """The DECRQSS SGR answer's body for the current pen, as VTE
+        reports it (`pen_decrqss`)."""
+        return pen_decrqss(self.grid.pen)
 
     # -- reads (the ScreenPort of §3.5)
 
@@ -410,24 +550,44 @@ class Screen:
             out.append("" if cell is None else cell[0])
         return tuple(out)
 
-    def tail_is_faint(self, row: int, column: int, foreground: RGB = FOREGROUND) -> bool:
-        """`vtehtml.is_dim_run`'s question asked of pens: is everything from
-        the column to the row's end one run of text drawn as the dimmed
-        default foreground, and nothing else? Faint with a palette or
-        direct colour draws another colour and reads as not dim, as today."""
+    def tail_is_faint(
+        self,
+        row: int,
+        column: int,
+        foreground: RGB = FOREGROUND,
+        background: RGB = BACKGROUND,
+        palette: tuple = PALETTE16,
+    ) -> bool:
+        """What today's read answers (`vtehtml.is_dim_run` over VTE's HTML
+        of the row from the cursor): is everything from the column to the
+        row's end one run of text in one colour, with no bold, italic,
+        underline, strikethrough, blink, overline or background (each of
+        which VTE wraps in its own tag and so splits the run), and is that
+        colour the terminal's foreground scaled down? The colour is what is
+        drawn, not the pen's faint bit: faint on the default or a light
+        palette colour reads dim, so does a plain mid grey; faint on a dark
+        or saturated colour, or a direct colour that is not a scaled
+        foreground, does not. `foreground`, `background` and `palette`
+        are the active client's, 0 to 255 a channel, VTE's own by default.
+        A cell nothing was written to inside the run reads as part of it
+        (measured), as do concealed cells."""
         line = self.grid.lines[row]
         tail = [cell for cell in line[column : _trim(line)] if cell is not None and cell[1]]
-        if not tail or not any(cell[0].strip() for cell in tail):
-            return False
+        drawn = None
         for cell in tail:
             attrs, fg, bg, _ = cell[2]
             if not cell[0].strip():
-                if bg is not None or attrs & (INVERSE | UNDERLINE_MASK | STRIKE):
+                if bg is not None or attrs & ~(FAINT | CONCEAL):
                     return False
                 continue
-            if (attrs & ~(BLINK | CONCEAL), fg, bg) != (FAINT, None, None):
+            if attrs & ~(FAINT | CONCEAL) or bg is not None:
                 return False
-        return True
+            colour = drawn_colours(cell[2], foreground, background, palette)[0]
+            if drawn is None:
+                drawn = colour
+            elif colour != drawn:
+                return False
+        return drawn is not None and _is_scaled_down(drawn, foreground)
 
     def capture_contents(self) -> str:
         """The scrollback and the screen as text, trailing empty rows
@@ -442,7 +602,7 @@ class Screen:
     # -- resize (no reflow, D19)
 
     def resize(self, cols: int, rows: int) -> None:
-        cols, rows = max(1, cols), max(1, rows)
+        cols, rows = _clamp_grid(cols, rows)
         for grid in (self.main, self.alt):
             for line in grid.lines:
                 if cols < len(line):
@@ -465,17 +625,18 @@ class Screen:
             else:
                 grid.lines.extend([[None] * cols for _ in range(rows - len(grid.lines))])
                 grid.wrapped.extend([False] * (rows - len(grid.wrapped)))
-            grid.top, grid.bottom = 0, rows - 1
             grid.x = min(grid.x, cols - 1)
             grid.y = min(grid.y, rows - 1)
+            grid.used = min(grid.used, rows)
             if grid.pending and grid.x < cols - 1:
                 grid.pending = False
             if grid.saved is not None:
                 x, y, pending, pen, origin = grid.saved
                 grid.saved = (min(x, cols - 1), min(y, rows - 1), pending and x >= cols - 1, pen, origin)
         if cols > self.cols:
-            self.tabs.update(range((self.cols // 8 + 1) * 8, cols, 8))
+            self.tabs.update(stop for stop in range(8, cols, 8) if stop >= self.cols)
         self.tabs = {stop for stop in self.tabs if stop < cols}
+        self.top, self.bottom = 0, rows - 1
         self.cols, self.rows_count = cols, rows
 
     # -- printing
@@ -502,6 +663,8 @@ class Screen:
                 self._cut(line, x)
                 self._cut(line, end)
                 line[x:end] = [(char, 1, pen) for char in chunk]
+                if grid.used <= grid.y:
+                    grid.used = grid.y + 1
                 start += n
                 if end >= cols:
                     grid.x = cols - 1
@@ -566,11 +729,16 @@ class Screen:
                 x -= 1
             if x >= 0 and line[x] is not None and line[x][0] and line[x][0] != "\t":
                 cell = line[x]
-                line[x] = (cell[0] + char, cell[1], cell[2])
+                if len(cell[0]) <= COMBINING_MAX:
+                    line[x] = (cell[0] + char, cell[1], cell[2])
             return
+        if width > cols:
+            width = cols  # a wide character on a one-column grid fills it
         if grid.pending or (width == 2 and grid.x == cols - 1):
             self._wrap_or_stay(width)
         line = grid.lines[grid.y]
+        if grid.used <= grid.y:
+            grid.used = grid.y + 1
         x = grid.x
         end = x + width
         if self.insert:
@@ -597,48 +765,52 @@ class Screen:
 
     def _linefeed(self) -> None:
         grid = self.grid
-        if grid.y == grid.bottom:
+        if grid.y == self.bottom:
             self._scroll_up(1)
         elif grid.y < self.rows_count - 1:
             grid.y += 1
 
     def _reverse_index(self) -> None:
         grid = self.grid
-        if grid.y == grid.top:
+        if grid.y == self.top:
             self._scroll_down(1)
         elif grid.y > 0:
             grid.y -= 1
 
     def _scroll_up(self, n: int, top: int | None = None) -> None:
         grid = self.grid
-        top = grid.top if top is None else top
-        n = min(n, grid.bottom - top + 1)
+        top = self.top if top is None else top
+        bottom = self.bottom
+        n = min(n, bottom - top + 1)
         cols = self.cols
         for _ in range(n):
             line = grid.lines.pop(top)
             wrapped = grid.wrapped.pop(top)
             if grid is self.main and top == 0:
                 self._push_scrollback(line, wrapped)
-            grid.lines.insert(grid.bottom, [None] * cols)
-            grid.wrapped.insert(grid.bottom, False)
+            grid.lines.insert(bottom, [None] * cols)
+            grid.wrapped.insert(bottom, False)
+        grid.used = self.rows_count
 
     def _scroll_down(self, n: int, top: int | None = None) -> None:
         grid = self.grid
-        top = grid.top if top is None else top
-        n = min(n, grid.bottom - top + 1)
+        top = self.top if top is None else top
+        bottom = self.bottom
+        n = min(n, bottom - top + 1)
         cols = self.cols
         for _ in range(n):
-            grid.lines.pop(grid.bottom)
-            grid.wrapped.pop(grid.bottom)
+            grid.lines.pop(bottom)
+            grid.wrapped.pop(bottom)
             grid.lines.insert(top, [None] * cols)
             grid.wrapped.insert(top, False)
+        grid.used = self.rows_count
 
     def _move(self, x: int | None = None, y: int | None = None, clamp_region: bool = False) -> None:
         grid = self.grid
         if x is not None:
             grid.x = max(0, min(self.cols - 1, x))
         if y is not None:
-            low, high = (grid.top, grid.bottom) if clamp_region else (0, self.rows_count - 1)
+            low, high = (self.top, self.bottom) if clamp_region else (0, self.rows_count - 1)
             grid.y = max(low, min(high, y))
         grid.pending = False
 
@@ -647,18 +819,24 @@ class Screen:
         grid = self.grid
         y = grid.y + delta
         if delta < 0:
-            low = grid.top if grid.y >= grid.top else 0
+            low = self.top if grid.y >= self.top else 0
             y = max(low, y)
         else:
-            high = grid.bottom if grid.y <= grid.bottom else self.rows_count - 1
+            high = self.bottom if grid.y <= self.bottom else self.rows_count - 1
             y = min(high, y)
         self._move(y=y)
 
     def _row_to(self, y: int) -> None:
         if self.origin:
-            self._move(y=self.grid.top + y, clamp_region=True)
+            self._move(y=self.top + y, clamp_region=True)
         else:
             self._move(y=y)
+
+    def _hold(self) -> None:
+        """The cursor's row now exists in the buffer."""
+        grid = self.grid
+        if grid.used <= grid.y:
+            grid.used = grid.y + 1
 
     # -- C0
 
@@ -694,9 +872,12 @@ class Screen:
             x = grid.x
             stops = [stop for stop in self.tabs if stop > x]
             stop = min(stops) if stops else self.cols - 1
-            if stop > x and all(cell is None for cell in line[x:stop]):
+            if stop <= x:
+                break  # the margin: nothing moves any more
+            if all(cell is None for cell in line[x:stop]):
                 line[x] = ("\t", stop - x, DEFAULT_PEN)
                 line[x + 1 : stop] = [("", 0, DEFAULT_PEN)] * (stop - x - 1)
+                self._hold()
             grid.x = stop
 
     # -- ESC
@@ -760,7 +941,7 @@ class Screen:
         out = []
         for part in params.split(b";"):
             part = part.partition(b":")[0]
-            out.append(int(part) if part.isdigit() else default)
+            out.append(_number(part, default))
         return out
 
     def _n(self, tok: Csi) -> int:
@@ -815,32 +996,39 @@ class Screen:
         grid = self.grid
         cols, rows = self.cols, self.rows_count
         if mode == 3:
+            # VTE blanks the scrollback rows and keeps their count
+            # (measured: ten rows scrolled off, ED 3, ten blank history
+            # rows); the cursor and a pending wrap are left as they were.
+            count = len(self.scrollback)
             self.scrollback.clear()
             self.scrollback_wrapped.clear()
-            return  # VTE: the cursor and a pending wrap are left as they were
+            self.scrollback.extend([()] * count)
+            self.scrollback_wrapped.extend([False] * count)
+            return
         if mode == 0:
             self._erase(grid.lines[grid.y], grid.x, cols)
             grid.wrapped[grid.y] = False
             for y in range(grid.y + 1, rows):
                 self._erase(grid.lines[y], 0, cols)
                 grid.wrapped[y] = False
+            grid.used = rows  # VTE makes every row below exist
         elif mode == 1:
             for y in range(grid.y):
                 self._erase(grid.lines[y], 0, cols)
                 grid.wrapped[y] = False
             self._erase(grid.lines[grid.y], 0, grid.x + 1)
+            self._hold()
         elif mode == 2:
             if grid is self.main:
-                # VTE scrolls the rows in use off the top instead of
-                # dropping them: they are in the scrollback afterwards.
-                used = rows
-                while used and all(cell is None for cell in grid.lines[used - 1]):
-                    used -= 1
-                for y in range(used):
+                # VTE scrolls the rows its buffer holds off the top instead
+                # of dropping them: they are in the scrollback afterwards,
+                # blank ones included (a second ED 2 moves a whole screen).
+                for y in range(max(grid.used, 1)):
                     self._push_scrollback(grid.lines[y], grid.wrapped[y])
             for y in range(rows):
                 self._erase(grid.lines[y], 0, cols)
                 grid.wrapped[y] = False
+            grid.used = rows
             grid.pending = False
             return  # the cursor stays where it was
         grid.pending = False
@@ -859,11 +1047,15 @@ class Screen:
         elif mode == 2:
             self._erase(line, 0, self.cols)
             grid.wrapped[grid.y] = False
+        else:
+            return
+        self._hold()
         grid.pending = False
 
     def _ech(self, tok):
         grid = self.grid
         self._erase(grid.lines[grid.y], grid.x, min(self.cols, grid.x + self._n(tok)))
+        self._hold()
         grid.pending = False
 
     def _ich(self, tok):
@@ -875,6 +1067,7 @@ class Screen:
         self._cut(line, cols - n)
         del line[cols - n :]
         line[grid.x : grid.x] = [self._erase_cell()] * n
+        self._hold()
         grid.pending = False
 
     def _dch(self, tok):
@@ -885,25 +1078,27 @@ class Screen:
         self._cut(line, grid.x + n)
         del line[grid.x : grid.x + n]
         line.extend([self._erase_cell()] * n)
+        self._hold()
         grid.pending = False
 
     def _il(self, tok):
         grid = self.grid
-        if grid.top <= grid.y <= grid.bottom:
+        if self.top <= grid.y <= self.bottom:
             self._scroll_down(self._n(tok), top=grid.y)
             grid.x = 0
             grid.pending = False
 
     def _dl(self, tok):
         grid = self.grid
-        if grid.top <= grid.y <= grid.bottom:
-            n = min(self._n(tok), grid.bottom - grid.y + 1)
+        if self.top <= grid.y <= self.bottom:
+            n = min(self._n(tok), self.bottom - grid.y + 1)
             cols = self.cols
             for _ in range(n):
                 grid.lines.pop(grid.y)
                 grid.wrapped.pop(grid.y)
-                grid.lines.insert(grid.bottom, [None] * cols)
-                grid.wrapped.insert(grid.bottom, False)
+                grid.lines.insert(self.bottom, [None] * cols)
+                grid.wrapped.insert(self.bottom, False)
+            grid.used = self.rows_count
             grid.x = 0
             grid.pending = False
 
@@ -921,13 +1116,22 @@ class Screen:
         bottom = min(bottom, rows - 1)
         if top >= bottom:
             return
-        self.grid.top, self.grid.bottom = top, bottom
+        self.top, self.bottom = top, bottom
         self._row_to(0)
         self._move(x=0)
 
     def _rep(self, tok):
-        if self.last_char:
-            self._print(self.last_char * self._n(tok))
+        """REP repeats the last character up to the margin and never wraps
+        (measured: ``a CSI 200 b`` fills the row and leaves the wrap
+        pending; with the wrap already pending it wraps first)."""
+        if not self.last_char:
+            return
+        grid = self.grid
+        if grid.pending:
+            self._wrap_or_stay(1)
+        n = min(self._n(tok), self.cols - grid.x)
+        if n > 0:
+            self._print(self.last_char * n)
 
     def _tbc(self, tok):
         mode = self._ints(tok)[0]
@@ -942,6 +1146,8 @@ class Screen:
     def _cbt(self, tok):
         x = self.grid.x
         for _ in range(self._n(tok)):
+            if x == 0:
+                break
             stops = [stop for stop in self.tabs if stop < x]
             x = max(stops) if stops else 0
         self._move(x=x)
@@ -955,7 +1161,7 @@ class Screen:
     def _decstr(self, tok):
         grid = self.grid
         grid.pen = DEFAULT_PEN
-        grid.top, grid.bottom = 0, self.rows_count - 1
+        self.top, self.bottom = 0, self.rows_count - 1
         grid.saved = None
         self.origin = self.insert = False
         self.autowrap = True
@@ -1042,7 +1248,7 @@ class Screen:
                         else:
                             ul = colour
                 continue
-            n = int(part) if part.isdigit() else 0
+            n = _number(part, 0)
             if n == 0:
                 attrs, fg, bg, ul = DEFAULT_PEN
             elif n == 1:
@@ -1096,13 +1302,17 @@ class Screen:
             elif 100 <= n <= 107:
                 bg = n - 100 + 8
             elif n in (38, 48, 58):
+                # A component out of range leaves the colour alone (measured:
+                # 38;5;99999 and 38;2;300;1;1 draw the default).
                 colour = None
-                kind = int(parts[i]) if i < count and parts[i].isdigit() else -1
+                kind = _number(parts[i], -1) if i < count else -1
                 if kind == 5 and i + 1 < count:
-                    colour = int(parts[i + 1] or 0) & 255
+                    index = _number(parts[i + 1], 0)
+                    colour = index if index <= 255 else None
                     i += 2
                 elif kind == 2 and i + 3 < count:
-                    colour = tuple(int(v or 0) & 255 for v in parts[i + 1 : i + 4])
+                    values = tuple(_number(v, 0) for v in parts[i + 1 : i + 4])
+                    colour = values if max(values) <= 255 else None
                     i += 4
                 else:
                     i = count
@@ -1113,7 +1323,7 @@ class Screen:
                         bg = colour
                     else:
                         ul = colour
-        self.grid.pen = (attrs, fg, bg, ul)
+        self.grid.pen = _intern((attrs, fg, bg, ul))
 
     # -- the redraw
 
@@ -1127,7 +1337,8 @@ class Screen:
             self._paint_scrollback(out)
             # Push every scrollback row above the screen: rows - 1 line
             # feeds reach the bottom and then scroll exactly one row off
-            # per row written, whether the rows filled the screen or not.
+            # per row written, blank ones included (VTE keeps a row that
+            # scrolled off the top whether or not it was written on).
             out.append("\x1b[0m\r" + "\n" * (rows - 1))
         # Tab stops first: a tab cell is written as a tab where it ends on
         # one of the model's stops, so the terminal must have them already.
@@ -1147,6 +1358,8 @@ class Screen:
         else:
             painter.paint()
             out += painter.out
+        if (self.top, self.bottom) != (0, rows - 1):
+            out.append(f"\x1b[{self.top + 1};{self.bottom + 1}r")
         if preamble:
             out.append(preamble.decode("latin-1"))
         # The screen's own modes, whether or not the preamble repeats them:
@@ -1207,12 +1420,12 @@ class Screen:
                 cell = grid.lines[grid.y][lead]
             text, pen = (cell[0], cell[2]) if cell is not None and cell[0] else (" ", DEFAULT_PEN)
             if self.origin:
-                out.append(f"\x1b[{grid.y - grid.top + 1};{lead + 1}H")
+                out.append(f"\x1b[{grid.y - self.top + 1};{lead + 1}H")
             else:
                 out.append(f"\x1b[{grid.y + 1};{lead + 1}H")
             out.append(pen_sgr(pen) + text)
         elif self.origin:
-            out.append(f"\x1b[{grid.y - grid.top + 1};{grid.x + 1}H")
+            out.append(f"\x1b[{grid.y - self.top + 1};{grid.x + 1}H")
         else:
             out.append(f"\x1b[{grid.y + 1};{grid.x + 1}H")
         out.append(pen_sgr(grid.pen))
@@ -1225,16 +1438,32 @@ def _cut_wide(line: list, cols: int) -> None:
         line[cols - 1] = (" ", 1, line[cols - 1][2])
 
 
+def _number(part: bytes, default: int) -> int:
+    """A numeric parameter as VTE's parser takes it: saturated at
+    PARAM_MAX however many digits it has."""
+    if not part.isdigit():
+        return default
+    if len(part) > 5:
+        return PARAM_MAX
+    return min(int(part), PARAM_MAX)
+
+
 def _colon_colour(sub: list[bytes]):
     kind = sub[1] if len(sub) > 1 else b""
     if kind == b"5" and len(sub) > 2 and sub[2].isdigit():
-        return int(sub[2]) & 255
+        index = _number(sub[2], 0)
+        return index if index <= 255 else None
     if kind == b"2":
         # 38:2::r:g:b (with the colour-space slot) or 38:2:r:g:b.
         values = sub[3:6] if len(sub) >= 6 else sub[2:5]
         if len(values) == 3 and all(v.isdigit() for v in values):
-            return tuple(int(v) & 255 for v in values)
+            rgb = tuple(_number(v, 0) for v in values)
+            return rgb if max(rgb) <= 255 else None
     return None
+
+
+def _clamp_grid(cols: int, rows: int) -> tuple[int, int]:
+    return max(1, min(cols, MAX_COLS)), max(1, min(rows, MAX_ROWS))
 
 
 _CSI = {
@@ -1325,17 +1554,14 @@ class _Painter:
             self.at = (0, y + 1)  # the next character wraps on its own
 
     def paint(self, under: bool = False) -> None:
-        """The cells, then the scroll region and the saved cursor. With
-        `under`, the screen beneath the alternate one: its cursor is what
-        entering the alternate screen saved."""
+        """The cells, then the saved cursor. With `under`, the screen
+        beneath the alternate one: its cursor is what entering the
+        alternate screen saved."""
         screen, grid = self.screen, self.grid
         pending = grid.pending and not under
         for y in range(screen.rows_count):
             self.row(y, skip_last=pending and y == grid.y)
         out = self.out
-        if (grid.top, grid.bottom) != (0, screen.rows_count - 1):
-            out.append(f"\x1b[{grid.top + 1};{grid.bottom + 1}r")
-            self.at = None
         if under:
             # ``?1049h`` saves the cursor it finds: leave it where entering
             # the alternate screen saved it, with that pen, so leaving the

@@ -273,28 +273,39 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
 
 - **Reads** (the `ScreenPort` of spec §3.5): `rows()`, `cursor()` (the
   column is `cols` while a wrap is pending, as VTE reports it),
-  `row_text(row)`, `tail_is_faint(row, column)` (the dim-tail question
-  `takes_prompt` asks, answered as today's HTML read answers it: faint with
-  the default or a palette foreground is dim, faint with a direct colour is
-  not), `first_column()` (the spinner), `capture_contents()` (scrollback
-  plus screen as text, the alternate screen alone while it is up),
-  `screen_text()` (one read with the soft wraps joined, what
-  `split_screen_rows` undoes), `cells(row)`.
-- **What it keeps.** Two screens of `(text, width, pen)` cells, the cursor
-  with its deferred wrap, the scroll region and saved cursor per screen,
-  tab stops as tab cells, the character sets, and 10 000 rows of
-  scrollback kept as runs with their pens. Origin, autowrap and insert
-  mode are its own; every other mode is the tracker's.
+  `row_text(row)`, `tail_is_faint(row, column, foreground, background,
+  palette)` (the dim-tail question `takes_prompt` asks, answered as
+  today's read answers it: `vtehtml.is_dim_run` over the drawn colour,
+  with the active client's colours; one run, no bold / italic / underline
+  / strike / blink / overline / background, the colour a scaled-down
+  foreground, so faint on a light palette colour or a plain mid grey
+  reads dim and faint on a saturated colour does not), `first_column()`
+  (the spinner), `capture_contents()` (scrollback plus screen as text,
+  the alternate screen alone while it is up), `screen_text()` (one read
+  with the soft wraps joined, what `split_screen_rows` undoes),
+  `cells(row)`, `sgr()` (the DECRQSS answer in VTE's form).
+- **What it keeps.** Two screens of `(text, width, pen)` cells, each with
+  its cursor, deferred wrap and saved cursor; one scroll region shared by
+  both screens (VTE's, measured); tab stops as tab cells; the character
+  sets; 10 000 rows of scrollback kept as runs with their pens (interned,
+  so a diff-like screen with a full scrollback is about 30 MiB). Origin,
+  autowrap and insert mode are its own; every other mode is the
+  tracker's, whose `preamble(screen=False)` leaves both the screen switch
+  and the region to the redraw. Every parameter saturates at 65535 as
+  VTE's parser does and the grid is clamped to the protocol's bounds.
 - **The VTE rules** it follows (F13, measured, listed in the module
   docstring): the pending-wrap table (which operations clear the wrap and
   act at the last column, which leave it), ED 2 moving the rows in use
   into scrollback, tab cells, never-written cells trimmed at a row's end,
   erased-with-background cells trimmed too, the per-screen saved cursor,
   IL/DL to column 0, a private-prefix CSI never read as its twin, width
-  by `dropimages.cell_width`'s rule (`WIDTH_SKEW` names where VTE
-  differs). No reflow on `resize` (D19): rows are truncated or padded, the
-  region cleared, rows above the cursor scrolled into history only as far
-  as keeping it on screen needs.
+  by `dropimages.cell_width`'s rule (`WIDTH_SKEW` is the full table of
+  the 473 code points VTE draws otherwise, re-measured with the spike's
+  `widths` mode). ED 2 moves the rows VTE's buffer holds into the
+  scrollback, blank ones included (`Grid.used`), so a panel shell's
+  Ctrl+L leaves the same history VTE would. No reflow on `resize` (D19):
+  rows are truncated or padded, the region cleared, rows above the cursor
+  scrolled into history only as far as keeping it on screen needs.
 - **The redraw.** `snapshot(preamble)` is the whole of attach: the
   scrollback rows as text with their pens (pushed above the screen), the
   main screen with absolute addressing and a full SGR per pen change
@@ -311,9 +322,12 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   `tests/test_termscreen.py` holds the model to them (rows, cursor, every
   drawn cell's colours and attributes, the soft wraps, the scrollback, the
   dim tail and the grammar's reads), and `scripts/check_termscreen_parity.py`
-  holds a real VTE to the same goldens under the headless display. Never
-  special-case the CLI in the model to make a fixture match (spec §5):
-  escalate with the differing rows instead.
+  holds a real VTE to the same goldens under the headless display, feeds
+  every scenario's `snapshot()` to a fresh VTE and holds it to the same
+  (one named exception, the F14 tab case), and compares DECRQSS answers
+  and the tab stops after a resize. Never special-case the CLI in the
+  model to make a fixture match (spec §5): escalate with the differing
+  rows instead.
 - **Re-recording.** `python3 scripts/spike_split_3_screen_model.py record
   DIR classic fullscreen worktree` from the checkout, DIR a neutral
   directory outside every checkout and outside the scratchpad (the path

@@ -2,14 +2,15 @@
 
 Shared by `tests/test_termscreen.py` (the model against the goldens) and
 `scripts/check_termscreen_parity.py` (a real VTE against the same goldens,
-which also writes them). GTK-free.
+which also writes them). GTK-free; not a package, both import it by path.
 
 A recorded session is `<session>.bin` with `<session>.marks.json` beside it
 (the offsets its scenarios end at, as `scripts/spike_split_3_screen_model.py
 record` writes them); a scenario is the stream up to its mark. The synthetic
 streams are generated here from the tables below (spike 3's, F13), never
 stored. The goldens are `<session>.golden.json` and `synthetic.golden.json`:
-what VTE 0.84 showed for each scenario, read by the parity check.
+what VTE 0.84 showed for each scenario, read by the parity check, one
+scenario a line so a diff shows which changed.
 
 Recording rule (spec §3.17): a real `claude` in an isolated $HOME from a
 neutral directory, so no path of the user's and no session link is in a
@@ -86,7 +87,43 @@ SYNTHETIC = {
     "faint-ghost-box": f"{E}[2m❯\xa0{E}[22m{E}[2mTry \"fix the tests\"{E}[0m\r\n" + "─" * 120 + f"{E}[1;3H",
     "faint-truecolor-box": f"❯\xa0{E}[2;38;2;180;180;180mdirect{E}[0m\r\n" + "─" * 120 + f"{E}[1;3H",
     "typed-box": "❯\xa0fix the tests in foo\r\n" + "─" * 120 + f"{E}[1;23H",
+    # REP never wraps: it fills to the margin and leaves the wrap pending.
+    "rep-to-margin": f"a{E}[200b|",
+    "rep-pending": "P" * 120 + f"{E}[bZ",
+    # One scroll region for both screens (measured).
+    "region-across-alt": f"{E}[?1049h{E}[3;6r{E}[?1049l{E}[H" + "".join(f"L{i}\r\n" for i in range(12)),
+    "region-across-alt-back": f"{E}[3;6r{E}[?1049h{E}[H" + "".join(f"A{i}\r\n" for i in range(12)),
+    # What ED 2 moves into the scrollback: the rows the buffer holds.
+    "ed2-twice": f"a\r\nb{E}[2J{E}[2J",
+    "ed0-then-ed2": f"a{E}[J{E}[2J",
+    "el-then-ed2": f"a{E}[5;1H{E}[K{E}[2J",
+    "ech-then-ed2": f"a{E}[7;1H{E}[3X{E}[2J",
+    "il-then-ed2": f"a{E}[4;1H{E}[2L{E}[2J",
+    "cursor-only-then-ed2": f"a{E}[20;1H{E}[2J",
+    "scrolled-then-ed2": "x\n" * 45 + f"{E}[2J",
+    # Combining marks past VTE's ten are dropped.
+    "combining-cap": "a" + "\u0301" * 40 + "b",
+    # Parameters saturate; a colour component out of range is ignored.
+    "saturated-params": f"{E}[70000;70000Hx{E}[" + "9" * 20 + f";3Hy{E}[38;5;99999mz{E}[38;2;300;1;1mw{E}[0m",
 }
+# The dim-tail question, asked at the cursor of an input box: what today's
+# read (`vtehtml.is_dim_run` over VTE's HTML) answers for each pen.
+for _name, _sgr in {
+    "faint-box-2-37": "2;37",
+    "faint-box-90": "90",
+    "faint-box-grey-direct": "38;2;128;128;128",
+    "faint-box-2-38-5-250": "2;38;5;250",
+    "faint-box-2-5": "2;5",
+    "faint-box-2-8": "2;8",
+    "faint-box-2-90": "2;90",
+    "faint-box-2-1": "2;1",
+    "faint-box-gap": "2",
+}.items():
+    if _name == "faint-box-gap":
+        _body = f"{E}[2mTry{E}[0m{E}[3C{E}[2mfix{E}[0m"  # a never-written cell inside the run
+    else:
+        _body = f"{E}[{_sgr}mTry \"fix\"{E}[0m"
+    SYNTHETIC[_name] = f"❯\xa0{_body}\r\n" + "─" * 120 + f"{E}[1;3H"
 
 # What VTE does with an operation that arrives while the wrap is pending:
 # 120 characters, the operation, then a Z (F13's pending-wrap table).
@@ -173,8 +210,25 @@ def load_goldens(directory: str = HERE) -> dict[str, dict]:
     return out
 
 
+def dump_goldens(path: str, goldens: dict[str, dict]) -> None:
+    """One scenario a line: ``{`` then ``"name": {...},`` per scenario."""
+    names = sorted(goldens)
+    with open(path, "w") as f:
+        f.write("{\n")
+        for i, name in enumerate(names):
+            f.write(json.dumps(name) + ": " + json.dumps(goldens[name], ensure_ascii=False))
+            f.write(",\n" if i + 1 < len(names) else "\n")
+        f.write("}\n")
+
+
 def all_scenarios(directory: str = HERE) -> list[tuple[str, bytes]]:
     return recorded_scenarios(directory) + synthetic_scenarios()
+
+
+def tab_grow_scenario() -> tuple[bytes, bytes]:
+    """A screen 16 columns wide (a multiple of 8) grown to 40: the stops
+    past the old width exist (`Screen.resize`); the check resizes VTE."""
+    return b"x", b"\r\n\tA\tB\tC\tD"
 
 
 def merge_runs(cells: list) -> list:

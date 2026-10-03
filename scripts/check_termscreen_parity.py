@@ -17,6 +17,14 @@ agree on every scenario.
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_termscreen_parity.py [--write] [--only NAME]
 
+Besides the goldens: every scenario's `snapshot()` (the redraw) is fed to
+a fresh VTE and must show what the original bytes showed (the named
+exceptions in `SNAPSHOT_EXCEPTIONS`, and the alternate screen's own
+scrolled-off rows, which the model does not keep); `Screen.sgr()` is
+compared with VTE's
+DECRQSS answer for a few pens; and tab stops after a resize from a
+multiple of eight columns are compared with VTE's.
+
 `--write` (re)writes the goldens from this VTE instead of comparing: for a
 fixture newly recorded (see the testing skill's recording rule), or after a
 VTE upgrade whose change was judged right. `--only NAME` runs the scenarios
@@ -48,7 +56,7 @@ import scenarios  # noqa: E402
 from gi.repository import Gdk, GLib, Gtk, Vte  # noqa: E402
 
 from collins import providers, vtehtml  # noqa: E402
-from collins.service import termscreen  # noqa: E402
+from collins.service import termscreen, termstream  # noqa: E402
 
 DEADLINE_S = 600
 GLib.timeout_add_seconds(DEADLINE_S, lambda: (print("FAIL deadline", flush=True), os._exit(2)))
@@ -190,13 +198,15 @@ def dump(term, cursor, top) -> dict:
     provider = providers.get_provider("claude")
     dim_tail = vtehtml.is_dim_run(tail, termscreen.FOREGROUND)
     entered = provider.entered_prompt(lines, abs_row - top, COLS)
-    history = (read_range(term, Vte.Format.TEXT, 0, 0, top - 1, COLS) if top > 0 else "").rstrip("\n")
+    # One read per history row: a read of a range joins the rows that
+    # wrapped, and a blank row is a row the buffer holds all the same.
+    history = [read_range(term, Vte.Format.TEXT, y, 0, y, COLS).rstrip("\n") for y in range(top)]
     return {
         "rows": rows,
         "cursor": [column, abs_row - top],
         "cells": cells,
         "screen_text": read_range(term, Vte.Format.TEXT, top, 0, top + ROWS - 1, COLS).rstrip("\n"),
-        "history": history.split("\n") if history else [],
+        "history": history,
         "tail_is_dim": dim_tail,
         "takes_prompt": provider.takes_prompt(line, column, dim_tail),
         "entered": None if entered is None else entered.text,
@@ -242,6 +252,60 @@ def compare(name: str, got: dict, want: dict) -> None:
     check(name, True)
 
 
+def model_of(data: bytes) -> termscreen.Screen:
+    screen = termscreen.Screen(COLS, ROWS)
+    tokenizer = termstream.Tokenizer()
+    screen.feed(tokenizer.feed(data))
+    screen.feed(tokenizer.flush())
+    return screen
+
+
+# What a redraw cannot carry, by measurement (F14), by scenario name: a tab
+# cell that no longer ends on a tab stop comes back as spaces (VTE's text
+# read then shows spaces where the golden shows a tab), and a soft-wrap
+# flag on a row that holds nothing cannot be re-made by writing (the
+# screen's one text read joins one row fewer). The only allowed
+# differences between a snapshot fed to VTE and the original; everything
+# else (rows, cursor, cells, history, the reads) must match.
+BLANKS = re.compile(r"[ \t]+")
+SNAPSHOT_EXCEPTIONS = {
+    "tabs-overwrite": "a tab that lost its stop is spaces after a redraw (F14)",
+    "pending-su": "a wrap flag on an empty row is not re-made (F14)",
+    "pending-sd": "a wrap flag on an empty row is not re-made (F14)",
+}
+
+# DECRQSS SGR, for a few pens: `Screen.sgr()` against VTE's answer.
+DECRQSS_PENS = (
+    b"0", b"1;31", b"2", b"1;2", b"4", b"4:3", b"21", b"7", b"9", b"53", b"38;5;100",
+    b"38;2;10;20;30", b"48;2;1;2;3", b"58;5;3;4", b"58:2::7:8:9;4", b"91;104", b"3;5;8",
+    b"38;5;99999", b"38;2;300;1;1",
+)  # fmt: skip
+
+
+def vte_decrqss(term, sgr: bytes) -> bytes:
+    commits.clear()
+    term.feed(b"\x1b[" + sgr + b"m" + b"\x1bP$qm\x1b\\" + SENTINEL)
+    pump_until(lambda: any(SENTINEL_ANSWER in c for c in commits))
+    return b"".join(commits).replace(SENTINEL_ANSWER, b"")
+
+
+def grown_terminal(before: bytes, after: bytes):
+    """A 16x4 VTE fed `before`, grown to 40x4, fed `after`."""
+    term = Vte.Terminal()
+    term.set_size(16, 4)
+    term.set_halign(Gtk.Align.START)
+    term.set_valign(Gtk.Align.START)
+    term.connect("commit", lambda _t, text, _size: commits.append(text.encode()))
+    window.set_child(term)
+    pump_until(lambda: term.get_mapped() and (term.get_column_count(), term.get_row_count()) == (16, 4))
+    feed_parsed(term, before)
+    term.set_size(40, 4)
+    pump_until(lambda: (term.get_column_count(), term.get_row_count()) == (40, 4))
+    pump_until(lambda: False, timeout=0.2)
+    feed_parsed(term, after)
+    return term
+
+
 directory = os.path.join(ROOT, "tests", "fixtures", "streams")
 goldens = {} if write else scenarios.load_goldens(directory)
 written: dict[str, dict] = {}
@@ -258,11 +322,56 @@ for name, data in scenarios.all_scenarios(directory):
     if write:
         written.setdefault(scenarios.golden_path(name, directory), {})[name] = got
         print(f"read {name}", flush=True)
-        continue
-    if name not in goldens:
+    elif name not in goldens:
         check(name, False, "no golden; run with --write")
         continue
-    compare(name, got, goldens[name])
+    else:
+        compare(name, got, goldens[name])
+    # The redraw: the model's snapshot fed to a fresh VTE shows what the
+    # original bytes showed (the goldens, or what was just read).
+    again = observe(model_of(data).snapshot())
+    if again is None:
+        check(f"{name}: snapshot", False, "VTE never answered the sentinel")
+    elif name in SNAPSHOT_EXCEPTIONS:
+        # A run of tabs and spaces reads as one space on both sides (only
+        # the tab that lost its stop became spaces, and a tab cell is one
+        # character for several cells), and the soft wraps are not compared.
+        lenient, loose = dict(got), dict(again)
+        for side in (lenient, loose):
+            side["rows"] = [BLANKS.sub(" ", row) for row in side["rows"]]
+            side["cells"] = [[c for c in row if c[1].strip()] for row in side["cells"]]
+        lenient["screen_text"] = again["screen_text"]
+        compare(f"{name}: snapshot (allowed: {SNAPSHOT_EXCEPTIONS[name]})", loose, lenient)
+    else:
+        expected = got
+        if model_of(data).on_alt:
+            # The alternate screen's own scrolled-off rows are VTE's
+            # buffer's, not the model's: a redraw does not carry them and
+            # nothing in the app reads them.
+            expected = dict(got, history=again["history"])
+        compare(f"{name}: snapshot", again, expected)
+
+if not only:
+    term = fresh_terminal()
+    for sgr in DECRQSS_PENS:
+        feed_parsed(term, b"\x1bc")
+        want = vte_decrqss(term, sgr)
+        mine = b"\x1bP1$r" + model_of(b"\x1b[" + sgr + b"m").sgr().encode() + b"m\x1b\\"
+        check(f"DECRQSS SGR {sgr.decode()}", mine == want, f"model {mine!r}, VTE {want!r}")
+    before, after = scenarios.tab_grow_scenario()
+    term = grown_terminal(before, after)
+    vte_cursor = tuple(term.get_cursor_position())
+    vte_row = read_range(term, Vte.Format.TEXT, 1, 0, 1, 40).rstrip("\n")
+    screen = termscreen.Screen(16, 4)
+    tokenizer = termstream.Tokenizer()
+    screen.feed(tokenizer.feed(before))
+    screen.resize(40, 4)
+    screen.feed(tokenizer.feed(after))
+    check(
+        "tab stops after growing 16 to 40 columns",
+        screen.cursor() == vte_cursor and screen.rows()[1] == vte_row,
+        f"model {screen.cursor()} {screen.rows()[1]!r}, VTE {vte_cursor} {vte_row!r}",
+    )
 
 if write:
     for path, entries in written.items():
@@ -271,9 +380,7 @@ if write:
             with open(path) as f:
                 existing = json.load(f)
         existing.update(entries)
-        with open(path, "w") as f:
-            json.dump(existing, f, ensure_ascii=False, indent=0, sort_keys=True)
-            f.write("\n")
+        scenarios.dump_goldens(path, existing)
         print(f"wrote {len(entries)} goldens to {os.path.relpath(path, ROOT)}")
 check("at least one scenario ran", ran > 0)
 verdict = "FAIL" if failures else "PASS"

@@ -81,9 +81,10 @@ CHECK_SECONDS = {
     "check_git_prefs.py": 6.5,
     # Not yet timed on CI: 4.0 s on a dev box under the headless shell.
     "check_termstream_answers.py": 6.0,
-    # Not yet timed on CI: 15.6 s on a dev box under the headless shell
-    # (131 scenarios, every drawn cell read one at a time).
-    "check_termscreen_parity.py": 20.0,
+    # Not yet timed on CI: 36 to 71 s on a dev box under the headless
+    # shell (153 scenarios, every drawn cell read one at a time, each
+    # scenario's redraw fed to a second terminal).
+    "check_termscreen_parity.py": 60.0,
     "check_composer_paste.py": 6.0,
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,
