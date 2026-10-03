@@ -428,8 +428,9 @@ per agent session and per panel shell (spec §3.3, PR-1.5).
   `{"t": "pty-exited", "pty", "status"}` (the exit code, or minus the
   signal), the row removed. `close()` is SIGHUP to the process group plus
   the master closed, and SIGKILL after `CLOSE_GRACE_MS` (5 s) for a child
-  that ignored it; `shutdown()` saves and closes everything and waits a
-  bounded time for the saves in flight (Phase 1: stopping the service ends
+  that ignored it; `shutdown()` saves and closes everything, waits a
+  bounded time for the saves in flight and writes any model still owed
+  synchronously (a stopping service runs no more idle callbacks) (Phase 1: stopping the service ends
   every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
   `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7.
 - **Attach and the redraw.** `attach(pty, sink, cols, rows)` sends
@@ -462,8 +463,9 @@ per agent session and per panel shell (spec §3.3, PR-1.5).
   the program in paste mode; the loop is never blocked on a write (F11's
   deadlock). A reply can land between two frames of a split paste.
 - **Flow control on the way out.** Live output per sink is counted
-  (`protocol.QUEUE_BYTES`, 4 MiB) and the transport reports what it wrote
-  out with `drained(pty, sink, n)`; a sink that would pass the bound is
+  (`protocol.QUEUE_BYTES`, 4 MiB) and the transport reports what of it it
+  wrote out with `drained(pty, sink, n)` (live bytes only, never a
+  redraw's frames, which are not counted); a sink that would pass the bound is
   not sent the backlog: its `drop_queued()` (required) is called, the
   count reset, and a fresh redraw follows. A redraw's own frames are
   never counted against the bound, and a redraw is bounded at attach time

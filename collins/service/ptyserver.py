@@ -86,8 +86,9 @@ the protocol's ``pty`` event when the size or the active client changes, so
 a pinned sink and its "Sized for" bar stay right.
 
 **Flow control** (§3.2): the server counts the live bytes it has handed
-each sink for a pty and the sink reports what it has written out with
-`PtyServer.drained(pty, sink, n)`. When the count would pass
+each sink for a pty and the sink reports what of them it has written out
+with `PtyServer.drained(pty, sink, n)` (live bytes only, flags 0; a
+redraw's frames are not counted and are not reported). When the count would pass
 `protocol.QUEUE_BYTES` (4 MiB) the sink is not sent the backlog: its
 ``drop_queued()`` is called, the count is reset, and a fresh redraw follows,
 flagged as one. A redraw's own frames are never counted against the bound
@@ -245,23 +246,29 @@ def set_window_size(fd: int, cols: int, rows: int) -> None:
 def _fork_child(argv: list[str], cwd: str, env: dict[str, str], master: int, slave: int, report: int) -> None:
     """The child side of `spawn`: never returns. Only os-level calls, so a
     fork inside a threaded process is safe (see the module docstring)."""
+    stage = _STAGE_SETUP
     try:
         os.close(master)
         os.login_tty(slave)
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
         signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
         signal.pthread_sigmask(signal.SIG_SETMASK, set())
+        stage = _STAGE_CHDIR
         os.chdir(cwd)
+        stage = _STAGE_EXEC
         os.execvpe(argv[0], argv, env)
     except OSError as exc:
         code = exc.errno or errno.EIO
     except BaseException:
         code = errno.EIO
     try:
-        os.write(report, struct.pack("i", code))
+        os.write(report, struct.pack("iB", code, stage))
     except OSError:
         pass
     os._exit(127)
+
+
+_STAGE_SETUP, _STAGE_CHDIR, _STAGE_EXEC = 0, 1, 2
 
 
 class _Attachment:
@@ -472,7 +479,7 @@ class PtyServer:
         os.close(slave)
         os.close(report_w)
         try:
-            failure = os.read(report_r, 4)  # EOF on a successful exec
+            failure = os.read(report_r, 5)  # EOF on a successful exec
         finally:
             os.close(report_r)
         if failure:
@@ -481,8 +488,9 @@ class PtyServer:
                 os.waitpid(pid, 0)
             except ChildProcessError:
                 pass
-            (code,) = struct.unpack("i", failure.ljust(4, b"\0"))
-            raise SpawnError(code, os.strerror(code), argv[0])
+            code, stage = struct.unpack("iB", failure.ljust(5, b"\0"))
+            what = cwd if stage == _STAGE_CHDIR else argv[0] if stage == _STAGE_EXEC else "the pty"
+            raise SpawnError(code, os.strerror(code), what)
         self._next_id += 1
         if self._record_next_id is not None:
             try:
@@ -583,8 +591,9 @@ class PtyServer:
             self._detach(pty, attachment)
 
     def drained(self, pty_id: int, sink, n: int) -> None:
-        """The sink wrote ``n`` bytes of this pty's output out; the server's
-        count of what it is holding goes down by that much."""
+        """The sink wrote ``n`` bytes of this pty's **live** output out (flags
+        0; a redraw's frames are never counted and must not be reported);
+        the server's count of what it is holding goes down by that much."""
         pty = self.ptys.get(pty_id)
         if pty is None:
             return
@@ -699,12 +708,12 @@ class PtyServer:
             if (cols, rows) != (pty.cols, pty.rows):
                 self._apply_size(pty, cols, rows)
             elif became_active:
-                self._announce(pty)
+                self._announce(pty, skip=attachment)
         else:
             pty.pending_sizes[key] = (cols, rows)
         self._redraw(pty, attachment)
         if key in pty.attachments:
-            self._announce(pty, only=attachment)
+            self._announce(pty, only=attachment)  # the attacher's, once, after its redraw
         return {"cols": pty.cols, "rows": pty.rows, "active": pty.active == key, "sized_for": pty.sized_for}
 
     def detach(self, pty_id: int, sink) -> None:
@@ -762,10 +771,10 @@ class PtyServer:
                 high = mid
         return best
 
-    def _announce(self, pty: Pty, only: _Attachment | None = None) -> None:
-        """The `pty` event to every attached sink (or one): the size and who
-        owns it."""
-        targets = [only] if only is not None else list(pty.attachments.values())
+    def _announce(self, pty: Pty, only: _Attachment | None = None, skip: _Attachment | None = None) -> None:
+        """The `pty` event to every attached sink (or one, or all but one):
+        the size and who owns it."""
+        targets = [only] if only is not None else [a for a in pty.attachments.values() if a is not skip]
         for attachment in targets:
             event = {
                 "t": "pty",
@@ -889,11 +898,23 @@ class PtyServer:
     def shutdown(self) -> None:
         """Save every model and close every pty (§3.10, Phase 1), and wait
         a bounded time for the saves in flight."""
-        for pty in list(self.ptys.values()):
+        ptys = list(self.ptys.values())
+        for pty in ptys:
             self.save_model(pty.id)
             if not pty._finished:
                 self.close(pty.id)
         self.wait_for_saves()
+        # A save that was in flight when we got here, or asked for after
+        # the join, would land on an idle callback a stopping service never
+        # runs: write the final model here, blocking, for every pty that
+        # still has one to write.
+        for pty in ptys:
+            if pty._save_again or pty._dirty:
+                try:
+                    write_model_file(pty.model_path(), pty.screen.dump())
+                except OSError as exc:
+                    log.warning("pty %d: saving the model at shutdown failed: %s", pty.id, exc)
+                pty._dirty = pty._save_again = False
 
     def wait_for_saves(self, timeout: float = SAVE_WAIT_S) -> None:
         threads = [t for t in self._save_threads() if t.is_alive()]
@@ -1017,7 +1038,6 @@ class PtyServer:
             pty._save_again = True  # the worker lands and goes again
             return pty.model_path()
         data = pty.screen.dump()  # on the loop; tens of ms at most
-        pty._dirty = False
         pty._save_again = False
         path = pty.model_path()
         thread = threading.Thread(target=self._save_worker, args=(pty, path, data), daemon=True)
@@ -1039,9 +1059,13 @@ class PtyServer:
         pty._save_thread = None
         if error is not None:
             log.warning("pty %d: saving the model failed: %s", pty.id, error)
-        if pty._save_again or (pty._dirty and pty._finished):
-            pty._dirty = True
+            # Still dirty: the next due save retries, output or not.
+        elif not pty._save_again:
+            pty._dirty = False
+        if pty._save_again:
             self._write_model(pty)
+        elif error is not None and not pty._save_source and not pty._finished:
+            self._schedule_save(pty)
         return GLib.SOURCE_REMOVE
 
     def load_model(self, path: Path) -> termscreen.Screen | None:
@@ -1069,8 +1093,9 @@ def write_model_file(path: Path, data: dict) -> None:
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
+        text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, separators=(",", ":"), ensure_ascii=False)
+            f.write(text)
     except BaseException:
         try:
             os.unlink(tmp)

@@ -208,10 +208,10 @@ def test_a_bad_argv_or_cwd_is_a_spawn_error_with_no_leak(server):
     before = fds()
     with pytest.raises(ptyserver.SpawnError) as info:
         server.spawn("shell", ["/nonexistent/binary"], os.getcwd())
-    assert info.value.errno == 2
+    assert info.value.errno == 2 and info.value.filename == "/nonexistent/binary"
     with pytest.raises(ptyserver.SpawnError) as info:
         server.spawn("shell", ["cat"], "/nonexistent/dir")
-    assert info.value.errno == 2
+    assert info.value.errno == 2 and info.value.filename == "/nonexistent/dir"
     assert fds() == before
     assert len(server.ptys) == 1  # neither made it into the table
     assert server.recorder.calls[-1][1] is not None
@@ -384,7 +384,8 @@ def test_a_draining_sink_is_never_cut_off(server):
     class Draining(Sink):
         def send_output(self, data, flags):
             super().send_output(data, flags)
-            server.drained(pty, self, len(data))
+            if not flags & FLAG_REDRAW:  # live bytes only
+                server.drained(pty, self, len(data))
 
     sink = Draining()
     server.attach(pty, sink, 120, 40)
@@ -409,6 +410,8 @@ def test_a_redraw_is_never_counted_against_the_bound_and_is_capped(server):
 
         def send_output(self, data, flags):
             super().send_output(data, flags)
+            if flags & FLAG_REDRAW:
+                return  # live bytes only
             n = len(data)
             GLib.timeout_add(20, lambda: (server.drained(pty, self, n), False)[1])
 
@@ -669,6 +672,56 @@ def test_the_model_is_written_on_a_timer_while_output_arrives(server, tmp_path, 
     server.write(pty, b"tick", sink=sink)
     path = tmp_path / "pty" / f"{pty}.model"
     pump(path.exists, timeout=5, what="the timed save")
+
+
+def test_shutdown_writes_the_model_a_save_in_flight_would_have_lost(tmp_path, monkeypatch):
+    real = ptyserver.write_model_file
+
+    def slow(path, data):
+        time.sleep(0.3)
+        real(path, data)
+
+    monkeypatch.setattr(ptyserver, "write_model_file", slow)
+    srv = ptyserver.PtyServer(state_dir=tmp_path / "pty")
+    pty = spawn_cat(srv)
+    sink = Sink()
+    srv.attach(pty, sink, 80, 24)
+    srv.write(pty, b"FIRST\r\n", sink=sink)
+    wait_live(sink, b"FIRST")
+    srv.save_model(pty)  # a periodic save in flight, holding FIRST
+    settle(0.05)
+    srv.write(pty, b"SECOND\r\n", sink=sink)
+    wait_live(sink, b"SECOND")
+    srv.shutdown()
+    # No loop iteration after this: what a process that exits now leaves.
+    loaded = ptyserver.PtyServer(state_dir=tmp_path / "pty").load_model(tmp_path / "pty" / f"{pty}.model")
+    rows = loaded.rows()
+    assert rows[:2] == ["FIRST", "SECOND"]
+    assert not any(t.is_alive() for t in srv._in_flight.values())
+    pump(lambda: not srv.ptys, what="every pty to end")
+
+
+def test_a_failed_save_is_retried(server, tmp_path, monkeypatch):
+    calls = []
+    real = ptyserver.write_model_file
+
+    def flaky(path, data):
+        calls.append(path)
+        if len(calls) == 1:
+            raise OSError(5, "disk on fire")
+        real(path, data)
+
+    monkeypatch.setattr(ptyserver, "write_model_file", flaky)
+    monkeypatch.setattr(ptyserver, "SAVE_INTERVAL_MS", 30)
+    pty = spawn_cat(server)
+    p = server.get(pty)
+    server.paint(pty, "keep me")
+    server.save_model(pty)
+    pump(lambda: p._save_thread is None, what="the failed save to land")
+    assert p._dirty  # still owed
+    pump(lambda: len(calls) >= 2 and p._save_thread is None, timeout=5, what="the retry")
+    assert not p._dirty
+    assert server.load_model(p.model_path()).rows()[0] == "keep me"
 
 
 def test_the_next_pty_id_is_persisted_and_never_reused(tmp_path):
