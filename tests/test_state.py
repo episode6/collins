@@ -1589,3 +1589,12 @@ def test_the_pty_table_is_written_and_read_back(app_state):
     again.remove_pty(3)
     again.remove_pty(99)  # nothing to do, nothing written
     assert app_state.AppState().get_ptys() == {7: again.get_ptys()[7]}
+
+
+def test_the_next_pty_id_is_persisted(app_state):
+    state = app_state.AppState()
+    assert state.pty_next_id == 1
+    state.set_pty_next_id(42)
+    assert app_state.AppState().pty_next_id == 42
+    state.set_pty_next_id(0)  # out of range: ignored
+    assert app_state.AppState().pty_next_id == 42

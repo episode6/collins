@@ -17,12 +17,23 @@ imports GTK, Adw, Gdk, Vte or GtkSource.
 Spawn
 -----
 `spawn(kind, argv, cwd, env, cols, rows, …)`: `os.openpty()`, the window
-size set on the slave before the fork, the child made a session leader with
-the slave as its controlling terminal (`os.login_tty`), the master
-non-blocking. The environment is the caller's plus what VTE would have set
-and the CLI's terminal detection reads: ``TERM=xterm-256color``,
-``COLORTERM=truecolor``, ``VTE_VERSION`` (the client's, else 8400) and the
-two spoofs of `terminal._agent_tab_environment` (``ConEmuANSI=ON``,
+size set on the slave before the fork, then `os.fork`. The child does only
+os-level calls before `execvpe`: `os.login_tty(slave)` (a new session, the
+slave its controlling terminal, the standard fds), the signal dispositions
+Python inherited reset (SIGPIPE and SIGXFSZ back to their defaults, the
+signal mask cleared), `chdir`, exec. A failed exec (an argv that is not
+there, a cwd that is not) is reported back through a close-on-exec pipe,
+and `spawn` raises `SpawnError` (an `OSError` subclass carrying the child's
+errno) with the master closed and the child reaped: a caller sees the
+failure where it asked, not as an exit 127 a moment later. In Phase 1 the
+fork runs inside the GTK app (the loopback of PR-1.7), a threaded process;
+that is acceptable because nothing Python-heavy runs between fork and exec
+(no allocation of note, no locks taken, the same thing `pty.fork` and VTE
+do), and PR-1.12 moves the whole server into the service process. The
+environment is the caller's plus what VTE would have set and the CLI's
+terminal detection reads: ``TERM=xterm-256color``, ``COLORTERM=truecolor``,
+``VTE_VERSION`` (the client's, else 8400) and the two spoofs of
+`terminal._agent_tab_environment` (``ConEmuANSI=ON``,
 ``TERM_PROGRAM=kitty``), unchanged (D15). An agent's command line is typed
 in by its `Session`, not here: the server only runs the argv it is given.
 
@@ -35,14 +46,24 @@ go to every sink as live output (flags 0), and the stream events (progress,
 bell, title, modes, the alternate screen) go to the server's listener for
 the service's own detection (§3.6).
 
+The write queue
+---------------
 **Every write is queued.** The master is non-blocking and the queue drains
 behind a writability watch: a blocking write of a 100 KB paste deadlocked
-the spike's server against a child that was echoing it (F11). Requests and
-typing alike go through one queue per pty in arrival order, the filter's
-replies ahead of what is waiting (a query's answer is what the program is
-blocked on). The queue is bounded at `INPUT_QUEUE_BYTES`: a client that
-floods a pty whose child is not reading finds its input beyond the bound
-dropped and counted (`Pty.dropped_input`), never a blocked loop.
+the spike's server against a child that was echoing it (F11). Two queues
+per pty, drained in this order: the entry a write already started (never
+split further), then the filter's replies in the order their queries came
+(§3.3, F11: a program closes a round of questions with DA1 and takes what
+arrived before that answer as the round's answers), then typing and
+requests in arrival order. A reply can therefore land between two frames
+of a split paste; the program asked mid-paste and gets its answer there,
+as it would from a terminal. Replies are never dropped: an unanswered
+DA1 stalls the program. Typing is bounded at `INPUT_QUEUE_BYTES` (4 MiB):
+a client that floods a pty whose child is not reading finds its input
+dropped **whole**, from the first entry that would pass the bound until
+the queue has drained completely (`Pty.dropped_input` counts the bytes),
+so a bracketed paste is never cut in the middle leaving the program in
+paste mode. Never a blocked loop.
 
 Attach, the redraw and the active client
 ----------------------------------------
@@ -50,29 +71,37 @@ Attach, the redraw and the active client
 with the mode tracker's preamble, in frames of at most
 `protocol.MAX_PAYLOAD`, every one flagged `FLAG_REDRAW` and the last
 `FLAG_REDRAW_END`, then live output. The active client owns the size (D1):
-the last sink to send input or report focus, the first to attach when none.
-A resize from the active sink is applied (``TIOCSWINSZ``, the model resized,
-the filter's grid updated); one from any other sink is remembered and
-applied when that sink becomes active; with no sink attached the size is
-left alone. An attaching sink that is active and whose grid differs is
-applied first, so its redraw is painted at its own size and the program's
-repaint follows on the live stream; a sink that is not active is redrawn at
-the pty's grid and told so (``active`` False and ``sized_for``, the active
-sink's ``device`` when it has one).
+the last sink to send input or report focus, the first to attach when none
+(a newcomer takes the role when no sink holds it, even with other sinks
+attached: whoever last cared has gone, and the one arriving is the one
+looking). A resize from the active sink is applied (``TIOCSWINSZ``, the
+model resized, the filter's grid updated); one from any other sink is
+remembered and applied when that sink becomes active; with no sink attached
+the size is left alone. An attaching sink that is active and whose grid
+differs is applied first, so its redraw is painted at its own size and the
+program's repaint follows on the live stream; a sink that is not active is
+redrawn at the pty's grid and told so (``active`` False and ``sized_for``,
+the active sink's ``device`` when it has one). Every attached sink is sent
+the protocol's ``pty`` event when the size or the active client changes, so
+a pinned sink and its "Sized for" bar stay right.
 
-**Flow control** (§3.2): the server counts the bytes it has handed each
-sink for a pty and the sink reports what it has written out with
+**Flow control** (§3.2): the server counts the live bytes it has handed
+each sink for a pty and the sink reports what it has written out with
 `PtyServer.drained(pty, sink, n)`. When the count would pass
 `protocol.QUEUE_BYTES` (4 MiB) the sink is not sent the backlog: its
-``drop_queued()`` is called when it has one and something is counted as
-queued, the count is reset, and a fresh redraw follows, flagged as one. A transport therefore treats the
-first frame of a redraw as "discard whatever of this pty is still queued
-behind me". A sink that never reports draining is cut off and redrawn
-every 4 MiB, which is the honest outcome for a transport that cannot say.
+``drop_queued()`` is called, the count is reset, and a fresh redraw follows,
+flagged as one. A redraw's own frames are never counted against the bound
+that triggered it, and **a redraw is bounded at attach time**: when the
+whole snapshot would pass half the queue bound, the oldest scrollback rows
+are left out of the redraw (not out of the model) until it fits, which is
+§3.2's "a slow link shows the screen as it is now". A sink that never
+reports draining is cut off and redrawn every 4 MiB (logged once per
+attachment), the honest outcome for a transport that cannot say.
 
-A sink is any object with ``send_output(data: bytes, flags: int)`` and
-``send_event(event: dict)``; ``drop_queued()`` and a ``device`` attribute
-are optional. Sinks are keyed by identity.
+A sink is any object with ``send_output(data: bytes, flags: int)``,
+``send_event(event: dict)`` and ``drop_queued()`` (discard what of this
+pty is still queued: the redraw that follows supersedes it); a ``device``
+attribute is optional. Sinks are keyed by identity.
 
 `paint(pty, text)` is rule 2's service-inserted text: it is fed to the
 model and sent to the sinks as if the child had written it, between two
@@ -88,28 +117,41 @@ the filter flushed, the model saved once more, every sink sent
 the signal number), the watches removed, the master closed and the pty
 dropped from the table. The order is the same when EIO arrives first (the
 child closed the slave) and the status comes later. `close(pty)` sends
-SIGHUP and closes the master, which ends a well-behaved child; `signal`
-sends anything else. `shutdown()` saves every model and closes every pty
-(Phase 1: stopping the service ends every agent, §3.10).
+SIGHUP to the child's process group and closes the master, which ends a
+well-behaved child; one that ignores SIGHUP is sent SIGKILL after
+`CLOSE_GRACE_MS`. `signal` sends anything else. `shutdown()` saves every
+model and closes every pty (Phase 1: stopping the service ends every
+agent, §3.10), waiting a bounded time for the saves in flight.
 
 The saved model
 ---------------
-`Screen.dump()` as JSON, written atomically to
+`Screen.dump()` as JSON, written to
 ``$XDG_STATE_HOME/collins/pty/<pty id>.model`` (`COLLINS_PTY_STATE_DIR`
-overrides the directory; tests, captures and e2e checks use it) at most
-once per `SAVE_INTERVAL_MS` while output arrives, at exit and at shutdown.
-It is what a restarted service reads to show a resumed session's scrollback
-and what `capture_contents` of a closed panel shell is read from (§3.10
-point 3); PR-3.6's keeper adopts it. `Screen.load` validates every field
-and bound (rule 5) and raises on anything off, so a file an older or
-newer service wrote, or a damaged one, means a fresh model, never a crash.
-The file is kept when the pty exits; the service removes it with the
-session (a later PR).
+overrides the directory; tests, captures and e2e checks use it; the
+directory is made 0700 and the file 0600) at most once per
+`SAVE_INTERVAL_MS` while output arrives, at exit and at shutdown. The dump
+is taken on the loop (tens of milliseconds for a full scrollback, which is
+accepted for now and noted for PR-1.12's own loop); the JSON encoding and
+the write run on a worker thread, one in flight per pty, a save that was
+asked for meanwhile following it, the result landing at
+`GLib.PRIORITY_DEFAULT` (CLAUDE.md's rule for anything that advances a
+pipeline). It is what a restarted service reads to show a resumed
+session's scrollback and what `capture_contents` of a closed panel shell
+is read from (§3.10 point 3); PR-3.6's keeper adopts it. `Screen.load`
+validates every field and bound (rule 5) and raises on anything off, and
+`load_model` refuses a file over `MODEL_FILE_MAX` before reading it, so a
+file an older or newer service wrote, or a damaged one, means a fresh
+model, never a crash. The file is kept when the pty exits; removing it is
+the session's end (PR-1.7) and the keeper's business (PR-3.6). Pty ids are
+never reused across restarts: the next id is persisted beside the table
+(`AppState.pty_next_id`, through the ``record_next_id`` callable), so no
+two ptys ever share a model file.
 
 The `ptys` table in `state.json` (§3.8) holds a row per live pty (kind,
 session, cwd, pid, options, box, plan, size), written through the
 ``record`` callable the server is built with (`AppState.set_pty` /
-`remove_pty` in the app; a test needs no `AppState`).
+`remove_pty`, wired in PR-1.7; a test needs no `AppState`): a spawn and an
+exit are written at once, size changes coalesced to one write a second.
 
 Measured 2026-10-02 (`tests/test_ptyserver.py`, the dev box, Python
 3.14.4): the redraw of a model holding 10 000 scrollback rows of coloured
@@ -128,6 +170,8 @@ import os
 import signal
 import struct
 import termios
+import threading
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -139,18 +183,35 @@ from . import termscreen, termstream
 
 log = logging.getLogger(__name__)
 
-# The write queue's bound per pty (typing, requests and the filter's replies
-# together): past it a client's input is dropped, never blocked on.
-INPUT_QUEUE_BYTES = 1024 * 1024
+# The typing queue's bound per pty: past it a client's input is dropped
+# whole until the queue has drained, never blocked on. The filter's replies
+# are not counted.
+INPUT_QUEUE_BYTES = 4 * 1024 * 1024
+# A redraw is bounded at attach time: the oldest scrollback rows are left
+# out until the snapshot fits (§3.2's "the screen as it is now").
+REDRAW_MAX = QUEUE_BYTES // 2
 READ_SIZE = 64 * 1024
 # The saved model is written at most this often while output arrives.
 SAVE_INTERVAL_MS = 3000
+# How long shutdown waits for the saves in flight, all together.
+SAVE_WAIT_S = 5.0
+# A model file bigger than this is not even read (rule 5).
+MODEL_FILE_MAX = 64 * 1024 * 1024
+# After close(), a child that ignored SIGHUP is killed this much later.
+CLOSE_GRACE_MS = 5000
+# Size changes reach the ptys table at most this often.
+RECORD_DEBOUNCE_MS = 1000
 DEFAULT_VTE_VERSION = 8400
 MODEL_SUFFIX = ".model"
 
 _AGENT = "agent"
 _SHELL = "shell"
 KINDS = frozenset({_AGENT, _SHELL})
+
+
+class SpawnError(OSError):
+    """The child could not be started: the errno is the child's (ENOENT for
+    an argv or cwd that is not there, EACCES, …)."""
 
 
 def default_state_dir() -> Path:
@@ -181,15 +242,39 @@ def set_window_size(fd: int, cols: int, rows: int) -> None:
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
+def _fork_child(argv: list[str], cwd: str, env: dict[str, str], master: int, slave: int, report: int) -> None:
+    """The child side of `spawn`: never returns. Only os-level calls, so a
+    fork inside a threaded process is safe (see the module docstring)."""
+    try:
+        os.close(master)
+        os.login_tty(slave)
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+        signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+        signal.pthread_sigmask(signal.SIG_SETMASK, set())
+        os.chdir(cwd)
+        os.execvpe(argv[0], argv, env)
+    except OSError as exc:
+        code = exc.errno or errno.EIO
+    except BaseException:
+        code = errno.EIO
+    try:
+        os.write(report, struct.pack("i", code))
+    except OSError:
+        pass
+    os._exit(127)
+
+
 class _Attachment:
     """One sink's view of one pty."""
 
-    __slots__ = ("sink", "cols", "rows", "queued")
+    __slots__ = ("sink", "cols", "rows", "queued", "ever_drained", "fallback_logged")
 
     def __init__(self, sink, cols: int, rows: int):
         self.sink = sink
         self.cols, self.rows = cols, rows
-        self.queued = 0  # bytes handed to the sink and not yet drained
+        self.queued = 0  # live bytes handed to the sink and not yet drained
+        self.ever_drained = False
+        self.fallback_logged = False
 
 
 class Pty:
@@ -216,14 +301,24 @@ class Pty:
         self.attachments: dict[int, _Attachment] = {}  # id(sink) -> attachment
         self.active: int | None = None  # id(sink)
         self.pending_sizes: dict[int, tuple[int, int]] = {}
-        self._queue: list[bytes] = []
-        self._queued = 0
+        # The write queues: the entry a write already started, the replies,
+        # the typing (see the module docstring).
+        self._current: bytes | None = None
+        self._current_typed = False
+        self._replies: deque[bytes] = deque()
+        self._inputs: deque[bytes] = deque()
+        self._queued = 0  # typing bytes waiting, _current included when it was typing
+        self._dropping = False
         self.dropped_input = 0
         self._read_watch = 0
         self._write_watch = 0
         self._child_watch = 0
         self._save_source = 0
+        self._kill_source = 0
+        self._record_source = 0
         self._dirty = False
+        self._save_thread: threading.Thread | None = None
+        self._save_again = False
         self.exit_status: int | None = None
         self._reaped = False
         self._eof = False
@@ -238,7 +333,7 @@ class Pty:
         self.server.resize(self.id, cols, rows)
 
     def child_pid(self) -> int | None:
-        return None if self._finished else self.pid
+        return None if self._reaped else self.pid
 
     def foreground_pgrp(self) -> int | None:
         if self.master < 0 or self._finished:
@@ -259,7 +354,7 @@ class Pty:
             "cols": self.cols,
             "rows": self.rows,
         }
-        if self.pid is not None and not self._finished:
+        if self.pid is not None and not self._reaped:
             out["pid"] = self.pid
         if self.session:
             out["session"] = self.session
@@ -292,15 +387,18 @@ class PtyServer:
         record: Callable[[int, dict | None], None] | None = None,
         on_event: Callable[[int, object], None] | None = None,
         next_id: int = 1,
+        record_next_id: Callable[[int], None] | None = None,
         vte_version: int = DEFAULT_VTE_VERSION,
     ):
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
         self._record = record
+        self._record_next_id = record_next_id
         self._on_event = on_event
         self._next_id = max(1, next_id)
         self.vte_version = vte_version
         self.ptys: dict[int, Pty] = {}
         self._term: dict = {}  # the active client's term, applied to every TerminalState
+        self._in_flight: dict[int, threading.Thread] = {}  # pty id -> its save worker
 
     # -- the table
 
@@ -349,36 +447,48 @@ class PtyServer:
         plan: str | None = None,
         options: dict | None = None,
     ) -> int:
-        """Fork `argv` on a new pty; the new pty's id."""
+        """Fork `argv` on a new pty; the new pty's id. Raises `SpawnError`
+        when the child could not exec."""
         if kind not in KINDS:
             raise ValueError(f"kind {kind!r}")
         if not argv:
             raise ValueError("empty argv")
         cols, rows = termscreen._clamp_grid(cols, rows)
         pty_id = self._next_id
-        self._next_id += 1
         pty = Pty(self, pty_id, kind, cwd, cols, rows)
         pty.session, pty.box, pty.plan, pty.options = session, box, plan, options
-        vte = pty.state.vte_version
-        child_env = spawn_environment(env, vte)
+        child_env = spawn_environment(env, pty.state.vte_version)
         master, slave = os.openpty()
+        report_r, report_w = os.pipe()  # close-on-exec by default (PEP 446)
         try:
             set_window_size(slave, cols, rows)
             pid = os.fork()
         except BaseException:
-            os.close(master)
-            os.close(slave)
+            for fd in (master, slave, report_r, report_w):
+                os.close(fd)
             raise
-        if pid == 0:  # the child
-            try:
-                os.close(master)
-                os.login_tty(slave)
-                os.chdir(cwd)
-                os.execvpe(argv[0], argv, child_env)
-            except BaseException:
-                pass
-            os._exit(127)
+        if pid == 0:
+            _fork_child(argv, cwd, child_env, master, slave, report_w)  # never returns
         os.close(slave)
+        os.close(report_w)
+        try:
+            failure = os.read(report_r, 4)  # EOF on a successful exec
+        finally:
+            os.close(report_r)
+        if failure:
+            os.close(master)
+            try:
+                os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+            (code,) = struct.unpack("i", failure.ljust(4, b"\0"))
+            raise SpawnError(code, os.strerror(code), argv[0])
+        self._next_id += 1
+        if self._record_next_id is not None:
+            try:
+                self._record_next_id(self._next_id)
+            except Exception:
+                log.exception("the next-id writer failed")
         os.set_blocking(master, False)
         pty.pid, pty.master = pid, master
         self.ptys[pty_id] = pty
@@ -394,11 +504,26 @@ class PtyServer:
         return pty_id
 
     def _record_row(self, pty: Pty) -> None:
+        if pty._record_source:
+            GLib.source_remove(pty._record_source)
+            pty._record_source = 0
         if self._record is not None:
             try:
                 self._record(pty.id, None if pty._finished else pty.row())
             except Exception:
                 log.exception("pty %d: the state writer failed", pty.id)
+
+    def _record_row_later(self, pty: Pty) -> None:
+        """A size change: one write a second at most."""
+        if pty._record_source or pty._finished:
+            return
+        pty._record_source = GLib.timeout_add(RECORD_DEBOUNCE_MS, self._on_record_due, pty)
+
+    def _on_record_due(self, pty: Pty) -> bool:
+        pty._record_source = 0
+        if not pty._finished:
+            self._record_row(pty)
+        return GLib.SOURCE_REMOVE
 
     # -- the read loop
 
@@ -425,7 +550,7 @@ class PtyServer:
 
     def _consume(self, pty: Pty, filtered: termstream.Filtered) -> None:
         for reply in filtered.replies:
-            self._enqueue(pty, reply, reply=True)
+            self._enqueue_reply(pty, reply)
         if filtered.forward:
             self._broadcast(pty, filtered.forward, 0)
             pty._dirty = True
@@ -445,6 +570,9 @@ class PtyServer:
         if attachment.queued + len(data) > QUEUE_BYTES:
             # The sink is not keeping up: it is not sent the backlog but a
             # fresh picture of the screen (§3.2).
+            if not attachment.ever_drained and not attachment.fallback_logged:
+                attachment.fallback_logged = True
+                log.warning("pty %d: a sink never reports draining; redrawing it on the fallback", pty.id)
             self._redraw(pty, attachment)
             return
         attachment.queued += len(data)
@@ -462,6 +590,7 @@ class PtyServer:
             return
         attachment = pty.attachments.get(id(sink))
         if attachment is not None:
+            attachment.ever_drained = True
             attachment.queued = max(0, attachment.queued - max(0, n))
 
     # -- the write queue
@@ -472,30 +601,49 @@ class PtyServer:
         pty = self.get(pty_id)
         if sink is not None:
             self._activate(pty, id(sink))
-        self._enqueue(pty, bytes(data))
+        self._enqueue_input(pty, bytes(data))
 
-    def _enqueue(self, pty: Pty, data: bytes, reply: bool = False) -> None:
+    def _enqueue_input(self, pty: Pty, data: bytes) -> None:
         if not data or pty._finished or pty.master < 0:
             return
-        if pty._queued + len(data) > INPUT_QUEUE_BYTES:
+        if pty._dropping and pty._current is None and not pty._inputs:
+            pty._dropping = False  # drained since, with nothing to flush it
+        if pty._dropping or pty._queued + len(data) > INPUT_QUEUE_BYTES:
+            # Dropped whole, and everything after it until the queue has
+            # drained; a single write over the bound with an empty queue is
+            # dropped on its own.
+            if not pty._dropping and (pty._current is not None or pty._inputs):
+                pty._dropping = True
+                log.warning("pty %d: input queue full; dropping input until it drains", pty.id)
             pty.dropped_input += len(data)
-            if pty.dropped_input == len(data):
-                log.warning("pty %d: input queue full; dropping input", pty.id)
             return
-        if reply:
-            # A query's answer is what the program is blocked on: ahead of
-            # what is waiting, after any partial write already started.
-            pty._queue.insert(1 if pty._queue else 0, data)
-        else:
-            pty._queue.append(data)
+        pty._inputs.append(data)
         pty._queued += len(data)
         self._flush(pty)
 
+    def _enqueue_reply(self, pty: Pty, data: bytes) -> None:
+        if not data or pty._finished or pty.master < 0:
+            return
+        pty._replies.append(data)
+        self._flush(pty)
+
     def _flush(self, pty: Pty) -> bool:
-        while pty._queue:
-            head = pty._queue[0]
+        """Write what is queued until the master would block; True when
+        the queues are empty."""
+        while True:
+            if pty._current is None:
+                if pty._replies:
+                    pty._current = pty._replies.popleft()
+                    pty._current_typed = False
+                elif pty._inputs:
+                    pty._current = pty._inputs.popleft()
+                    pty._current_typed = True
+                else:
+                    if pty._dropping:
+                        pty._dropping = False
+                    return True
             try:
-                n = os.write(pty.master, head)
+                n = os.write(pty.master, pty._current)
             except BlockingIOError:
                 if not pty._write_watch:
                     pty._write_watch = GLib.io_add_watch(
@@ -503,15 +651,21 @@ class PtyServer:
                     )
                 return False
             except OSError:
-                pty._queued = 0
-                pty._queue.clear()
-                break
-            pty._queued -= n
-            if n < len(head):
-                pty._queue[0] = head[n:]
+                self._clear_queues(pty)
+                return True
+            if pty._current_typed:
+                pty._queued -= n
+            if n < len(pty._current):
+                pty._current = pty._current[n:]
             else:
-                pty._queue.pop(0)
-        return True
+                pty._current = None
+
+    def _clear_queues(self, pty: Pty) -> None:
+        pty._current = None
+        pty._replies.clear()
+        pty._inputs.clear()
+        pty._queued = 0
+        pty._dropping = False
 
     def _on_writable(self, fd: int, condition, pty: Pty) -> bool:
         if pty._finished:
@@ -536,15 +690,21 @@ class PtyServer:
             attachment = pty.attachments[key] = _Attachment(sink, cols, rows)
         else:
             attachment.cols, attachment.rows, attachment.queued = cols, rows, 0
+        became_active = False
         if pty.active is None:
             pty.active = key
+            became_active = True
         if pty.active == key:
             pty.pending_sizes.pop(key, None)
             if (cols, rows) != (pty.cols, pty.rows):
                 self._apply_size(pty, cols, rows)
+            elif became_active:
+                self._announce(pty)
         else:
             pty.pending_sizes[key] = (cols, rows)
         self._redraw(pty, attachment)
+        if key in pty.attachments:
+            self._announce(pty, only=attachment)
         return {"cols": pty.cols, "rows": pty.rows, "active": pty.active == key, "sized_for": pty.sized_for}
 
     def detach(self, pty_id: int, sink) -> None:
@@ -561,28 +721,66 @@ class PtyServer:
         pty.pending_sizes.pop(key, None)
         if pty.active == key:
             pty.active = None  # the next sink to attach, type or focus takes it
+            self._announce(pty)
 
     def _redraw(self, pty: Pty, attachment: _Attachment) -> None:
         if attachment.queued:
-            # The sink holds output this redraw supersedes.
-            drop = getattr(attachment.sink, "drop_queued", None)
-            if callable(drop):
-                try:
-                    drop()
-                except Exception:
-                    log.exception("pty %d: a sink's drop_queued failed", pty.id)
+            try:
+                attachment.sink.drop_queued()
+            except Exception:
+                log.exception("pty %d: a sink's drop_queued failed", pty.id)
         attachment.queued = 0
-        data = pty.screen.snapshot(pty.filter.preamble(screen=False))
+        data = self.redraw_bytes(pty)
         frames = [data[i : i + MAX_PAYLOAD] for i in range(0, len(data), MAX_PAYLOAD)] or [b""]
         for index, frame in enumerate(frames):
             flags = FLAG_REDRAW | (FLAG_REDRAW_END if index == len(frames) - 1 else 0)
-            attachment.queued += len(frame)
             try:
                 attachment.sink.send_output(frame, flags)
             except Exception:
                 log.exception("pty %d: a sink failed; detaching it", pty.id)
                 self._detach(pty, attachment)
                 return
+
+    def redraw_bytes(self, pty: Pty) -> bytes:
+        """The redraw, bounded at `REDRAW_MAX`: the newest scrollback rows
+        that fit, the screen always."""
+        preamble = pty.filter.preamble(screen=False)
+        data = pty.screen.snapshot(preamble)
+        if len(data) <= REDRAW_MAX:
+            return data
+        # The screen alone, then as many of the newest rows as fit, found
+        # by halving (each try serializes the rows it keeps).
+        rows = len(pty.screen.scrollback)
+        best = pty.screen.snapshot(preamble, scrollback_rows=0)
+        low, high = 0, rows
+        while high - low > 1:
+            mid = (low + high) // 2
+            attempt = pty.screen.snapshot(preamble, scrollback_rows=mid)
+            if len(attempt) <= REDRAW_MAX:
+                best, low = attempt, mid
+            else:
+                high = mid
+        return best
+
+    def _announce(self, pty: Pty, only: _Attachment | None = None) -> None:
+        """The `pty` event to every attached sink (or one): the size and who
+        owns it."""
+        targets = [only] if only is not None else list(pty.attachments.values())
+        for attachment in targets:
+            event = {
+                "t": "pty",
+                "pty": pty.id,
+                "kind": pty.kind,
+                "cols": pty.cols,
+                "rows": pty.rows,
+                "active": pty.active == id(attachment.sink),
+                "sized_for": pty.sized_for,
+            }
+            try:
+                attachment.sink.send_event(event)
+            except Exception:
+                log.exception("pty %d: a sink failed; detaching it", pty.id)
+                self._detach(pty, attachment)
 
     def _activate(self, pty: Pty, key: int) -> None:
         """A sink typed or took focus: it is the active client now, and the
@@ -594,6 +792,8 @@ class PtyServer:
             size = pty.pending_sizes.pop(key, None)
             if size is not None and size != (pty.cols, pty.rows):
                 self._apply_size(pty, *size)
+            else:
+                self._announce(pty)
 
     def focus(self, pty_id: int, sink, focused: bool) -> None:
         pty = self.get(pty_id)
@@ -628,7 +828,8 @@ class PtyServer:
                 log.warning("pty %d: TIOCSWINSZ failed: %s", pty.id, exc)
         pty._dirty = True
         self._schedule_save(pty)
-        self._record_row(pty)
+        self._record_row_later(pty)
+        self._announce(pty)
 
     # -- the service's own writes
 
@@ -647,7 +848,7 @@ class PtyServer:
 
     def signal(self, pty_id: int, sig: int) -> None:
         pty = self.get(pty_id)
-        if pty.pid is None or pty._finished:
+        if pty.pid is None or pty._reaped:
             return
         try:
             os.kill(pty.pid, sig)
@@ -656,35 +857,64 @@ class PtyServer:
 
     def close(self, pty_id: int) -> None:
         """End a pty: SIGHUP to the child's process group and the master
-        closed; `pty-exited` follows when the child is reaped."""
+        closed; SIGKILL after `CLOSE_GRACE_MS` if it is still there;
+        `pty-exited` follows when the child is reaped."""
         pty = self.get(pty_id)
         if pty._finished:
             return
-        if pty.pid is not None:
-            try:
-                os.killpg(pty.pid, signal.SIGHUP)
-            except (ProcessLookupError, PermissionError):
-                # Not a session leader yet (closed before it exec'd): the
-                # process itself, then.
-                try:
-                    os.kill(pty.pid, signal.SIGHUP)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        if pty.pid is not None and not pty._reaped:
+            self._signal_group(pty, signal.SIGHUP)
+            if not pty._kill_source:
+                pty._kill_source = GLib.timeout_add(CLOSE_GRACE_MS, self._on_close_grace_over, pty)
         self._close_master(pty)
         self._maybe_finish(pty)
 
+    def _signal_group(self, pty: Pty, sig: int) -> None:
+        try:
+            os.killpg(pty.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            # Not a session leader (yet): the process itself, then.
+            try:
+                os.kill(pty.pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+
+    def _on_close_grace_over(self, pty: Pty) -> bool:
+        pty._kill_source = 0
+        if pty.pid is not None and not pty._reaped:
+            log.warning("pty %d: the child ignored SIGHUP; killing it", pty.id)
+            self._signal_group(pty, signal.SIGKILL)
+        return GLib.SOURCE_REMOVE
+
     def shutdown(self) -> None:
-        """Save every model and close every pty (§3.10, Phase 1)."""
+        """Save every model and close every pty (§3.10, Phase 1), and wait
+        a bounded time for the saves in flight."""
         for pty in list(self.ptys.values()):
             self.save_model(pty.id)
             if not pty._finished:
                 self.close(pty.id)
+        self.wait_for_saves()
+
+    def wait_for_saves(self, timeout: float = SAVE_WAIT_S) -> None:
+        threads = [t for t in self._save_threads() if t.is_alive()]
+        deadline = GLib.get_monotonic_time() + int(timeout * 1_000_000)
+        for thread in threads:
+            remaining = (deadline - GLib.get_monotonic_time()) / 1_000_000
+            if remaining <= 0:
+                break
+            thread.join(remaining)
+
+    def _save_threads(self) -> list[threading.Thread]:
+        return list(self._in_flight.values())
 
     # -- exit
 
     def _on_child_exited(self, pid: int, status: int, pty: Pty) -> None:
         pty._child_watch = 0
         pty._reaped = True
+        if pty._kill_source:
+            GLib.source_remove(pty._kill_source)
+            pty._kill_source = 0
         try:
             pty.exit_status = os.waitstatus_to_exitcode(status)
         except ValueError:
@@ -724,14 +954,13 @@ class PtyServer:
 
     def _finish(self, pty: Pty) -> None:
         pty._finished = True
-        for name in ("_read_watch", "_write_watch", "_save_source"):
+        for name in ("_read_watch", "_write_watch", "_save_source", "_kill_source", "_record_source"):
             source = getattr(pty, name)
             if source:
                 GLib.source_remove(source)
                 setattr(pty, name, 0)
         self._close_master(pty)
-        pty._queue.clear()
-        pty._queued = 0
+        self._clear_queues(pty)
         self._write_model(pty)
         self.ptys.pop(pty.id, None)
         self._record_row(pty)
@@ -774,7 +1003,8 @@ class PtyServer:
         return GLib.SOURCE_REMOVE
 
     def save_model(self, pty_id: int) -> Path | None:
-        """Write the pty's model now; the path, or None when it failed."""
+        """Start writing the pty's model now (on the worker); the path it
+        goes to, or None when there is nothing to write."""
         pty = self.ptys.get(pty_id)
         if pty is None:
             return None
@@ -783,28 +1013,72 @@ class PtyServer:
     def _write_model(self, pty: Pty) -> Path | None:
         if not pty._dirty:
             return pty.model_path() if pty.model_path().exists() else None
-        path = pty.model_path()
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_name(path.name + ".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(pty.screen.dump(), f, separators=(",", ":"), ensure_ascii=False)
-            tmp.replace(path)
-        except OSError as exc:
-            log.warning("pty %d: saving the model failed: %s", pty.id, exc)
-            return None
+        if pty._save_thread is not None and pty._save_thread.is_alive():
+            pty._save_again = True  # the worker lands and goes again
+            return pty.model_path()
+        data = pty.screen.dump()  # on the loop; tens of ms at most
         pty._dirty = False
+        pty._save_again = False
+        path = pty.model_path()
+        thread = threading.Thread(target=self._save_worker, args=(pty, path, data), daemon=True)
+        pty._save_thread = thread
+        self._in_flight[pty.id] = thread
+        thread.start()
         return path
 
-    def load_model(self, path: Path) -> termscreen.Screen | None:
-        """A saved model, or None when the file is missing, damaged or
-        from another format (then the caller starts fresh)."""
+    def _save_worker(self, pty: Pty, path: Path, data: dict) -> None:
+        error = None
         try:
+            write_model_file(path, data)
+        except OSError as exc:
+            error = exc
+        GLib.idle_add(self._on_saved, pty, path, error, priority=GLib.PRIORITY_DEFAULT)
+
+    def _on_saved(self, pty: Pty, path: Path, error: OSError | None) -> bool:
+        self._in_flight.pop(pty.id, None)
+        pty._save_thread = None
+        if error is not None:
+            log.warning("pty %d: saving the model failed: %s", pty.id, error)
+        if pty._save_again or (pty._dirty and pty._finished):
+            pty._dirty = True
+            self._write_model(pty)
+        return GLib.SOURCE_REMOVE
+
+    def load_model(self, path: Path) -> termscreen.Screen | None:
+        """A saved model, or None when the file is missing, too big,
+        damaged or from another format (then the caller starts fresh)."""
+        try:
+            if os.stat(path).st_size > MODEL_FILE_MAX:
+                log.warning("%s: a model file over %d bytes; ignored", path, MODEL_FILE_MAX)
+                return None
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return termscreen.Screen.load(data)
         except (OSError, ValueError, RecursionError):
             return None
+
+
+def write_model_file(path: Path, data: dict) -> None:
+    """The model as compact JSON, through a 0600 temp file and a rename, in
+    a 0700 directory. Runs on the worker thread."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"), ensure_ascii=False)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
 
 
 def wait_status_name(status: int | None) -> str:
@@ -814,4 +1088,3 @@ def wait_status_name(status: int | None) -> str:
     if status < 0:
         return f"signal {-status}"
     return str(status)
-

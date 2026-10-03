@@ -801,10 +801,13 @@ class AppState:
         # The pty table (split-service spec §3.8): pty id (as a string, JSON
         # keys) -> the row the service's PtyServer keeps for a live pty
         # (kind, session, cwd, pid, cols, rows, box, plan, options). Written
-        # by the server through set_pty / remove_pty; a row outlives nothing:
-        # a restarted service (before the keeper, PR-3.6) finds no live pty
-        # behind it and clears it.
+        # by the server through set_pty / remove_pty (wired in PR-1.7). A
+        # row left by a service that died stays until the service that
+        # starts next clears it (PR-1.12; before the keeper, PR-3.6, no pty
+        # survives a restart). pty_next_id is the id the next spawn takes,
+        # persisted so a saved model file never names two ptys.
         self.ptys: dict[str, dict] = {}
+        self.pty_next_id: int = 1
         # The notification history, newest first, as notifycenter records
         # ({id, session_id, title, project, kind, body, when, read, count}).
         # Messages and bells only — a finished run's synthetic row stands for
@@ -951,6 +954,8 @@ class AppState:
             k: v for k, v in (data.get("ptys") or {}).items()
             if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
         }
+        next_id = data.get("pty_next_id")
+        self.pty_next_id = next_id if isinstance(next_id, int) and 1 <= next_id < 2**32 else 1
         self.notifications = notifycenter.clean_records(data.get("notifications"))
         settings = dict(data.get("settings") or {})
         # Read-time, one-way migration of the auto_title_sessions switch the
@@ -1059,6 +1064,7 @@ class AppState:
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
             "ptys": self.ptys,
+            "pty_next_id": self.pty_next_id,
             "notifications": self.notifications,  # newest first; never sort
             "settings": {
                 k: v for k, v in self.settings.items()
@@ -1519,6 +1525,14 @@ class AppState:
 
     def get_ptys(self) -> dict[int, dict]:
         return {int(k): dict(v) for k, v in self.ptys.items()}
+
+    def set_pty_next_id(self, next_id: int) -> None:
+        """The id the service's next pty takes (PtyServer's counter)."""
+        next_id = int(next_id)
+        if not 1 <= next_id < 2**32 or next_id == self.pty_next_id:
+            return
+        self.pty_next_id = next_id
+        self.save()
 
     def get_process_baseline(self, session_id: str) -> set[str]:
         """The plumbing cmdlines captured for this session, empty when none

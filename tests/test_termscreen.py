@@ -835,10 +835,10 @@ def test_load_takes_no_other_type():
 
 
 def test_the_scrollback_byte_budget_evicts_the_oldest_rows():
-    screen = Screen(20, 3, scrollback=1000, scrollback_bytes=300)
+    screen = Screen(20, 3, scrollback=1000, scrollback_cost=600)
     tokenizer = termstream.Tokenizer()
     screen.feed(tokenizer.feed(b"".join(b"row %03d\r\n" % i for i in range(100))))
-    assert screen.scrollback_bytes <= 300
+    assert screen.scrollback_bytes <= 600
     assert len(screen.scrollback) < 97  # the row count alone would have kept 97
     assert screen.scrollback_bytes == sum(termscreen._runs_cost(r) for r in screen.scrollback)
     texts = [termscreen._runs_text(r) for r in screen.scrollback]
@@ -849,7 +849,7 @@ def test_the_scrollback_byte_budget_evicts_the_oldest_rows():
 
 
 def test_the_row_count_and_the_budget_agree_on_what_is_kept():
-    screen = Screen(20, 3, scrollback=5, scrollback_bytes=10**6)
+    screen = Screen(20, 3, scrollback=5, scrollback_cost=10**6)
     tokenizer = termstream.Tokenizer()
     screen.feed(tokenizer.feed(b"".join(b"r%d\r\n" % i for i in range(20))))
     assert len(screen.scrollback) == 5

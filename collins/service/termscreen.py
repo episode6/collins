@@ -111,11 +111,15 @@ its tuple and its text. Measured 2026-10-02 with `tracemalloc`, a screen
 and a full scrollback of 10 000 rows: plain text rows 4.5 MiB; twenty
 coloured runs a row (a diff-like paint) 29 MiB; a different pen on every
 cell 113 MiB, the worst case a program can make. So the scrollback has a
-byte budget as well as its row count (`SCROLLBACK_BYTES`, 8 MiB: a row
-costs its text's characters plus `RUN_COST` per run; the oldest rows go
-first, as they do when the row count is reached), which holds the full
-10 000 rows of anything the CLI paints and stops the worst case at a few
-thousand. `dump()` / `load()` are the saved model file the pty server
+cost budget as well as its row count (`SCROLLBACK_COST`, 8 Mi units: a
+row costs its text's characters plus `RUN_COST` (100, the measured cost
+of a run in Python objects) per run; the oldest rows go first, as they do
+when the row count is reached). Measured 2026-10-02 with `tracemalloc`
+under that budget: 10 000 rows of plain 85-character text 4.5 MiB (the
+row count is the bound); twenty 256-colour runs a row keeps 3 994 rows
+at 10.2 MiB, twenty truecolour runs with backgrounds the same 3 994 at
+10.2 MiB, a pen per cell 692 rows at 6.7 MiB (`p_size.py` of the PR-1.5
+review, re-run after the calibration). `dump()` / `load()` are the saved model file the pty server
 writes (`ptyserver`): a JSON document, `MODEL_FORMAT`, with a pen table
 and every cell and scrollback run naming its pen by index, validated
 field by field on the way back in.
@@ -167,14 +171,16 @@ from ..vtehtml import _is_scaled_down
 from .termstream import Bad, Control, Csi, Esc, Str, Text, Token
 
 SCROLLBACK_ROWS = 10_000
-# The scrollback's byte budget (PR-1.5): a row costs its text's characters
-# plus `RUN_COST` per run (a pen's share), and the oldest rows go when the
-# sum passes the budget, as they do when the row count does. 8 MiB holds
-# the full 10 000 rows of anything the CLI paints (the memory table in
-# the docstring) and stops a program that fills every cell with its own
-# pen at a few thousand rows.
-SCROLLBACK_BYTES = 8 * 1024 * 1024
-RUN_COST = 8
+# The scrollback's cost budget (PR-1.5), in cost units that track what a
+# row costs in memory: a row costs its text's characters plus `RUN_COST`
+# per run (a run is a tuple, a str and the pen's share: 80 to 130 bytes
+# measured; 100 is the calibration), and the oldest rows go when the sum
+# passes the budget, as they do when the row count does. 8 Mi units keeps
+# the full 10 000 rows of plain text, about 4 000 rows of a diff-like
+# paint with twenty runs a row, and a few hundred of a program that gives
+# every cell its own pen (the memory table in the docstring).
+SCROLLBACK_COST = 8 * 1024 * 1024
+RUN_COST = 100
 # The saved model's format version (`Screen.dump` / `Screen.load`).
 MODEL_FORMAT = 1
 # The grid a pty is spawned with when no client says otherwise (§3.3). The
@@ -489,11 +495,11 @@ class Screen:
         cols: int = DEFAULT_COLS,
         rows: int = DEFAULT_ROWS,
         scrollback: int = SCROLLBACK_ROWS,
-        scrollback_bytes: int = SCROLLBACK_BYTES,
+        scrollback_cost: int = SCROLLBACK_COST,
     ):
         self.cols, self.rows_count = _clamp_grid(cols, rows)
-        self._scrollback_max = max(1, scrollback)
-        self._scrollback_budget = max(1, scrollback_bytes)
+        self._scrollback_max = max(1, min(scrollback, SCROLLBACK_ROWS))
+        self._scrollback_budget = max(1, min(scrollback_cost, SCROLLBACK_COST))
         self._init_state()
 
     def _init_state(self) -> None:
@@ -701,8 +707,10 @@ class Screen:
         if not isinstance(data, dict) or data.get("format") != MODEL_FORMAT:
             raise ValueError("not a saved model")
         cols, rows = _clamp_grid(_int(data.get("cols"), 1, MAX_COLS), _int(data.get("rows"), 1, MAX_ROWS))
-        max_rows = _int(data.get("scrollback_rows"), 1, 1_000_000)
-        budget = _int(data.get("scrollback_budget"), 1, 2**40)
+        # The file's caps are read for shape only: the model's own
+        # constants bound what is kept, whatever a file claims.
+        max_rows = min(_int(data.get("scrollback_rows"), 1, 2**31), SCROLLBACK_ROWS)
+        budget = min(_int(data.get("scrollback_budget"), 1, 2**40), SCROLLBACK_COST)
         pens_data = data.get("pens")
         if not isinstance(pens_data, list) or len(pens_data) > _PENS_MAX:
             raise ValueError("pens")
@@ -1551,14 +1559,16 @@ class Screen:
 
     # -- the redraw
 
-    def snapshot(self, preamble: bytes = b"") -> bytes:
+    def snapshot(self, preamble: bytes = b"", scrollback_rows: int | None = None) -> bytes:
         """The bytes a fresh terminal of this size is fed to show this
         screen (the module docstring, "The redraw"). `preamble` is the
-        mode tracker's ``preamble(screen=False)``."""
+        mode tracker's ``preamble(screen=False)``. `scrollback_rows`
+        limits the redraw to the newest that many scrollback rows (the pty
+        server's attach-time bound); the model keeps them all."""
         rows = self.rows_count
         out: list[str] = ["\x1b[0m"]
-        if self.scrollback:
-            self._paint_scrollback(out)
+        if self.scrollback and scrollback_rows != 0:
+            self._paint_scrollback(out, scrollback_rows)
             # Push every scrollback row above the screen: rows - 1 line
             # feeds reach the bottom and then scroll exactly one row off
             # per row written, blank ones included (VTE keeps a row that
@@ -1601,11 +1611,13 @@ class Screen:
         out.append(self._paint_cursor())
         return "".join(out).encode()
 
-    def _paint_scrollback(self, out: list[str]) -> None:
+    def _paint_scrollback(self, out: list[str], limit: int | None = None) -> None:
         cols = self.cols
         pen = DEFAULT_PEN
         rows = list(self.scrollback)
         wrapped = list(self.scrollback_wrapped)
+        if limit is not None and limit < len(rows):
+            rows, wrapped = rows[-limit:], wrapped[-limit:]
         for index, runs in enumerate(rows):
             col = 0
             for text, width, run_pen in runs:

@@ -43,9 +43,9 @@ SERVICE_RECORDS = {
     "sandbox_project_grants", "sandbox_tools", "project_order",
     "virtual_projects", "expanded_groups", "session_prs", "session_attachments",
     "session_drafts", "new_chat_drafts", "process_baselines", "session_forwards",
-    "pending_detaches", "ptys", "notifications", "settings",
+    "pending_detaches", "ptys", "pty_next_id", "notifications", "settings",
 }
-NEW_SERVICE_RECORDS = {"service_id", "ptys"}  # not in a v0.1.4 file
+NEW_SERVICE_RECORDS = {"service_id", "ptys", "pty_next_id"}  # not in a v0.1.4 file
 
 # Every settings key v0.1.4 wrote, frozen as a literal: the migration
 # fixture is built from this list, not from DEFAULT_SETTINGS, so a key the
