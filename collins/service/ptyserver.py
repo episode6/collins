@@ -706,7 +706,7 @@ class PtyServer:
         if pty.active == key:
             pty.pending_sizes.pop(key, None)
             if (cols, rows) != (pty.cols, pty.rows):
-                self._apply_size(pty, cols, rows)
+                self._apply_size(pty, cols, rows, skip=attachment)
             elif became_active:
                 self._announce(pty, skip=attachment)
         else:
@@ -826,7 +826,7 @@ class PtyServer:
         if (cols, rows) != (pty.cols, pty.rows):
             self._apply_size(pty, cols, rows)
 
-    def _apply_size(self, pty: Pty, cols: int, rows: int) -> None:
+    def _apply_size(self, pty: Pty, cols: int, rows: int, skip: _Attachment | None = None) -> None:
         pty.cols, pty.rows = cols, rows
         pty.state.cols, pty.state.rows = cols, rows
         pty.screen.resize(cols, rows)
@@ -838,7 +838,7 @@ class PtyServer:
         pty._dirty = True
         self._schedule_save(pty)
         self._record_row_later(pty)
-        self._announce(pty)
+        self._announce(pty, skip=skip)
 
     # -- the service's own writes
 

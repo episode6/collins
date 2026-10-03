@@ -332,6 +332,23 @@ def test_sinks_are_told_of_size_and_active_changes(server):
     assert last(a)["active"] is False and last(a)["sized_for"] == ""
 
 
+@pytest.mark.parametrize("grid", [(120, 40), (80, 24)])
+def test_a_new_attacher_gets_its_pty_event_exactly_once(server, grid):
+    pty = spawn_cat(server)  # 120x40
+    a = Sink(device="laptop")
+    server.attach(pty, a, *grid)
+    events = [e for e in a.events if e["t"] == "pty"]
+    assert len(events) == 1
+    assert (events[0]["cols"], events[0]["rows"]) == grid and events[0]["active"] is True
+    # And it came after the redraw.
+    assert a.frames[-1][1] & FLAG_REDRAW_END
+    # A second sink, not active, with either grid: one event too.
+    b = Sink(device="desk")
+    server.attach(pty, b, *grid)
+    assert len([e for e in b.events if e["t"] == "pty"]) == 1
+    assert len([e for e in a.events if e["t"] == "pty"]) == 1  # nothing changed for a
+
+
 def test_a_resize_from_the_active_sink_is_applied_at_once(server):
     pty = spawn_cat(server)
     a = Sink()
