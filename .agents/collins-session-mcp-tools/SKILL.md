@@ -77,6 +77,53 @@ credentials is still dropped. `start()` refuses socket paths over 107 bytes: Gio
 silently truncates longer ones and listens on the wrong path (bit a scratch
 tree with a long tmpdir prefix).
 
+## The twin: `collins/api/protocol.py` (the service/client API)
+
+The split into `collins-service` and a GTK client
+(`~/specs/collins/split-service-and-client.md`, §3.2) gets a table of its
+own, modelled on `mcptools` and kept here until the split has a skill.
+**GTK-free and stdlib only** (`json`, `math`, `re`, `struct`,
+`dataclasses`), pinned by `tests/test_protocol.py`, since both halves
+import it. It holds:
+
+- `TYPES`: every message type, each with a request form (always client →
+  service, with the fields of its ok reply) and/or an event form (either
+  way, the sender recorded). `state.set` and `seen` have both. The set of
+  names is pinned against the spec's Phase 1 list; a new type is a
+  deliberate edit there, and ships behind a name in `CAPABILITIES`.
+- Field specs (`Field`: kind, bounds, pattern, choices, nested shapes).
+  Every string is bounded, every list and map capped, free JSON (state
+  values, PR records, tool arguments) bounded by depth and node count.
+  Unknown fields are dropped at every depth of a closed shape; free JSON
+  is kept whole for its receiver to re-validate.
+- **The contract**: `validate(message, sender)` returns a `Message` (type,
+  kind, id, the kept fields) or a `Refusal` (`re`, `error`, `msgid`,
+  `args`). A refusal with an `re` is answered with `to_message()`; one
+  without (an event, a frame with no usable id) is dropped. Responses go
+  through `response_id` then `validate_response(message, request_type)`.
+  Error codes are `ERRORS` (`unknown` for a type nobody knows, `invalid`,
+  `direction` for a type from the wrong peer, `protocol`, `sequence`,
+  `gone`, `refused`, `failed`); a receiver accepts any code-shaped string.
+  `msgid` is an English source string with `{name}` placeholders, for the
+  client's `i18n._()` and `format_map`.
+- Framing: `encode` (refuses over `MAX_FRAME`, 1 MiB, and NaN / lone
+  surrogates) and `decode` (refuses over `MAX_INCOMING`, 16 MiB, NaN,
+  non-objects, nesting Python can't parse). The binary header is
+  `tag:u8 flags:u8 reserved:u16 stream:u32 offset:u64`, big endian, 16
+  bytes: `pack_header` / `unpack_header` / `pack_frame` / `unpack_frame`
+  and `check_frame` (tag 0x01 output from the service with REDRAW 0x01 /
+  REDRAW_END 0x02, 0x02 input from the client, 0x03 blob chunks either
+  way; `reserved` is reported, never refused).
+- **Versioning is additive.** `PROTOCOL` and `MIN_PROTOCOL` (both 1,
+  pinned) bound what a peer speaks; the window is at most two wide, so an
+  upgraded client still talks to a service with running agents.
+  `negotiate(own, own_min, peer, peer_min)` gives both sides the same
+  answer, None being the mismatch dialog. Also here: `QUEUE_BYTES` (4 MiB),
+  the keepalive pair (10 s, 10 s), `LOCAL_PROOF_BYTES`.
+
+The module docstring's "Shapes the spec left to this module" records each
+field shape chosen beyond the spec's text; read it before adding a field.
+
 ## Identity and dispatch (`app.py`)
 
 There is no session id in an MCP server's environment. `App._mcp_tab_for_pid`
