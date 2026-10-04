@@ -436,13 +436,24 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   `get_setting`); the session types the agent command exactly as before,
   the `sandboxrun.py` wrapper included. A refusal (`SpawnError`'s errno)
   is painted where VTE's spawn error was.
-- **The redraw guard.** `attach` resets the VTE and raises the guard: every
-  commit is dropped until the frame flagged `REDRAW_END` has been fed,
-  `CSI 5 n` fed after it, and VTE's `CSI 0 n` seen in a commit (F3). If the
-  redraw's own bytes carried `CSI ?1004h`, the real focus state is sent
-  then. `ClientTerminal.dropped_commits` counts what the guard swallowed
-  (`check_attach_redraw.py` asserts it and that no `CSI 0 n` reached the
-  pty).
+- **The redraw guard** (`redrawguard.RedrawGuard`, GTK-free,
+  `tests/test_redrawguard.py`). Raised by `attach` (the VTE reset first)
+  and by the first `REDRAW` frame of a redraw the service sends on its
+  own (flow control, a resize for another client; the VTE is reset then
+  too). Every commit is dropped until VTE answers the sentinel fed after
+  the frame flagged `REDRAW_END`: a generation-tagged `OSC 4;<index>;?`
+  (DSR 5 answers the same whatever was asked, so two sentinels could not
+  be told apart), and only the latest sentinel's answer lowers it, so
+  two attaches back to back or a redraw landing mid-redraw stay guarded
+  until the last repaint is in. A 2 s watchdog lowers a guard nothing
+  answered (an attach that failed, a sink cut mid-redraw) and logs. The
+  `attach` reply's `modes` lists what the preamble re-asserted; if
+  `?1004h` is among them the real focus state is sent when the guard
+  comes down. `ClientTerminal.dropped_commits` counts what the guard
+  swallowed (`check_attach_redraw.py` asserts it and that no sentinel
+  answer reached the pty). A commit carrying NUL (Ctrl+Space, Ctrl+@)
+  reaches `commit` as an empty C string of size 1 and is sent as `\0`
+  (`ptyclient.commit_bytes`).
 - **The mouse.** `mouserate.MotionCoalescer` (GTK-free,
   `tests/test_mouserate.py`): a plain motion report naming the cell of the
   one before is dropped, the rest coalesced to the latest per 30 ms on a
@@ -489,10 +500,13 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   (a real `claude` in a real tab) reproduced the loss once per run: the
   key after the **first** click into the window never reached GTK at all
   (a capture-phase key controller on the window saw nothing, no commit,
-  the guard down), while the key after a second click arrived. The
-  compositor delivers the key before its keyboard focus has moved to the
-  window the click activated; a harness that clicks a window for the
-  first time and types in the same breath loses that key.
+  the guard down), while the key after a second click arrived, and the
+  same step on the `vte` backend (the drive's control run) behaves the
+  same. The key never reached GTK; the compositor's keyboard focus not
+  having moved yet to the window the click activated is the likely
+  cause (the toplevel reports `is_active()` False throughout under the
+  headless shell). A harness that clicks a window for the first time and
+  types in the same breath loses that key, on either backend.
 - **Running the suite on it:** `python3 scripts/run_e2e.py --pty-backend
   server` (CI runs both backends as `e2e-shard (<backend>, N)`); a single
   check: `COLLINS_PTY_BACKEND=server … python3 scripts/check_x.py`.

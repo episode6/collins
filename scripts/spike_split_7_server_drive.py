@@ -43,6 +43,10 @@ parser.add_argument("--out", required=True, help="directory the PNGs go to")
 parser.add_argument("--model", default="claude-haiku-4-5-20251001", help="the cheapest model")
 parser.add_argument("--keep-home", action="store_true")
 parser.add_argument("--no-turn", action="store_true", help="type the prompt but never send it (no quota)")
+parser.add_argument(
+    "--backend", choices=("server", "vte"), default="server",
+    help="vte: the control run of the click-and-type step on the tab's own VTE child",
+)
 ARGS = parser.parse_args()
 os.makedirs(ARGS.out, exist_ok=True)
 
@@ -65,7 +69,7 @@ for key in list(os.environ):
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.Drive.{RUN}"
 os.environ["COLLINS_CHATS_DIR"] = f"{SCRATCH}/chats"
 os.environ["COLLINS_PTY_STATE_DIR"] = f"{SCRATCH}/pty"
-os.environ["COLLINS_PTY_BACKEND"] = "server"
+os.environ["COLLINS_PTY_BACKEND"] = ARGS.backend
 os.environ["XDG_CONFIG_HOME"] = f"{SCRATCH}/config"
 os.environ["XDG_STATE_HOME"] = f"{SCRATCH}/state"
 os.environ["XDG_CACHE_HOME"] = f"{SCRATCH}/cache"
@@ -176,7 +180,7 @@ def steps():
         inp_pre.button(False)
         inp_pre.stop()
         ok = yield from until(lambda: win.is_active(), 5000)
-    check("the window is active (fullscreen %s)" % win.is_fullscreen(), ok, win.is_active())
+    check(f"the window is active (fullscreen {win.is_fullscreen()})", ok, win.is_active())
     yield 500
     try:
         inp = spike.Input(Gio, GLib)
@@ -189,17 +193,27 @@ def steps():
         return focus is not None and (focus is widget or focus.is_ancestor(widget))
 
     tab = win.start_background_session(WORK, options=SessionOptions(model=ARGS.model))
-    check("a tab on the server backend", tab is not None and tab._view is not None)
+    check(
+        f"a tab on the {ARGS.backend} backend",
+        tab is not None and (tab._view is not None) == (ARGS.backend == "server"),
+    )
     win.tab_view.set_selected_page(win.tab_view.get_page(tab))
     term = tab.terminal
-    loopback = terminal_mod.SERVICE_LOOPBACK
-    real_write = loopback.core.ptys.write
+    if ARGS.backend == "server":
+        loopback = terminal_mod.SERVICE_LOOPBACK
+        real_write = loopback.core.ptys.write
 
-    def spy(pty_id, data, sink=None):
-        state["written"].append(bytes(data))
-        return real_write(pty_id, data, sink=sink)
+        def spy(pty_id, data, sink=None):
+            state["written"].append(bytes(data))
+            return real_write(pty_id, data, sink=sink)
 
-    loopback.core.ptys.write = spy
+        loopback.core.ptys.write = spy
+    else:
+        # The VTE child: what reaches the pty is what VTE commits.
+        term_commits = term.connect("commit", lambda _t, text, size: state["written"].append(
+            (text[:size] if text else "").encode("utf-8", "surrogateescape")
+        ))
+        state["term_commits"] = term_commits
     commits = []
     term.connect("commit", lambda _t, text, size: commits.append(text[:size] if text else ""))
     keys = []
@@ -212,7 +226,8 @@ def steps():
     check("the CLI is up at its box", ok)
     yield 800
     shot(win, "1-startup")
-    check("the tab shows a pty of the service", tab._view.pty is not None)
+    if ARGS.backend == "server":
+        check("the tab shows a pty of the service", tab._view.pty is not None)
 
     # A click into the terminal, then one character: the first key after
     # focus must arrive.
@@ -236,20 +251,26 @@ def steps():
     state["written"].clear()
     commits.clear()
     keys.clear()
-    before = tab._view.dropped_commits
+    before = tab._view.dropped_commits if tab._view is not None else 0
+    at_key = {
+        "is_active": win.is_active(),
+        "focus": type(win.get_focus()).__name__,
+        "term_has_focus": term.has_focus(),
+    }
     inp.tap(ord("h"))
     ok = yield from until(lambda: any(b"h" in w for w in state["written"]), 2000)
-    check(
-        "the first keystroke after the click reached the pty",
-        ok,
-        {
-            "written": state["written"][-4:],
-            "vte_commits": commits[-4:],
-            "window_saw_keyvals": keys[-4:],
-            "guard_dropped": tab._view.dropped_commits - before,
-            "guard_up": tab._view.guarded,
-        },
-    )
+    detail = {
+        "backend": ARGS.backend,
+        "at_key": at_key,
+        "written": state["written"][-4:],
+        "vte_commits": commits[-4:],
+        "window_saw_keyvals": keys[-4:],
+    }
+    if tab._view is not None:
+        detail["guard_dropped"] = tab._view.dropped_commits - before
+        detail["guard_up"] = tab._view.guarded
+    print("first key:", detail)
+    check("the first keystroke after the click reached the pty", ok, detail)
     for ch in "ello":
         inp.tap(ord(ch))
         yield 40

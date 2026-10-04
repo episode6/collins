@@ -33,7 +33,6 @@ would be a second product to test.
 from __future__ import annotations
 
 import logging
-import socket
 from collections.abc import Callable
 
 from ..service.core import ServiceCore
@@ -206,18 +205,7 @@ class LoopbackServer:
         self.core.client_connected(client)
         return client
 
-    def clients(self) -> list[LoopbackClient]:
-        return list(self._clients)
-
     def shutdown(self) -> None:
         for client in list(self._clients):
             client.close()
         self.core.shutdown()
-
-
-def default_device() -> str:
-    """This machine's name, as the hello's ``device``."""
-    try:
-        return socket.gethostname()[: protocol.HOST_MAX]
-    except OSError:
-        return ""

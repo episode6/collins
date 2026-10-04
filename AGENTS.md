@@ -154,8 +154,8 @@ one `ServiceCore` behind a `LoopbackServer` (`terminal.SERVICE_LOOPBACK`,
 `collins/service/session.py` is a tab's `Session` (see "The tab"), the
 first module the app did use: the tab's logic carved out of the widget,
 reaching its terminal through the two ports in `collins/service/ports.py`
-(`PtyPort`, `ScreenPort`), today adapters over the tab's own VTE, later
-the service's pty and `termscreen`.
+(`PtyPort`, `ScreenPort`): adapters over the tab's own VTE on the `vte`
+backend, the service's pty and `termscreen` on `server`.
 `collins/service/ptyserver.py` (GLib only) is the pty table: it spawns each
 child on a pty it holds the master of, runs the output through the filter
 into the screen model, hands what is left to every attached sink, answers an

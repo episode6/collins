@@ -734,6 +734,26 @@ class ModeTracker:
 
     # -- the attach
 
+    def assertions(self) -> list[str]:
+        """The mode re-assertions of `preamble(screen=False)` as short
+        strings without the CSI (``"?1004h"``, ``">5u"``, ``">4;2m"``):
+        what the `attach` reply lists, so a client knows which modes the
+        redraw turned on without reading its frames."""
+        out = []
+        for mode, value in self.private.items():
+            if mode not in _PREAMBLE_SKIP and value != _default(VTE_PRIVATE_MODES, mode):
+                out.append(f"?{mode}{'h' if value else 'l'}")
+        for mode, value in self.ansi.items():
+            if value != _default(VTE_ANSI_MODES, mode):
+                out.append(f"{mode}{'h' if value else 'l'}")
+        if self.kitty_base:
+            out.append(f"={self.kitty_base}u")
+        for flags in self.kitty_stack:
+            out.append(f">{flags}u")
+        if self.modify_other_keys:
+            out.append(f">4;{self.modify_other_keys}m")
+        return out
+
     def preamble(self, screen: bool = True) -> bytes:
         """The sequences that bring a fresh terminal to the tracked state:
         the alternate screen and the scroll region (unless ``screen`` is

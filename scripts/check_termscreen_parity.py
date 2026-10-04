@@ -53,7 +53,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
 gi.require_version("Vte", "3.91")
 import scenarios  # noqa: E402
-from gi.repository import Gdk, GLib, Gtk, Vte  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, Vte  # noqa: E402
 
 from collins import providers, vtehtml  # noqa: E402
 from collins.service import termscreen, termstream  # noqa: E402
@@ -201,7 +201,14 @@ def dump(term, cursor, top) -> dict:
     # One read per history row: a read of a range joins the rows that
     # wrapped, and a blank row is a row the buffer holds all the same.
     history = [read_range(term, Vte.Format.TEXT, y, 0, y, COLS).rstrip("\n") for y in range(top)]
+    # VTE's own whole-text dump (`write_contents_sync`): what the panel
+    # history and read_terminal are made of today, soft wraps joined.
+    stream = Gio.MemoryOutputStream.new_resizable()
+    term.write_contents_sync(stream, Vte.WriteFlags.DEFAULT, None)
+    stream.close(None)
+    capture = (stream.steal_as_bytes().get_data() or b"").decode("utf-8", "replace")
     return {
+        "capture": scenarios.normalise_capture(capture),
         "rows": rows,
         "cursor": [column, abs_row - top],
         "cells": cells,
@@ -229,7 +236,10 @@ def observe(data: bytes) -> dict | None:
 
 
 def compare(name: str, got: dict, want: dict) -> None:
-    keys = ("rows", "cursor", "cells", "screen_text", "history", "tail_is_dim", "takes_prompt", "entered")
+    keys = (
+        "rows", "cursor", "cells", "screen_text", "history", "capture", "tail_is_dim", "takes_prompt",
+        "entered",
+    )
     for key in keys:
         if key not in want:
             continue
@@ -360,14 +370,17 @@ for name, data in scenarios.all_scenarios(directory):
             side["rows"] = [BLANKS.sub(" ", row) for row in side["rows"]]
             side["cells"] = [[c for c in row if c[1].strip()] for row in side["cells"]]
         lenient["screen_text"] = again["screen_text"]
+        lenient["capture"] = again.get("capture")
         compare(f"{name}: snapshot (allowed: {SNAPSHOT_EXCEPTIONS[name]})", loose, lenient)
     else:
-        expected = got
+        # The capture is the original's: a redraw's trailing rows and
+        # never-written cells read back differently, by design (F14).
+        expected = dict(got, capture=again.get("capture"))
         if model_of(data).on_alt:
             # The alternate screen's own scrolled-off rows are VTE's
             # buffer's, not the model's: a redraw does not carry them and
             # nothing in the app reads them.
-            expected = dict(got, history=again["history"])
+            expected = dict(expected, history=again["history"])
         compare(f"{name}: snapshot", again, expected)
 
 if not only:

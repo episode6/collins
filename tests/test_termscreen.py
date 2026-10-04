@@ -145,6 +145,10 @@ def test_golden(name):
     assert screen.screen_text().rstrip("\n") == golden["screen_text"]
     if not screen.on_alt:
         assert history(screen) == golden["history"]
+    if "capture" in golden and not screen.on_alt:
+        # capture_contents against VTE's write_contents_sync: soft wraps
+        # joined, trailing blanks and empty tail rows as VTE gives them.
+        assert scenarios.normalise_capture(screen.capture_contents()) == golden["capture"]
     x, y = screen.cursor()
     faint = screen.tail_is_faint(y, x)
     assert faint == golden["tail_is_dim"]

@@ -253,6 +253,8 @@ NAME_MAX = 1024  # a title, a project's name, a display name
 HOST_MAX = 255  # a hostname, a device's name
 VERSION_MAX = 64
 SHORT_MAX = 32  # a status, a kind, a mode, a permission mode, an effort
+MODES_MAX = 256  # the mode re-assertions an attach reply lists
+MODE_MAX = 16  # one of them, as the preamble sends it (CSI stripped): "?1004h"
 MODEL_MAX = 128
 PREVIEW_MAX = 4096
 MSGID_MAX = 4096
@@ -486,6 +488,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "rows": _req(_ROWS),
                 "active": _req(_BOOL),
                 "sized_for": _HOST,
+                # The mode tracker's re-assertions, as the redraw's preamble
+                # sends them: "?1004h" and the like, so a client knows what
+                # the redraw turned on without reading its frames.
+                "modes": Field(K_LIST, high=MODES_MAX, item=_s(MODE_MAX, low=1)),
             },
         ),
     ),

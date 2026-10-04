@@ -24,15 +24,20 @@ MOTION_COALESCE_MS = 30
 # An SGR mouse report: button code, column, row, M (press/motion) or m
 # (release). Motion with no button held has code 35 (32 + 3), plus any
 # modifier bits (4 shift, 8 meta, 16 control).
-MOUSE_RE = re.compile(rb"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
+MOUSE_RE = re.compile(rb"\x1b\[<(\d{1,5});(\d{1,5});(\d{1,5})([Mm])")
 _NO_BUTTON = 3
 _MOTION_BIT = 32
 _WHEEL_BIT = 64
+_EXTRA_BUTTONS_BIT = 128  # buttons 8 to 11: a drag with one held is never plain
 
 
 def is_plain_motion(code: int) -> bool:
     """A motion report with no button held: the only kind ever dropped."""
-    return bool(code & _MOTION_BIT) and not code & _WHEEL_BIT and (code & 3) == _NO_BUTTON
+    return (
+        bool(code & _MOTION_BIT)
+        and not code & (_WHEEL_BIT | _EXTRA_BUTTONS_BIT)
+        and (code & 3) == _NO_BUTTON
+    )
 
 
 class MotionCoalescer:

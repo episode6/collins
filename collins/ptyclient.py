@@ -18,17 +18,16 @@ shell itself; ``server``: this module).
 
 The redraw guard
 ----------------
-An attach answers with a redraw painted from the service's screen model
-(§3.3): the VTE is reset, and from then until the guard comes down every
-`commit` is dropped, so nothing the VTE says on its own account while it is
-being repainted (an answer to a query the preamble re-asserts a mode with,
-a focus report the reset provokes) reaches the pty as if typed. After the
-frame flagged ``REDRAW_END`` the client feeds ``CSI 5 n``; VTE's ``CSI 0
-n`` is the last thing it says in reply (F3), and the guard comes down on
-it. If the redraw turned focus reporting on (``CSI ?1004h`` in the
-preamble: the tracker's word, read off the redraw's own bytes, the one
-local read this module makes of the stream), the client then tells the
-program the real focus state, which the reset had lost.
+`redrawguard.RedrawGuard` (GTK-free, its own tests) is the state machine:
+raised by an attach or by the first frame of a redraw the service sends
+on its own (flow control, §3.2; the VTE is reset then), lowered only by
+the VTE's answer to the latest sentinel fed after the frame flagged
+``REDRAW_END`` (a generation-tagged ``OSC 4`` query), or by a 2 s
+watchdog. While it is up every commit is dropped, so nothing the VTE
+says on its own account while it is being repainted reaches the pty as
+if typed. The `attach` reply lists the modes the redraw's preamble
+re-asserted; if focus reporting (``?1004h``) is among them the client
+then tells the program the real focus state, which the reset had lost.
 
 The mouse
 ---------
@@ -61,6 +60,7 @@ from gi.repository import GLib, Vte
 
 from .api import protocol
 from .mouserate import MOTION_COALESCE_MS, MotionCoalescer
+from .redrawguard import RedrawGuard
 
 log = logging.getLogger(__name__)
 
@@ -70,10 +70,7 @@ if PTY_BACKEND not in BACKENDS:
     log.warning("COLLINS_PTY_BACKEND=%r is not one of %s; using vte", PTY_BACKEND, BACKENDS)
     PTY_BACKEND = "vte"
 
-# The sentinel that ends the redraw guard, and VTE's answer to it (F3, F8).
-SENTINEL = b"\x1b[5n"
-SENTINEL_ANSWER = b"\x1b[0n"
-FOCUS_REPORTING_ON = b"\x1b[?1004h"
+FOCUS_REPORTING_ON = "?1004h"  # as the attach reply's `modes` lists it
 FOCUS_IN, FOCUS_OUT = b"\x1b[I", b"\x1b[O"
 
 
@@ -123,9 +120,11 @@ class ClientTerminal:
         self.pty: int | None = None
         self._on_exited = on_exited
         self._on_pty_event = on_pty_event
-        self._guard = False
-        self._redraw_turned_focus_on = False
+        self.guard = RedrawGuard(self._arm, GLib.source_remove)
+        self._focus_reporting = False  # the redraw's preamble turned it on
+        self._nul_warned = False
         self._exited = False
+        self.term: dict = {}  # the hello's term: colours and scheme, sent as `theme`
         self._motion = MotionCoalescer()
         self._motion_source = 0
         self._last_grid: tuple[int, int] | None = None
@@ -143,15 +142,15 @@ class ClientTerminal:
         here for this terminal's pty)."""
         if pty != self.pty or self._exited:
             return
-        if flags & protocol.FLAG_REDRAW:
-            if FOCUS_REPORTING_ON in data:
-                self._redraw_turned_focus_on = True
-            self.terminal.feed(data)
-            if flags & protocol.FLAG_REDRAW_END:
-                # The guard stays up until VTE has answered the sentinel.
-                self.terminal.feed(SENTINEL)
-            return
+        reset, sentinel = self.guard.on_frame(flags)
+        if reset:
+            # A redraw the service sent on its own (flow control, a resize
+            # for another client): the screen it lands on is stale.
+            self.terminal.reset(True, True)
         self.terminal.feed(data)
+        if sentinel is not None:
+            # The guard stays up until VTE has answered this sentinel.
+            self.terminal.feed(sentinel)
 
     def on_event(self, event: dict) -> None:
         if event.get("pty") != self.pty:
@@ -177,13 +176,19 @@ class ClientTerminal:
         at this VTE's grid. The attach reply."""
         self.pty = pty
         self._exited = False
-        self._guard = True
-        self._redraw_turned_focus_on = False
+        self._focus_reporting = False
         self._motion = MotionCoalescer()
+        self.guard.raise_for_attach()
         self.terminal.reset(True, True)
         cols, rows = self.grid()
-        reply = self.client.request({"t": "attach", "pty": pty, "cols": cols, "rows": rows})
+        try:
+            reply = self.client.request({"t": "attach", "pty": pty, "cols": cols, "rows": rows})
+        except Exception:
+            self.guard.attach_failed()  # no redraw is coming: typing may go on
+            raise
+        self._focus_reporting = FOCUS_REPORTING_ON in (reply.get("modes") or ())
         self._last_grid = (cols, rows)
+        self.send_theme()
         return reply
 
     def detach(self) -> None:
@@ -204,19 +209,25 @@ class ClientTerminal:
     def _on_commit(self, _terminal, text: str, size: int) -> None:
         if self.pty is None or self._exited:
             return
-        data = text.encode("utf-8", "surrogateescape")[:size] if text else b""
+        data = commit_bytes(text, size)
+        if data is None:
+            if not self._nul_warned:
+                self._nul_warned = True
+                log.warning("a commit of %d bytes came through as %r; sent as far as it reads", size, text)
+            data = (text or "").encode("utf-8", "surrogateescape")
         if not data:
             return
-        if self._guard:
+        was_up = self.guard.up
+        if not self.guard.on_commit(data):
             self.dropped_commits += 1
-            if SENTINEL_ANSWER in data:
-                self._guard = False
-                if self._redraw_turned_focus_on:
-                    self._redraw_turned_focus_on = False
-                    self.client.send_input(self.pty, FOCUS_IN if self.terminal.has_focus() else FOCUS_OUT)
+            if was_up and not self.guard.up and self._focus_reporting:
+                # The redraw turned focus reporting on; the reset lost the
+                # real state, so say it now.
+                self._focus_reporting = False
+                self.client.send_input(self.pty, FOCUS_IN if self.terminal.has_focus() else FOCUS_OUT)
             return
-        if b"\x1b[<" not in data:
-            self.client.send_input(self.pty, data)
+        if b"\x1b[<" not in data and self._motion.pending is None:
+            self.client.send_input(self.pty, data)  # nothing pending to keep order behind
             return
         now, pending = self._motion.take(data)
         if now:
@@ -265,13 +276,46 @@ class ClientTerminal:
         except Exception:
             log.debug("resize event for pty %s failed", self.pty, exc_info=True)
 
+    def _arm(self, ms: int, fn) -> int:
+        return GLib.timeout_add(ms, lambda: (fn(), GLib.SOURCE_REMOVE)[1])
+
+    def send_theme(self) -> None:
+        """The `theme` event: the terminal's colours and scheme, so the
+        service answers OSC 10/11/4 and the colour-scheme query as this
+        terminal would (§3.3). Sent at attach and whenever the theme
+        changes (`set_term`)."""
+        if self.pty is None or self._exited or not self.term:
+            return
+        try:
+            self.client.send_event({"t": "theme", "term": dict(self.term)})
+        except Exception:
+            log.debug("theme event for pty %s failed", self.pty, exc_info=True)
+
+    def set_term(self, term: dict) -> None:
+        self.term = {k: v for k, v in term.items() if v is not None}
+        self.send_theme()
+
     @property
     def guarded(self) -> bool:
-        return self._guard
+        return self.guard.up
 
     @property
     def exited(self) -> bool:
         return self._exited
+
+
+def commit_bytes(text: str | None, size: int) -> bytes | None:
+    """The bytes a `commit` carried. PyGObject hands the signal a C
+    string, so a NUL ends the text early: ``\\0`` alone (Ctrl+Space,
+    Ctrl+@) arrives as ``''`` with *size* 1, and ``a\\0b`` as ``'a'`` with
+    size 3. The first is given back whole; any other short read is None
+    (the caller sends what it has and says so once)."""
+    data = (text or "").encode("utf-8", "surrogateescape")
+    if size <= len(data):
+        return data[:size]
+    if not data and size == 1:
+        return b"\x00"
+    return None
 
 
 class ServicePtyPort:
@@ -302,6 +346,9 @@ class ServicePtyPort:
             self._client.send_input(self._view.pty, data)
 
     def resize(self, cols: int, rows: int) -> None:
+        # The PtyPort of §3.5: a never-shown tab is sized before its spawn
+        # (window.start_background_session), and the grid goes to the
+        # service as the widget's allocation would have.
         self._view.terminal.set_size(cols, rows)
         self._view.send_grid()
 
@@ -318,16 +365,16 @@ class ServiceScreenPort:
     """`service.ports.ScreenPort` over the service's screen model
     (`termscreen.Screen`), read through the loopback's `screen_of`. The
     model is the screen as anchored to the cursor already (it has no
-    scroll position), so every row index is the model's own. *foreground*
-    is the theme's text colour, read live (None while the terminal follows
-    the system colours), as `VteScreenPort` reads it."""
+    scroll position), so every row index is the model's own. *colours*
+    answers the theme's (foreground, background, 16-colour palette), read
+    live, each None while the terminal follows the system colours; the
+    model's `tail_is_faint` is today's read only with the colours the
+    terminal draws in."""
 
-    def __init__(
-        self, client, view: ClientTerminal, foreground: Callable[[], tuple[int, int, int] | None]
-    ) -> None:
+    def __init__(self, client, view: ClientTerminal, colours: Callable[[], tuple]) -> None:
         self._client = client
         self._view = view
-        self._foreground = foreground
+        self._colours = colours
 
     def _screen(self) -> Any:
         if self._view.pty is None:
@@ -357,10 +404,15 @@ class ServiceScreenPort:
         screen = self._screen()
         if screen is None or not 0 <= row < screen.row_count():
             return False
-        fg = self._foreground()
-        if fg is None:
-            return screen.tail_is_faint(row, column)
-        return screen.tail_is_faint(row, column, foreground=fg)
+        fg, bg, palette = self._colours()
+        kw = {}
+        if fg is not None:
+            kw["foreground"] = fg
+        if bg is not None:
+            kw["background"] = bg
+        if palette:
+            kw["palette"] = palette
+        return screen.tail_is_faint(row, column, **kw)
 
     def first_column(self) -> tuple[str, ...]:
         screen = self._screen()
@@ -392,9 +444,9 @@ class ServiceScreenPort:
 
 def _cells_prefix(cells: list, end_column: int) -> str:
     """The text of a model row's cells up to *end_column* (cells,
-    exclusive), as `termscreen._line_text` gives the whole row: up to the
+    exclusive), as `termscreen.line_text` gives the whole row: up to the
     last cell written, a blank inside reading as a space, the second half
     of a wide character nothing (its first half carries the text)."""
-    from .service.termscreen import _line_text
+    from .service.termscreen import line_text
 
-    return _line_text(cells[:end_column])
+    return line_text(cells[:end_column])

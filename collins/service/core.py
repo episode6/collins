@@ -100,6 +100,9 @@ class ServiceCore:
             on_event=on_stream_event,
         )
         self._clients: set[int] = set()  # id(client)
+        pruned = self.ptys.prune_models()
+        if pruned:
+            log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
 
     # -- clients
 

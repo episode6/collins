@@ -429,7 +429,7 @@ def _trim(line: list) -> int:
     return end
 
 
-def _line_text(line: list) -> str:
+def line_text(line: list) -> str:
     """What VTE's text read gives for a row: the cells up to the last one
     written, a skipped or erased cell reading as a space."""
     out = []
@@ -562,10 +562,10 @@ class Screen:
         return self.rows_count
 
     def rows(self) -> list[str]:
-        return [_line_text(line) for line in self.grid.lines]
+        return [line_text(line) for line in self.grid.lines]
 
     def row_text(self, row: int) -> str:
-        return _line_text(self.grid.lines[row])
+        return line_text(self.grid.lines[row])
 
     def cells(self, row: int) -> list:
         return self.grid.lines[row]
@@ -575,7 +575,7 @@ class Screen:
         into the next with nothing between them."""
         out = []
         for y, line in enumerate(self.grid.lines):
-            out.append(_line_text(line))
+            out.append(line_text(line))
             if not self.grid.wrapped[y]:
                 out.append("\n")
         return "".join(out)

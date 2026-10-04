@@ -303,7 +303,7 @@ REPLIES = {
     },
     "local": {},
     "subscribe": {"items": 12, "ptys": 2},
-    "attach": {"cols": 120, "rows": 40, "active": False, "sized_for": "desktop"},
+    "attach": {"cols": 120, "rows": 40, "active": False, "sized_for": "desktop", "modes": ["?1004h", ">5u"]},
     "detach": {},
     "spawn": {"pty": 8, "cols": 120, "rows": 40},
     "prompt": {},
