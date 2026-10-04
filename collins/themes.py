@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-16. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 """Built-in terminal color palettes for the VTE terminal."""
 
 from __future__ import annotations
@@ -90,6 +90,11 @@ DEFAULT_THEME = "Default"
 def get_theme(name: str | None) -> dict | None:
     """The palette dict for a theme name, or None for 'Default'/unknown."""
     return _THEMES.get(name or DEFAULT_THEME)
+
+
+def hex_rgb(hex_str: str) -> tuple[int, int, int]:
+    """'d3d7cf' -> (211, 215, 207): a theme colour as the screen model takes it."""
+    return int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
 
 
 def terminal_foreground(name: str | None) -> tuple[int, int, int] | None:

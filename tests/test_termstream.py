@@ -586,6 +586,33 @@ def test_tokens_kinds():
     assert Csi(CSI + b"38:2::1m", b"", b"38:2::1", b"", ord("m")).numbers() is None
 
 
+def test_the_trackers_worst_case_fits_the_attach_replys_bound():
+    """Every known mode off its default, the unknown-mode allowance full, the
+    kitty stack full, modifyOtherKeys on: the assertions list validates
+    as an attach reply (protocol.MODES_MAX is sized to it)."""
+    from collins.api import protocol
+
+    t = termstream.ModeTracker()
+    for mode in termstream.VTE_PRIVATE_MODES:
+        t.private[mode] = not termstream._default(termstream.VTE_PRIVATE_MODES, mode)
+    for mode in termstream.VTE_ANSI_MODES:
+        t.ansi[mode] = not termstream._default(termstream.VTE_ANSI_MODES, mode)
+    unknown = 0
+    for mode in range(60000, 65535):
+        if len(t.private) >= len(termstream.VTE_PRIVATE_MODES) + termstream.UNKNOWN_MODES_MAX:
+            break
+        t.private[mode] = True
+        unknown += 1
+    t.kitty_base = 1
+    t.kitty_stack = [31] * termstream.KITTY_STACK_MAX
+    t.modify_other_keys = 2
+    modes = t.assertions()
+    assert len(modes) <= protocol.MODES_MAX
+    reply = protocol.reply(1, cols=80, rows=24, active=True, sized_for="x", modes=modes)
+    checked = protocol.validate_response(reply, "attach")
+    assert not isinstance(checked, protocol.Refusal) and checked.ok
+
+
 def test_the_service_loads_no_gi():
     # conftest blocks only the widget libraries; a stray GLib import in the
     # service would pass the suite, so look in a fresh interpreter.

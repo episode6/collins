@@ -1897,10 +1897,13 @@ class Session:
                     # _finish_spawn re-checks the directory; on failure it
                     # falls back with its usual warning.
                     inside = cwd is not None and _within(worktree, cwd) and Path(cwd).is_dir()
-                    # Default-idle as in the base, though it advances the
-                    # spawn; PR-1.7 rewrites this path at PRIORITY_DEFAULT.
+                    # It advances the spawn, so it lands at PRIORITY_DEFAULT:
+                    # a default-idle callback starves under CI's Xvfb.
                     self.scheduler.idle_add(
-                        self._finish_spawn, cwd if inside else worktree, session_id
+                        self._finish_spawn,
+                        cwd if inside else worktree,
+                        session_id,
+                        priority=GLib.PRIORITY_DEFAULT,
                     )
 
                 self.scheduler.background(recreate)

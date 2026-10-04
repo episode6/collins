@@ -29,6 +29,9 @@ Options:
     --shard I/N     run only the I-th of N time-balanced shards (1-based);
                     CI runs the suite as five of these in parallel
     --timeout SECS  per-check timeout, default 300
+    --pty-backend B run the checks with COLLINS_PTY_BACKEND=B (vte, the
+                    default, or server: the tab on the service's pty server
+                    through the loopback); CI runs the suite on both
     --list          print the discovered checks and exit
 
 Sharding is by measured wall time, not by count: CHECK_SECONDS below holds
@@ -85,6 +88,8 @@ CHECK_SECONDS = {
     # shell (153 scenarios, every drawn cell read one at a time, each
     # scenario's redraw fed to a second terminal).
     "check_termscreen_parity.py": 60.0,
+    # Not yet timed on CI: about 12 s on a dev box under the headless shell.
+    "check_attach_redraw.py": 12.0,
     "check_composer_paste.py": 6.0,
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,
@@ -169,7 +174,7 @@ def discover(only):
 SKIP_EXIT = 77
 
 
-def run_check(path, timeout, use_dbus):
+def run_check(path, timeout, use_dbus, env=None):
     """Run one check script; return (status, seconds) where status is
     'pass', 'skip', 'fail', or 'timeout'."""
     cmd = [sys.executable, path]
@@ -178,7 +183,7 @@ def run_check(path, timeout, use_dbus):
     start = time.monotonic()
     # A check spawns real children (VTEs, shims); its own process group lets
     # a timeout take the whole tree down rather than orphaning them.
-    proc = subprocess.Popen(cmd, start_new_session=True)
+    proc = subprocess.Popen(cmd, start_new_session=True, env=env)
     try:
         code = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -211,6 +216,9 @@ def main():
     parser.add_argument("--only", action="append", default=[], metavar="SUBSTR")
     parser.add_argument("--shard", type=parse_shard, default=None, metavar="I/N")
     parser.add_argument("--timeout", type=int, default=300, metavar="SECS")
+    parser.add_argument(
+        "--pty-backend", choices=("vte", "server"), default=None, metavar="BACKEND"
+    )
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
@@ -234,15 +242,19 @@ def main():
             file=sys.stderr,
         )
 
+    env = None
+    if args.pty_backend:
+        env = dict(os.environ, COLLINS_PTY_BACKEND=args.pty_backend)
+        print(f"run_e2e: COLLINS_PTY_BACKEND={args.pty_backend}", flush=True)
     results = []
     for i, path in enumerate(checks, 1):
         name = os.path.basename(path)
         print(f"\n=== [{i}/{len(checks)}] {name} ===", flush=True)
-        status, secs = run_check(path, args.timeout, use_dbus)
+        status, secs = run_check(path, args.timeout, use_dbus, env)
         if status not in ("pass", "skip"):
             print(f"=== {name}: {status.upper()} ({secs:.1f}s), retrying ===",
                   flush=True)
-            status2, secs2 = run_check(path, args.timeout, use_dbus)
+            status2, secs2 = run_check(path, args.timeout, use_dbus, env)
             secs += secs2
             status = "flaky" if status2 == "pass" else status2
         print(f"=== {name}: {status.upper()} ({secs:.1f}s) ===", flush=True)

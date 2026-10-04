@@ -56,7 +56,9 @@ def latest_green_run():
 def e2e_jobs(run_id):
     run = json.loads(gh(
         "run", "view", str(run_id), "--repo", REPO, "--json", "jobs,createdAt,headBranch"))
-    jobs = [j for j in run["jobs"] if re.fullmatch(r"e2e(-shard \(\d+\))?", j["name"])]
+    # `e2e`, `e2e-shard (N)` (before the two backends) and `e2e-shard (vte, N)`
+    # / `e2e-shard (server, N)`: every leg, both backends.
+    jobs = [j for j in run["jobs"] if re.fullmatch(r"e2e(-shard \((?:\w+, )?\d+\))?", j["name"])]
     if not jobs:
         sys.exit(f"run {run_id} has no e2e jobs")
     return run["createdAt"][:10], run["headBranch"], jobs
@@ -122,7 +124,10 @@ def main():
         log = gh("run", "view", "--repo", REPO, "--job", str(job["databaseId"]), "--log")
         got = timings_from_log(log)
         print(f"{job['name']}: {len(got)} timed checks")
-        measured.update(got)
+        # The table is shared by both backends: a check's weight is its
+        # slower run, so neither backend's shard overruns.
+        for name, secs in got.items():
+            measured[name] = max(secs, measured.get(name, 0.0))
 
     runner = load_runner(args.runner)
     present = {os.path.basename(p) for p in runner.discover(only=[])}

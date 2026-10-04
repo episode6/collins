@@ -77,6 +77,13 @@ SYNTHETIC = {
     "backspace-wrap": "A" * 120 + "\x08\x08X\r\n" + "B" * 120 + "C\x08\x08\x08Y",
     "charset-line-drawing": f"{E}(0lqqk{E}(B plain {E})0\x0elqqk\x0f plain",
     "shell-wrap": "$ " + "long " * 40 + "\r\n" + "日本" * 70 + "\r\nend",
+    # What capture_contents has to say about a wrap: a row that wrapped at
+    # the margin, a wide character pushed to the next row by the margin,
+    # blanks typed up to and across a wrap (PR-1.7's attach check found
+    # VTE's capture joins the wrapped rows).
+    "capture-wrapped-row": "W" * 130 + "\r\nnext",
+    "capture-wide-at-wrap": "v" * 119 + "日本語" + "x\r\nnext",
+    "capture-blanks-at-wrap": "b" * 117 + "   " + "  tail\r\n" + "c" * 120 + "   \r\nend",
     "erase-inside-row": f"{E}[44m{E}[5X{E}[0m{E}[8Cx\r\nab{E}[41m{E}[3X{E}[0m{E}[6Cy\r\n"
     f"{E}[42mabc{E}[1K{E}[0m{E}[10Gz",
     "decorations": f"{E}[58:2::200:100:50m{E}[4mcoloured{E}[0m {E}[58:5:196;4:3mcube{E}[0m "
@@ -238,6 +245,19 @@ RESIZE = {
     "shrink-then-ed2": (20, 10, b"r0\r\nr1\r\nr2\x1b[9;1H", (20, 6), b"\x1b[2J"),
     "shrink-written-low-then-ed2": (20, 10, b"r0\r\nr1\r\nr2\x1b[9;1Hlow", (20, 6), b"\x1b[2J"),
 }
+
+
+def normalise_capture(text: str) -> str:
+    """A whole-text capture as the two sides are compared: VTE's
+    `write_contents_sync` writes a never-written cell as NUL and keeps
+    every row its buffer holds; the model's `capture_contents` gives a
+    blank as a space and drops the trailing empty rows. Both are read
+    with NUL as a space, each row's trailing blanks dropped, the trailing
+    empty rows dropped."""
+    rows = [row.replace("\x00", " ").rstrip(" ") for row in text.split("\n")]
+    while rows and not rows[-1]:
+        rows.pop()
+    return "\n".join(rows)
 
 
 def merge_runs(cells: list) -> list:

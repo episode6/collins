@@ -405,11 +405,128 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   `check_termscreen_parity.py --write` under the headless display to
   regenerate the goldens from VTE, and run the unit suite.
 
+## The server backend: the tab on the pty server (ptyclient, loopback, core)
+
+Since PR-1.7 of the split a session tab runs on one of two backends,
+`ptyclient.PTY_BACKEND`, read once from `COLLINS_PTY_BACKEND` (`vte`, the
+default; `server`, opt-in until PR-1.9 makes it the only one). On `vte`
+nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
+
+- **The terminal has no child.** `TerminalTab.terminal` is a
+  `ptyclient.ClientVte` (a `Vte.Terminal` that reports its own allocation,
+  since GTK4 has no size-allocate signal) glued to a pty of the service by
+  `ptyclient.ClientTerminal` (`tab._view`): output frames are `feed()`,
+  every `commit` goes back as an input frame, the grid goes as a `resize`
+  event on every allocation change, `notify::has-focus` as a `focus`
+  event, `pty-exited` is what `child-exited` was (`tab._on_pty_exited` →
+  `Session.shell_exited`; a status the service does not know is -1). The
+  ports are `ptyclient.ServicePtyPort` (a write is an input frame, a
+  resize `set_size` plus the event; the pid and foreground group read off
+  the loopback's pty object) and `ServiceScreenPort` over the service's
+  `termscreen.Screen` (`client.screen_of(pty)`): the model is the screen
+  as anchored to the cursor already, so row indices are the model's own;
+  `row_text` cuts a row's cells, `visible_text` joins on the wrap flags.
+- **The spawn.** `_TabHost.spawn_shell` → `TerminalTab._service_spawn`: a
+  `spawn` request (kind `agent`, the cwd, the VTE's grid), then
+  `ClientTerminal.attach(pty)`, and `Session.shell_spawned` an idle later
+  at `PRIORITY_DEFAULT` (VTE's spawn was asynchronous; the session's
+  recreated-worktree landing now runs at `PRIORITY_DEFAULT` too). The
+  **service** builds the shell's environment (its own, plus the two
+  progress declarations when `progress_termprop` is on: `ServiceCore`'s
+  `get_setting`); the session types the agent command exactly as before,
+  the `sandboxrun.py` wrapper included. A refusal (`SpawnError`'s errno)
+  is painted where VTE's spawn error was.
+- **The redraw guard** (`redrawguard.RedrawGuard`, GTK-free,
+  `tests/test_redrawguard.py`). Raised by `attach` (the VTE reset first)
+  and by the first `REDRAW` frame of a redraw the service sends on its
+  own (flow control, a resize for another client; the VTE is reset then
+  too). Every commit is dropped until VTE answers the sentinel fed after
+  the frame flagged `REDRAW_END`: a generation-tagged `OSC 4;<index>;?`
+  (DSR 5 answers the same whatever was asked, so two sentinels could not
+  be told apart), and only the latest sentinel's answer lowers it, so
+  two attaches back to back or a redraw landing mid-redraw stay guarded
+  until the last repaint is in. A 2 s watchdog lowers a guard nothing
+  answered (an attach that failed, a sink cut mid-redraw) and logs. The
+  `attach` reply's `modes` lists what the preamble re-asserted; if
+  `?1004h` is among them the real focus state is sent when the guard
+  comes down. `ClientTerminal.dropped_commits` counts what the guard
+  swallowed (`check_attach_redraw.py` asserts it and that no sentinel
+  answer reached the pty). A commit carrying NUL (Ctrl+Space, Ctrl+@)
+  reaches `commit` as an empty C string of size 1 and is sent as `\0`
+  (`ptyclient.commit_bytes`).
+- **The mouse.** `mouserate.MotionCoalescer` (GTK-free,
+  `tests/test_mouserate.py`): a plain motion report naming the cell of the
+  one before is dropped, the rest coalesced to the latest per 30 ms on a
+  timer in `ClientTerminal`; presses, releases, wheel and drags go at once
+  and flush what was pending ahead of them.
+- **`feed_message` is `paint`** (rule 2 of §3.1) once the pty is attached:
+  the line goes into the stream on the service, so the model and every
+  client show it; before the spawn or after the exit it is fed to the
+  widget alone.
+- **The tab's end.** `TerminalTab.release_pty()` (from
+  `MainWindow._on_close_page`, the final close) sends `close` (mode
+  `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
+  SIGKILL after the grace), detaches and closes the loopback client:
+  closing a tab ends the session (D12) until *Detach* in PR-1.12.
+  `App.do_shutdown` shuts the loopback down, which finishes every pty on
+  the spot, records its row gone and removes its model file (Phase 1:
+  quitting ends the sessions; scrollback survives a crash only, and only
+  once PR-3.6's keeper exists to re-adopt a live pty from its file).
+- **The wiring.** `App._start_service_loopback` builds one
+  `service.core.ServiceCore` (the pty half: `spawn`, `attach`, `detach`,
+  `paint`, `close`; the `resize`/`focus`/`theme` events; the state's
+  `set_pty` / `set_pty_next_id` as the pty table's writers) behind an
+  `api.loopback.LoopbackServer` in `terminal.SERVICE_LOOPBACK`; a tab
+  built without an app gets one made on the spot. The loopback passes
+  the same dicts and bytes the socket will, every message through
+  `protocol.validate` both ways, with no framing and no queue (a request
+  is answered before it returns; every live frame is reported drained
+  as the callback takes it). Two shortcuts the socket will not have
+  (`screen_of`, `pty_of`) exist because the `Session` still runs in the
+  client's process; they go with the loopback (D21, PR-1.12).
+- **What differs, by design.** A row written before a resize is kept by
+  the model as it was (no reflow, D19) where VTE re-wraps it: a shell's
+  echo from before the tab's first allocation reads differently in
+  `capture_contents` on the two backends until the program repaints
+  (`check_attach_redraw.py` compares from the first line written at the
+  settled grid for that reason). `capture_contents` is held to VTE's
+  `write_contents_sync` by the goldens' `capture` read (three wrap
+  scenarios in `scenarios.SYNTHETIC`, every scenario compared after
+  `scenarios.normalise_capture`): soft-wrapped rows joined, and the rows
+  `ED 3` blanked left out (VTE's text reads show them, measured in
+  PR-1.2; its capture does not, measured in PR-1.7:
+  `Screen.scrollback_erased` counts them, carried in the model file).
+- **The first keystroke after focus** (F11's unexplained loss) is the
+  harness, not the client. `scripts/probe_first_keystroke.py` drives the
+  glue with real input through the headless shell's own bus: with `cat`
+  behind the pty, under every mode the CLI sets (focus reporting, mouse
+  tracking, the kitty flags, modifyOtherKeys, bracketed paste) and with
+  the guard freshly raised and lowered, the first key after a click
+  arrived in every round (20 to 30 a condition; the one miss was a click
+  that did not focus, not a key). `scripts/spike_split_7_server_drive.py`
+  (a real `claude` in a real tab) reproduced the loss once per run: the
+  key after the **first** click into the window never reached GTK at all
+  (a capture-phase key controller on the window saw nothing, no commit,
+  the guard down), while the key after a second click arrived in every
+  run (server: lost in 7 of 9 runs; the same step on the `vte` backend,
+  the drive's `--backend vte` control run: lost in 2 of 4, the key never
+  seen by GTK either, delivered when it was). The key never reached GTK;
+  the compositor's keyboard focus not having moved yet to the window the
+  click activated is the likely cause (the toplevel reports
+  `is_active()` False throughout under the headless shell). A harness
+  that clicks a window for the first time and types in the same breath
+  loses that key, on either backend.
+- **Running the suite on it:** `python3 scripts/run_e2e.py --pty-backend
+  server` (CI runs both backends as `e2e-shard (<backend>, N)`); a single
+  check: `COLLINS_PTY_BACKEND=server … python3 scripts/check_x.py`.
+
 ## The service's pty server (ptyserver)
 
-`collins/service/ptyserver.py` (GLib only, nothing from GTK; not yet wired
-into the app) is the table of terminals the service will own, one `Pty`
-per agent session and per panel shell (spec §3.3, PR-1.5).
+`collins/service/ptyserver.py` (GLib only, nothing from GTK; wired into the
+app through `service.core.ServiceCore` and the loopback, used by every tab
+on the server backend) is the table of terminals the service owns, one
+`Pty` per agent session and, from PR-1.8, per panel shell (spec §3.3,
+PR-1.5).
 
 - **Lifetime.** `PtyServer.spawn(kind, argv, cwd, env, cols, rows, …)`
   does `os.openpty()`, sets the window size on the slave, forks, and in the
@@ -428,10 +545,11 @@ per agent session and per panel shell (spec §3.3, PR-1.5).
   `{"t": "pty-exited", "pty", "status"}` (the exit code, or minus the
   signal), the row removed. `close()` is SIGHUP to the process group plus
   the master closed, and SIGKILL after `CLOSE_GRACE_MS` (5 s) for a child
-  that ignored it; `shutdown()` saves and closes everything, waits a
-  bounded time for the saves in flight and writes any model still owed
-  synchronously (a stopping service runs no more idle callbacks) (Phase 1: stopping the service ends
-  every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
+  that ignored it; `shutdown()` closes every pty, waits a bounded time
+  for the saves in flight, then finishes each on the spot (status
+  unknown: the reap no longer lands on a stopping service), its row
+  recorded gone and its model file removed with it (Phase 1: stopping the
+  service ends every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
   `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7.
 - **Attach and the redraw.** `attach(pty, sink, cols, rows)` sends
   `Screen.snapshot()` with the tracker's `preamble(screen=False)` in
@@ -480,8 +598,8 @@ per agent session and per panel shell (spec §3.3, PR-1.5).
   validates every field and bound, clamps the file's caps to the model's
   constants, and raises on anything off) is written to
   `$XDG_STATE_HOME/collins/pty/<id>.model` (0600 in a 0700 directory) at
-  most every `SAVE_INTERVAL_MS` while output arrives, at exit and at
-  shutdown: the dump on the loop, the encoding and the write on a worker
+  most every `SAVE_INTERVAL_MS` while output arrives and while the pty
+  lives (see the retention rule below): the dump on the loop, the encoding and the write on a worker
   thread (one in flight per pty, a save asked for meanwhile following it,
   the landing at `PRIORITY_DEFAULT`); `COLLINS_PTY_STATE_DIR` overrides the
   directory (tests, captures). `PtyServer.load_model(path)` gives the
@@ -492,8 +610,14 @@ per agent session and per panel shell (spec §3.3, PR-1.5).
   diff-like scrollback at about 4 000 rows and a pen-per-cell one at a few
   hundred, and leaves plain text to the 10 000-row cap. Pty ids are never
   reused: the next id is persisted (`AppState.pty_next_id`, through the
-  `record_next_id` callable), so no two ptys share a model file; removing
-  old files is the session's end (PR-1.7) and the keeper's (PR-3.6).
+  `record_next_id` callable), so no two ptys share a model file. **A
+  model file lives exactly as long as its pty's row**: removed when the
+  pty exits (`_finish`) and at shutdown (which finishes every pty on the
+  spot, status unknown, since the reap no longer lands on a stopping
+  service), and every `*.model` whose id is not in the table is pruned at
+  service start (`prune_models`, from `ServiceCore`). The panel history
+  and the transcript carry what a person needs after the exit; the file
+  exists for a live pty's re-adoption (PR-3.6).
 - **The `ptys` table.** The server's `record(pty_id, row | None)` callable
   (`AppState.set_pty`, wired in PR-1.7) keeps a row per live pty in
   `state.json` (§3.8): kind, session, cwd, pid, cols, rows, box, plan,

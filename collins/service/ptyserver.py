@@ -82,8 +82,9 @@ differs is applied first, so its redraw is painted at its own size and the
 program's repaint follows on the live stream; a sink that is not active is
 redrawn at the pty's grid and told so (``active`` False and ``sized_for``,
 the active sink's ``device`` when it has one). Every attached sink is sent
-the protocol's ``pty`` event when the size or the active client changes, so
-a pinned sink and its "Sized for" bar stay right.
+the protocol's ``pty`` event (the row, with the child's pid while it lives)
+when the size or the active client changes, so a pinned sink and its "Sized
+for" bar stay right, and a client learns the pid of what it attached to.
 
 **Flow control** (§3.2): the server counts the live bytes it has handed
 each sink for a pty and the sink reports what of them it has written out
@@ -126,24 +127,31 @@ agent, §3.10), waiting a bounded time for the saves in flight.
 
 The saved model
 ---------------
+A model file lives exactly as long as its pty's row: written while the
+pty lives, removed when it exits (`_finish`) and at shutdown, and every
+``*.model`` whose id is not in the table pruned at service start
+(`prune_models`: a service that died before an exit landed). The
+panel history and the transcript carry what a person needs after the
+exit; the file exists for a live pty's re-adoption (PR-3.6).
+
 `Screen.dump()` as JSON, written to
 ``$XDG_STATE_HOME/collins/pty/<pty id>.model`` (`COLLINS_PTY_STATE_DIR`
 overrides the directory; tests, captures and e2e checks use it; the
 directory is made 0700 and the file 0600) at most once per
-`SAVE_INTERVAL_MS` while output arrives, at exit and at shutdown. The dump
+`SAVE_INTERVAL_MS` while output arrives, for as long as the pty lives. The dump
 is taken on the loop (tens of milliseconds for a full scrollback, which is
 accepted for now and noted for PR-1.12's own loop); the JSON encoding and
 the write run on a worker thread, one in flight per pty, a save that was
 asked for meanwhile following it, the result landing at
 `GLib.PRIORITY_DEFAULT` (CLAUDE.md's rule for anything that advances a
-pipeline). It is what a restarted service reads to show a resumed
-session's scrollback and what `capture_contents` of a closed panel shell
-is read from (§3.10 point 3); PR-3.6's keeper adopts it. `Screen.load`
+pipeline). It is what a restarted service reads to re-adopt a live pty
+(§3.10 point 3; PR-3.6's keeper); it is removed when the pty exits and
+pruned at service start when its pty is not in the table, and a closed
+panel shell's text is the panel history's, not this file's. `Screen.load`
 validates every field and bound (rule 5) and raises on anything off, and
 `load_model` refuses a file over `MODEL_FILE_MAX` before reading it, so a
 file an older or newer service wrote, or a damaged one, means a fresh
-model, never a crash. The file is kept when the pty exits; removing it is
-the session's end (PR-1.7) and the keeper's business (PR-3.6). Pty ids are
+model, never a crash. Pty ids are
 never reused across restarts: the next id is persisted beside the table
 (`AppState.pty_next_id`, through the ``record_next_id`` callable), so no
 two ptys ever share a model file.
@@ -200,6 +208,10 @@ SAVE_WAIT_S = 5.0
 MODEL_FILE_MAX = 64 * 1024 * 1024
 # After close(), a child that ignored SIGHUP is killed this much later.
 CLOSE_GRACE_MS = 5000
+# After the reap, how long a pty waits for EOF before it is finished anyway:
+# a job the shell left holding the slave would otherwise keep a dead tab
+# open for as long as it lives (VTE's child-exited fires at the reap).
+EOF_AFTER_REAP_MS = 1000
 # Size changes reach the ptys table at most this often.
 RECORD_DEBOUNCE_MS = 1000
 DEFAULT_VTE_VERSION = 8400
@@ -225,17 +237,14 @@ def default_state_dir() -> Path:
     return base / "collins" / "pty"
 
 
-def spawn_environment(env: dict[str, str] | None, vte_version: int) -> dict[str, str]:
-    """The child's environment: the caller's, plus what VTE sets and what
-    makes the CLI announce its progress (`terminal._agent_tab_environment`)."""
+def spawn_environment(env: dict[str, str] | None, vte_version: int, progress: bool = True) -> dict[str, str]:
+    """The child's environment: the caller's, plus what VTE sets and, with
+    *progress*, what makes the CLI announce its progress
+    (`session.agent_environment`; off when the experimental setting is)."""
     out = dict(os.environ if env is None else env)
-    out.update(
-        TERM="xterm-256color",
-        COLORTERM="truecolor",
-        VTE_VERSION=str(vte_version),
-        ConEmuANSI="ON",
-        TERM_PROGRAM="kitty",
-    )
+    out.update(TERM="xterm-256color", COLORTERM="truecolor", VTE_VERSION=str(vte_version))
+    if progress:
+        out.update(ConEmuANSI="ON", TERM_PROGRAM="kitty")
     return out
 
 
@@ -323,6 +332,7 @@ class Pty:
         self._save_source = 0
         self._kill_source = 0
         self._record_source = 0
+        self._eof_source = 0
         self._dirty = False
         self._save_thread: threading.Thread | None = None
         self._save_again = False
@@ -453,9 +463,11 @@ class PtyServer:
         box: str | None = None,
         plan: str | None = None,
         options: dict | None = None,
+        progress: bool = True,
     ) -> int:
         """Fork `argv` on a new pty; the new pty's id. Raises `SpawnError`
-        when the child could not exec."""
+        when the child could not exec. *progress* adds the two progress
+        declarations to the environment (`spawn_environment`)."""
         if kind not in KINDS:
             raise ValueError(f"kind {kind!r}")
         if not argv:
@@ -464,7 +476,7 @@ class PtyServer:
         pty_id = self._next_id
         pty = Pty(self, pty_id, kind, cwd, cols, rows)
         pty.session, pty.box, pty.plan, pty.options = session, box, plan, options
-        child_env = spawn_environment(env, pty.state.vte_version)
+        child_env = spawn_environment(env, pty.state.vte_version, progress)
         master, slave = os.openpty()
         report_r, report_w = os.pipe()  # close-on-exec by default (PEP 446)
         try:
@@ -714,7 +726,13 @@ class PtyServer:
         self._redraw(pty, attachment)
         if key in pty.attachments:
             self._announce(pty, only=attachment)  # the attacher's, once, after its redraw
-        return {"cols": pty.cols, "rows": pty.rows, "active": pty.active == key, "sized_for": pty.sized_for}
+        return {
+            "cols": pty.cols,
+            "rows": pty.rows,
+            "active": pty.active == key,
+            "sized_for": pty.sized_for,
+            "modes": pty.filter.modes.assertions(),
+        }
 
     def detach(self, pty_id: int, sink) -> None:
         pty = self.ptys.get(pty_id)
@@ -780,11 +798,16 @@ class PtyServer:
                 "t": "pty",
                 "pty": pty.id,
                 "kind": pty.kind,
+                "cwd": pty.cwd,
                 "cols": pty.cols,
                 "rows": pty.rows,
                 "active": pty.active == id(attachment.sink),
                 "sized_for": pty.sized_for,
             }
+            if pty.pid is not None and not pty._reaped:
+                event["pid"] = pty.pid
+            if pty.session:
+                event["session"] = pty.session
             try:
                 attachment.sink.send_event(event)
             except Exception:
@@ -900,21 +923,17 @@ class PtyServer:
         a bounded time for the saves in flight."""
         ptys = list(self.ptys.values())
         for pty in ptys:
-            self.save_model(pty.id)
             if not pty._finished:
                 self.close(pty.id)
         self.wait_for_saves()
-        # A save that was in flight when we got here, or asked for after
-        # the join, would land on an idle callback a stopping service never
-        # runs: write the final model here, blocking, for every pty that
-        # still has one to write.
+        # The reap no longer lands on a stopping service: every pty it
+        # closed is finished here, its row recorded gone and its model
+        # file removed with it (the file lives as long as the row).
         for pty in ptys:
-            if pty._save_again or pty._dirty:
-                try:
-                    write_model_file(pty.model_path(), pty.screen.dump())
-                except OSError as exc:
-                    log.warning("pty %d: saving the model at shutdown failed: %s", pty.id, exc)
-                pty._dirty = pty._save_again = False
+            if not pty._finished:
+                pty._reaped = True
+                pty.exit_status = None
+                self._finish(pty)
 
     def wait_for_saves(self, timeout: float = SAVE_WAIT_S) -> None:
         threads = [t for t in self._save_threads() if t.is_alive()]
@@ -944,6 +963,19 @@ class PtyServer:
         # drain it before the farewell.
         self._drain(pty)
         self._maybe_finish(pty)
+        if not pty._finished and not pty._eof_source:
+            # Something the child left behind still holds the slave: the
+            # pty is finished after a bound anyway, and closing the master
+            # then hangs the leftover up.
+            pty._eof_source = GLib.timeout_add(EOF_AFTER_REAP_MS, self._on_eof_overdue, pty)
+
+    def _on_eof_overdue(self, pty: Pty) -> bool:
+        pty._eof_source = 0
+        if not pty._finished:
+            self._drain(pty)
+            log.debug("pty %d: reaped, no EOF after %d ms; finishing", pty.id, EOF_AFTER_REAP_MS)
+            self._finish(pty)
+        return GLib.SOURCE_REMOVE
 
     def _drain(self, pty: Pty) -> None:
         while pty.master >= 0 and not pty._eof:
@@ -975,16 +1007,24 @@ class PtyServer:
 
     def _finish(self, pty: Pty) -> None:
         pty._finished = True
-        for name in ("_read_watch", "_write_watch", "_save_source", "_kill_source", "_record_source"):
+        for name in (
+            "_read_watch", "_write_watch", "_save_source", "_kill_source", "_record_source", "_eof_source"
+        ):
             source = getattr(pty, name)
             if source:
                 GLib.source_remove(source)
                 setattr(pty, name, 0)
         self._close_master(pty)
         self._clear_queues(pty)
-        self._write_model(pty)
+        # The model file lives exactly as long as the pty's row: a save
+        # in flight is let go (its landing finds the pty finished), the
+        # file removed. The panel history and the transcript carry what
+        # a person needs after the exit; the file exists for a live pty's
+        # re-adoption (PR-3.6).
+        pty._dirty = pty._save_again = False
         self.ptys.pop(pty.id, None)
         self._record_row(pty)
+        self._remove_model(pty)
         log.debug("pty %d: exited, status %s", pty.id, wait_status_name(pty.exit_status))
         event = {"t": "pty-exited", "pty": pty.id, "status": pty.exit_status}
         for attachment in list(pty.attachments.values()):
@@ -1057,6 +1097,9 @@ class PtyServer:
     def _on_saved(self, pty: Pty, path: Path, error: OSError | None) -> bool:
         self._in_flight.pop(pty.id, None)
         pty._save_thread = None
+        if pty._finished:
+            self._remove_model(pty)  # a save that landed after the exit
+            return GLib.SOURCE_REMOVE
         if error is not None:
             log.warning("pty %d: saving the model failed: %s", pty.id, error)
             # Still dirty: the next due save retries, output or not.
@@ -1067,6 +1110,36 @@ class PtyServer:
         elif error is not None and not pty._save_source and not pty._finished:
             self._schedule_save(pty)
         return GLib.SOURCE_REMOVE
+
+    def _remove_model(self, pty: Pty) -> None:
+        try:
+            pty.model_path().unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            log.warning("pty %d: removing the model file failed: %s", pty.id, exc)
+
+    def prune_models(self) -> int:
+        """At service start: every ``*.model`` whose pty is not in the
+        table (a service that died before the exit landed) is removed;
+        how many were."""
+        removed = 0
+        try:
+            names = list(self.state_dir.iterdir())
+        except OSError:
+            return 0
+        for path in names:
+            if path.suffix != MODEL_SUFFIX:
+                continue
+            stem = path.stem
+            if stem.isdigit() and int(stem) in self.ptys:
+                continue
+            try:
+                path.unlink()
+                removed += 1
+            except OSError as exc:
+                log.warning("%s: pruning failed: %s", path, exc)
+        return removed
 
     def load_model(self, path: Path) -> termscreen.Screen | None:
         """A saved model, or None when the file is missing, too big,

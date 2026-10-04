@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-07. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 name: CI
 
@@ -62,9 +62,13 @@ jobs:
   #
   # The suite runs as five shards in parallel, dealt out by measured wall
   # time (scripts/run_e2e.py --shard, weights in its CHECK_SECONDS table) so
-  # each leg takes under a minute instead of the serial four. The matrix
-  # legs are `e2e-shard (N)`; the `e2e` job below fans them back in under
-  # the name the main-branch ruleset requires.
+  # each leg takes under a minute instead of the serial four, and on both
+  # pty backends (scripts/run_e2e.py --pty-backend: the tab's VTE spawning
+  # the shell itself, and the tab on the service's pty server through the
+  # loopback, COLLINS_PTY_BACKEND=server, until PR-1.9 makes it the only
+  # one). The matrix legs are `e2e-shard (vte, N)` and `e2e-shard (server,
+  # N)`; the `e2e` job below fans them back in under the name the
+  # main-branch ruleset requires.
   e2e-shard:
     needs: image
     runs-on: ubuntu-latest
@@ -74,6 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        backend: [vte, server]
         shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
@@ -83,10 +88,10 @@ jobs:
       # shard grows — so a pathological run still writes its step-summary
       # table instead of being hard-killed by GitHub mid-suite. A shard
       # passes in about a minute; a check that needs more than 120s is hung.
-      - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120 --shard ${{ matrix.shard }}/5
+      - run: xvfb-run -a -s "-screen 0 1920x1200x24" python3 scripts/run_e2e.py --timeout 120 --pty-backend ${{ matrix.backend }} --shard ${{ matrix.shard }}/5
 
   # Fan-in: `e2e` is a required status check on main, and a matrix job's
-  # legs are named `e2e-shard (1)` … — no job called `e2e` would leave
+  # legs are named `e2e-shard (vte, 1)` … — no job called `e2e` would leave
   # every PR unmergeable. `if: always()` runs it even when a shard fails
   # (or is cancelled) so that it reports red rather than being skipped,
   # which the ruleset would also treat as "not passed".

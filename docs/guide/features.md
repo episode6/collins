@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-02. Full change history: git log for this file.
+fork. Last modified: 2026-10-04. Full change history: git log for this file.
 -->
 
 # Features
@@ -129,6 +129,17 @@ Enter opens, Esc closes.
 
 ## Sessions & terminals
 
+- Experimental: **`COLLINS_PTY_BACKEND=server`** runs every session tab on
+  the service that the split into a headless service and a client is
+  building towards. The terminal you see has no child of its own: the
+  shell runs on a pty the in-app service holds, the service answers the
+  CLI's terminal queries and keeps a screen model of record, and the
+  terminal is painted from the service's stream — a fresh terminal
+  attaching to a running session is redrawn from that model, scrollback
+  and colours included. Opt-in by the environment variable only, and
+  the default stays the terminal's own pty until a release cycle of
+  daily use says the two feel the same; the e2e suite already runs on
+  both. Quitting Collins ends the sessions on both backends.
 - Clicking a session opens it in an embedded **VTE terminal** running your
   `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
   the directory the session **last worked in** (worktree-aware), not just

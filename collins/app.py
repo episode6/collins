@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-02. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -58,6 +58,7 @@ from . import (
     welcome,
 )
 from . import terminal as terminal_mod
+from .api.loopback import LoopbackServer
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .copylabel import open_uri
 from .i18n import _
@@ -66,6 +67,7 @@ from .notifycenter import NotificationCenter
 from .prefs import apply_color_scheme
 from .providers import SessionOptions
 from .prstatus import parse_pr_url
+from .service.core import ServiceCore
 from .sessions import worktree_project_root
 from .state import AppState
 from .store import SessionStore
@@ -1962,7 +1964,12 @@ class App(Adw.Application):
 
         # Shared across all windows so scans/monitors aren't duplicated and
         # state.json writes don't race. The app's own instance is the one
-        # that migrates the state split (see state.py's docstring).
+        # that migrates the state split (see state.py's docstring). main()
+        # builds a throwaway one first, also with migrate=True, so that
+        # i18n reads `language` (a device key) off the merged view before
+        # any GTK object exists; whichever of the two finds an unsplit
+        # file commits the split, and the other finds it done and only
+        # reads: two reads of each file at startup, never two migrations.
         self.state = AppState(migrate=True)
         apply_color_scheme(self.state.get_setting("color_scheme"))
         # A remembered CLI location goes on PATH before anything looks for
@@ -1973,6 +1980,7 @@ class App(Adw.Application):
 
         self._start_mcp_service()
         self._start_sandbox_support()
+        self._start_service_loopback()
 
         focus = Gio.SimpleAction.new("focus-session", GLib.VariantType("s"))
         focus.connect("activate", self._on_focus_session)
@@ -2493,6 +2501,21 @@ class App(Adw.Application):
         self._mcp_service = service
         providers.MCP_CONFIG_PATH = config
 
+    def _start_service_loopback(self) -> None:
+        """The service's pty half, in-process (spec §3.5 swap 2): the
+        loopback every tab on the ``server`` backend spawns its shell
+        through, with the app's state as the pty table's writer. Built
+        on every backend (it costs nothing idle) so a check can flip a
+        tab's backend without the app knowing."""
+        core = ServiceCore(
+            record=self.state.set_pty,
+            record_next_id=self.state.set_pty_next_id,
+            next_id=self.state.pty_next_id,
+            get_setting=self.state.get_setting,
+        )
+        self._service_loopback = LoopbackServer(core)
+        terminal_mod.SERVICE_LOOPBACK = self._service_loopback
+
     def _start_sandbox_support(self) -> None:
         """Find out, off the main loop, whether sandboxed sessions can be
         launched here (bubblewrap on PATH and a namespace probe that
@@ -2562,6 +2585,16 @@ class App(Adw.Application):
         # errors rather than breaking the session.
         if self._mcp_service is not None:
             self._mcp_service.stop()
+        loopback = getattr(self, "_service_loopback", None)
+        if loopback is not None:
+            # Phase 1: quitting ends every session the service's pty server
+            # holds (§3.10): every pty finished, its row recorded gone and
+            # its model file removed with it (a model file lives as long as
+            # its row; in Phase 1 scrollback survives a crash only, and only
+            # once PR-3.6's keeper exists to re-adopt a live pty).
+            terminal_mod.SERVICE_LOOPBACK = None
+            loopback.shutdown()
+            self._service_loopback = None
         grants = getattr(self, "_sandbox_grants", None)
         if grants is not None:
             # Every directory mounted into a running box, unmounted; the

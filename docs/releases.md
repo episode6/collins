@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-02. Full change history: git log for this file.
+fork. Last modified: 2026-10-04. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,15 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **Experimental: session tabs on the service's pty server.** With
+  `COLLINS_PTY_BACKEND=server` in the environment, every session tab
+  runs on the in-app half of the headless service Collins is being split
+  into: the shell runs on a pty the service holds, the service answers
+  the terminal's queries and keeps a screen model of record, and the
+  terminal you see is painted from the service's stream (a fresh terminal
+  attaching to a running session is redrawn from the model, scrollback
+  and colours included). Opt-in only; the default is unchanged. The e2e
+  suite runs on both backends in CI.
 - **App state is now two files.** `~/.config/collins/state.json` keeps what
   describes your sessions and projects and what Collins does for them
   (names, favorites, archives, drafts, pull request records, the sandbox,

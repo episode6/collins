@@ -264,7 +264,7 @@ def test_a_fresh_attach_gets_a_redraw_a_fresh_model_reproduces(server):
 
     late = Sink()
     reply = server.attach(pty, late, 40, 5)
-    assert reply == {"cols": 40, "rows": 5, "active": False, "sized_for": ""}
+    assert reply == {"cols": 40, "rows": 5, "active": False, "sized_for": "", "modes": []}
     redraws = late.redraws()
     assert len(redraws) == 1
     assert late.frames[-1][1] & FLAG_REDRAW_END
@@ -284,7 +284,7 @@ def test_the_first_sink_is_active_and_sizes_the_pty(server):
     pty = spawn_cat(server)  # 120x40
     a = Sink(device="laptop")
     reply = server.attach(pty, a, 80, 24)
-    assert reply == {"cols": 80, "rows": 24, "active": True, "sized_for": "laptop"}
+    assert reply == {"cols": 80, "rows": 24, "active": True, "sized_for": "laptop", "modes": []}
     assert winsize(server.get(pty).master) == (80, 24)
     assert server.get(pty).screen.columns() == 80
 
@@ -294,7 +294,7 @@ def test_a_resize_from_a_non_active_sink_waits_until_it_sends_input(server):
     a, b = Sink(device="laptop"), Sink(device="desk")
     server.attach(pty, a, 80, 24)
     reply = server.attach(pty, b, 100, 30)
-    assert reply == {"cols": 80, "rows": 24, "active": False, "sized_for": "laptop"}
+    assert reply == {"cols": 80, "rows": 24, "active": False, "sized_for": "laptop", "modes": []}
     assert winsize(server.get(pty).master) == (80, 24)
     server.resize(pty, 90, 28, sink=b)
     settle()
@@ -323,8 +323,12 @@ def test_sinks_are_told_of_size_and_active_changes(server):
     assert last(a)["active"] is True and last(a)["sized_for"] == "laptop" and last(a)["cols"] == 80
     assert last(b)["active"] is False and last(b)["sized_for"] == "laptop"
     server.write(pty, b"z", sink=b)  # b takes over and its size applies
-    assert last(a) == {"t": "pty", "pty": pty, "kind": "shell", "cols": 100, "rows": 30,
-                       "active": False, "sized_for": "desk"}
+    event = last(a)
+    assert event["pid"] == server.get(pty).pid and event["cwd"] == server.get(pty).cwd
+    assert {k: v for k, v in event.items() if k not in ("pid", "cwd")} == {
+        "t": "pty", "pty": pty, "kind": "shell", "cols": 100, "rows": 30,
+        "active": False, "sized_for": "desk",
+    }
     assert last(b)["active"] is True
     server.resize(pty, 90, 28, sink=b)
     assert last(a)["cols"] == 90 and last(b)["cols"] == 90
@@ -555,6 +559,46 @@ def test_the_child_exiting_produces_pty_exited_with_its_status(server):
     assert server.recorder.rows[pty] is None
 
 
+def test_a_job_holding_the_slave_does_not_hold_the_tab(server):
+    """The shell exits leaving a background job on the pty: VTE's
+    child-exited fires at the reap, and so does pty-exited, after at most
+    EOF_AFTER_REAP_MS without EOF; the master closed then hangs the job up."""
+    pty = spawn_sh(server, "set -m; sleep 30 & printf gone; exit 5")
+    sink = Sink()
+    server.attach(pty, sink, 120, 40)
+    start = time.monotonic()
+    pump(lambda: sink.exited(), timeout=10.0, what="pty-exited with the job alive")
+    assert time.monotonic() - start < ptyserver.EOF_AFTER_REAP_MS / 1000 + 4
+    assert sink.exited()[0]["status"] == 5
+    assert sink.live() == b"gone"
+    assert pty not in server.ptys
+
+
+def test_the_model_file_goes_with_the_pty_row(server, tmp_path):
+    pty = spawn_cat(server)
+    sink = Sink()
+    server.attach(pty, sink, 120, 40)
+    server.write(pty, b"saved", sink=sink)
+    wait_live(sink, b"saved")
+    path = server.save_model(pty)
+    pump(lambda: server.get(pty)._save_thread is None, what="the save to land")
+    assert path.exists()
+    server.close(pty)
+    pump(lambda: sink.exited(), what="pty-exited")
+    assert not path.exists()  # removed with the row
+    assert server.recorder.rows[pty] is None
+    # A file of a pty no longer in the table is pruned at start.
+    stale = server.state_dir / "999.model"
+    stale.write_text("{}")
+    other = server.state_dir / "notes.txt"
+    other.write_text("keep")
+    live = spawn_cat(server)
+    live_path = server.get(live).model_path()
+    live_path.write_text("{}")
+    assert server.prune_models() == 1
+    assert not stale.exists() and other.exists() and live_path.exists()
+
+
 def test_close_ends_the_child_by_sighup(server):
     pty = spawn_cat(server)
     sink = Sink()
@@ -637,15 +681,19 @@ def test_the_model_is_saved_and_loads_back(server, tmp_path):
     assert loaded.rows()[:2] == ["green", "plain"]
 
 
-def test_the_model_is_saved_on_exit_and_a_damaged_file_loads_as_none(server, tmp_path):
-    pty = spawn_sh(server, "printf farewell")
+def test_a_live_models_file_loads_back_and_a_damaged_file_loads_as_none(server, tmp_path):
+    pty = spawn_cat(server)
     sink = Sink()
     server.attach(pty, sink, 120, 40)
-    pump(lambda: sink.exited(), what="exit")
-    path = tmp_path / "pty" / f"{pty}.model"
-    server.wait_for_saves()
-    assert path.exists()
+    server.write(pty, b"farewell", sink=sink)
+    wait_live(sink, b"farewell")
+    path = server.save_model(pty)
+    pump(lambda: server.get(pty)._save_thread is None, what="the save to land")
+    assert path == tmp_path / "pty" / f"{pty}.model" and path.exists()
     assert server.load_model(path).rows()[0] == "farewell"
+    server.close(pty)
+    pump(lambda: sink.exited(), what="exit")
+    assert not path.exists()  # the file lives as long as the row
     path.write_text("{not json", encoding="utf-8")
     assert server.load_model(path) is None
     path.write_text(json.dumps({"format": 99}), encoding="utf-8")
@@ -691,7 +739,10 @@ def test_the_model_is_written_on_a_timer_while_output_arrives(server, tmp_path, 
     pump(path.exists, timeout=5, what="the timed save")
 
 
-def test_shutdown_writes_the_model_a_save_in_flight_would_have_lost(tmp_path, monkeypatch):
+def test_shutdown_finishes_every_pty_and_removes_its_model_file(tmp_path, monkeypatch):
+    """A save in flight at shutdown is waited for, then the file goes with
+    the row (nothing is resurrected by the straggler) and the row is
+    recorded gone without a loop iteration."""
     real = ptyserver.write_model_file
 
     def slow(path, data):
@@ -711,11 +762,10 @@ def test_shutdown_writes_the_model_a_save_in_flight_would_have_lost(tmp_path, mo
     wait_live(sink, b"SECOND")
     srv.shutdown()
     # No loop iteration after this: what a process that exits now leaves.
-    loaded = ptyserver.PtyServer(state_dir=tmp_path / "pty").load_model(tmp_path / "pty" / f"{pty}.model")
-    rows = loaded.rows()
-    assert rows[:2] == ["FIRST", "SECOND"]
+    assert not (tmp_path / "pty" / f"{pty}.model").exists()
     assert not any(t.is_alive() for t in srv._in_flight.values())
-    pump(lambda: not srv.ptys, what="every pty to end")
+    assert not srv.ptys and sink.exited()[0]["status"] is None
+    assert ptyserver.PtyServer(state_dir=tmp_path / "pty").prune_models() == 0
 
 
 def test_a_failed_save_is_retried(server, tmp_path, monkeypatch):
@@ -766,10 +816,10 @@ def test_shutdown_saves_and_closes_everything(tmp_path):
     for s in sinks:
         wait_live(s, b"w")
     srv.shutdown()
-    pump(lambda: not srv.ptys, what="every pty to end")
+    assert not srv.ptys  # finished on the spot: the reap does not land on a stopping service
     for i, s in zip(ids, sinks, strict=True):
-        assert (tmp_path / "pty" / f"{i}.model").exists()
-        assert s.exited()
+        assert not (tmp_path / "pty" / f"{i}.model").exists()  # the file goes with the row
+        assert s.exited() and s.exited()[0]["status"] is None
 
 
 def test_the_default_state_dir_honours_the_override(monkeypatch, tmp_path):
