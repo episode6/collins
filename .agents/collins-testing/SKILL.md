@@ -182,6 +182,16 @@ a tab running a real CLI, kill the foreground process group
   last commit), so nothing waits on a timer. `get_cursor_position()` counts
   rows from the top of the buffer, not the screen: take a fresh terminal
   before comparing a cursor.
+- `scripts/check_termscreen_parity.py` holds a real VTE to the termscreen
+  goldens (`tests/fixtures/streams/*.golden.json`): rows, cursor, every
+  drawn cell read one at a time through `Vte.Format.HTML` (a row-level
+  HTML read folds faint into a colour only for its first run), the dim
+  tail and the grammar's reads. `--write` regenerates the goldens from
+  this VTE; the unit suite then holds the model to them. It converts
+  VTE's buffer-relative cursor row by homing the cursor with origin mode
+  off and reading where it landed. The recorded fixtures were made from
+  a neutral directory in an isolated `$HOME` (the terminal-tab skill's
+  "Re-recording"), so no path of the user's is in them; a test pins that.
 
 ## CI
 
