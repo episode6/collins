@@ -221,7 +221,9 @@ def main():
             yield from until(lambda: not view2.guarded, redrawguard.WATCHDOG_MS + 1500)
             elapsed = time.monotonic() - t0
             check("2. the watchdog lowered it after about 2 s",
-                not view2.guarded and 1.5 < elapsed < 3.5 and view2.guard.expired == 1, (elapsed, view2.guard.expired))
+                not view2.guarded and 1.5 < elapsed < 3.5 and view2.guard.expired == 1,
+                (elapsed, view2.guard.expired),
+            )
 
             # 3. NUL through a real key event
             term.grab_focus()
