@@ -468,8 +468,10 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
   SIGKILL after the grace), detaches and closes the loopback client:
   closing a tab ends the session (D12) until *Detach* in PR-1.12.
-  `App.do_shutdown` shuts the loopback down, which saves every model and
-  ends every pty (Phase 1: quitting ends the sessions).
+  `App.do_shutdown` shuts the loopback down, which finishes every pty on
+  the spot, records its row gone and removes its model file (Phase 1:
+  quitting ends the sessions; scrollback survives a crash only, and only
+  once PR-3.6's keeper exists to re-adopt a live pty from its file).
 - **The wiring.** `App._start_service_loopback` builds one
   `service.core.ServiceCore` (the pty half: `spawn`, `attach`, `detach`,
   `paint`, `close`; the `resize`/`focus`/`theme` events; the state's
@@ -543,10 +545,11 @@ PR-1.5).
   `{"t": "pty-exited", "pty", "status"}` (the exit code, or minus the
   signal), the row removed. `close()` is SIGHUP to the process group plus
   the master closed, and SIGKILL after `CLOSE_GRACE_MS` (5 s) for a child
-  that ignored it; `shutdown()` saves and closes everything, waits a
-  bounded time for the saves in flight and writes any model still owed
-  synchronously (a stopping service runs no more idle callbacks) (Phase 1: stopping the service ends
-  every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
+  that ignored it; `shutdown()` closes every pty, waits a bounded time
+  for the saves in flight, then finishes each on the spot (status
+  unknown: the reap no longer lands on a stopping service), its row
+  recorded gone and its model file removed with it (Phase 1: stopping the
+  service ends every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
   `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7.
 - **Attach and the redraw.** `attach(pty, sink, cols, rows)` sends
   `Screen.snapshot()` with the tracker's `preamble(screen=False)` in

@@ -2588,7 +2588,10 @@ class App(Adw.Application):
         loopback = getattr(self, "_service_loopback", None)
         if loopback is not None:
             # Phase 1: quitting ends every session the service's pty server
-            # holds (§3.10), the models saved first.
+            # holds (§3.10): every pty finished, its row recorded gone and
+            # its model file removed with it (a model file lives as long as
+            # its row; in Phase 1 scrollback survives a crash only, and only
+            # once PR-3.6's keeper exists to re-adopt a live pty).
             terminal_mod.SERVICE_LOOPBACK = None
             loopback.shutdown()
             self._service_loopback = None
