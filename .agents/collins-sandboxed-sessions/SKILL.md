@@ -241,8 +241,8 @@ The app sets `terminal.SANDBOX_HOST` to one at startup.
 `<repo>/.claude/worktrees/<name>` *after* it has started, inside the box,
 and a bind needs a source that exists when bubblewrap runs — so a plan
 built for the launch directory used to hold the whole main checkout
-read-write, every other worktree with it. Now the tab settles the
-worktree first (`TerminalTab._reserve_worktree`, from `_sandbox_options(
+read-write, every other worktree with it. Now the session settles the
+worktree first (`Session._reserve_worktree`, from `_sandbox_options(
 cwd, fresh=True)` — a new session's launch with `options.worktree`, never
 a plan adopted from a parent):
 
@@ -311,7 +311,7 @@ a plan adopted from a parent):
   worktree remove --force` empties the directory and drops the
   registration, fails on the directory itself (a mount point under a
   read-only parent: `EROFS`), and the CLI then leaves the branch.
-  `retire_worktree(path)` — from the tab's `_on_child_exited` and from
+  `retire_worktree(path)` — from `Session.shell_exited` and from
   the fallback, on a thread — removes the directory *when it is empty*
   (`release_worktree`, by file descriptor) and then the branch *when
   every commit on it is reachable from another ref*
@@ -391,8 +391,12 @@ this instance claims the root and sweeps; anyone else's → it sweeps
 nothing. `discard_box` has no such check: it is only called for a box
 this instance's own state named or its own tab minted.
 
-**The tab.** `SessionOptions.sandbox` is the decision, `sandbox_plan` the
-file, `sandbox_box` the box. `TerminalTab._launch_command` (from
+**The tab.** The launch is the tab's `Session`'s
+(`collins/service/session.py`; the tab forwards `sandboxed`,
+`sandbox_plan_path`, `sandbox_box`, `restart_sandboxed` and the rest):
+every method named here and under the restart below lives there.
+`SessionOptions.sandbox` is the decision, `sandbox_plan` the
+file, `sandbox_box` the box. `Session._launch_command` (from
 `_finish_spawn`, and again from a
 restart) writes the plan at the last moment through
 `terminal.SANDBOX_HOST.prepare_launch` because the workspace is the
@@ -408,7 +412,7 @@ prepends the wrapper in `new_command` / `resume_command` and, for the
 settled, so a box that couldn't be built never leaves a bypass flag typed.
 `--die-with-parent` ties the box to the tab's shell, so every close flow
 holds; `_release_sandbox_plan` unlinks the plan and releases the lease
-(before a restart's rebuild, and in `_on_child_exited`, which then asks
+(before a restart's rebuild, and in `shell_exited`, which then asks
 `forget_box` — a no-op for a box a session names, and what removes
 the box of a launch that never produced a transcript, its grants with
 it). `tab.sandboxed`
@@ -618,18 +622,18 @@ something work:
     tab the caller's pid resolves to, never from anything in a call, and
     before any handler runs. A tool with no default is off inside a box.
 
-**Restart to apply** (`TerminalTab.restart_sandboxed`): the CLI's exit
-keystroke, a `_RESTART_POLL_MS` poll that answers the worktree keep/remove
-dialog and re-nudges at `_RESTART_NUDGE_TICKS` (a mid-turn agent spends the
+**Restart to apply** (`Session.restart_sandboxed`): the CLI's exit
+keystroke, a `RESTART_POLL_MS` poll that answers the worktree keep/remove
+dialog and re-nudges at `RESTART_NUDGE_TICKS` (a mid-turn agent spends the
 first Ctrl+C Ctrl+C on itself), and — once the shell has the terminal
-back — `_launch_command(self._cwd, self.session_id)` typed again: a fresh
+back — `_launch_command(self.cwd, self.session_id)` typed again: a fresh
 plan from the state now, the old one released, the same shell, tab and
-row. Gives up with a message at `_RESTART_GIVE_UP_TICKS`. `can_restart_
+row. Gives up with a message at `RESTART_GIVE_UP_TICKS`. `can_restart_
 sandboxed` also refuses three tabs that would get something other than a
 restart: a fork (the tab holds its origin's id, and a resume would fork it
 a second time), a tab whose id the resolver hasn't bound yet (a
 `new_command` would *replace* the conversation, not restart it), and one
-running a plan adopted from another session (`_sandbox_plan_adopted`: a
+running a plan adopted from another session (`sandbox_plan_adopted`: a
 sibling's box was built for its parent's workspace, and a rebuild here
 takes this tab's own cwd, silently narrowing it). The chip says so in a
 caption where the row would be. `_launch_command(cwd, id, restart=True)`

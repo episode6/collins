@@ -98,8 +98,18 @@ model, effort, PR chips), a `PanelDock` around the terminal (`paneldock.py`
 realizing a GTK-free `docktree.DockTree` of `Gtk.Paned`s whose leaves are
 `PanelStrip`s of duck-typed `PanelPage`s — shells, PR pages, the composer, the
 attachments gallery, the git page), an `EditorPane` in its own end slot, and
-overlays (composer, attachments, lightbox). It also runs the transcript
-resolver that binds a freshly spawned tab to the session id the CLI mints.
+overlays (composer, attachments, lightbox). The logic behind the widget is
+the tab's `Session` (`service/session.py`, GTK-free, `tab.session`): the
+launch (command, sandbox plan, worktree checks, restart), reading and
+writing the CLI's input box (`takes_prompt`, prompts, switches, the
+composer's cut), the transcript tail and the resolver that binds a freshly
+spawned tab to the session id the CLI mints, the activity watches the
+window's tracker is fed through, the cwd poll, and the close flows'
+keystrokes and polls. It reaches the terminal through two ports
+(`service/ports.py`: `PtyPort`, `ScreenPort`), today `terminal.VtePtyPort`
+and `VteScreenPort` over the tab's own VTE, and reports back through a
+listener (`terminal._TabHost`); every old name on the tab forwards to it,
+and `tests/test_session.py` drives its state machines through fake ports.
 
 **What the session can call.** `mcp_shim.py` (stdlib-only, spawned by the CLI
 via `--mcp-config`) relays MCP over a Unix socket to `mcpserver.py`
@@ -109,7 +119,7 @@ identity is the shim's kernel-verified pid walked up `/proc` to a tab.
 
 **The service and its API, in progress.** The split into a headless
 `collins-service` and a GTK client (`~/specs/collins/split-service-and-client.md`)
-lands a module per PR, GTK-free and not yet wired into the app.
+lands a module per PR, GTK-free, and only `Session` is wired into the app yet.
 `collins/api/protocol.py` (stdlib-only) is the API's message table (types,
 direction, fields and bounds), `validate` / `validate_response`, JSON
 framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
@@ -124,6 +134,11 @@ record: it consumes the filter's tokens and is what every automated read
 will be made of, and what an attaching client is redrawn from
 (`snapshot()`); its fidelity to VTE is pinned by the goldens in
 `tests/fixtures/streams/` and `scripts/check_termscreen_parity.py`.
+`collins/service/session.py` is a tab's `Session` (see "The tab"), the
+first module the app does use: the tab's logic carved out of the widget,
+reaching its terminal through the two ports in `collins/service/ports.py`
+(`PtyPort`, `ScreenPort`), today adapters over the tab's own VTE, later
+the service's pty and `termscreen`.
 
 **Everything Claude-shaped runs on the CLI's own login.** Titles
 (`titles.py`), project icons (`icongen.py`) and login repair
@@ -252,7 +267,7 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store, sidebar, state.json, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `models` `state` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `api/protocol` | `collins-terminal-tab` (the stream and the screen), `collins-session-mcp-tools` (the protocol) |
+| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; a tab's `Session` behind its pty and screen ports; the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/session` `service/ports` `api/protocol` | `collins-terminal-tab` (the stream, the screen model, Session), `collins-session-mcp-tools` (the protocol) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
