@@ -227,4 +227,3 @@ def test_nothing_in_the_service_or_the_transport_loads_gtk():
     for name in ("collins.api.loopback", "collins.service.core"):
         assert name in sys.modules
     assert not any(m in sys.modules for m in ("gi.repository.Gtk", "gi.repository.Vte"))
-    assert os.environ.get("COLLINS_PTY_BACKEND") is None or True  # the backend is the client's business

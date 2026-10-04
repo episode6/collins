@@ -8,8 +8,8 @@ telling a working agent from an idle one, closing it. Those state machines
 could only be tested by driving a real VTE behind a fake CLI. `Session`
 holds them now, GTK-free, and reaches its terminal through two ports
 (`ports.PtyPort` to write, `ports.ScreenPort` to read; spec §3.5).
-`TerminalTab` builds one per tab over adapters on its own `Vte.Terminal`
-(`terminal.VtePtyPort`, `terminal.VteScreenPort`) and keeps every public
+`TerminalTab` builds one per tab over adapters on the service's pty and
+screen (`ptyclient.ServicePtyPort`, `ptyclient.ServiceScreenPort`) and keeps every public
 name it had as a forwarder, so nothing that talks to a tab had to change.
 
 What lives here:

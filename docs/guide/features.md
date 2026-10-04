@@ -129,21 +129,17 @@ Enter opens, Esc closes.
 
 ## Sessions & terminals
 
-- Experimental: **`COLLINS_PTY_BACKEND=server`** runs every session tab on
-  the service that the split into a headless service and a client is
-  building towards. The terminal you see has no child of its own: the
-  shell runs on a pty the in-app service holds, the service answers the
-  CLI's terminal queries and keeps a screen model of record, and the
-  terminal is painted from the service's stream — a fresh terminal
-  attaching to a running session is redrawn from that model, scrollback
-  and colours included. Opt-in by the environment variable only, and
-  the default stays the terminal's own pty until a release cycle of
-  daily use says the two feel the same; the e2e suite already runs on
-  both. The terminal panel's shells (Ctrl+J, and the sandboxed shell) run
+- Every session tab runs on the service that the split into a headless
+  service and a client is building towards. The terminal you see has no
+  child of its own: the shell runs on a pty the in-app service holds, the
+  service answers the CLI's terminal queries and keeps a screen model of
+  record, and the terminal is painted from the service's stream — a fresh
+  terminal attaching to a running session is redrawn from that model,
+  scrollback and colours included. The terminal panel's shells (Ctrl+J, and the sandboxed shell) run
   on the service too: their saved scrollback is written from the service's
   screen model and painted back ahead of the new shell's prompt, and
   `read_terminal` / `run_in_terminal` read and type through the service.
-  Quitting Collins ends the sessions on both backends.
+  Quitting Collins ends the sessions.
 - Clicking a session opens it in an embedded **VTE terminal** running your
   `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
   the directory the session **last worked in** (worktree-aware), not just

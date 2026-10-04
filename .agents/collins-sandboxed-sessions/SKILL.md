@@ -692,8 +692,8 @@ pages), and `open_shell_page(sandboxed=True)` / `PanelStrip.new_shell(
 sandboxed=True)` / the strip menu's *New sandboxed shell* (offered while
 `set_sandboxed_shell_offer` says there is a plan) are the ways in;
 `TerminalTab.open_sandboxed_shell(focus)` opens one beside the last shell
-or in a strip of its own on the home edge. On the server backend
-(PR-1.8) the shell asks the service for a `shell` pty with `sandbox` and
+or in a strip of its own on the home edge. The shell
+(PR-1.8) asks the service for a `shell` pty with `sandbox` and
 the session's box id, and the service spawns the same launcher argv on the
 plan its records hold for that box (`ServiceCore`'s `sandbox_plan`; the
 pty keeps the plan, which is the shell's `sandbox_plan`) and queues the

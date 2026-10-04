@@ -12,9 +12,8 @@ back as input frames, the grid and the focus go as `resize` and `focus`
 events, and `pty-exited` is what `child-exited` used to be. Nothing
 reaches the VTE that did not come out of the service's stream for the pty,
 and nothing reaches the pty that did not go through the service (§3.1
-rule 2). The backend a tab runs on is `PTY_BACKEND`, read once from
-``COLLINS_PTY_BACKEND`` (``vte``, the default: the tab's VTE spawns the
-shell itself; ``server``: this module).
+rule 2). Every session tab and panel shell runs on it; there is no other
+backend (PR-1.9 deleted the tab's own in-widget pty).
 
 The redraw guard
 ----------------
@@ -51,7 +50,6 @@ VTE to that grid (`set_size`), the "Sized for <device>" bar being PR-3.5's.
 from __future__ import annotations
 
 import logging
-import os
 import socket
 from collections.abc import Callable
 from typing import Any
@@ -64,18 +62,8 @@ from .redrawguard import RedrawGuard
 
 log = logging.getLogger(__name__)
 
-PTY_BACKEND = os.environ.get("COLLINS_PTY_BACKEND", "vte")
-BACKENDS = ("vte", "server")
-if PTY_BACKEND not in BACKENDS:
-    log.warning("COLLINS_PTY_BACKEND=%r is not one of %s; using vte", PTY_BACKEND, BACKENDS)
-    PTY_BACKEND = "vte"
-
 FOCUS_REPORTING_ON = "?1004h"  # as the attach reply's `modes` lists it
 FOCUS_IN, FOCUS_OUT = b"\x1b[I", b"\x1b[O"
-
-
-def server_backend() -> bool:
-    return PTY_BACKEND == "server"
 
 
 def device_name() -> str:

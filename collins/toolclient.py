@@ -22,10 +22,9 @@ resolves). The halves are the bodies `App._mcp_*` had, taking the same
   `_ShowDiff`), `diff_context`, `annotate_diff`, `highlight_diff`,
   `clear_diff_marks` (on the page, its load awaited; the marks written
   through to the service's store by the page's mirror),
-- `read_terminal`, `run_in_terminal` (the tab's panel shells: widgets on the
-  vte backend, the service's ptys on the server backend, where a shell
-  opened for the call is a pty the service spawns and this client reveals,
-  never focused),
+- `read_terminal`, `run_in_terminal` (the tab's panel shells: the service's ptys,
+  where a shell opened for the call is a pty the service spawns and this
+  client reveals, never focused),
 - `start_session` (a background tab, its prompt and its id, serialized per
   project root; `_BackgroundSpawn`).
 
@@ -822,7 +821,7 @@ class ToolClient:
         agent runs, and must not have their keyboard moved by it. A
         sandboxed session types only into a shell running inside its box
         (mcptools.tool_shells), opening one when none is idle — never into
-        the user's own unconfined shell. On the server backend the shell
+        the user's own unconfined shell. The shell
         is a pty of the service and the command reaches it as input through
         the service (PanelTerminal.run_command), its busy read is the pty
         server's, and a shell opened for it is spawned there."""

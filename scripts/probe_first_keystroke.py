@@ -3,7 +3,7 @@
 
 F11's harness (scripts/spike_split_1_end_to_end.py) lost the first key it
 typed after the terminal took focus in every run (34 of 35, 69 of 70) and
-never chased it. This drives the client glue of the server backend
+never chased it. This drives the client glue of the pty server
 (collins.ptyclient.ClientTerminal over the loopback) with real input
 events through the headless compositor — a click into the terminal, one
 key — and counts, over many rounds, whether the key reached the pty and

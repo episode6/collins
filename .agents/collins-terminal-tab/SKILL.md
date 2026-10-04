@@ -405,12 +405,13 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   `check_termscreen_parity.py --write` under the headless display to
   regenerate the goldens from VTE, and run the unit suite.
 
-## The server backend: the tab on the pty server (ptyclient, loopback, core)
+## The tab on the pty server (ptyclient, loopback, core)
 
-Since PR-1.7 of the split a session tab runs on one of two backends,
-`ptyclient.PTY_BACKEND`, read once from `COLLINS_PTY_BACKEND` (`vte`, the
-default; `server`, opt-in until PR-1.9 makes it the only one). On `vte`
-nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
+Since PR-1.9 of the split a session tab has one backend: the service's pty
+server (PR-1.7 added it beside the tab's own in-widget pty; PR-1.9 deleted
+that one, with `COLLINS_PTY_BACKEND`, `ptyclient.PTY_BACKEND`,
+`terminal.VtePtyPort` / `VteScreenPort` and every `spawn_async`). Spec §3.4,
+swap 2 of §3.5:
 
 - **The terminal has no child.** `TerminalTab.terminal` is a
   `ptyclient.ClientVte` (a `Vte.Terminal` that reports its own allocation,
@@ -510,26 +511,24 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   key after the **first** click into the window never reached GTK at all
   (a capture-phase key controller on the window saw nothing, no commit,
   the guard down), while the key after a second click arrived in every
-  run (server: lost in 7 of 9 runs; the same step on the `vte` backend,
-  the drive's `--backend vte` control run: lost in 2 of 4, the key never
-  seen by GTK either, delivered when it was). The key never reached GTK;
+  run (on the server backend, then the `vte` one's control run: lost in 2 of
+  4 on VTE's own child, the key never seen by GTK either, delivered when it
+  was; PR-1.9 deleted the control). The key never reached GTK;
   the compositor's keyboard focus not having moved yet to the window the
   click activated is the likely cause (the toplevel reports
   `is_active()` False throughout under the headless shell). A harness
   that clicks a window for the first time and types in the same breath
-  loses that key, on either backend.
-- **Running the suite on it:** `python3 scripts/run_e2e.py --pty-backend
-  server` (CI runs both backends as `e2e-shard (<backend>, N)`); a single
-  check: `COLLINS_PTY_BACKEND=server … python3 scripts/check_x.py`.
-- **The panel shells** (PR-1.8) follow the same backend, each a
-  `ClientTerminal` over a `shell` pty with its own loopback client; see
-  `collins-panel-dock`, "Panel shells on the server backend".
+  loses that key.
+- **Running the suite on it:** `python3 scripts/run_e2e.py`; a single
+  check: `python3 scripts/check_x.py`.
+- **The panel shells** (PR-1.8) are the same, each a `ClientTerminal` over
+  a `shell` pty with its own loopback client; see `collins-panel-dock`,
+  "Panel shells on the pty server".
 
 ## The service's pty server (ptyserver)
 
 `collins/service/ptyserver.py` (GLib only, nothing from GTK; wired into the
-app through `service.core.ServiceCore` and the loopback, used by every tab
-on the server backend) is the table of terminals the service owns, one
+app through `service.core.ServiceCore` and the loopback, used by every tab) is the table of terminals the service owns, one
 `Pty` per agent session and, from PR-1.8, per panel shell (spec §3.3,
 PR-1.5).
 

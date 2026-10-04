@@ -44,7 +44,7 @@ attach_pr             the session's own PR list             the same
 start_session         the active client's window spawns     refused: in Phase 1 a session's logic
                       the sibling (a new tab)               runs in its client's tab (escalated)
 read_terminal,        the active client (Phase 1: the       the session's shell ptys on the pty server,
-run_in_terminal       vte backend's shells are widgets)     read through the model; one of its own spawned
+run_in_terminal       shells' pages)                        read through the model; one of its own spawned
                                                             when none is idle (one at most, reused; busy
                                                             is refused), closed when the agent exits
 show_image            the lightbox, recorded too            recorded as an attachment; the reply says

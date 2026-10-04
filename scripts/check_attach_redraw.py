@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check for attaching a fresh terminal to a running pty.
 
-The split's server backend (COLLINS_PTY_BACKEND=server, spec §3.4) feeds a
+The split's pty server (spec §3.4) feeds a
 childless VTE from the service's pty server, and a terminal that attaches
 later is painted from the service's screen model, not from any bytes the
 first terminal saw. This check drives a real TerminalTab on that backend
@@ -20,8 +20,8 @@ suite cannot (a real VTE on each side):
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\
         python3 scripts/check_attach_redraw.py
 
-The check runs the tab on the server backend whatever the environment says:
-it is about that backend. With COLLINS_ATTACH_RECORD=<file> it also writes
+The check is about the tab's client terminal on the service's pty. With
+COLLINS_ATTACH_RECORD=<file> it also writes
 every live output byte the first client was fed to that file, so a
 difference between the model and VTE can be replayed through both
 (scripts/check_termscreen_parity.py's harness) outside the app.
@@ -43,7 +43,6 @@ os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["COLLINS_PTY_STATE_DIR"] = f"{E2E}/pty"
-os.environ["COLLINS_PTY_BACKEND"] = "server"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 
@@ -125,6 +124,15 @@ PASSED = 0
 FAILED = 0
 
 
+def _range_text(terminal, fmt, start_row, start_col, end_row, end_col):
+    """One `get_text_range_format` read, unwrapped from the tuple some VTE
+    bindings return it in; "" for nothing."""
+    text = terminal.get_text_range_format(fmt, start_row, start_col, end_row, end_col)
+    if isinstance(text, tuple):
+        text = text[0]
+    return text or ""
+
+
 def check(label: str, ok: bool, detail: object = "") -> None:
     global PASSED, FAILED
     if ok:
@@ -168,9 +176,9 @@ def row_html(terminal: Vte.Terminal, text: str) -> str:
     columns = terminal.get_column_count()
     _, cursor_row = terminal.get_cursor_position()
     for index in range(cursor_row + 1):
-        row = terminal_mod._range_text(terminal, Vte.Format.TEXT, index, 0, index, columns)
+        row = _range_text(terminal, Vte.Format.TEXT, index, 0, index, columns)
         if text in row:
-            return terminal_mod._range_text(terminal, Vte.Format.HTML, index, 0, index, columns)
+            return _range_text(terminal, Vte.Format.HTML, index, 0, index, columns)
     return ""
 
 
@@ -199,7 +207,7 @@ def steps():
         win = app.get_active_window()
     state["tab"] = tab = win.start_background_session(TRUSTED)
     state["first_view"] = tab._view
-    check("the tab runs on the server backend", tab._view is not None and tab._client is not None)
+    check("the tab runs on the service's pty", tab._view is not None and tab._client is not None)
     for _ in range(100):
         if tab.takes_prompt():
             break

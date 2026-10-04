@@ -38,8 +38,7 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
-- **Experimental: session tabs on the service's pty server.** With
-  `COLLINS_PTY_BACKEND=server` in the environment, every session tab
+- **Session tabs on the service's pty server.** Every session tab
   runs on the in-app half of the headless service Collins is being split
   into: the shell runs on a pty the service holds, the service answers
   the terminal's queries and keeps a screen model of record, and the
@@ -49,8 +48,7 @@ downloads of each version, see the
   included, run on the service the same way: their scrollback is saved
   from the service's screen model and painted back into a reopened shell
   before its prompt, and the agent's `read_terminal` / `run_in_terminal`
-  read and type through the service. Opt-in only; the default is
-  unchanged. The e2e suite runs on both backends in CI.
+  read and type through the service. Nothing looks different, by design.
 - **The sidebar and Preferences talk to the in-app service.** Sessions, the
   sidebar's rows and every saved setting and record now belong to the
   service half of the app, and the window works on a copy it keeps in
@@ -69,8 +67,7 @@ downloads of each version, see the
   rung under one language reads in another after a switch (an older
   row shows the text it was saved with, translated where that is
   Collins' own English). The service also saves a panel
-  shell's scrollback itself when the shell exits on the
-  `COLLINS_PTY_BACKEND=server` backend.
+  shell's scrollback itself when the shell exits.
 - **App state is now two files.** `~/.config/collins/state.json` keeps what
   describes your sessions and projects and what Collins does for them
   (names, favorites, archives, drafts, pull request records, the sandbox,

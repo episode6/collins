@@ -67,7 +67,7 @@ levels); it keeps its own end slot on the tab.
 - `panelhistory`: one plain-text scrollback file per shell under
   `~/.local/state/collins/panel_history/`, keyed by a persistent **ordinal**
   (never renumbered; pages move between strips); `save_all` takes the live
-  mapping as an explicit keep-set. On the server backend the service
+  mapping as an explicit keep-set. The service
   writes it (below).
 
 ## The rules
@@ -143,16 +143,15 @@ the dock-wide numbering, and Ctrl+J never binds to one
 the last shell page; the strip's tab menu offers *New sandboxed shell*
 while `set_sandboxed_shell_offer` says there is a plan.
 
-## Panel shells on the server backend
+## Panel shells on the pty server
 
-Under `COLLINS_PTY_BACKEND=server` (`ptyclient.PTY_BACKEND`, PR-1.8 of the
-split, spec §3.15) a `PanelTerminal` does what the session tab does there
-(see `collins-terminal-tab`, "The server backend"): its `terminal` is a
+A `PanelTerminal` (PR-1.8 of the split, spec §3.15; PR-1.9 made it the
+only kind) does what the session tab does (see `collins-terminal-tab`,
+"The tab on the pty server"): its `terminal` is a
 childless `ptyclient.ClientVte` and `_view` a `ClientTerminal` over a pty
 of kind `shell` on the service's `PtyServer`, through the shell's **own**
-loopback client (`service_loopback().connect`, one per shell). Every
-`if self._view` seam mirrors the tab's; on `vte` (`_view` None) nothing
-changed.
+loopback client (`service_loopback().connect`, one per shell). `_view` is
+the glue, as the tab's.
 
 - **Spawn.** `_service_spawn`: a `spawn` request (`kind` `shell`, the cwd,
   the VTE's grid) and `attach`; the service runs `$SHELL` with its own
@@ -160,7 +159,7 @@ changed.
   them). It returns once the child has exec'd, so `_child_pid` is set at
   once (the e2e checks read `proctree.process_cwd(shell._child_pid)`) and
   input queued before the spawn is sent straight after. A refusal is fed to
-  the widget where VTE's spawn error was. A sandboxed shell asks with
+  the widget where a spawn error goes. A sandboxed shell asks with
   `sandbox` and the session's `sandbox_box` (`box_lookup`); the service
   finds the plan by the box (`ServiceCore`'s `sandbox_plan`, in Phase 1
   `App._sandbox_plan_of_box` over the tabs' `Session`s), spawns
@@ -175,7 +174,7 @@ changed.
   box's inner shell, `Pty.process_cwd` from `/proc`), all through the
   loopback's `pty_of` shortcut. Typing (`run_command`, the `cd`, Ctrl+L) is
   input frames (`_write`); `note()` is a `paint`.
-- **The history.** `TerminalTab.save_panel_history` on the server backend
+- **The history.** `TerminalTab.save_panel_history`
   hands the service the key and `{ordinal: shell.history_source()}` (the
   pty id, or the widget's text for a shell with no pty) and
   `ServiceCore.write_panel_history` writes each from its model
@@ -189,9 +188,8 @@ changed.
   pty's stream right after the attach, before the main loop can read the
   shell's first byte (`_history_paint`, in `TEXT_MAX` pieces); a sandboxed
   shell with no plan yet keeps it for the spawn that finds one.
-- **A shell closed by `exit` loses its history, on both backends.** Its
-  page closes and its ordinal drops out of the next save's keep-set (and
-  the VTE path would read a reset widget anyway); the service writes no
+- **A shell closed by `exit` loses its history.** Its
+  page closes and its ordinal drops out of the next save's keep-set; the service writes no
   history of its own at `pty-exited` because the key is still the tab's.
   Until PR-1.11 moves the key into the service (spec amended: a `history`
   key on `spawn` or a `panel.key` request, the history written from the
