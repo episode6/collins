@@ -681,15 +681,19 @@ def test_the_model_is_saved_and_loads_back(server, tmp_path):
     assert loaded.rows()[:2] == ["green", "plain"]
 
 
-def test_the_model_is_saved_on_exit_and_a_damaged_file_loads_as_none(server, tmp_path):
-    pty = spawn_sh(server, "printf farewell")
+def test_a_live_models_file_loads_back_and_a_damaged_file_loads_as_none(server, tmp_path):
+    pty = spawn_cat(server)
     sink = Sink()
     server.attach(pty, sink, 120, 40)
-    pump(lambda: sink.exited(), what="exit")
-    path = tmp_path / "pty" / f"{pty}.model"
-    server.wait_for_saves()
-    assert path.exists()
+    server.write(pty, b"farewell", sink=sink)
+    wait_live(sink, b"farewell")
+    path = server.save_model(pty)
+    pump(lambda: server.get(pty)._save_thread is None, what="the save to land")
+    assert path == tmp_path / "pty" / f"{pty}.model" and path.exists()
     assert server.load_model(path).rows()[0] == "farewell"
+    server.close(pty)
+    pump(lambda: sink.exited(), what="exit")
+    assert not path.exists()  # the file lives as long as the row
     path.write_text("{not json", encoding="utf-8")
     assert server.load_model(path) is None
     path.write_text(json.dumps({"format": 99}), encoding="utf-8")
@@ -735,7 +739,10 @@ def test_the_model_is_written_on_a_timer_while_output_arrives(server, tmp_path, 
     pump(path.exists, timeout=5, what="the timed save")
 
 
-def test_shutdown_writes_the_model_a_save_in_flight_would_have_lost(tmp_path, monkeypatch):
+def test_shutdown_finishes_every_pty_and_removes_its_model_file(tmp_path, monkeypatch):
+    """A save in flight at shutdown is waited for, then the file goes with
+    the row (nothing is resurrected by the straggler) and the row is
+    recorded gone without a loop iteration."""
     real = ptyserver.write_model_file
 
     def slow(path, data):
@@ -755,11 +762,10 @@ def test_shutdown_writes_the_model_a_save_in_flight_would_have_lost(tmp_path, mo
     wait_live(sink, b"SECOND")
     srv.shutdown()
     # No loop iteration after this: what a process that exits now leaves.
-    loaded = ptyserver.PtyServer(state_dir=tmp_path / "pty").load_model(tmp_path / "pty" / f"{pty}.model")
-    rows = loaded.rows()
-    assert rows[:2] == ["FIRST", "SECOND"]
+    assert not (tmp_path / "pty" / f"{pty}.model").exists()
     assert not any(t.is_alive() for t in srv._in_flight.values())
-    pump(lambda: not srv.ptys, what="every pty to end")
+    assert not srv.ptys and sink.exited()[0]["status"] is None
+    assert ptyserver.PtyServer(state_dir=tmp_path / "pty").prune_models() == 0
 
 
 def test_a_failed_save_is_retried(server, tmp_path, monkeypatch):

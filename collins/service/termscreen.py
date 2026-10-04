@@ -513,6 +513,12 @@ class Screen:
         self.top, self.bottom = 0, rows - 1
         self.scrollback: deque[tuple] = deque(maxlen=self._scrollback_max)
         self.scrollback_wrapped: deque[bool] = deque(maxlen=self._scrollback_max)
+        # How many of the scrollback's first rows ED 3 blanked: they count
+        # (a text read of the history shows them, measured) but VTE's
+        # whole-text capture leaves them out (measured in PR-1.7), so
+        # `capture_contents` skips them; evicted from the front as newer
+        # rows push them out.
+        self.scrollback_erased = 0
         self.scrollback_bytes = 0  # what the rows cost against the budget
         self.autowrap = True
         self.origin = False
@@ -639,8 +645,9 @@ class Screen:
             rows = list(self.rows())
             wrapped = list(self.grid.wrapped)
         else:
-            rows = [_runs_text(runs) for runs in self.scrollback]
-            wrapped = list(self.scrollback_wrapped)
+            skip = min(self.scrollback_erased, len(self.scrollback))
+            rows = [_runs_text(runs) for runs in list(self.scrollback)[skip:]]
+            wrapped = list(self.scrollback_wrapped)[skip:]
             rows.extend(self.rows())
             wrapped.extend(self.grid.wrapped)
         while rows and not rows[-1]:
@@ -712,6 +719,7 @@ class Screen:
             "alt": alt,
             "scrollback": scrollback,
             "scrollback_wrapped": list(self.scrollback_wrapped),
+            "scrollback_erased": min(self.scrollback_erased, len(self.scrollback)),
         }
 
     @classmethod
@@ -809,6 +817,9 @@ class Screen:
         screen.last_char = last_char
         scrollback = data.get("scrollback")
         wrapped = data.get("scrollback_wrapped")
+        erased = data.get("scrollback_erased", 0)
+        if not isinstance(erased, int) or isinstance(erased, bool) or erased < 0:
+            raise ValueError("scrollback_erased")
         if not isinstance(scrollback, list) or len(scrollback) > max_rows:
             raise ValueError("scrollback")
         if not isinstance(wrapped, list) or len(wrapped) != len(scrollback):
@@ -825,6 +836,7 @@ class Screen:
                     raise ValueError("run text")
                 row.append((text, _int(width, 0, cols), pen_at(pen)))
             screen._append_scrollback(tuple(row), _bool(wrap))
+        screen.scrollback_erased = min(erased, len(screen.scrollback))
         return screen
 
     # -- resize (no reflow, D19)
@@ -999,6 +1011,8 @@ class Screen:
             self.scrollback_bytes -= _runs_cost(scrollback[0])
         scrollback.append(runs)
         self.scrollback_wrapped.append(wrapped)
+        if self.scrollback_erased and len(self.scrollback) == self.scrollback.maxlen:
+            self.scrollback_erased -= 1  # the oldest row, an erased one, was pushed out
         self.scrollback_bytes += _runs_cost(runs)
         # The byte budget: the oldest rows go first, as with the row count.
         while self.scrollback_bytes > self._scrollback_budget and len(scrollback) > 1:
@@ -1247,6 +1261,7 @@ class Screen:
             self.scrollback.extend([()] * count)
             self.scrollback_wrapped.extend([False] * count)
             self.scrollback_bytes = 0
+            self.scrollback_erased = count
             return
         if mode == 0:
             self._erase(grid.lines[grid.y], grid.x, cols)
