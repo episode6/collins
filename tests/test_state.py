@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-02. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 import json
 import time
@@ -1144,10 +1144,13 @@ def test_notifications_roundtrip(app_state):
     rows = [_note("b", now - 1, kind="bell", count=3), _note("a", now - 2, read=True)]
     state.set_notifications(rows)
     fresh = app_state.AppState()
-    assert fresh.get_notifications() == rows  # order preserved, not sorted
+    # Order preserved, not sorted; each record read back with its msgid
+    # (PR-1.11: a record written without one has its body as its msgid).
+    expected = [{**row, "msgid": row["body"]} for row in rows]
+    assert fresh.get_notifications() == expected
     # The getter hands out a copy: mutating it changes nothing.
     fresh.get_notifications().clear()
-    assert fresh.get_notifications() == rows
+    assert fresh.get_notifications() == expected
 
 
 def test_notifications_unchanged_are_not_rewritten(app_state):

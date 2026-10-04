@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     ptyclient,  # noqa: E402
+    remoteprs,
     sandboxchip,
     sandboxgrants,
     sandboxplan,
@@ -93,7 +94,6 @@ from .providers import (  # noqa: E402
 from .prstatus import (  # noqa: E402
     PullRequest,
     describe,
-    invalidate,
     known,
     parse_pr_url,
     to_records,
@@ -2840,13 +2840,12 @@ class TerminalTab(Gtk.Box):
         # (see sandboxchip): what is inside, the workspace's grants, and a
         # restart when they changed. Hidden on every other tab, and shown
         # only once the launch settled with a plan (_sync_sandbox_chip).
+        # A client of the service's sandbox.* requests (service.sandbox):
+        # what the box holds, its grants and tools, its restart.
         self._sandbox_chip = sandboxchip.SandboxChip(
-            plan_path=lambda: self.session.sandbox_plan_path,
-            host=lambda: SANDBOX_HOST,
-            grants=lambda: SANDBOX_GRANTS,
             box=lambda: self.session.sandbox_box,
-            can_restart=self.can_restart_sandboxed,
-            on_restart=self.restart_sandboxed,
+            link=apilink.current,
+            handle=lambda: self.session.handle,
             on_open_shell=self.open_sandboxed_shell,
             on_toast=lambda text: self.emit("toast", text),
         )
@@ -4095,7 +4094,7 @@ class TerminalTab(Gtk.Box):
         self._pr_focus_refresh_at = now
         for pr in self._footer_prs:
             if not pr.merged:
-                invalidate(pr.url)
+                remoteprs.invalidate(pr.url)
         self._request_update()
 
     def note_run_finished(self) -> None:

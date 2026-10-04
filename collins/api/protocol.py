@@ -203,7 +203,9 @@ each taken from the code the message replaces:
   object bounded here and re-validated against `mcptools.validate_args` by
   the client, and `handle`: the service's name for the calling session,
   which a session has before its id resolves (`service.session.Session.
-  handle`). `tool-reply` is the client's event back, `call`, `ok` and
+  handle`), and `sandboxed`, the service's own reading of whether the
+  caller runs in a box, which the client's half applies the policy on.
+  `tool-reply` is the client's event back, `call`, `ok` and
   `text`, `mcptools.run_tool_call`'s ``(ok, text)``.
 - The `sandbox.*` requests name the session's box (`box`, required: what
   the service's records are keyed by) and, on the server backend, its pty.
@@ -535,7 +537,9 @@ _MARKS = {
     "notes": _req(Field(K_LIST, high=NOTES_MAX, item=Field(K_JSON_OBJECT))),
     "highlights": _req(Field(K_LIST, high=HIGHLIGHTS_MAX, item=Field(K_JSON_OBJECT))),
 }
-_SANDBOX_TARGET = {"box": _req(_ID), "pty": _PTY}
+# The box a sandbox request is about, and the session asking (its handle:
+# boxes are per session, but a restart is the asking session's own).
+_SANDBOX_TARGET = {"box": _req(_ID), "pty": _PTY, "handle": _ID}
 
 _SESSIONS = Field(K_LIST, low=1, high=ROWS_MAX, item=_ID)
 _PROJECT = _s(NAME_MAX, low=1)  # a project's name: the group's identity in the sidebar
@@ -1242,6 +1246,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "handle": _ID,
                 "name": _req(_TOOL_NAME),
                 "arguments": _req(Field(K_JSON_OBJECT)),
+                # The service's reading of the caller: whether it runs in a
+                # box (the sandbox policy is applied on it, never the
+                # caller's word).
+                "sandboxed": _BOOL,
             },
         ),
     ),
@@ -1278,6 +1286,9 @@ _TABLE: tuple[MessageType, ...] = (
                 "tools": Field(K_MAP, high=TOOLS_MAX, key=_TOOL_RE, item=_BOOL),
                 "available": Field(K_MAP, high=TOOLS_MAX, key=_TOOL_RE, item=_BOOL),
                 "overridden": _BOOL,
+                # Whether this machine runs sandboxed sessions at all (a
+                # host): what the chip's allow and pins are offered on.
+                "hosted": _BOOL,
                 "stale": _BOOL,
                 "can_restart": _BOOL,
             },
@@ -1291,7 +1302,11 @@ _TABLE: tuple[MessageType, ...] = (
                 **_SANDBOX_TARGET,
                 "path": _req(_PATH),
                 "scope": _req(Field(K_STR, choices=frozenset({"session", "project"}), high=8)),
-            }
+            },
+            # Whether the running box is being told (a `sandbox` event
+            # follows with what became of it), or the grant waits for the
+            # session's restart.
+            reply={"live": _BOOL},
         ),
     ),
     MessageType(
@@ -1302,7 +1317,8 @@ _TABLE: tuple[MessageType, ...] = (
                 **_SANDBOX_TARGET,
                 "path": _req(_PATH),
                 "scope": _req(Field(K_STR, choices=frozenset({"session", "project"}), high=8)),
-            }
+            },
+            reply={"live": _BOOL},
         ),
     ),
     MessageType(
@@ -1328,7 +1344,16 @@ _TABLE: tuple[MessageType, ...] = (
         "A sandboxed session's grants or plan changed; a delivery for the toast.",
         event=_event(
             SERVICE,
-            {"box": _req(_ID), "pty": _PTY, "session": _ID, "delivery": _DELIVERY},
+            {
+                "box": _req(_ID),
+                "pty": _PTY,
+                "session": _ID,
+                # The grant the event is about, what became of it in the
+                # running box, and whether it was taken back.
+                "path": _PATH,
+                "delivery": _DELIVERY,
+                "revoked": _BOOL,
+            },
         ),
     ),
     # -- the service itself (§3.10)

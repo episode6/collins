@@ -695,6 +695,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.sidebar.connect("rows-reordered", lambda *_: self._sort_tabs())
         self.store.connect("refreshed", self._on_store_refreshed)
+        if hasattr(self.state, "connect_changed"):
+            # A name the service wrote (the set_session_title tool runs there
+            # since PR-1.11): the session's open tab wears it, as a rename
+            # made here does (rename_session_tab).
+            self.state.connect_changed(self._on_state_name_changed)
+            self.connect("destroy", lambda *_a: self.state.disconnect_changed(self._on_state_name_changed))
 
         # Yellow "running detached" guide lines: keep the set of backgrounded session
         # ids fresh (see bgstatus.py for the trigger strategy).
@@ -2771,6 +2777,7 @@ class MainWindow(Adw.ApplicationWindow):
             notifycenter.KIND_BELL,
             notifycenter.bell_body(),
             notifycenter.delivery(notifycenter.KIND_BELL, focus),
+            msgid=notifycenter.BELL_MSGID,
         )
 
     def _flash_session(self, page: Adw.TabPage | None) -> None:
@@ -5319,6 +5326,7 @@ class MainWindow(Adw.ApplicationWindow):
         deliveries: frozenset[str],
         *,
         notification: Notification | None = None,
+        msgid: str = "",
     ) -> frozenset[str]:
         """Do what the delivery table asked for a notification of *kind*
         from *page*'s tab, and return what was done — the set itself, after
@@ -5358,7 +5366,9 @@ class MainWindow(Adw.ApplicationWindow):
         if notification is not None:
             key, title = notification.session_id or key, notification.title or title
         elif deliveries & {notifycenter.DELIVER_ROW, notifycenter.DELIVER_ROW_READ}:
-            notification = self.notify_center.make(kind, key, title, project, body)
+            # The row is the service's (notify.post); its text crosses as a
+            # msgid (§3.14): Collins' own words, or the agent's as theirs.
+            notification = self.notify_center.make(kind, key, title, project, body, msgid=msgid or body)
             notification.read = notifycenter.DELIVER_ROW_READ in deliveries
             notification = self.notify_center.post(notification)
         if notifycenter.DELIVER_CARD in deliveries and notification is not None:
@@ -6090,6 +6100,14 @@ class MainWindow(Adw.ApplicationWindow):
         title = newest_title(self.store.pr_store.records(session_id))
         if title:
             self.rename_session_tab(session_id, title)
+
+    def _on_state_name_changed(self, key: str, entry: str | None, _reverted: bool) -> None:
+        if key != "names" or not entry:
+            return
+        page = self._page_for(entry)
+        session = self.store.get_session(entry) if page is not None else None
+        if page is not None and session is not None:
+            page.set_title(self._tab_title(session))
 
     def rename_session_tab(self, session_id: str, title: str) -> None:
         """Rename a session and retitle its open tab — the rename dialog's

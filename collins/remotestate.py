@@ -191,6 +191,10 @@ class RemoteState(AppState):
         value, a refusal that reverted (``reverted`` True)."""
         self._listeners.append(listener)
 
+    def disconnect_changed(self, listener: Callable[[str, str | None, bool], None]) -> None:
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
     def is_pending(self, key: str, entry: str | None = None) -> bool:
         """Whether a write of *key* (or of its *entry*) waits on a reply."""
         if self._pending.get((key, None), 0) > 0:

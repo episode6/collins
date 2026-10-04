@@ -10,7 +10,8 @@ event of that job to *on_event* as a `JobEvent`: its state, its progress
 or failure already translated (`text`, §3.14: `translate`), its result. A
 refused start (no link, a kind the service does not serve) reaches
 *on_event* as one final ``refused`` event, so a dialog has one path for
-every ending. `cancel(job)` sends `job.cancel`.
+every ending. `cancel(job)` sends `job.cancel`. (`translate` is
+`i18n.translate`, re-exported for the dialogs.)
 
 Events can land before the reply that names the job (an inline test
 runner; a socket's ordering): they are held under the id and handed over
@@ -27,28 +28,9 @@ from dataclasses import dataclass, field
 from . import apilink
 from .api import protocol
 from .api.loopback import RequestRefused
-from .i18n import _
+from .i18n import _, translate
 
 log = logging.getLogger(__name__)
-
-
-def translate(msgid: str, args: dict | None = None) -> str:
-    """A msgid and its args as this client's person reads them (§3.14):
-    the msgid through `i18n._()` and, with args, `str.format_map`. Text
-    with no args is never formatted: an agent's words, a git error's, may
-    hold braces of their own. A translation whose placeholders don't fit
-    the args falls back to the English source, then to the msgid as is."""
-    if not msgid:
-        return ""
-    text = _(msgid)
-    if not args:
-        return text
-    for candidate in (text, msgid):
-        try:
-            return candidate.format_map(dict(args))
-        except (KeyError, ValueError, IndexError, AttributeError):
-            continue
-    return msgid
 
 
 @dataclass(frozen=True)

@@ -34,8 +34,9 @@ SPEC_SERVICE_SETTINGS = {
 
 # The spec's §3.8 service top-level keys that the code writes. The spec also
 # names "hidden" and "hidden_projects" (pre-rename spellings AppState only
-# ever reads) and "diff_notes", "pending_diffs" (later PRs'). "ptys" is the
-# pty table PR-1.5 added; a migrated file gains it with its empty default.
+# ever reads). "ptys" is the pty table PR-1.5 added, "diff_notes" and
+# "pending_diffs" PR-1.11's; a migrated file gains each with its empty
+# default.
 SERVICE_RECORDS = {
     "service_id", "names", "generated_names", "cli_titles", "emojis", "favorites",
     "archived", "archived_at", "archived_projects", "project_worktree",
@@ -44,8 +45,10 @@ SERVICE_RECORDS = {
     "virtual_projects", "expanded_groups", "session_prs", "session_attachments",
     "session_drafts", "new_chat_drafts", "process_baselines", "session_forwards",
     "pending_detaches", "ptys", "pty_next_id", "notifications", "settings",
+    "diff_notes", "pending_diffs",
 }
-NEW_SERVICE_RECORDS = {"service_id", "ptys", "pty_next_id"}  # not in a v0.1.4 file
+# Not in a v0.1.4 file.
+NEW_SERVICE_RECORDS = {"service_id", "ptys", "pty_next_id", "diff_notes", "pending_diffs"}
 
 # Every settings key v0.1.4 wrote, frozen as a literal: the migration
 # fixture is built from this list, not from DEFAULT_SETTINGS, so a key the

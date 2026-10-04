@@ -40,6 +40,7 @@ from . import (
     openwithrows,
     pkgrepos,
     prmenu,
+    remoteprs,
     sandboxplan,
 )
 from .chats import is_chat_cwd
@@ -56,8 +57,6 @@ from .prstatus import (
     from_records,
     known,
     newest_titled,
-    resync,
-    sweep,
 )
 from .remotestore import RemoteStore
 from .scrolling import offset_into_view
@@ -1012,7 +1011,7 @@ class SessionRow(Gtk.ListBoxRow):
 
     def _resync_prs(self, token: int, prs: list[PullRequest]) -> None:
         """Fetch every PR's title and status. Runs off the main loop."""
-        refreshed = resync(prs)
+        refreshed = remoteprs.resync(prs)
         GLib.idle_add(self._pr_menu_refreshed, token, refreshed)
 
     def _pr_menu_refreshed(self, token: int, prs: list[PullRequest]) -> bool:
@@ -1940,7 +1939,7 @@ class SessionSidebar(Gtk.Box):
         """Run the sweep. Off the main loop — it is a `gh` call per directory,
         after a transcript tail for every session whose tab isn't open."""
         try:
-            swept = sweep(
+            swept = remoteprs.sweep(
                 (session_id, prs, live or resume_cwd(session))
                 for session_id, prs, session, live in targets
             )

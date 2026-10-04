@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import APP_ID, __version__, is_debug_app_id, notifycenter, state
-from .i18n import _
+from .i18n import N_, _
 from .prstatus import gh_json, gh_succeeds
 
 log = logging.getLogger(__name__)
@@ -410,16 +410,20 @@ def notification(center: notifycenter.NotificationCenter, release: Release) -> n
     """The row for *release*, ready to post: titled with the version, its
     body naming the one running, keyed by the version (notifycenter.update_id)
     so the center replaces any older update row with it, and carrying the
-    release page's URL for the click. Translated when made and persisted as
-    such, like a bell's body."""
+    release page's URL for the click. The body crosses to the service (which
+    mints and keeps the row) as its msgid and args, and every client shows
+    it in its own language (split-service spec §3.14); the title is worded
+    here."""
+    body = N_("You're running {version}. Click to open the release on GitHub")
+    args = {"version": running_version()}
     row = center.make(
         notifycenter.KIND_UPDATE,
         "",
         _("Collins {version} is available").format(version=release.version),
         "",
-        _("You're running {version}. Click to open the release on GitHub").format(
-            version=running_version()
-        ),
+        _(body).format_map(args),
+        msgid=body,
+        args=args,
     )
     row.id = notifycenter.update_id(release.version)
     row.url = release.url or RELEASES_URL

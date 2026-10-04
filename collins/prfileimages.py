@@ -32,7 +32,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk  # noqa: E402
 
-from . import imagediff, prblobs, prdetail  # noqa: E402
+from . import imagediff, prblobs, prdetail, remoteprs  # noqa: E402
 from .i18n import _  # noqa: E402
 
 # Re-exported: the section height cap is imagediff's now.
@@ -67,5 +67,5 @@ def _side(side: prblobs.Side, captioned: bool) -> imagediff.ImageSide:
         key=side.key,
         path=side.path,
         caption=caption,
-        fetcher=lambda: prblobs.fetch_to_file(side.repository, side.ref, side.path),
+        fetcher=lambda: remoteprs.fetch_blob(side.repository, side.ref, side.path),
     )

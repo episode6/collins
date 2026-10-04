@@ -30,9 +30,12 @@ with a short list and this is where one session's differs. The *Sandboxed
 shell* row opens a shell inside the same box — the answer to "what can
 the agent see?".
 
-Everything the chip decides is the host's (GTK-free, in sandboxplan and
-sandboxgrants); this module only draws it. Absent from every unsandboxed
-tab.
+Everything the chip shows or changes is the service's to decide (split-
+service spec §3.9, PR-1.11): it is a client of the `sandbox.*` requests
+(`service.sandbox`, over the host and the live grants of sandboxplan and
+sandboxgrants) and of the `sandbox` events that say what became of a grant
+in the running box; this module only draws the answers. Absent from every
+unsandboxed tab.
 """
 
 from __future__ import annotations
@@ -46,8 +49,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
+from .api.loopback import RequestRefused  # noqa: E402
 from .formatting import display_path  # noqa: E402
-from .i18n import _  # noqa: E402
+from .i18n import _, translate  # noqa: E402
 
 # The shield glyph: the chip, and the tab icon of a sandboxed panel shell.
 # A filled path in data/icons/hicolor/scalable/actions/.
@@ -70,33 +74,30 @@ _DOCK_SETTLE_MS = 250
 
 class SandboxChip(Gtk.MenuButton):
     """See the module docstring. The callables keep the chip free of any
-    tab or app import: *plan_path* is the launched plan file (None until
-    the launch settled), *host* the SandboxHost (None when the app never
-    set one), *grants* the live grants (None likewise) and *box* the id of
-    the box this session runs in, *can_restart* / *on_restart* the tab's
-    restart, *on_open_shell* opens a sandboxed panel shell, *on_toast*
-    floats a message."""
+    tab or app import: *box* is the id of the box this session runs in
+    ("" before the launch settled), *link* the connection to the service
+    (`apilink.current`), *handle* the session's handle on the service (who
+    asks: a restart is its own), *on_open_shell* opens a sandboxed panel shell,
+    *on_toast* floats a message. Everything it shows or changes is a
+    `sandbox.*` request the service decides (service.sandbox)."""
 
     def __init__(
         self,
-        plan_path: Callable[[], str | None],
-        host: Callable[[], sandboxplan.SandboxHost | None],
-        grants: Callable[[], sandboxgrants.GrantMounts | None],
         box: Callable[[], str],
-        can_restart: Callable[[], bool],
-        on_restart: Callable[[], object],
+        link: Callable[[], object],
+        handle: Callable[[], str],
         on_open_shell: Callable[[], object],
         on_toast: Callable[[str], object],
     ) -> None:
         super().__init__()
-        self._plan_path = plan_path
-        self._host = host
-        self._grants = grants
         self._box = box
-        self._can_restart = can_restart
-        self._on_restart = on_restart
+        self._link = link
+        self._handle = handle
         self._on_open_shell = on_open_shell
         self._on_toast = on_toast
+        # The paths an allow is waiting to hear about from the running box
+        # (a `sandbox` event says what became of each).
+        self._awaiting: set[str] = set()
         # Whether the tools list is unfolded: the popover is drawn again
         # at every change, and a list that folded itself at each tick
         # would be no list to work in.
@@ -126,6 +127,38 @@ class SandboxChip(Gtk.MenuButton):
         popover.set_child(self._content)
         popover.connect("show", lambda *_a: self._rebuild())
         self.set_popover(popover)
+        self._listening = None
+        self.connect("realize", lambda *_a: self._listen())
+        self.connect("destroy", lambda *_a: self._unlisten())
+
+    # -- the service ------------------------------------------------------------
+
+    def _listen(self) -> None:
+        link = self._link()
+        if link is not None and self._listening is None:
+            link.on("sandbox", self._on_event)
+            self._listening = link
+
+    def _unlisten(self) -> None:
+        if self._listening is not None:
+            self._listening.off("sandbox", self._on_event)
+            self._listening = None
+
+    def _ask(self, message: dict) -> dict | None:
+        """One `sandbox.*` request for this session's box; None when there
+        is no box, no link, or the service refused (the refusal, then, in
+        `self._refusal`)."""
+        self._refusal = ""
+        box = self._box()
+        link = self._link()
+        if not sandboxplan.valid_box_id(box) or link is None:
+            return None
+        self._listen()
+        try:
+            return link.call({**message, "box": box, "handle": self._handle()})
+        except RequestRefused as refusal:
+            self._refusal = translate(refusal.msgid, refusal.details)
+            return None
 
     # -- the popover ----------------------------------------------------------
 
@@ -135,11 +168,12 @@ class SandboxChip(Gtk.MenuButton):
 
     def _rebuild(self) -> None:
         self._clear()
-        plan_path = self._plan_path()
-        plan = sandboxplan.load_plan(plan_path)
+        reply = self._ask({"t": "sandbox.plan"})
+        plan = sandboxplan.checked_plan(reply.get("plan")) if reply is not None else None
         if plan is None:
             self._content.append(_caption(_("The sandbox plan for this session can't be read")))
             return
+        drawn = self._ask({"t": "sandbox.grants"}) or {}
         inputs = plan["inputs"]
         workspace = inputs["workspace"]
 
@@ -179,25 +213,16 @@ class SandboxChip(Gtk.MenuButton):
         heading.add_css_class("caption-heading")
         self._content.append(heading)
         self._content.append(_caption(_("For this session only")))
-        host = self._host()
-        mounts = self._live_grants()
-        box = self._box()
-        launched = list(inputs.get("grants", []))
-        grants = host.grants(box) if host is not None else list(launched)
-        # The state's grants, then the ones the launched plan binds that
-        # have been taken back since — drawn only where a grant can arrive
-        # live, since only there does the difference show.
-        rows = [(grant, self._status(mounts, box, grant, launched)) for grant in grants]
-        if mounts is not None:
-            rows += [(grant, sandboxgrants.LEAVING) for grant in launched if grant not in grants]
+        defaults = list(drawn.get("defaults") or [])
+        rows = list(drawn.get("grants") or [])
         if not rows:
             self._content.append(_caption(_("None — the workspace only")))
-        for grant, status in rows:
-            delivery = mounts.delivery(box, grant) if mounts is not None else None
-            self._content.append(self._grant_row(workspace, grant, status, delivery))
+        hosted = bool(drawn.get("hosted"))
+        for row in rows:
+            self._content.append(self._grant_row(workspace, row, defaults, hosted))
         allow = Gtk.Button(label=_("Allow a directory…"))
         allow.set_halign(Gtk.Align.START)
-        allow.set_sensitive(host is not None)
+        allow.set_sensitive(bool(drawn.get("hosted")))
         allow.connect("clicked", lambda *_a: self._pick_directory(workspace))
         self._content.append(allow)
 
@@ -207,22 +232,17 @@ class SandboxChip(Gtk.MenuButton):
         heading = Gtk.Label(label=_("New sessions of this project"), xalign=0.0)
         heading.add_css_class("caption-heading")
         self._content.append(heading)
-        defaults = host.project_grants(workspace) if host is not None else []
         if not defaults:
             self._content.append(_caption(_("None")))
         for path in defaults:
             self._content.append(self._default_row(workspace, path))
 
         self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        self._content.append(self._tools_section(host, box))
+        self._content.append(self._tools_section(drawn))
 
         self._content.append(Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL))
-        # What is mounted into the running box counts as held, whether or
-        # not the rows above are drawn from it.
-        every = self._grants()
-        live = every.live_paths(box) if every is not None else ()
-        stale = host is not None and host.plan_stale(plan_path, workspace, live=live)
-        if stale and self._can_restart():
+        stale = bool(drawn.get("stale"))
+        if stale and drawn.get("can_restart"):
             restart = Gtk.Button(label=_("Restart to apply"))
             restart.add_css_class("suggested-action")
             restart.set_halign(Gtk.Align.START)
@@ -249,22 +269,9 @@ class SandboxChip(Gtk.MenuButton):
         shell.connect("clicked", self._open_shell)
         self._content.append(shell)
 
-    def _live_grants(self) -> sandboxgrants.GrantMounts | None:
-        """The live grants, when a grant can arrive live here and this
-        session's box is one they know; None otherwise, and the rows are
-        then drawn from the launched plan alone."""
-        mounts = self._grants()
-        if mounts is None or not mounts.registered(self._box()) or mounts.capable():
-            return None
-        return mounts
-
-    @staticmethod
-    def _status(mounts, box: str, grant: str, launched: list[str]) -> str:
-        if mounts is not None:
-            return mounts.status(box, grant)
-        return sandboxgrants.STATIC if grant in launched else sandboxgrants.PENDING
-
-    def _grant_row(self, workspace: str, grant: str, status: str, delivery=None) -> Gtk.Widget:
+    def _grant_row(self, workspace: str, drawn: dict, defaults: list[str], hosted: bool) -> Gtk.Widget:
+        grant = drawn.get("path", "")
+        status = drawn.get("status", "")
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         label = _path_label(grant)
         label.set_hexpand(True)
@@ -274,14 +281,14 @@ class SandboxChip(Gtk.MenuButton):
             tip = _(
                 "Mounted into the running session. Restart the session to make it a plain bind."
             )
-            if delivery is not None and not delivery.linked:
-                tip += " " + _("Inside the sandbox at {inside}").format(inside=delivery.inside)
+            if drawn.get("linked") is False and drawn.get("inside"):
+                tip += " " + _("Inside the sandbox at {inside}").format(inside=drawn["inside"])
             tag.set_tooltip_text(tip)
             row.append(tag)
         elif status == sandboxgrants.PENDING:
             tag = _caption(_("after restart"))
-            if delivery is not None and delivery.reason:
-                tag.set_tooltip_text(delivery.reason)
+            if drawn.get("reason"):
+                tag.set_tooltip_text(drawn["reason"])
             row.append(tag)
         elif status == sandboxgrants.LEAVING:
             # Bound by the plan the box runs on, and no longer granted:
@@ -289,7 +296,7 @@ class SandboxChip(Gtk.MenuButton):
             label.add_css_class("dim-label")
             row.append(_caption(_("until restart")))
             return row
-        row.append(self._pin(workspace, grant))
+        row.append(self._pin(workspace, grant, defaults, hosted))
         remove = Gtk.Button.new_from_icon_name("list-remove-symbolic")
         remove.add_css_class("flat")
         remove.set_valign(Gtk.Align.CENTER)
@@ -298,15 +305,14 @@ class SandboxChip(Gtk.MenuButton):
         row.append(remove)
         return row
 
-    def _pin(self, workspace: str, grant: str) -> Gtk.ToggleButton:
+    def _pin(self, workspace: str, grant: str, defaults: list[str], hosted: bool) -> Gtk.ToggleButton:
         """The toggle that makes a directory this session holds a default
         of its project: what new sessions start allowed."""
-        host = self._host()
-        pinned = host is not None and host.is_project_default(workspace, grant)
+        pinned = os.path.normpath(grant) in defaults
         pin = Gtk.ToggleButton(icon_name=PIN_ICON, active=pinned)
         pin.add_css_class("flat")
         pin.set_valign(Gtk.Align.CENTER)
-        pin.set_sensitive(host is not None)
+        pin.set_sensitive(hosted)
         pin.set_tooltip_text(
             _("Allowed in new sessions of this project")
             if pinned
@@ -328,18 +334,16 @@ class SandboxChip(Gtk.MenuButton):
         row.append(remove)
         return row
 
-    def _tools_section(self, host, box: str) -> Gtk.Widget:
+    def _tools_section(self, drawn: dict) -> Gtk.Widget:
         """The session tools this session is offered: a check per tool,
         folded away under a line that counts them. Every tool runs on the
         host, outside the box, so a sandboxed session starts with a short
         list (Preferences → Sandbox) and this is where one session's
         differs from it."""
         names = mcptools.tool_names()
-        offered = [
-            name
-            for name in names
-            if host is not None and host.tool_available(name) and host.tool_enabled(box, name)
-        ]
+        tools = drawn.get("tools") or {}
+        available = drawn.get("available") or {}
+        offered = [name for name in names if tools.get(name)]
         expander = Gtk.Expander(
             label=_("Session tools: {on} of {all} on").format(on=len(offered), all=len(names))
         )
@@ -360,18 +364,18 @@ class SandboxChip(Gtk.MenuButton):
         for name in names:
             title, subtitle = tokensettings.mcp_tool_label(name)
             check = Gtk.CheckButton(label=title)
-            available = host is not None and host.tool_available(name)
+            on_here = bool(available.get(name))
             check.set_active(name in offered)
-            check.set_sensitive(available and sandboxplan.valid_box_id(box))
+            check.set_sensitive(on_here and sandboxplan.valid_box_id(self._box()))
             check.set_tooltip_text(
                 subtitle
-                if available
+                if on_here
                 else _("{name} is switched off for every session in Preferences").format(name=name)
             )
             check.connect("toggled", self._on_tool_toggled, name)
             rows.append(check)
         body.append(_caption(_("Off is refused at once; on reaches the session when it restarts")))
-        if host is not None and host.tool_overrides(box):
+        if drawn.get("overridden"):
             reset = Gtk.Button(label=_("Use the defaults"))
             reset.add_css_class("flat")
             reset.set_halign(Gtk.Align.START)
@@ -395,22 +399,15 @@ class SandboxChip(Gtk.MenuButton):
         """Offer this session the tool *name*, or stop offering it —
         this session's box, and no other; whether the state says so now.
         A refusal is a toast."""
-        host = self._host()
-        if host is None:
-            return False
-        reason = host.set_tool(self._box(), name, on)
-        if reason:
-            self._on_toast(
-                _("Can't change {name}: {reason}").format(name=name, reason=reason)
-            )
+        reply = self._ask({"t": "sandbox.tools", "tools": {name: bool(on)}})
+        if reply is None and self._refusal:
+            self._on_toast(self._refusal)
         self._refresh()
-        return not reason
+        return reply is not None
 
     def reset_tools(self) -> None:
         """This session is offered what the defaults say again."""
-        host = self._host()
-        if host is not None:
-            host.reset_tools(self._box())
+        self._ask({"t": "sandbox.tools", "reset": True})
         self._refresh()
 
     def _on_pin_toggled(self, pin: Gtk.ToggleButton, workspace: str, grant: str) -> None:
@@ -420,43 +417,24 @@ class SandboxChip(Gtk.MenuButton):
         """Make *path* a default of this session's project, or stop it
         being one; whether the list says so now. A refusal is a toast. The
         session's own list, and every other session's, is left as it is."""
-        host = self._host()
-        if host is None:
-            return False
-        reason = host.set_project_default(workspace, path, on)
-        if reason:
+        kind = "sandbox.allow" if on else "sandbox.revoke"
+        reply = self._ask({"t": kind, "path": path, "scope": "project"})
+        if reply is None and self._refusal:
             self._on_toast(
                 _("Can't make {path} a default: {reason}").format(
-                    path=display_path(path), reason=reason
+                    path=display_path(path), reason=self._refusal
                 )
             )
         # Drawn again either way: the pin goes back after a refusal, and
         # the list below follows the toggle.
         self._refresh()
-        return not reason
+        return reply is not None
 
     def _revoke(self, grant: str) -> None:
-        box = self._box()
-        host = self._host()
-        if host is not None:
-            host.revoke(box, grant)
-        mounts = self._grants()
-        if mounts is not None:
-            # Out of the running box, where it arrived live; the rows are
-            # drawn again once it has gone.
-            mounts.revoke(box, grant, lambda _gone: self._land(self._refresh))
+        # Out of the running box, where it arrived live; the rows are drawn
+        # again once it has gone (the `sandbox` event).
+        self._ask({"t": "sandbox.revoke", "path": grant, "scope": "session"})
         self._rebuild()
-
-    def _land(self, call, *args) -> None:
-        """Run *call* on the main loop. The live grants answer on their own
-        thread; default priority, since an idle one starves under a
-        display whose frame clock never goes quiet."""
-
-        def landed() -> bool:
-            call(*args)
-            return GLib.SOURCE_REMOVE
-
-        GLib.idle_add(landed, priority=GLib.PRIORITY_DEFAULT)
 
     def _refresh(self) -> None:
         if self.get_popover().get_visible():
@@ -485,42 +463,46 @@ class SandboxChip(Gtk.MenuButton):
     def allow_directory(self, workspace: str, path: str) -> None:
         """Grant *path* to this session — its box, and no other — and say
         what became of it: the guard's refusal, or, once the live grants
-        have tried it in the running box, where it stands there."""
-        host = self._host()
-        if host is None:
-            return
-        box = self._box()
-        reason = host.allow(box, workspace, path)
+        have tried it in the running box, where it stands there (the
+        service decides both; *workspace* is the plan's, which the service
+        reads for itself)."""
         shown = display_path(path)
-        if reason:
-            self._on_toast(_("Can't allow {path}: {reason}").format(path=shown, reason=reason))
-            self._refresh()
-            return
-        mounts = self._grants()
-        if mounts is None:
-            self._on_toast(_("Allowed {path} — restart the session to apply").format(path=shown))
-            self._refresh()
-            return
         path = os.path.normpath(path)
-        mounts.allow(
-            box, path, lambda delivered: self._land(self._on_delivered, box, path, delivered)
-        )
+        self._awaiting.add(path)
+        reply = self._ask({"t": "sandbox.allow", "path": path, "scope": "session"})
+        if reply is None:
+            self._awaiting.discard(path)
+            if self._refusal:
+                self._on_toast(_("Can't allow {path}: {reason}").format(path=shown, reason=self._refusal))
+            self._refresh()
+            return
+        if not reply.get("live"):
+            self._awaiting.discard(path)
+            self._on_toast(_("Allowed {path} — restart the session to apply").format(path=shown))
         self._refresh()
 
-    def _on_delivered(self, box: str, path: str, delivered: list) -> None:
+    def _on_event(self, event: dict) -> None:
+        """The service's `sandbox` event: a grant of this session's box
+        landed in the running box, or left it."""
+        if event.get("box") != self._box():
+            return
+        path = event.get("path") or ""
+        if path in self._awaiting and not event.get("revoked"):
+            self._awaiting.discard(path)
+            self._on_delivered(path, event.get("delivery"))
+            return
+        self._refresh()
+
+    def _on_delivered(self, path: str, delivery: dict | None) -> None:
         """The live grants tried *path* in this session's box: one toast,
         by what became of it there."""
-        mounts = self._grants()
-        own = next((d for d in delivered if d.box == box), None)
-        if own is None and mounts is not None:
-            own = mounts.delivery(box, path)
         shown = display_path(path)
-        if own is not None and own.status == sandboxgrants.LIVE:
-            if own.linked:
+        if delivery is not None and delivery.get("status") == sandboxgrants.LIVE:
+            if delivery.get("linked"):
                 text = _("Allowed {path}").format(path=shown)
             else:
                 text = _("Allowed {path} — inside the sandbox at {inside}").format(
-                    path=shown, inside=own.inside
+                    path=shown, inside=delivery.get("inside", "")
                 )
         else:
             text = _("Allowed {path} — restart the session to apply").format(path=shown)
@@ -529,7 +511,7 @@ class SandboxChip(Gtk.MenuButton):
 
     def _restart(self, *_args) -> None:
         self.get_popover().popdown()
-        self._on_restart()
+        self._ask({"t": "sandbox.restart"})
 
     def _open_shell(self, *_args) -> None:
         self.get_popover().popdown()

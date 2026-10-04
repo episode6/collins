@@ -1827,6 +1827,15 @@ def load_plan(path: str | None) -> dict | None:
         plan = sandboxrun.read_plan(path)
     except sandboxrun.PlanError:
         return None
+    return checked_plan(plan)
+
+
+def checked_plan(plan: object) -> dict | None:
+    """*plan* when it is the shape load_plan accepts, else None: what a
+    client checks a plan the service sent it against (`sandbox.plan`,
+    rule 5) as load_plan checks the file."""
+    if not isinstance(plan, dict):
+        return None
     if plan.get("version") != PLAN_VERSION:
         return None
     inputs = plan.get("inputs")

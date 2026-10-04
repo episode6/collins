@@ -47,6 +47,12 @@ class Link:
         """Call *handler* with every event of *event_type*."""
         self._handlers.setdefault(event_type, []).append(handler)
 
+    def off(self, event_type: str, handler: Callable[[dict], None]) -> None:
+        """Stop calling *handler* (a widget that goes away before the link)."""
+        handlers = self._handlers.get(event_type)
+        if handlers and handler in handlers:
+            handlers.remove(handler)
+
     def dispatch(self, event: dict) -> None:
         """An event from the service (already validated by the transport)."""
         for handler in list(self._handlers.get(event.get("t"), ())):

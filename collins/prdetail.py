@@ -783,3 +783,186 @@ def _unquote(name: str) -> str:
         out += char.encode("utf-8")
         at += 1
     return out.decode("utf-8", "replace")
+
+
+# ---- the page's data over the service's API (PR-1.11) ----------------------------
+#
+# `prdetail` runs on the service's machine (gh is authenticated there) and the
+# page draws on the client: `pr.detail` and `pr.threads` carry the reply as
+# JSON objects, rebuilt here into the same dataclasses (rule 5: every field
+# re-typed and bounded on the way in). A file's patch longer than the
+# protocol carries in one string (WIRE_PATCH_MAX) crosses as None, which the
+# page already draws as "a diff over the cap".
+
+WIRE_PATCH_MAX = 1024 * 1024 - 1024
+
+
+def _comment_record(comment: PrComment) -> dict:
+    return {
+        "author": comment.author,
+        "created_at": comment.created_at,
+        "body": comment.body,
+        "url": comment.url,
+    }
+
+
+def thread_record(thread: PrThread) -> dict:
+    return {
+        "id": thread.id,
+        "path": thread.path,
+        "line": thread.line,
+        "is_resolved": thread.is_resolved,
+        "is_outdated": thread.is_outdated,
+        "comments": [_comment_record(c) for c in thread.comments],
+    }
+
+
+def _entry_record(entry) -> dict:
+    if isinstance(entry, PrThread):
+        return {"type": "thread", **thread_record(entry)}
+    if isinstance(entry, PrReview):
+        return {
+            "type": "review",
+            "author": entry.author,
+            "created_at": entry.created_at,
+            "state": entry.state,
+            "body": entry.body,
+        }
+    return {"type": "comment", **_comment_record(entry)}
+
+
+def detail_record(detail: PullRequestDetail) -> dict:
+    """*detail* as `pr.detail`'s reply carries it."""
+    return {
+        "summary": prstatus.to_record(detail.summary)
+        or {"number": detail.summary.number, "url": detail.summary.url},
+        "body": detail.body,
+        "author": detail.author,
+        "created_at": detail.created_at,
+        "base_ref": detail.base_ref,
+        "head_ref": detail.head_ref,
+        "base_oid": detail.base_oid,
+        "head_oid": detail.head_oid,
+        "head_repository": detail.head_repository,
+        "additions": detail.additions,
+        "deletions": detail.deletions,
+        "changed_files": detail.changed_files,
+        "labels": list(detail.labels),
+        "checks": [{"name": c.name, "state": c.state, "url": c.url} for c in detail.checks],
+        "timeline": [_entry_record(entry) for entry in detail.timeline],
+        "files": [
+            {
+                "path": f.path,
+                "additions": f.additions,
+                "deletions": f.deletions,
+                "patch": f.patch if f.patch is None or len(f.patch) <= WIRE_PATCH_MAX else None,
+                "change_type": f.change_type,
+            }
+            for f in detail.files
+        ],
+        "threads": [thread_record(t) for t in detail.threads],
+        "viewer_is_author": detail.viewer_is_author,
+    }
+
+
+def _str(value: object, limit: int = _MAX_BODY) -> str:
+    return value[:limit] if isinstance(value, str) else ""
+
+
+def _num(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _comment_from(raw: dict) -> PrComment:
+    return PrComment(_str(raw.get("author"), _MAX_LINE), _str(raw.get("created_at"), _MAX_LINE),
+                     _str(raw.get("body")), _http_url(raw.get("url")))
+
+
+def thread_from_record(raw: object) -> PrThread | None:
+    if not isinstance(raw, dict):
+        return None
+    thread_id = raw.get("id")
+    if not isinstance(thread_id, str) or not THREAD_ID.match(thread_id):
+        return None
+    comments = tuple(_comment_from(c) for c in raw.get("comments") or [] if isinstance(c, dict))
+    if not comments:
+        return None
+    line = raw.get("line")
+    return PrThread(
+        id=thread_id,
+        path=_str(raw.get("path"), _MAX_PATH),
+        line=line if isinstance(line, int) and not isinstance(line, bool) and line > 0 else None,
+        is_resolved=raw.get("is_resolved") is True,
+        is_outdated=raw.get("is_outdated") is True,
+        comments=comments,
+    )
+
+
+def threads_from_records(records: object) -> tuple[PrThread, ...]:
+    if not isinstance(records, list):
+        return ()
+    return tuple(t for t in map(thread_from_record, records) if t is not None)
+
+
+def _entry_from(raw: object):
+    if not isinstance(raw, dict):
+        return None
+    kind = raw.get("type")
+    if kind == "thread":
+        return thread_from_record(raw)
+    if kind == "review":
+        return PrReview(_str(raw.get("author"), _MAX_LINE), _str(raw.get("created_at"), _MAX_LINE),
+                        _str(raw.get("state"), _MAX_LINE), _str(raw.get("body")))
+    if kind == "comment":
+        return _comment_from(raw)
+    return None
+
+
+def detail_from_record(record: object) -> PullRequestDetail | None:
+    """The page's data from `pr.detail`'s reply, or None for anything that
+    is not one."""
+    if not isinstance(record, dict):
+        return None
+    summary = prstatus.from_record(record.get("summary"))
+    if summary is None:
+        return None
+    files = []
+    for raw in record.get("files") or []:
+        if not isinstance(raw, dict):
+            continue
+        patch = raw.get("patch")
+        files.append(
+            PrFile(
+                path=_str(raw.get("path"), _MAX_PATH),
+                additions=_num(raw.get("additions")),
+                deletions=_num(raw.get("deletions")),
+                patch=patch if isinstance(patch, str) else None,
+                change_type=_str(raw.get("change_type"), _MAX_LINE),
+            )
+        )
+    checks = tuple(
+        PrCheck(_str(c.get("name"), _MAX_LINE), _str(c.get("state"), _MAX_LINE), _http_url(c.get("url")))
+        for c in record.get("checks") or []
+        if isinstance(c, dict)
+    )
+    timeline = tuple(e for e in map(_entry_from, record.get("timeline") or []) if e is not None)
+    return PullRequestDetail(
+        summary=summary,
+        body=_str(record.get("body")),
+        author=_str(record.get("author"), _MAX_LINE),
+        created_at=_str(record.get("created_at"), _MAX_LINE),
+        base_ref=_str(record.get("base_ref"), _MAX_LINE),
+        head_ref=_str(record.get("head_ref"), _MAX_LINE),
+        base_oid=_str(record.get("base_oid"), _MAX_LINE),
+        head_oid=_str(record.get("head_oid"), _MAX_LINE),
+        head_repository=_str(record.get("head_repository"), _MAX_LINE),
+        additions=_num(record.get("additions")),
+        deletions=_num(record.get("deletions")),
+        changed_files=_num(record.get("changed_files")),
+        labels=tuple(_str(x, _MAX_LINE) for x in record.get("labels") or [] if isinstance(x, str)),
+        checks=checks,
+        timeline=timeline,
+        files=tuple(files),
+        threads=threads_from_records(record.get("threads")),
+        viewer_is_author=record.get("viewer_is_author") is True,
+    )

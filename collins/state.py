@@ -801,7 +801,12 @@ SHARED_KEYS: dict[str, SharedKey] = {
         SharedKey("pending_detaches", MAP, _map_of(lambda v: isinstance(v, dict))),
         SharedKey("ptys", MAP, _clean_ptys, writable=False),
         SharedKey("pty_next_id", SCALAR, _clean_next_id, writable=False),
-        SharedKey("notifications", LIST, _clean_notifications),
+        # The service's own since PR-1.11: the history is written through
+        # its notification center (notify.* and seen), the diffs' marks
+        # through diff.set-notes, the pending show_diffs by the tools.
+        SharedKey("notifications", LIST, _clean_notifications, writable=False),
+        SharedKey("diff_notes", MAP, _map_of(lambda v: isinstance(v, dict)), writable=False),
+        SharedKey("pending_diffs", MAP, _map_of(lambda v: isinstance(v, dict)), writable=False),
         SharedKey("settings", MAP, _clean_settings),
     )
 }
@@ -978,6 +983,15 @@ class AppState:
         # evidence needed to finish the pairing after a restart (see
         # MainWindow._replay_pending_detaches).
         self.pending_detaches: dict[str, dict] = {}
+        # The marks on each session's diff (split-service spec §3.8,
+        # PR-1.11): session id -> {"notes": [...], "highlights": [...]},
+        # diffnotes.mark_record each; written by the service's
+        # diffs.DiffNotes, mirrored to the git page's store.
+        self.diff_notes: dict[str, dict] = {}
+        # A show_diff a session asked for while no client was attached:
+        # session id -> the tool's arguments, handed to the first client
+        # that subscribes (service.tools, §3.7).
+        self.pending_diffs: dict[str, dict] = {}
         # The pty table (split-service spec §3.8): pty id (as a string, JSON
         # keys) -> the row the service's PtyServer keeps for a live pty
         # (kind, session, cwd, pid, cols, rows, box, plan, options). Written
@@ -1130,6 +1144,12 @@ class AppState:
         self.pending_detaches = {
             k: v for k, v in (data.get("pending_detaches") or {}).items() if isinstance(v, dict)
         }
+        self.diff_notes = {
+            k: v for k, v in (data.get("diff_notes") or {}).items() if isinstance(v, dict)
+        }
+        self.pending_diffs = {
+            k: v for k, v in (data.get("pending_diffs") or {}).items() if isinstance(v, dict)
+        }
         self.ptys = {
             k: v for k, v in (data.get("ptys") or {}).items()
             if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
@@ -1243,6 +1263,8 @@ class AppState:
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
+            "diff_notes": self.diff_notes,
+            "pending_diffs": self.pending_diffs,
             "ptys": self.ptys,
             "pty_next_id": self.pty_next_id,
             "notifications": self.notifications,  # newest first; never sort
@@ -1782,6 +1804,37 @@ class AppState:
 
     def get_pending_detaches(self) -> dict[str, dict]:
         return dict(self.pending_detaches)
+
+    # -- the diffs' marks and pending loads (§3.8, PR-1.11)
+
+    def get_diff_notes(self, session_id: str) -> dict:
+        return dict(self.diff_notes.get(session_id) or {})
+
+    def set_diff_notes(self, session_id: str, marks: dict | None) -> None:
+        """A session's marks (diffnotes records); None or empty drops
+        them. Unsaved: the caller saves."""
+        if not session_id:
+            return
+        if marks and (marks.get("notes") or marks.get("highlights")):
+            self.diff_notes[session_id] = {
+                "notes": list(marks.get("notes") or []),
+                "highlights": list(marks.get("highlights") or []),
+            }
+        else:
+            self.diff_notes.pop(session_id, None)
+
+    def get_pending_diffs(self) -> dict[str, dict]:
+        return {k: dict(v) for k, v in self.pending_diffs.items()}
+
+    def set_pending_diff(self, session_id: str, args: dict | None) -> None:
+        """A session's pending show_diff (the tool's arguments); None
+        drops it. Unsaved: the caller saves."""
+        if not session_id:
+            return
+        if args:
+            self.pending_diffs[session_id] = dict(args)
+        else:
+            self.pending_diffs.pop(session_id, None)
 
     # -- the pty table (§3.8)
 

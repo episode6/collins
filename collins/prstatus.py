@@ -1732,3 +1732,32 @@ def _discover(target: tuple[str, str]) -> PullRequest | None:
     except Exception:
         log.debug("prstatus: branch lookup in %s failed", cwd, exc_info=True)
         return None
+
+
+# -- the fetch cache over the service's API (PR-1.11) ---------------------------------
+
+
+def status_entry(url: str) -> dict | None:
+    """The fetch cache's entry for *url* as `pr-status` carries it (None:
+    nothing fetched, or a fetch that failed)."""
+    with _lock:
+        stamped = _statuses.get(url)
+    entry = stamped[1] if stamped else None
+    return dict(entry) if isinstance(entry, dict) else None
+
+
+def absorb_entry(url: str, entry: object) -> bool:
+    """A `pr-status` event's entry, put in this process's cache (a client's
+    copy of the service's; in Phase 1 they are the same cache, and an entry
+    that is already there changes nothing and tells nobody). Whether it
+    changed anything."""
+    if not isinstance(url, str) or not _FETCHABLE.match(url) or not isinstance(entry, dict):
+        return False
+    with _lock:
+        stamped = _statuses.get(url)
+        if stamped is not None and stamped[1] == entry:
+            return False
+        changed = _put(url, dict(entry))
+    if changed:
+        _notify(url)
+    return changed
