@@ -80,10 +80,13 @@ def coalescer_fuzz(rounds=300):
         kept = re.findall(rb"\x1b\[<\d{1,5};\d{1,5};\d{1,5}[Mm]|[ -~]", out)
 
         def plain(item):
-            return item.startswith(b"\x1b[<") and item.endswith(b"M") and mouserate.is_plain_motion(int(item[3:].split(b";")[0]))
+            if not item.startswith(b"\x1b[<") or not item.endswith(b"M"):
+                return False
+            return mouserate.is_plain_motion(int(item[3:].split(b";")[0]))
 
         wanted = [s for s in stream if not plain(s)]
-        # every non-plain item in order (plain motions may be dropped or held, never reordered past a non-plain one)
+        # Every non-plain item comes out in order; a plain motion may be
+        # dropped or held, never reordered past a non-plain one.
         it = iter(kept)
         in_order = all(any(k == w for k in it) for w in wanted)
         if not in_order:
@@ -96,7 +99,8 @@ def coalescer_fuzz(rounds=300):
 def main():
     core = ServiceCore()
     loopback = LoopbackServer(core)
-    app = Gtk.Application(application_id="com.episode6.Collins.ProbeServerBackend", flags=Gio.ApplicationFlags.NON_UNIQUE)
+    app = Gtk.Application(application_id="com.episode6.Collins.ProbeServerBackend",
+        flags=Gio.ApplicationFlags.NON_UNIQUE)
     ok, detail = coalescer_fuzz()
     check("coalescer: order kept and nothing but plain motion ever dropped (300 random streams)", ok, detail)
     check("commit_bytes: a lone NUL", ptyclient.commit_bytes("", 1) == b"\x00")
@@ -148,7 +152,8 @@ def main():
 
             # 1. a flow-control redraw: no attach, the service redraws on its own
             term, client, view = make()
-            pty = client.request({"t": "spawn", "kind": "shell", "cwd": "/tmp", "cols": 100, "rows": 30})["pty"]
+            pty = client.request({"t": "spawn", "kind": "shell",
+                "cwd": "/tmp", "cols": 100, "rows": 30})["pty"]
             view.attach(pty)
             yield from until(lambda: not view.guarded, 3000)
             check("1. the attach's guard came down", not view.guarded)
@@ -165,8 +170,12 @@ def main():
             sink = client.sink_for(pty)
             core.ptys._redraw(core.ptys.get(pty), core.ptys.get(pty).attachments[id(sink)])
             yield from until(lambda: not view.guarded, 3000)
-            check("1. the unannounced redraw raised and lowered the guard", not view.guarded and view.dropped_commits > dropped, (view.guarded, view.dropped_commits - dropped))
-            check("1. its sentinel answer never reached the pty", not any(b"\x1b]4;" in w for w in written), written)
+            check("1. the unannounced redraw raised and lowered the guard",
+                not view.guarded and view.dropped_commits > dropped,
+                (view.guarded, view.dropped_commits - dropped),
+            )
+            check("1. its sentinel answer never reached the pty",
+                not any(b"\x1b]4;" in w for w in written), written)
             client.send_input(pty, b"after\r")
             yield from until(lambda: any(w == b"after\r" for w in written), 2000)
             check("1. typing after it reaches the pty", any(w == b"after\r" for w in written))
@@ -177,7 +186,8 @@ def main():
             view.attach(pty)
             gen = view.guard.generation
             yield from until(lambda: not view.guarded, 3000)
-            check("5. two attaches: one guard, lowered once by the latest sentinel", not view.guarded and view.guard.expired == 0, (gen, view.guard.expired))
+            check("5. two attaches: one guard, lowered once by the latest sentinel",
+                not view.guarded and view.guard.expired == 0, (gen, view.guard.expired))
             check("5. no sentinel answer reached the pty", not any(b"\x1b]4;" in w for w in written), written)
 
             # 2. the guard never stays up
@@ -210,7 +220,8 @@ def main():
             t0 = time.monotonic()
             yield from until(lambda: not view2.guarded, redrawguard.WATCHDOG_MS + 1500)
             elapsed = time.monotonic() - t0
-            check("2. the watchdog lowered it after about 2 s", not view2.guarded and 1.5 < elapsed < 3.5 and view2.guard.expired == 1, (elapsed, view2.guard.expired))
+            check("2. the watchdog lowered it after about 2 s",
+                not view2.guarded and 1.5 < elapsed < 3.5 and view2.guard.expired == 1, (elapsed, view2.guard.expired))
 
             # 3. NUL through a real key event
             term.grab_focus()
@@ -221,7 +232,8 @@ def main():
             # GTK4 cannot inject key events; feed the commit VTE would make.
             term.emit("commit", "", 1)
             yield from until(lambda: b"\x00" in b"".join(written), 2000)
-            check("3. a NUL commit reaches the pty as one NUL byte", any(w == b"\x00" for w in written), written)
+            check("3. a NUL commit reaches the pty as one NUL byte",
+                any(w == b"\x00" for w in written), written)
             del controller
 
             client.request({"t": "close", "pty": pty, "mode": "kill"})

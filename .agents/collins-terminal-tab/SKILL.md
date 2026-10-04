@@ -600,8 +600,14 @@ PR-1.5).
   diff-like scrollback at about 4 000 rows and a pen-per-cell one at a few
   hundred, and leaves plain text to the 10 000-row cap. Pty ids are never
   reused: the next id is persisted (`AppState.pty_next_id`, through the
-  `record_next_id` callable), so no two ptys share a model file; removing
-  old files is the session's end (PR-1.7) and the keeper's (PR-3.6).
+  `record_next_id` callable), so no two ptys share a model file. **A
+  model file lives exactly as long as its pty's row**: removed when the
+  pty exits (`_finish`) and at shutdown (which finishes every pty on the
+  spot, status unknown, since the reap no longer lands on a stopping
+  service), and every `*.model` whose id is not in the table is pruned at
+  service start (`prune_models`, from `ServiceCore`). The panel history
+  and the transcript carry what a person needs after the exit; the file
+  exists for a live pty's re-adoption (PR-3.6).
 - **The `ptys` table.** The server's `record(pty_id, row | None)` callable
   (`AppState.set_pty`, wired in PR-1.7) keeps a row per live pty in
   `state.json` (§3.8): kind, session, cwd, pid, cols, rows, box, plan,

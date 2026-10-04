@@ -189,7 +189,7 @@ directly. No separate API key exists anywhere.
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
 | Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
 | The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer` once PR-1.7 wires it) |
-| A pty's saved screen model (`termscreen.Screen.dump()` as JSON; read back by a restarted service, PR-3.6's keeper) | `~/.local/state/collins/pty/<pty id>.model` |
+| A live pty's saved screen model (`termscreen.Screen.dump()` as JSON, for a restarted service's re-adoption, PR-3.6's keeper); removed with the pty's row, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
 | Everything of the CLI's | `~/.claude/` — read only |
 
