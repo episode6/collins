@@ -111,6 +111,17 @@ reads, so it lands at a token boundary; it does not go through the query
 responder (the service does not answer its own questions), so a paint that
 contains a query is a bug in the caller, not a reply.
 
+A panel shell (a pty of kind ``shell``, PR-1.8) is asked three more things,
+all read on the service's side of the pty: `Pty.shell_pid` (the child, or
+for a sandboxed shell, one spawned with a box, the shell inside the box
+below the launcher and bubblewrap, remembered once found),
+`Pty.has_running_command` (the master's foreground group against that
+shell's) and `Pty.process_cwd` (that shell's ``/proc`` cwd, where the row's
+``cwd`` is where it started). `clear(pty)` swaps in a fresh model at the
+pty's grid (a panel shell's *Clear*; the tracker keeps the program's modes
+for the next attach), and `capture(pty)` is a live pty's text (what the
+panel history is written from).
+
 Exit
 ----
 A `GLib.child_watch_add` reaps the child; the master is drained until EIO,
@@ -187,6 +198,7 @@ from typing import Any
 
 from gi.repository import GLib
 
+from .. import proctree
 from ..api.protocol import FLAG_REDRAW, FLAG_REDRAW_END, MAX_PAYLOAD, QUEUE_BYTES
 from . import termscreen, termstream
 
@@ -340,6 +352,9 @@ class Pty:
         self._reaped = False
         self._eof = False
         self._finished = False
+        # A sandboxed panel shell's shell inside the box, once found (see
+        # shell_pid).
+        self._inner_pid: int | None = None
 
     # -- PtyPort
 
@@ -359,6 +374,46 @@ class Pty:
             return os.tcgetpgrp(self.master)
         except OSError:
             return None
+
+    # -- the shell's own reads (a panel shell, PR-1.8)
+
+    def shell_pid(self) -> int | None:
+        """The pid whose process group is "the shell at its prompt": the
+        child itself; for a sandboxed panel shell (a ``shell`` pty spawned
+        with a box) the shell *inside* the box, found below the launcher
+        and bubblewrap once they have spawned it (`proctree.inner_shell_pid`)
+        and remembered, since the wrappers never re-exec it. None once the
+        child is reaped, and for a sandboxed one until the inner shell
+        exists."""
+        pid = self.child_pid()
+        if pid is None or self.kind != _SHELL or not self.box:
+            return pid
+        if self._inner_pid is None:
+            self._inner_pid = proctree.inner_shell_pid(pid)
+        return self._inner_pid
+
+    def has_running_command(self) -> bool:
+        """Whether something other than the shell owns the terminal's
+        foreground: the cue terminal emulators use for a close
+        confirmation, and what the terminal tools call busy. A sandboxed
+        shell is compared against the shell inside the box, which takes
+        the foreground for itself (the kernel reports its process group in
+        host pid numbers), so a shell at its prompt in a box reads idle like
+        a plain one."""
+        shell = self.shell_pid()
+        foreground = self.foreground_pgrp()
+        if shell is None or foreground is None:
+            return False
+        try:
+            return foreground not in (-1, os.getpgid(shell))
+        except OSError:
+            return False
+
+    def process_cwd(self) -> str | None:
+        """The shell's working directory now, read from ``/proc`` (the
+        row's ``cwd`` is where it was spawned): what a panel shell's
+        follow-the-agent move compares against."""
+        return proctree.process_cwd(self.shell_pid())
 
     # -- reads
 
@@ -877,6 +932,28 @@ class PtyServer:
         self._broadcast(pty, data, 0)
         pty._dirty = True
         self._schedule_save(pty)
+
+    def clear(self, pty_id: int) -> None:
+        """Wipe a pty's screen and scrollback: a fresh model at the pty's
+        grid, which is what VTE's reset with its history cleared leaves of
+        a terminal (a panel shell's *Clear*). The modes the program set
+        stay in the tracker, so a client attaching again (the one that
+        asked does, to be redrawn from the empty model) has them
+        re-asserted. Nothing is written to the child: nudging it to repaint
+        is the caller's."""
+        pty = self.get(pty_id)
+        pty.screen = termscreen.Screen(pty.cols, pty.rows)
+        pty.filter.screen = pty.screen
+        pty._dirty = True
+        self._schedule_save(pty)
+
+    def capture(self, pty_id: int) -> str:
+        """A pty's text, scrollback and screen (`Screen.capture_contents`),
+        "" once it is gone: its model file goes with its row, so the panel
+        history is written while the shell lives (the tab's saves, the
+        last one before its shells end)."""
+        pty = self.ptys.get(pty_id)
+        return pty.screen.capture_contents() if pty is not None else ""
 
     def signal(self, pty_id: int, sig: int) -> None:
         pty = self.get(pty_id)

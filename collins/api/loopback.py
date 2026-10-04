@@ -23,7 +23,11 @@ Two shortcuts the socket will not have, for the `Session` that still runs
 in the client's process through Phase 1: `screen_of(pty)` (the model the
 session's `ScreenPort` reads) and `pty_of(pty)` (the pty object its
 `PtyPort` asks for the child's pid and foreground group). PR-1.10 moves
-the session into the service and both go.
+the session into the service and both go. A panel shell (PR-1.8) reads
+through the same two (its text for `read_terminal`, its foreground, its
+shell's cwd), and the tab's panel-history save, whose key and moment are
+still the tab's in Phase 1, is a third on the server's end:
+`LoopbackServer.write_panel_history`, the core writing from its models.
 
 **This module is deleted at the end of Phase 1** (D21): hard requirement 1
 says same-machine goes through the API, and an in-process mode left behind
@@ -204,6 +208,11 @@ class LoopbackServer:
         self._clients.add(client)
         self.core.client_connected(client)
         return client
+
+    def write_panel_history(self, key: str, shells: dict[int, int | str]) -> None:
+        """The tab's panel-history save (`ServiceCore.write_panel_history`):
+        a shortcut, see the module docstring."""
+        self.core.write_panel_history(key, shells)
 
     def shutdown(self) -> None:
         for client in list(self._clients):

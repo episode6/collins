@@ -45,8 +45,12 @@ downloads of each version, see the
   the terminal's queries and keeps a screen model of record, and the
   terminal you see is painted from the service's stream (a fresh terminal
   attaching to a running session is redrawn from the model, scrollback
-  and colours included). Opt-in only; the default is unchanged. The e2e
-  suite runs on both backends in CI.
+  and colours included). The terminal panel's shells, the sandboxed one
+  included, run on the service the same way: their scrollback is saved
+  from the service's screen model and painted back into a reopened shell
+  before its prompt, and the agent's `read_terminal` / `run_in_terminal`
+  read and type through the service. Opt-in only; the default is
+  unchanged. The e2e suite runs on both backends in CI.
 - **App state is now two files.** `~/.config/collins/state.json` keeps what
   describes your sessions and projects and what Collins does for them
   (names, favorites, archives, drafts, pull request records, the sandbox,

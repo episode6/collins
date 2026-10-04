@@ -519,6 +519,9 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
 - **Running the suite on it:** `python3 scripts/run_e2e.py --pty-backend
   server` (CI runs both backends as `e2e-shard (<backend>, N)`); a single
   check: `COLLINS_PTY_BACKEND=server … python3 scripts/check_x.py`.
+- **The panel shells** (PR-1.8) follow the same backend, each a
+  `ClientTerminal` over a `shell` pty with its own loopback client; see
+  `collins-panel-dock`, "Panel shells on the server backend".
 
 ## The service's pty server (ptyserver)
 
@@ -550,7 +553,11 @@ PR-1.5).
   unknown: the reap no longer lands on a stopping service), its row
   recorded gone and its model file removed with it (Phase 1: stopping the
   service ends every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
-  `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7.
+  `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7,
+  and for a panel shell `shell_pid` (a sandboxed one's shell inside the
+  box), `has_running_command` and `process_cwd`; `clear(pty)` swaps in a
+  fresh model and `capture(pty)` reads a live pty's text ("" once gone:
+  the model file goes with the row).
 - **Attach and the redraw.** `attach(pty, sink, cols, rows)` sends
   `Screen.snapshot()` with the tracker's `preamble(screen=False)` in
   frames of at most `protocol.MAX_PAYLOAD`, every one flagged `REDRAW`,

@@ -49,6 +49,7 @@ from . import (  # noqa: E402
     transcriptlinks,
     vtehtml,
 )
+from .api import protocol  # noqa: E402
 from .api.loopback import LoopbackServer, RequestRefused  # noqa: E402
 from .claudemodels import short_name  # noqa: E402
 from .composer import ComposerPage, ComposerView  # noqa: E402
@@ -199,6 +200,27 @@ def service_loopback() -> LoopbackServer:
 # is the session's now (service.session.agent_environment, which says why);
 # kept under its old name for what refers to it.
 _agent_tab_environment = agent_environment
+
+
+def _service_term(theme_name: str | None, terminal: Vte.Terminal) -> dict:
+    """The hello's ``term`` for *terminal*, drawn in *theme_name*: the
+    colours the service answers the program's colour queries with (the
+    session tab's and the panel shells' alike). No ``scheme``: the service
+    answers the colour-scheme query from the background's luminance, as
+    VTE does (`check_termstream_answers`), and VTE's Default theme is grey
+    on black whatever the desktop's scheme."""
+    term: dict = {"vte": Vte.get_major_version() * 10000 + Vte.get_minor_version() * 100}
+    theme = themes.get_theme(theme_name)
+    if theme is not None:
+        term["fg"] = "#" + theme["fg"]
+        term["bg"] = "#" + theme["bg"]
+    else:
+        # VTE's defaults: the foreground it draws plain text in, the
+        # background as it is drawn now.
+        term["fg"] = "#c0c0c0"
+        bg = terminal.get_color_background_for_draw()
+        term["bg"] = f"#{round(bg.red * 255):02x}{round(bg.green * 255):02x}{round(bg.blue * 255):02x}"
+    return term
 
 
 def _setup_links(terminal: Vte.Terminal) -> None:
@@ -1155,7 +1177,21 @@ class PanelTerminal(Gtk.Box):
     Spawns lazily the first time it is shown and survives hide/show and
     bottom↔right swaps; the shell is only lost when the tab itself closes.
     The shell kind of PanelPage (see panelstrip): *number* is the 1-based
-    ordinal its tab title shows."""
+    ordinal its tab title shows.
+
+    Two backends, as the tab has (ptyclient.PTY_BACKEND): on ``vte`` the
+    terminal spawns the shell on its own pty; on ``server`` (spec §3.15,
+    PR-1.8) the terminal has no child and shows a pty of kind ``shell`` on
+    the service's pty server, through its own loopback client: output
+    frames fed, commits sent back as input, the redraw guard, resize and
+    focus as events, `pty-exited` for `child-exited` (ptyclient
+    .ClientTerminal). Everything that reads or writes the shell then goes
+    through the service: its text is the screen model's capture, the
+    foreground, the inner shell of a box and the cwd are the pty server's
+    reads, typing is input frames, a note and the restored history are
+    painted into the stream, and the panel history is written by the
+    service from the model (TerminalTab.save_panel_history). `_view` is
+    the glue on the second, None on the first."""
 
     page_kind = "shell"
 
@@ -1167,7 +1203,12 @@ class PanelTerminal(Gtk.Box):
         "bell": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, number: int = 1, plan_lookup: Callable[[], str | None] | None = None) -> None:
+    def __init__(
+        self,
+        number: int = 1,
+        plan_lookup: Callable[[], str | None] | None = None,
+        box_lookup: Callable[[], str] | None = None,
+    ) -> None:
         """*plan_lookup* makes this the **sandboxed** kind: `() -> the
         session's sandbox plan path` (or None while there is none), and
         the shell spawns as `bwrap <plan> -- $SHELL` through the same
@@ -1175,10 +1216,14 @@ class PanelTerminal(Gtk.Box):
         inside exactly the box the agent does, and is what the agent's
         run_in_terminal / read_terminal reach from inside one (see
         mcptools.tool_shells). Titled "Sandboxed shell N"; the same
-        scrollback persistence as any shell."""
+        scrollback persistence as any shell. *box_lookup* (`() -> the
+        session's box id`) is what the server backend names the box by:
+        the service spawns the shell on the plan its own records hold for
+        that box (service.core)."""
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._number = number
         self._plan_lookup = plan_lookup
+        self._box_lookup = box_lookup
         # The plan file this shell's box was actually built from, once it
         # has spawned. A box outlives the plan it was built from: after the
         # session's *Restart to apply* the tab holds a new plan, and a
@@ -1204,7 +1249,21 @@ class PanelTerminal(Gtk.Box):
         # and on exit — a queued command must never surprise a later shell.
         self._pending_input: list[bytes] = []
 
-        self.terminal = Vte.Terminal()
+        # The server backend's glue (see the class docstring), and the saved
+        # panel history waiting to be painted into the stream of the shell's
+        # pty ahead of its first byte (shown on the widget meanwhile: a
+        # sandboxed shell with no plan yet has no pty to paint into).
+        self._view: ptyclient.ClientTerminal | None = None
+        self._client = None
+        self._history_paint: str | None = None
+        if ptyclient.server_backend():
+            self.terminal = ptyclient.ClientVte()
+            self._client = service_loopback().connect(
+                self._on_service_output, self._on_service_event, ptyclient.device_name()
+            )
+            self._view = ptyclient.ClientTerminal(self.terminal, self._client, on_exited=self._on_pty_exited)
+        else:
+            self.terminal = Vte.Terminal()
         self.terminal.set_scrollback_lines(10_000)
         self.terminal.set_scroll_on_output(False)
         self.terminal.set_scroll_on_keystroke(True)
@@ -1212,7 +1271,8 @@ class PanelTerminal(Gtk.Box):
         # The sound belongs to the window, not to VTE (see Window._on_bell);
         # all this terminal does with a BEL is say that one arrived.
         self.terminal.set_audible_bell(False)
-        self.terminal.connect("child-exited", self._on_child_exited)
+        if self._view is None:
+            self.terminal.connect("child-exited", self._on_child_exited)
         self.terminal.connect("bell", lambda *_: self.emit("bell"))
         _setup_links(self.terminal)
         _setup_smooth_scroll(self.terminal)
@@ -1225,6 +1285,10 @@ class PanelTerminal(Gtk.Box):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self._on_key_pressed)
         self.terminal.add_controller(keys)
+        if self._view is not None:
+            # A page destroyed with no close of its own (its tab's window
+            # closed with idle tabs): the shell must not outlive it.
+            self.connect("destroy", lambda *_a: self.release_pty())
 
     @property
     def ever_spawned(self) -> bool:
@@ -1253,8 +1317,13 @@ class PanelTerminal(Gtk.Box):
 
     def note(self, text: str) -> None:
         """Feed a dim one-line note into this shell's scrollback — said to
-        the user, never to the shell (nothing is typed)."""
-        self.terminal.feed(f"\r\n\x1b[2m{text}\x1b[0m\r\n".encode())
+        the user, never to the shell (nothing is typed). On the server
+        backend it is painted into the pty's stream (rule 2 of §3.1), so the
+        model, the history and every client have it; with no pty, the
+        widget alone shows it."""
+        line = f"\r\n\x1b[2m{text}\x1b[0m\r\n"
+        if not self._paint(line):
+            self.terminal.feed(line.encode())
 
     def open_shell(self, cwd: str | None, restore_text: str | None = None) -> None:
         """Spawn the shell on first show; on later shows follow the agent's
@@ -1273,6 +1342,13 @@ class PanelTerminal(Gtk.Box):
             self.terminal.feed(restore_text.replace("\n", "\r\n").encode())
             marker = _("── restored panel history ──")
             self.terminal.feed(f"\r\n\x1b[2m{marker}\x1b[0m\r\n".encode())
+            if self._view is not None:
+                # The same bytes go into the pty's stream once it exists,
+                # ahead of the shell's first (§3.15): the attach resets this
+                # widget and the model is what everything else reads.
+                self._history_paint = (
+                    restore_text.replace("\n", "\r\n") + f"\r\n\x1b[2m{marker}\x1b[0m\r\n"
+                )
         if cwd is None or not Path(cwd).is_dir():
             cwd = str(Path.home())
         shell = os.environ.get("SHELL") or "/bin/bash"
@@ -1289,6 +1365,11 @@ class PanelTerminal(Gtk.Box):
                     _("no sandbox plan for this session — the shell was not started").encode()
                 )
                 return
+            if self._view is not None:
+                # The service runs the launcher on the plan its records
+                # hold for the session's box, and queues the `cd` (core).
+                self._service_spawn(cwd, sandboxed=True)
+                return
             # The launcher execs `bwrap --args <fd> -- $SHELL`, whose
             # --chdir lands the shell where the plan starts — the
             # workspace, or the checkout of a launch narrowed to its
@@ -1300,6 +1381,9 @@ class PanelTerminal(Gtk.Box):
             workspace, start = self._plan_workspace(plan)
             if workspace and cwd != start and _within(workspace, cwd):
                 self.run_command(f"cd {shlex.quote(cwd)}")
+        if self._view is not None:
+            self._service_spawn(cwd, sandboxed=False)
+            return
         self.terminal.spawn_async(
             Vte.PtyFlags.DEFAULT,
             cwd,
@@ -1334,6 +1418,127 @@ class PanelTerminal(Gtk.Box):
         self.terminal.reset(True, True)
         self.emit("shell-exited")
 
+    # -- the server backend (see the class docstring) ----------------------
+
+    def _service_spawn(self, cwd: str, sandboxed: bool) -> None:
+        """Ask the service for a ``shell`` pty in *cwd* at this terminal's
+        grid (a sandboxed one by the session's box), show it, paint the
+        restored history into it before the shell has said anything, and
+        hand it the input queued meanwhile. A refusal is fed to the widget
+        where VTE's spawn error was. The service's spawn returns once the
+        child has exec'd, so the pid is known here, as VTE's callback knew
+        it."""
+        view, client = self._view, self._client
+        assert view is not None and client is not None
+        cols, rows = view.grid()
+        request: dict = {"t": "spawn", "kind": "shell", "cwd": cwd, "cols": cols, "rows": rows}
+        if sandboxed:
+            request["sandbox"] = True
+            box = self._box_lookup() if self._box_lookup is not None else ""
+            if box:
+                request["sandbox_box"] = box
+        try:
+            reply = client.request(request)
+            pty = int(reply["pty"])
+            view.attach(pty)
+        except RequestRefused as exc:
+            reason = _(exc.msgid).format_map(exc.details) if exc.msgid else _("failed to start shell")
+            self._pending_input.clear()
+            self.terminal.feed(reason.encode())
+            return
+        except (ValueError, KeyError) as exc:
+            self._pending_input.clear()
+            self.terminal.feed(_("failed to start shell: {msg}").format(msg=str(exc)).encode())
+            return
+        found = self._service_pty()
+        self._child_pid = found.child_pid() if found is not None else None
+        if sandboxed and found is not None:
+            self._spawn_plan = found.plan
+        history, self._history_paint = self._history_paint, None
+        if history:
+            self._paint(history)
+        pending, self._pending_input = self._pending_input, []
+        for data in pending:
+            client.send_input(pty, data)
+
+    def _service_pty(self):
+        """The service's pty this shell shows (the loopback's `pty_of`), or
+        None: before the spawn, after the exit, once released."""
+        view = self._view
+        if view is None or view.pty is None or view.exited or self._client is None:
+            return None
+        try:
+            return self._client.pty_of(view.pty)
+        except KeyError:
+            return None
+
+    def _paint(self, text: str) -> bool:
+        """Paint *text* into the stream of this shell's pty (the service's
+        `paint`, rule 2 of §3.1), in pieces the protocol takes. False when
+        there is no pty to paint into (or on the VTE backend): the caller
+        feeds the widget instead."""
+        if self._service_pty() is None:
+            return False
+        pty = self._view.pty
+        step = protocol.TEXT_MAX
+        try:
+            for start in range(0, len(text), step):
+                self._client.request({"t": "paint", "pty": pty, "text": text[start : start + step]})
+        except (RequestRefused, ValueError):
+            return False
+        return True
+
+    def _write(self, data: bytes) -> None:
+        """Type *data* into the shell: the VTE's child, or an input frame
+        to the service's pty."""
+        if self._view is None:
+            self.terminal.feed_child(data)
+        elif self._view.pty is not None and self._client is not None:
+            self._client.send_input(self._view.pty, data)
+
+    def _on_service_output(self, pty: int, data: bytes, flags: int) -> None:
+        if self._view is not None:
+            self._view.on_output(pty, data, flags)
+
+    def _on_service_event(self, event: dict) -> None:
+        if self._view is not None:
+            self._view.on_event(event)
+
+    def _on_pty_exited(self, _status: int | None) -> None:
+        # `pty-exited` is what `child-exited` was (§3.4).
+        self._on_child_exited(self.terminal, -1 if _status is None else int(_status))
+
+    def history_source(self) -> int | str:
+        """What the panel history is written from for this shell (the tab's
+        save on the server backend, `ServiceCore.write_panel_history`): its
+        pty's id, so the service captures its model, or the widget's text
+        when it has no pty (a sandboxed shell that never found a plan
+        still holds the history it was restored with)."""
+        found = self._service_pty()
+        if found is not None:
+            return int(self._view.pty)
+        return _capture_contents(self.terminal)
+
+    def release_pty(self) -> None:
+        """The page is closing for good, or its tab is: end the shell on the
+        service and let the loopback client go — what the widget's finalize
+        did to its VTE child. A no-op on the VTE backend, and once done."""
+        view, client = self._view, self._client
+        if view is None or client is None or client.closed:
+            return
+        if view.pty is not None and not view.exited:
+            try:
+                client.request({"t": "close", "pty": view.pty, "mode": "kill"})
+            except (RequestRefused, ValueError):
+                pass
+        view.detach()
+        client.close()
+
+    def page_closed(self) -> None:
+        """PanelPage hook: the page's X (or a stowed shell's exit) closed it
+        for real, not a transfer between strips."""
+        self.release_pty()
+
     @staticmethod
     def _plan_workspace(plan: str) -> tuple[str | None, str | None]:
         """(the workspace of the box *plan* builds, the directory a process
@@ -1349,6 +1554,9 @@ class PanelTerminal(Gtk.Box):
         inside the box, found below the launcher and bubblewrap once they
         have spawned it (proctree.inner_shell_pid) and remembered — the
         wrappers never re-exec it. None until it exists."""
+        if self._view is not None:
+            found = self._service_pty()
+            return found.shell_pid() if found is not None else None
         if self._child_pid is None:
             return None
         if self._plan_lookup is None:
@@ -1356,6 +1564,15 @@ class PanelTerminal(Gtk.Box):
         if self._inner_pid is None:
             self._inner_pid = proctree.inner_shell_pid(self._child_pid)
         return self._inner_pid
+
+    def _shell_cwd(self, shell_pid: int) -> str | None:
+        """The shell's working directory now: the service's ``/proc`` read
+        of its pty's shell (Pty.process_cwd) on the server backend, the
+        same read of *shell_pid* here on VTE's."""
+        if self._view is not None:
+            found = self._service_pty()
+            return found.process_cwd() if found is not None else None
+        return proctree.process_cwd(shell_pid)
 
     def follow_cwd(self, cwd: str | None) -> bool:
         """`cd` this shell to *cwd* if it is sitting idle at its prompt —
@@ -1368,7 +1585,7 @@ class PanelTerminal(Gtk.Box):
             return False
         if self.has_running_command():
             return False
-        if proctree.process_cwd(shell_pid) == cwd:
+        if self._shell_cwd(shell_pid) == cwd:
             return False
         self._sync_cwd(cwd)
         return True
@@ -1379,11 +1596,11 @@ class PanelTerminal(Gtk.Box):
             return
         if self.has_running_command():
             return  # don't interrupt whatever the user left running
-        if proctree.process_cwd(shell_pid) == cwd:
+        if self._shell_cwd(shell_pid) == cwd:
             return
         # The line reset clears any half-typed input before the cd; see
         # shellinput for what else can be sitting on that line.
-        self.terminal.feed_child(shell_command(f"cd {shlex.quote(cwd)}\n").encode())
+        self._write(shell_command(f"cd {shlex.quote(cwd)}\n").encode())
 
     def has_running_command(self) -> bool:
         """True when something other than the shell owns the terminal's
@@ -1391,7 +1608,12 @@ class PanelTerminal(Gtk.Box):
         shell *inside* the box, not the launcher the terminal spawned:
         the inside shell takes the foreground for itself, and the kernel
         reports its process group in host pid numbers, so a bwrap-wrapped
-        shell at its prompt reads idle like a plain one."""
+        shell at its prompt reads idle like a plain one. On the server
+        backend the pty server answers (Pty.has_running_command), from the
+        master it holds."""
+        if self._view is not None:
+            found = self._service_pty()
+            return found.has_running_command() if found is not None else False
         return _has_running_command(self.terminal, self._shell_pid())
 
     def run_command(self, command: str) -> None:
@@ -1405,13 +1627,24 @@ class PanelTerminal(Gtk.Box):
         if self._child_pid is None:
             self._pending_input.append(data)
         else:
-            self.terminal.feed_child(data)
+            self._write(data)
 
     def clear(self) -> None:
         """Wipe the screen and scrollback; a running shell keeps running and
-        is nudged to repaint its prompt (\\x0c = Ctrl+L)."""
+        is nudged to repaint its prompt (\\x0c = Ctrl+L). On the server
+        backend the service wipes its model (what the history and the
+        terminal tools read) and this terminal is redrawn from it."""
+        if self._service_pty() is not None:
+            pty = self._view.pty
+            try:
+                self._client.request({"t": "clear", "pty": pty})
+                self._view.attach(pty)
+            except (RequestRefused, ValueError):
+                self.terminal.reset(False, True)
+            self._write(b"\x0c")
+            return
         self.terminal.reset(False, True)
-        if self._spawned:
+        if self._spawned and self._view is None:
             self.terminal.feed_child(b"\x0c")
 
     def page_state(self) -> dict:
@@ -1425,7 +1658,12 @@ class PanelTerminal(Gtk.Box):
 
     def capture_contents(self) -> str:
         """The panel's current text contents including scrollback (plain text
-        — VTE's dump carries no colors or attributes)."""
+        — VTE's dump carries no colors or attributes). On the server backend
+        the service's screen model is the text of record (§3.3): its
+        capture, the same text the panel history is written from."""
+        found = self._service_pty()
+        if found is not None:
+            return self._client.screen_of(self._view.pty).capture_contents()
         return _capture_contents(self.terminal)
 
     def apply_settings(self, settings: dict) -> None:
@@ -1436,6 +1674,9 @@ class PanelTerminal(Gtk.Box):
         except (TypeError, ValueError):
             pass
         themes.apply_terminal_theme(self.terminal, settings.get("terminal_theme"))
+        if self._view is not None:
+            # What the service answers this shell's colour queries with.
+            self._view.set_term(_service_term(settings.get("terminal_theme"), self.terminal))
         self._easy_copy_paste = bool(settings.get("easy_copy_paste"))
         self._keys = keymap.KeyMatcher.from_settings(settings)
 
@@ -2319,23 +2560,8 @@ class TerminalTab(Gtk.Box):
         )
 
     def _term_for_service(self) -> dict:
-        """The hello's ``term`` for this terminal: the colours the service
-        answers the program's colour queries with. No ``scheme``: the
-        service answers the colour-scheme query from the background's
-        luminance, as VTE does (`check_termstream_answers`), and VTE's
-        Default theme is grey on black whatever the desktop's scheme."""
-        term: dict = {"vte": Vte.get_major_version() * 10000 + Vte.get_minor_version() * 100}
-        theme = themes.get_theme(self._theme_name)
-        if theme is not None:
-            term["fg"] = "#" + theme["fg"]
-            term["bg"] = "#" + theme["bg"]
-        else:
-            # VTE's defaults: the foreground it draws plain text in, the
-            # background as it is drawn now.
-            term["fg"] = "#c0c0c0"
-            bg = self.terminal.get_color_background_for_draw()
-            term["bg"] = f"#{round(bg.red * 255):02x}{round(bg.green * 255):02x}{round(bg.blue * 255):02x}"
-        return term
+        """The hello's ``term`` for this terminal (`_service_term`)."""
+        return _service_term(self._theme_name, self.terminal)
 
     def _on_service_output(self, pty: int, data: bytes, flags: int) -> None:
         if self._view is not None:
@@ -3128,6 +3354,8 @@ class TerminalTab(Gtk.Box):
         # A window closed with idle tabs destroys them with no close-page:
         # the server backend's pty must not outlive the tab (idempotent).
         self.connect("destroy", lambda *_a: self.release_pty())
+        # Nor its panel shells' (a stowed or maximized one included).
+        self.connect("destroy", lambda *_a: self.release_panel_ptys())
 
     def _leave_pr_store(self, *_args) -> None:
         if self._pr_store is None:
@@ -4777,7 +5005,8 @@ class TerminalTab(Gtk.Box):
         spawn, so one restored before the launch settled retries on its
         next show, and one restored into an unsandboxed tab never starts."""
         lookup = (lambda: self.session.sandbox_plan_path) if sandboxed else None
-        shell = PanelTerminal(self._dock.next_shell_number(), plan_lookup=lookup)
+        box = (lambda: self.session.sandbox_box) if sandboxed else None
+        shell = PanelTerminal(self._dock.next_shell_number(), plan_lookup=lookup, box_lookup=box)
         shell.hist = self._dock.next_hist_ordinal()
         return shell
 
@@ -5186,11 +5415,29 @@ class TerminalTab(Gtk.Box):
     def save_panel_history(self) -> None:
         """Persist each panel tab's scrollback so re-opening this session
         restores them. A panel never opened in this tab leaves prior history
-        untouched; tabs closed along the way drop out of the saved set."""
+        untouched; tabs closed along the way drop out of the saved set.
+
+        On the server backend the service writes it, from each shell's
+        screen model (spec §3.15, `ServiceCore.write_panel_history`): the
+        tab names the key and the shells, the moment being the same three
+        (a draft save, the tab's close before its shells end, the quit)."""
         history_id = self._history_id()
         if self.fork or not history_id or not self._dock.ever_spawned:
             return
+        if ptyclient.server_backend():
+            sources = {shell.hist: shell.history_source() for shell in self._dock.shell_pages()}
+            service_loopback().write_panel_history(history_id, sources)
+            return
         panelhistory.save_all(history_id, self._dock.capture_shell_texts())
+
+    def release_panel_ptys(self) -> None:
+        """The tab is closing for good: end every panel shell's pty on the
+        service (the server backend; on VTE's the shells die with their
+        widgets). After `save_panel_history`, which reads their models."""
+        for shell in self._dock.shell_pages():
+            release = getattr(shell, "release_pty", None)
+            if release is not None:
+                release()
 
     def clear_panel_history(self) -> None:
         """Wipe every panel tab's scrollback and the persisted history files.

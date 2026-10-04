@@ -139,7 +139,11 @@ Enter opens, Esc closes.
   and colours included. Opt-in by the environment variable only, and
   the default stays the terminal's own pty until a release cycle of
   daily use says the two feel the same; the e2e suite already runs on
-  both. Quitting Collins ends the sessions on both backends.
+  both. The terminal panel's shells (Ctrl+J, and the sandboxed shell) run
+  on the service too: their saved scrollback is written from the service's
+  screen model and painted back ahead of the new shell's prompt, and
+  `read_terminal` / `run_in_terminal` read and type through the service.
+  Quitting Collins ends the sessions on both backends.
 - Clicking a session opens it in an embedded **VTE terminal** running your
   `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
   the directory the session **last worked in** (worktree-aware), not just
