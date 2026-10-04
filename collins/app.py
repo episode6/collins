@@ -2512,9 +2512,29 @@ class App(Adw.Application):
             record_next_id=self.state.set_pty_next_id,
             next_id=self.state.pty_next_id,
             get_setting=self.state.get_setting,
+            sandbox_plan=self._sandbox_plan_of_box,
         )
         self._service_loopback = LoopbackServer(core)
         terminal_mod.SERVICE_LOOPBACK = self._service_loopback
+
+    def _sandbox_plan_of_box(self, box: str) -> str | None:
+        """The plan file the session running in *box* launched from, or
+        None: the service's record a sandboxed panel shell is spawned on
+        (ServiceCore's *sandbox_plan*). In Phase 1 that record is the box's
+        `Session`, still held by its tab; PR-1.10 moves the sessions into
+        the service and this lookup with them."""
+        if not box:
+            return None
+        for window in self.get_windows():
+            if not isinstance(window, MainWindow):
+                continue
+            for i in range(window.tab_view.get_n_pages()):
+                tab = window.tab_view.get_nth_page(i).get_child()
+                if isinstance(tab, TerminalTab) and tab.sandbox_box == box and tab.sandbox_plan_path:
+                    # A plan file gone from disk is still returned: the
+                    # launcher fails at exec, SpawnError, refused with its errno.
+                    return tab.sandbox_plan_path
+        return None
 
     def _start_sandbox_support(self) -> None:
         """Find out, off the main loop, whether sandboxed sessions can be
@@ -3015,8 +3035,10 @@ class App(Adw.Application):
     def _mcp_read_terminal(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
         """Hand the agent its session's terminal-panel shells, as text: each
         one's scrollback tail under a header naming it. The dump is VTE's
-        own (capture_contents — what panel history saves), read here on the
-        main loop like every dispatch, so the screen can't change mid-read;
+        own (capture_contents — what panel history saves), or on the server
+        backend the service's screen model of the shell's pty (the shell
+        routes it, as it routes its busy read to the pty server), read here
+        on the main loop like every dispatch, so the screen can't change mid-read;
         mcptools.terminal_reply does the tailing and keeps the reply inside
         the socket's frame limit. A sandboxed session reads only the
         shells running inside its box (mcptools.tool_shells): the user's
@@ -3056,7 +3078,10 @@ class App(Adw.Application):
         agent runs, and must not have their keyboard moved by it. A
         sandboxed session types only into a shell running inside its box
         (mcptools.tool_shells), opening one when none is idle — never into
-        the user's own unconfined shell."""
+        the user's own unconfined shell. On the server backend the shell
+        is a pty of the service and the command reaches it as input through
+        the service (PanelTerminal.run_command), its busy read is the pty
+        server's, and a shell opened for it is spawned there."""
         _window, tab = found
         wanted = args.get("terminal")
         opened = False

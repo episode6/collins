@@ -103,13 +103,33 @@ attachment), the honest outcome for a transport that cannot say.
 A sink is any object with ``send_output(data: bytes, flags: int)``,
 ``send_event(event: dict)`` and ``drop_queued()`` (discard what of this
 pty is still queued: the redraw that follows supersedes it); a ``device``
-attribute is optional. Sinks are keyed by identity.
+attribute is optional, and so is ``term`` (its client's terminal: the
+colours and scheme the hello and the ``theme`` event carry). Sinks are
+keyed by identity.
+
+**The colours a pty's queries are answered from are its active client's**
+(§3.3): the active sink's ``term``, or, while no sink is active or the
+active one has said nothing, the last term any client sent
+(`set_term`). They are re-applied whenever the active client changes and
+whenever a client's term does, so one client's theme never answers
+another client's pty.
 
 `paint(pty, text)` is rule 2's service-inserted text: it is fed to the
 model and sent to the sinks as if the child had written it, between two
 reads, so it lands at a token boundary; it does not go through the query
 responder (the service does not answer its own questions), so a paint that
 contains a query is a bug in the caller, not a reply.
+
+A panel shell (a pty of kind ``shell``, PR-1.8) is asked three more things,
+all read on the service's side of the pty: `Pty.shell_pid` (the child, or
+for a sandboxed shell, one spawned with a box, the shell inside the box
+below the launcher and bubblewrap, remembered once found),
+`Pty.has_running_command` (the master's foreground group against that
+shell's) and `Pty.process_cwd` (that shell's ``/proc`` cwd, where the row's
+``cwd`` is where it started). `clear(pty)` swaps in a fresh model at the
+pty's grid (a panel shell's *Clear*; the tracker keeps the program's modes
+for the next attach), and `capture(pty)` is a live pty's text (what the
+panel history is written from).
 
 Exit
 ----
@@ -187,6 +207,7 @@ from typing import Any
 
 from gi.repository import GLib
 
+from .. import proctree
 from ..api.protocol import FLAG_REDRAW, FLAG_REDRAW_END, MAX_PAYLOAD, QUEUE_BYTES
 from . import termscreen, termstream
 
@@ -340,6 +361,9 @@ class Pty:
         self._reaped = False
         self._eof = False
         self._finished = False
+        # A sandboxed panel shell's shell inside the box, once found (see
+        # shell_pid).
+        self._inner_pid: int | None = None
 
     # -- PtyPort
 
@@ -359,6 +383,46 @@ class Pty:
             return os.tcgetpgrp(self.master)
         except OSError:
             return None
+
+    # -- the shell's own reads (a panel shell, PR-1.8)
+
+    def shell_pid(self) -> int | None:
+        """The pid whose process group is "the shell at its prompt": the
+        child itself; for a sandboxed panel shell (a ``shell`` pty spawned
+        with a box) the shell *inside* the box, found below the launcher
+        and bubblewrap once they have spawned it (`proctree.inner_shell_pid`)
+        and remembered, since the wrappers never re-exec it. None once the
+        child is reaped, and for a sandboxed one until the inner shell
+        exists."""
+        pid = self.child_pid()
+        if pid is None or self.kind != _SHELL or not self.box:
+            return pid
+        if self._inner_pid is None:
+            self._inner_pid = proctree.inner_shell_pid(pid)
+        return self._inner_pid
+
+    def has_running_command(self) -> bool:
+        """Whether something other than the shell owns the terminal's
+        foreground: the cue terminal emulators use for a close
+        confirmation, and what the terminal tools call busy. A sandboxed
+        shell is compared against the shell inside the box, which takes
+        the foreground for itself (the kernel reports its process group in
+        host pid numbers), so a shell at its prompt in a box reads idle like
+        a plain one."""
+        shell = self.shell_pid()
+        foreground = self.foreground_pgrp()
+        if shell is None or foreground is None:
+            return False
+        try:
+            return foreground not in (-1, os.getpgid(shell))
+        except OSError:
+            return False
+
+    def process_cwd(self) -> str | None:
+        """The shell's working directory now, read from ``/proc`` (the
+        row's ``cwd`` is where it was spawned): what a panel shell's
+        follow-the-agent move compares against."""
+        return proctree.process_cwd(self.shell_pid())
 
     # -- reads
 
@@ -414,7 +478,7 @@ class PtyServer:
         self._next_id = max(1, next_id)
         self.vte_version = vte_version
         self.ptys: dict[int, Pty] = {}
-        self._term: dict = {}  # the active client's term, applied to every TerminalState
+        self._term: dict = {}  # the last term any client sent: the fallback (see pty_term)
         self._in_flight: dict[int, threading.Thread] = {}  # pty id -> its save worker
 
     # -- the table
@@ -429,14 +493,31 @@ class PtyServer:
         return {pty_id: pty.row() for pty_id, pty in self.ptys.items()}
 
     def set_term(self, term: dict) -> None:
-        """The active client's terminal (hello's ``term``, the ``theme``
-        event): colours and scheme the responder answers from."""
+        """A client's terminal changed (its hello's ``term``, the ``theme``
+        event; the caller has already given the client's sinks their
+        ``term``): remembered as the last one seen, the fallback, and every
+        pty's colours re-read from its active client (`pty_term`)."""
         self._term = dict(term)
         for pty in self.ptys.values():
-            self.apply_term(pty.state)
+            self.apply_pty_term(pty)
 
-    def apply_term(self, state: termstream.TerminalState) -> None:
-        term = self._term
+    def pty_term(self, pty: Pty) -> dict:
+        """The term *pty*'s queries are answered from: its active sink's,
+        else the last one any client sent."""
+        attachment = pty.attachments.get(pty.active) if pty.active is not None else None
+        term = getattr(attachment.sink, "term", None) if attachment is not None else None
+        return dict(term) if term else self._term
+
+    def apply_pty_term(self, pty: Pty) -> None:
+        self.apply_term(pty.state, self.pty_term(pty))
+
+    def apply_term(self, state: termstream.TerminalState, term: dict | None = None) -> None:
+        """Set *state*'s colours, scheme and VTE version from *term* (the
+        fallback when None); a colour the term does not carry goes back to
+        VTE's default, so a switch of active client leaves nothing of the
+        last one's behind."""
+        term = self._term if term is None else term
+        state.foreground, state.background = termstream.VTE_FOREGROUND, termstream.VTE_BACKGROUND
         try:
             if term.get("fg"):
                 state.foreground = termstream.rgb16(term["fg"])
@@ -715,6 +796,7 @@ class PtyServer:
         if pty.active is None:
             pty.active = key
             became_active = True
+            self.apply_pty_term(pty)
         if pty.active == key:
             pty.pending_sizes.pop(key, None)
             if (cols, rows) != (pty.cols, pty.rows):
@@ -748,6 +830,7 @@ class PtyServer:
         pty.pending_sizes.pop(key, None)
         if pty.active == key:
             pty.active = None  # the next sink to attach, type or focus takes it
+            self.apply_pty_term(pty)
             self._announce(pty)
 
     def _redraw(self, pty: Pty, attachment: _Attachment) -> None:
@@ -821,6 +904,7 @@ class PtyServer:
             return
         if pty.active != key:
             pty.active = key
+            self.apply_pty_term(pty)
             size = pty.pending_sizes.pop(key, None)
             if size is not None and size != (pty.cols, pty.rows):
                 self._apply_size(pty, *size)
@@ -877,6 +961,28 @@ class PtyServer:
         self._broadcast(pty, data, 0)
         pty._dirty = True
         self._schedule_save(pty)
+
+    def clear(self, pty_id: int) -> None:
+        """Wipe a pty's screen and scrollback: a fresh model at the pty's
+        grid, which is what VTE's reset with its history cleared leaves of
+        a terminal (a panel shell's *Clear*). The modes the program set
+        stay in the tracker, so a client attaching again (the one that
+        asked does, to be redrawn from the empty model) has them
+        re-asserted. Nothing is written to the child: nudging it to repaint
+        is the caller's."""
+        pty = self.get(pty_id)
+        pty.screen = termscreen.Screen(pty.cols, pty.rows)
+        pty.filter.screen = pty.screen
+        pty._dirty = True
+        self._schedule_save(pty)
+
+    def capture(self, pty_id: int) -> str:
+        """A pty's text, scrollback and screen (`Screen.capture_contents`),
+        "" once it is gone: its model file goes with its row, so the panel
+        history is written while the shell lives (the tab's saves, the
+        last one before its shells end)."""
+        pty = self.ptys.get(pty_id)
+        return pty.screen.capture_contents() if pty is not None else ""
 
     def signal(self, pty_id: int, sig: int) -> None:
         pty = self.get(pty_id)

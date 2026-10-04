@@ -5941,6 +5941,9 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_panel_layout(tab)
             self._save_editor_state(tab)
             self._save_composer_draft(tab)
+            # The server backend's panel shells end with the tab, after the
+            # service has written their history from their models.
+            tab.release_panel_ptys()
         session_id = self._session_id_of(page)
         if session_id:
             # Only if this page is the one actually bound to the session.

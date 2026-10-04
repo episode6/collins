@@ -574,7 +574,7 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "clear",
-        "Erase the agent's box.",
+        "Erase the agent's box; wipe a shell's screen and scrollback.",
         request=_request({"pty": _req(_PTY)}),
     ),
     MessageType(

@@ -274,6 +274,12 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   command` queues input until the pty exists. Multi-line input feeds each
   newline as Enter — `sudo` then eats the next line as its password, so
   privileged sequences must be one `a && b` line.
+- On the server backend (`COLLINS_PTY_BACKEND=server`, PR-1.8) the
+  handlers are unchanged: the panel shell routes. `capture_contents()` is
+  the service's screen model of the shell's pty, `has_running_command()`
+  the pty server's foreground read, `run_command` input frames to the
+  service, and a shell opened for the call is spawned there (a sandboxed
+  one on its box's plan). The handlers stay in `app.py` until PR-1.11.
 
 A tool that ends or hands off its own session (an `archive_session` was
 prototyped) can't land inside its own call — the reply would never reach the

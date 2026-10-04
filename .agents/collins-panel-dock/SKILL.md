@@ -67,7 +67,8 @@ levels); it keeps its own end slot on the tab.
 - `panelhistory`: one plain-text scrollback file per shell under
   `~/.local/state/collins/panel_history/`, keyed by a persistent **ordinal**
   (never renumbered; pages move between strips); `save_all` takes the live
-  mapping as an explicit keep-set.
+  mapping as an explicit keep-set. On the server backend the service
+  writes it (below).
 
 ## The rules
 
@@ -141,6 +142,74 @@ the dock-wide numbering, and Ctrl+J never binds to one
 (`_on_page_touched`). `open_shell_page(sandboxed=True)` sits one beside
 the last shell page; the strip's tab menu offers *New sandboxed shell*
 while `set_sandboxed_shell_offer` says there is a plan.
+
+## Panel shells on the server backend
+
+Under `COLLINS_PTY_BACKEND=server` (`ptyclient.PTY_BACKEND`, PR-1.8 of the
+split, spec §3.15) a `PanelTerminal` does what the session tab does there
+(see `collins-terminal-tab`, "The server backend"): its `terminal` is a
+childless `ptyclient.ClientVte` and `_view` a `ClientTerminal` over a pty
+of kind `shell` on the service's `PtyServer`, through the shell's **own**
+loopback client (`service_loopback().connect`, one per shell). Every
+`if self._view` seam mirrors the tab's; on `vte` (`_view` None) nothing
+changed.
+
+- **Spawn.** `_service_spawn`: a `spawn` request (`kind` `shell`, the cwd,
+  the VTE's grid) and `attach`; the service runs `$SHELL` with its own
+  environment and **no** progress declarations (a panel shell never had
+  them). It returns once the child has exec'd, so `_child_pid` is set at
+  once (the e2e checks read `proctree.process_cwd(shell._child_pid)`) and
+  input queued before the spawn is sent straight after. A refusal is fed to
+  the widget where VTE's spawn error was. A sandboxed shell asks with
+  `sandbox` and the session's `sandbox_box` (`box_lookup`); the service
+  finds the plan by the box (`ServiceCore`'s `sandbox_plan`, in Phase 1
+  `App._sandbox_plan_of_box` over the tabs' `Session`s), spawns
+  `providers.sandboxed_shell_argv(plan, $SHELL)` and queues the `cd` into
+  the workspace itself; `sandbox_plan` is the pty's `plan`. The client
+  still checks `plan_lookup()` first, so "no plan" is the same message and
+  the same retry on the next show.
+- **Reads go to the service.** `capture_contents()` is the screen model's
+  (`screen_of(pty).capture_contents()`), `has_running_command()` /
+  `_shell_pid()` / the cwd `follow_cwd` and `_sync_cwd` compare against are
+  the pty server's (`Pty.has_running_command`, `Pty.shell_pid` with the
+  box's inner shell, `Pty.process_cwd` from `/proc`), all through the
+  loopback's `pty_of` shortcut. Typing (`run_command`, the `cd`, Ctrl+L) is
+  input frames (`_write`); `note()` is a `paint`.
+- **The history.** `TerminalTab.save_panel_history` on the server backend
+  hands the service the key and `{ordinal: shell.history_source()}` (the
+  pty id, or the widget's text for a shell with no pty) and
+  `ServiceCore.write_panel_history` writes each from its model
+  (`PtyServer.capture`: the live model; a pty already gone has none, its
+  model file removed with its row) with
+  `panelhistory.save_all`'s keep-set, path and cap. The moments are the
+  same three (a draft save, the tab's close, the quit), and at the tab's
+  close the window then ends the shells (`tab.release_panel_ptys()`, after
+  the saves), so the write is the shells' last word. A reopened shell's
+  saved text is fed to the widget at once and **painted** into the new
+  pty's stream right after the attach, before the main loop can read the
+  shell's first byte (`_history_paint`, in `TEXT_MAX` pieces); a sandboxed
+  shell with no plan yet keeps it for the spawn that finds one.
+- **A shell closed by `exit` loses its history, on both backends.** Its
+  page closes and its ordinal drops out of the next save's keep-set (and
+  the VTE path would read a reset widget anyway); the service writes no
+  history of its own at `pty-exited` because the key is still the tab's.
+  Until PR-1.11 moves the key into the service (spec amended: a `history`
+  key on `spawn` or a `panel.key` request, the history written from the
+  model at `pty-exited` for kind `shell` before the model is dropped).
+- **The end.** `pty-exited` is `child-exited` (`_on_pty_exited`); the X
+  closing a shell page calls `page_closed()` → `release_pty()` (`close`,
+  detach, the client closed; idempotent), and so do the shell's own
+  `destroy` and the tab's (`release_panel_ptys`), for a window closed with
+  idle tabs that never sees a close-page. `clear()` asks the service to
+  `clear` the shell's model (a fresh one; the modes stay in the tracker),
+  re-attaches to be redrawn from it, then sends Ctrl+L.
+- **The theme.** `apply_settings` sends the shell's colours as the
+  `theme` event (`ClientTerminal.set_term(_service_term(theme, terminal))`,
+  the tab's builder shared). The term is the client's (`LoopbackClient.
+  term`, read by its sinks), and a pty's queries are answered from its
+  active client's (`PtyServer.pty_term`; the last one seen while none is
+  active), so the service answers as this terminal would even beside a
+  new-chat screen with no agent pty.
 
 ## Adding a page kind
 
