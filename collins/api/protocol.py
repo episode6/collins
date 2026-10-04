@@ -224,8 +224,9 @@ each taken from the code the message replaces:
   carries a grant's `delivery`, the same shape, for the toast.
 - `diff.notes` is a session's notes and highlights on its diff (the
   service's `diffnotes.MarkStore`, §3.7, §3.8): sent whole whenever they
-  change, each mark as a JSON object (`diffnotes.mark_record`), keyed by
-  the session's `handle`. `diff.set-notes` is a client's write of them,
+  change (and in the subscribe snapshot, every session's that has any),
+  each mark as a JSON object (`diffnotes.mark_record`), keyed by the
+  session's id, or by its `handle` before the id resolves. `diff.set-notes` is a client's write of them,
   in the same shape and whole: the page's own store is the mirror, every
   change (a note typed into the view, an edit, a remove, a clear, the
   prune a reload makes, the marks an agent's tool call landed while the
@@ -532,7 +533,9 @@ _SWEEP_TARGET = Field(
 # A session's marks on its diff, as `diff.notes` and `diff.set-notes` carry
 # them (diffnotes.mark_record).
 _MARKS = {
-    "handle": _req(_ID),
+    # Whose: the session's id once it resolved (what the marks are kept
+    # under), its handle before.
+    "handle": _ID,
     "session": _ID,
     "notes": _req(Field(K_LIST, high=NOTES_MAX, item=Field(K_JSON_OBJECT))),
     "highlights": _req(Field(K_LIST, high=HIGHLIGHTS_MAX, item=Field(K_JSON_OBJECT))),
@@ -1261,12 +1264,12 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "diff.notes",
         "A session's notes and highlights on its diff, whole.",
-        event=_event(SERVICE, _MARKS),
+        event=_event(SERVICE, _MARKS, one_of=("handle", "session")),
     ),
     MessageType(
         "diff.set-notes",
         "Write a session's notes and highlights on its diff, whole.",
-        request=_request(_MARKS),
+        request=_request(_MARKS, one_of=("handle", "session")),
     ),
     # -- sandboxed sessions (§3.9)
     MessageType(

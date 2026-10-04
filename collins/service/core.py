@@ -17,8 +17,15 @@ client's from then on) and `SessionStore`, answers `subscribe` with the
 snapshot and keeps every subscriber current through `storefeed.StoreFeed`,
 and serves `state.get`, `state.set` and every mutation the sidebar, the
 window and Preferences make as a `store.*` request, plus the CLI's folder
-trust (`trust.*`). PRs, notifications and the tools join in PR-1.11.
-GLib only; nothing here imports GTK.
+trust (`trust.*`). PR-1.11 adds the rest, each in a module of its own
+the core routes to: the PR hub's events and every gh call
+(`prfeed`), the notification history (`notifications`), the session
+tools and the MCP socket (`tools`, `start_tools`, `start_mcp`; a
+UI-bound call is a `tool` event to the session's active client,
+`_tool_client`, answered by `tool-reply`), the Sandboxed chip's
+requests (`sandbox`, `start_sandbox`), the diffs' marks (`diffs`),
+token use (`tokenuse`) and the jobs (`jobs`). GLib only; nothing here
+imports GTK.
 
 **The service decides which keys a client writes** (`state.set`): every
 key of `state.SHARED_KEYS` but the three only the service writes
@@ -108,6 +115,7 @@ from .. import panelhistory, providers, sandboxplan, trust
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
+from . import diffs as diffs_mod
 from . import jobs, prfeed, ptyserver, storefeed, termstream, tokenuse
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
@@ -179,6 +187,7 @@ class ServiceCore:
         self.feed: storefeed.StoreFeed | None = None
         self.notifications: notifications_mod.ServiceNotifications | None = None
         self.prs: prfeed.PrFeed | None = None
+        self.diffs: diffs_mod.DiffNotes | None = None
         if state is not None:
             record = record or state.set_pty
             record_next_id = record_next_id or state.set_pty_next_id
@@ -236,6 +245,8 @@ class ServiceCore:
         # The PR hub is the store's own; its events go to the same
         # subscribers (PR-1.11).
         self.prs = prfeed.PrFeed(store.pr_store)
+        # The marks on each session's diff (PR-1.11, service.diffs).
+        self.diffs = diffs_mod.DiffNotes(self.state, self._broadcast, self._get_setting)
         if start:
             store.start()
 
@@ -469,6 +480,15 @@ class ServiceCore:
     _req_pr_review = _gh
     _req_pr_thread = _gh
 
+    # -- the diffs' marks (PR-1.11; service.diffs)
+
+    def _req_diff_set_notes(self, message: protocol.Message, client: Client) -> dict:
+        if self.diffs is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
+            )
+        return self.diffs.set_notes(message)
+
     # -- token use (PR-1.11; service.tokenuse)
 
     def _req_usage_get(self, message: protocol.Message, client: Client) -> dict:
@@ -516,6 +536,8 @@ class ServiceCore:
             self.notifications.subscribe(client, client.deliver)
         if self.prs is not None:
             self.prs.subscribe(client, client.deliver)
+        if self.diffs is not None:
+            self.diffs.subscribe(client.deliver)
         if all(c is not client for c in self._subscribers):
             self._subscribers.append(client)
         if self.tools is not None:
@@ -720,7 +742,7 @@ class ServiceCore:
             state=self.state,
             ptys=self.ptys,
             notifications=notifications or self.notifications,
-            diffs=diffs,
+            diffs=diffs or self.diffs,
             shell_spawner=self._spawn_tool_shell,
         )
         return self.tools

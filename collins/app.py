@@ -38,6 +38,7 @@ from . import (
     prmenu,
     providers,
     ptyclient,
+    remotediffs,
     sandboxgrants,
     sandboxplan,
     statusicon,
@@ -2189,6 +2190,8 @@ class App(Adw.Application):
         # The notification history's mirror listens on the same link, so
         # the one subscribe fills it too.
         self.notification_center = RemoteNotifications(link)
+        # And the copy of the marks on each session's diff (remotediffs).
+        remotediffs.mirror_for(link)
         self.store.subscribe()
 
     def _show_refused_write(self, text: str) -> None:

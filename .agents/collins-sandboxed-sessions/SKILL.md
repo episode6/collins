@@ -496,13 +496,29 @@ that means *whose grants* passes the box; the workspace is passed only
 where `grant_reason` and the defaults need it and as the folder
 chooser's starting point. *Allow a directory…*
 (`Gtk.FileDialog.select_folder`, modal, closes the popover — so the verdict
-goes out as a toast either way) is `allow_directory`: `host.allow`, whose
-refusal is a toast and ends there; then `grants.allow(workspace, path,
-done)`, and one toast when `done` lands, by this tab's own `Delivery` —
-"Allowed {path}" (live and linked), "… — inside the sandbox at {inside}"
-(live, not linked), "… — restart the session to apply" (pending). The
-remove button is `host.revoke` then `grants.revoke`, and the popover is
-drawn again when that lands. `done` runs on the grants' worker thread:
+goes out as a toast either way) is `allow_directory`: a `sandbox.allow`
+request (scope ``session``), on whose service `host.allow` decides —
+its refusal is a toast and ends there; then `grants.allow(workspace,
+path, done)` there, the reply's `live` saying one is coming, and one
+toast when the service's `sandbox` event lands with this box's
+`Delivery` — "Allowed {path}" (live and linked), "… — inside the sandbox
+at {inside}" (live, not linked), "… — restart the session to apply"
+(pending, or no live grants at all). The remove button is a
+`sandbox.revoke` (`host.revoke` then `grants.revoke` on the service), and
+the popover is drawn again when its event lands.
+
+**The chip is a client** (PR-1.11, split spec §3.9). Everything above is
+decided on the service (`service/sandbox.py`, `SandboxRequests`) from its
+own records, by the box the request names (and the asking session's
+`handle`, whose restart it is): `sandbox.plan` (the plan the box launched
+with, checked again on arrival with `sandboxplan.checked_plan`),
+`sandbox.grants` (the rows with their statuses and deliveries, worked out
+as the chip worked them out; the launched grants; the defaults; the tools
+offered and available; `overridden`, `hosted`, `stale`, `can_restart`),
+`sandbox.allow` / `sandbox.revoke` (scope ``session`` or ``project``),
+`sandbox.tools` (a switch, or `reset`) and `sandbox.restart`. A refusal
+carries the host's own reason as its msgid. What a session is offered at
+a call is still the tools' question, asked of the same host. `done` runs on the grants' worker thread:
 `_land` puts it on the main loop with `GLib.idle_add(...,
 priority=GLib.PRIORITY_DEFAULT)` — an idle-priority landing starves under
 Xvfb, and a chip stuck on *after restart* after a delivery that worked is
@@ -695,15 +711,17 @@ flag"** — so nothing about it is the caller's to say:
 
 - **Where it is decided.** `mcptools.run_tool_call(..., is_offered=)`,
   after the arguments, the global switch and the identity, before any
-  handler: `App._mcp_tool_offered(found, tool)` is True for a tab that
-  isn't `sandboxed`, else `SANDBOX_HOST.tool_enabled(tab.sandbox_box,
-  tool)`. The tab is the one the peer's `SO_PEERCRED` pid walks up to;
-  `tab.sandboxed` and `tab.sandbox_box` are the launch's own records. The
+  handler: `SessionTools.tool_offered(session, tool)` (service/tools.py;
+  `App._mcp_tool_offered` until PR-1.11, moved word for word) is True for
+  a session that isn't `sandboxed`, else
+  `SANDBOX_HOST.tool_enabled(session.sandbox_box, tool)`. The session is
+  the one the peer's `SO_PEERCRED` pid walks up to; `session.sandboxed`
+  and `session.sandbox_box` are the launch's own records. The
   refusal is `mcptools.sandbox_disabled_error`. A call's arguments can't
   carry a claim: every schema is `additionalProperties: False`.
 - **The list a session is told** is filtered the same way:
   `SessionToolService`'s `list_tools(pid)` takes the peer's pid
-  (`App._mcp_list_tools`). The CLI reads it once, at launch, which is
+  (`SessionTools.list_tools`). The CLI reads it once, at launch, which is
   why the call is gated too: a tool switched off is refused at once, one
   switched on is refused no longer and *listed* from the next launch.
 - **The two layers.** `sandbox_tool_<name>` settings
@@ -755,15 +773,16 @@ flag"** — so nothing about it is the caller's to say:
 **What a sandboxed session may ask Collins to do, once a tool is on.**
 `run_tool_call` hands
 every handler a third argument, `sandboxed` — Collins' own reading of the
-calling tab (`is_sandboxed=lambda found: found[1].sandboxed`), never the
-caller's word — and the three host-reaching handlers apply the policy:
-`_mcp_read_terminal` / `_mcp_run_in_terminal` filter through
+calling session (`is_sandboxed=lambda session: session.sandboxed`, carried
+to the client half on the `tool` event), never the caller's word — and the
+three host-reaching handlers apply the policy:
+`ToolClient.read_terminal` / `run_in_terminal` filter through
 `mcptools.tool_shells(shells, sandboxed)` (a sandboxed session sees only
 `sandboxed` shells; the reply names them *Sandboxed shell N* via
 `terminal_reply`'s fourth tuple slot) and open one with
 `tab.open_panel_shell(sandboxed=True)` when none is idle — the user's own
 Ctrl+J shell is never typed into or read from inside a box.
-`_mcp_start_session`: `mcptools.sibling_sandboxed(parent, project_default)`
+`ToolClient.start_session`: `mcptools.sibling_sandboxed(parent, project_default)`
 (a sandboxed parent's sibling is always sandboxed — the unit test says so
 in those words), and for a sandboxed parent the sibling gets
 `host.derive(parent's launch plan, cwd)`: the parent's exact mounts
@@ -1017,7 +1036,8 @@ the chip's *Read-only* row, the refused sibling, the restart, and
 finds its launches by where they start (`--chdir`), not by count, since
 a launch reaches the fake bwrap when its own shell gets to it. Its
 **tools stage** goes through the dispatcher by pid
-(`app._mcp_dispatch(tab._child_pid, …)`, `app._mcp_list_tools(pid)`),
+(`app.session_tools.dispatch(tab._child_pid, …)`,
+`app.session_tools.list_tools(pid)`),
 not through a handler: six tools listed, the others refused with
 nothing opened, an argument claiming otherwise a schema error, a switch
 in the chip reaching one box, the global switch winning, a default

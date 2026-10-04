@@ -59,8 +59,8 @@ reply (`Link.call`), which on the loopback is immediate; the socket client
 of PR-1.12 makes their callers wait the same way they wait on a dialog.
 
 **Forwarders kept for the e2e checks and the panel code**: `sessions`
-(the dict of every session, paging), `pr_store` (the service store's PR
-hub, in-process until PR-1.11 mirrors it), `start()` and the two title
+(the dict of every session, paging), `pr_store` (the mirror of the
+service store's PR hub, `remoteprs.RemotePrStore`), `start()` and the two title
 re-projections (`apply_pr_titles`, `apply_cli_titles`), which are no-ops
 here because the service runs them when it takes a write of their
 settings.
@@ -129,7 +129,8 @@ class RemoteStore(GObject.Object):
 
     def __init__(self, link, state, pr_store=None) -> None:
         """*link* is an `apilink.Link`, *state* the `RemoteState` on the same
-        link; *pr_store* the service store's PR hub (Phase 1's shortcut)."""
+        link; *pr_store* the mirror of the service store's PR hub
+        (`remoteprs.RemotePrStore`, on the same link)."""
         super().__init__()
         self._link = link
         self.state = state

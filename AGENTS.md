@@ -63,9 +63,12 @@ map at the end says which to load.
 ## Architecture in one page
 
 **Entry and composition.** `collins/app.py` (`App(Adw.Application)`) loads the
-CSS, prepends the bundled icon path, starts the MCP socket service, owns
-Caffeine Mode, the status icon, the notification center's app-level fan-out,
-and the MCP tool *handlers* (`App._mcp_*`). `collins/window.py` (`MainWindow`)
+CSS, prepends the bundled icon path, starts the in-process service and its
+MCP socket service, owns Caffeine Mode, the status icon and the
+notification center's app-level fan-out (the delivery, the withdraws, the
+badge). The session tools are the service's (`service/tools.py`); the app
+holds their client half (`toolclient.ToolClient`, as `app.tool_client`;
+the dispatcher is `app.session_tools`). `collins/window.py` (`MainWindow`)
 composes the sidebar with the tab view, installs every `win.*` action, and owns
 the tab lifecycle: open, resolve, close (graceful exit / `/bg` / hide), archive,
 quit flows. There can be several windows; a tab can move between them.
@@ -98,10 +101,14 @@ per-item `SessionItem` property notifications (`models.py`) on them.
 **Hubs, not wires.** The app repeatedly replaced lattices of hand-run signals
 with one owner that everybody subscribes to: `SessionStore` (sessions, seen
 by the UI through its mirror `RemoteStore`),
-`prstore.PrStore` (all pull-request state, reachable as `store.pr_store`;
-still the service store's own object in-process until PR-1.11 mirrors it),
+`prstore.PrStore` (all pull-request state: the service store's own, seen
+by the UI as `store.pr_store`, the mirror `remoteprs.RemotePrStore` with the
+same three signals and equality guard),
 `notifycenter.NotificationCenter` (every notification, the badge's number,
-the delivery table), `traymodel` (what the status icon shows), `keybindings`
+the delivery table: the history and the unread set are the service's,
+`service/notifications.py`, and `app.notification_center` is the mirror
+`remotenotify.RemoteNotifications`, which applies the delivery table with
+this client's focus), `traymodel` (what the status icon shows), `keybindings`
 (every shortcut). New surfaces read from the hub and subscribe to its
 signals; new writes go through the hub. Do not reintroduce per-surface relays.
 
@@ -139,9 +146,15 @@ on reopen. The e2e suite runs on both; PR-1.9 makes `server` the only one.
 
 **What the session can call.** `mcp_shim.py` (stdlib-only, spawned by the CLI
 via `--mcp-config`) relays MCP over a Unix socket to `mcpserver.py`
-(Gio-only) inside the app; `mcptools.py` (GTK-free) holds the tool table,
-schemas, framing and runtime paths; the handlers live in `app.py`. Session
-identity is the shim's kernel-verified pid walked up `/proc` to a tab.
+(Gio-only), which the service starts (`ServiceCore.start_mcp`);
+`mcptools.py` (GTK-free) holds the tool table, schemas, framing, runtime
+paths and the sandbox policy; the dispatcher and the handlers live in
+`service/tools.py` (§3.7's table: the tools a session's own data serves
+run there, a UI-bound one is a `tool` event to the session's active client
+and a deferred reply settled by its `tool-reply` or at a 14 s bound, and
+each has its no-client behaviour), and the client halves of the UI-bound
+ones in `toolclient.py`. Session identity is the shim's kernel-verified pid
+walked up `/proc` to a `Session` (through Phase 1 the tabs' own).
 
 **The service and its API, in progress.** The split into a headless
 `collins-service` and a GTK client (`~/specs/collins/split-service-and-client.md`)
@@ -174,7 +187,20 @@ and `trust.*`, with `collins/service/storefeed.py` turning each save and
 refresh into events per subscriber (archived sessions only once paged
 in). The activity tracker still runs in the client (the window's), and
 its verdicts go to the service as `store.flags` and come back as `item`
-fields. PRs, notifications and the tools join in PR-1.11.
+fields. PR-1.11 put the rest behind requests and events: the PR hub and
+every `gh` call (`service/prfeed.py`), the notification history
+(`service/notifications.py`; rows carry their text as msgid and args,
+each client translating with `i18n.translate`), the session tools
+(`service/tools.py`), the Sandboxed chip's requests (`service/sandbox.py`),
+the diffs' marks (`service/diffs.py`), token use (`service/tokenuse.py`:
+usage, the model catalog, the CLI's defaults, an icon's save) and the
+long-running operations as jobs (`service/jobs.py`: `job.start` and `job`
+events for the clone, the repository list, worktree trash and restore, a
+chat folder's trust, icon generation, the login repair; `jobclient.py` is
+the client's end). Client modules reach the service through
+`apilink.current()` (the app's link, or a harness's own loopback). The
+service also writes a panel shell's history from its model when the shell
+exits, under the key `spawn`'s `history` and `panel.key` give it.
 `collins/api/loopback.py` is the one transport until PR-1.12's socket: the
 same dicts and bytes, every message through `protocol.validate` both
 ways, in one process (deleted at the end of Phase 1, D21). The app owns
@@ -200,19 +226,25 @@ queues every write behind a writability watch, reaps the child, keeps the
 (`usage.py`), the model catalog (`claudemodels.py`) and claude.ai archive
 mirroring (`remotearchive.py`) read the OAuth token from
 `~/.claude/.credentials.json` and call Anthropic's undocumented endpoints
-directly. No separate API key exists anywhere.
+directly. No separate API key exists anywhere. All of it runs on the
+service, against its machine's login: the UI asks (`usage.get`,
+`models.get` through `modelcatalog.py`, `models.defaults`, the `icon` and
+`login.repair` jobs, `icon.save`).
 
 **GitHub goes through `gh`.** Every PR read and action is a `gh` call
-(`prstatus.py` transport); without `gh` a PR is a number and an empty menu.
+(`prstatus.py` transport) on the service's machine, asked through the
+`pr.*` requests (`remoteprs.py`'s functions keep the old names); without
+`gh` a PR is a number and an empty menu.
 
 ## Where state lives
 
 | What | Where |
 | --- | --- |
-| The service's half: names, favorites, archived, project order, PR records, attachments, drafts, notifications, the service id, and the settings in `state.SERVICE_SETTINGS` | `~/.config/collins/state.json` (`AppState`, synchronous atomic writes) |
+| The service's half: names, favorites, archived, project order, PR records, attachments, drafts, notifications (each row's text as `msgid` and `args`, plus its English `body` for an older build; a row written before PR-1.11 reads its body as its msgid), the service id, and the settings in `state.SERVICE_SETTINGS` | `~/.config/collins/state.json` (`AppState`, synchronous atomic writes) |
+| The marks on each session's diff (`diff_notes`: session id → notes and highlights, `diffnotes.mark_record` each; kept for the git page's life, so only a crash leaves any) and the show_diffs asked for with no client attached (`pending_diffs`: session id → the tool's arguments) | `state.json` (the service's alone: `service/diffs.py`, `service/tools.py`) |
 | This device's half: the settings in `state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, tray, Caffeine, composer, editor and git-page looks), and per service: panel layouts, editor states, the last active session | `~/.config/collins/ui-state.json` (`uistate.UiState`, written through `AppState`; `state.json.pre-split` is the one-time backup the first start after the split leaves) |
 | Headless-run scratch cwd | `~/.config/collins/title-scratch/<uuid>` |
-| Panel shell scrollback | `~/.local/state/collins/panel_history/<session>[.<ordinal>].txt` |
+| Panel shell scrollback (the tab's saves, and on the server backend the service's own write when a shell exits) | `~/.local/state/collins/panel_history/<session>[.<ordinal>].txt` |
 | Chats virtual project | `~/.local/share/collins/chats/` |
 | MCP config file | `~/.local/share/collins/<app id>/` |
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
@@ -326,16 +358,16 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store and its mirror, sidebar, state.json and its mirror, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `remotestore` `models` `state` `remotestate` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the server backend (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the server backend), `collins-panel-dock` (panel shells on the server backend, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
-| Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` | `collins-sandboxed-sessions` |
+| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the server backend (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/jobs` `service/diffs` `jobclient` `remotediffs` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the server backend), `collins-panel-dock` (panel shells on the server backend, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
+| Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` `service/sandbox` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
-| Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
-| Pull requests: status, hub, detail page, body markdown, actions, menus, gh setup | `prstatus` `prstore` `prdetail` `practions` `prmenu` `prview` `mdblocks` `mdwidgets` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
+| Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `service/tools` `toolclient` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
+| Pull requests: status, hub, detail page, body markdown, actions, menus, gh setup | `prstatus` `prstore` `service/prfeed` `remoteprs` `prdetail` `practions` `prmenu` `prview` `mdblocks` `mdwidgets` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
 | The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info, the panels' model and git runners | `gitpage` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitmodel` `gitops` `commitcard` `gitoperation` `keyedslots` `imagediff` | `collins-git-page` |
 | Editor panel: file tree, quick open, pop-out, narrow mode | `editor` `editorfiles` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
-| Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
-| Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `usage` `usagepanel` `tokenrefresh` `tokensettings` `welcome` `welcomegate` `clisetup` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |
+| Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `service/notifications` `remotenotify` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
+| Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `modelcatalog` `usage` `usagepanel` `tokenrefresh` `tokensettings` `service/tokenuse` `service/jobs` `jobclient` `welcome` `welcomegate` `clisetup` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |
 | Preferences dialog, keybindings, themes, translations | `prefs` `prefslayout` `prefssearch` `keybindings` `keymap` `keybindingsdialog` `themes` `i18n` `po/` | `collins-preferences-keybindings-i18n` |
 | Testing: unit suite rules, e2e checks, shims, headless probes | `tests/` `scripts/check_*.py` `scripts/run_e2e.py` | `collins-testing` |
 | Packaging and CI: wheel, deb, rpm, PPA, COPR, AUR, the CI image, versions | `pyproject.toml` `debian/` `packaging/` `.github/` `scripts/` | `collins-packaging-and-ci` |

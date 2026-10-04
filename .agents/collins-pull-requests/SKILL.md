@@ -20,6 +20,35 @@ empty menu, and a launch that finds `gh` missing or signed out shows the
 `ghwelcome` notice until "Don't show this again" (`gh_welcome_dismissed`).
 Signed-in-ness is `gh auth token` (local, no network), never `gh auth status`.
 
+## On the service (PR-1.11)
+
+`gh` is authenticated on the service's machine, so every PR read and action
+runs there (split spec §3.15). The hub, `prstore.PrStore`, is the service
+store's own; `service/prfeed.py`'s `PrFeed` publishes it: a `pr` event per
+session with saved PRs in the subscribe snapshot, then one per
+``session-changed`` carrying the URLs that joined the list for the first
+time (`attached`: the hub's ``pr-attached``, worked out against the list
+last published), and a `pr-status` event per ``status-changed`` (the fetch
+cache's entry, `prstatus.status_entry`). The UI's `store.pr_store` is the
+mirror, `remoteprs.RemotePrStore`: the same three signals and methods, the
+**equality guard on both sides** (an identical write sends nothing and
+signals nothing; an event that brings the list the mirror holds — the
+echo of its own write — emits nothing), writes optimistic (`pr.set`) and
+reverted on a refusal; a `pr-status` is absorbed into `prstatus`'s cache
+(`absorb_entry`; the same cache in Phase 1, so nothing loops) and
+re-emitted. The gh calls keep their names as `remoteprs` functions —
+`perform`, `comment`, `review`, `reply_in_thread`, `set_thread_resolved`
+(`pr.action` / `pr.comment` / `pr.review` / `pr.thread`, the PR named by
+its record), `fetch_detail` / `fetch_threads` (`pr.detail` /
+`pr.threads`: `prdetail.detail_record` / `detail_from_record`, a patch
+over `WIRE_PATCH_MAX` crossing as None), `fetch_blob` (`pr.blob`; a path
+on this machine through Phase 1, a blob transfer from PR-1.12),
+`invalidate` and `sweep` / `resync` (`pr.fetch`, `pr.sweep`) — called from
+worker threads as before; a refusal reads as the function's own failure.
+The Session's own transcript-driven fetches (`enrich`, `discover_pr`) are
+the Session's, which is service code. Avatars and public body images stay
+client fetches.
+
 ## Where a PR comes from
 
 Claude Code appends a `pr-link` record to the transcript the moment a PR URL

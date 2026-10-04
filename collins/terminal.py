@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     ptyclient,  # noqa: E402
+    remotediffs,
     remoteprs,
     sandboxchip,
     sandboxgrants,
@@ -5163,6 +5164,7 @@ class TerminalTab(Gtk.Box):
                 loaded=mode,
             )
             self._git_page = page
+            self._bind_git_page_marks(page)
             self._dock.open_page(page, focus=focus)
         else:
             self._dock.reveal_page(page, focus=focus)
@@ -5227,6 +5229,7 @@ class TerminalTab(Gtk.Box):
         identity so a stale page closing late can't null a newer one."""
         if page is self._git_page:
             self._git_page = None
+            self._unbind_git_page_marks(clear=True)
 
     def _restore_git_page(self, page: dict) -> GitPage | None:
         """A saved layout's git page, rebuilt on what it was saved showing —
@@ -5247,7 +5250,55 @@ class TerminalTab(Gtk.Box):
             loaded=gitloads.decode_state(page),
             sidebar=gitloads.decode_sidebar(page),
         )
+        self._bind_git_page_marks(self._git_page)
         return self._git_page
+
+    # -- the diff's marks, mirrored (PR-1.11) ------------------------------------
+
+    def _marks_key(self) -> tuple[str, bool]:
+        """What this session's marks are kept under on the service: its id,
+        or its handle before the id resolves."""
+        if self.session_id:
+            return self.session_id, True
+        return self.session.handle, False
+
+    def _bind_git_page_marks(self, page: GitPage) -> None:
+        """The page's store mirrors the service's (service.diffs): seeded
+        from the copy, its changes sent whole, the service's changes loaded
+        into it."""
+        mirror = remotediffs.mirror_for(apilink.current())
+        if mirror is None:
+            return
+        view = page.diff_view
+        key, _session = self._marks_key()
+        saved = mirror.marks(key)
+        if saved:
+            view.load_marks(*saved)
+
+        def send(*_args) -> None:
+            key, session = self._marks_key()
+            mirror.send(key, session, *view.export_marks())
+
+        def loaded(marks) -> None:
+            if self._git_page is page:
+                view.load_marks(*marks)
+
+        view.connect("notes-changed", send)
+        mirror.listen(key, loaded)
+        self._marks_binding = (mirror, key, loaded)
+
+    def _unbind_git_page_marks(self, clear: bool = False) -> None:
+        """The page went: its marks go with it, as they always went with the
+        page (the service drops what it kept for the session)."""
+        binding = getattr(self, "_marks_binding", None)
+        if binding is None:
+            return
+        self._marks_binding = None
+        mirror, key, loaded = binding
+        mirror.unlisten(key, loaded)
+        if clear:
+            current, session = self._marks_key()
+            mirror.send(current, session, [], [])
 
     def _make_panel_page(self, page: dict):
         """The dock's non-shell factory for layout restore (see

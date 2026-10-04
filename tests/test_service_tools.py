@@ -452,3 +452,35 @@ def test_a_sandboxed_session_reads_only_its_boxs_shells(world):
     )
     ok, text = world["tools"].dispatch(4242, "read_terminal", {})
     assert ok and "boxed$" in text and "host$" not in text
+
+
+# -- through the core and the loopback ------------------------------------------------
+
+
+def test_a_tool_event_crosses_the_loopback_and_its_reply_settles_the_call(tmp_path, monkeypatch):
+    """The whole path: the core picks the active client, the event is
+    validated on its way out, the client's tool-reply comes back as an
+    event and settles the call the dispatcher returned."""
+    from collins.api import loopback
+    from collins.service.core import ServiceCore
+
+    monkeypatch.setattr(proctree, "ancestor_pids", lambda pid: {pid, 1})
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    session = FakeSession()
+    tools = core.start_tools(sessions=lambda: [session])
+    server = loopback.LoopbackServer(core)
+    seen = []
+
+    def on_event(event):
+        seen.append(event)
+        if event["t"] == "tool":
+            client.send_event({"t": "tool-reply", "call": event["call"], "ok": True, "text": "Opened."})
+
+    client = server.connect(lambda *_a: None, on_event, device="laptop")
+    try:
+        assert tools.dispatch(4242, "open_in_editor", {"path": "a.py"}) == (False, tools_mod.NO_CLIENT)
+        core._subscribers.append(client)  # what a subscribe does
+        assert tools.dispatch(4242, "open_in_editor", {"path": "a.py"}) == (True, "Opened.")
+        assert [e["t"] for e in seen] == ["tool"] and seen[0]["handle"] == session.handle
+    finally:
+        server.shutdown()

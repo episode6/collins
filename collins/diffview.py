@@ -3099,6 +3099,22 @@ class DiffView(Gtk.Box):
         ones parked off the current load included (diffnotes.MarkStore)."""
         return self._store.notes(path)
 
+    def export_marks(self) -> tuple[list[dict], list[dict]]:
+        """Every mark as a record (diffnotes.MarkStore.export): what the
+        tab sends the service, whose store this one mirrors (PR-1.11)."""
+        return self._store.export()
+
+    def load_marks(self, notes: list, highlights: list) -> None:
+        """The service's marks for this session, in place of these (a
+        change made on the service: an agent's call that landed with no
+        page open, another client's edit). Redrawn, and announced as any
+        change is; a load of what is already here changes nothing."""
+        if self._store.export() == (list(notes), list(highlights)):
+            return
+        self._store.load(notes, highlights)
+        self._apply_marks()
+        self.emit("notes-changed")
+
     def highlights(self, path: str | None = None) -> list[diffnotes.Highlight]:
         return self._store.highlights(path)
 
