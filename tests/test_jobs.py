@@ -190,3 +190,33 @@ def test_translate_formats_only_with_args():
     assert jobclient.translate("Exit status {code}", {"code": 2}) == "Exit status 2"
     assert jobclient.translate("Missing {name}", {"code": 2}) == "Missing {name}"
     assert jobclient.translate("") == ""
+
+
+def test_a_cancelled_login_repair_stops_waiting(monkeypatch):
+    """The repair's own thread runs on (tokenrefresh is single-flight); the
+    job stops waiting for it the moment it is cancelled."""
+    from collins import tokenrefresh
+
+    release = threading.Event()
+    started = threading.Event()
+
+    def fake_repair(on_refreshed):
+        thread = threading.Thread(target=release.wait, args=(10,), daemon=True)
+        thread.start()
+        started.set()
+        return thread
+
+    monkeypatch.setattr(tokenrefresh, "maybe_repair", fake_repair)
+    events = []
+    runner = jobs.JobRunner(dict(jobs.WORKERS), dispatch=lambda fn: fn())
+    job_id = runner.start("login.repair", {"mode": "repair"}, events.append)
+    try:
+        assert started.wait(5)
+        assert runner.cancel(job_id)
+        for _ in range(200):
+            if events:
+                break
+            threading.Event().wait(0.01)
+        assert [e["state"] for e in events] == ["cancelled"]
+    finally:
+        release.set()

@@ -449,11 +449,23 @@ def login_repair(job: Job, args: dict) -> dict:
     if mode not in ("start", "repair"):
         raise JobRefused("{field} must be one of: {choices}", {"field": "mode", "choices": "repair, start"})
     refreshed = threading.Event()
+    # A cancel stops the wait, not the run: tokenrefresh's own thread is
+    # single-flight and cooled down, and finishes its repair (or not) by
+    # itself; the job just stops listening for it.
+    stop = threading.Event()
+    job.on_cancel(stop.set)
     entry = tokenrefresh.maybe_start if mode == "start" else tokenrefresh.maybe_repair
     thread = entry(refreshed.set)
     if thread is not None:
-        thread.join()
+        while thread.is_alive():
+            if stop.wait(_REPAIR_POLL_S):
+                raise JobCancelled()
     return {"refreshed": refreshed.is_set(), "ran": thread is not None}
+
+
+# How often a login repair's wait looks up from its thread to see whether
+# the job was cancelled.
+_REPAIR_POLL_S = 0.1
 
 
 WORKERS: dict[str, Callable[[Job, dict], dict | None]] = {

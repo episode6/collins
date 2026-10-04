@@ -173,3 +173,21 @@ def test_not_a_repository_is_refused(tmp_path, linked):
         "The session's working directory isn't inside a git repository",
     )
     assert mcptools.PAGE_NOT_OPEN  # the client half's refusal is unchanged
+
+
+def test_a_read_that_raises_answers_at_once(tmp_path, linked, monkeypatch):
+    """An exception out of the diff read lands as a failed read, not a
+    call left hanging until the shim's timeout."""
+    from collins import gitinfo, gitops
+
+    _state, diffs, _wire, _mirror, _events = linked
+    monkeypatch.setattr(gitinfo, "repo_root", lambda cwd: tmp_path)
+
+    def boom(*_args, **_kwargs):
+        raise OSError("git vanished")
+
+    monkeypatch.setattr(gitops, "read_diff", boom)
+    got = diffs.context(FakeSession(str(tmp_path)), {})
+    assert got == (False, "git vanished")
+    got = diffs.annotate(FakeSession(str(tmp_path)), {"notes": [{"file": "a.py", "line": 1, "summary": "s"}]})
+    assert got == (False, "git vanished")

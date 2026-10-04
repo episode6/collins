@@ -136,6 +136,17 @@ class DiffNotes:
         deferred = mcptools.DeferredResult()
 
         def work() -> None:
+            # Whatever the read raises lands as a failed read, on the main
+            # loop at default priority (self._dispatch): an exception that
+            # escaped here would leave the shim waiting out its 15 s.
+            try:
+                read_and_land()
+            except Exception as error:
+                log.exception("diffs: reading the session's diff failed")
+                failed = gitops.DiffRead(ok=False, error=str(error)[:200])
+                self._dispatch(deferred.resolve, False, failed.error or "git couldn't read the diff")
+
+        def read_and_land() -> None:
             parent = gitinfo.default_branch(cwd) if loaded == "branch" else None
             if gitloads.show_ref(loaded):
                 sha = gitloads.resolve_commit(cwd, gitloads.show_ref(loaded))
