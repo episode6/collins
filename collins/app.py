@@ -1638,7 +1638,7 @@ class App(Adw.Application):
         self._start_service_client()
         apply_color_scheme(self.state.get_setting("color_scheme"))
 
-        self._start_mcp_service()
+        self._start_session_tools()
         self._start_sandbox_support()
 
         focus = Gio.SimpleAction.new("focus-session", GLib.VariantType("s"))
@@ -2131,7 +2131,7 @@ class App(Adw.Application):
     # service's records of its sessions are the tabs' own Sessions, which is
     # the one thing it asks the app (ToolClient.sessions).
 
-    def _start_mcp_service(self) -> None:
+    def _start_session_tools(self) -> None:
         """The tools' dispatcher on the service, its socket and the
         `--mcp-config` file it's named in, and this client's half. Any
         failure leaves providers.MCP_CONFIG_PATH unset, so launched commands
