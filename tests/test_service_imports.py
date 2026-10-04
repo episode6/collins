@@ -47,4 +47,7 @@ def test_the_service_and_the_api_load_no_gtk():
     assert result.returncode == 0, result.stderr
     loaded = {line.removeprefix("gi.repository.") for line in result.stdout.split()}
     assert not loaded & set(FORBIDDEN), sorted(loaded & set(FORBIDDEN))
-    assert {"GLib", "Gio"} <= loaded  # the probe saw something: the service's loop
+    # The probe saw something: the store (collins.store, through
+    # service.core) runs on Gio's file monitors and GLib's main loop, so a
+    # probe that imported nothing at all could not pass this line.
+    assert {"GLib", "Gio"} <= loaded

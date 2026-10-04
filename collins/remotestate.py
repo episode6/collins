@@ -34,9 +34,11 @@ optimistic value holds until the reply (rule: events never clobber an
 unanswered write). On the reply the confirmed value wins if it differs
 (the service may have normalised it); on a refusal the mirror reverts to
 the confirmed value, the change is announced again (`connect_changed`
-listeners, with ``reverted`` set: the store's mirror re-projects its rows
-off it), and the window raises a toast with the service's reason
-(`on_refused`, through `i18n._()`).
+listeners, with ``reverted`` set), and the window raises a toast with the service's reason
+(`on_refused`, through `i18n._()`). Every change of the mirror is
+announced to those listeners, the write made here included, which is how
+the store's mirror keeps a row's name and star in step with a name written
+straight on the state.
 
 A store mutation (`remotestore.RemoteStore`'s rename, archive, favorite,
 ...) is the same move with a different request: `request(message, mutate)`
@@ -179,8 +181,8 @@ class RemoteState(AppState):
         return self.settings.get(key, DEFAULT_SETTINGS.get(key))
 
     def connect_changed(self, listener: Callable[[str, str | None, bool], None]) -> None:
-        """Call *listener(key, entry, reverted)* whenever the mirror changes
-        under the client: an event, a reply that settled on the service's
+        """Call *listener(key, entry, reverted)* whenever the mirror changes:
+        a write made here, an event, a reply that settled on the service's
         value, a refusal that reverted (``reverted`` True)."""
         self._listeners.append(listener)
 
@@ -202,12 +204,16 @@ class RemoteState(AppState):
             return
         if self._capture is not None:
             self._capture.extend(changes)
-            return
-        for name, entry, value in changes:
-            if name == _DRAFTS and entry is not None:
-                self._defer_draft(entry)
-                continue
-            self._send_state(name, entry, value)
+        else:
+            for name, entry, value in changes:
+                if name == _DRAFTS and entry is not None:
+                    self._defer_draft(entry)
+                    continue
+                self._send_state(name, entry, value)
+        # A local write is a change of the mirror like any other: its
+        # listeners (the store's rows) hear it now, not at the next refresh.
+        for name, entry, _value in changes:
+            self._announce(name, entry, False)
 
     def request(
         self,

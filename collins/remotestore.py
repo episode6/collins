@@ -50,7 +50,9 @@ archived actions read (`summary()`, `has_archived()`) come with every
 (`store.rename`, `store.archive`, ...), and optimistic where the client
 can know the outcome: the state change goes through `RemoteState.request`
 (the mirror first, pending until the reply, reverted on a refusal) and the
-row's name and star are re-projected at once. The new row order of a
+row's name and star are re-projected at once (as they are for any change
+of a name, a title switch or the favorites in the mirror, a write made
+straight on the state included). The new row order of a
 favorite or an archive waits for the service's `rows`: one round trip, and
 none on the loopback. `trash_many`, `delete` and the lookups wait for their
 reply (`Link.call`), which on the loopback is immediate; the socket client
@@ -101,7 +103,8 @@ _PROPS = (
     "can_background",
 )
 _SIGNALLED = {"busy": "busy-changed", "unread": "unread-changed"}
-# State keys whose revert changes what a row shows.
+# State keys whose change moves what a row shows (settings: the
+# cli_title_sessions switch).
 _NAME_KEYS = frozenset({"names", "generated_names", "cli_titles", "settings"})
 
 
@@ -231,9 +234,18 @@ class RemoteStore(GObject.Object):
     def _on_put_away(self, event: dict) -> None:
         self.emit("archived", event["session"])
 
-    def _on_state_changed(self, key: str, _entry, reverted: bool) -> None:
-        """A refused write came back: show the rows as the service has them."""
-        if reverted and (key in _NAME_KEYS or key == "favorites"):
+    def _on_state_changed(self, key: str, entry, _reverted: bool) -> None:
+        """A name or a star moved in the mirror (a write made here, the
+        service's event, a refusal's revert): show the rows as the mirror
+        has them now. A write made straight on the state (not through a
+        store method) re-projects too, so a row never waits for the next
+        refresh to show a name the mirror already holds; the service's own
+        `item` event, when its refresh comes, carries the same value."""
+        if key not in _NAME_KEYS and key != "favorites":
+            return
+        if key != "settings" and entry is not None:
+            self._reproject([entry])
+        else:
             self._reproject(list(self._items))
 
     def _session_from(self, session_id: str, fields: dict) -> Session | None:
@@ -285,7 +297,11 @@ class RemoteStore(GObject.Object):
 
     def get_session(self, session_id: str) -> Session | None:
         """The session, from what the client holds or, for one it was never
-        sent (out of sight), from the service."""
+        sent (out of sight), from the service. A miss is remembered until
+        the next `rows` (the next refresh of the service's store): a
+        session that appears on disk in between is found by asking again
+        after that refresh, which is when the store itself would first
+        have known it."""
         session = self.known_sessions.get(session_id)
         if session is not None or not session_id or session_id in self._missing:
             return session

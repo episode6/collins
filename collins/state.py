@@ -807,6 +807,16 @@ SHARED_KEYS: dict[str, SharedKey] = {
 }
 
 
+def _setting_type_ok(key: str, value: object) -> bool:
+    """Whether *value* has the type of the setting's default (rule 5: a
+    setting written through the API is foreign content). Exact types, so a
+    bool is no int; an int stands in for a float."""
+    default = DEFAULT_SETTINGS[key]
+    if type(value) is type(default):
+        return True
+    return type(default) is float and type(value) is int
+
+
 def diff_shared(key: SharedKey, old, new) -> list[tuple[str | None, object]]:
     """What changed in *key* between two exported values (`export_key`'s
     form), as ``(entry, value)`` pairs: a MAP key entry by entry (value
@@ -1299,7 +1309,12 @@ class AppState:
         """Replace a shared key's value with *value* (wire form), cleaned as
         `_load` reads it. `settings` replaces the service's settings only:
         a key it no longer names falls back to its default, and a device
-        setting in it is ignored."""
+        setting in it is ignored. Falling back is right for the one place a
+        whole `settings` arrives, a mirror's snapshot: the service exports
+        every service setting (its merged view holds each default), so an
+        omitted key is one the service does not have, and its default is
+        what `get_setting` there would answer too. (A client never writes
+        `settings` whole: the service refuses it.)"""
         key = SHARED_KEYS[name]
         clean = key.clean(value)
         if name == "settings":
@@ -1322,14 +1337,19 @@ class AppState:
     def import_entry(self, name: str, entry: str, value) -> bool:
         """Set one entry of a MAP key (None removes it; for `settings`, back
         to the default). False, changing nothing, when the value is not one
-        the key takes (its cleaner drops it) or the setting is a device
-        one."""
+        the key takes (its cleaner drops it), or for `settings` when the
+        setting is a device one, one the catalogue does not name, or of a
+        type other than its default's (`_setting_type_ok`)."""
         key = SHARED_KEYS[name]
         if key.form != MAP or not isinstance(entry, str) or not entry:
             return False
         target = getattr(self, key.attr)
         if name == "settings":
             if self.is_device_setting(entry):
+                return False
+            if value is not None and (
+                entry not in DEFAULT_SETTINGS or not _setting_type_ok(entry, value)
+            ):
                 return False
             if value is None:
                 if entry in DEFAULT_SETTINGS:

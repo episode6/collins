@@ -197,6 +197,49 @@ def test_the_service_refuses_a_device_setting(world):
     assert refused.value.error == "refused"
 
 
+def test_a_setting_of_the_wrong_type_is_refused_and_reverted(world, app_state):
+    store, _remote, state, _ids, _link = world
+    toasts = []
+    state.on_refused = toasts.append
+    before = store.state.get_setting("git_log_page")
+    state.set_setting("git_log_page", "abc")
+    assert store.state.get_setting("git_log_page") == before
+    assert state.get_setting("git_log_page") == before  # reverted
+    assert toasts == ["Not saved: git_log_page does not take that value"]
+    saved = json.loads(app_state._STATE_FILE.read_text())
+    assert saved["settings"].get("git_log_page") != "abc"
+    # A bool is no int, an exact type is.
+    state.set_setting("git_log_page", True)
+    assert store.state.get_setting("git_log_page") == before
+    state.set_setting("git_log_page", 250)
+    assert store.state.get_setting("git_log_page") == 250
+
+
+def test_a_setting_the_catalogue_does_not_name_is_refused(world, app_state):
+    store, _remote, state, _ids, _link = world
+    toasts = []
+    state.on_refused = toasts.append
+    state.set_setting("totally_unknown_key", {"nested": [1]})
+    assert "totally_unknown_key" not in store.state.settings
+    assert state.get_setting("totally_unknown_key") is None  # reverted
+    assert toasts == ["Not saved: totally_unknown_key does not take that value"]
+    saved = json.loads(app_state._STATE_FILE.read_text())
+    assert "totally_unknown_key" not in saved["settings"]
+
+
+def test_a_name_written_on_the_state_reaches_the_row(world):
+    """Not through a store method (the PR-title and title paths write the
+    state directly): the row shows it at once, and the service holds it."""
+    store, remote, state, ids, _link = world
+    state.set_name(ids["alpha2"], "Written on the state")
+    assert remote.get_item(ids["alpha2"]).display_name == "Written on the state"
+    assert store.state.get_name(ids["alpha2"]) == "Written on the state"
+    state.set_generated_name(ids["alpha1"], "Generated")  # a manual name still wins
+    assert remote.get_item(ids["alpha1"]).display_name == "Named alpha"
+    state.toggle_favorite(ids["alpha2"])
+    assert remote.get_item(ids["alpha2"]).favorite
+
+
 def test_a_write_from_elsewhere_reaches_the_mirror(world):
     store, remote, state, ids, _link = world
     store.state.set_emoji(ids["alpha1"], "🦊")  # the service's own write

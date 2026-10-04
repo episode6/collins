@@ -25,7 +25,10 @@ key of `state.SHARED_KEYS` but the three only the service writes
 (``service_id``, ``ptys``, ``pty_next_id``), and `settings` one service
 setting at a time; a device setting, which lives in the client's
 ui-state.json and never reaches the service, is `refused`, and so is a
-value the key's cleaner would drop. A settings write is followed by the
+value the key's cleaner would drop, a setting the catalogue
+(`state.DEFAULT_SETTINGS`) does not name, and a setting of a type other
+than its default's (rule 5: a bool is no int, an int stands in for a
+float). A settings write is followed by the
 store's two reactions to its title switches (`apply_pr_titles`,
 `apply_cli_titles`): the service acting on its own settings.
 
@@ -441,6 +444,13 @@ class ServiceCore:
                     {"setting": entry},
                 )
             if not state.import_entry(name, entry, value):
+                if name == "settings":
+                    return protocol.refuse(
+                        message.id,
+                        protocol.ERROR_REFUSED,
+                        "{setting} does not take that value",
+                        {"setting": entry},
+                    )
                 return protocol.refuse(
                     message.id, protocol.ERROR_REFUSED, "{key} does not take that value", {"key": name}
                 )
@@ -524,7 +534,9 @@ class ServiceCore:
 
     def _req_store_flags(self, message: protocol.Message, client: Client) -> dict:
         """The tracker's verdicts (see the module docstring), set on the
-        service's items; each lands back as an `item` field."""
+        service's items; each lands back as an `item` field. A session with
+        no row is a silent no-op, as the store's setters are: the reply is
+        ok and no event follows (the client sends none for a row it lacks)."""
         session_id = message.get("session")
         store = self.store
         if (status := message.get("status")) is not None:

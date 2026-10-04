@@ -135,10 +135,12 @@ def test_a_refused_whole_key_write_reverts(mirror):
 def test_an_event_during_an_unanswered_write_does_not_clobber_it(mirror):
     state, link, _timers, _toasts, changes = mirror
     state.set_name("a", "Mine")
+    assert changes == [("names", "a", False)]  # the write itself is announced
+    changes.clear()
     # Another client's write lands first.
     link.event("names", "Theirs", entry="a")
     assert state.get_name("a") == "Mine"  # the optimistic value holds
-    assert changes == []
+    assert changes == []  # and nothing moved in the mirror
     # The service's answer to ours is the last word, and its echo with it.
     link.event("names", "Mine", entry="a")
     link.reply()

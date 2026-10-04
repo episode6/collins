@@ -6904,17 +6904,21 @@ class MainWindow(Adw.ApplicationWindow):
         the way the dialog's default keeps it: an automatic delete has nobody
         to ask, and losing a project you never removed is the surprise.
         Returns the ids that were not trashed."""
+        # Every session, read once: the archived ones are paged into the
+        # store's mirror here (the first read), and the projects this
+        # empties are judged against the whole set, survivors included.
+        sessions = self.store.sessions
         wanted = [
             sid
             for sid in session_ids
-            if sid in self.store.sessions
+            if sid in sessions
             and self.store.state.is_archived(sid)
             and not self.session_is_running(sid)
         ]
         skipped = [sid for sid in session_ids if sid not in wanted]
         if not wanted:
             return skipped
-        emptied = emptied_projects(self.store.sessions.values(), set(wanted))
+        emptied = emptied_projects(list(sessions.values()), set(wanted))
         if emptied:
             self.store.keep_projects(emptied)
         errors = self.store.trash_many(wanted)
