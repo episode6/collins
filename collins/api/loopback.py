@@ -22,12 +22,18 @@ live frame as drained the moment the callback took it.
 Two shortcuts the socket will not have, for the `Session` that still runs
 in the client's process through Phase 1: `screen_of(pty)` (the model the
 session's `ScreenPort` reads) and `pty_of(pty)` (the pty object its
-`PtyPort` asks for the child's pid and foreground group). PR-1.10 moves
-the session into the service and both go. A panel shell (PR-1.8) reads
+`PtyPort` asks for the child's pid and foreground group). Both go when
+the session moves into the service. A panel shell (PR-1.8) reads
 through the same two (its text for `read_terminal`, its foreground, its
 shell's cwd), and the tab's panel-history save, whose key and moment are
 still the tab's in Phase 1, is a third on the server's end:
 `LoopbackServer.write_panel_history`, the core writing from its models.
+
+The app's own client (PR-1.10) carries the store and the state: it
+subscribes once, and the core hands it the snapshot and every change
+after it through `deliver`; `remotestore.RemoteStore` and
+`remotestate.RemoteState` are built on it (through `apilink.LoopbackLink`,
+the adapter both use, which a test's fake link stands in for).
 
 **This module is deleted at the end of Phase 1** (D21): hard requirement 1
 says same-machine goes through the API, and an in-process mode left behind
@@ -124,6 +130,13 @@ class LoopbackClient:
 
     def forget(self, pty: int) -> None:
         self._sinks.pop(pty, None)
+
+    def deliver(self, event: dict) -> None:
+        """An event of this client's store and state subscription (the
+        snapshot, `item`, `rows`, `state.set`, ...), validated on its way
+        in like every other."""
+        if not self.closed:
+            self._deliver_event(event)
 
     # -- what the tab calls
 
