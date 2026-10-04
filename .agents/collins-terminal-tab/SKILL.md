@@ -490,7 +490,7 @@ swap 2 of §3.5:
 - **What differs, by design.** A row written before a resize is kept by
   the model as it was (no reflow, D19) where VTE re-wraps it: a shell's
   echo from before the tab's first allocation reads differently in
-  `capture_contents` on the two backends until the program repaints
+  `capture_contents` between the model's read and the VTE's until the program repaints
   (`check_attach_redraw.py` compares from the first line written at the
   settled grid for that reason). `capture_contents` is held to VTE's
   `write_contents_sync` by the goldens' `capture` read (three wrap

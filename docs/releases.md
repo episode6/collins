@@ -48,7 +48,8 @@ downloads of each version, see the
   included, run on the service the same way: their scrollback is saved
   from the service's screen model and painted back into a reopened shell
   before its prompt, and the agent's `read_terminal` / `run_in_terminal`
-  read and type through the service. Nothing looks different, by design.
+  read and type through the service. Nothing looks different, by design;
+  if a tab misbehaves, report the session and the step.
 - **The sidebar and Preferences talk to the in-app service.** Sessions, the
   sidebar's rows and every saved setting and record now belong to the
   service half of the app, and the window works on a copy it keeps in

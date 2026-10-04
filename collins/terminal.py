@@ -149,12 +149,6 @@ _UNLIMITED_CLAMP_WIDTH = 1_000_000
 PROGRESS_HINT_TERMPROP: str | None = getattr(Vte, "TERMPROP_PROGRESS_HINT", None)
 
 
-def _within(root: str, path: str) -> bool:
-    """Whether *path* is *root* itself or something under it. Purely lexical."""
-    root, path = os.path.normpath(root), os.path.normpath(path)
-    return path == root or path.startswith(root + os.sep)
-
-
 # The host side of sandboxing (sandboxplan.SandboxHost, bound to the app id
 # and state): how a sandboxed launch gets its plan (`prepare_launch(cwd, box)`
 # for the settled launch cwd — with the worktree a `-w` launch is narrowed
@@ -1291,7 +1285,12 @@ class PanelTerminal(Gtk.Box):
 
     def _on_pty_exited(self, _status: int | None) -> None:
         # `pty-exited` is what `child-exited` was (§3.4).
-        self._on_child_exited(self.terminal, -1 if _status is None else int(_status))
+        self._spawned = False  # a fresh shell is spawned on the next show
+        self._child_pid = None
+        self._spawn_plan = None  # the next spawn takes the plan of its day
+        self._pending_input.clear()
+        self.terminal.reset(True, True)
+        self.emit("shell-exited")
 
     def history_source(self) -> int | str:
         """What the panel history is written from for this shell (the tab's
