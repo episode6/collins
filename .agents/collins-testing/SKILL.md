@@ -158,6 +158,20 @@ a tab running a real CLI, kill the foreground process group
   scrub `CLAUDE_*` from the environment (an inherited
   `CLAUDE_CODE_CHILD_SESSION` turns transcript saving off); a probe that posts
   `/model` rewrites the user's `~/.claude/settings.json` default — restore it.
+- `with-headless-display.sh` swaps the Wayland display and leaves the
+  command on the user's session bus. Synthesizing input through
+  `org.gnome.Mutter.RemoteDesktop` on that bus types into the user's live
+  desktop. Connect to the headless shell's own bus (read it from the
+  shell's `/proc/<pid>/environ`) and refuse to run on the session bus; the
+  capture-screenshots skill has the recipe. Prefer in-process synthesis
+  (`feed_child`, `paste_text`, emitting the signal) when real events are
+  not the point.
+- Real-CLI probes that must run side by side: `scripts/spike_split_common.py`
+  makes a throwaway `HOME` per probe (copies of the login and the config,
+  the work directory pre-trusted), refuses when the token is close to
+  expiring, and leaves the CLI with Ctrl+C Ctrl+C. `CLAUDE_CODE_NO_FLICKER`
+  picks the CLI's mode (`0` classic, `1` fullscreen); unset, the account's
+  server gates do, so a fixture always sets it.
 - Long inline shell pipelines are refused by the worktree guard; put probes
   in a scratchpad `.py`/`.sh` and run them with `PYTHONPATH=<worktree>`.
 
