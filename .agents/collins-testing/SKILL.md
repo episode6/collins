@@ -55,6 +55,20 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 python3 scripts/run_e2e.py --list --shard 2/5       # …and its estimate; no display needed
 ```
 
+The store and state over the API (PR-1.10) have three modules of their
+own. `tests/test_remote_state.py` drives `remotestate.RemoteState` through
+a fake link that holds every reply until the test answers it (a refused
+write reverts, notifies and toasts; an event landing while a write is
+unanswered does not clobber it; the draft debounce, with a fake timer;
+`get_setting`'s routing). `tests/test_remote_store.py` runs the real
+`ServiceCore` (its own `AppState` and a `SessionStore` fed the
+`projects_dir` sessions) behind a real `LoopbackServer` with both mirrors
+on a `LoopbackLink`: the snapshot, an `item` moving one property and its
+signal, every mutation, archived paging, the service refusing a device
+setting. `tests/test_service_imports.py` imports every module of
+`collins.service` and `collins.api` in a subprocess and fails on any
+`gi.repository` widget library (GLib, GObject and Gio are allowed).
+
 Real ptys are fine in the unit suite: `tests/test_ptyserver.py` spawns
 `cat` and `sh -c` children on ptys the server owns and iterates the
 default GLib main context by hand (its `pump`), no display, no GTK. Put the

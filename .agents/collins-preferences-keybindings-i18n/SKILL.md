@@ -37,6 +37,21 @@ written by `uistate.UiState` through `AppState`. `get_setting` /
 records which side each group is on (several are "mixed" until PR-3.3
 regroups the dialog into "This device" and "Service" headings).
 
+**A setting write is optimistic** (PR-1.10, spec §3.8). The `state` the
+dialog is handed is the app's `remotestate.RemoteState`, the mirror of
+the service's `AppState`: `get_setting` answers off this device's
+`UiState` for a device key and off the mirror for a service key, and
+`set_setting` of a service key changes the mirror at once and sends a
+`state.set` (`settings`, one entry per key) to the service, which saves
+`state.json` and reacts (the two title switches re-project the store
+there). A device key never leaves the device; the service refuses one
+written through the API. When the service refuses a write the mirror
+reverts and the window shows a toast, "Not saved: <reason>" (the
+service's msgid, translated here); the dialog's row is not re-synced, so
+it shows the refused value until it is opened again. On the loopback
+the write and its echo are done before `set_setting` returns, so a check
+reading `AppState()` off disk right after still sees it.
+
 To add a setting:
 
 1. The `DEFAULT_SETTINGS` entry with its comment, and its name in

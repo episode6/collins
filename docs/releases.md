@@ -51,6 +51,11 @@ downloads of each version, see the
   before its prompt, and the agent's `read_terminal` / `run_in_terminal`
   read and type through the service. Opt-in only; the default is
   unchanged. The e2e suite runs on both backends in CI.
+- **The sidebar and Preferences talk to the in-app service.** Sessions, the
+  sidebar's rows and every saved setting and record now belong to the
+  service half of the app, and the window works on a copy it keeps in
+  step; nothing looks different, except that a change the service
+  refuses is put back with a "Not saved" notice.
 - **App state is now two files.** `~/.config/collins/state.json` keeps what
   describes your sessions and projects and what Collins does for them
   (names, favorites, archives, drafts, pull request records, the sandbox,

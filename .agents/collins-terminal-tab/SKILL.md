@@ -472,10 +472,12 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   the spot, records its row gone and removes its model file (Phase 1:
   quitting ends the sessions; scrollback survives a crash only, and only
   once PR-3.6's keeper exists to re-adopt a live pty from its file).
-- **The wiring.** `App._start_service_loopback` builds one
-  `service.core.ServiceCore` (the pty half: `spawn`, `attach`, `detach`,
-  `paint`, `close`; the `resize`/`focus`/`theme` events; the state's
-  `set_pty` / `set_pty_next_id` as the pty table's writers) behind an
+- **The wiring.** `App._start_service` builds one
+  `service.core.ServiceCore` (`ServiceCore.with_state`: the service's own
+  `AppState`, whose `set_pty` / `set_pty_next_id` write the pty table;
+  the pty half: `spawn`, `attach`, `detach`, `paint`, `close`; the
+  `resize`/`focus`/`theme` events; and since PR-1.10 the store and state
+  half, see `collins-sessions-and-sidebar`) behind an
   `api.loopback.LoopbackServer` in `terminal.SERVICE_LOOPBACK`; a tab
   built without an app gets one made on the spot. The loopback passes
   the same dicts and bytes the socket will, every message through
