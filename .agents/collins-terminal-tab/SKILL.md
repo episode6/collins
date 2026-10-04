@@ -505,13 +505,15 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   (a real `claude` in a real tab) reproduced the loss once per run: the
   key after the **first** click into the window never reached GTK at all
   (a capture-phase key controller on the window saw nothing, no commit,
-  the guard down), while the key after a second click arrived, and the
-  same step on the `vte` backend (the drive's control run) behaves the
-  same. The key never reached GTK; the compositor's keyboard focus not
-  having moved yet to the window the click activated is the likely
-  cause (the toplevel reports `is_active()` False throughout under the
-  headless shell). A harness that clicks a window for the first time and
-  types in the same breath loses that key, on either backend.
+  the guard down), while the key after a second click arrived in every
+  run (server: lost in 7 of 9 runs; the same step on the `vte` backend,
+  the drive's `--backend vte` control run: lost in 2 of 4, the key never
+  seen by GTK either, delivered when it was). The key never reached GTK;
+  the compositor's keyboard focus not having moved yet to the window the
+  click activated is the likely cause (the toplevel reports
+  `is_active()` False throughout under the headless shell). A harness
+  that clicks a window for the first time and types in the same breath
+  loses that key, on either backend.
 - **Running the suite on it:** `python3 scripts/run_e2e.py --pty-backend
   server` (CI runs both backends as `e2e-shard (<backend>, N)`); a single
   check: `COLLINS_PTY_BACKEND=server … python3 scripts/check_x.py`.
