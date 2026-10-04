@@ -13,9 +13,9 @@ with no display. Modules land one PR at a time; `termstream` was the first.
 `session.Session` is a session tab's logic taken out of the tab — launching
 the agent, reading and writing its input box, the transcript resolver and
 tail, activity, the close flows — talking to its terminal through the two
-ports in `ports` (`PtyPort` to write to it, `ScreenPort` to read it). Today
-the ports are adapters over the tab's own VTE (`terminal.VtePtyPort`,
-`terminal.VteScreenPort`); the split's later PRs swap them for the service's
-own pty and screen (`termstream`, `termscreen`); see
+ports in `ports` (`PtyPort` to write to it, `ScreenPort` to read it). The
+ports are adapters over the service's own pty and screen
+(`ptyclient.ServicePtyPort`, `ptyclient.ServiceScreenPort` over
+`termstream`, `termscreen`); see
 ~/specs/collins/split-service-and-client.md §3.5.
 """

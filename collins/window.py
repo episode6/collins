@@ -5944,7 +5944,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_closing.discard(page)
         if isinstance(tab, TerminalTab):
             tab.session.end_close()  # its close poll, if one was running, ends here
-            tab.release_pty()  # the server backend's pty goes with the tab
+            tab.release_pty()  # the tab's pty goes with it
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)
@@ -5981,7 +5981,7 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_panel_layout(tab)
             self._save_editor_state(tab)
             self._save_composer_draft(tab)
-            # The server backend's panel shells end with the tab, after the
+            # The panel shells' ptys end with the tab, after the
             # service has written their history from their models.
             tab.release_panel_ptys()
         session_id = self._session_id_of(page)

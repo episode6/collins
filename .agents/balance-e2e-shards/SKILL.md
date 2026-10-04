@@ -35,10 +35,10 @@ python3 .agents/balance-e2e-shards/scripts/refresh_weights.py             # then
 
 By default it takes the latest green `ci.yml` run on main; `--run <id>` names
 another (a PR run whose shards you are staring at, say — the id is in the
-job URLs `gh pr checks` prints). It reads every `e2e` / `e2e-shard (vte, N)`
-/ `e2e-shard (server, N)` job log through `gh` (the suite runs on both pty
-backends; a check's weight is the slower of its two runs, since one table
-deals both), rewrites the table sorted heaviest-first with the run id
+job URLs `gh pr checks` prints). It reads every `e2e` / `e2e-shard (N)` job
+log through `gh` (a run from the two-backend interval, with `(vte, N)` and
+`(server, N)` legs, is still read: a check's weight is the slower of its two
+runs), rewrites the table sorted heaviest-first with the run id
 and date in the comment above it, and prints the deal before and after:
 
 ```

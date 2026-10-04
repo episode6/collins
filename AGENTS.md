@@ -129,20 +129,19 @@ keystrokes and polls. It reaches the terminal through two ports
 (`service/ports.py`: `PtyPort`, `ScreenPort`) and reports back through a
 listener (`terminal._TabHost`); every old name on the tab forwards to it,
 and `tests/test_session.py` drives its state machines through fake ports.
-The tab has **two backends** (`ptyclient.PTY_BACKEND`, from
-`COLLINS_PTY_BACKEND`): on `vte`, the default, the terminal spawns the
-shell on its own pty and the ports are `terminal.VtePtyPort` and
-`VteScreenPort` over it; on `server` (opt-in, the split's swap 2) the
-terminal has no child and shows a pty of the service's pty server through
-the loopback (`ptyclient.ClientTerminal`: output frames are `feed()`, the
+The tab has **one backend** (PR-1.9; the tab's own in-widget pty, its
+`COLLINS_PTY_BACKEND` switch and the VTE adapters are gone): the terminal
+has no child and shows a pty of the service's pty server through the
+loopback (`ptyclient.ClientTerminal`: output frames are `feed()`, the
 VTE's commits go back as input, the redraw guard, the mouse coalescing;
 `ServicePtyPort` / `ServiceScreenPort` over the service's pty and screen
-model). The panel shells beside it follow the same backend: on `server`
-each `PanelTerminal` is a `ClientTerminal` over a service pty of kind
-`shell` (a sandboxed one spawned by the service on its box's plan), its
-text, foreground and cwd read on the service, its history written by the
-service from the screen model and painted back into the new pty's stream
-on reopen. The e2e suite runs on both; PR-1.9 makes `server` the only one.
+model). The panel shells beside it are the same: each `PanelTerminal` is a
+`ClientTerminal` over a service pty of kind `shell` (a sandboxed one
+spawned by the service on its box's plan), its text, foreground and cwd
+read on the service, its history written by the service from the screen
+model and painted back into the new pty's stream on reopen. The client's
+VTE still parses what it is fed, so the OSC 9;4 progress termprop the
+activity tracker listens to still arrives there.
 
 **What the session can call.** `mcp_shim.py` (stdlib-only, spawned by the CLI
 via `--mcp-config`) relays MCP over a Unix socket to `mcpserver.py`
@@ -158,8 +157,7 @@ walked up `/proc` to a `Session` (through Phase 1 the tabs' own).
 
 **The service and its API, in progress.** The split into a headless
 `collins-service` and a GTK client (`~/specs/collins/split-service-and-client.md`)
-lands a module per PR, GTK-free; `Session`, the pty server (behind
-`COLLINS_PTY_BACKEND=server`) and the store and state are wired into the app.
+lands a module per PR, GTK-free; `Session`, the pty server and the store and state are wired into the app.
 `collins/api/protocol.py` (stdlib-only) is the API's message table (types,
 direction, fields and bounds), `validate` / `validate_response`, JSON
 framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
@@ -211,8 +209,8 @@ LoopbackLink` carrying the two mirrors).
 `collins/service/session.py` is a tab's `Session` (see "The tab"), the
 first module the app did use: the tab's logic carved out of the widget,
 reaching its terminal through the two ports in `collins/service/ports.py`
-(`PtyPort`, `ScreenPort`): adapters over the tab's own VTE on the `vte`
-backend, the service's pty and `termscreen` on `server`.
+(`PtyPort`, `ScreenPort`): adapters over the service's pty and
+`termscreen`.
 `collins/service/ptyserver.py` (GLib only) is the pty table: it spawns each
 child on a pty it holds the master of, runs the output through the filter
 into the screen model, hands what is left to every attached sink, answers an
@@ -244,14 +242,14 @@ service, against its machine's login: the UI asks (`usage.get`,
 | The marks on each session's diff (`diff_notes`: session id → notes and highlights, `diffnotes.mark_record` each; kept for the git page's life, so only a crash leaves any) and the show_diffs asked for with no client attached (`pending_diffs`: session id → the tool's arguments) | `state.json` (the service's alone: `service/diffs.py`, `service/tools.py`) |
 | This device's half: the settings in `state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, tray, Caffeine, composer, editor and git-page looks), and per service: panel layouts, editor states, the last active session | `~/.config/collins/ui-state.json` (`uistate.UiState`, written through `AppState`; `state.json.pre-split` is the one-time backup the first start after the split leaves) |
 | Headless-run scratch cwd | `~/.config/collins/title-scratch/<uuid>` |
-| Panel shell scrollback (the tab's saves, and on the server backend the service's own write when a shell exits) | `~/.local/state/collins/panel_history/<session>[.<ordinal>].txt` |
+| Panel shell scrollback (the tab's saves, and the service's own write when a shell exits) | `~/.local/state/collins/panel_history/<session>[.<ordinal>].txt` |
 | Chats virtual project | `~/.local/share/collins/chats/` |
 | MCP config file | `~/.local/share/collins/<app id>/` |
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
 | Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
-| The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer` on the server backend: an agent's pty and a panel shell's) |
+| The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer`: an agent's pty and a panel shell's) |
 | A live pty's saved screen model (`termscreen.Screen.dump()` as JSON, for a restarted service's re-adoption, PR-3.6's keeper); removed with the pty's row, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
 | Everything of the CLI's | `~/.claude/` — read only |
@@ -263,9 +261,7 @@ e2e checks: `COLLINS_APP_ID`, `COLLINS_PROJECTS_DIR`, `COLLINS_CLAUDE_CONFIG`,
 bubblewrap, like the fake `claude`), `COLLINS_BINDFS` and
 `COLLINS_FUSERMOUNT` (the two tools a live grant is mounted with; a path
 that doesn't exist says "not installed"), `COLLINS_PTY_STATE_DIR` (where
-the service saves pty models), `COLLINS_PTY_BACKEND` (`vte` or `server`:
-which backend a session tab runs on; `scripts/run_e2e.py --pty-backend`
-sets it for a whole suite run), plus `XDG_CONFIG_HOME` / `XDG_STATE_HOME` /
+the service saves pty models), plus `XDG_CONFIG_HOME` / `XDG_STATE_HOME` /
 `XDG_RUNTIME_DIR`.
 Diagnostics: `COLLINS_LOG=INFO`, `COLLINS_SHIM_LOG=<file>`,
 `COLLINS_GIT_DEBUG_LOG=<file>`.
@@ -358,7 +354,7 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store and its mirror, sidebar, state.json and its mirror, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `remotestore` `models` `state` `remotestate` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the server backend (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/jobs` `service/diffs` `jobclient` `remotediffs` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the server backend), `collins-panel-dock` (panel shells on the server backend, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
+| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the pty server (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/jobs` `service/diffs` `jobclient` `remotediffs` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` `service/sandbox` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |

@@ -313,7 +313,7 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   command` queues input until the pty exists. Multi-line input feeds each
   newline as Enter — `sudo` then eats the next line as its password, so
   privileged sequences must be one `a && b` line.
-- On the server backend (`COLLINS_PTY_BACKEND=server`, PR-1.8) the
+- Over the pty server (PR-1.8) the
   handlers are unchanged: the panel shell routes. `capture_contents()` is
   the service's screen model of the shell's pty, `has_running_command()`
   the pty server's foreground read, `run_command` input frames to the

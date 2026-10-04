@@ -29,9 +29,6 @@ Options:
     --shard I/N     run only the I-th of N time-balanced shards (1-based);
                     CI runs the suite as five of these in parallel
     --timeout SECS  per-check timeout, default 300
-    --pty-backend B run the checks with COLLINS_PTY_BACKEND=B (vte, the
-                    default, or server: the tab on the service's pty server
-                    through the loopback); CI runs the suite on both
     --list          print the discovered checks and exit
 
 Sharding is by measured wall time, not by count: CHECK_SECONDS below holds
@@ -216,9 +213,6 @@ def main():
     parser.add_argument("--only", action="append", default=[], metavar="SUBSTR")
     parser.add_argument("--shard", type=parse_shard, default=None, metavar="I/N")
     parser.add_argument("--timeout", type=int, default=300, metavar="SECS")
-    parser.add_argument(
-        "--pty-backend", choices=("vte", "server"), default=None, metavar="BACKEND"
-    )
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
@@ -243,9 +237,6 @@ def main():
         )
 
     env = None
-    if args.pty_backend:
-        env = dict(os.environ, COLLINS_PTY_BACKEND=args.pty_backend)
-        print(f"run_e2e: COLLINS_PTY_BACKEND={args.pty_backend}", flush=True)
     results = []
     for i, path in enumerate(checks, 1):
         name = os.path.basename(path)

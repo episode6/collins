@@ -2,9 +2,9 @@
 """What a `Session` needs of a terminal, as two ports.
 
 A session writes to a pty and reads a screen; which pty and which screen is
-not its business. Today both are the tab's own `Vte.Terminal`
-(`terminal.VtePtyPort`, `terminal.VteScreenPort`); later the service's pty
-and its headless screen model (spec §3.5, the split's swaps 2 and 3). The
+not its business. Both are the service's: its pty and its headless screen
+model (`ptyclient.ServicePtyPort`, `ptyclient.ServiceScreenPort`; spec
+§3.5, the split's swaps 2 and 3). The
 unit suite drives a `Session` through fakes of both.
 
 Coordinates. Every row index a `ScreenPort` hands out or takes is counted

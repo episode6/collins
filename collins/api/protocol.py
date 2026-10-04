@@ -208,7 +208,7 @@ each taken from the code the message replaces:
   `tool-reply` is the client's event back, `call`, `ok` and
   `text`, `mcptools.run_tool_call`'s ``(ok, text)``.
 - The `sandbox.*` requests name the session's box (`box`, required: what
-  the service's records are keyed by) and, on the server backend, its pty.
+  the service's records are keyed by) and its pty.
   `sandbox.grants` answers with what the chip draws, each
   grant in ``sandboxgrants.Delivery``'s shape (path, status, inside,
   linked, reason: why a grant is pending, the grant tag's tooltip),

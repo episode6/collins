@@ -186,6 +186,36 @@ def verify() -> bool:
             not shell.has_page_focus(),
         )
 
+    # A shell that exits (typing `exit`, as a user would) is reset and
+    # announced, and the next show spawns a fresh one.
+    shell2 = next(s for s in state["caller"].panel_shells() if s.number == 2)
+    state["shell2"] = shell2
+    state["exited"] = []
+    shell2.connect("shell-exited", lambda *_a: state["exited"].append(True))
+    got = app.tool_client.run_in_terminal(found(), {"command": "exit", "terminal": 2})
+    check("exit is typed into the idle shell", got == (True, "Running in Terminal 2."), got)
+    GLib.timeout_add(3000, after_exit)
+    return GLib.SOURCE_REMOVE
+
+
+def after_exit() -> bool:
+    shell2 = state["shell2"]
+    check("the shell's exit emits shell-exited", state["exited"] == [True], state["exited"])
+    check("the exited shell is marked unspawned", not shell2._spawned)
+    check("its pid is cleared", shell2._child_pid is None)
+    check(
+        "the strip closed the dead page",
+        all(sh is not shell2 for sh in state["caller"].panel_shells()),
+    )
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo after-exit"})
+    check("a later run opens a fresh shell", got[0] and got[1].startswith("Running in new"), got)
+    GLib.timeout_add(3500, finish)
+    return GLib.SOURCE_REMOVE
+
+
+def finish() -> bool:
+    ok, text = app.tool_client.read_terminal(found(), {})
+    check("the fresh shell ran the command", "after-exit" in text, text)
     # Take the shim's process group out before quitting; it never exits on
     # its own. The panel shells die with their pty.
     win = state["win"]

@@ -43,10 +43,6 @@ parser.add_argument("--out", required=True, help="directory the PNGs go to")
 parser.add_argument("--model", default="claude-haiku-4-5-20251001", help="the cheapest model")
 parser.add_argument("--keep-home", action="store_true")
 parser.add_argument("--no-turn", action="store_true", help="type the prompt but never send it (no quota)")
-parser.add_argument(
-    "--backend", choices=("server", "vte"), default="server",
-    help="vte: the control run of the click-and-type step on the tab's own VTE child",
-)
 ARGS = parser.parse_args()
 os.makedirs(ARGS.out, exist_ok=True)
 
@@ -69,7 +65,6 @@ for key in list(os.environ):
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.Drive.{RUN}"
 os.environ["COLLINS_CHATS_DIR"] = f"{SCRATCH}/chats"
 os.environ["COLLINS_PTY_STATE_DIR"] = f"{SCRATCH}/pty"
-os.environ["COLLINS_PTY_BACKEND"] = ARGS.backend
 os.environ["XDG_CONFIG_HOME"] = f"{SCRATCH}/config"
 os.environ["XDG_STATE_HOME"] = f"{SCRATCH}/state"
 os.environ["XDG_CACHE_HOME"] = f"{SCRATCH}/cache"
@@ -98,6 +93,15 @@ from collins.state import AppState  # noqa: E402
 PASSED = 0
 FAILED = 0
 SHOTS = []
+
+
+def _range_text(terminal, fmt, start_row, start_col, end_row, end_col):
+    """One `get_text_range_format` read, unwrapped from the tuple some VTE
+    bindings return it in; "" for nothing."""
+    text = terminal.get_text_range_format(fmt, start_row, start_col, end_row, end_col)
+    if isinstance(text, tuple):
+        text = text[0]
+    return text or ""
 
 
 def check(label, ok, detail=""):
@@ -193,27 +197,17 @@ def steps():
         return focus is not None and (focus is widget or focus.is_ancestor(widget))
 
     tab = win.start_background_session(WORK, options=SessionOptions(model=ARGS.model))
-    check(
-        f"a tab on the {ARGS.backend} backend",
-        tab is not None and (tab._view is not None) == (ARGS.backend == "server"),
-    )
+    check("a tab on the service's pty server", tab is not None and tab._view is not None)
     win.tab_view.set_selected_page(win.tab_view.get_page(tab))
     term = tab.terminal
-    if ARGS.backend == "server":
-        loopback = terminal_mod.SERVICE_LOOPBACK
-        real_write = loopback.core.ptys.write
+    loopback = terminal_mod.SERVICE_LOOPBACK
+    real_write = loopback.core.ptys.write
 
-        def spy(pty_id, data, sink=None):
-            state["written"].append(bytes(data))
-            return real_write(pty_id, data, sink=sink)
+    def spy(pty_id, data, sink=None):
+        state["written"].append(bytes(data))
+        return real_write(pty_id, data, sink=sink)
 
-        loopback.core.ptys.write = spy
-    else:
-        # The VTE child: what reaches the pty is what VTE commits.
-        term_commits = term.connect("commit", lambda _t, text, size: state["written"].append(
-            (text[:size] if text else "").encode("utf-8", "surrogateescape")
-        ))
-        state["term_commits"] = term_commits
+    loopback.core.ptys.write = spy
     commits = []
     term.connect("commit", lambda _t, text, size: commits.append(text[:size] if text else ""))
     keys = []
@@ -226,8 +220,7 @@ def steps():
     check("the CLI is up at its box", ok)
     yield 800
     shot(win, "1-startup")
-    if ARGS.backend == "server":
-        check("the tab shows a pty of the service", tab._view.pty is not None)
+    check("the tab shows a pty of the service", tab._view.pty is not None)
 
     # A click into the terminal, then one character: the first key after
     # focus must arrive.
@@ -260,7 +253,6 @@ def steps():
     inp.tap(ord("h"))
     ok = yield from until(lambda: any(b"h" in w for w in state["written"]), 2000)
     detail = {
-        "backend": ARGS.backend,
         "at_key": at_key,
         "written": state["written"][-4:],
         "vte_commits": commits[-4:],
@@ -388,7 +380,7 @@ def steps():
     found = None
     top = max(0, cursor_row - term.get_row_count() + 1)
     for row in range(top, cursor_row + 1):  # the screen only: the link is matched where it is drawn
-        text = terminal_mod._range_text(term, Vte.Format.TEXT, row, 0, row, columns)
+        text = _range_text(term, Vte.Format.TEXT, row, 0, row, columns)
         if "https://example.com/collins" in text:
             found = (row, text.index("https://example.com/collins"))
     check("the URL is on the screen", found is not None, terminal_mod._capture_contents(term)[-300:])

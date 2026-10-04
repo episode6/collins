@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probes of the server backend's client glue against a real VTE and the
+"""Probes of the pty client's glue against a real VTE and the
 in-app loopback: what PR-1.7's review asked to see with its own eyes.
 
     bash .agents/capture-screenshots/scripts/with-headless-display.sh \\

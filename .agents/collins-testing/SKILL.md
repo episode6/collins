@@ -227,10 +227,9 @@ a tab running a real CLI, kill the foreground process group
 VitePress build of `docs/`, so a page that Vue can't compile — a `<word>`
 outside a one-line code span — fails the PR rather than the deploy after
 the merge) on the bare runner;
-`test`, `e2e-shard (vte, 1)` … `(server, 5)` (`xvfb-run … scripts/run_e2e.py
---timeout 120 --pty-backend B --shard N/5`: the suite on both pty backends,
-the tab's own VTE and the tab on the service's pty server through the
-loopback, `COLLINS_PTY_BACKEND=server`; 60-minute job cap each),
+`test`, `e2e-shard (1)` … `(5)` (`xvfb-run … scripts/run_e2e.py
+--timeout 120 --shard N/5`: the suite, every tab and panel shell on the
+service's pty server through the loopback; 60-minute job cap each),
 `packaging` and `ppa-source
 (resolute)` inside the resolute CI image; `ppa-source (noble)` in the noble
 packaging image; `rpm` in the Fedora image. The e2e suite runs as five
@@ -244,16 +243,15 @@ have exited green — keep watching until the `e2e` row is listed and
 finished. A check that hangs is one that needs more than 120 s; a shard
 passes in about a minute. When a leg drifts or a check changes, the
 `balance-e2e-shards` skill refreshes the weights from a run's logs and
-previews the deal (the table is shared by both backends). On a dev box the
-whole suite on one backend is `python3 scripts/run_e2e.py --pty-backend
-server` under the headless wrapper; `scripts/check_attach_redraw.py` runs
-the tab on the server backend whatever the environment says (it is about
-that backend: a second VTE attaching to a running pty is redrawn from the
+previews the deal. On a dev box the whole suite is
+`python3 scripts/run_e2e.py` under the headless wrapper;
+`scripts/check_attach_redraw.py` is about the tab's client terminal on the
+service's pty (a second VTE attaching to a running pty is redrawn from the
 service's model, scrollback and colours compared, and the redraw guard's
 sentinel answer is shown never to reach the pty; `COLLINS_ATTACH_RECORD=<file>`
 writes the first client's stream for a replay through the model and a VTE
 outside the app). `scripts/probe_server_backend.py` (headless, no quota) is
-the server backend's probe set: a flow-control redraw's sentinel never
+the pty client's probe set: a flow-control redraw's sentinel never
 reaching the pty, the guard's watchdog and a failed attach, a NUL commit,
 two attaches back to back, the mouse coalescer under random streams.
 Reproduce a shard (or, without
