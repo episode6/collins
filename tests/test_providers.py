@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 import os
 import shutil
@@ -715,6 +715,22 @@ def test_claude_worktree_exit_dialog_is_answered_with_enter():
         "  Remove worktree\n"
     )
     assert claude.worktree_exit_prompt(screen) == "\r"
+
+
+def test_claude_worktree_exit_dialog_with_numbered_items_is_answered():
+    """CLI 2.1.285 numbers the dialog's items: "❯ 1. Keep worktree". The
+    marker and the label are still adjacent, with only the number between."""
+    claude = ClaudeProvider()
+    screen = (
+        "You are working in a worktree. Keep it to continue working there,\n"
+        "or remove it to clean up.\n"
+        "\n"
+        "❯ 1. Keep worktree\n"
+        "  2. Remove worktree\n"
+    )
+    assert claude.worktree_exit_prompt(screen) == "\r"
+    # A number without the marker, or the marker on another item, is not it.
+    assert claude.worktree_exit_prompt("1. Keep worktree\n❯ 2. Remove worktree\n") is None
 
 
 def test_claude_worktree_exit_dialog_with_tmux_variant_is_still_answered():
