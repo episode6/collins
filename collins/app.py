@@ -47,6 +47,7 @@ from . import (
     prmenu,
     proctree,
     providers,
+    ptyclient,
     remoteimages,
     sandboxgrants,
     sandboxplan,
@@ -58,7 +59,7 @@ from . import (
     welcome,
 )
 from . import terminal as terminal_mod
-from .api.loopback import LoopbackServer, default_device
+from .api.loopback import LoopbackServer
 from .apilink import LoopbackLink
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .copylabel import open_uri
@@ -2525,7 +2526,7 @@ class App(Adw.Application):
         the call."""
         link = LoopbackLink()
         client = self._service_loopback.connect(
-            lambda *_frame: None, link.dispatch, default_device()
+            lambda *_frame: None, link.dispatch, ptyclient.device_name()
         )
         link.bind(client)
         self._service_client = client
