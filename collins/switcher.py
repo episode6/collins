@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-07-28. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 """Quick switcher: a type-ahead dialog to jump to any session."""
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ from gi.repository import Adw, Gdk, Gtk  # noqa: E402
 
 from .chats import is_chat_cwd
 from .models import SessionItem
-from .store import SessionStore
+from .remotestore import RemoteStore
 
 _MAX_RESULTS = 50
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 
 
 class QuickSwitcher(Adw.Dialog):
-    def __init__(self, store: SessionStore, on_choose: Callable[[SessionItem], None]) -> None:
+    def __init__(self, store: RemoteStore, on_choose: Callable[[SessionItem], None]) -> None:
         super().__init__(title="Switch session")
         self._store = store
         self._on_choose = on_choose

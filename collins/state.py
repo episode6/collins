@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-02. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -50,7 +50,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from . import autodelete, mcptools, newchat, notifycenter, panelhistory, panellayout, uistate
@@ -674,6 +674,167 @@ def _sandbox_project_grants(raw: object) -> dict[str, list[str]]:
     return {key: paths for key, paths in grants.items() if paths}
 
 
+# ---- the shared keys (the mirror, split-service spec §3.8) ------------------
+#
+# The top-level keys of state.json as the API carries them: what the
+# service's `ServiceCore` publishes to its clients as `state.set` events, and
+# what a client's `remotestate.RemoteState` mirrors and writes back. Each
+# names the AppState attribute holding it, its form on the wire, the cleaner
+# that reads a value of it as `_load` would (garbage dropped: rule 5, in
+# both directions), and whether a client may write it. A MAP key travels
+# entry by entry (`state.set`'s `entry`: a session id, a setting's name);
+# the rest travel whole. `settings` carries the service's settings only
+# (`DEVICE_SETTINGS` never leave the device), and a client writes them one
+# entry at a time.
+
+MAP = "map"
+SET = "set"
+LIST = "list"
+SCALAR = "scalar"
+
+
+def _map_of(check: Callable[[object], bool]) -> Callable[[object], dict]:
+    """A cleaner for a map of non-empty string keys whose values pass
+    *check*."""
+
+    def clean(raw: object) -> dict:
+        if not isinstance(raw, dict):
+            return {}
+        return {k: v for k, v in raw.items() if isinstance(k, str) and k and check(v)}
+
+    return clean
+
+
+def _is_str(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _clean_set(raw: object) -> list[str]:
+    return [v for v in raw if isinstance(v, str)] if isinstance(raw, list) else []
+
+
+def _clean_drafts(raw: object) -> dict[str, str]:
+    return _map_of(lambda v: isinstance(v, str) and bool(v))(raw)
+
+
+def _clean_new_chat_drafts(raw: object) -> dict[str, dict]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict] = {}
+    for key, value in raw.items():
+        clean = newchat.valid_draft(value)
+        if newchat.is_draft_id(key) and clean is not None:
+            out[key] = clean
+    return out
+
+
+def _clean_ptys(raw: object) -> dict[str, dict]:
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        k: v for k, v in raw.items() if isinstance(k, str) and k.isdigit() and isinstance(v, dict)
+    }
+
+
+def _clean_settings(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and k}
+
+
+def _clean_service_id(raw: object) -> str:
+    return raw if uistate._is_id(raw) else ""
+
+
+def _clean_next_id(raw: object) -> int:
+    return raw if isinstance(raw, int) and not isinstance(raw, bool) and 1 <= raw < 2**32 else 1
+
+
+def _clean_notifications(raw: object) -> list[dict]:
+    return [r for r in raw if isinstance(r, dict)] if isinstance(raw, list) else []
+
+
+class SharedKey:
+    """One top-level key of state.json as the API carries it."""
+
+    __slots__ = ("name", "attr", "form", "clean", "writable")
+
+    def __init__(self, name: str, form: str, clean, attr: str | None = None, writable: bool = True):
+        self.name = name
+        self.attr = attr or name
+        self.form = form
+        self.clean = clean
+        self.writable = writable
+
+
+SHARED_KEYS: dict[str, SharedKey] = {
+    key.name: key
+    for key in (
+        SharedKey("service_id", SCALAR, _clean_service_id, writable=False),
+        SharedKey("names", MAP, _map_of(_is_str)),
+        SharedKey("generated_names", MAP, _map_of(_is_str)),
+        SharedKey("cli_titles", MAP, _map_of(_is_str)),
+        SharedKey("emojis", MAP, _map_of(_is_str)),
+        SharedKey("favorites", SET, _clean_set),
+        SharedKey("archived", SET, _clean_set),
+        SharedKey("archived_at", MAP, _map_of(_is_number)),
+        SharedKey("archived_projects", SET, _clean_set),
+        SharedKey("project_worktree", MAP, _map_of(lambda v: isinstance(v, bool))),
+        SharedKey("project_sandbox", MAP, _map_of(lambda v: isinstance(v, bool))),
+        SharedKey("sandboxed_sessions", MAP, lambda raw: _sandboxed_sessions(raw)),
+        SharedKey("sandbox_grants", MAP, lambda raw: _sandbox_grants(raw)),
+        SharedKey("sandbox_project_grants", MAP, lambda raw: _sandbox_project_grants(raw)),
+        SharedKey("sandbox_tools", MAP, lambda raw: _sandbox_tools(raw)),
+        SharedKey("project_order", LIST, _clean_set),
+        SharedKey("virtual_projects", MAP, _map_of(_is_str)),
+        SharedKey("expanded_groups", SET, _clean_set),
+        SharedKey("session_prs", MAP, _map_of(lambda v: isinstance(v, list))),
+        SharedKey("session_attachments", MAP, _map_of(lambda v: isinstance(v, list))),
+        SharedKey("session_drafts", MAP, _clean_drafts),
+        SharedKey("new_chat_drafts", MAP, _clean_new_chat_drafts),
+        SharedKey("process_baselines", MAP, _map_of(lambda v: isinstance(v, list))),
+        SharedKey("session_forwards", MAP, _map_of(_is_str)),
+        SharedKey("pending_detaches", MAP, _map_of(lambda v: isinstance(v, dict))),
+        SharedKey("ptys", MAP, _clean_ptys, writable=False),
+        SharedKey("pty_next_id", SCALAR, _clean_next_id, writable=False),
+        SharedKey("notifications", LIST, _clean_notifications),
+        SharedKey("settings", MAP, _clean_settings),
+    )
+}
+
+
+def _setting_type_ok(key: str, value: object) -> bool:
+    """Whether *value* has the type of the setting's default (rule 5: a
+    setting written through the API is foreign content). Exact types, so a
+    bool is no int; an int stands in for a float."""
+    default = DEFAULT_SETTINGS[key]
+    if type(value) is type(default):
+        return True
+    return type(default) is float and type(value) is int
+
+
+def diff_shared(key: SharedKey, old, new) -> list[tuple[str | None, object]]:
+    """What changed in *key* between two exported values (`export_key`'s
+    form), as ``(entry, value)`` pairs: a MAP key entry by entry (value
+    None for an entry that went), anything else whole (entry None)."""
+    if old == new:
+        return []
+    if key.form != MAP or not isinstance(old, dict) or not isinstance(new, dict):
+        return [(None, new)]
+    changes: list[tuple[str | None, object]] = [
+        (entry, value) for entry, value in new.items() if old.get(entry, _MISSING) != value
+    ]
+    changes.extend((entry, None) for entry in old if entry not in new)
+    return changes
+
+
+_MISSING = object()
+
+
 def editor_pops_out(monitor_width: int, limit: int) -> bool:
     """Whether the editor should open popped out rather than docked: true on
     monitors at most `limit` scaled px wide (the pop-out threshold setting;
@@ -688,13 +849,30 @@ def editor_pops_out(monitor_width: int, limit: int) -> bool:
 
 
 class AppState:
-    def __init__(self, migrate: bool = False) -> None:
+    def __init__(
+        self,
+        migrate: bool = False,
+        device: bool = True,
+        ui: uistate.UiState | None = None,
+    ) -> None:
         """*migrate*: whether this instance may perform the state split's
         one-time migration at load (the app's own instance; see the module
         docstring). A reader that does not migrate still sees an unsplit
         file's device keys in its merged view, and commits the migration
-        before its first save, if it ever saves."""
+        before its first save, if it ever saves.
+
+        *device*: whether this instance writes this device's half,
+        ui-state.json. The service's own instance (`service.core.ServiceCore`)
+        passes False: once the migration is written, the device's half is
+        the client's (`remotestate.RemoteState`, which owns its own
+        `UiState`), and a second writer in the same process would clobber
+        it. *ui* is the `UiState` to use, one read off ui-state.json by
+        default."""
         self._migrate = migrate
+        self._device = device
+        # Called after every write of state.json (the service publishes the
+        # change to its clients from here; see service.core).
+        self.on_saved = None
         # Set while an unsplit state.json has been read and its migration
         # not yet written: the first write of either half commits it
         # (ui-state.json first), whichever instance writes.
@@ -710,6 +888,8 @@ class AppState:
         self.favorites: set[str] = set()
         self.archived: set[str] = set()
         self.archived_projects: set[str] = set()  # by project name (the group identity)
+        # When each session was archived (wall-clock seconds; see autodelete).
+        self.archived_at: dict[str, float] = {}
         # Per-project "new sessions use a worktree" choices, by project name.
         # Absent key = follow the worktree_new_sessions setting.
         self.project_worktree: dict[str, bool] = {}
@@ -755,7 +935,7 @@ class AppState:
         # there (the panel_layouts and editor_states properties below), as
         # do the device settings. The service id is minted once into
         # state.json; _load reads it or makes it.
-        self.ui = uistate.UiState(_ui_state_file(), device_defaults())
+        self.ui = ui if ui is not None else uistate.UiState(_ui_state_file(), device_defaults())
         self.service_id: str = ""
         # session id -> the PRs it has opened, oldest first, as prstatus
         # records ({number, url, repository?, title?, state?, checks?,
@@ -1018,7 +1198,7 @@ class AppState:
                     backup = backup.with_name(f"{backup.name}.{stamp}")
                 shutil.copy2(_STATE_FILE, backup)
             self._migration_pending = False
-            self._save_ui()
+            self._write_ui()
             self.save()
         except OSError as exc:
             self._migration_pending = True
@@ -1072,12 +1252,21 @@ class AppState:
             },
         }
         uistate.write_json_atomic(_STATE_FILE, payload)
+        if self.on_saved is not None:
+            self.on_saved()
 
     def _save_ui(self) -> None:
-        """Write this device's half, ui-state.json, from the merged view."""
+        """Write this device's half, ui-state.json, from the merged view —
+        unless this is the service's own instance (*device* False), whose
+        device half is the client's to write once the migration is."""
         if self._migration_pending:
             self._commit_migration()
             return
+        if not self._device:
+            return
+        self._write_ui()
+
+    def _write_ui(self) -> None:
         self.ui.settings = {
             k: v for k, v in self.settings.items()
             if (k in DEVICE_SETTINGS and k not in SERVICE_SCOPED_SETTINGS) or k in self._ui_only_keys
@@ -1089,6 +1278,95 @@ class AppState:
     def ui_state_file(self) -> str:
         """The device's file, beside state_file()."""
         return str(self.ui.path)
+
+    # -- the shared keys, as the API carries them (SHARED_KEYS) ----------------
+
+    def is_device_setting(self, key: str) -> bool:
+        """Whether a setting is this device's (ui-state.json's): one of
+        DEVICE_SETTINGS, or a key the catalogue doesn't know that the
+        device's file holds."""
+        return key in DEVICE_SETTINGS or key in self._ui_only_keys
+
+    def export_key(self, name: str):
+        """A shared key's value in its wire form: a set as a sorted list, a
+        map as a fresh dict (its values the live ones), `settings` as the
+        service's settings alone."""
+        key = SHARED_KEYS[name]
+        value = getattr(self, key.attr)
+        if name == "settings":
+            return {k: v for k, v in value.items() if not self.is_device_setting(k)}
+        if key.form == SET:
+            return sorted(value)
+        if key.form == MAP:
+            if name == "sandboxed_sessions":
+                return dict(sorted(value.items()))
+            return dict(value)
+        if key.form == LIST:
+            return list(value)
+        return value
+
+    def import_key(self, name: str, value) -> None:
+        """Replace a shared key's value with *value* (wire form), cleaned as
+        `_load` reads it. `settings` replaces the service's settings only:
+        a key it no longer names falls back to its default, and a device
+        setting in it is ignored. Falling back is right for the one place a
+        whole `settings` arrives, a mirror's snapshot: the service exports
+        every service setting (its merged view holds each default), so an
+        omitted key is one the service does not have, and its default is
+        what `get_setting` there would answer too. (A client never writes
+        `settings` whole: the service refuses it.)"""
+        key = SHARED_KEYS[name]
+        clean = key.clean(value)
+        if name == "settings":
+            for k in [k for k in self.settings if not self.is_device_setting(k)]:
+                if k not in clean:
+                    if k in DEFAULT_SETTINGS:
+                        self.settings[k] = DEFAULT_SETTINGS[k]
+                    else:
+                        del self.settings[k]
+            for k, v in clean.items():
+                if not self.is_device_setting(k):
+                    self.settings[k] = v
+            return
+        if key.form == SET:
+            clean = set(clean)
+        if name == "service_id" and not clean:
+            return
+        setattr(self, key.attr, clean)
+
+    def import_entry(self, name: str, entry: str, value) -> bool:
+        """Set one entry of a MAP key (None removes it; for `settings`, back
+        to the default). False, changing nothing, when the value is not one
+        the key takes (its cleaner drops it), or for `settings` when the
+        setting is a device one, one the catalogue does not name, or of a
+        type other than its default's (`_setting_type_ok`)."""
+        key = SHARED_KEYS[name]
+        if key.form != MAP or not isinstance(entry, str) or not entry:
+            return False
+        target = getattr(self, key.attr)
+        if name == "settings":
+            if self.is_device_setting(entry):
+                return False
+            if value is not None and (
+                entry not in DEFAULT_SETTINGS or not _setting_type_ok(entry, value)
+            ):
+                return False
+            if value is None:
+                if entry in DEFAULT_SETTINGS:
+                    target[entry] = DEFAULT_SETTINGS[entry]
+                else:
+                    target.pop(entry, None)
+            else:
+                target[entry] = value
+            return True
+        if value is None:
+            target.pop(entry, None)
+            return True
+        clean = key.clean({entry: value})
+        if entry not in clean:
+            return False
+        target[entry] = clean[entry]
+        return True
 
     # -- names -----------------------------------------------------------
 

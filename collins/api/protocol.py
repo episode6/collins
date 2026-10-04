@@ -115,9 +115,33 @@ each taken from the code the message replaces:
   a session id); `state.set`'s `value` is any bounded JSON value, null
   removing an entry. The service decides which keys a client may write.
   `state.set` is also the service's event for a change, in the same shape.
+  The keys are `state.SHARED_KEYS`: a map key changes entry by entry, the
+  rest whole, and the snapshot sends a large map entry by entry too, so no
+  value nears the frame cap. A client may write every key but
+  ``service_id``, ``ptys`` and ``pty_next_id``, and ``settings`` only one
+  service setting at a time: a device setting is ``refused``.
 - `item` carries a `SessionItem`'s bindable properties and the `Session`
   facts the sidebar reads, every one optional but `session`, plus
   `removed`. `pty` is a row of the pty table (§3.8) as a client needs it.
+- The store (§3.15, PR-1.10). `item` also carries `path` (the transcript)
+  and `forward` (the row's forward state: "", "moved" or "syncing", which
+  reads the service's disk), so a client holds the session as a
+  `sessions.Session`; after the first, an `item` carries only the fields
+  that changed. `rows` is the projection after each refresh (the row
+  order, the groups with their counts, the empty project headers, the
+  resolved project order, and the counts the sidebar's footer and the
+  archived actions read) and is `SessionStore`'s `refreshed`; `put-away` is
+  its `archived`. A subscription carries the sessions with rows; the ones
+  kept out of sight are paged in by `store.page-archived`, or one at a time
+  by `store.lookup`, and a session once sent is kept current until it is
+  `removed`. The store's mutations are `store.*` requests named after
+  `SessionStore`'s methods, bulk ones carrying up to `ROWS_MAX` sessions;
+  `store.flags` carries the activity tracker's verdicts (busy, unread,
+  status, the background handoff) while the tracker still runs in the
+  client (Phase 1), and the service sets them and sends them back as
+  `item` fields. `trust.check` and `trust.grant` are the CLI's folder
+  trust (`trust.py`), which only the service's machine can read and
+  write.
 - `pr` carries a session's PR records in `prstatus.to_record`'s shape, as
   bounded JSON objects: `prstatus.from_record` re-validates them on arrival.
 - `notify` carries a `notifycenter.Notification` record with the body as
@@ -271,6 +295,7 @@ PRS_MAX = 100
 SEEN_MAX = 200  # notifycenter.ROW_CAP: the most rows a history holds
 GRANTS_MAX = 256
 TOOLS_MAX = 64
+ROWS_MAX = 10_000  # sessions a store message names: the sidebar's rows, a bulk mutation
 MAX_COLS = 2000
 MAX_ROWS = 1000
 VTE_VERSION_MAX = 99_999_999
@@ -399,6 +424,34 @@ _SEEN = {
     "ids": Field(K_LIST, high=SEEN_MAX, item=_ID),
     "session": _ID,
 }
+
+_SESSIONS = Field(K_LIST, low=1, high=ROWS_MAX, item=_ID)
+_PROJECT = _s(NAME_MAX, low=1)  # a project's name: the group's identity in the sidebar
+
+# A sidebar group, as the `rows` event lists them: its kind (``fav``,
+# ``chats`` or ``proj``, a string a later service may extend), the
+# project's name for ``proj``, the label it is shown under, and how many of
+# the rows (in order) are its.
+_GROUP = Field(
+    K_OBJ,
+    fields={
+        "kind": _req(_s(SHORT_MAX, low=1)),
+        "name": _NAME,
+        "label": _NAME,
+        "count": _req(_i(1, ROWS_MAX)),
+    },
+)
+# A project with no rows under its header (all archived or favorited, or a
+# kept folder): the same identity, and its directory when one is known.
+_EMPTY_GROUP = Field(
+    K_OBJ,
+    fields={
+        "kind": _req(_s(SHORT_MAX, low=1)),
+        "name": _NAME,
+        "label": _NAME,
+        "cwd": _PATH,
+    },
+)
 
 _STATE_FIELDS = {
     "key": Field(K_STR, required=True, low=1, high=KEY_MAX, pattern=_KEY_RE),
@@ -631,7 +684,148 @@ _TABLE: tuple[MessageType, ...] = (
                 "mtime": _NUM,
                 "created": _NUM,
                 "size": _i(0, SIZE_MAX),
+                "path": _PATH,
+                "forward": _SHORT,
             },
+        ),
+    ),
+    MessageType(
+        "rows",
+        "The sidebar's rows after a refresh: their order, groups and counts.",
+        event=_event(
+            SERVICE,
+            {
+                "rows": _req(Field(K_LIST, high=ROWS_MAX, item=_ID)),
+                "groups": Field(K_LIST, high=ROWS_MAX, item=_GROUP),
+                "empty": Field(K_LIST, high=ROWS_MAX, item=_EMPTY_GROUP),
+                "order": Field(K_LIST, high=ROWS_MAX, item=_NAME),
+                "order_changed": _BOOL,
+                "show_archived": _BOOL,
+                "total": _COUNT,
+                "hidden": _COUNT,
+                "size": _i(0, SIZE_MAX),
+                "projects": Field(K_LIST, high=ROWS_MAX, item=_NAME),
+                "chats": _COUNT,
+            },
+        ),
+    ),
+    MessageType(
+        "put-away",
+        "A session was archived: whatever it still asked of the user goes with it.",
+        event=_event(SERVICE, {"session": _req(_ID)}),
+    ),
+    MessageType(
+        "store.lookup",
+        "Send one session's item, archived or not (a session the client was never sent).",
+        request=_request({"session": _req(_ID)}, reply={"found": _req(_BOOL)}),
+    ),
+    MessageType(
+        "store.page-archived",
+        "Send the sessions kept out of sight as items, and keep them current.",
+        request=_request(reply={"items": _COUNT}),
+    ),
+    MessageType(
+        "store.refresh",
+        "Rescan the transcripts.",
+        request=_request({"force": _BOOL}),
+    ),
+    MessageType(
+        "store.show-archived",
+        "Draw the rows kept out of sight (Show archived sessions).",
+        request=_request({"show": _req(_BOOL)}),
+    ),
+    MessageType(
+        "store.rename",
+        "Name a session; an empty name clears the manual one.",
+        request=_request({"session": _req(_ID), "name": _req(_NAME)}),
+    ),
+    MessageType(
+        "store.regenerate-name",
+        "Title a session again with the title model, over a manual name.",
+        request=_request({"session": _req(_ID)}),
+    ),
+    MessageType(
+        "store.favorite",
+        "Add sessions to the favorites, or take them out.",
+        request=_request({"sessions": _req(_SESSIONS), "favorite": _req(_BOOL)}),
+    ),
+    MessageType(
+        "store.archive",
+        "Archive sessions, or restore them.",
+        request=_request({"sessions": _req(_SESSIONS), "archived": _req(_BOOL)}),
+    ),
+    MessageType(
+        "store.archive-project",
+        "Archive a whole project, or restore it.",
+        request=_request({"project": _req(_PROJECT), "archived": _req(_BOOL)}),
+    ),
+    MessageType(
+        "store.trash",
+        "Move sessions' transcripts to the trash; the ones that failed, with why.",
+        request=_request(
+            {"sessions": _req(_SESSIONS)},
+            reply={"errors": Field(K_MAP, high=ROWS_MAX, key=_ID_RE, item=_s(ARG_TEXT_MAX))},
+        ),
+    ),
+    MessageType(
+        "store.delete",
+        "Delete a session's transcript for good; why it failed, when it did.",
+        request=_request({"session": _req(_ID)}, reply={"error": _s(ARG_TEXT_MAX)}),
+    ),
+    MessageType(
+        "store.forward",
+        "A session continued under a new id (a /bg fork): carry its records over.",
+        request=_request({"session": _req(_ID), "to": _req(_ID)}),
+    ),
+    MessageType(
+        "store.add-project",
+        "Put a folder in the sidebar before a session has run there.",
+        request=_request({"cwd": _req(_PATH)}),
+    ),
+    MessageType(
+        "store.keep-projects",
+        "Keep projects in the sidebar after their sessions go.",
+        request=_request({"projects": _req(Field(K_LIST, low=1, high=ROWS_MAX, item=_PROJECT))}),
+    ),
+    MessageType(
+        "store.forget-project",
+        "Drop a kept project from the sidebar.",
+        request=_request({"project": _req(_PROJECT)}),
+    ),
+    MessageType(
+        "store.move-project",
+        "Move a project in the sidebar order, before another or to the end.",
+        request=_request({"project": _req(_PROJECT), "before": _null(_PROJECT)}),
+    ),
+    MessageType(
+        "store.flags",
+        "The activity tracker's verdicts for a session's row (Phase 1: it runs in the client).",
+        request=_request(
+            {
+                "session": _req(_ID),
+                "status": _SHORT,
+                "busy": _BOOL,
+                "unread": _BOOL,
+                "backgrounding": _BOOL,
+                "can_background": _BOOL,
+            },
+            one_of=("status", "busy", "unread", "backgrounding", "can_background"),
+        ),
+    ),
+    MessageType(
+        "trust.check",
+        "Whether the CLI trusts a folder already, and the folder a trust is recorded on.",
+        request=_request({"path": _req(_PATH)}, reply={"trusted": _req(_BOOL), "root": _PATH}),
+    ),
+    MessageType(
+        "trust.grant",
+        "Record the CLI's folder trust: on the folder's root, or on a launch directory.",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                "scope": _req(Field(K_STR, choices=frozenset({"root", "launch"}), high=8)),
+            },
+            reply={"written": _req(_BOOL)},
         ),
     ),
     MessageType(

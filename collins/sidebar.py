@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -59,10 +59,10 @@ from .prstatus import (
     resync,
     sweep,
 )
+from .remotestore import RemoteStore
 from .scrolling import offset_into_view
 from .sessions import Session, project_name_for_cwd, resume_cwd, worktree_project_root
 from .state import merge_project_order
-from .store import SessionStore
 from .svgtexture import svg_texture
 from .titles import regenerate_name_label
 from .usagepanel import UsagePanel
@@ -1352,7 +1352,7 @@ class SessionSidebar(Gtk.Box):
         "rows-reordered": (GObject.SignalFlags.RUN_FIRST, None, ()),
     }
 
-    def __init__(self, store: SessionStore) -> None:
+    def __init__(self, store: RemoteStore) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.store = store
         self._view = Adw.ToolbarView(vexpand=True)
@@ -1629,8 +1629,10 @@ class SessionSidebar(Gtk.Box):
 
     # -- store sync ------------------------------------------------------------
 
-    def _on_store_refreshed(self, store: SessionStore, order_changed: bool) -> None:
-        self._selected &= set(store.sessions)
+    def _on_store_refreshed(self, store: RemoteStore, order_changed: bool) -> None:
+        # The sessions the client holds (every row among them): reading
+        # `store.sessions` would page the archived ones in on every refresh.
+        self._selected &= set(store.known_sessions)
         if order_changed:
             self._rebuild_rows()
         self._update_selection_label()
@@ -1638,23 +1640,26 @@ class SessionSidebar(Gtk.Box):
         self.update_footer()
 
     def update_footer(self) -> None:
-        sessions = self.store.sessions.values()
+        # Every session, archived ones too: the counts the service sends
+        # with each refresh (store.summary), so drawing the footer never
+        # pages the archive in.
+        summary = self.store.summary()
         # Kept projects have no sessions to count them, but they are projects.
         # All chat sessions together count as one pseudo-project.
-        projects = {s.project_name for s in sessions if not is_chat_cwd(s.cwd)} | {
+        projects = set(summary["projects"]) | {
             label for _key, label, _cwd in self.store.empty_groups
         }
-        if any(is_chat_cwd(s.cwd) for s in sessions):
+        if summary["chats"]:
             projects.add("Chats")
         open_tabs = sum(
             1
-            for sid in self.store.sessions
+            for sid in self.store.row_ids()
             if (item := self.store.get_item(sid)) and item.status in _IN_TAB_STATUSES
         )
         parts = [
-            _("{n} sessions").format(n=len(sessions)),
+            _("{n} sessions").format(n=summary["total"]),
             _("{n} projects").format(n=len(projects)),
-            format_size(sum(s.size for s in sessions)),
+            format_size(summary["size"]),
         ]
         if open_tabs:
             parts.append(_("{n} open").format(n=open_tabs))
@@ -1918,7 +1923,7 @@ class SessionSidebar(Gtk.Box):
                 session,
                 self.live_cwd(session_id),
             )
-            for session_id, session in self.store.sessions.items()
+            for session_id, session in self.store.known_sessions.items()
             if not self.store.is_out_of_sight(session)
         ]
         if not targets:

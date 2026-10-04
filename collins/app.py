@@ -47,6 +47,7 @@ from . import (
     prmenu,
     proctree,
     providers,
+    ptyclient,
     remoteimages,
     sandboxgrants,
     sandboxplan,
@@ -59,6 +60,7 @@ from . import (
 )
 from . import terminal as terminal_mod
 from .api.loopback import LoopbackServer
+from .apilink import LoopbackLink
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .copylabel import open_uri
 from .i18n import _
@@ -67,10 +69,10 @@ from .notifycenter import NotificationCenter
 from .prefs import apply_color_scheme
 from .providers import SessionOptions
 from .prstatus import parse_pr_url
+from .remotestate import RemoteState
+from .remotestore import RemoteStore
 from .service.core import ServiceCore
 from .sessions import worktree_project_root
-from .state import AppState
-from .store import SessionStore
 from .terminal import TerminalTab
 from .window import HIDE_NOTICE_ID, MainWindow, session_window
 
@@ -1962,25 +1964,25 @@ class App(Adw.Application):
         # the mode keeps watching — and only turning the mode off clears it.
         self._caffeine_mode: str | None = None
 
-        # Shared across all windows so scans/monitors aren't duplicated and
-        # state.json writes don't race. The app's own instance is the one
-        # that migrates the state split (see state.py's docstring). main()
-        # builds a throwaway one first, also with migrate=True, so that
-        # i18n reads `language` (a device key) off the merged view before
-        # any GTK object exists; whichever of the two finds an unsplit
-        # file commits the split, and the other finds it done and only
-        # reads: two reads of each file at startup, never two migrations.
-        self.state = AppState(migrate=True)
+        # The service, in this process through Phase 1 (the split-service
+        # spec, PR-1.10): it owns state.json and the session store, shared
+        # by every window so scans and monitors aren't duplicated and
+        # state.json has one writer. Its AppState is the one that migrates
+        # the state split (see state.py's docstring). main() builds a
+        # throwaway one first, also with migrate=True, so that i18n reads
+        # `language` (a device key) off the merged view before any GTK
+        # object exists; whichever of the two finds an unsplit file
+        # commits the split, and the other finds it done and only reads.
+        self._start_service()
+        # The client's side of it: one loopback connection, the mirrors of
+        # the store and the state on it (remotestore, remotestate), filled
+        # by the subscribe snapshot. Everything in the UI reads and writes
+        # through these two: `app.state` and `app.store` keep their names.
+        self._start_service_client()
         apply_color_scheme(self.state.get_setting("color_scheme"))
-        # A remembered CLI location goes on PATH before anything looks for
-        # the CLI — the store's first scan is the very next line.
-        clisetup.apply_saved(self.state)
-        self.store = SessionStore(self.state)
-        self.store.start()
 
         self._start_mcp_service()
         self._start_sandbox_support()
-        self._start_service_loopback()
 
         focus = Gio.SimpleAction.new("focus-session", GLib.VariantType("s"))
         focus.connect("activate", self._on_focus_session)
@@ -2501,28 +2503,52 @@ class App(Adw.Application):
         self._mcp_service = service
         providers.MCP_CONFIG_PATH = config
 
-    def _start_service_loopback(self) -> None:
-        """The service's pty half, in-process (spec §3.5 swap 2): the
-        loopback every tab on the ``server`` backend spawns its shell
-        through, with the app's state as the pty table's writer. Built
-        on every backend (it costs nothing idle) so a check can flip a
-        tab's backend without the app knowing."""
-        core = ServiceCore(
-            record=self.state.set_pty,
-            record_next_id=self.state.set_pty_next_id,
-            next_id=self.state.pty_next_id,
-            get_setting=self.state.get_setting,
-            sandbox_plan=self._sandbox_plan_of_box,
-        )
+    def _start_service(self) -> None:
+        """The service, in-process (spec §3.5 swap 2, PR-1.10): its state
+        (the pty table's writer too), its store, and the loopback every
+        client connection goes through — the app's own, and every tab's
+        on the ``server`` backend. Built on every backend (the pty half
+        costs nothing idle) so a check can flip a tab's backend without
+        the app knowing."""
+        core = ServiceCore.with_state(sandbox_plan=self._sandbox_plan_of_box)
+        self._service_core = core
+        # A remembered CLI location goes on PATH before anything looks for
+        # the CLI — the store's first scan is the very next line.
+        clisetup.apply_saved(core.state)
+        core.start_store()
         self._service_loopback = LoopbackServer(core)
         terminal_mod.SERVICE_LOOPBACK = self._service_loopback
+
+    def _start_service_client(self) -> None:
+        """The app's connection to the service and the two mirrors on it
+        (see remotestate, remotestore). Subscribing fills both before
+        anything reads them: on the loopback the snapshot arrives inside
+        the call."""
+        link = LoopbackLink()
+        client = self._service_loopback.connect(
+            lambda *_frame: None, link.dispatch, ptyclient.device_name()
+        )
+        link.bind(client)
+        self._service_client = client
+        self.state = RemoteState(link, on_refused=self._show_refused_write)
+        self.store = RemoteStore(link, self.state, pr_store=self._service_core.store.pr_store)
+        self.store.subscribe()
+
+    def _show_refused_write(self, text: str) -> None:
+        """A write the service refused, already reverted in the mirror:
+        say so on the window in front (spec §3.8)."""
+        window = self.get_active_window()
+        if not isinstance(window, MainWindow):
+            window = next((w for w in self.get_windows() if isinstance(w, MainWindow)), None)
+        if window is not None:
+            window.show_toast(text)
 
     def _sandbox_plan_of_box(self, box: str) -> str | None:
         """The plan file the session running in *box* launched from, or
         None: the service's record a sandboxed panel shell is spawned on
         (ServiceCore's *sandbox_plan*). In Phase 1 that record is the box's
-        `Session`, still held by its tab; PR-1.10 moves the sessions into
-        the service and this lookup with them."""
+        `Session`, still held by its tab; when the sessions move into the
+        service this lookup goes with them."""
         if not box:
             return None
         for window in self.get_windows():
@@ -2543,7 +2569,11 @@ class App(Adw.Application):
         The verdict is cached for the run; a launch that comes before it
         lands probes synchronously once."""
         app_id = self.get_application_id()
-        host = sandboxplan.SandboxHost(app_id, self.state, self.state.state_file())
+        # The sandbox host is the service's (§3.9: everything but the chip
+        # moves as it is), so it keeps the service's own state: the boxes
+        # it makes and sweeps are the service machine's.
+        service_state = self._service_core.state
+        host = sandboxplan.SandboxHost(app_id, service_state, service_state.state_file())
         terminal_mod.SANDBOX_HOST = host
         # Plans a previous run never released (a tab destroyed before its
         # shell's exit landed): all this app id's, and bwrap read each one
@@ -2605,6 +2635,15 @@ class App(Adw.Application):
         # errors rather than breaking the session.
         if self._mcp_service is not None:
             self._mcp_service.stop()
+        state = getattr(self, "state", None)
+        if state is not None:
+            # A draft still waiting on the debounce reaches the service
+            # before it goes (remotestate).
+            state.flush_drafts()
+        client = getattr(self, "_service_client", None)
+        if client is not None:
+            client.close()
+            self._service_client = None
         loopback = getattr(self, "_service_loopback", None)
         if loopback is not None:
             # Phase 1: quitting ends every session the service's pty server

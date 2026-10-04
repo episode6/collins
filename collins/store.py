@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-06. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -72,6 +72,24 @@ def emptied_projects(sessions: Iterable[Session], doomed_ids: set[str]) -> list[
         target = losing if session.session_id in doomed_ids else surviving
         target.add(session.project_name)
     return sorted(losing - surviving)
+
+
+def display_name_for(state: AppState, session: Session) -> str:
+    """The name a session's row shows, read off *state*: a manual name, the
+    CLI's own title (when cli_title_sessions is on), the generated or PR
+    title, the first words of the prompt, the id's head. One function for
+    the service's store and the client's mirror of it (remotestore), so
+    the two can never disagree about a name."""
+    cli_title = (
+        state.get_cli_title(session.session_id) if state.get_setting("cli_title_sessions") else None
+    )
+    return (
+        state.get_name(session.session_id)
+        or cli_title
+        or state.get_generated_name(session.session_id)
+        or session.preview
+        or session.session_id[:8]
+    )
 
 
 def _relative_time(dt: datetime) -> str:
@@ -149,6 +167,7 @@ class SessionStore(GObject.Object):
         self._items: dict[str, SessionItem] = {}
         self._last_sessions: list[Session] = []
         self._first_scan = True
+        self._applied = False  # set by the first _apply
         self._regen_pending: set[str] = set()  # ids whose regen should replace a manual name
         # Last-seen pr_title_sessions value, so apply_pr_titles sweeps only
         # when the setting flips on rather than on every preferences apply.
@@ -443,6 +462,7 @@ class SessionStore(GObject.Object):
         self._force_rebuild = False
         if order_changed:
             self.model.splice(0, self.model.get_n_items(), items)
+        self._applied = True
         self.emit("refreshed", order_changed)
 
     def forward_state(self, session: Session) -> str:
@@ -506,18 +526,7 @@ class SessionStore(GObject.Object):
                 item.set_property(prop, value)
 
     def display_name(self, session: Session) -> str:
-        cli_title = (
-            self.state.get_cli_title(session.session_id)
-            if self.state.get_setting("cli_title_sessions")
-            else None
-        )
-        return (
-            self.state.get_name(session.session_id)
-            or cli_title
-            or self.state.get_generated_name(session.session_id)
-            or session.preview
-            or session.session_id[:8]
-        )
+        return display_name_for(self.state, session)
 
     # -- file monitoring -------------------------------------------------------
 
@@ -556,6 +565,23 @@ class SessionStore(GObject.Object):
 
     def get_session(self, session_id: str) -> Session | None:
         return self.sessions.get(session_id)
+
+    # -- what the service publishes (service.core) ----------------------------
+
+    @property
+    def applied(self) -> bool:
+        """Whether the first scan has been projected: before it, the store
+        has no rows to tell anyone about."""
+        return self._applied
+
+    def all_sessions(self) -> list[Session]:
+        """Every session the last scan found, in scan order, out of sight
+        or not."""
+        return list(self._last_sessions)
+
+    def row_items(self) -> list[SessionItem]:
+        """The rows, in the list's order."""
+        return [self.model.get_item(i) for i in range(self.model.get_n_items())]
 
     # -- mutations (all UI changes go through here) ------------------------------
 

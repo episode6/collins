@@ -92,6 +92,68 @@ gets the free local title only) and persisted so each is generated once;
 question "does this header stand for a folder with nothing in it";
 `state.is_virtual_project` alone is stale data.
 
+## The store and the state over the API (`remotestore.py`, `remotestate.py`)
+
+Since PR-1.10 (split-service spec §3.8, §3.15) the `SessionStore` and the
+`AppState` above are **the service's**: `service.core.ServiceCore` owns
+them (`ServiceCore.with_state()` builds the state with `migrate=True,
+device=False`; `start_store()` the store) and `service/storefeed.py`
+publishes them. Everything in the UI — `app.state`, `app.store`,
+`window.state`, `window.store`, the sidebar, Preferences, the tabs' settings
+dict — holds the client's **mirrors** on one `apilink.LoopbackLink`
+(`App._start_service_client`):
+
+- `RemoteState` *is* an `AppState` (subclass): the same methods and
+  attributes, every read local. Its `_load` reads only `ui-state.json`;
+  `save()` diffs `state.SHARED_KEYS` against what was shown and sends each
+  change as `state.set` (map keys per entry, the rest whole). Writes are
+  **optimistic**: the mirror holds the new value at once, the key or entry
+  is *pending* until the reply, and a `state.set` event for a pending
+  mark only updates the confirmed copy (the optimistic value holds). On
+  the reply the service's last word wins; on a refusal the mirror reverts,
+  `connect_changed` listeners hear it with `reverted`, and the window's
+  toast says "Not saved: <reason>". `get_setting` reads this device's
+  `UiState` first for a device key. `session_drafts` is debounced 500 ms
+  per draft; `flush_drafts` sends what waits (the window flushes on every
+  stash, its own close, blur; the app on shutdown).
+- `RemoteStore` has the store's four signals (`refreshed`,
+  `unread-changed`, `busy-changed`, `archived`), a `Gio.ListStore` of
+  `SessionItem`s and the store's lookups and mutators. The snapshot sends
+  an `item` per row and one `rows`; each service refresh sends the items
+  that moved (changed fields only) then `rows`, which is the client's
+  `refreshed`. **Busy, unread and status are the service's**: the
+  window's activity tracker (still in the client in Phase 1) calls
+  `set_busy` & co., which send `store.flags`, and the property moves when
+  the `item` comes back (immediately on the loopback). **Archived sessions
+  are paged**: not in the snapshot; `set_show_archived(True)`,
+  `archived_sessions()`, `archived_breakdown()` and the `sessions`
+  attribute (every session, as before) page them in once
+  (`store.page-archived`); `get_session` of an unseen id asks
+  (`store.lookup`). Per-refresh readers use `known_sessions`,
+  `summary()` (the footer's counts), `has_archived()` and
+  `session_count()`, which never page.
+
+**How a mutation flows.** `remotestore.RemoteStore.rename(sid, name)` →
+`RemoteState.request({"t": "store.rename", ...}, mutate=lambda:
+state.set_name(sid, name), applied=re-project the row)` → the mirror
+changes, the mark is pending, the row's name shows → the service's
+`_req_store_rename` runs `SessionStore.rename` → its save publishes
+`state.set names/<sid>`, its refresh an `item` and `rows` → the reply
+settles the mark. **To add one**: a `store.<verb>` type in
+`api/protocol.py` (bounded fields, a sample and reply in
+`tests/test_protocol.py`, the type list), a `_req_store_<verb>` in
+`service/core.py` calling the store's method, and the mirror method in
+`remotestore.py` — optimistic through `state.request(..., mutate=...)`
+where the client can compute the state change, a plain
+`state.request(msg)` or `link.call` (when the caller needs the reply)
+where only the service can. A new **state key** goes in
+`state.SHARED_KEYS` (attribute, form, cleaner, writable) and travels by
+itself. Folder trust is `store.folder_trust` / `trust_folder`
+(`trust.check` / `trust.grant`), the CLI's config being the service
+machine's. `store.pr_store` is still the service store's `PrStore`
+in-process (PR-1.11 mirrors it), and the sandbox host keeps the service's
+own `AppState`.
+
 ## AppState (`state.py`)
 
 Sandboxing mirrors the worktree pair exactly: `sandbox_new_sessions` +

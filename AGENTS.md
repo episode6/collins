@@ -81,12 +81,25 @@ keeps; `SERVICE_SETTINGS` / `DEVICE_SETTINGS` say which side a setting
 lives on, and every read and write goes through `AppState`'s one API, which
 routes); `store.py` is `SessionStore`, the single source of truth between
 disk and UI (threaded scans, `Gio.FileMonitor`s, grouping, every state
-mutation), which the sidebar and windows observe via `refreshed`, `busy-changed`
-and per-item `SessionItem` property notifications (`models.py`).
+mutation). **Both are the service's** since PR-1.10: `ServiceCore` owns the
+`AppState` (built `migrate=True, device=False`: it writes the split, and
+never `ui-state.json`) and the `SessionStore`, and publishes them
+(`service/storefeed.py`). The UI holds the **mirrors**: `remotestate.
+RemoteState` (an `AppState` subclass over a copy the subscribe snapshot
+fills and `state.set` events keep; writes optimistic, reverted with a toast
+on a refusal; `get_setting` reads this device's `UiState` first) and
+`remotestore.RemoteStore` (the store's four signals, `Gio.ListStore` of
+`SessionItem`s and methods, filled by `item` / `rows` / `put-away` events,
+every mutation a `store.*` request). `app.state`, `app.store`,
+`window.state` and `window.store` are the mirrors; the sidebar and windows
+observe `refreshed`, `busy-changed`, `unread-changed`, `archived` and
+per-item `SessionItem` property notifications (`models.py`) on them.
 
 **Hubs, not wires.** The app repeatedly replaced lattices of hand-run signals
-with one owner that everybody subscribes to: `SessionStore` (sessions),
-`prstore.PrStore` (all pull-request state, reachable as `store.pr_store`),
+with one owner that everybody subscribes to: `SessionStore` (sessions, seen
+by the UI through its mirror `RemoteStore`),
+`prstore.PrStore` (all pull-request state, reachable as `store.pr_store`;
+still the service store's own object in-process until PR-1.11 mirrors it),
 `notifycenter.NotificationCenter` (every notification, the badge's number,
 the delivery table), `traymodel` (what the status icon shows), `keybindings`
 (every shortcut). New surfaces read from the hub and subscribe to its
@@ -132,7 +145,8 @@ identity is the shim's kernel-verified pid walked up `/proc` to a tab.
 
 **The service and its API, in progress.** The split into a headless
 `collins-service` and a GTK client (`~/specs/collins/split-service-and-client.md`)
-lands a module per PR, GTK-free, and only `Session` is wired into the app yet.
+lands a module per PR, GTK-free; `Session`, the pty server (behind
+`COLLINS_PTY_BACKEND=server`) and the store and state are wired into the app.
 `collins/api/protocol.py` (stdlib-only) is the API's message table (types,
 direction, fields and bounds), `validate` / `validate_response`, JSON
 framing, the 16-byte binary header and the `PROTOCOL` / `MIN_PROTOCOL`
@@ -152,13 +166,22 @@ its pty half owns the `PtyServer` and serves `spawn` (an agent's pty or a
 panel shell's, a sandboxed shell on the plan of its box), `attach`,
 `detach`, `paint`, `close`, `clear` (a shell's) and the `resize` / `focus`
 / `theme` events, and writes the panel history from the screen models
-(`write_panel_history`); the store, the state, PRs, notifications and the
-tools join in PR-1.10 and PR-1.11.
+(`write_panel_history`); its store and state half owns `AppState` and
+`SessionStore` and serves `subscribe`, `state.get` / `state.set` (the
+service decides which keys a client writes: a device setting, an unknown
+setting or one of the wrong type is `refused`), every `store.*` mutation
+and `trust.*`, with `collins/service/storefeed.py` turning each save and
+refresh into events per subscriber (archived sessions only once paged
+in). The activity tracker still runs in the client (the window's), and
+its verdicts go to the service as `store.flags` and come back as `item`
+fields. PRs, notifications and the tools join in PR-1.11.
 `collins/api/loopback.py` is the one transport until PR-1.12's socket: the
 same dicts and bytes, every message through `protocol.validate` both
 ways, in one process (deleted at the end of Phase 1, D21). The app owns
 one `ServiceCore` behind a `LoopbackServer` (`terminal.SERVICE_LOOPBACK`,
-`App._start_service_loopback`) with the state as the pty table's writer.
+`App._start_service`) with its state as the pty table's writer, and one
+app-level client on it (`App._start_service_client`: an `apilink.
+LoopbackLink` carrying the two mirrors).
 `collins/service/session.py` is a tab's `Session` (see "The tab"), the
 first module the app did use: the tab's logic carved out of the widget,
 reaching its terminal through the two ports in `collins/service/ports.py`
@@ -301,9 +324,9 @@ spec's `%changelog`.
 
 | Area | Modules | Skill |
 | --- | --- | --- |
-| Session discovery, the store, sidebar, state.json, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `models` `state` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
+| Session discovery, the store and its mirror, sidebar, state.json and its mirror, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `remotestore` `models` `state` `remotestate` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the server backend (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the server backend), `collins-panel-dock` (panel shells on the server backend, the history the service writes), `collins-session-mcp-tools` (the protocol) |
+| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the server backend (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the server backend), `collins-panel-dock` (panel shells on the server backend, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
