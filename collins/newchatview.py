@@ -46,7 +46,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GObject, Gtk, Pango  # noqa: E402
 
-from . import claudemodels, modelmenu  # noqa: E402
+from . import modelcatalog, modelmenu  # noqa: E402
 from .chats import is_chat_cwd  # noqa: E402
 from .composer import ComposerView  # noqa: E402
 from .formatting import display_path  # noqa: E402
@@ -161,7 +161,7 @@ class NewChatView(Gtk.Box):
         # thread while the menu is open.
         popover = (
             modelmenu.new_launch_model_popover(
-                default_model=lambda: claudemodels.cli_default_model(self._cwd),
+                default_model=lambda: modelcatalog.cli_default_model(self._cwd),
                 choice=lambda: self._model,
                 on_pick=self._on_model_picked,
             )
@@ -380,12 +380,12 @@ class NewChatView(Gtk.Box):
     def _launch_model(self) -> str | None:
         """The model the launch will run on: the pick, else the CLI's own
         default as its settings name it (None when they don't)."""
-        return self._model or claudemodels.cli_default_model(self._cwd)
+        return self._model or modelcatalog.cli_default_model(self._cwd)
 
     def _default_effort(self) -> str | None:
         """The effort the launch runs at with nothing picked: the CLI's
         default for the model the launch will run on."""
-        return claudemodels.cli_default_effort(self._cwd, self._launch_model())
+        return modelcatalog.cli_default_effort(self._cwd, self._launch_model())
 
     def _on_effort_picked(self, effort: str) -> None:
         self.set_effort(effort)

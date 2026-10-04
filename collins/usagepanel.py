@@ -24,7 +24,8 @@ import time
 
 from gi.repository import Adw, Gio, GLib, Gtk
 
-from . import tokenrefresh, usage
+from . import apilink, jobclient, usage
+from .api.loopback import RequestRefused
 from .i18n import _
 from .state import AppState
 
@@ -321,12 +322,13 @@ class UsagePanel(Gtk.Box):
         self._refresh()
         return GLib.SOURCE_REMOVE
 
-    def _on_login_repaired(self) -> None:
-        # tokenrefresh worker-thread callback: the throwaway run this panel's
-        # failed fetch asked for succeeded — marshal home and re-ask. Other
-        # windows' panels recover on their own next poll. PRIORITY_DEFAULT:
-        # a cross-thread landing that advances a pipeline, like _on_result.
-        GLib.idle_add(self.refetch, priority=GLib.PRIORITY_DEFAULT)
+    def _on_login_repair(self, event) -> None:
+        # The service's login.repair job (tokenrefresh on its machine),
+        # landing on the main loop: the throwaway run this panel's failed
+        # fetch asked for refreshed the login — re-ask. Other windows'
+        # panels recover on their own next poll.
+        if event.ok and event.result.get("refreshed") is True:
+            self.refetch()
 
     def refetch(self) -> None:
         """The login just changed under the panel (a token refresh — see
@@ -347,10 +349,18 @@ class UsagePanel(Gtk.Box):
         self._spinner.set_spinning(True)
 
         def work() -> None:
+            # The fetch is the service's (`usage.get`: its machine's login,
+            # PR-1.11), asked from this thread as the module was.
             try:
-                result: object = usage.fetch_snapshot()
+                reply = apilink.call({"t": "usage.get"})
+                if "snapshot" in reply:
+                    result: object = usage.snapshot_from_record(reply["snapshot"])
+                else:
+                    result = usage.UsageError(reply.get("kind") or "http", reply.get("error") or "")
             except usage.UsageError as err:
                 result = err
+            except RequestRefused as refusal:
+                result = usage.UsageError("network", refusal.msgid)
             except Exception as err:  # never let a surprise kill the panel
                 result = usage.UsageError("http", str(err))
             # The landing resets the _fetching gate, so it must not sit at
@@ -389,7 +399,7 @@ class UsagePanel(Gtk.Box):
             # fetch does on a fresh install with a dead token: tokenrefresh
             # refuses until the dialog that discloses the run is answered,
             # and the status text below names `claude` as the fix meanwhile.
-            tokenrefresh.maybe_repair(self._on_login_repaired)
+            jobclient.start("login.repair", {"mode": "repair"}, self._on_login_repair)
         if self._snapshot is not None:
             # Keep showing stale data; the tooltip carries its age and what
             # went wrong.

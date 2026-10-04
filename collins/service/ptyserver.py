@@ -134,7 +134,9 @@ panel history is written from).
 Exit
 ----
 A `GLib.child_watch_add` reaps the child; the master is drained until EIO,
-the filter flushed, the model saved once more, every sink sent
+the filter flushed, the server's *on_exit* hook told while the model is
+still whole (the service writes a panel shell's history from it there,
+PR-1.11), every sink sent
 ``{"t": "pty-exited", "pty": id, "status": s}`` (the exit code, or minus
 the signal number), the watches removed, the master closed and the pty
 dropped from the table. The order is the same when EIO arrives first (the
@@ -331,6 +333,11 @@ class Pty:
         self.box: str | None = None
         self.plan: str | None = None
         self.options: dict | None = None
+        # A panel shell's history: the key its file is under (a session id,
+        # a new-chat draft id; None while the tab has none, or once its page
+        # closed for good) and its ordinal (panelhistory's).
+        self.history: str | None = None
+        self.ordinal: int = 0
         self.state = termstream.TerminalState(cols=cols, rows=rows, vte_version=server.vte_version)
         server.apply_term(self.state)
         self.screen = termscreen.Screen(cols, rows)
@@ -470,8 +477,12 @@ class PtyServer:
         next_id: int = 1,
         record_next_id: Callable[[int], None] | None = None,
         vte_version: int = DEFAULT_VTE_VERSION,
+        on_exit: Callable[[Pty], None] | None = None,
     ):
+        """*on_exit* hears every pty whose child exited, before its model
+        is dropped and before `pty-exited` goes out."""
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
+        self._on_exit = on_exit
         self._record = record
         self._record_next_id = record_next_id
         self._on_event = on_event
@@ -545,10 +556,13 @@ class PtyServer:
         plan: str | None = None,
         options: dict | None = None,
         progress: bool = True,
+        history: str | None = None,
+        ordinal: int = 0,
     ) -> int:
         """Fork `argv` on a new pty; the new pty's id. Raises `SpawnError`
         when the child could not exec. *progress* adds the two progress
-        declarations to the environment (`spawn_environment`)."""
+        declarations to the environment (`spawn_environment`); *history*
+        and *ordinal* are a panel shell's history file (`Pty.history`)."""
         if kind not in KINDS:
             raise ValueError(f"kind {kind!r}")
         if not argv:
@@ -557,6 +571,7 @@ class PtyServer:
         pty_id = self._next_id
         pty = Pty(self, pty_id, kind, cwd, cols, rows)
         pty.session, pty.box, pty.plan, pty.options = session, box, plan, options
+        pty.history, pty.ordinal = history, ordinal
         child_env = spawn_environment(env, pty.state.vte_version, progress)
         master, slave = os.openpty()
         report_r, report_w = os.pipe()  # close-on-exec by default (PEP 446)
@@ -1113,6 +1128,11 @@ class PtyServer:
 
     def _finish(self, pty: Pty) -> None:
         pty._finished = True
+        if self._on_exit is not None:
+            try:
+                self._on_exit(pty)
+            except Exception:
+                log.exception("pty %d: the exit hook failed", pty.id)
         for name in (
             "_read_watch", "_write_watch", "_save_source", "_kill_source", "_record_source", "_eof_source"
         ):

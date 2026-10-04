@@ -32,7 +32,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from . import claudemodels, formatting, mcptools, prefslayout, tokenrefresh  # noqa: E402
+from . import claudemodels, formatting, mcptools, modelcatalog, prefslayout, tokenrefresh  # noqa: E402
 from .i18n import N_, _  # noqa: E402
 from .state import AppState  # noqa: E402
 
@@ -218,20 +218,20 @@ class ModelRows:
         aged out, and the CLI's own aliases stand in when the API can't be
         asked and nothing was ever saved.
         """
-        cached = claudemodels.cached_models()
+        cached = modelcatalog.cached_models()
         if cached:
             self._apply_rows(cached)
             self._apply_status(
-                len(cached), claudemodels.cache_fetched_at(), claudemodels.cache_failed()
+                len(cached), modelcatalog.cache_fetched_at(), modelcatalog.cache_failed()
             )
 
         def work() -> None:
-            models = claudemodels.available_models()
+            models = modelcatalog.available_models()
             GLib.idle_add(
                 apply_models,
                 models,
-                claudemodels.cache_fetched_at(),
-                claudemodels.cache_failed(),
+                modelcatalog.cache_fetched_at(),
+                modelcatalog.cache_failed(),
                 priority=GLib.PRIORITY_DEFAULT,
             )
 
@@ -290,7 +290,7 @@ class ModelRows:
         product of a query that didn't answer, it says so and keeps naming the
         list it fell back to and how old that is.
 
-        *failed* is `claudemodels.cache_failed()` at both call sites, not a
+        *failed* is `modelcatalog.cache_failed()` at both call sites, not a
         flag off whichever call got here. Opening the page onto a lapsed TTL
         with the network down is the same broken as pressing Refresh with the
         network down, and the row should read the same either way.
@@ -316,12 +316,12 @@ class ModelRows:
         self._set_status(_("Checking…"))
 
         def work() -> None:
-            models = claudemodels.refresh_models()
+            models = modelcatalog.refresh_models()
             GLib.idle_add(
                 done,
                 models,
-                claudemodels.cache_fetched_at(),
-                claudemodels.cache_failed(),
+                modelcatalog.cache_fetched_at(),
+                modelcatalog.cache_failed(),
                 priority=GLib.PRIORITY_DEFAULT,
             )
 

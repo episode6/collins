@@ -38,6 +38,7 @@ from . import (
     gitloads,
     gitops,
     is_debug_app_id,
+    jobclient,
     keybindings,
     keymap,
     mcptools,
@@ -113,10 +114,8 @@ from .sessions import (
     path_within,
     project_name_for_cwd,
     removable_worktree,
-    restore_worktree,
     resume_cwd,
     session_from_file,
-    trash_worktree,
     worktree_project_root,
 )
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
@@ -1908,19 +1907,25 @@ class MainWindow(Adw.ApplicationWindow):
     def _new_session_in_chats(self, provider=None) -> None:
         """A session in the virtual Chats project: launched in a fresh
         throwaway directory instead of a real project folder."""
-        try:
-            cwd = chats.create_chat_dir()
-        except OSError as err:
-            dialogs.error_dialog(self, _("Could not create chat directory"), str(err))
-            return
-        # Skip the CLI's folder-trust prompt: we created this directory
-        # ourselves two lines ago, empty.
-        chats.trust_chat_dir(cwd)
-        # Unknown groups start collapsed; the first chat must not vanish the
-        # moment its placeholder resolves into a real row. (Key matches the
-        # sidebar's _group_state_key for CHATS_GROUP.)
-        self.state.set_group_expanded("chats:", True)
-        self._start_new_session(cwd, provider)
+        # The folder is the service's to make, and to pre-trust in the
+        # CLI's config so the launch skips the folder-trust prompt: it is
+        # an empty directory it made a moment before (the ``chats.trust``
+        # job, chats.trust_chat_dir). The session starts when it lands.
+
+        def landed(event: jobclient.JobEvent) -> None:
+            if not event.finished:
+                return
+            cwd = event.result.get("cwd")
+            if not event.ok or not isinstance(cwd, str) or not chats.is_chat_cwd(cwd):
+                dialogs.error_dialog(self, _("Could not create chat directory"), event.text)
+                return
+            # Unknown groups start collapsed; the first chat must not vanish
+            # the moment its placeholder resolves into a real row. (Key
+            # matches the sidebar's _group_state_key for CHATS_GROUP.)
+            self.state.set_group_expanded("chats:", True)
+            self._start_new_session(cwd, provider)
+
+        jobclient.start("chats.trust", {"create": True}, landed)
 
     def _choose_new_session_folder(self, provider=None) -> None:
         self._new_session_provider = provider or self._default_provider()
@@ -6720,17 +6725,17 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _trash_worktree(self, session_id: str, state: dict) -> None:
-        """Move a stopped session's worktree to the trash on a worker thread
-        (sessions.trash_worktree); a toast when it is there, the error's
-        words in a dialog when it isn't. The record is kept in
-        _trashed_worktrees so the archive's Undo restores the worktree too —
-        or, when Undo (or a restore by hand) beat the move, restored right
-        away."""
+        """Move a stopped session's worktree to the trash: the service's
+        ``worktree.trash`` job (sessions.trash_worktree on its machine); a
+        toast when it is there, the error's words in a dialog when it
+        isn't. The record is kept in _trashed_worktrees so the archive's
+        Undo restores the worktree too — or, when Undo (or a restore by
+        hand) beat the move, restored right away."""
         path = str(state["worktreePath"])
 
-        def work() -> None:
-            error = trash_worktree(state)
-            GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
+        def landed(event: jobclient.JobEvent) -> None:
+            if event.finished:
+                done(event.text if not event.ok else "")
 
         def done(error: str) -> bool:
             if error:
@@ -6746,18 +6751,18 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return GLib.SOURCE_REMOVE
 
-        threading.Thread(target=work, daemon=True).start()
+        jobclient.start("worktree.trash", {"state": dict(state)}, landed)
 
     def _restore_worktree(self, state: dict) -> None:
-        """Bring a trashed worktree back (sessions.restore_worktree) on a
-        worker thread: a toast when it is back, the trouble's words in a
-        dialog otherwise — the directory may still be in the trash then, and
-        the dialog says so."""
+        """Bring a trashed worktree back: the service's ``worktree.restore``
+        job (sessions.restore_worktree): a toast when it is back, the
+        trouble's words in a dialog otherwise — the directory may still be
+        in the trash then, and the dialog says so."""
         path = str(state["worktreePath"])
 
-        def work() -> None:
-            error = restore_worktree(state)
-            GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
+        def landed(event: jobclient.JobEvent) -> None:
+            if event.finished:
+                done(event.text if not event.ok else "")
 
         def done(error: str) -> bool:
             if error:
@@ -6775,7 +6780,7 @@ class MainWindow(Adw.ApplicationWindow):
                 )
             return GLib.SOURCE_REMOVE
 
-        threading.Thread(target=work, daemon=True).start()
+        jobclient.start("worktree.restore", {"state": dict(state)}, landed)
 
     def _offer_undo(self, session_ids: list[str]) -> None:
         """An archive just landed: arm Undo with it — replacing whatever the

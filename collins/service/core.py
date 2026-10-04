@@ -79,10 +79,20 @@ held by its tab), and is refused when there is none; the plan is the pty's
 inside the box's workspace other than where bwrap lands the shell is one
 queued ``cd`` away, typed before anything else. ``clear`` on a shell wipes
 its model (`PtyServer.clear`); on an agent it is the composer's erase of
-the box, PR-1.10's. The panel history is written here from the models
-(`write_panel_history`), and the cwd, foreground and inner-shell reads a
-panel shell asks of its pty are the pty server's (`Pty.process_cwd`,
-`Pty.has_running_command`, `Pty.shell_pid`).
+the box, which is the `Session`'s and so still the client's through Phase
+1 (the session moves into the service in PR-1.12): the core refuses it
+rather than erase a box it cannot read. The panel history is written here
+from the models: by the tab's three saves (`write_panel_history`), and
+(PR-1.11, §3.15) by the core itself when a shell's child exits, from its
+model before the model is dropped, under the key and ordinal the shell was
+spawned with (`spawn`'s ``history`` and ``ordinal``) or re-filed under
+since (`panel.key`: the resolver bound the tab; none once the shell's page
+closed for good, so a closed shell's history goes with it). The cwd,
+foreground and inner-shell reads a panel shell asks of its pty are the pty
+server's (`Pty.process_cwd`, `Pty.has_running_command`, `Pty.shell_pid`).
+
+**Jobs** (PR-1.11): `job.start` and `job.cancel` are `jobs.JobRunner`'s,
+whose `job` events go to the client that started each one.
 """
 
 from __future__ import annotations
@@ -98,7 +108,7 @@ from .. import panelhistory, providers, sandboxplan, trust
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
-from . import ptyserver, storefeed, termstream
+from . import jobs, ptyserver, storefeed, termstream, tokenuse
 
 log = logging.getLogger(__name__)
 
@@ -179,7 +189,9 @@ class ServiceCore:
             record_next_id=record_next_id,
             next_id=1 if next_id is None else next_id,
             on_event=on_stream_event,
+            on_exit=self._on_pty_exit,
         )
+        self.jobs = jobs.JobRunner()
         self._clients: set[int] = set()  # id(client)
         pruned = self.ptys.prune_models()
         if pruned:
@@ -220,6 +232,7 @@ class ServiceCore:
         """A client went away however it went: nothing changes on the
         service but "no client is attached" (§3.1 rule 5)."""
         self._clients.discard(id(client))
+        self.jobs.forget(client.deliver)
         if self.feed is not None:
             self.feed.unsubscribe(client)
         for pty_id in list(self.ptys.ptys):
@@ -301,6 +314,8 @@ class ServiceCore:
                 box=box,
                 plan=plan,
                 progress=progress,
+                history=message.get("history") if kind == "shell" else None,
+                ordinal=int(message.get("ordinal") or 0),
             )
         except ptyserver.SpawnError as exc:
             return protocol.refuse(
@@ -354,13 +369,64 @@ class ServiceCore:
     def _req_clear(self, message: protocol.Message, client: Client) -> dict:
         """A shell's *Clear*: its screen and scrollback wiped from the model
         (the client attaches again to be redrawn from it). An agent's
-        ``clear`` is the composer's erase of the CLI's box, PR-1.10's."""
+        ``clear`` is the composer's erase of the CLI's box: the `Session`'s,
+        which runs in the client through Phase 1 (see the module
+        docstring)."""
         pty_id = message.get("pty")
         if self.ptys.get(pty_id).kind != "shell":
             # Refused, not unknown: the type is served, an agent's case is
-            # not yet, and a client can tell the two apart.
-            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "clear of an agent's box is PR-1.10's")
+            # not here yet, and a client can tell the two apart.
+            return protocol.refuse(
+                message.id,
+                protocol.ERROR_REFUSED,
+                "An agent's box is erased by its session, which runs in the client"
+                " until the service holds it",
+            )
         self.ptys.clear(pty_id)
+        return protocol.reply(message.id)
+
+    def _req_panel_key(self, message: protocol.Message, client: Client) -> dict:
+        """File a shell's history under a new key (the resolver bound its
+        tab to a session id), or under none (its page closed for good)."""
+        pty = self.ptys.get(message.get("pty"))
+        if pty.kind != "shell":
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Only a shell has a panel history")
+        pty.history = message.get("history")
+        return protocol.reply(message.id)
+
+    def _on_pty_exit(self, pty: ptyserver.Pty) -> None:
+        """A shell's child exited: its history, from its model while the
+        model is still whole (§3.15). A shell filed under no key (a fork's,
+        a page closed for good, a tab with no session yet) writes nothing."""
+        if pty.kind != "shell" or not pty.history:
+            return
+        panelhistory.save(pty.history, pty.screen.capture_contents(), pty.ordinal)
+
+    # -- jobs (PR-1.11)
+
+    def _req_job_start(self, message: protocol.Message, client: Client) -> dict:
+        job_id = self.jobs.start(message.get("kind"), message.get("args") or {}, client.deliver)
+        return protocol.reply(message.id, job=job_id)
+
+    # -- token use (PR-1.11; service.tokenuse)
+
+    def _req_usage_get(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.usage_get(message)
+
+    def _req_models_get(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.models_get(message)
+
+    def _req_models_defaults(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.models_defaults(message)
+
+    def _req_icon_save(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.icon_save(message)
+
+    def _req_job_cancel(self, message: protocol.Message, client: Client) -> dict:
+        if not self.jobs.cancel(message.get("job")):
+            return protocol.refuse(
+                message.id, protocol.ERROR_GONE, "No such job: {job}", {"job": message.get("job")}
+            )
         return protocol.reply(message.id)
 
     # -- the store and the state (PR-1.10)

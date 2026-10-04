@@ -863,3 +863,20 @@ def pick_model(setting: str | None, prefer: str = "sonnet") -> str:
     if setting:
         return setting  # an explicit choice needs no query at all
     return default_model(available_models(), prefer)
+
+
+# ---- the catalog over the service's API (PR-1.11) ----------------------------------
+
+
+def model_records(models) -> list[dict]:
+    """Models as `models.get`'s reply carries them: the API's own entry
+    shape (what the saved catalog holds too), so `models_from_records` is
+    `parse_models` and there is still one shape to keep in step."""
+    return [_entry(model) for model in models]
+
+
+def models_from_records(records: object) -> list[ClaudeModel]:
+    """The other way, through parse_models (junk entries skipped)."""
+    if not isinstance(records, list):
+        return []
+    return parse_models({"data": records})

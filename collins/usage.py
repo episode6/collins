@@ -265,3 +265,83 @@ def time_until(target: datetime | None, now: datetime | None = None) -> str:
         return f"{hours}h {minutes}m" if minutes else f"{hours}h"
     days, hours = divmod(hours, 24)
     return f"{days}d {hours}h" if hours else f"{days}d"
+
+
+# ---- the snapshot over the service's API (PR-1.11) ---------------------------------
+
+
+def snapshot_record(snapshot: UsageSnapshot) -> dict:
+    """A snapshot as `usage.get`'s reply carries it: the service fetches,
+    the client's panel draws (split-service spec §3.15, "Token use")."""
+    record: dict = {
+        "bars": [
+            {
+                "kind": bar.kind,
+                "percent": bar.percent,
+                "raw_percent": bar.raw_percent,
+                "severity": bar.severity,
+                "resets_at": bar.resets_at.isoformat() if bar.resets_at else None,
+                "model_name": bar.model_name,
+            }
+            for bar in snapshot.bars
+        ],
+        "subscription": snapshot.subscription,
+        "fetched_at": snapshot.fetched_at,
+    }
+    if snapshot.credits is not None:
+        credits = snapshot.credits
+        record["credits"] = {
+            "enabled": credits.enabled,
+            "used": credits.used,
+            "limit": credits.limit,
+            "currency": credits.currency,
+            "spend_limit_reached": credits.spend_limit_reached,
+        }
+    return record
+
+
+def _number(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    return float(value)
+
+
+def snapshot_from_record(record: object) -> UsageSnapshot:
+    """The other way, re-validated (rule 5): every field bounded and typed,
+    anything malformed dropped as `parse_snapshot` drops it."""
+    if not isinstance(record, dict):
+        raise UsageError("parse", "the service sent no usage snapshot")
+    bars = []
+    for entry in record.get("bars") or []:
+        if not isinstance(entry, dict):
+            continue
+        raw = int(_number(entry.get("raw_percent"), _number(entry.get("percent"))))
+        model_name = entry.get("model_name")
+        bars.append(
+            UsageBar(
+                kind=str(entry.get("kind") or "")[:64],
+                percent=max(0, min(100, raw)),
+                raw_percent=raw,
+                severity=str(entry.get("severity") or "normal")[:32],
+                resets_at=_parse_resets_at(entry.get("resets_at")),
+                model_name=model_name[:256] if isinstance(model_name, str) and model_name else None,
+            )
+        )
+    credits = None
+    raw_credits = record.get("credits")
+    if isinstance(raw_credits, dict):
+        limit = raw_credits.get("limit")
+        credits = UsageCredits(
+            enabled=raw_credits.get("enabled") is True,
+            used=_number(raw_credits.get("used")),
+            limit=_number(limit) if limit is not None else None,
+            currency=str(raw_credits.get("currency") or "USD")[:8],
+            spend_limit_reached=raw_credits.get("spend_limit_reached") is True,
+        )
+    subscription = record.get("subscription")
+    return UsageSnapshot(
+        bars=bars,
+        credits=credits,
+        subscription=subscription[:64] if isinstance(subscription, str) else "",
+        fetched_at=_number(record.get("fetched_at")),
+    )

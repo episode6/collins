@@ -25,6 +25,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 from . import (
     APP_ID,
     DEBUG_APP_ID,
+    apilink,
     attachrecords,
     autodelete,
     buildinfo,
@@ -37,6 +38,7 @@ from . import (
     gitinfo,
     gitloads,
     is_debug_app_id,
+    jobclient,
     keybindings,
     keymap,
     mcpserver,
@@ -52,7 +54,6 @@ from . import (
     sandboxgrants,
     sandboxplan,
     statusicon,
-    tokenrefresh,
     tooltipmute,
     traymodel,
     updatecheck,
@@ -2530,6 +2531,10 @@ class App(Adw.Application):
         )
         link.bind(client)
         self._service_client = client
+        self._service_link = link
+        # Every other ask of the service (PRs, jobs, tools, token use)
+        # goes over the same connection (apilink.current).
+        apilink.set_current(link)
         self.state = RemoteState(link, on_refused=self._show_refused_write)
         self.store = RemoteStore(link, self.state, pr_store=self._service_core.store.pr_store)
         self.store.subscribe()
@@ -2642,6 +2647,7 @@ class App(Adw.Application):
             state.flush_drafts()
         client = getattr(self, "_service_client", None)
         if client is not None:
+            apilink.set_current(None)
             client.close()
             self._service_client = None
         loopback = getattr(self, "_service_loopback", None)
@@ -3604,7 +3610,9 @@ class App(Adw.Application):
 
         def then() -> None:
             ghwelcome.maybe_show(window, self.state)
-            tokenrefresh.maybe_start(self._on_claude_token_refreshed)
+            # The service's login repair (the ``login.repair`` job, on its
+            # machine's ~/.claude): heard back when it refreshed.
+            jobclient.start("login.repair", {"mode": "start"}, self._on_login_repair)
             # The update check waits on the welcome too — not for a switch
             # on the dialog, but so a card never slides in over it — and
             # then asks again every hour, which updatecheck turns into one
@@ -3618,11 +3626,12 @@ class App(Adw.Application):
 
         return then
 
-    def _on_claude_token_refreshed(self) -> None:
-        # Worker-thread callback (tokenrefresh.maybe_start); the model
-        # catalog is already retried by the time this fires, so only the
-        # usage panels are left to tell — on the main loop.
-        GLib.idle_add(self._refetch_usage_panels)
+    def _on_login_repair(self, event: jobclient.JobEvent) -> None:
+        # The job's event lands on the main loop; the model catalog is
+        # already retried by the time a refresh is reported, so only the
+        # usage panels are left to tell.
+        if event.ok and event.result.get("refreshed") is True:
+            self._refetch_usage_panels()
 
     def _refetch_usage_panels(self) -> bool:
         for window in self.get_windows():

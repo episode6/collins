@@ -58,6 +58,19 @@ def test_seen_cap_mirrors_the_history_cap():
     assert p.SEEN_MAX == notifycenter.ROW_CAP
 
 
+def test_mark_caps_mirror_the_stores_caps():
+    from collins import diffnotes
+
+    assert p.NOTES_MAX == diffnotes.MAX_NOTES
+    assert p.HIGHLIGHTS_MAX == diffnotes.MAX_HIGHLIGHTS
+
+
+def test_post_kinds_are_notifications_but_the_finished_run():
+    from collins import notifycenter
+
+    assert p.POST_KINDS == notifycenter.KINDS - {notifycenter.KIND_FINISHED}
+
+
 # ---- the table -------------------------------------------------------------------
 
 PHASE_ONE_TYPES = [
@@ -70,6 +83,8 @@ PHASE_ONE_TYPES = [
     "focus",
     "theme",
     "spawn",
+    # PR-1.11: the panel history key moves into the service.
+    "panel.key",
     "prompt",
     "switch",
     "mention",
@@ -107,10 +122,38 @@ PHASE_ONE_TYPES = [
     "pty",
     "pty-exited",
     "pr",
+    # PR-1.11: the PR hub's status fan-out, its writes and every gh call;
+    # the notification history's writes; the job shape; token use; the
+    # diff's marks.
+    "pr-status",
+    "pr.set",
+    "pr.fetch",
+    "pr.sweep",
+    "pr.detail",
+    "pr.threads",
+    "pr.blob",
+    "pr.action",
+    "pr.comment",
+    "pr.review",
+    "pr.thread",
     "notify",
+    "notify.post",
+    "notify.remove",
+    "notify.clear",
+    "notify.green",
+    "notify.rekey",
     "seen",
+    "job.start",
+    "job.cancel",
+    "job",
+    "usage.get",
+    "models.get",
+    "models.defaults",
+    "icon.save",
     "tool",
     "tool-reply",
+    "diff.notes",
+    "diff.set-notes",
     "sandbox.plan",
     "sandbox.grants",
     "sandbox.allow",
@@ -198,6 +241,13 @@ DELIVERY = {
     "linked": True,
     "reason": "bindfs not installed",
 }
+PR_RECORD = {"url": "https://github.com/o/r/pull/1", "number": 1, "title": "Fix it"}
+MARKS = {
+    "handle": "s-4",
+    "session": ID,
+    "notes": [{"id": "n1", "path": "a.py", "side": "new", "line": 3, "summary": "Why"}],
+    "highlights": [{"id": "h1", "path": "a.py", "side": "new", "line": 3, "start": 0, "end": 4}],
+}
 
 SAMPLES = {
     ("hello", p.REQUEST): {
@@ -231,7 +281,10 @@ SAMPLES = {
         "sandbox_box": BOX,
         "cols": 120,
         "rows": 40,
+        "history": ID,
+        "ordinal": 2,
     },
+    ("panel.key", p.REQUEST): {"pty": 7, "history": ID},
     ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld"},
     ("switch", p.REQUEST): {"pty": 7, "model": "opus", "effort": "max"},
     ("mention", p.REQUEST): {"pty": 7, "path": "/home/u/project/a.py", "start_line": 2, "end_line": 4},
@@ -323,6 +376,28 @@ SAMPLES = {
     ("pr", p.EVENT): {
         "session": ID,
         "prs": [{"url": "https://github.com/o/r/pull/1", "number": 1, "extra": {"x": [1]}}],
+        "attached": ["https://github.com/o/r/pull/1"],
+    },
+    ("pr-status", p.EVENT): {
+        "url": "https://github.com/o/r/pull/1",
+        "status": {"state": "open", "checks": {"pass": 3}},
+    },
+    ("pr.set", p.REQUEST): {"session": ID, "prs": [PR_RECORD]},
+    ("pr.fetch", p.REQUEST): {"urls": ["https://github.com/o/r/pull/1"], "invalidate": True},
+    ("pr.sweep", p.REQUEST): {
+        "targets": [{"session": ID, "prs": [PR_RECORD], "cwd": "/home/u/project"}],
+    },
+    ("pr.detail", p.REQUEST): {"url": "https://github.com/o/r/pull/1"},
+    ("pr.threads", p.REQUEST): {"url": "https://github.com/o/r/pull/1"},
+    ("pr.blob", p.REQUEST): {"repository": "o/r", "ref": "a" * 40, "path": "docs/shot.png"},
+    ("pr.action", p.REQUEST): {"pr": PR_RECORD, "key": "merge"},
+    ("pr.comment", p.REQUEST): {"pr": PR_RECORD, "body": "Looks good"},
+    ("pr.review", p.REQUEST): {"pr": PR_RECORD, "verdict": "approve", "body": "Ship it"},
+    ("pr.thread", p.REQUEST): {
+        "pr": PR_RECORD,
+        "thread": "PRRT_kwDOabc123=",
+        "body": "Done",
+        "resolved": True,
     },
     ("notify", p.EVENT): {
         "notification": ID,
@@ -336,23 +411,61 @@ SAMPLES = {
         "read": False,
         "count": 3,
         "url": "https://github.com/episode6/collins/releases/tag/v0.1.5",
+        "removed": False,
     },
-    ("seen", p.REQUEST): {"ids": [ID, "green:" + ID], "session": ID},
-    ("seen", p.EVENT): {"ids": ["update:0.1.5"], "session": ID},
+    ("notify.post", p.REQUEST): {
+        "kind": "update",
+        "session": "",
+        "title": "Collins 0.1.5",
+        "project": "",
+        "msgid": "Collins {version} is out",
+        "args": {"version": "0.1.5"},
+        "read": False,
+        "url": "https://github.com/episode6/collins/releases/tag/v0.1.5",
+        "key": "update:0.1.5",
+    },
+    ("notify.remove", p.REQUEST): {"ids": [ID]},
+    ("notify.clear", p.REQUEST): {},
+    ("notify.green", p.REQUEST): {"session": ID, "on": True, "title": "Fix", "project": "project"},
+    ("notify.rekey", p.REQUEST): {"session": "placeholder-3", "to": ID},
+    ("seen", p.REQUEST): {"ids": [ID, "green:" + ID], "session": ID, "all": False},
+    ("seen", p.EVENT): {"ids": ["update:0.1.5"], "session": ID, "all": True},
+    ("job.start", p.REQUEST): {"kind": "clone", "args": {"source": "o/r", "dest": "/home/u/r"}},
+    ("job.cancel", p.REQUEST): {"job": "job-3"},
+    ("job", p.EVENT): {
+        "job": "job-3",
+        "kind": "clone",
+        "state": "failed",
+        "msgid": "The clone failed (exit status {code})",
+        "args": {"code": 128},
+        "result": {"path": "/home/u/r"},
+    },
+    ("usage.get", p.REQUEST): {},
+    ("models.get", p.REQUEST): {"fetch": True, "refresh": False},
+    ("models.defaults", p.REQUEST): {"cwd": "/home/u/project", "model": "claude-opus-5-5"},
+    ("icon.save", p.REQUEST): {"cwd": "/home/u/project", "svg": "<svg/>"},
     ("tool", p.EVENT): {
         "call": "call-17",
         "session": ID,
+        "handle": "s-4",
         "name": "open_in_editor",
         "arguments": {"path": "/home/u/project/a.py", "line": 3},
     },
     ("tool-reply", p.EVENT): {"call": "call-17", "ok": True, "text": "Opened a.py"},
-    ("sandbox.plan", p.REQUEST): {"pty": 7},
-    ("sandbox.grants", p.REQUEST): {"pty": 7},
-    ("sandbox.allow", p.REQUEST): {"pty": 7, "path": "/home/u/data", "scope": "project"},
-    ("sandbox.revoke", p.REQUEST): {"pty": 7, "path": "/home/u/data", "scope": "session"},
-    ("sandbox.tools", p.REQUEST): {"pty": 7, "tools": {"show_image": True}, "reset": False},
-    ("sandbox.restart", p.REQUEST): {"pty": 7},
-    ("sandbox", p.EVENT): {"pty": 7, "session": ID, "delivery": DELIVERY},
+    ("diff.notes", p.EVENT): MARKS,
+    ("diff.set-notes", p.REQUEST): MARKS,
+    ("sandbox.plan", p.REQUEST): {"box": BOX, "pty": 7},
+    ("sandbox.grants", p.REQUEST): {"box": BOX, "pty": 7},
+    ("sandbox.allow", p.REQUEST): {"box": BOX, "pty": 7, "path": "/home/u/data", "scope": "project"},
+    ("sandbox.revoke", p.REQUEST): {"box": BOX, "pty": 7, "path": "/home/u/data", "scope": "session"},
+    ("sandbox.tools", p.REQUEST): {
+        "box": BOX,
+        "pty": 7,
+        "tools": {"show_image": True},
+        "reset": False,
+    },
+    ("sandbox.restart", p.REQUEST): {"box": BOX, "pty": 7},
+    ("sandbox", p.EVENT): {"box": BOX, "pty": 7, "session": ID, "delivery": DELIVERY},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -400,12 +513,43 @@ REPLIES = {
     "store.flags": {},
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
+    "panel.key": {},
+    "pr.set": {},
+    "pr.fetch": {},
+    "pr.sweep": {"results": {ID: [PR_RECORD]}},
+    "pr.detail": {"detail": {"url": "https://github.com/o/r/pull/1", "files": [{"path": "a.py"}]}},
+    "pr.threads": {"threads": [{"id": "PRRT_1", "path": "a.py", "comments": []}]},
+    "pr.blob": {"file": "/home/u/.cache/collins/pr-blobs/ab.png", "error": ""},
+    "pr.action": {"error": "gh: Pull request is not mergeable"},
+    "pr.comment": {"error": ""},
+    "pr.review": {"error": ""},
+    "pr.thread": {"error": ""},
+    "notify.post": {"notification": ID},
+    "notify.remove": {"removed": 1},
+    "notify.clear": {"removed": 4},
+    "notify.green": {"changed": True},
+    "notify.rekey": {"moved": 2},
     "seen": {},
+    "job.start": {"job": "job-3"},
+    "job.cancel": {},
+    "usage.get": {"snapshot": {"bars": [{"label": "5h", "used": 0.4}]}, "kind": "", "error": ""},
+    "models.get": {
+        "models": [{"id": "claude-opus-5-5", "display_name": "Opus 5.5"}],
+        "cached": True,
+        "fetched_at": 1790000000.0,
+        "failed": False,
+    },
+    "models.defaults": {"model": "claude-opus-5-5", "effort": "high"},
+    "icon.save": {"path": "/home/u/project/project-icon.svg"},
+    "diff.set-notes": {},
     "sandbox.plan": {"plan": {"version": 2, "inputs": {"workspace": "/home/u/project"}}},
     "sandbox.grants": {
         "grants": [DELIVERY],
+        "launched": ["/home/u/old"],
         "defaults": ["/home/u/data"],
         "tools": {"show_image": True, "notify_user": False},
+        "available": {"show_image": True, "notify_user": True},
+        "overridden": True,
         "stale": True,
         "can_restart": True,
     },
@@ -708,7 +852,8 @@ def test_bound_cases_reach_every_field():
     [
         ("switch", {"pty": 1}),
         ("seen", {}),
-        ("sandbox.tools", {"pty": 1}),
+        ("sandbox.tools", {"box": BOX, "pty": 1}),
+        ("pr.thread", {"pr": PR_RECORD, "thread": "PRRT_1"}),
         ("store.flags", {"session": ID}),
     ],
 )
@@ -734,7 +879,7 @@ def test_lone_surrogate_text_is_refused():
 
 
 def test_a_map_key_that_is_not_text_is_refused():
-    refusal = p.validate(p.request("sandbox.tools", 1, pty=1, tools={1: True}), p.CLIENT)
+    refusal = p.validate(p.request("sandbox.tools", 1, box=BOX, pty=1, tools={1: True}), p.CLIENT)
     assert isinstance(refusal, p.Refusal)
     assert refusal.msgid == "{field} has a key that is not well formed"
 
@@ -769,10 +914,12 @@ def test_unknown_fields_in_list_items_are_dropped():
 def test_a_pending_delivery_leaves_inside_out():
     """Delivery.inside is "" while a grant is pending; the wire omits it."""
     pending = {"path": "/home/u/data", "status": "pending", "reason": "bindfs not installed"}
-    message = p.validate(p.event("sandbox", pty=7, delivery=pending), p.SERVICE)
+    message = p.validate(p.event("sandbox", box=BOX, pty=7, delivery=pending), p.SERVICE)
     assert isinstance(message, p.Message)
     assert message.fields["delivery"] == pending
-    refusal = p.validate(p.event("sandbox", pty=7, delivery={**pending, "inside": ""}), p.SERVICE)
+    refusal = p.validate(
+        p.event("sandbox", box=BOX, pty=7, delivery={**pending, "inside": ""}), p.SERVICE
+    )
     assert refusal.msgid == "{field} must be an absolute path"
 
 

@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -16,7 +16,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import claudemodels, composerkeys, editorfiles, icongen
+from . import apilink, claudemodels, composerkeys, editorfiles, jobclient, modelcatalog
+from .api import protocol
+from .api.loopback import RequestRefused
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _, ngettext
@@ -971,12 +973,12 @@ def generate_icon_dialog(
         return GLib.SOURCE_REMOVE
 
     def load_models() -> None:
-        catalog = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+        catalog = modelcatalog.available_models() or list(claudemodels.FALLBACK_MODELS)
         GLib.idle_add(fill_models, catalog)
 
     # The cached catalog fills the list at once; the worker heals a stale or
     # alias-only list to the live one without blocking the dialog.
-    cached = claudemodels.cached_models()
+    cached = modelcatalog.cached_models()
     if cached:
         fill_models(cached)
     threading.Thread(target=load_models, name="icon-models", daemon=True).start()
@@ -1025,9 +1027,11 @@ def generate_icon_dialog(
         state["gen"] += 1
         gen = state["gen"]
         if state["run"] is not None:
-            state["run"].cancel()
-        run = icongen.IconRun()
-        state["run"] = run
+            jobclient.cancel(state["run"])
+        # The run is the service's (the ``icon`` job: icongen.IconRun there,
+        # through titles.headless_argv from its scratch dir). Marked before
+        # the start: a refusal lands inside the call.
+        state["run"] = "starting"
         regen.set_label(_("Regenerate"))
         regen.set_sensitive(False)
         save.set_sensitive(False)
@@ -1039,20 +1043,23 @@ def generate_icon_dialog(
         previous = state["svg"]
         model = model_ids[models.get_selected()] or None
 
-        def work() -> None:
-            try:
-                prompt = icongen.build_prompt(
-                    cwd, project_name, feedback=feedback, previous_svg=previous
-                )
-                svg = run.run(prompt, model=model)
-            except icongen.IconGenCancelled:
+        def on_event(event: jobclient.JobEvent) -> None:
+            if not event.finished or event.state == protocol.JOB_CANCELLED:
                 return
-            except Exception as err:  # IconGenError, OSError, ...
-                GLib.idle_add(fail, gen, str(err))
+            svg = event.result.get("svg")
+            if event.ok and isinstance(svg, str) and svg:
+                land(gen, svg.encode("utf-8"))
             else:
-                GLib.idle_add(land, gen, svg)
+                fail(gen, event.text)
 
-        threading.Thread(target=work, name="icon-gen", daemon=True).start()
+        args = {"cwd": cwd, "project": project_name, "feedback": feedback}
+        if previous is not None:
+            args["previous"] = previous.decode("utf-8", errors="replace")
+        if model:
+            args["model"] = model
+        job = jobclient.start("icon", args, on_event)
+        if state["run"] == "starting":
+            state["run"] = job
 
     def land(gen: int, svg: bytes) -> bool:
         if gen != state["gen"]:
@@ -1090,9 +1097,10 @@ def generate_icon_dialog(
         if svg is None:
             return
         try:
-            icongen.save_icon(cwd, svg)
-        except OSError as err:
-            status.set_label(_("Saving failed: {error}").format(error=err))
+            apilink.call({"t": "icon.save", "cwd": cwd, "svg": svg.decode("utf-8", errors="replace")})
+        except RequestRefused as refusal:
+            error = jobclient.translate(refusal.msgid, refusal.details)
+            status.set_label(_("Saving failed: {error}").format(error=error))
             status.set_visible(True)
             return
         dialog.close()
@@ -1127,7 +1135,7 @@ def generate_icon_dialog(
     # Closing by any route (Cancel, Esc, the close after a save) kills
     # whatever run is still burning tokens; cancelling a finished or absent
     # run is a no-op.
-    dialog.connect("closed", lambda *_a: state["run"] and state["run"].cancel())
+    dialog.connect("closed", lambda *_a: jobclient.cancel(state["run"]))
 
     _present(dialog, parent)
     if pick_first:

@@ -31,10 +31,10 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import (
-    claudemodels,
     contextmenu,
     desktopentry,
     footerapps,
+    modelcatalog,
     newchat,
     openwith,
     openwithrows,
@@ -2625,7 +2625,7 @@ class SessionSidebar(Gtk.Box):
         edit_section.append_item(
             item(
                 regenerate_name_label(
-                    self.store.state.get_setting("title_model"), claudemodels.cached_models()
+                    self.store.state.get_setting("title_model"), modelcatalog.cached_models()
                 ),
                 "regenerate-name",
             )

@@ -144,25 +144,75 @@ each taken from the code the message replaces:
   write.
 - `pr` carries a session's PR records in `prstatus.to_record`'s shape, as
   bounded JSON objects: `prstatus.from_record` re-validates them on arrival.
+  It is the service's `PrStore` seen from a client (§3.15, PR-1.11): sent
+  for every session with records in the subscribe snapshot and after every
+  change of a session's list, with `attached` naming the URLs that joined
+  the list for the first time (the hub's ``pr-attached``). `pr-status` is
+  its ``status-changed``: a PR's fetched status by URL, as the fetch
+  cache's entry. Every write and every `gh` call is a request on the
+  service's machine: `pr.set` (a session's list, wholesale), `pr.fetch`
+  (re-read the statuses of some URLs), `pr.sweep` (the sidebar's sweep),
+  `pr.detail` and `pr.threads` (the PR page's data, `prdetail`'s, as JSON
+  objects), `pr.blob` (an image in the Files view; through Phase 1 the
+  file the service wrote, from PR-1.12 a blob transfer) and the actions:
+  `pr.action` (`practions.perform`'s keys), `pr.comment`, `pr.review` and
+  `pr.thread` (reply in a review thread, or resolve it). Each names the PR
+  by its record, from which the service rebuilds it with
+  `prstatus.from_record`; a refusal's or a failure's words come back as
+  the reply's `error`, `practions`' own.
 - `notify` carries a `notifycenter.Notification` record with the body as
   `msgid` and `args` (§3.13, §3.14); the record's id rides as
-  `notification`, since `id` on any frame makes it a request. This is a
-  forward shape, not a port: today's `Notification.body` is a formatted
-  string. PR-1.11 moves the producers to msgid and args (the client
-  translates with `i18n._()`), and text an agent supplied (`notify_user`)
+  `notification`, since `id` on any frame makes it a request. The
+  producers send msgid and args (the client translates with `i18n._()`
+  and `str.format_map`), and text an agent supplied (`notify_user`)
   crosses as its own `msgid` with no `args`, which `_()` returns
-  unchanged. `seen`
-  carries notification ids and/or a session, from a client as a request and from the service to every other
-  client as an event, so unread is one number everywhere.
+  unchanged and which is never formatted. `removed` says a row left the
+  history. The service owns the history and the unread set; a client asks
+  for a row with `notify.post` (the service mints its id and time,
+  coalesces a bell, and answers with the id), and for the rest with
+  `notify.remove`, `notify.clear`, `notify.green` (the synthetic row of a
+  finished run, on or off) and `notify.rekey` (a placeholder's rows moving
+  to the session that resolved). `seen` carries notification ids and/or a
+  session, or `all`, from a client as a request and from the service to
+  every other client as an event, so unread is one number everywhere.
+- `job.start` starts a long-running operation on the service (a clone, the
+  repository list a clone picks from, a worktree's trash or restore, a
+  chat folder's trust, an icon's generation, a login repair) and answers
+  with its id at once; `job` events then report it to the client that
+  started it: `state` (``running``, then one of ``done``, ``failed``,
+  ``refused`` or ``cancelled``), the progress or the failure as `msgid`
+  and `args`, and the `result` (a JSON object; a ``running`` event may
+  carry a partial one, such as the repositories listed so far).
+  `job.cancel` ends one early. The kinds are closed (`JOB_KINDS`).
+- `usage.get`, `models.get` and `models.defaults` are the token-use reads
+  of §3.15: the usage panel's snapshot (or why there is none), the model
+  catalog as the service's cache has it (`refresh` fetches it again), and
+  the CLI's default model and effort for a directory. `icon.save` writes a
+  generated project icon. They are requests a client makes from a worker
+  thread, as the git transport of §3.15 will be: blocking that thread on
+  the reply is the shape the code had when it called the module itself.
+- `spawn`'s `history` and `ordinal` name the panel-history file a shell's
+  scrollback is written to (`panelhistory`'s key, the session id or a
+  new-chat draft id, and the shell's ordinal); `panel.key` re-files a
+  shell's pty under a new key (the resolver bound the tab) or none (the
+  shell's page closed for good, so its history goes with it). The service
+  writes a shell's history from its model when its child exits, before the
+  model is dropped (§3.15).
 - `tool` is a UI-bound tool call the service hands the active client:
   `call` (its id), the session, the tool's name and its arguments, a JSON
   object bounded here and re-validated against `mcptools.validate_args` by
-  the client. `tool-reply` is the client's event back, `call`, `ok` and
+  the client, and `handle`: the service's name for the calling session,
+  which a session has before its id resolves (`service.session.Session.
+  handle`). `tool-reply` is the client's event back, `call`, `ok` and
   `text`, `mcptools.run_tool_call`'s ``(ok, text)``.
-- The `sandbox.*` requests name the session's pty (the chip lives on a
-  running tab). `sandbox.grants` answers with what the chip draws, each
+- The `sandbox.*` requests name the session's box (`box`, required: what
+  the service's records are keyed by) and, on the server backend, its pty.
+  `sandbox.grants` answers with what the chip draws, each
   grant in ``sandboxgrants.Delivery``'s shape (path, status, inside,
-  linked, reason: why a grant is pending, the grant tag's tooltip).
+  linked, reason: why a grant is pending, the grant tag's tooltip),
+  the grants the launched plan binds (`launched`), the project's defaults,
+  the tools the box is offered with which of them exist on this machine
+  (`available`) and whether the box overrides the defaults (`overridden`).
   `inside` must be absolute, so the service omits it where `Delivery`
   holds ``""`` (a pending grant) rather than sending the empty string.
   `sandbox.allow` and `sandbox.revoke` take a required `scope`,
@@ -170,6 +220,15 @@ each taken from the code the message replaces:
   for new sessions); `sandbox.tools` sets switches (`tools`, name -> on)
   or `reset`s them. The `sandbox` event says something changed, and
   carries a grant's `delivery`, the same shape, for the toast.
+- `diff.notes` is a session's notes and highlights on its diff (the
+  service's `diffnotes.MarkStore`, §3.7, §3.8): sent whole whenever they
+  change, each mark as a JSON object (`diffnotes.mark_record`), keyed by
+  the session's `handle`. `diff.set-notes` is a client's write of them,
+  in the same shape and whole: the page's own store is the mirror, every
+  change (a note typed into the view, an edit, a remove, a clear, the
+  prune a reload makes, the marks an agent's tool call landed while the
+  page was open) is applied there first against the diff the page has
+  loaded, and the result sent; the service's echo is the event.
 - `service.restart` takes a required `when`, ``now`` or ``idle`` (§3.10's
   *Restart when idle*); `service.status` answers with the version, the protocol and
   the counts of ptys, busy sessions and clients.
@@ -316,6 +375,37 @@ _COLOR_RE = re.compile(r"#[0-9A-Fa-f]{6}")
 _HEX_RE = re.compile(rf"(?:[0-9a-f]{{2}}){{1,{LOCAL_PROOF_MAX}}}")
 _LOCALE_RE = re.compile(r"[A-Za-z0-9_.@-]{1,64}")
 _TOOL_RE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+# A review thread's id (prdetail.THREAD_ID's alphabet).
+_THREAD_RE = re.compile(r"[A-Za-z0-9+/=_-]{1,200}")
+
+# The long-running operations a client starts with `job.start` (see the
+# module docstring), and the states a `job` event reports.
+JOB_KINDS = frozenset(
+    {
+        "clone",
+        "clone.repos",
+        "worktree.trash",
+        "worktree.restore",
+        "chats.trust",
+        "icon",
+        "login.repair",
+    }
+)
+JOB_RUNNING = "running"
+JOB_DONE = "done"
+JOB_FAILED = "failed"
+JOB_REFUSED = "refused"
+JOB_CANCELLED = "cancelled"
+JOB_STATES = frozenset({JOB_RUNNING, JOB_DONE, JOB_FAILED, JOB_REFUSED, JOB_CANCELLED})
+
+# The notification kinds a client may post (a finished run's row is
+# `notify.green`'s).
+POST_KINDS = frozenset({"message", "bell", "update"})
+
+# The most marks a session's diff holds (diffnotes.MAX_NOTES and
+# MAX_HIGHLIGHTS, pinned by tests/test_protocol.py).
+NOTES_MAX = 1000
+HIGHLIGHTS_MAX = 5000
 
 # ---- field specs -------------------------------------------------------------
 
@@ -423,7 +513,29 @@ _DELIVERY = Field(
 _SEEN = {
     "ids": Field(K_LIST, high=SEEN_MAX, item=_ID),
     "session": _ID,
+    "all": _BOOL,
 }
+
+# A PR as a request names it: its record (prstatus.to_record's shape).
+_PR_RECORD = Field(K_JSON_OBJECT)
+_PR_RECORDS = Field(K_LIST, high=PRS_MAX, item=Field(K_JSON_OBJECT))
+# What a gh call that may fail answers: its words, "" or absent on success.
+_PR_ERROR = {"error": _s(ARG_TEXT_MAX)}
+# One session of the sidebar's sweep: its PRs and the directory a PR is
+# discovered from.
+_SWEEP_TARGET = Field(
+    K_OBJ,
+    fields={"session": _req(_ID), "prs": _PR_RECORDS, "cwd": _PATH},
+)
+# A session's marks on its diff, as `diff.notes` and `diff.set-notes` carry
+# them (diffnotes.mark_record).
+_MARKS = {
+    "handle": _req(_ID),
+    "session": _ID,
+    "notes": _req(Field(K_LIST, high=NOTES_MAX, item=Field(K_JSON_OBJECT))),
+    "highlights": _req(Field(K_LIST, high=HIGHLIGHTS_MAX, item=Field(K_JSON_OBJECT))),
+}
+_SANDBOX_TARGET = {"box": _req(_ID), "pty": _PTY}
 
 _SESSIONS = Field(K_LIST, low=1, high=ROWS_MAX, item=_ID)
 _PROJECT = _s(NAME_MAX, low=1)  # a project's name: the group's identity in the sidebar
@@ -591,9 +703,18 @@ _TABLE: tuple[MessageType, ...] = (
                 "sandbox_box": _ID,
                 "cols": _COLS,
                 "rows": _ROWS,
+                # A shell's panel history: the key its file is under and
+                # its ordinal (panelhistory's).
+                "history": _ID,
+                "ordinal": _i(0, 65535),
             },
             reply={"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS)},
         ),
+    ),
+    MessageType(
+        "panel.key",
+        "File a shell's panel history under a new key, or under none.",
+        request=_request({"pty": _req(_PTY), "history": _req(_null(_ID))}),
     ),
     MessageType(
         "prompt",
@@ -863,8 +984,104 @@ _TABLE: tuple[MessageType, ...] = (
             SERVICE,
             {
                 "session": _req(_ID),
-                "prs": _req(Field(K_LIST, high=PRS_MAX, item=Field(K_JSON_OBJECT))),
+                "prs": _req(_PR_RECORDS),
+                # The URLs that joined the session's list for the first time
+                # (the hub's pr-attached), in the list's order.
+                "attached": Field(K_LIST, high=PRS_MAX, item=Field(K_URL)),
             },
+        ),
+    ),
+    MessageType(
+        "pr-status",
+        "A pull request's fetched status changed (the fetch cache's entry, by URL).",
+        event=_event(SERVICE, {"url": _req(Field(K_URL)), "status": _req(Field(K_JSON_OBJECT))}),
+    ),
+    MessageType(
+        "pr.set",
+        "Replace a session's saved pull requests.",
+        request=_request({"session": _req(_ID), "prs": _req(_PR_RECORDS)}),
+    ),
+    MessageType(
+        "pr.fetch",
+        "Fetch pull requests' statuses again (dropping what is cached, when asked).",
+        request=_request(
+            {
+                "urls": _req(Field(K_LIST, low=1, high=PRS_MAX, item=Field(K_URL))),
+                "invalidate": _BOOL,
+            }
+        ),
+    ),
+    MessageType(
+        "pr.sweep",
+        "The sidebar's sweep: fetch and discover the pull requests of sessions.",
+        request=_request(
+            {"targets": _req(Field(K_LIST, low=1, high=ROWS_MAX, item=_SWEEP_TARGET))},
+            reply={"results": Field(K_MAP, high=ROWS_MAX, key=_ID_RE, item=_PR_RECORDS)},
+        ),
+    ),
+    MessageType(
+        "pr.detail",
+        "A pull request's page: everything gh says about it.",
+        request=_request(
+            {"url": _req(Field(K_URL))},
+            reply={"detail": Field(K_JSON_OBJECT)},
+        ),
+    ),
+    MessageType(
+        "pr.threads",
+        "A pull request's review threads.",
+        request=_request(
+            {"url": _req(Field(K_URL))},
+            reply={"threads": Field(K_LIST, high=1000, item=Field(K_JSON_OBJECT))},
+        ),
+    ),
+    MessageType(
+        "pr.blob",
+        "Fetch one file of a repository at a commit (an image the Files view shows).",
+        request=_request(
+            {
+                "repository": _req(_s(NAME_MAX, low=1)),
+                "ref": _req(_s(256, low=1)),
+                "path": _req(_s(PATH_MAX, low=1)),
+            },
+            reply={"file": _PATH, **_PR_ERROR},
+        ),
+    ),
+    MessageType(
+        "pr.action",
+        "Run one of a pull request's actions through gh (practions.perform).",
+        request=_request(
+            {"pr": _req(_PR_RECORD), "key": _req(_s(SHORT_MAX, low=1))},
+            reply=_PR_ERROR,
+        ),
+    ),
+    MessageType(
+        "pr.comment",
+        "Comment on a pull request.",
+        request=_request(
+            {"pr": _req(_PR_RECORD), "body": _req(_s(TEXT_MAX, low=1))}, reply=_PR_ERROR
+        ),
+    ),
+    MessageType(
+        "pr.review",
+        "Review a pull request: approve, or request changes.",
+        request=_request(
+            {"pr": _req(_PR_RECORD), "verdict": _req(_s(SHORT_MAX, low=1)), "body": _TEXT},
+            reply=_PR_ERROR,
+        ),
+    ),
+    MessageType(
+        "pr.thread",
+        "Reply in a pull request's review thread, or resolve it.",
+        request=_request(
+            {
+                "pr": _req(_PR_RECORD),
+                "thread": _req(Field(K_STR, low=1, high=200, pattern=_THREAD_RE)),
+                "body": _s(TEXT_MAX, low=1),
+                "resolved": _BOOL,
+            },
+            reply=_PR_ERROR,
+            one_of=("body", "resolved"),
         ),
     ),
     # -- notifications (§3.13)
@@ -885,14 +1102,133 @@ _TABLE: tuple[MessageType, ...] = (
                 "read": _BOOL,
                 "count": _i(1, COUNT_MAX),
                 "url": Field(K_URL),
+                "removed": _BOOL,
             },
         ),
     ),
     MessageType(
+        "notify.post",
+        "Add a row to the notification history (the service mints it).",
+        request=_request(
+            {
+                "kind": _req(Field(K_STR, choices=POST_KINDS, high=SHORT_MAX)),
+                "session": _SESSION_OR_EMPTY,
+                "title": _NAME,
+                "project": _NAME,
+                "msgid": _req(_MSGID),
+                "args": _ARGS,
+                "read": _BOOL,
+                "url": Field(K_URL),
+                # The row's id, for a kind whose id is fixed (an update's).
+                "key": _ID,
+            },
+            reply={"notification": _req(_ID)},
+        ),
+    ),
+    MessageType(
+        "notify.remove",
+        "Drop rows from the notification history.",
+        request=_request(
+            {"ids": _req(Field(K_LIST, low=1, high=SEEN_MAX, item=_ID))},
+            reply={"removed": _COUNT},
+        ),
+    ),
+    MessageType(
+        "notify.clear",
+        "Drop every row of the notification history but the finished runs'.",
+        request=_request(reply={"removed": _COUNT}),
+    ),
+    MessageType(
+        "notify.green",
+        "A finished run's row: raise it (unread) or take it down.",
+        request=_request(
+            {"session": _req(_ID), "on": _req(_BOOL), "title": _NAME, "project": _NAME},
+            reply={"changed": _req(_BOOL)},
+        ),
+    ),
+    MessageType(
+        "notify.rekey",
+        "File a placeholder's rows under the session it resolved to.",
+        request=_request({"session": _req(_ID), "to": _req(_ID)}, reply={"moved": _COUNT}),
+    ),
+    MessageType(
         "seen",
         "Notifications or a session were seen: a client says so, the service tells the rest.",
-        request=_request(_SEEN, one_of=("ids", "session")),
-        event=_event(SERVICE, _SEEN, one_of=("ids", "session")),
+        request=_request(_SEEN, one_of=("ids", "session", "all")),
+        event=_event(SERVICE, _SEEN, one_of=("ids", "session", "all")),
+    ),
+    # -- long-running operations
+    MessageType(
+        "job.start",
+        "Start a long-running operation; its progress and outcome arrive as job events.",
+        request=_request(
+            {
+                "kind": _req(Field(K_STR, choices=JOB_KINDS, high=SHORT_MAX)),
+                "args": Field(K_JSON_OBJECT),
+            },
+            reply={"job": _req(_ID)},
+        ),
+    ),
+    MessageType(
+        "job.cancel",
+        "End a job early.",
+        request=_request({"job": _req(_ID)}),
+    ),
+    MessageType(
+        "job",
+        "A job's progress, or how it ended.",
+        event=_event(
+            SERVICE,
+            {
+                "job": _req(_ID),
+                "kind": _req(_s(SHORT_MAX, low=1)),
+                "state": _req(_s(SHORT_MAX, low=1)),
+                "msgid": _MSGID,
+                "args": _ARGS,
+                "result": Field(K_JSON_OBJECT),
+            },
+        ),
+    ),
+    # -- token use (§3.15)
+    MessageType(
+        "usage.get",
+        "The plan's usage, as the usage panel shows it, or why there is none.",
+        request=_request(
+            reply={
+                "snapshot": Field(K_JSON_OBJECT),
+                "kind": _SHORT,
+                "error": _s(ARG_TEXT_MAX),
+            }
+        ),
+    ),
+    MessageType(
+        "models.get",
+        "The model catalog: the service's cache, fetched again when asked.",
+        request=_request(
+            {"fetch": _BOOL, "refresh": _BOOL},
+            reply={
+                "models": Field(K_LIST, high=256, item=Field(K_JSON_OBJECT)),
+                "cached": _BOOL,
+                "fetched_at": _NUM,
+                "failed": _BOOL,
+            },
+        ),
+    ),
+    MessageType(
+        "models.defaults",
+        "The CLI's default model for a directory, and its effort for a model.",
+        request=_request(
+            {"cwd": _PATH, "model": _s(MODEL_MAX)},
+            reply={"model": _s(MODEL_MAX), "effort": _SHORT},
+        ),
+    ),
+    MessageType(
+        "icon.save",
+        "Write a generated project icon into the project.",
+        request=_request(
+            {"cwd": _req(_PATH), "svg": _req(_s(TEXT_MAX, low=1))},
+            reply={"path": _PATH},
+        ),
     ),
     # -- session tools (§3.7)
     MessageType(
@@ -903,6 +1239,7 @@ _TABLE: tuple[MessageType, ...] = (
             {
                 "call": _req(_ID),
                 "session": _SESSION_OR_EMPTY,
+                "handle": _ID,
                 "name": _req(_TOOL_NAME),
                 "arguments": _req(Field(K_JSON_OBJECT)),
             },
@@ -913,21 +1250,34 @@ _TABLE: tuple[MessageType, ...] = (
         "The active client's answer to a tool call.",
         event=_event(CLIENT, {"call": _req(_ID), "ok": _req(_BOOL), "text": _req(_TEXT)}),
     ),
+    MessageType(
+        "diff.notes",
+        "A session's notes and highlights on its diff, whole.",
+        event=_event(SERVICE, _MARKS),
+    ),
+    MessageType(
+        "diff.set-notes",
+        "Write a session's notes and highlights on its diff, whole.",
+        request=_request(_MARKS),
+    ),
     # -- sandboxed sessions (§3.9)
     MessageType(
         "sandbox.plan",
         "The plan a sandboxed session's box was launched with.",
-        request=_request({"pty": _req(_PTY)}, reply={"plan": _req(Field(K_JSON_OBJECT))}),
+        request=_request(_SANDBOX_TARGET, reply={"plan": _req(Field(K_JSON_OBJECT))}),
     ),
     MessageType(
         "sandbox.grants",
         "What the Sandboxed chip draws: grants, defaults, tools, staleness.",
         request=_request(
-            {"pty": _req(_PTY)},
+            _SANDBOX_TARGET,
             reply={
                 "grants": Field(K_LIST, high=GRANTS_MAX, item=_DELIVERY),
+                "launched": Field(K_LIST, high=GRANTS_MAX, item=_PATH),
                 "defaults": Field(K_LIST, high=GRANTS_MAX, item=_PATH),
                 "tools": Field(K_MAP, high=TOOLS_MAX, key=_TOOL_RE, item=_BOOL),
+                "available": Field(K_MAP, high=TOOLS_MAX, key=_TOOL_RE, item=_BOOL),
+                "overridden": _BOOL,
                 "stale": _BOOL,
                 "can_restart": _BOOL,
             },
@@ -938,7 +1288,7 @@ _TABLE: tuple[MessageType, ...] = (
         "Allow a directory to a session's box, or make it a project default.",
         request=_request(
             {
-                "pty": _req(_PTY),
+                **_SANDBOX_TARGET,
                 "path": _req(_PATH),
                 "scope": _req(Field(K_STR, choices=frozenset({"session", "project"}), high=8)),
             }
@@ -949,7 +1299,7 @@ _TABLE: tuple[MessageType, ...] = (
         "Take a directory back from a session's box, or from the project defaults.",
         request=_request(
             {
-                "pty": _req(_PTY),
+                **_SANDBOX_TARGET,
                 "path": _req(_PATH),
                 "scope": _req(Field(K_STR, choices=frozenset({"session", "project"}), high=8)),
             }
@@ -960,7 +1310,7 @@ _TABLE: tuple[MessageType, ...] = (
         "Set which session tools a sandboxed session is offered, or reset them.",
         request=_request(
             {
-                "pty": _req(_PTY),
+                **_SANDBOX_TARGET,
                 "tools": Field(K_MAP, low=1, high=TOOLS_MAX, key=_TOOL_RE, item=_BOOL),
                 "reset": _BOOL,
             },
@@ -971,14 +1321,14 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "sandbox.restart",
         "Exit a sandboxed session and resume it with the current plan.",
-        request=_request({"pty": _req(_PTY)}),
+        request=_request(_SANDBOX_TARGET),
     ),
     MessageType(
         "sandbox",
         "A sandboxed session's grants or plan changed; a delivery for the toast.",
         event=_event(
             SERVICE,
-            {"pty": _req(_PTY), "session": _ID, "delivery": _DELIVERY},
+            {"box": _req(_ID), "pty": _PTY, "session": _ID, "delivery": _DELIVERY},
         ),
     ),
     # -- the service itself (§3.10)

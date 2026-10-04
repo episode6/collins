@@ -395,3 +395,42 @@ def error_summary(output: str) -> str:
     if len(text) > _MAX_ERROR:
         text = "…" + text[-_MAX_ERROR:]
     return text
+
+
+def repo_records(repos) -> list[dict]:
+    """Repos as the service's ``clone.repos`` job carries them (PR-1.11)."""
+    return [
+        {
+            "full_name": repo.full_name,
+            "description": repo.description,
+            "private": repo.private,
+            "fork": repo.fork,
+            "archived": repo.archived,
+        }
+        for repo in repos
+    ]
+
+
+def repos_from_records(records: object) -> list | None:
+    """The other way, re-validated (rule 5): what a client makes of a
+    result's ``repos``. None for anything that is not a list."""
+    if not isinstance(records, list):
+        return None
+    out = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        name = record.get("full_name")
+        if not isinstance(name, str) or not name or len(name) > 1024:
+            continue
+        description = record.get("description")
+        out.append(
+            Repo(
+                full_name=name,
+                description=description[:1000] if isinstance(description, str) else "",
+                private=record.get("private") is True,
+                fork=record.get("fork") is True,
+                archived=record.get("archived") is True,
+            )
+        )
+    return out
