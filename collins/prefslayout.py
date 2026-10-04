@@ -42,6 +42,31 @@ GROUPS: tuple[str, ...] = (
     "editor",
 )
 
+# Which side of the state split each group's settings live on (the
+# service-and-client spec, §3.8; state.SERVICE_SETTINGS and DEVICE_SETTINGS
+# are the per-key lists): "service" for a group whose every row writes a
+# setting the Collins service reads, "device" for one whose rows are all
+# this device's, and "mixed" for the groups that hold both today. The
+# spec's dialog shows the two sides as two headings; that regrouping is
+# PR-3.3's, and until it lands the page keeps this order and the sides are
+# data only, pinned by tests/test_state_split.py.
+GROUP_SIDES: dict[str, str] = {
+    "cli": "service",
+    "general": "mixed",
+    "token_use": "service",
+    "mcp_tools": "service",
+    "sessions": "mixed",
+    "sandbox": "service",
+    "notifications": "device",
+    "composer": "device",
+    "terminal": "device",
+    "footer_apps": "device",
+    "pull_requests": "mixed",
+    "git": "mixed",
+    "caffeine": "device",
+    "editor": "device",
+}
+
 # The Token use group's rows, top to bottom, by the setting each one writes.
 # "model_list" is the exception: the status row under the two pickers writes
 # nothing (it dates the cached catalog and carries the Refresh button), and

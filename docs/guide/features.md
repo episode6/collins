@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-27. Full change history: git log for this file.
+fork. Last modified: 2026-10-02. Full change history: git log for this file.
 -->
 
 # Features
@@ -1363,6 +1363,12 @@ live — the agent keeps running, and its scrollback, panel, and editor come
 along.
 
 ## Preferences
+
+Every preference is saved in one of two files under `~/.config/collins/`:
+the ones that describe what Collins does for your sessions in `state.json`,
+the ones that describe this computer's window in `ui-state.json` (see
+[App state](./how-it-works#app-state)). The dialog does not show the
+difference.
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,
