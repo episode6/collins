@@ -5904,6 +5904,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._bg_closing.discard(page)
         if isinstance(tab, TerminalTab):
             tab.session.end_close()  # its close poll, if one was running, ends here
+            tab.release_pty()  # the server backend's pty goes with the tab
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)

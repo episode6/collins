@@ -1415,10 +1415,10 @@ def test_gate_resetting_landings_are_never_starvable(launch, tmp_path, monkeypat
     assert clock.idle_priority("gone") == PRIORITY_DEFAULT
 
 
-def test_the_recreated_worktree_spawn_lands_at_default_idle(launch, tmp_path, monkeypatch):
-    """The one pipeline landing still at default-idle, as in the base
-    (PR-1.7 rewrites the path at PRIORITY_DEFAULT): pinned so the change is
-    a deliberate one."""
+def test_the_recreated_worktree_spawn_lands_at_default_priority(launch, tmp_path, monkeypatch):
+    """The recreated-worktree spawn advances the pipeline, so it lands at
+    PRIORITY_DEFAULT like every other gate-resetting landing (it was the
+    one default-idle landing until PR-1.7)."""
     session, _term, _host, clock = launch(session_id="sid")
     monkeypatch.setattr(
         session_mod, "recreatable_worktree",
@@ -1426,4 +1426,4 @@ def test_the_recreated_worktree_spawn_lands_at_default_idle(launch, tmp_path, mo
     )
     monkeypatch.setattr(session_mod, "recreate_worktree", lambda state: True)
     session.spawn(str(tmp_path), "sid")
-    assert clock.idle_priority("_finish_spawn") == PRIORITY_DEFAULT_IDLE
+    assert clock.idle_priority("_finish_spawn") == PRIORITY_DEFAULT

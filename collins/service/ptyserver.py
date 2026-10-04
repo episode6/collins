@@ -82,8 +82,9 @@ differs is applied first, so its redraw is painted at its own size and the
 program's repaint follows on the live stream; a sink that is not active is
 redrawn at the pty's grid and told so (``active`` False and ``sized_for``,
 the active sink's ``device`` when it has one). Every attached sink is sent
-the protocol's ``pty`` event when the size or the active client changes, so
-a pinned sink and its "Sized for" bar stay right.
+the protocol's ``pty`` event (the row, with the child's pid while it lives)
+when the size or the active client changes, so a pinned sink and its "Sized
+for" bar stay right, and a client learns the pid of what it attached to.
 
 **Flow control** (§3.2): the server counts the live bytes it has handed
 each sink for a pty and the sink reports what of them it has written out
@@ -225,17 +226,14 @@ def default_state_dir() -> Path:
     return base / "collins" / "pty"
 
 
-def spawn_environment(env: dict[str, str] | None, vte_version: int) -> dict[str, str]:
-    """The child's environment: the caller's, plus what VTE sets and what
-    makes the CLI announce its progress (`terminal._agent_tab_environment`)."""
+def spawn_environment(env: dict[str, str] | None, vte_version: int, progress: bool = True) -> dict[str, str]:
+    """The child's environment: the caller's, plus what VTE sets and, with
+    *progress*, what makes the CLI announce its progress
+    (`session.agent_environment`; off when the experimental setting is)."""
     out = dict(os.environ if env is None else env)
-    out.update(
-        TERM="xterm-256color",
-        COLORTERM="truecolor",
-        VTE_VERSION=str(vte_version),
-        ConEmuANSI="ON",
-        TERM_PROGRAM="kitty",
-    )
+    out.update(TERM="xterm-256color", COLORTERM="truecolor", VTE_VERSION=str(vte_version))
+    if progress:
+        out.update(ConEmuANSI="ON", TERM_PROGRAM="kitty")
     return out
 
 
@@ -453,9 +451,11 @@ class PtyServer:
         box: str | None = None,
         plan: str | None = None,
         options: dict | None = None,
+        progress: bool = True,
     ) -> int:
         """Fork `argv` on a new pty; the new pty's id. Raises `SpawnError`
-        when the child could not exec."""
+        when the child could not exec. *progress* adds the two progress
+        declarations to the environment (`spawn_environment`)."""
         if kind not in KINDS:
             raise ValueError(f"kind {kind!r}")
         if not argv:
@@ -464,7 +464,7 @@ class PtyServer:
         pty_id = self._next_id
         pty = Pty(self, pty_id, kind, cwd, cols, rows)
         pty.session, pty.box, pty.plan, pty.options = session, box, plan, options
-        child_env = spawn_environment(env, pty.state.vte_version)
+        child_env = spawn_environment(env, pty.state.vte_version, progress)
         master, slave = os.openpty()
         report_r, report_w = os.pipe()  # close-on-exec by default (PEP 446)
         try:
@@ -780,11 +780,16 @@ class PtyServer:
                 "t": "pty",
                 "pty": pty.id,
                 "kind": pty.kind,
+                "cwd": pty.cwd,
                 "cols": pty.cols,
                 "rows": pty.rows,
                 "active": pty.active == id(attachment.sink),
                 "sized_for": pty.sized_for,
             }
+            if pty.pid is not None and not pty._reaped:
+                event["pid"] = pty.pid
+            if pty.session:
+                event["session"] = pty.session
             try:
                 attachment.sink.send_event(event)
             except Exception:

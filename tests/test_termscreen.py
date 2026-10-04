@@ -534,7 +534,7 @@ def test_the_grid_is_clamped_to_the_protocols_bounds():
     assert (tiny.columns(), tiny.row_count()) == (1, 1)
     tiny.feed(termstream.Tokenizer().feed("日本a".encode()))  # a wide character fills the one column
     assert tiny.rows() == ["a"]
-    assert tiny.capture_contents() == "日\n本\na"
+    assert tiny.capture_contents() == "日本a"  # the wraps join, as VTE's capture joins them
     huge = Screen(10**6, 10**6)
     assert (huge.columns(), huge.row_count()) == (MAX_COLS, MAX_ROWS)
     huge.resize(0, 0)
@@ -709,8 +709,17 @@ def test_capture_contents_of_a_shell_fixture():
     screen = feed("$ ls\r\na.txt  b.txt\r\n$ " + "echo " + "x" * 130 + "\r\n" + "x" * 130 + "\r\n$ ")
     text = screen.capture_contents()
     assert text.split("\n")[0] == "$ ls"
-    assert text.split("\n")[2].startswith("$ echo ")
+    # The command wrapped at the margin and reads back as one line, the
+    # way VTE's own capture joins a soft-wrapped row with the next.
+    assert text.split("\n")[2] == "$ echo " + "x" * 130
+    assert text.split("\n")[3] == "x" * 130
     assert text.endswith("$ ")
+
+
+def test_capture_contents_joins_wrapped_rows_in_the_scrollback():
+    screen = Screen(10, 3)
+    screen.feed(termstream.Tokenizer().feed(("abcdefghijklmnop\r\n" * 4 + "end").encode()))
+    assert screen.capture_contents() == "abcdefghijklmnop\n" * 4 + "end"
 
 
 # ----------------------------------------------------------- width skew

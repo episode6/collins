@@ -405,11 +405,105 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   `check_termscreen_parity.py --write` under the headless display to
   regenerate the goldens from VTE, and run the unit suite.
 
+## The server backend: the tab on the pty server (ptyclient, loopback, core)
+
+Since PR-1.7 of the split a session tab runs on one of two backends,
+`ptyclient.PTY_BACKEND`, read once from `COLLINS_PTY_BACKEND` (`vte`, the
+default; `server`, opt-in until PR-1.9 makes it the only one). On `vte`
+nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
+
+- **The terminal has no child.** `TerminalTab.terminal` is a
+  `ptyclient.ClientVte` (a `Vte.Terminal` that reports its own allocation,
+  since GTK4 has no size-allocate signal) glued to a pty of the service by
+  `ptyclient.ClientTerminal` (`tab._view`): output frames are `feed()`,
+  every `commit` goes back as an input frame, the grid goes as a `resize`
+  event on every allocation change, `notify::has-focus` as a `focus`
+  event, `pty-exited` is what `child-exited` was (`tab._on_pty_exited` →
+  `Session.shell_exited`; a status the service does not know is -1). The
+  ports are `ptyclient.ServicePtyPort` (a write is an input frame, a
+  resize `set_size` plus the event; the pid and foreground group read off
+  the loopback's pty object) and `ServiceScreenPort` over the service's
+  `termscreen.Screen` (`client.screen_of(pty)`): the model is the screen
+  as anchored to the cursor already, so row indices are the model's own;
+  `row_text` cuts a row's cells, `visible_text` joins on the wrap flags.
+- **The spawn.** `_TabHost.spawn_shell` → `TerminalTab._service_spawn`: a
+  `spawn` request (kind `agent`, the cwd, the VTE's grid), then
+  `ClientTerminal.attach(pty)`, and `Session.shell_spawned` an idle later
+  at `PRIORITY_DEFAULT` (VTE's spawn was asynchronous; the session's
+  recreated-worktree landing now runs at `PRIORITY_DEFAULT` too). The
+  **service** builds the shell's environment (its own, plus the two
+  progress declarations when `progress_termprop` is on: `ServiceCore`'s
+  `get_setting`); the session types the agent command exactly as before,
+  the `sandboxrun.py` wrapper included. A refusal (`SpawnError`'s errno)
+  is painted where VTE's spawn error was.
+- **The redraw guard.** `attach` resets the VTE and raises the guard: every
+  commit is dropped until the frame flagged `REDRAW_END` has been fed,
+  `CSI 5 n` fed after it, and VTE's `CSI 0 n` seen in a commit (F3). If the
+  redraw's own bytes carried `CSI ?1004h`, the real focus state is sent
+  then. `ClientTerminal.dropped_commits` counts what the guard swallowed
+  (`check_attach_redraw.py` asserts it and that no `CSI 0 n` reached the
+  pty).
+- **The mouse.** `mouserate.MotionCoalescer` (GTK-free,
+  `tests/test_mouserate.py`): a plain motion report naming the cell of the
+  one before is dropped, the rest coalesced to the latest per 30 ms on a
+  timer in `ClientTerminal`; presses, releases, wheel and drags go at once
+  and flush what was pending ahead of them.
+- **`feed_message` is `paint`** (rule 2 of §3.1) once the pty is attached:
+  the line goes into the stream on the service, so the model and every
+  client show it; before the spawn or after the exit it is fed to the
+  widget alone.
+- **The tab's end.** `TerminalTab.release_pty()` (from
+  `MainWindow._on_close_page`, the final close) sends `close` (mode
+  `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
+  SIGKILL after the grace), detaches and closes the loopback client:
+  closing a tab ends the session (D12) until *Detach* in PR-1.12.
+  `App.do_shutdown` shuts the loopback down, which saves every model and
+  ends every pty (Phase 1: quitting ends the sessions).
+- **The wiring.** `App._start_service_loopback` builds one
+  `service.core.ServiceCore` (the pty half: `spawn`, `attach`, `detach`,
+  `paint`, `close`; the `resize`/`focus`/`theme` events; the state's
+  `set_pty` / `set_pty_next_id` as the pty table's writers) behind an
+  `api.loopback.LoopbackServer` in `terminal.SERVICE_LOOPBACK`; a tab
+  built without an app gets one made on the spot. The loopback passes
+  the same dicts and bytes the socket will, every message through
+  `protocol.validate` both ways, with no framing and no queue (a request
+  is answered before it returns; every live frame is reported drained
+  as the callback takes it). Two shortcuts the socket will not have
+  (`screen_of`, `pty_of`) exist because the `Session` still runs in the
+  client's process; they go with the loopback (D21, PR-1.12).
+- **What differs, by design.** A row written before a resize is kept by
+  the model as it was (no reflow, D19) where VTE re-wraps it: a shell's
+  echo from before the tab's first allocation reads differently in
+  `capture_contents` on the two backends until the program repaints
+  (`check_attach_redraw.py` compares from the first line written at the
+  settled grid for that reason). `capture_contents` joins soft-wrapped
+  rows as VTE's `write_contents_sync` does.
+- **The first keystroke after focus** (F11's unexplained loss) is the
+  harness, not the client. `scripts/probe_first_keystroke.py` drives the
+  glue with real input through the headless shell's own bus: with `cat`
+  behind the pty, under every mode the CLI sets (focus reporting, mouse
+  tracking, the kitty flags, modifyOtherKeys, bracketed paste) and with
+  the guard freshly raised and lowered, the first key after a click
+  arrived in every round (20 to 30 a condition; the one miss was a click
+  that did not focus, not a key). `scripts/spike_split_7_server_drive.py`
+  (a real `claude` in a real tab) reproduced the loss once per run: the
+  key after the **first** click into the window never reached GTK at all
+  (a capture-phase key controller on the window saw nothing, no commit,
+  the guard down), while the key after a second click arrived. The
+  compositor delivers the key before its keyboard focus has moved to the
+  window the click activated; a harness that clicks a window for the
+  first time and types in the same breath loses that key.
+- **Running the suite on it:** `python3 scripts/run_e2e.py --pty-backend
+  server` (CI runs both backends as `e2e-shard (<backend>, N)`); a single
+  check: `COLLINS_PTY_BACKEND=server … python3 scripts/check_x.py`.
+
 ## The service's pty server (ptyserver)
 
-`collins/service/ptyserver.py` (GLib only, nothing from GTK; not yet wired
-into the app) is the table of terminals the service will own, one `Pty`
-per agent session and per panel shell (spec §3.3, PR-1.5).
+`collins/service/ptyserver.py` (GLib only, nothing from GTK; wired into the
+app through `service.core.ServiceCore` and the loopback, used by every tab
+on the server backend) is the table of terminals the service owns, one
+`Pty` per agent session and, from PR-1.8, per panel shell (spec §3.3,
+PR-1.5).
 
 - **Lifetime.** `PtyServer.spawn(kind, argv, cwd, env, cols, rows, …)`
   does `os.openpty()`, sets the window size on the slave, forks, and in the

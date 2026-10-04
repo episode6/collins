@@ -323,8 +323,12 @@ def test_sinks_are_told_of_size_and_active_changes(server):
     assert last(a)["active"] is True and last(a)["sized_for"] == "laptop" and last(a)["cols"] == 80
     assert last(b)["active"] is False and last(b)["sized_for"] == "laptop"
     server.write(pty, b"z", sink=b)  # b takes over and its size applies
-    assert last(a) == {"t": "pty", "pty": pty, "kind": "shell", "cols": 100, "rows": 30,
-                       "active": False, "sized_for": "desk"}
+    event = last(a)
+    assert event["pid"] == server.get(pty).pid and event["cwd"] == server.get(pty).cwd
+    assert {k: v for k, v in event.items() if k not in ("pid", "cwd")} == {
+        "t": "pty", "pty": pty, "kind": "shell", "cols": 100, "rows": 30,
+        "active": False, "sized_for": "desk",
+    }
     assert last(b)["active"] is True
     server.resize(pty, 90, 28, sink=b)
     assert last(a)["cols"] == 90 and last(b)["cols"] == 90

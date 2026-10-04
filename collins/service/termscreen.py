@@ -629,13 +629,29 @@ class Screen:
 
     def capture_contents(self) -> str:
         """The scrollback and the screen as text, trailing empty rows
-        dropped: what `read_terminal` and the panel history want. On the
-        alternate screen the scrollback is out of reach, as in VTE."""
-        rows = [_runs_text(runs) for runs in self.scrollback] if not self.on_alt else []
-        rows.extend(self.rows())
+        dropped: what `read_terminal` and the panel history want. A row
+        that wrapped runs into the next with nothing between them, as
+        VTE's `write_contents_sync` gives a soft-wrapped line (measured in
+        PR-1.7's attach check: a 150-character command line on a 100
+        column grid came back as one line). On the alternate screen the
+        scrollback is out of reach, as in VTE."""
+        if self.on_alt:
+            rows = list(self.rows())
+            wrapped = list(self.grid.wrapped)
+        else:
+            rows = [_runs_text(runs) for runs in self.scrollback]
+            wrapped = list(self.scrollback_wrapped)
+            rows.extend(self.rows())
+            wrapped.extend(self.grid.wrapped)
         while rows and not rows[-1]:
             rows.pop()
-        return "\n".join(rows)
+            wrapped.pop()
+        out = []
+        for index, row in enumerate(rows):
+            out.append(row)
+            if index < len(rows) - 1 and not wrapped[index]:
+                out.append("\n")
+        return "".join(out)
 
     # -- the saved model (PR-1.5)
 
