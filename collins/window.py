@@ -51,7 +51,6 @@ from . import (
     panelhistory,
     pkgrepos,
     sandboxplan,
-    trust,
     updatecheck,
     welcome,
 )
@@ -103,6 +102,8 @@ from .projecticons import project_icon_data
 from .providers import SessionOptions, available_providers, default_provider, get_provider
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
+from .remotestate import RemoteState
+from .remotestore import RemoteStore
 from .replayview import ReplayTab
 from .service import session as live_session
 from .sessions import (
@@ -119,8 +120,8 @@ from .sessions import (
     worktree_project_root,
 )
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
-from .state import AppState, clamp_window_size, editor_pops_out, panel_size_key
-from .store import SessionStore, emptied_projects
+from .state import clamp_window_size, editor_pops_out, panel_size_key
+from .store import emptied_projects
 from .svgtexture import svg_texture
 from .switcher import QuickSwitcher
 from .taborder import neighbour_tab, tab_order
@@ -317,8 +318,11 @@ def session_window(
 
 
 class MainWindow(Adw.ApplicationWindow):
-    def __init__(self, state: AppState, store: SessionStore, **kwargs) -> None:
+    def __init__(self, state: RemoteState, store: RemoteStore, **kwargs) -> None:
         super().__init__(**kwargs)
+        # The app's mirrors of the service's state and store (see
+        # remotestate, remotestore): every read here is local, every
+        # write a request the mirror makes optimistically.
         self.state = state
         self.store = store
         self.set_title(_APP_TITLE)
@@ -994,6 +998,9 @@ class MainWindow(Adw.ApplicationWindow):
         if tab.fork or not tab.session_id:
             return
         self.state.set_session_draft(tab.session_id, tab.capture_composer_draft())
+        # A close: the draft goes to the service now, not after the
+        # mirror's debounce (remotestate).
+        self.state.flush_drafts(tab.session_id)
 
     def _busy_tab_count(self) -> int:
         """Tabs the quit confirmation should count as active sessions. An
@@ -2043,15 +2050,20 @@ class MainWindow(Adw.ApplicationWindow):
         Chats are exempt: their directory is an empty one Collins created
         moments earlier and trusted itself (see chats.trust_chat_dir).
         """
-        root = trust.trust_root(cwd)
-        if chats.is_chat_cwd(cwd) or trust.is_trusted(root):
+        if chats.is_chat_cwd(cwd):
+            proceed()
+            return
+        # The CLI's config is the service machine's: the question and the
+        # answer are requests (trust.check, trust.grant).
+        trusted, root = self.store.folder_trust(cwd)
+        if trusted:
             proceed()
             return
 
         def accept() -> None:
             # Record the answer where the CLI reads it, so the terminal doesn't
             # open onto the agent's own copy of the question we just asked.
-            trust.trust_dir(root)
+            self.store.trust_folder(root)
             proceed()
 
         dialogs.trust_folder_dialog(
@@ -2089,7 +2101,7 @@ class MainWindow(Adw.ApplicationWindow):
         hands are skipped.
         """
         provider = provider or self._default_provider()
-        if not (chats.is_chat_cwd(cwd) or trust.is_trusted(trust.trust_root(cwd))):
+        if not (chats.is_chat_cwd(cwd) or self.store.folder_trust(cwd)[0]):
             return None
         return self._launch_new_session(
             cwd, provider, options, worktree, background=True,
@@ -2158,7 +2170,7 @@ class MainWindow(Adw.ApplicationWindow):
             # written down before it starts, or the CLI refuses to cut the
             # worktree and exits (see trust.trust_launch_dir; the tab catches
             # what still slips through, in _check_worktree_launch).
-            trust.trust_launch_dir(cwd)
+            self.store.trust_folder(cwd, launch=True)
             options = replace(options or SessionOptions(), worktree=True)
         tab = TerminalTab(
             cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
@@ -2382,7 +2394,7 @@ class MainWindow(Adw.ApplicationWindow):
         cwd = tab.start_cwd or ""
         worktree = bool(worktree) and (Path(cwd) / ".git").exists()
         if worktree:
-            trust.trust_launch_dir(cwd)  # see _launch_new_session
+            self.store.trust_folder(cwd, launch=True)  # see _launch_new_session
         options = replace(
             tab.launch_options or SessionOptions(),
             worktree=worktree,
@@ -2821,6 +2833,11 @@ class MainWindow(Adw.ApplicationWindow):
         a directory), floated over the sessions panel like the archive's
         Undo. Plain text: toast titles are markup by default, and a path
         can carry an ampersand."""
+        self.show_toast(text)
+
+    def show_toast(self, text: str) -> None:
+        """A short plain-text message over the sessions panel: a tab's,
+        or the app's (a write the service refused, see remotestate)."""
         self.sidebar.toast_overlay.add_toast(Adw.Toast(title=GLib.markup_escape_text(text)))
 
     def _settle_sandbox_box(self, tab: TerminalTab, session_id: str) -> None:
@@ -2902,6 +2919,9 @@ class MainWindow(Adw.ApplicationWindow):
         if tab.fork or not tab.session_id:
             return
         self.state.set_session_draft(tab.session_id, draft)
+        # A stash is a composer's close (or a send that spent the
+        # draft): flushed past the mirror's debounce (remotestate).
+        self.state.flush_drafts(tab.session_id)
 
     def _panel_size_seed(self, scope: str, mode: str) -> int:
         """The app-wide px a dock strip opens at before the tab has sized it
@@ -2979,7 +2999,7 @@ class MainWindow(Adw.ApplicationWindow):
         """
         if self._launch_sweep_done or self._launch_sweep_source is not None:
             return
-        if not self.store.sessions:
+        if not self.store.session_count():
             return  # nothing to sweep yet; the next scan may have some
         if not self.state.get_setting("refresh_prs_on_launch"):
             self._launch_sweep_done = True
@@ -5188,8 +5208,13 @@ class MainWindow(Adw.ApplicationWindow):
         others get the same treatment from _on_selected_page_changed when
         they're switched to, and refreshing a tab nobody is looking at is a
         `gh` call for nothing.
+
+        Going the other way, the window losing focus is a blur: a draft
+        still waiting on the state mirror's debounce goes to the service
+        (remotestate.flush_drafts).
         """
         if not self.is_active():
+            self.state.flush_drafts()
             return
         page = self.tab_view.get_selected_page()
         if page is not None and isinstance(page.get_child(), TerminalTab):
@@ -6861,7 +6886,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.set_selection_mode(value.get_boolean())
 
     def _sync_trash_archived_action(self) -> None:
-        self._trash_archived_action.set_enabled(bool(self.store.archived_sessions()))
+        # The count rides on every refresh (store.has_archived): the
+        # archived sessions themselves are only paged in for the delete.
+        self._trash_archived_action.set_enabled(self.store.has_archived())
 
     def session_is_running(self, session_id: str) -> bool:
         """Whether the session has a tab in this window or runs as a
@@ -6983,6 +7010,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.set_panel_layout(session_id, None)
         self.state.set_editor_state(session_id, None)
         self.state.set_session_draft(session_id, "")
+        self.state.flush_drafts(session_id)
         self.store.pr_store.set_records(session_id, [])
         self.state.set_session_attachments(session_id, [])
         if session_id in self.state.sandboxed_sessions:

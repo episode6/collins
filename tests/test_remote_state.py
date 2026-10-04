@@ -268,6 +268,46 @@ def test_update_settings_splits_by_side(mirror):
     assert state.get_setting("scrollback") == 500
 
 
+def test_every_shared_key_survives_the_trip(app_state, tmp_path):
+    """What the service exports, a mirror imports to the same value: each
+    key's cleaner keeps everything a real state holds."""
+    from collins.state import SHARED_KEYS
+
+    service = app_state.AppState(migrate=True, device=False)
+    box = "a" * 32
+    service.set_name("s1", "Named")
+    service.set_generated_name("s2", "Generated")
+    service.set_cli_titles({"s3": "CLI"})
+    service.set_emoji("s1", "🦊")
+    service.toggle_favorite("s1")
+    service.set_archived("s2", True)
+    service.set_project_archived("old", True)
+    service.set_project_worktree("alpha", True)
+    service.set_project_sandbox("alpha", False)
+    service.set_sandboxed("s1", True, box=box)
+    service.set_sandbox_grants(box, ["/data"])
+    service.set_sandbox_project_grants("/home/u/alpha", ["/data"])
+    service.set_project_order(["beta", "alpha"])
+    service.keep_virtual_projects({"kept": "/home/u/kept"})
+    service.set_groups_expanded(["proj:alpha"], True)
+    service.set_session_prs("s1", [{"number": 1, "url": "https://github.com/o/r/pull/1"}])
+    service.set_session_draft("s1", "half")
+    service.set_process_baseline("s1", ["node mcp"])
+    service.forward_session("s1", "s4")
+    service.set_pending_detach("s5", provider="claude", cwd="/home/u", uuid="u")
+    service.set_pty(3, {"kind": "agent", "cwd": "/home/u", "cols": 80, "rows": 24})
+    service.set_setting("title_model", "none")
+    link = FakeLink()
+    mirror = RemoteState(link, ui=uistate.UiState(tmp_path / "ui.json", device_defaults()))
+    for name in SHARED_KEYS:
+        link.event(name, service.export_key(name))
+    for name in SHARED_KEYS:
+        assert mirror.export_key(name) == service.export_key(name), name
+    assert mirror.resolve_forward("s1") == "s4"
+    assert mirror.sandbox_box("s4") == box
+    assert mirror.get_setting("title_model") == "none"
+
+
 def test_service_scoped_settings_wait_for_the_service_id(tmp_path):
     link = FakeLink()
     ui = uistate.UiState(tmp_path / "ui-state.json", device_defaults())
