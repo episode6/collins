@@ -1465,6 +1465,10 @@ class PanelTerminal(Gtk.Box):
         """The service's pty this shell shows (the loopback's `pty_of`), or
         None: before the spawn, after the exit, once released."""
         view = self._view
+        # `exited`: between `pty-exited` and the next spawn the view still
+        # names the old pty, whose id the service has dropped (or, in the
+        # beat before the reap lands, holds a finished pty with no master):
+        # nothing is read from or written to it.
         if view is None or view.pty is None or view.exited or self._client is None:
             return None
         try:

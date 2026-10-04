@@ -233,7 +233,7 @@ def test_clear_wipes_a_shells_model_and_refuses_an_agent(tmp_path, restore_shell
     agent = client.request({"t": "spawn", "kind": "agent", "cwd": str(tmp_path)})["pty"]
     with pytest.raises(loopback.RequestRefused) as refused:
         client.request({"t": "clear", "pty": agent})
-    assert refused.value.error == protocol.ERROR_UNKNOWN
+    assert refused.value.error == protocol.ERROR_REFUSED
 
 
 # -- the panel history

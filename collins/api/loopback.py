@@ -71,6 +71,12 @@ class _PtySink:
         self.pty = pty
         self.device = client.device
 
+    @property
+    def term(self) -> dict:
+        """The client's terminal, read live (the pty server answers the
+        active client's colours)."""
+        return self.client.term
+
     def send_output(self, data: bytes, flags: int) -> None:
         header = protocol.unpack_header(protocol.pack_header(protocol.TAG_OUTPUT, flags, self.pty, 0))
         refusal = protocol.check_frame(header, protocol.SERVICE)
@@ -103,6 +109,7 @@ class LoopbackClient:
         self._on_output = on_output
         self._on_event = on_event
         self.device = device
+        self.term: dict = {}  # set by the `theme` event (ServiceCore._ev_theme)
         self._next_id = 1
         self._sinks: dict[int, _PtySink] = {}
         self.closed = False

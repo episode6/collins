@@ -566,6 +566,11 @@ PR-1.5).
   A sink is any object with `send_output(bytes, flags)` and
   `send_event(dict)`; `drop_queued()` and a `device` attribute are
   optional; sinks are keyed by identity.
+- **The active client's colours answer the queries** (§3.3): a client's
+  `theme` event sets its own term (`LoopbackClient.term`, which its sinks
+  read), and a pty's responder takes its active sink's
+  (`PtyServer.pty_term`, re-applied whenever the active client or a
+  term changes), the last term any client sent while none is active.
 - **The active client owns the size** (D1): the last sink to type
   (`write(…, sink=)`) or take focus (`focus(…, True)`), the first to
   attach when none (a newcomer takes the role when nobody holds it, other

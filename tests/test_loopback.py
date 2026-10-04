@@ -172,6 +172,14 @@ def test_resize_focus_and_theme_events_reach_the_pty_server(server):
     assert [e for e in a.events if e["t"] == "pty"][-1]["active"] is False
     cb.send_event({"t": "theme", "term": {"vte": 8400, "fg": "#ffffff", "bg": "#000000", "scheme": "dark"}})
     assert server.core.ptys.get(pty).state.dark is True
+    # The theme is b's own: b is active, so b's colours answer; a's later
+    # theme is remembered as a's and changes nothing for b's pty.
+    assert server.core.ptys.get(pty).state.background == (0, 0, 0)
+    ca.send_event({"t": "theme", "term": {"bg": "#102030"}})
+    assert ca.term == {"bg": "#102030"} and cb.term["bg"] == "#000000"
+    assert server.core.ptys.get(pty).state.background == (0, 0, 0)
+    ca.send_event({"t": "focus", "pty": pty, "focused": True})
+    assert server.core.ptys.get(pty).state.background == (0x1010, 0x2020, 0x3030)
 
 
 def test_paint_reaches_the_model_and_every_client(server):

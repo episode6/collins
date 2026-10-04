@@ -2531,6 +2531,8 @@ class App(Adw.Application):
             for i in range(window.tab_view.get_n_pages()):
                 tab = window.tab_view.get_nth_page(i).get_child()
                 if isinstance(tab, TerminalTab) and tab.sandbox_box == box and tab.sandbox_plan_path:
+                    # A plan file gone from disk is still returned: the
+                    # launcher fails at exec, SpawnError, refused with its errno.
                     return tab.sandbox_plan_path
         return None
 

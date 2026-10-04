@@ -867,3 +867,55 @@ def test_the_server_loads_no_gtk():
         [sys.executable, "-c", code], cwd=root, env=env, capture_output=True, text=True, check=True
     )
     assert out.stdout.strip() == "[]"
+
+
+# -- the active client's colours, and attaching again (PR-1.8 review)
+
+
+def test_a_ptys_colour_queries_follow_its_active_client(server):
+    """§3.3: the term a pty's queries are answered from is its active
+    sink's, the last one any client sent standing in while none is active;
+    one client's theme never answers another's pty. (A pty per question:
+    cat echoes each answer back, which the stream reads as the program
+    setting the colour itself.)"""
+    a, b = Sink("a"), Sink("b")
+    a.term, b.term = {"bg": "#102030"}, {"bg": "#405060"}
+    query = b"\x1b]11;?\x07"
+
+    def two_sinks() -> int:
+        pty = spawn_cat(server)
+        server.attach(pty, a, 100, 30)  # the first to attach: active
+        server.attach(pty, b, 100, 30)
+        return pty
+
+    first = two_sinks()
+    server.set_term(b.term)  # b's theme arrives last: the fallback, not a's answer
+    server.write(first, query, sink=a)
+    wait_live(a, b"\x1b]11;rgb:1010/2020/3030\x07")
+
+    second = two_sinks()
+    server.focus(second, b, True)  # b is active on this one
+    server.write(second, query, sink=b)
+    wait_live(b, b"\x1b]11;rgb:4040/5050/6060\x07")
+    assert server.get(first).state.background == (0x1010, 0x2020, 0x3030)  # a's still
+
+    third = two_sinks()
+    server.detach(third, a)  # the active one leaves: nobody is active
+    server.set_term({"bg": "#708090"})
+    server.write(third, query)
+    wait_live(b, b"\x1b]11;rgb:7070/8080/9090\x07")
+
+
+def test_attaching_an_attached_sink_again_is_idempotent(server):
+    """A panel shell's Clear re-attaches its own sink: one attachment
+    still, one more redraw, one more `pty` event, and it stays active."""
+    pty = spawn_cat(server)
+    sink = Sink()
+    server.attach(pty, sink, 100, 30)
+    redraws = len(sink.redraws())
+    events = len([e for e in sink.events if e.get("t") == "pty"])
+    reply = server.attach(pty, sink, 100, 30)
+    assert len(server.get(pty).attachments) == 1
+    assert len(sink.redraws()) == redraws + 1
+    assert len([e for e in sink.events if e.get("t") == "pty"]) == events + 1
+    assert reply["active"] is True and server.get(pty).active == id(sink)

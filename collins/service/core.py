@@ -77,6 +77,7 @@ class Client(Protocol):
     """What the core needs of a connected client (the transport's object)."""
 
     device: str
+    term: dict  # its terminal (the hello's ``term``, the ``theme`` event)
 
     def sink_for(self, pty: int):
         """The sink the pty server hands this client's output and events
@@ -267,9 +268,9 @@ class ServiceCore:
         ``clear`` is the composer's erase of the CLI's box, PR-1.10's."""
         pty_id = message.get("pty")
         if self.ptys.get(pty_id).kind != "shell":
-            return protocol.refuse(
-                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
-            )
+            # Refused, not unknown: the type is served, an agent's case is
+            # not yet, and a client can tell the two apart.
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "clear of an agent's box is PR-1.10's")
         self.ptys.clear(pty_id)
         return protocol.reply(message.id)
 
@@ -284,7 +285,11 @@ class ServiceCore:
         self.ptys.focus(pty_id, client.sink_for(pty_id), bool(event.get("focused")))
 
     def _ev_theme(self, event: protocol.Message, client: Client) -> None:
-        term = event.get("term") or {}
+        """A client's terminal: its own (its sinks answer `term` from it),
+        so a pty's queries are answered with its active client's colours
+        (§3.3), the last one seen standing in while none is active."""
+        term = dict(event.get("term") or {})
+        client.term = term
         self.ptys.set_term(term)
 
     # -- input
