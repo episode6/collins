@@ -14,6 +14,31 @@ description: >-
 
 # Notifications, the status icon, updates and Caffeine
 
+## Who owns what (PR-1.11)
+
+The service produces every record and owns the history and the unread set
+(split spec §3.13): `service/notifications.py`'s `ServiceNotifications`
+holds a `NotificationCenter` over state.json's records (persisted after
+each change; `notifications` is no longer a key a client writes) and
+publishes `notify` events (the snapshot oldest first, then each row that
+appeared, changed or left, `removed`). `app.notification_center` is the
+mirror, `remotenotify.RemoteNotifications`: the center's API, every write a
+request — `post` (`notify.post`: the service mints the id and time,
+coalesces a bell, replaces an update), `remove`, `clear`, `set_green`
+(`notify.green`; green is still decided by the client's edges in Phase 1,
+as the tracker runs there), `rekey_session`, and the reads (`seen`, told
+to every other client), applied here first. Listeners hear one `changed`
+per write. Each client applies the delivery table below with its own
+focus; the card, sound, desktop notification, flash, tray, dock badge and
+Caffeine are pure client. **A row's text is a msgid and args** (§3.14):
+`Notification.msgid` / `args` cross the wire and are persisted beside an
+English `body` (for an older build); a client shows `i18n.translate(msgid,
+args)` (no args: never formatted — an agent's `notify_user` text is its own
+msgid). Collins' own words are `BELL_MSGID`, `FINISHED_MSGID` and the
+update's body. A record from before has its body read as its msgid.
+`notify_user` with no client attached is recorded unread with its session
+flagged (`service/tools.py`); the command sink for that case is PR-3.4's.
+
 ## The center (`notifycenter.py`, GTK-free)
 
 `NotificationCenter` owns every notification Collins has raised, the number

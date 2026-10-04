@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-02. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 """Translation setup. Call init() once at startup, then use _() everywhere."""
 
 from __future__ import annotations
@@ -50,3 +50,37 @@ def ngettext(singular: str, plural: str, n: int) -> str:
 def N_(message: str) -> str:
     """No-op marker for strings translated later (extracted by xgettext -k N_)."""
     return message
+
+
+def _formatted(text: str, args: dict | None) -> str | None:
+    if not args:
+        return text
+    try:
+        return text.format_map(dict(args))
+    except (KeyError, ValueError, IndexError, AttributeError, TypeError):
+        return None
+
+
+def translate(msgid: str, args: dict | None = None) -> str:
+    """A string the service sent as a msgid and its args, as this client's
+    person reads it (split-service spec §3.14): the msgid through `_()`
+    and, with args, `str.format_map`. Text with no args is never formatted:
+    an agent's words, a git error's, cross as their own msgid and may hold
+    braces of their own. A translation whose placeholders don't fit the
+    args falls back to the English source, then to the msgid as it is."""
+    if not msgid:
+        return ""
+    for candidate in (_(msgid), msgid):
+        text = _formatted(candidate, args)
+        if text is not None:
+            return text
+    return msgid
+
+
+def english(msgid: str, args: dict | None = None) -> str:
+    """The same string in the English source, as the service writes it
+    where no client is reading (a persisted record's readable copy)."""
+    if not msgid:
+        return ""
+    text = _formatted(msgid, args)
+    return msgid if text is None else text

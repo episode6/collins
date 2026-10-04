@@ -38,6 +38,7 @@ from . import (
     gitloads,
     gitops,
     is_debug_app_id,
+    jobclient,
     keybindings,
     keymap,
     mcptools,
@@ -113,10 +114,8 @@ from .sessions import (
     path_within,
     project_name_for_cwd,
     removable_worktree,
-    restore_worktree,
     resume_cwd,
     session_from_file,
-    trash_worktree,
     worktree_project_root,
 )
 from .sidebar import ARCHIVE_GHOST_MS, SessionSidebar, package_repo_label
@@ -696,6 +695,12 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.sidebar.connect("rows-reordered", lambda *_: self._sort_tabs())
         self.store.connect("refreshed", self._on_store_refreshed)
+        if hasattr(self.state, "connect_changed"):
+            # A name the service wrote (the set_session_title tool runs there
+            # since PR-1.11): the session's open tab wears it, as a rename
+            # made here does (rename_session_tab).
+            self.state.connect_changed(self._on_state_name_changed)
+            self.connect("destroy", lambda *_a: self.state.disconnect_changed(self._on_state_name_changed))
 
         # Yellow "running detached" guide lines: keep the set of backgrounded session
         # ids fresh (see bgstatus.py for the trigger strategy).
@@ -1908,19 +1913,25 @@ class MainWindow(Adw.ApplicationWindow):
     def _new_session_in_chats(self, provider=None) -> None:
         """A session in the virtual Chats project: launched in a fresh
         throwaway directory instead of a real project folder."""
-        try:
-            cwd = chats.create_chat_dir()
-        except OSError as err:
-            dialogs.error_dialog(self, _("Could not create chat directory"), str(err))
-            return
-        # Skip the CLI's folder-trust prompt: we created this directory
-        # ourselves two lines ago, empty.
-        chats.trust_chat_dir(cwd)
-        # Unknown groups start collapsed; the first chat must not vanish the
-        # moment its placeholder resolves into a real row. (Key matches the
-        # sidebar's _group_state_key for CHATS_GROUP.)
-        self.state.set_group_expanded("chats:", True)
-        self._start_new_session(cwd, provider)
+        # The folder is the service's to make, and to pre-trust in the
+        # CLI's config so the launch skips the folder-trust prompt: it is
+        # an empty directory it made a moment before (the ``chats.trust``
+        # job, chats.trust_chat_dir). The session starts when it lands.
+
+        def landed(event: jobclient.JobEvent) -> None:
+            if not event.finished:
+                return
+            cwd = event.result.get("cwd")
+            if not event.ok or not isinstance(cwd, str) or not chats.is_chat_cwd(cwd):
+                dialogs.error_dialog(self, _("Could not create chat directory"), event.text)
+                return
+            # Unknown groups start collapsed; the first chat must not vanish
+            # the moment its placeholder resolves into a real row. (Key
+            # matches the sidebar's _group_state_key for CHATS_GROUP.)
+            self.state.set_group_expanded("chats:", True)
+            self._start_new_session(cwd, provider)
+
+        jobclient.start("chats.trust", {"create": True}, landed)
 
     def _choose_new_session_folder(self, provider=None) -> None:
         self._new_session_provider = provider or self._default_provider()
@@ -2766,6 +2777,7 @@ class MainWindow(Adw.ApplicationWindow):
             notifycenter.KIND_BELL,
             notifycenter.bell_body(),
             notifycenter.delivery(notifycenter.KIND_BELL, focus),
+            msgid=notifycenter.BELL_MSGID,
         )
 
     def _flash_session(self, page: Adw.TabPage | None) -> None:
@@ -5314,6 +5326,7 @@ class MainWindow(Adw.ApplicationWindow):
         deliveries: frozenset[str],
         *,
         notification: Notification | None = None,
+        msgid: str = "",
     ) -> frozenset[str]:
         """Do what the delivery table asked for a notification of *kind*
         from *page*'s tab, and return what was done — the set itself, after
@@ -5353,7 +5366,9 @@ class MainWindow(Adw.ApplicationWindow):
         if notification is not None:
             key, title = notification.session_id or key, notification.title or title
         elif deliveries & {notifycenter.DELIVER_ROW, notifycenter.DELIVER_ROW_READ}:
-            notification = self.notify_center.make(kind, key, title, project, body)
+            # The row is the service's (notify.post); its text crosses as a
+            # msgid (§3.14): Collins' own words, or the agent's as theirs.
+            notification = self.notify_center.make(kind, key, title, project, body, msgid=msgid or body)
             notification.read = notifycenter.DELIVER_ROW_READ in deliveries
             notification = self.notify_center.post(notification)
         if notifycenter.DELIVER_CARD in deliveries and notification is not None:
@@ -6086,6 +6101,14 @@ class MainWindow(Adw.ApplicationWindow):
         if title:
             self.rename_session_tab(session_id, title)
 
+    def _on_state_name_changed(self, key: str, entry: str | None, _reverted: bool) -> None:
+        if key != "names" or not entry:
+            return
+        page = self._page_for(entry)
+        session = self.store.get_session(entry) if page is not None else None
+        if page is not None and session is not None:
+            page.set_title(self._tab_title(session))
+
     def rename_session_tab(self, session_id: str, title: str) -> None:
         """Rename a session and retitle its open tab — the rename dialog's
         save path, callable without the dialog. The session MCP tools use it
@@ -6720,17 +6743,17 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _trash_worktree(self, session_id: str, state: dict) -> None:
-        """Move a stopped session's worktree to the trash on a worker thread
-        (sessions.trash_worktree); a toast when it is there, the error's
-        words in a dialog when it isn't. The record is kept in
-        _trashed_worktrees so the archive's Undo restores the worktree too —
-        or, when Undo (or a restore by hand) beat the move, restored right
-        away."""
+        """Move a stopped session's worktree to the trash: the service's
+        ``worktree.trash`` job (sessions.trash_worktree on its machine); a
+        toast when it is there, the error's words in a dialog when it
+        isn't. The record is kept in _trashed_worktrees so the archive's
+        Undo restores the worktree too — or, when Undo (or a restore by
+        hand) beat the move, restored right away."""
         path = str(state["worktreePath"])
 
-        def work() -> None:
-            error = trash_worktree(state)
-            GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
+        def landed(event: jobclient.JobEvent) -> None:
+            if event.finished:
+                done(event.text if not event.ok else "")
 
         def done(error: str) -> bool:
             if error:
@@ -6746,18 +6769,18 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return GLib.SOURCE_REMOVE
 
-        threading.Thread(target=work, daemon=True).start()
+        jobclient.start("worktree.trash", {"state": dict(state)}, landed)
 
     def _restore_worktree(self, state: dict) -> None:
-        """Bring a trashed worktree back (sessions.restore_worktree) on a
-        worker thread: a toast when it is back, the trouble's words in a
-        dialog otherwise — the directory may still be in the trash then, and
-        the dialog says so."""
+        """Bring a trashed worktree back: the service's ``worktree.restore``
+        job (sessions.restore_worktree): a toast when it is back, the
+        trouble's words in a dialog otherwise — the directory may still be
+        in the trash then, and the dialog says so."""
         path = str(state["worktreePath"])
 
-        def work() -> None:
-            error = restore_worktree(state)
-            GLib.idle_add(done, error, priority=GLib.PRIORITY_DEFAULT)
+        def landed(event: jobclient.JobEvent) -> None:
+            if event.finished:
+                done(event.text if not event.ok else "")
 
         def done(error: str) -> bool:
             if error:
@@ -6775,7 +6798,7 @@ class MainWindow(Adw.ApplicationWindow):
                 )
             return GLib.SOURCE_REMOVE
 
-        threading.Thread(target=work, daemon=True).start()
+        jobclient.start("worktree.restore", {"state": dict(state)}, landed)
 
     def _offer_undo(self, session_ids: list[str]) -> None:
         """An archive just landed: arm Undo with it — replacing whatever the

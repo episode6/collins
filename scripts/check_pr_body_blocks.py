@@ -58,6 +58,10 @@ from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
 from collins import i18n, mdblocks, mdwidgets, pictures, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
+from collins import apilink  # noqa: E402
+
+# No app behind the page: its gh requests go to a loopback of its own.
+apilink.allow_harness()
 from collins.editor import GtkSource  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 

@@ -11,11 +11,14 @@ typed. Under it sit the target directory, which starts at the
 `clone_directory` setting, and the full destination path in plain view,
 with a line saying whether git will accept it there.
 
-The list arrives on a daemon thread a page at a time and is cached for the
-app's lifetime, so a second open is instant and quietly refreshed. The
+The list and the clone are the service's (split-service spec §3.15,
+PR-1.11): `gh` and git run on the service's machine, as jobs
+(`service.jobs`: ``clone.repos`` and ``clone``) whose events this dialog
+reads (`jobclient`). The list arrives a page at a time and is cached for
+the app's lifetime, so a second open is instant and quietly refreshed. The
 clone runs `gh repo clone` / `git clone` in its own process group with
-every prompt turned off; Cancel (or closing the dialog) kills the group,
-and git removes the half-made folder itself.
+every prompt turned off; Cancel (or closing the dialog) cancels the job,
+which kills the group, and git removes the half-made folder itself.
 """
 
 from __future__ import annotations
@@ -23,9 +26,6 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import signal
-import subprocess
-import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -35,10 +35,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import clonerepo, ghsetup  # noqa: E402
+from . import clonerepo, ghsetup, jobclient  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
-from .prstatus import gh_json  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -46,9 +45,6 @@ log = logging.getLogger(__name__)
 # at once while a fresh fetch replaces it.
 _repo_cache: list[clonerepo.Repo] | None = None
 
-
-def _fetch_page(args: list[str]) -> object | None:
-    return gh_json(args, timeout=clonerepo.PAGE_TIMEOUT_S)
 
 
 class CloneDialog(Adw.Dialog):
@@ -62,7 +58,8 @@ class CloneDialog(Adw.Dialog):
         self._loading = True
         self._list_problem: str | None = None  # a ghsetup state, or "failed"
         self._selected_name: str | None = None
-        self._proc: subprocess.Popen | None = None
+        self._job: str | None = None  # the clone job in flight
+        self._list_job: str | None = None
         self._closed = False
         self.set_content_width(600)
         self.set_content_height(640)
@@ -182,25 +179,25 @@ class CloneDialog(Adw.Dialog):
     # -- the repository list -------------------------------------------------
 
     def _start_fetch(self) -> None:
-        def work() -> None:
-            state = ghsetup.check()
-            if state != ghsetup.READY:
-                GLib.idle_add(self._land_repos, None, state, priority=GLib.PRIORITY_DEFAULT)
-                return
-            repos = clonerepo.fetch_repos(
-                _fetch_page,
-                lambda so_far: GLib.idle_add(
-                    self._land_page, so_far, priority=GLib.PRIORITY_DEFAULT
-                ),
-            )
-            GLib.idle_add(
-                self._land_repos,
-                repos,
-                None if repos is not None else "failed",
-                priority=GLib.PRIORITY_DEFAULT,
-            )
+        """The service's ``clone.repos`` job: a page at a time as running
+        events, then the whole list, or the problem (a ghsetup state, or
+        "failed")."""
 
-        threading.Thread(target=work, daemon=True, name="clone-repo-list").start()
+        def on_event(event: jobclient.JobEvent) -> None:
+            if not event.finished:
+                repos = clonerepo.repos_from_records(event.result.get("repos"))
+                if repos is not None:
+                    self._land_page(repos)
+                return
+            if event.ok:
+                repos = clonerepo.repos_from_records(event.result.get("repos"))
+                problem = event.result.get("problem")
+                problem = problem if isinstance(problem, str) else None
+                self._land_repos(repos, problem if repos is None else None)
+            else:
+                self._land_repos(None, "failed")
+
+        self._list_job = jobclient.start("clone.repos", {}, on_event)
 
     def _land_page(self, repos: list[clonerepo.Repo]) -> bool:
         """A page arrived: show what's here so far, the rest still coming."""
@@ -347,7 +344,7 @@ class CloneDialog(Adw.Dialog):
             self._dest_label.set_text(os.path.join(shown, _("<repository>")))
             self._dest_label.add_css_class("dim-label")
         bad = status in (clonerepo.EXISTS, clonerepo.BLOCKED, clonerepo.RELATIVE)
-        if self._proc is not None:
+        if self._job is not None:
             note = _("Cloning…")
         elif status == clonerepo.RELATIVE:
             note = _("Clone into needs a full path, like ~/dev")
@@ -370,7 +367,7 @@ class CloneDialog(Adw.Dialog):
         self._dest_note.set_text(note)
         # Red only for a problem with a real choice behind it: no pick yet
         # is not an error, and neither is a path mid-way through typing.
-        error = self._proc is None and (
+        error = self._job is None and (
             status == clonerepo.RELATIVE or (source is not None and bad)
         )
         if error:
@@ -380,7 +377,7 @@ class CloneDialog(Adw.Dialog):
             self._dest_note.remove_css_class("error")
             self._dest_note.add_css_class("dim-label")
         self._clone_btn.set_sensitive(
-            self._proc is None and source is not None and dest is not None and not bad
+            self._job is None and source is not None and dest is not None and not bad
         )
 
     def _browse_target(self) -> None:
@@ -403,39 +400,29 @@ class CloneDialog(Adw.Dialog):
     # -- cloning -------------------------------------------------------------
 
     def _start_clone(self) -> None:
-        if self._proc is not None or not self._clone_btn.get_sensitive():
+        if self._job is not None or not self._clone_btn.get_sensitive():
             return
         source = self.source()
         dest = self.destination()
         if source is None or dest is None:
             return
-        argv = clonerepo.clone_argv(source, dest, shutil.which("gh"), shutil.which("git") or "git")
-        log.info("clone: %s", " ".join(argv))
-        try:
-            proc = subprocess.Popen(
-                argv,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                env=clonerepo.clone_env(dict(os.environ)),
-                start_new_session=True,  # no terminal to prompt on; killable as a group
-                text=True,
-                errors="replace",
-            )
-        except OSError as err:
-            self._show_error(str(err))
-            return
-        self._proc = proc
+        # Busy before the start: its refusal, which lands inside the call,
+        # is what turns it off again.
+        self._job = "starting"
         self._error.set_visible(False)
         self._set_busy(True)
+        args = {
+            "source": {"kind": source.kind, "spec": source.spec, "name": source.name},
+            "dest": str(dest),
+        }
+        started = jobclient.start("clone", args, self._clone_event)
+        if self._job == "starting":
+            self._job = started
 
-        def work() -> None:
-            output, _unused = proc.communicate()
-            GLib.idle_add(
-                self._clone_done, proc, output or "", str(dest), priority=GLib.PRIORITY_DEFAULT
-            )
-
-        threading.Thread(target=work, daemon=True, name="clone-repo").start()
+    def _clone_event(self, event: jobclient.JobEvent) -> None:
+        # One clone at a time: a finished event while one is out is its.
+        if event.finished and self._job is not None:
+            self._clone_done(event)
 
     def _set_busy(self, busy: bool) -> None:
         self._spinner.set_visible(busy)
@@ -445,22 +432,17 @@ class CloneDialog(Adw.Dialog):
         self._clone_btn.set_label(_("Cloning…") if busy else _("Clone"))
         self._refresh_destination()
 
-    def _clone_done(self, proc: subprocess.Popen, output: str, dest: str) -> bool:
-        if proc is not self._proc:
-            return GLib.SOURCE_REMOVE
-        self._proc = None
+    def _clone_done(self, event: jobclient.JobEvent) -> None:
+        self._job = None
         if self._closed:
-            return GLib.SOURCE_REMOVE
+            return
         self._set_busy(False)
-        if proc.returncode == 0 and os.path.isdir(dest):
+        dest = event.result.get("path")
+        if event.ok and isinstance(dest, str) and os.path.isdir(dest):
             self.close()
             self._on_cloned(dest)
-            return GLib.SOURCE_REMOVE
-        self._show_error(
-            clonerepo.error_summary(output)
-            or _("The clone failed (exit status {code})").format(code=proc.returncode)
-        )
-        return GLib.SOURCE_REMOVE
+            return
+        self._show_error(event.text or _("The clone failed"))
 
     def _show_error(self, text: str) -> None:
         self._error.set_text(text)
@@ -471,9 +453,6 @@ class CloneDialog(Adw.Dialog):
         group goes (gh and the git under it), and git's own signal handler
         removes the folder it had started."""
         self._closed = True
-        proc, self._proc = self._proc, None
-        if proc is not None and proc.poll() is None:
-            try:
-                os.killpg(proc.pid, signal.SIGTERM)
-            except OSError:
-                pass
+        job, self._job = self._job, None
+        jobclient.cancel(job)
+        jobclient.cancel(self._list_job)

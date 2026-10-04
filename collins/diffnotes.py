@@ -328,6 +328,27 @@ class MarkStore:
         self._serial += 1
         return f"{prefix}{self._serial}"
 
+    # -- the store over the service's API (PR-1.11) --
+
+    def export(self) -> tuple[list[dict], list[dict]]:
+        """Every mark as a record (`mark_record`): (notes, highlights), in
+        insertion order."""
+        return (
+            [mark_record(note) for note in self._notes.values()],
+            [mark_record(mark) for mark in self._highlights.values()],
+        )
+
+    def load(self, notes: object, highlights: object) -> None:
+        """Replace every mark with *notes* and *highlights* (records, each
+        re-validated: what does not read back is dropped), and mint new ids
+        past every one loaded."""
+        self._notes = {n.id: n for n in (note_from_record(r) for r in _list(notes)) if n is not None}
+        self._highlights = {
+            h.id: h for h in (highlight_from_record(r) for r in _list(highlights)) if h is not None
+        }
+        serials = [int(mark_id[1:]) for mark_id in (*self._notes, *self._highlights) if mark_id[1:].isdigit()]
+        self._serial = max([self._serial, *serials])
+
     # -- reading --
 
     def notes(self, path: str | None = None) -> list[Note]:
@@ -590,3 +611,107 @@ def _placed(files: Sequence[diffmodel.File], marks: Iterable) -> dict:
             continue
         out.setdefault((file.path, where[0]), []).append((mark, where[1]))
     return out
+
+
+# -- the marks as records (the service's store and its mirrors, PR-1.11) ----------
+
+_MARK_ID_MAX = 32
+
+
+def mark_record(mark: Note | Highlight) -> dict:
+    """A note or a highlight as `diff.notes` carries it and state.json
+    keeps it (`diff_notes`)."""
+    record = {
+        "id": mark.id,
+        "path": mark.path,
+        "side": mark.side,
+        "line": mark.line,
+        "hunk_key": mark.hunk_key,
+        "line_index": mark.line_index,
+    }
+    if isinstance(mark, Note):
+        record.update(source=mark.source, summary=mark.summary)
+        if mark.rationale is not None:
+            record["rationale"] = mark.rationale
+        if mark.author is not None:
+            record["author"] = mark.author
+    else:
+        record.update(start=mark.start, end=mark.end, tone=mark.tone)
+    return record
+
+
+def _list(value: object) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _common(raw: object, prefix: str) -> dict | None:
+    """The fields a note and a highlight share, re-validated (rule 5: a
+    record is foreign content whoever wrote it)."""
+    if not isinstance(raw, dict):
+        return None
+    mark_id = raw.get("id")
+    if not isinstance(mark_id, str) or not mark_id.startswith(prefix) or len(mark_id) > _MARK_ID_MAX:
+        return None
+    path, side, line = raw.get("path"), raw.get("side"), _int(raw.get("line"))
+    if not isinstance(path, str) or not path or len(path) > 4096:
+        return None
+    if side not in (diffmodel.OLD, diffmodel.NEW) or line is None or line < 1:
+        return None
+    hunk_key = raw.get("hunk_key")
+    index = _int(raw.get("line_index"))
+    if not isinstance(hunk_key, str) or len(hunk_key) > 256 or index is None or index < 0:
+        return None
+    return {
+        "id": mark_id,
+        "path": path,
+        "side": side,
+        "line": line,
+        "hunk_key": hunk_key,
+        "line_index": index,
+    }
+
+
+def note_from_record(raw: object) -> Note | None:
+    common = _common(raw, "n")
+    if common is None or raw.get("source") not in SOURCES:
+        return None
+    summary = summary_text(raw.get("summary"))
+    if not summary:
+        return None
+    rationale = raw.get("rationale")
+    return Note(
+        common["id"],
+        raw["source"],
+        common["path"],
+        common["side"],
+        common["line"],
+        summary,
+        bound_text(rationale) or None if isinstance(rationale, str) else None,
+        _author(raw.get("author")),
+        common["hunk_key"],
+        common["line_index"],
+    )
+
+
+def highlight_from_record(raw: object) -> Highlight | None:
+    common = _common(raw, "h")
+    if common is None:
+        return None
+    start, end, tone = _int(raw.get("start")), _int(raw.get("end")), raw.get("tone")
+    if start is None or end is None or not 0 <= start < end or tone not in TONES:
+        return None
+    return Highlight(
+        common["id"],
+        common["path"],
+        common["side"],
+        common["line"],
+        start,
+        end,
+        tone,
+        common["hunk_key"],
+        common["line_index"],
+    )

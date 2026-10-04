@@ -23,6 +23,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa:
 
 from . import (  # noqa: E402
     activity,
+    apilink,  # noqa: E402
     apppicker,
     attachpanel,
     attachrecords,
@@ -42,6 +43,8 @@ from . import (  # noqa: E402
     prmenu,
     proctree,
     ptyclient,  # noqa: E402
+    remotediffs,
+    remoteprs,
     sandboxchip,
     sandboxgrants,
     sandboxplan,
@@ -92,7 +95,6 @@ from .providers import (  # noqa: E402
 from .prstatus import (  # noqa: E402
     PullRequest,
     describe,
-    invalidate,
     known,
     parse_pr_url,
     to_records,
@@ -194,6 +196,11 @@ def service_loopback() -> LoopbackServer:
         state_dir = os.environ.get("COLLINS_PTY_STATE_DIR") or tempfile.mkdtemp(prefix="collins-pty-")
         SERVICE_LOOPBACK = LoopbackServer(ServiceCore(state_dir=Path(state_dir)))
     return SERVICE_LOOPBACK
+
+
+# A widget built with no app behind it reaches the service through the same
+# loopback (apilink.current: a PR page's gh calls, a job, a tool's reply).
+apilink.set_fallback(service_loopback)
 
 # The environment an agent tab's shell spawns with — the app's own plus the
 # two declarations that coax the CLI's progress announcements out for VTE —
@@ -1001,6 +1008,7 @@ class _TabHost:
         self._tab._on_transcript_landed(prs, lookup_empty)
 
     def session_resolved(self, session_id: str) -> None:
+        self._tab._rekey_panel_shells()
         self._tab.emit("session-resolved", session_id)
 
     def fork_resolved(self, session_id: str) -> None:
@@ -1208,8 +1216,12 @@ class PanelTerminal(Gtk.Box):
         number: int = 1,
         plan_lookup: Callable[[], str | None] | None = None,
         box_lookup: Callable[[], str] | None = None,
+        history_lookup: Callable[[], str | None] | None = None,
     ) -> None:
-        """*plan_lookup* makes this the **sandboxed** kind: `() -> the
+        """*history_lookup* (`() -> the key the tab's panel history is
+        filed under`, None for none) names the history file the service
+        writes this shell's scrollback to when its child exits (the server
+        backend; `spawn`'s ``history``, PR-1.11). *plan_lookup* makes this the **sandboxed** kind: `() -> the
         session's sandbox plan path` (or None while there is none), and
         the shell spawns as `bwrap <plan> -- $SHELL` through the same
         launcher the session's own typed line starts with — so it runs
@@ -1224,6 +1236,7 @@ class PanelTerminal(Gtk.Box):
         self._number = number
         self._plan_lookup = plan_lookup
         self._box_lookup = box_lookup
+        self._history_lookup = history_lookup
         # The plan file this shell's box was actually built from, once it
         # has spawned. A box outlives the plan it was built from: after the
         # session's *Restart to apply* the tab holds a new plan, and a
@@ -1432,6 +1445,11 @@ class PanelTerminal(Gtk.Box):
         assert view is not None and client is not None
         cols, rows = view.grid()
         request: dict = {"t": "spawn", "kind": "shell", "cwd": cwd, "cols": cols, "rows": rows}
+        history = self._history_lookup() if self._history_lookup is not None else None
+        if history:
+            # The service writes the scrollback here when the shell exits.
+            request["history"] = history
+            request["ordinal"] = self.hist
         if sandboxed:
             request["sandbox"] = True
             box = self._box_lookup() if self._box_lookup is not None else ""
@@ -1532,11 +1550,27 @@ class PanelTerminal(Gtk.Box):
             return
         if view.pty is not None and not view.exited:
             try:
+                # Filed under no key first: a page closed for good takes its
+                # history with it (the tab's saves wrote what a tab closing
+                # keeps), so the exit this close causes writes nothing.
+                client.request({"t": "panel.key", "pty": view.pty, "history": None})
                 client.request({"t": "close", "pty": view.pty, "mode": "kill"})
             except (RequestRefused, ValueError):
                 pass
         view.detach()
         client.close()
+
+    def set_history_key(self, key: str | None) -> None:
+        """Re-file this shell's history on the service under *key* (the
+        tab's key moved: its session resolved, a draft became one or
+        stopped being one). A no-op on the VTE backend and with no pty."""
+        view, client = self._view, self._client
+        if view is None or client is None or client.closed or view.pty is None or view.exited:
+            return
+        try:
+            client.request({"t": "panel.key", "pty": view.pty, "history": key or None})
+        except (RequestRefused, ValueError):
+            pass
 
     def page_closed(self) -> None:
         """PanelPage hook: the page's X (or a stowed shell's exit) closed it
@@ -2454,6 +2488,7 @@ class TerminalTab(Gtk.Box):
         if self._new_chat is None:
             return
         self._history_key = draft_id
+        self._rekey_panel_shells()
         self._new_chat.set_text(text)
         self._new_chat.set_worktree_choice(worktree)
         self._new_chat.set_sandbox_choice(sandbox)
@@ -2467,6 +2502,7 @@ class TerminalTab(Gtk.Box):
         what a fresh new chat gets the moment it becomes a draft."""
         if self._new_chat is not None:
             self._history_key = draft_id
+            self._rekey_panel_shells()
 
     def begin_session(self, options, prompt: str) -> None:
         """The screen's Send, once the window has settled the launch options
@@ -2488,6 +2524,7 @@ class TerminalTab(Gtk.Box):
             return
         self._new_chat = None
         self._history_key = None
+        self._rekey_panel_shells()
         self.session.options = options
         # Shells open right now, at a launch that will move into a worktree,
         # get the offer to move with it once the worktree exists.
@@ -2804,13 +2841,12 @@ class TerminalTab(Gtk.Box):
         # (see sandboxchip): what is inside, the workspace's grants, and a
         # restart when they changed. Hidden on every other tab, and shown
         # only once the launch settled with a plan (_sync_sandbox_chip).
+        # A client of the service's sandbox.* requests (service.sandbox):
+        # what the box holds, its grants and tools, its restart.
         self._sandbox_chip = sandboxchip.SandboxChip(
-            plan_path=lambda: self.session.sandbox_plan_path,
-            host=lambda: SANDBOX_HOST,
-            grants=lambda: SANDBOX_GRANTS,
             box=lambda: self.session.sandbox_box,
-            can_restart=self.can_restart_sandboxed,
-            on_restart=self.restart_sandboxed,
+            link=apilink.current,
+            handle=lambda: self.session.handle,
             on_open_shell=self.open_sandboxed_shell,
             on_toast=lambda text: self.emit("toast", text),
         )
@@ -4059,7 +4095,7 @@ class TerminalTab(Gtk.Box):
         self._pr_focus_refresh_at = now
         for pr in self._footer_prs:
             if not pr.merged:
-                invalidate(pr.url)
+                remoteprs.invalidate(pr.url)
         self._request_update()
 
     def note_run_finished(self) -> None:
@@ -5010,7 +5046,12 @@ class TerminalTab(Gtk.Box):
         next show, and one restored into an unsandboxed tab never starts."""
         lookup = (lambda: self.session.sandbox_plan_path) if sandboxed else None
         box = (lambda: self.session.sandbox_box) if sandboxed else None
-        shell = PanelTerminal(self._dock.next_shell_number(), plan_lookup=lookup, box_lookup=box)
+        shell = PanelTerminal(
+            self._dock.next_shell_number(),
+            plan_lookup=lookup,
+            box_lookup=box,
+            history_lookup=self._shell_history_key,
+        )
         shell.hist = self._dock.next_hist_ordinal()
         return shell
 
@@ -5123,6 +5164,7 @@ class TerminalTab(Gtk.Box):
                 loaded=mode,
             )
             self._git_page = page
+            self._bind_git_page_marks(page)
             self._dock.open_page(page, focus=focus)
         else:
             self._dock.reveal_page(page, focus=focus)
@@ -5187,6 +5229,7 @@ class TerminalTab(Gtk.Box):
         identity so a stale page closing late can't null a newer one."""
         if page is self._git_page:
             self._git_page = None
+            self._unbind_git_page_marks(clear=True)
 
     def _restore_git_page(self, page: dict) -> GitPage | None:
         """A saved layout's git page, rebuilt on what it was saved showing —
@@ -5207,7 +5250,55 @@ class TerminalTab(Gtk.Box):
             loaded=gitloads.decode_state(page),
             sidebar=gitloads.decode_sidebar(page),
         )
+        self._bind_git_page_marks(self._git_page)
         return self._git_page
+
+    # -- the diff's marks, mirrored (PR-1.11) ------------------------------------
+
+    def _marks_key(self) -> tuple[str, bool]:
+        """What this session's marks are kept under on the service: its id,
+        or its handle before the id resolves."""
+        if self.session_id:
+            return self.session_id, True
+        return self.session.handle, False
+
+    def _bind_git_page_marks(self, page: GitPage) -> None:
+        """The page's store mirrors the service's (service.diffs): seeded
+        from the copy, its changes sent whole, the service's changes loaded
+        into it."""
+        mirror = remotediffs.mirror_for(apilink.current())
+        if mirror is None:
+            return
+        view = page.diff_view
+        key, _session = self._marks_key()
+        saved = mirror.marks(key)
+        if saved:
+            view.load_marks(*saved)
+
+        def send(*_args) -> None:
+            key, session = self._marks_key()
+            mirror.send(key, session, *view.export_marks())
+
+        def loaded(marks) -> None:
+            if self._git_page is page:
+                view.load_marks(*marks)
+
+        view.connect("notes-changed", send)
+        mirror.listen(key, loaded)
+        self._marks_binding = (mirror, key, loaded)
+
+    def _unbind_git_page_marks(self, clear: bool = False) -> None:
+        """The page went: its marks go with it, as they always went with the
+        page (the service drops what it kept for the session)."""
+        binding = getattr(self, "_marks_binding", None)
+        if binding is None:
+            return
+        self._marks_binding = None
+        mirror, key, loaded = binding
+        mirror.unlisten(key, loaded)
+        if clear:
+            current, session = self._marks_key()
+            mirror.send(current, session, [], [])
 
     def _make_panel_page(self, page: dict):
         """The dock's non-shell factory for layout restore (see
@@ -5406,6 +5497,21 @@ class TerminalTab(Gtk.Box):
         if self.fork or not history_id:
             return {}
         return panelhistory.load_all(history_id)
+
+    def _shell_history_key(self) -> str | None:
+        """What a shell's history is filed under on the service: the
+        tab's key, none for a fork (forks never save)."""
+        return None if self.fork else self._history_id()
+
+    def _rekey_panel_shells(self) -> None:
+        """The tab's history key moved: tell the service, for every shell
+        it holds (the key and the moment are the service's to act on when
+        a shell exits, §3.15)."""
+        key = self._shell_history_key()
+        for shell in self._dock.shell_pages():
+            rekey = getattr(shell, "set_history_key", None)
+            if rekey is not None:
+                rekey(key)
 
     def _history_id(self) -> str | None:
         """What this tab's panel scrollback is filed under: the session id,

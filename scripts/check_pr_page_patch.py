@@ -51,6 +51,10 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from collins import i18n, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
+from collins import apilink  # noqa: E402
+
+# No app behind the page: its gh requests go to a loopback of its own.
+apilink.allow_harness()
 from collins.prstatus import PullRequest  # noqa: E402
 
 PR_URL = "https://github.com/episode6/collins/pull/55"

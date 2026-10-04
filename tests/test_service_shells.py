@@ -270,3 +270,57 @@ def test_a_shell_already_gone_writes_nothing(tmp_path, restore_shell, history):
     assert pump(3, lambda: pty not in srv.core.ptys.ptys)
     srv.write_panel_history("sess", {0: pty})
     assert panelhistory.load("sess", 0) is None
+
+
+# -- the history written at the shell's exit (PR-1.11)
+
+
+def test_a_shell_that_exits_writes_its_history_under_its_key(tmp_path, restore_shell, history):
+    """§3.15: the service writes a shell's history from its model when its
+    child exits, before the model is dropped, under the key and ordinal it
+    was spawned with."""
+    srv, client, ends = make(tmp_path)
+    restore_shell.append(srv)
+    pty = spawn_shell(client, tmp_path, history="sess", ordinal=3)
+    client.send_input(pty, b"kept at exit\r")
+    assert pump(2, lambda: "kept at exit\nkept at exit" in client.screen_of(pty).capture_contents())
+    client.request({"t": "close", "pty": pty, "mode": "kill"})
+    assert pump(3, lambda: any(e.get("t") == "pty-exited" for e in ends.events))
+    assert "kept at exit" in (panelhistory.load("sess", 3) or "")
+
+
+def test_a_shell_refiled_under_a_new_key_writes_there(tmp_path, restore_shell, history):
+    srv, client, ends = make(tmp_path)
+    restore_shell.append(srv)
+    pty = spawn_shell(client, tmp_path, history="draft-1", ordinal=0)
+    client.send_input(pty, b"moved\r")
+    assert pump(2, lambda: "moved\nmoved" in client.screen_of(pty).capture_contents())
+    client.request({"t": "panel.key", "pty": pty, "history": "sess"})
+    client.request({"t": "close", "pty": pty, "mode": "kill"})
+    assert pump(3, lambda: any(e.get("t") == "pty-exited" for e in ends.events))
+    assert "moved" in (panelhistory.load("sess", 0) or "")
+    assert panelhistory.load("draft-1", 0) is None
+
+
+def test_a_shell_filed_under_no_key_writes_nothing(tmp_path, restore_shell, history):
+    """A page closed for good unbinds first: its history goes with it."""
+    srv, client, ends = make(tmp_path)
+    restore_shell.append(srv)
+    pty = spawn_shell(client, tmp_path, history="sess", ordinal=1)
+    panelhistory.save("sess", "an older save", 1)
+    client.send_input(pty, b"gone\r")
+    assert pump(2, lambda: "gone\ngone" in client.screen_of(pty).capture_contents())
+    client.request({"t": "panel.key", "pty": pty, "history": None})
+    client.request({"t": "close", "pty": pty, "mode": "kill"})
+    assert pump(3, lambda: any(e.get("t") == "pty-exited" for e in ends.events))
+    assert panelhistory.load("sess", 1) == "an older save"
+
+
+def test_an_agent_has_no_panel_history(tmp_path, restore_shell, history):
+    srv, client, _ends = make(tmp_path)
+    restore_shell.append(srv)
+    agent = client.request({"t": "spawn", "kind": "agent", "cwd": str(tmp_path), "history": "sess"})["pty"]
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "panel.key", "pty": agent, "history": "sess"})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    assert srv.core.ptys.get(agent).history is None

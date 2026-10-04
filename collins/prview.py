@@ -142,6 +142,7 @@ from . import (  # noqa: E402
     prdetail,
     prfileimages,
     prmenu,
+    remoteprs,
 )
 from .copylabel import (  # noqa: E402
     copy_hint,
@@ -158,7 +159,7 @@ from .formatting import (  # noqa: E402
     split_body,
 )
 from .i18n import _, ngettext  # noqa: E402
-from .prstatus import PullRequest, invalidate, known  # noqa: E402
+from .prstatus import PullRequest, known  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -701,7 +702,7 @@ class PrViewPage(Adw.Bin):
         def work() -> None:
             detail = None
             try:
-                detail = prdetail.fetch(url)
+                detail = remoteprs.fetch_detail(url)
             except Exception:  # a page must never take the app down
                 log.debug("prview: fetch of %s failed", url, exc_info=True)
             GLib.idle_add(self._landed, gen, detail)
@@ -930,7 +931,7 @@ class PrViewPage(Adw.Bin):
         or one of the header buttons' actions: re-read everything that shows
         this PR, the page itself (whose fetch re-absorbs into the summary
         cache) and the summary the tab's own poll holds."""
-        invalidate(self.pr_url)
+        remoteprs.invalidate(self.pr_url)
         self._host_factory().refresh()
         self.refresh()
 
@@ -1772,7 +1773,7 @@ class _ActionBar(Gtk.Box):
 
         def work() -> None:
             try:
-                error = practions.perform(action.key, pr)
+                error = remoteprs.perform(action.key, pr)
             except Exception:  # a button must never take the app down with it
                 log.debug("prview: %s on %s failed", action.key, pr.url, exc_info=True)
                 error = _("Collins couldn't run that action.")
@@ -1908,7 +1909,7 @@ class _Composer(Gtk.Box):
             lambda *_a: self._post(
                 self._request_btn,
                 _("Request changes"),
-                lambda pr, body: practions.review(pr, practions.REQUEST_CHANGES, body),
+                lambda pr, body: remoteprs.review(pr, practions.REQUEST_CHANGES, body),
             ),
         )
         row.append(self._request_btn)
@@ -1918,7 +1919,7 @@ class _Composer(Gtk.Box):
             lambda *_a: self._post(
                 self._approve_btn,
                 _("Approve"),
-                lambda pr, body: practions.review(pr, practions.APPROVE, body),
+                lambda pr, body: remoteprs.review(pr, practions.APPROVE, body),
             ),
         )
         row.append(self._approve_btn)
@@ -1926,7 +1927,7 @@ class _Composer(Gtk.Box):
         self._comment_btn.add_css_class("suggested-action")
         self._comment_btn.connect(
             "clicked",
-            lambda *_a: self._post(self._comment_btn, _("Comment"), practions.comment),
+            lambda *_a: self._post(self._comment_btn, _("Comment"), remoteprs.comment),
         )
         row.append(self._comment_btn)
         self.append(row)
@@ -2006,7 +2007,7 @@ class _Composer(Gtk.Box):
         # Ctrl+Enter comments, as on GitHub itself; a bare Enter stays a newline.
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) and state & Gdk.ModifierType.CONTROL_MASK:
             if self._comment_btn.get_sensitive():
-                self._post(self._comment_btn, _("Comment"), practions.comment)
+                self._post(self._comment_btn, _("Comment"), remoteprs.comment)
             return Gdk.EVENT_STOP
         return Gdk.EVENT_PROPAGATE
 
@@ -2020,7 +2021,7 @@ class _Composer(Gtk.Box):
             self._post(
                 self._reply_btn,
                 _("Request review"),
-                lambda pr, _body: practions.perform(practions.REVIEW, pr),
+                lambda pr, _body: remoteprs.perform(practions.REVIEW, pr),
                 clear=False,
             )
             return
@@ -2290,7 +2291,7 @@ class _ThreadCard(Gtk.Box):
         self._post(
             self._post_btn,
             _("Reply"),
-            lambda: practions.reply_in_thread(self._pr, self._thread.id, body),
+            lambda: remoteprs.reply_in_thread(self._pr, self._thread.id, body),
             sent_draft=True,
         )
 
@@ -2298,7 +2299,7 @@ class _ThreadCard(Gtk.Box):
         self._post(
             self._resolve_btn,
             _("Resolve") if resolved else _("Unresolve"),
-            lambda: practions.set_thread_resolved(self._pr, self._thread.id, resolved),
+            lambda: remoteprs.set_thread_resolved(self._pr, self._thread.id, resolved),
         )
 
     def _post(

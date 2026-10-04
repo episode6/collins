@@ -17,8 +17,15 @@ client's from then on) and `SessionStore`, answers `subscribe` with the
 snapshot and keeps every subscriber current through `storefeed.StoreFeed`,
 and serves `state.get`, `state.set` and every mutation the sidebar, the
 window and Preferences make as a `store.*` request, plus the CLI's folder
-trust (`trust.*`). PRs, notifications and the tools join in PR-1.11.
-GLib only; nothing here imports GTK.
+trust (`trust.*`). PR-1.11 adds the rest, each in a module of its own
+the core routes to: the PR hub's events and every gh call
+(`prfeed`), the notification history (`notifications`), the session
+tools and the MCP socket (`tools`, `start_tools`, `start_mcp`; a
+UI-bound call is a `tool` event to the session's active client,
+`_tool_client`, answered by `tool-reply`), the Sandboxed chip's
+requests (`sandbox`, `start_sandbox`), the diffs' marks (`diffs`),
+token use (`tokenuse`) and the jobs (`jobs`). GLib only; nothing here
+imports GTK.
 
 **The service decides which keys a client writes** (`state.set`): every
 key of `state.SHARED_KEYS` but the three only the service writes
@@ -79,10 +86,20 @@ held by its tab), and is refused when there is none; the plan is the pty's
 inside the box's workspace other than where bwrap lands the shell is one
 queued ``cd`` away, typed before anything else. ``clear`` on a shell wipes
 its model (`PtyServer.clear`); on an agent it is the composer's erase of
-the box, PR-1.10's. The panel history is written here from the models
-(`write_panel_history`), and the cwd, foreground and inner-shell reads a
-panel shell asks of its pty are the pty server's (`Pty.process_cwd`,
-`Pty.has_running_command`, `Pty.shell_pid`).
+the box, which is the `Session`'s and so still the client's through Phase
+1 (the session moves into the service in PR-1.12): the core refuses it
+rather than erase a box it cannot read. The panel history is written here
+from the models: by the tab's three saves (`write_panel_history`), and
+(PR-1.11, §3.15) by the core itself when a shell's child exits, from its
+model before the model is dropped, under the key and ordinal the shell was
+spawned with (`spawn`'s ``history`` and ``ordinal``) or re-filed under
+since (`panel.key`: the resolver bound the tab; none once the shell's page
+closed for good, so a closed shell's history goes with it). The cwd,
+foreground and inner-shell reads a panel shell asks of its pty are the pty
+server's (`Pty.process_cwd`, `Pty.has_running_command`, `Pty.shell_pid`).
+
+**Jobs** (PR-1.11): `job.start` and `job.cancel` are `jobs.JobRunner`'s,
+whose `job` events go to the client that started each one.
 """
 
 from __future__ import annotations
@@ -98,7 +115,11 @@ from .. import panelhistory, providers, sandboxplan, trust
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
-from . import ptyserver, storefeed, termstream
+from . import diffs as diffs_mod
+from . import jobs, prfeed, ptyserver, storefeed, termstream, tokenuse
+from . import notifications as notifications_mod
+from . import sandbox as sandbox_mod
+from . import tools as tools_mod
 
 log = logging.getLogger(__name__)
 
@@ -164,6 +185,9 @@ class ServiceCore:
         self.state = state
         self.store = None
         self.feed: storefeed.StoreFeed | None = None
+        self.notifications: notifications_mod.ServiceNotifications | None = None
+        self.prs: prfeed.PrFeed | None = None
+        self.diffs: diffs_mod.DiffNotes | None = None
         if state is not None:
             record = record or state.set_pty
             record_next_id = record_next_id or state.set_pty_next_id
@@ -179,8 +203,15 @@ class ServiceCore:
             record_next_id=record_next_id,
             next_id=1 if next_id is None else next_id,
             on_event=on_stream_event,
+            on_exit=self._on_pty_exit,
         )
+        self.jobs = jobs.JobRunner()
+        self.tools: tools_mod.SessionTools | None = None
+        self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
         self._clients: set[int] = set()  # id(client)
+        # The subscribed clients, in the order they subscribed: who a
+        # UI-bound tool call can go to (_tool_client).
+        self._subscribers: list[Client] = []
         pruned = self.ptys.prune_models()
         if pruned:
             log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
@@ -208,6 +239,14 @@ class ServiceCore:
             store = SessionStore(self.state)
         self.store = store
         self.feed = storefeed.StoreFeed(store, self.state)
+        # The notification history (PR-1.11): the service's, over the same
+        # state, published to the same subscribers.
+        self.notifications = notifications_mod.ServiceNotifications(self.state)
+        # The PR hub is the store's own; its events go to the same
+        # subscribers (PR-1.11).
+        self.prs = prfeed.PrFeed(store.pr_store)
+        # The marks on each session's diff (PR-1.11, service.diffs).
+        self.diffs = diffs_mod.DiffNotes(self.state, self._broadcast, self._get_setting)
         if start:
             store.start()
 
@@ -220,8 +259,16 @@ class ServiceCore:
         """A client went away however it went: nothing changes on the
         service but "no client is attached" (§3.1 rule 5)."""
         self._clients.discard(id(client))
+        self.jobs.forget(client.deliver)
+        self._subscribers = [c for c in self._subscribers if c is not client]
+        if self.tools is not None:
+            self.tools.client_gone(client)
         if self.feed is not None:
             self.feed.unsubscribe(client)
+        if self.notifications is not None:
+            self.notifications.unsubscribe(client)
+        if self.prs is not None:
+            self.prs.unsubscribe(client)
         for pty_id in list(self.ptys.ptys):
             self.ptys.detach(pty_id, client.sink_for(pty_id))
 
@@ -250,7 +297,7 @@ class ServiceCore:
 
     def deliver(self, event: protocol.Message, client: Client) -> None:
         """A validated client event (`resize`, `focus`, `theme`)."""
-        handler = getattr(self, "_ev_" + event.type.replace(".", "_"), None)
+        handler = getattr(self, "_ev_" + event.type.replace(".", "_").replace("-", "_"), None)
         if handler is None:
             return
         try:
@@ -301,6 +348,8 @@ class ServiceCore:
                 box=box,
                 plan=plan,
                 progress=progress,
+                history=message.get("history") if kind == "shell" else None,
+                ordinal=int(message.get("ordinal") or 0),
             )
         except ptyserver.SpawnError as exc:
             return protocol.refuse(
@@ -354,13 +403,117 @@ class ServiceCore:
     def _req_clear(self, message: protocol.Message, client: Client) -> dict:
         """A shell's *Clear*: its screen and scrollback wiped from the model
         (the client attaches again to be redrawn from it). An agent's
-        ``clear`` is the composer's erase of the CLI's box, PR-1.10's."""
+        ``clear`` is the composer's erase of the CLI's box: the `Session`'s,
+        which runs in the client through Phase 1 (see the module
+        docstring)."""
         pty_id = message.get("pty")
         if self.ptys.get(pty_id).kind != "shell":
             # Refused, not unknown: the type is served, an agent's case is
-            # not yet, and a client can tell the two apart.
-            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "clear of an agent's box is PR-1.10's")
+            # not here yet, and a client can tell the two apart.
+            return protocol.refuse(
+                message.id,
+                protocol.ERROR_REFUSED,
+                "An agent's box is erased by its session, which runs in the client"
+                " until the service holds it",
+            )
         self.ptys.clear(pty_id)
+        return protocol.reply(message.id)
+
+    def _req_panel_key(self, message: protocol.Message, client: Client) -> dict:
+        """File a shell's history under a new key (the resolver bound its
+        tab to a session id), or under none (its page closed for good)."""
+        pty = self.ptys.get(message.get("pty"))
+        if pty.kind != "shell":
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Only a shell has a panel history")
+        pty.history = message.get("history")
+        return protocol.reply(message.id)
+
+    def _on_pty_exit(self, pty: ptyserver.Pty) -> None:
+        """A shell's child exited: its history, from its model while the
+        model is still whole (§3.15). A shell filed under no key (a fork's,
+        a page closed for good, a tab with no session yet) writes nothing.
+        An agent's exit closes the shell the tools opened for its session
+        with no client attached (SessionTools.agent_exited)."""
+        if pty.kind != "shell":
+            if self.tools is not None and pty.session:
+                self.tools.agent_exited(pty.session)
+            return
+        if not pty.history:
+            return
+        panelhistory.save(pty.history, pty.screen.capture_contents(), pty.ordinal)
+
+    # -- jobs (PR-1.11)
+
+    def _req_job_start(self, message: protocol.Message, client: Client) -> dict:
+        job_id = self.jobs.start(message.get("kind"), message.get("args") or {}, client.deliver)
+        return protocol.reply(message.id, job=job_id)
+
+    # -- notifications (PR-1.11; service.notifications)
+
+    def _notify(self, message: protocol.Message, client: Client) -> dict:
+        if self.notifications is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
+            )
+        return self.notifications.handle(message, client)
+
+    _req_notify_post = _notify
+    _req_notify_remove = _notify
+    _req_notify_clear = _notify
+    _req_notify_green = _notify
+    _req_notify_rekey = _notify
+    _req_seen = _notify
+
+    # -- pull requests (PR-1.11; service.prfeed)
+
+    def _req_pr_set(self, message: protocol.Message, client: Client) -> dict:
+        if self.prs is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
+            )
+        return self.prs.set_records(message)
+
+    def _gh(self, message: protocol.Message, client: Client) -> dict:
+        return prfeed.handle_gh(message)
+
+    _req_pr_fetch = _gh
+    _req_pr_sweep = _gh
+    _req_pr_detail = _gh
+    _req_pr_threads = _gh
+    _req_pr_blob = _gh
+    _req_pr_action = _gh
+    _req_pr_comment = _gh
+    _req_pr_review = _gh
+    _req_pr_thread = _gh
+
+    # -- the diffs' marks (PR-1.11; service.diffs)
+
+    def _req_diff_set_notes(self, message: protocol.Message, client: Client) -> dict:
+        if self.diffs is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
+            )
+        return self.diffs.set_notes(message)
+
+    # -- token use (PR-1.11; service.tokenuse)
+
+    def _req_usage_get(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.usage_get(message)
+
+    def _req_models_get(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.models_get(message)
+
+    def _req_models_defaults(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.models_defaults(message)
+
+    def _req_icon_save(self, message: protocol.Message, client: Client) -> dict:
+        return tokenuse.icon_save(message)
+
+    def _req_job_cancel(self, message: protocol.Message, client: Client) -> dict:
+        if not self.jobs.cancel(message.get("job")):
+            return protocol.refuse(
+                message.id, protocol.ERROR_GONE, "No such job: {job}", {"job": message.get("job")}
+            )
         return protocol.reply(message.id)
 
     # -- the store and the state (PR-1.10)
@@ -385,6 +538,17 @@ class ServiceCore:
                 event["pid"] = pid
             client.deliver(event)
             ptys += 1
+        if self.notifications is not None:
+            self.notifications.subscribe(client, client.deliver)
+        if self.prs is not None:
+            self.prs.subscribe(client, client.deliver)
+        if self.diffs is not None:
+            self.diffs.subscribe(client.deliver)
+        if all(c is not client for c in self._subscribers):
+            self._subscribers.append(client)
+        if self.tools is not None:
+            # A show_diff asked for while nobody was attached opens now.
+            self.tools.apply_pending_diffs(client)
         return protocol.reply(message.id, items=items, ptys=ptys)
 
     def _req_state_get(self, message: protocol.Message, client: Client) -> dict:
@@ -567,6 +731,168 @@ class ServiceCore:
         else:
             written = trust.trust_dir(trust.trust_root(path))
         return protocol.reply(message.id, written=bool(written))
+
+    # -- the session tools (PR-1.11, service.tools)
+
+    def start_tools(self, sessions, sandbox_host=lambda: None, notifications=None, diffs=None):
+        """The session tools' dispatcher over the core's records: *sessions*
+        lists the `service.session.Session`s the service holds (through
+        Phase 1 the tabs' own; the app's lookup), *sandbox_host* the
+        SandboxHost. Returns it: what the MCP socket service dispatches to."""
+        self.tools = tools_mod.SessionTools(
+            get_setting=self._get_setting,
+            sessions=sessions,
+            sandbox_host=sandbox_host,
+            send_tool=self._send_tool,
+            store=self.store,
+            state=self.state,
+            ptys=self.ptys,
+            notifications=notifications or self.notifications,
+            diffs=diffs or self.diffs,
+            shell_spawner=self._spawn_tool_shell,
+        )
+        return self.tools
+
+    def start_mcp(self, app_id: str) -> str | None:
+        """The socket every launched session's MCP shim relays its calls
+        through (`mcpserver.SessionToolService`, dispatching to the tools of
+        `start_tools`) and the `--mcp-config` file naming it. The path of
+        that file, or None when either could not be made (logged): the
+        tools are conveniences, never load-bearing."""
+        from .. import mcpserver, mcptools
+
+        self.mcp_service = None
+        if self.tools is None:
+            return None
+        service = mcpserver.SessionToolService(
+            mcptools.socket_path(app_id),
+            list_tools=self.tools.list_tools,
+            dispatch=self.tools.dispatch,
+        )
+        try:
+            service.start()
+        except Exception:  # GLib.Error, OSError
+            log.exception("session MCP socket unavailable")
+            return None
+        config = mcptools.write_config(app_id)
+        if config is None:
+            log.error("session MCP config not writable")
+            service.stop()
+            return None
+        self.mcp_service = service
+        return config
+
+    def stop_mcp(self) -> None:
+        """Stop accepting and unlink the socket; the config file stays
+        behind on purpose: the app-id-keyed path is stable across restarts,
+        so a session that outlives this run reconnects to the next one, and
+        until then its shim degrades to clean "Collins is not running"
+        errors rather than breaking the session."""
+        service = getattr(self, "mcp_service", None)
+        if service is not None:
+            service.stop()
+            self.mcp_service = None
+
+    def start_sandbox(self, host, grants, sessions) -> None:
+        """The Sandboxed chip's requests (service.sandbox): *host* and
+        *grants* answer the SandboxHost and the GrantMounts, *sessions* the
+        service's sessions; the plan of a box is the core's own lookup."""
+        self.sandbox = sandbox_mod.SandboxRequests(
+            host=host,
+            grants=grants,
+            plan_of=self._sandbox_plan,
+            sessions=sessions,
+            broadcast=self._broadcast,
+        )
+
+    def _broadcast(self, event: dict) -> None:
+        """An event for every subscribed client."""
+        for client in list(self._subscribers):
+            try:
+                client.deliver(dict(event))
+            except Exception:
+                log.exception("a client's delivery failed")
+
+    def _req_sandbox(self, message: protocol.Message, client: Client) -> dict:
+        if getattr(self, "sandbox", None) is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
+            )
+        return self.sandbox.handle(message)
+
+    _req_sandbox_plan = _req_sandbox
+    _req_sandbox_grants = _req_sandbox
+    _req_sandbox_allow = _req_sandbox
+    _req_sandbox_revoke = _req_sandbox
+    _req_sandbox_tools = _req_sandbox
+    _req_sandbox_restart = _req_sandbox
+
+    def _tool_client(self, session) -> Client | None:
+        """The session's active client (D20): of the subscribed clients,
+        the one whose device is the active client of the session's agent
+        pty, else the one that subscribed last. Through Phase 1 there is
+        one subscriber, the app's own connection."""
+        if not self._subscribers:
+            return None
+        device = None
+        for pty in self.ptys.ptys.values():
+            if pty.kind != "shell" and session.session_id and pty.session == session.session_id:
+                device = pty.sized_for() or None
+                break
+        if device:
+            for client in reversed(self._subscribers):
+                if client.device == device:
+                    return client
+        return self._subscribers[-1]
+
+    def _send_tool(self, session, event: dict) -> Client | None:
+        client = self._tool_client(session)
+        if client is None:
+            return None
+        checked = protocol.validate(dict(event), protocol.SERVICE)
+        if isinstance(checked, protocol.Refusal):
+            log.error("tools: a tool event the protocol refuses: %s", checked.msgid)
+            return None
+        client.deliver(event)
+        return client
+
+    def _ev_tool_reply(self, event: protocol.Message, client: Client) -> None:
+        if self.tools is not None:
+            self.tools.reply(event.get("call"), event.get("ok"), event.get("text"), client)
+
+    def _spawn_tool_shell(self, session, sandboxed: bool) -> int | None:
+        """A panel shell for run_in_terminal with no client attached: the
+        user's shell in the session's directory, filed under its history; a
+        sandboxed session's in its own box, on the plan its records hold."""
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        cwd = session.current_agent_cwd() or session.cwd
+        if not cwd:
+            return None
+        argv, box, plan = [shell], None, None
+        if sandboxed:
+            box = session.sandbox_box
+            plan = self._sandbox_plan(box) if box else None
+            if not plan:
+                return None
+            argv = providers.sandboxed_shell_argv(plan, shell)
+        try:
+            pty_id = self.ptys.spawn(
+                "shell",
+                argv,
+                cwd,
+                dict(self._environment()),
+                session=session.session_id,
+                box=box,
+                plan=plan,
+                progress=False,
+                history=session.session_id,
+            )
+        except (OSError, ValueError):
+            log.exception("tools: a shell for run_in_terminal failed to start")
+            return None
+        if plan:
+            self._enter_cwd_in_box(pty_id, plan, cwd)
+        return pty_id
 
     # -- client events
 

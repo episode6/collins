@@ -150,9 +150,24 @@ where only the service can. A new **state key** goes in
 `state.SHARED_KEYS` (attribute, form, cleaner, writable) and travels by
 itself. Folder trust is `store.folder_trust` / `trust_folder`
 (`trust.check` / `trust.grant`), the CLI's config being the service
-machine's. `store.pr_store` is still the service store's `PrStore`
-in-process (PR-1.11 mirrors it), and the sandbox host keeps the service's
-own `AppState`.
+machine's. `store.pr_store` is the mirror of the service store's
+`PrStore` (`remoteprs.RemotePrStore`, PR-1.11), and the sandbox host keeps
+the service's own `AppState`. `notifications`, `diff_notes` and
+`pending_diffs` are written by the service alone (not `writable`): the
+history through its notification center, the marks through
+`service/diffs.py`, the pending show_diffs by the tools.
+
+**Long-running operations are jobs** (PR-1.11): a `job.start` request
+(kind and arguments, answered with an id) and `job` events (`running`
+with progress or a partial result, then `done`, `failed`, `refused` or
+`cancelled`), run by `service/jobs.py`'s `JobRunner` on daemon threads and
+read through `jobclient.start(kind, args, on_event)`. Worktree recovery
+(`worktree.trash`, `worktree.restore`: `sessions.trash_worktree` /
+`restore_worktree` on the service's machine), the chat folder made and
+trusted before its session starts (`chats.trust`: `chats.create_chat_dir`
+then `trust_chat_dir`), the clone and the repository list it picks from
+(`clone`, `clone.repos`) all go this way; the dialogs keep their
+confirmations and read the events.
 
 ## AppState (`state.py`)
 
@@ -316,7 +331,8 @@ in `_worktree_deletions` and acted on by `_settle_archived_worktree` once
 the archive has landed on a stopped session — the move always comes last.
 "always" probes and trashes at that same landing. `sessions.
 removable_worktree` finds the worktree the transcript still records on
-disk, `sessions.trash_worktree` moves it to the system trash (`worktree
+disk, `sessions.trash_worktree` (the service's `worktree.trash` job)
+moves it to the system trash (`worktree
 unlock`, then `Gio.File.trash`; git's registration and the branch stay,
 so the entry lists as prunable until gc forgets it), never while the
 session is detached or another tab / background agent works in it, and
@@ -360,7 +376,9 @@ stricter `usable_generated_icon_bytes`. Rasterized via `svgtexture.py`.
 
 **Adding and cloning projects.** The sidebar header's folder button is a
 `Gtk.MenuButton`: *Open folder…* (`win.add-project`, a `Gtk.FileDialog`)
-and *Clone repository…* (`win.clone-project`, `clonedialog.CloneDialog`).
+and *Clone repository…* (`win.clone-project`, `clonedialog.CloneDialog`,
+whose repository list and clone are the service's `clone.repos` and
+`clone` jobs: gh and git run on its machine).
 Both end in `MainWindow._with_folder_trust` → `_add_project` →
 `store.add_project`, which records a virtual project (a no-op for a
 project that already has sessions). The clone dialog's GTK-free half is

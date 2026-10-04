@@ -75,6 +75,7 @@ otherwise starve.
 
 from __future__ import annotations
 
+import itertools
 import logging
 import os
 import threading
@@ -110,6 +111,11 @@ from ..transcript import TranscriptModel
 from .ports import PtyPort, ScreenPort
 
 log = logging.getLogger(__name__)
+
+# Every Session's handle: the service's name for a session before (and
+# after) its id resolves -- what a `tool` event names its caller by
+# (PR-1.11). Unique in the process; the service mints them.
+_handles = itertools.count(1)
 
 # The transcript tail: how long a burst of file-change events is let settle
 # before the read, and the backstop poll for a monitor that missed one.
@@ -473,6 +479,7 @@ class Session:
         use (None: every sandboxed decision degrades to an unsandboxed
         launch that says so, and grants apply at the next restart)."""
         self.provider = provider
+        self.handle = f"s-{next(_handles)}"
         self.pty = pty
         self.screen = screen
         self.host = host

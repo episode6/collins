@@ -394,9 +394,43 @@ def test_loading_prunes_and_ignores_garbage():
 
 
 def test_notification_record_round_trip():
-    row = Notification("id", "s", "t", "p", KIND_BELL, "b", 1.0, read=True, count=4)
+    row = Notification("id", "s", "t", "p", KIND_BELL, "b", 1.0, read=True, count=4, msgid="b")
     assert Notification.from_record(row.to_record()) == row
     assert Notification.from_record("nope") is None
+
+
+def test_a_record_carries_its_msgid_and_args_and_an_english_body():
+    """§3.14: the text crosses (and is persisted) as a msgid and its args;
+    the body beside it is the English rendering an older build reads."""
+    row = Notification(
+        "id", "s", "t", "p", KIND_MESSAGE, "Hallo 3", 1.0, msgid="Hello {n}", args={"n": 3}
+    )
+    record = row.to_record()
+    assert record["msgid"] == "Hello {n}" and record["args"] == {"n": 3}
+    assert record["body"] == "Hello 3"
+    back = Notification.from_record(record)
+    assert back.msgid == "Hello {n}" and back.args == {"n": 3} and back.body == "Hello 3"
+
+
+def test_a_record_from_before_msgids_keeps_its_body_as_its_msgid():
+    """The migration: an older build's record has only a body."""
+    old = {"id": "a", "session_id": "s", "title": "t", "project": "p", "kind": KIND_BELL,
+           "body": "Hat geklingelt", "when": 1.0, "read": False, "count": 2}
+    row = Notification.from_record(old)
+    assert row.msgid == "Hat geklingelt" and row.args == {} and row.body == "Hat geklingelt"
+    assert row.to_record()["msgid"] == "Hat geklingelt"
+
+
+def test_bad_args_in_a_record_are_dropped():
+    raw = {"id": "a", "kind": KIND_MESSAGE, "when": 1.0, "msgid": "Hi {who}",
+           "args": {"who": "you", "1bad": "x", "nested": {"no": 1}}}
+    row = Notification.from_record(raw)
+    assert row.args == {"who": "you"} and row.body == "Hi you"
+
+
+def test_an_agents_braces_are_never_formatted():
+    row = Notification.from_record({"id": "a", "kind": KIND_MESSAGE, "when": 1.0, "msgid": "use {x}"})
+    assert row.body == "use {x}"
 
 
 # -- listeners ----------------------------------------------------------------

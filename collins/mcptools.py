@@ -1552,6 +1552,10 @@ class DeferredResult:
     def resolved(self) -> bool:
         return self._result is not None
 
+    def result(self) -> tuple[bool, str] | None:
+        """The ``(ok, text)`` it resolved with, None while it hasn't."""
+        return self._result
+
     def resolve(self, ok: bool, text: str) -> None:
         if self._result is not None:
             return

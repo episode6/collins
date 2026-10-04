@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check for the start_session MCP tool — run on a dev machine.
 
-Exercises App._mcp_start_session against a real App: a real window, a real
+Exercises the start_session tool (toolclient.ToolClient.start_session) against a real App: a real window, a real
 AdwTabView, real VTEs spawning real children. It builds on
 check_background_session.py (the launch path PR) and adds the tool half — the
 deferred spawn → inject → resolve dance, and the per-project-root serialization
@@ -182,8 +182,8 @@ def fire_tool() -> bool:
     caller = state["caller"]
     before = win.tab_view.get_n_pages()
 
-    first = app._mcp_start_session((win, caller), {"prompt": PROMPT, "cwd": TRUSTED})
-    second = app._mcp_start_session(
+    first = app.tool_client.start_session((win, caller), {"prompt": PROMPT, "cwd": TRUSTED})
+    second = app.tool_client.start_session(
         (win, caller), {"prompt": "Second sibling, go.", "cwd": TRUSTED}
     )
     check("the tool returns a deferred answer", isinstance(first, mcptools.DeferredResult))

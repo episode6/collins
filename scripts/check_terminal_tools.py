@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check for the read_terminal / run_in_terminal MCP tools.
 
-Exercises App._mcp_read_terminal and App._mcp_run_in_terminal against a real
+Exercises the read_terminal and run_in_terminal tools (toolclient.ToolClient) against a real
 App: a real window, a real PanelDock, real VTE shells running real commands.
 The claims that matter are exactly the ones the GTK-free unit tests
 (tests/test_mcptools.py — schemas, tailing, framing) can't make: that a run
@@ -124,11 +124,11 @@ def stage() -> bool:
 def first_run() -> bool:
     check(
         "read with no panel says so",
-        app._mcp_read_terminal(found(), {})
+        app.tool_client.read_terminal(found(), {})
         == (True, "No terminal-panel tabs are open in this session."),
-        app._mcp_read_terminal(found(), {}),
+        app.tool_client.read_terminal(found(), {}),
     )
-    got = app._mcp_run_in_terminal(found(), {"command": "echo collins-agent-was-here"})
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo collins-agent-was-here"})
     check("run with no panel opens one", got == (True, "Running in new Terminal 1."), got)
     caller = state["caller"]
     check("the panel came on screen", caller.panel_visible)
@@ -137,25 +137,25 @@ def first_run() -> bool:
 
 
 def first_read() -> bool:
-    ok, text = app._mcp_read_terminal(found(), {})
+    ok, text = app.tool_client.read_terminal(found(), {})
     check("read is a success", ok, text)
     check("read names the terminal, idle again", "── Terminal 1 (idle) ──" in text, text)
     check("read sees the command's output", "collins-agent-was-here" in text, text)
     check(
         "a missing number is an error naming the open ones",
-        app._mcp_read_terminal(found(), {"terminal": 9})
+        app.tool_client.read_terminal(found(), {"terminal": 9})
         == (False, "No terminal numbered 9 — open: 1"),
     )
     shells = state["caller"].panel_shells()
     check("the revealed shell never took the keyboard", not shells[0].has_page_focus())
-    got = app._mcp_run_in_terminal(found(), {"command": "sleep 60", "terminal": 1})
+    got = app.tool_client.run_in_terminal(found(), {"command": "sleep 60", "terminal": 1})
     check("an idle terminal named outright is reused", got == (True, "Running in Terminal 1."), got)
     GLib.timeout_add(2500, second_run)  # the sleep takes the foreground
     return GLib.SOURCE_REMOVE
 
 
 def second_run() -> bool:
-    got = app._mcp_run_in_terminal(found(), {"command": "echo nope", "terminal": 1})
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo nope", "terminal": 1})
     check(
         "a busy terminal is refused, not typed into",
         got
@@ -166,18 +166,18 @@ def second_run() -> bool:
         ),
         got,
     )
-    got = app._mcp_run_in_terminal(found(), {"command": "echo second-terminal"})
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo second-terminal"})
     check("all-busy opens a second tab", got == (True, "Running in new Terminal 2."), got)
     GLib.timeout_add(4000, verify)
     return GLib.SOURCE_REMOVE
 
 
 def verify() -> bool:
-    ok, text = app._mcp_read_terminal(found(), {})
+    ok, text = app.tool_client.read_terminal(found(), {})
     check("the busy terminal reads as running", "── Terminal 1 (command running) ──" in text, text)
     check("the new terminal reads as idle", "── Terminal 2 (idle) ──" in text, text)
     check("the second command ran in it", "second-terminal" in text, text)
-    ok, text = app._mcp_read_terminal(found(), {"terminal": 2, "lines": 5})
+    ok, text = app.tool_client.read_terminal(found(), {"terminal": 2, "lines": 5})
     check("a single-terminal read filters", ok and "Terminal 1" not in text, text)
     check("…to the terminal asked for", "── Terminal 2 (idle) ──" in text, text)
     for shell in state["caller"].panel_shells():

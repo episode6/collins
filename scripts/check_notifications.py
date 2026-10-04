@@ -543,7 +543,7 @@ def steps(app: App):
         check("the sidebar row is flagged again", store.get_item(SESSION_B).unread)
         win.is_active = lambda: True
         # The app's tool dispatch, end to end: the reply is one of the three.
-        ok, reply = app._mcp_notify_user((win, shared["tab_b"]), {"message": "Through the tool"})
+        ok, reply = app.tool_client.notify_user((win, shared["tab_b"]), {"message": "Through the tool"})
         check("the notify_user tool replies 'in Collins' for a card",
               ok and reply == "The user was notified in Collins.", reply)
     yield message_unfocused

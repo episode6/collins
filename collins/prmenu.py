@@ -43,7 +43,7 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
 from gi.repository import Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
-from . import dialogs, practions  # noqa: E402
+from . import dialogs, practions, remoteprs  # noqa: E402
 from .copylabel import open_tooltip, open_uri  # noqa: E402
 from .i18n import _  # noqa: E402
 from .prstatus import (  # noqa: E402
@@ -56,7 +56,6 @@ from .prstatus import (  # noqa: E402
     combined_badge,
     combined_state,
     describe,
-    invalidate,
     menu_name,
 )
 
@@ -957,7 +956,7 @@ def _start_action(
 
     def work() -> None:
         try:
-            error = practions.perform(action.key, pr)
+            error = remoteprs.perform(action.key, pr)
         except Exception:  # a menu item must never take the app down with it
             log.debug("prmenu: %s on %s failed", action.key, pr.url, exc_info=True)
             error = _("Collins couldn't run that action.")
@@ -986,6 +985,6 @@ def _action_landed(
         if root is not None:
             dialogs.error_dialog(root, _("{action} failed").format(action=action.label), error)
         return GLib.SOURCE_REMOVE
-    invalidate(pr.url)
+    remoteprs.invalidate(pr.url)
     host.refresh()
     return GLib.SOURCE_REMOVE

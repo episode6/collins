@@ -7,8 +7,10 @@ description: >-
   show_image, notify_user, attach_pr, start_session, read_terminal,
   run_in_terminal): the stdlib-only stdio shim (mcp_shim.py), the GTK-free
   tool table, validation, framing and runtime paths (mcptools.py), the Gio
-  socket service (mcpserver.py), the handlers in app.py, session identity via
-  the shim pid, deferred replies, the per-tool Preferences switches, plus the
+  socket service (mcpserver.py), the dispatcher and handlers on the service
+  (service/tools.py) with their client halves (toolclient.py), session
+  identity via the shim pid, deferred replies and the active-client tool
+  events, the per-tool Preferences switches, plus the
   lightbox and the attachments gallery that show_image feeds. Use when adding
   or changing a session tool, debugging "Collins is not running" from an
   agent, or touching the lightbox/attachments panel.
@@ -124,15 +126,51 @@ import it. It holds:
 The module docstring's "Shapes the spec left to this module" records each
 field shape chosen beyond the spec's text; read it before adding a field.
 
-## Identity and dispatch (`app.py`)
+## Identity and dispatch (`service/tools.py`, `toolclient.py`)
 
-There is no session id in an MCP server's environment. `App._mcp_tab_for_pid`
-walks the shim's `/proc` ancestry (`proctree.ancestor_pids`) and asks every
-open tab `owns_pid_ancestors` — so a tool acts on the tab whose shell the CLI
-descends from. Anything not launched from a tab (a daemon-hosted `/bg` job,
-whose ancestry tops out at systemd; a closed tab) gets a clean "not from a
-Collins session" error. Handlers are `App._mcp_<tool>(found, args)` returning
-`(ok, text)` or a `DeferredResult`.
+Since PR-1.11 the dispatcher is the service's: `SessionTools` (built by
+`ServiceCore.start_tools`, reachable as `app.session_tools`; the core also
+starts the socket, `start_mcp`). There is no session id in an MCP server's
+environment. `SessionTools.find(pid)` walks the shim's `/proc` ancestry
+(`proctree.ancestor_pids`) and asks every `Session` the service holds
+`owns_pid_ancestors` (through Phase 1 the tabs' own Sessions, listed by the
+app's `ToolClient.sessions`) — so a tool acts on the session whose shell the
+CLI descends from. Anything not launched from a tab (a daemon-hosted `/bg`
+job, whose ancestry tops out at systemd; a closed tab) gets a clean "not
+from a Collins session" error. `list_tools`, `tool_enabled` and
+`tool_offered` are `App._mcp_*`'s as they were, over the Session (§5 of the
+split spec: nothing a sandboxed session is offered or refused changes;
+`tests/test_service_tools.py` pins the parity), reading the service's
+settings.
+
+**Where a tool runs** (the split spec's §3.7 table, in the module
+docstring): `set_session_title` (the service store renames; the tab's
+title follows the name through the state mirror) and `attach_pr`
+(`Session.attach_pr`) run on the service whoever is attached. Every other
+tool is **UI-bound**: a `tool` event (`call`, `session`, `handle`, `name`,
+`arguments`, and `sandboxed`: the service's reading of the caller) to the
+session's **active client** (`ServiceCore._tool_client`, D20) and a
+`DeferredResult` settled by the client's `tool-reply` or at
+`TOOL_BOUND_S` (14 s, under the shim's 15 s). On the loopback the client
+answers inside the event, so a call that finishes at once still returns
+`(ok, text)` at once (`_settled`) — the e2e checks rely on it. The client
+half is `toolclient.ToolClient` (`app.tool_client`): it finds the tab by
+the Session's `handle` (an unresolved session is still found) and runs
+`<tool>(found, args, sandboxed)` with `found = (window, tab)` — the old
+`App._mcp_<tool>` bodies, `_ShowDiff`, `_BackgroundSpawn` and the
+per-root spawn queue (`app._start_session_chains`, shared). **With no
+client attached** each tool does what §3.7 says (`_headless_<tool>`):
+`open_in_editor` replies that no window is open; `show_image` records the
+attachment; `notify_user` records an unread row in the service's history
+and flags the session; `show_diff` records the session's pending load
+(`state.pending_diffs`), waits up to 10 s for a client to subscribe
+(`apply_pending_diffs`), then answers "queued"; the diff tools work on the
+service's `diffnotes` store over its own read of the diff (`service/
+diffs.py`); `read_terminal` / `run_in_terminal` reach the session's shell
+ptys on the pty server (`run_in_terminal` opens at most one shell of its
+own per session, reused and refused when busy, closed when the session's
+agent pty exits); `start_session` is refused (in Phase 1 a session's
+logic lives in its client's tab; it moves into the service in PR-1.12).
 
 **Deferred replies.** The whole dispatch runs on the main loop, so a handler
 that blocks freezes the window. Return `mcptools.DeferredResult` and resolve
@@ -149,11 +187,11 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
 - `set_session_title` — writes Collins' manual name slot (beats generated and
   CLI titles).
 - `open_in_editor` — resolves a path against the tab's live cwd and editor
-  root (`_mcp_resolve_file`), opens it at a line (`window.open_in_tab_editor`,
+  root (`ToolClient.resolve_file`), opens it at a line (`window.open_in_tab_editor`,
   which honours the pop-out rule).
 - `show_diff` — opens the git page quietly on the working tree / index /
   branch / a commit (`open_git_page(focus=False)`), waits for the read to
-  settle (`app._ShowDiff` polls `page.settled()` up to
+  settle (`toolclient._ShowDiff` polls `page.settled()` up to
   `gitloads.SHOW_DIFF_DEADLINE_S`), then `GitPage.reveal(path, hunk, side,
   line, focus=False)`; the reply names what loaded and what was revealed
   (a line no hunk holds lands on the nearest hunk and the reply says so;
@@ -168,11 +206,11 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   spot, the hunk count and the 1-based hunk landed on).
 - `diff_context`, `annotate_diff`, `highlight_diff`, `clear_diff_marks` —
   the page-reading and marking half of the diff tools, all behind
-  `App._mcp_on_diff_page(tab, act)`: refused with `mcptools.PAGE_NOT_OPEN`
+  `ToolClient._on_diff_page(tab, act)`: refused with `mcptools.PAGE_NOT_OPEN`
   (which names `show_diff`) when the tab has no page or one that is
   neither `opened` nor `opening`; run at once on a settled page; and
   otherwise waited for behind a `DeferredResult` through
-  `app._await_page_settled` (the one settle poll `_ShowDiff` uses too —
+  `toolclient._await_page_settled` (the one settle poll `_ShowDiff` uses too —
   the watch or the footer's tick may have a reload out), so an agent
   calling right after an edit isn't flaky. `diff_context` is
   `mcptools.diff_context_reply(page.context(), files, patch, notes)`:
@@ -194,7 +232,7 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   `highlight_diff` shape their batches with `mcptools.note_specs` /
   `highlight_specs` (each refuses a non-repo path by index, `notes[1]
   (x.py)`, and a note with both or neither of `line` / `hunk`; the path
-  resolver, `App._mcp_diff_path_resolver(tab, page)`, works against
+  resolver, `ToolClient._diff_path_resolver(tab, page)`, works against
   `page.repo_root` — the diff the agent sees — not the tab's live cwd,
   which the agent may have `cd`ed out of since `show_diff`; the cwd only
   breaks a relative path's tie, and a page on its card answers
@@ -253,14 +291,15 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   holds only *live* included (`derive(..., live=SANDBOX_GRANTS.
   live_paths(parent box))`: "restart the parent session to start a
   sibling there"). Every refusal past the derive drops
-  both (`app._drop_sibling_box`). `bypassPermissions` is granted —
+  both (`toolclient._drop_sibling_box`). `bypassPermissions` is granted —
   explicit or inherited — only to a sandboxed sibling
   (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is
   refused; the trust dialog becomes a refusal. See
   `collins-sandboxed-sessions`.
-- Every handler is `App._mcp_<name>(found, args, sandboxed)`: the third
-  argument is `run_tool_call`'s reading of the calling tab
-  (`is_sandboxed=lambda found: found[1].sandboxed`), and the three
+- Every client half is `ToolClient.<name>(found, args, sandboxed)`: the
+  third argument is the service's reading of the calling session
+  (`run_tool_call`'s `is_sandboxed=lambda session: session.sandboxed`,
+  carried on the `tool` event), and the three
   host-reaching tools apply the sandbox policy on it — `read_terminal` and
   `run_in_terminal` through `mcptools.tool_shells` (a sandboxed session
   reaches only *Sandboxed shell* pages, opening one via
@@ -279,7 +318,7 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   the service's screen model of the shell's pty, `has_running_command()`
   the pty server's foreground read, `run_command` input frames to the
   service, and a shell opened for the call is spawned there (a sandboxed
-  one on its box's plan). The handlers stay in `app.py` until PR-1.11.
+  one on its box's plan).
 
 A tool that ends or hands off its own session (an `archive_session` was
 prototyped) can't land inside its own call — the reply would never reach the
@@ -293,15 +332,20 @@ shim — so it should arm and ride the busy→idle finish edge
    so does `sandbox_tool_<name>`, which is **off**: decide whether a
    sandboxed session should be offered the tool (it runs on the host,
    outside the box) and add it to `SANDBOX_DEFAULT_TOOLS` only if so.
-2. Add `App._mcp_<name>` and register it in `_mcp_dispatch`'s handler map;
-   keep decisions in a GTK-free module (as `gitloads` does for `show_diff`).
+2. Decide where it runs (§3.7): a tool a session's own data serves goes in
+   `service.tools.SERVICE_TOOLS` with a `SessionTools._tool_<name>`; a
+   UI-bound one gets a `ToolClient.<name>(found, args, sandboxed)` half
+   and a `SessionTools._headless_<name>` for no client attached. Keep
+   decisions in a GTK-free module (as `gitloads` does for `show_diff`).
 3. If it opens or changes panels: `focus=False`, and a beat's delay if it runs
    from inside another cascade.
 4. Add the tool to `prefslayout` if the switch group's order is pinned, to
    the README's "Tools the session itself can call" bullet, `docs/guide`, and
    the `docs/guide/how-it-works.md` token-use list.
-5. An e2e check with a real `App`: either call the handler directly
-   (`scripts/check_terminal_tools.py`, `check_start_session.py`) or go
+5. An e2e check with a real `App`: either call the client half directly
+   (`app.tool_client.<name>(found, args)`: `scripts/check_terminal_tools.py`,
+   `check_start_session.py`) or the dispatcher (`app.session_tools.
+   dispatch(pid, tool, args)`, `check_sandbox_policy.py`), or go
    the whole way through the socket as `check_show_diff.py` does — its
    `claude` stub spawns the real `collins.mcp_shim` from the tab's
    `--mcp-config` file (so the shim's ancestry reaches the tab and the

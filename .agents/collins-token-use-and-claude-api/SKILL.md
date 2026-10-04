@@ -25,6 +25,18 @@ token is the CLI's job at the start of any run, which is what the login
 repair exploits. Anthropic can change any of these endpoints without notice —
 degrade, never crash.
 
+**All of it runs on the service** (split spec §3.15, PR-1.11), against its
+machine's login: the usage panel asks `usage.get` (`service/tokenuse.py`:
+`fetch_snapshot`, the snapshot as `usage.snapshot_record`), the pickers,
+Preferences and the new-chat screen read the catalog and the CLI's defaults
+through `modelcatalog.py` (`models.get`, `models.defaults`; the same names
+`claudemodels` had), icon generation and the login repair are jobs
+(`icon`, `login.repair`: `service/jobs.py`, read with `jobclient`) and an
+icon's save is `icon.save` (the generated-icon gate again on the service).
+Titles were the service store's already. Rule 6 is unchanged: the modules
+that run `claude -p` are the same ones, called on the service. The Token
+use page and the welcome gate are client UI writing service settings.
+
 ## Headless runs
 
 All three go through `titles.headless_argv(cli, model, effort)`:

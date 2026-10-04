@@ -378,13 +378,13 @@ def launched() -> bool:
         )
 
     # The tool policy: a sandboxed session reaches only sandboxed shells.
-    got = app._mcp_read_terminal(found(), {}, True)
+    got = app.tool_client.read_terminal(found(), {}, True)
     check(
         "read from the box with no sandboxed shell says so",
         got == (True, "No sandboxed shells are open in this session."),
         got,
     )
-    got = app._mcp_run_in_terminal(found(), {"command": "echo boxed-here"}, True)
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo boxed-here"}, True)
     check("run from the box opens a sandboxed shell", got == (True, "Running in new Sandboxed shell 1."), got)
     shells = caller.panel_shells()
     check("the shell page is the sandboxed kind", len(shells) == 1 and shells[0].sandboxed, shells)
@@ -413,22 +413,22 @@ def shells_up() -> bool:
     if boxed is None or plain is None:
         return bail("no shells")
     check("the sandboxed shell reads idle at its prompt", not boxed.has_running_command())
-    ok, text = app._mcp_read_terminal(found(), {}, True)
+    ok, text = app.tool_client.read_terminal(found(), {}, True)
     check("read from the box is a success", ok, text)
     check("…names the sandboxed shell", "── Sandboxed shell 1 (idle) ──" in text, text)
     check("…sees its output", "boxed-here" in text, text)
     check("…and never the user's shell", f"Terminal {plain.number}" not in text, text)
-    got = app._mcp_read_terminal(found(), {"terminal": plain.number}, True)
+    got = app.tool_client.read_terminal(found(), {"terminal": plain.number}, True)
     check(
         "the user's shell can't be named from the box",
         got == (False, f"No sandboxed shell numbered {plain.number} — open: 1"),
         got,
     )
-    got = app._mcp_run_in_terminal(found(), {"command": "echo nope", "terminal": plain.number}, True)
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo nope", "terminal": plain.number}, True)
     check("…nor typed into", got == (False, f"No sandboxed shell numbered {plain.number} — open: 1"), got)
-    got = app._mcp_run_in_terminal(found(), {"command": "echo again"}, True)
+    got = app.tool_client.run_in_terminal(found(), {"command": "echo again"}, True)
     check("a second run reuses the idle sandboxed shell", got == (True, "Running in Sandboxed shell 1."), got)
-    ok, text = app._mcp_read_terminal(found(), {}, False)
+    ok, text = app.tool_client.read_terminal(found(), {}, False)
     check("an unsandboxed reading sees every shell", ok and f"Terminal {plain.number}" in text, text)
     # The layout round-trips the kind.
     layout = caller.capture_panel_layout()
@@ -458,13 +458,13 @@ OFFERED = ["set_session_title", "open_in_editor", "show_diff", "show_image", "no
 def offered_to(tab) -> list[str]:
     """What the session in *tab* is told it may call: the list the socket
     serves the pid of a process under the tab's shell."""
-    return [tool["name"] for tool in app._mcp_list_tools(tab._child_pid)]
+    return [tool["name"] for tool in app.session_tools.list_tools(tab._child_pid)]
 
 
 def call_from(tab, tool: str, args: dict):
     """One tool call as the dispatcher sees it arrive from *tab*: by pid,
     through every gate — not the handler alone."""
-    return app._mcp_dispatch(tab._child_pid, tool, args)
+    return app.session_tools.dispatch(tab._child_pid, tool, args)
 
 
 def tools() -> bool:
@@ -473,7 +473,7 @@ def tools() -> bool:
     caller = state["caller"]
     host = terminal.SANDBOX_HOST
     box = caller.sandbox_box
-    check("the pid of the session's shell resolves to its tab", app._mcp_tab_for_pid(caller._child_pid) == found())
+    check("the pid of the session's shell resolves to its tab", app.tool_client.found_for_pid(caller._child_pid) == found())
     check("a sandboxed session is offered six tools", offered_to(caller) == OFFERED, offered_to(caller))
     shells = len(caller.panel_shells())
     refused = {
@@ -709,7 +709,7 @@ def restarted() -> bool:
     # The shell opened before the restart still runs in the box it spawned
     # in, which may hold a directory the revoke has since taken away: it
     # stays on screen for the user, and leaves the agent's reach.
-    got = app._mcp_read_terminal(found(), {}, True)
+    got = app.tool_client.read_terminal(found(), {}, True)
     check(
         "the shell left in the old box is out of the agent's reach",
         got == (True, "No sandboxed shells are open in this session."),
@@ -763,7 +763,7 @@ def siblings() -> bool:
     refused, no_box, reason = host.derive(plan, f"{HOME}/.ssh")
     check("a sibling in ~/.ssh is refused", refused is None and "outside the sandbox" in reason, reason)
     check("…and gets no box", no_box == "", no_box)
-    got = app._mcp_start_session(found(), {"prompt": "hi", "cwd": f"{HOME}/.ssh"}, True)
+    got = app.tool_client.start_session(found(), {"prompt": "hi", "cwd": f"{HOME}/.ssh"}, True)
     check(
         "start_session from the box refuses a cwd outside it",
         isinstance(got, tuple)
@@ -772,12 +772,12 @@ def siblings() -> bool:
         got,
     )
     check("…naming the rule", isinstance(got, tuple) and "allowed directories" in got[1], got)
-    got = app._mcp_start_session(
+    got = app.tool_client.start_session(
         found(), {"prompt": "hi", "cwd": SUB, "model": "not a model; rm -rf"}, True
     )
     check("a refusal past the derive", isinstance(got, tuple) and got[0] is False, got)
     before = win.tab_view.get_n_pages()
-    got = app._mcp_start_session(found(), {"prompt": "hi", "cwd": SUB}, True)
+    got = app.tool_client.start_session(found(), {"prompt": "hi", "cwd": SUB}, True)
     check("start_session from the box spawns a sibling", not isinstance(got, tuple), got)
     GLib.timeout_add(3000, sibling_up, before)
     return GLib.SOURCE_REMOVE
@@ -1163,7 +1163,7 @@ def narrowed_up(tab) -> None:
     # The checkout is not "already inside": the user can allow it.
     check("the guard would allow the checkout", host.grant_reason(own, CHECKOUT) == "", host.grant_reason(own, CHECKOUT))
     # A sibling collapses to the repository, which the box can't write.
-    got = app._mcp_start_session((state["win"], tab), {"prompt": "hi", "cwd": own}, True)
+    got = app.tool_client.start_session((state["win"], tab), {"prompt": "hi", "cwd": own}, True)
     check(
         "a sibling of a session in its worktree is refused",
         isinstance(got, tuple) and got[0] is False and "outside the sandbox's workspace" in got[1],
@@ -1349,7 +1349,7 @@ def delivered() -> bool:
     check("no Restart to apply: the box holds what the state grants", "Restart to apply" not in names, names)
     check("both rows can be removed", len([b for b in buttons(chip._content) if b.get_icon_name() == "list-remove-symbolic"]) == 2)
     # A sibling can't start inside a directory its parent holds only live.
-    got = app._mcp_start_session(found(), {"prompt": "hi", "cwd": LIVE}, True)
+    got = app.tool_client.start_session(found(), {"prompt": "hi", "cwd": LIVE}, True)
     check(
         "a sibling inside the live grant is refused, and told why",
         isinstance(got, tuple) and got[0] is False and "was allowed while the parent session was running" in got[1],

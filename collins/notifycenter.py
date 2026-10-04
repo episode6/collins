@@ -50,6 +50,20 @@ theme for its events), what the picker offers (`sound_choices`), and what
 the preferences row and the sheet's footer call the choice. notifysound.py
 plays whatever this resolves to.
 
+**Who owns the list** (split-service spec §3.13, PR-1.11): the service.
+Its `service.notifications.ServiceNotifications` holds a center over
+state.json's records, mints every row (`notify.post`), keeps the unread
+set, and tells every client; each client holds `remotenotify.
+RemoteNotifications`, this class's API over a mirror of it, and applies
+the delivery table here with its own focus state. A row's text is a
+**msgid and its args** (§3.14): `Notification.msgid` / `args` cross the
+wire and are persisted; `body` is that text as this process shows it
+(`i18n.translate` on a client, the English source on the service).
+Records written before PR-1.11 carry only a body: it becomes the msgid,
+with no args, when the record is read (`from_record`), so the history
+stays readable — and a stored English source string ("Rang the bell")
+is now shown translated.
+
 **What the widgets say** is decided here too, where it is string work: the
 bell's tooltip, a row's relative time, a coalesced bell's "×3", the split of
 the list into its unread and earlier halves (see the helpers after the
@@ -62,9 +76,9 @@ import os
 import time
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from .i18n import N_, _
+from .i18n import N_, _, english
 
 # What raised the notification. A `finished` row is synthetic — the green
 # flag's row, owned by set_green — and never persisted.
@@ -371,6 +385,17 @@ class Notification:
     read: bool = False
     count: int = 1  # bells coalesce: "Rang the bell ×3"
     url: str = ""  # where an update row's click goes; "" for every other kind
+    # The text as it crosses the wire and is persisted (§3.14): an English
+    # source string and its args, or an agent's words as their own msgid
+    # with none. "" means the body is the msgid (a row made before there
+    # was one).
+    msgid: str = ""
+    args: dict = field(default_factory=dict)
+
+    @property
+    def text_id(self) -> str:
+        """The msgid, the body standing in for a row made without one."""
+        return self.msgid or self.body
 
     def to_record(self) -> dict:
         """The row as state.json holds it. The url rides only on a row that
@@ -381,11 +406,16 @@ class Notification:
             "title": self.title,
             "project": self.project,
             "kind": self.kind,
-            "body": self.body,
+            "msgid": self.text_id,
+            # The English rendering beside it: what an older build, which
+            # knows only "body", shows after a downgrade.
+            "body": english(self.text_id, self.args),
             "when": self.when,
             "read": self.read,
             "count": self.count,
         }
+        if self.args:
+            record["args"] = dict(self.args)
         if self.url:
             record["url"] = self.url
         return record
@@ -415,17 +445,23 @@ class Notification:
             value = raw.get(key, "")
             return value if isinstance(value, str) else ""
 
+        # The migration of PR-1.11: a record with no msgid (every record an
+        # older build wrote) has its body as its msgid, with no args.
+        msgid = text("msgid") or text("body")
+        args = clean_args(raw.get("args"))
         return cls(
             id=notification_id,
             session_id=text("session_id"),
             title=text("title"),
             project=text("project"),
             kind=kind,
-            body=text("body"),
+            body=english(msgid, args),
             when=float(when),
             read=bool(raw.get("read", False)),
             count=count,
             url=text("url"),
+            msgid=msgid,
+            args=args,
         )
 
 
@@ -463,6 +499,22 @@ def clean_notifications(raw, now: float | None = None) -> list[Notification]:
         seen.add(row.id)
         rows.append(row)
     return rows[:ROW_CAP]
+
+
+def clean_args(raw) -> dict:
+    """A record's args, kept only as the protocol carries them (rule 5:
+    the file is ours but not sacred): text keys, scalar values, bounded."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict = {}
+    for key, value in list(raw.items())[:32]:
+        if not isinstance(key, str) or not key.isidentifier():
+            continue
+        if isinstance(value, str):
+            out[key] = value[:4096]
+        elif value is None or isinstance(value, (bool, int, float)):
+            out[key] = value
+    return out
 
 
 def clean_records(raw, now: float | None = None) -> list[dict]:
@@ -602,8 +654,13 @@ class NotificationCenter:
         title: str,
         project: str,
         body: str,
+        *,
+        msgid: str = "",
+        args: dict | None = None,
     ) -> Notification:
-        """A fresh row for post(): a new id and the clock's time."""
+        """A fresh row for post(): a new id and the clock's time. *body* is
+        the text as shown here; *msgid* and *args* what it is made of (the
+        body itself when there is no msgid: an agent's words)."""
         return Notification(
             id=uuid.uuid4().hex,
             session_id=session_id,
@@ -612,6 +669,8 @@ class NotificationCenter:
             kind=kind,
             body=body,
             when=self._clock(),
+            msgid=msgid or body,
+            args=dict(args or {}),
         )
 
     def _trim(self) -> None:
@@ -744,8 +803,9 @@ class NotificationCenter:
                     title=title,
                     project=project,
                     kind=KIND_FINISHED,
-                    body=_("Finished a run"),
+                    body=_(FINISHED_MSGID),
                     when=self._clock(),
+                    msgid=FINISHED_MSGID,
                 ),
             )
         else:
@@ -764,12 +824,16 @@ class NotificationCenter:
 # -- what the bell and the sheet say -------------------------------------------
 
 
+# The msgids of the rows Collins words itself (§3.14): what crosses the
+# wire and is persisted; each client shows them in its own language.
+BELL_MSGID = N_("Rang the bell")
+FINISHED_MSGID = N_("Finished a run")
+
+
 def bell_body() -> str:
-    """A bell row's body. Translated when the row is posted and persisted as
-    such — a bell rung under one UI language is shown in it after a switch,
-    the way the row's title (the session's name at the time) is a record of
-    the moment rather than a live lookup."""
-    return _("Rang the bell")
+    """A bell row's body as this process shows it (BELL_MSGID is what the
+    row carries)."""
+    return _(BELL_MSGID)
 
 
 def bell_tooltip(unread: int) -> str:

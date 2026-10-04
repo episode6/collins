@@ -44,7 +44,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
-from . import claudemodels  # noqa: E402
+from . import claudemodels, modelcatalog  # noqa: E402
 from .i18n import _  # noqa: E402
 
 _GROUP = "modelmenu"
@@ -105,11 +105,11 @@ def _refresh(
     current = current_model() or ""
     pick.set_state(GLib.Variant.new_string(current))
     copy.set_enabled(bool(current))
-    cached = claudemodels.cached_models()
+    cached = modelcatalog.cached_models()
     _fill(menu, cached, bool(current))
 
     def work() -> None:
-        live = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+        live = modelcatalog.available_models() or list(claudemodels.FALLBACK_MODELS)
         GLib.idle_add(apply_models, live)
 
     def apply_models(live: list[claudemodels.ClaudeModel]) -> bool:
@@ -162,7 +162,7 @@ def model_label(model_id: str) -> str:
     resolves to (claudemodels.catalog_id, so an ``opus`` alias reads as the
     Opus it stands for, the row the picker marks), else the short name read
     off the id."""
-    catalog = list(claudemodels.cached_models() or claudemodels.FALLBACK_MODELS)
+    catalog = list(modelcatalog.cached_models() or claudemodels.FALLBACK_MODELS)
     listed = claudemodels.catalog_id(model_id, catalog)
     for model in catalog:
         if model.id == listed:
@@ -218,11 +218,11 @@ def new_launch_model_popover(
         pick.set_state(GLib.Variant.new_string(_launch_mark(choice(), default_model(), models)))
 
     def refresh(*_a) -> None:
-        cached = claudemodels.cached_models()
+        cached = modelcatalog.cached_models()
         fill(cached)
 
         def work() -> None:
-            live = claudemodels.available_models() or list(claudemodels.FALLBACK_MODELS)
+            live = modelcatalog.available_models() or list(claudemodels.FALLBACK_MODELS)
             GLib.idle_add(apply_models, live)
 
         def apply_models(live: list[claudemodels.ClaudeModel]) -> bool:
@@ -296,7 +296,7 @@ def new_effort_popover(
     def refresh(*_a) -> None:
         pick.set_state(GLib.Variant.new_string(current_effort() or ""))
         menu.remove_all()
-        _append_efforts(menu, claudemodels.model_efforts(current_model() or ""))
+        _append_efforts(menu, modelcatalog.model_efforts(current_model() or ""))
 
     popover.connect("show", refresh)
     return popover
@@ -339,7 +339,7 @@ def new_launch_effort_popover(
             default = ""  # a name the CLI wouldn't take marks nothing
         pick.set_state(GLib.Variant.new_string(choice() or default))
         menu.remove_all()
-        _append_efforts(menu, claudemodels.model_efforts(launch_model() or ""))
+        _append_efforts(menu, modelcatalog.model_efforts(launch_model() or ""))
 
     popover.connect("show", refresh)
     return popover

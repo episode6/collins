@@ -56,6 +56,21 @@ downloads of each version, see the
   service half of the app, and the window works on a copy it keeps in
   step; nothing looks different, except that a change the service
   refuses is put back with a "Not saved" notice.
+- **Pull requests, notifications, session tools and the rest join the
+  service.** Every `gh` call (statuses, the PR page, merges, reviews,
+  comments, image previews), the notification history and its unread
+  count, the session tools sessions call back with, the Sandboxed chip's
+  grants and switches, the notes and highlights on a session's diff, the
+  usage panel, the model list, project icons, the login repair, cloning a
+  repository, moving a session's worktree to the trash and back, and a
+  new chat's folder now run in the service half of the app; the window
+  asks and shows. Notifications are stored as their source text and
+  shown in the language Collins runs in, so a bell or a finished run
+  rung under one language reads in another after a switch (an older
+  row shows the text it was saved with, translated where that is
+  Collins' own English). The service also saves a panel
+  shell's scrollback itself when the shell exits on the
+  `COLLINS_PTY_BACKEND=server` backend.
 - **App state is now two files.** `~/.config/collins/state.json` keeps what
   describes your sessions and projects and what Collins does for them
   (names, favorites, archives, drafts, pull request records, the sandbox,
