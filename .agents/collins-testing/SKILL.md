@@ -231,7 +231,11 @@ that backend: a second VTE attaching to a running pty is redrawn from the
 service's model, scrollback and colours compared, and the redraw guard's
 sentinel answer is shown never to reach the pty; `COLLINS_ATTACH_RECORD=<file>`
 writes the first client's stream for a replay through the model and a VTE
-outside the app). Reproduce a shard (or, without
+outside the app). `scripts/probe_server_backend.py` (headless, no quota) is
+the server backend's probe set: a flow-control redraw's sentinel never
+reaching the pty, the guard's watchdog and a failed attach, a NUL commit,
+two attaches back to back, the mouse coalescer under random streams.
+Reproduce a shard (or, without
 `--shard`, the whole suite) on any machine with Docker:
 
 ```bash
