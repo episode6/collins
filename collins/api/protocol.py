@@ -253,7 +253,11 @@ NAME_MAX = 1024  # a title, a project's name, a display name
 HOST_MAX = 255  # a hostname, a device's name
 VERSION_MAX = 64
 SHORT_MAX = 32  # a status, a kind, a mode, a permission mode, an effort
-MODES_MAX = 256  # the mode re-assertions an attach reply lists
+# The mode re-assertions an attach reply lists: what termstream's tracker
+# can hold at most (every known private and ANSI mode off its default, the
+# unknown-mode allowance, the kitty base and stack, modifyOtherKeys), with
+# room; tests/test_termstream.py pins the worst case under it.
+MODES_MAX = 512
 MODE_MAX = 16  # one of them, as the preamble sends it (CSI stripped): "?1004h"
 MODEL_MAX = 128
 PREVIEW_MAX = 4096

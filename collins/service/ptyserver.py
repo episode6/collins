@@ -138,15 +138,16 @@ exit; the file exists for a live pty's re-adoption (PR-3.6).
 ``$XDG_STATE_HOME/collins/pty/<pty id>.model`` (`COLLINS_PTY_STATE_DIR`
 overrides the directory; tests, captures and e2e checks use it; the
 directory is made 0700 and the file 0600) at most once per
-`SAVE_INTERVAL_MS` while output arrives, at exit and at shutdown. The dump
+`SAVE_INTERVAL_MS` while output arrives, for as long as the pty lives. The dump
 is taken on the loop (tens of milliseconds for a full scrollback, which is
 accepted for now and noted for PR-1.12's own loop); the JSON encoding and
 the write run on a worker thread, one in flight per pty, a save that was
 asked for meanwhile following it, the result landing at
 `GLib.PRIORITY_DEFAULT` (CLAUDE.md's rule for anything that advances a
-pipeline). It is what a restarted service reads to show a resumed
-session's scrollback and what `capture_contents` of a closed panel shell
-is read from (§3.10 point 3); PR-3.6's keeper adopts it. `Screen.load`
+pipeline). It is what a restarted service reads to re-adopt a live pty
+(§3.10 point 3; PR-3.6's keeper); it is removed when the pty exits and
+pruned at service start when its pty is not in the table, and a closed
+panel shell's text is the panel history's, not this file's. `Screen.load`
 validates every field and bound (rule 5) and raises on anything off, and
 `load_model` refuses a file over `MODEL_FILE_MAX` before reading it, so a
 file an older or newer service wrote, or a damaged one, means a fresh

@@ -79,6 +79,20 @@ def test_the_watchdog_lowers_a_guard_nothing_answered():
     assert g.on_commit(b"typed")
 
 
+def test_an_answer_arriving_after_the_watchdog_is_swallowed_once():
+    g, timers = guard()
+    g.raise_for_attach()
+    timers.fire_all()
+    assert not g.up
+    assert not g.on_commit(answer(1))  # the late answer: swallowed, not typed
+    assert g.on_commit(answer(1))  # only once
+    assert g.on_commit(b"typed")
+    g.raise_for_attach()
+    timers.fire_all()
+    assert g.on_commit(answer(1))  # an older generation's late answer is not the one waited for
+    assert not g.on_commit(answer(2))
+
+
 def test_a_failed_attach_lowers_the_guard_at_once():
     g, timers = guard()
     g.raise_for_attach()

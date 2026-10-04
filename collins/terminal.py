@@ -2319,17 +2319,22 @@ class TerminalTab(Gtk.Box):
         )
 
     def _term_for_service(self) -> dict:
-        """The hello's ``term`` for this terminal: its colours and scheme as
-        the service answers the program's colour queries with."""
+        """The hello's ``term`` for this terminal: the colours the service
+        answers the program's colour queries with. No ``scheme``: the
+        service answers the colour-scheme query from the background's
+        luminance, as VTE does (`check_termstream_answers`), and VTE's
+        Default theme is grey on black whatever the desktop's scheme."""
         term: dict = {"vte": Vte.get_major_version() * 10000 + Vte.get_minor_version() * 100}
         theme = themes.get_theme(self._theme_name)
         if theme is not None:
             term["fg"] = "#" + theme["fg"]
             term["bg"] = "#" + theme["bg"]
-            r, g, b = themes.hex_rgb(theme["bg"])
-            term["scheme"] = "dark" if (r * 299 + g * 587 + b * 114) / 1000 < 128 else "light"
         else:
-            term["scheme"] = "dark" if Adw.StyleManager.get_default().get_dark() else "light"
+            # VTE's defaults: the foreground it draws plain text in, the
+            # background as it is drawn now.
+            term["fg"] = "#c0c0c0"
+            bg = self.terminal.get_color_background_for_draw()
+            term["bg"] = f"#{round(bg.red * 255):02x}{round(bg.green * 255):02x}{round(bg.blue * 255):02x}"
         return term
 
     def _on_service_output(self, pty: int, data: bytes, flags: int) -> None:

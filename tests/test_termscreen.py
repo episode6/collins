@@ -437,6 +437,38 @@ def test_ed2_moves_the_rows_the_buffer_holds_into_scrollback():
     assert len(feed("x\n" * 45 + f"{E}[2J").scrollback) == 46
 
 
+def test_ed3s_blanked_rows_leave_the_capture_and_the_count_follows_evictions():
+    """After ED 3 the blanked rows count (VTE's text reads show them) but
+    VTE's capture leaves them out (measured in PR-1.7); the count goes down
+    only as those rows are pushed out, by the row cap or the byte budget,
+    never a real row."""
+    screen = Screen(20, 4, scrollback=12)
+    screen.feed(termstream.Tokenizer().feed("".join(f"old {i}\r\n" for i in range(10)).encode()))
+    scrolled = len(screen.scrollback)
+    screen.feed(termstream.Tokenizer().feed(f"{E}[3J".encode()))
+    assert screen.scrollback_erased == scrolled
+    assert screen.capture_contents().split("\n")[0] == f"old {scrolled}"  # the screen's first row
+    # Rows up to the cap push nothing out: the count holds.
+    room = 12 - scrolled
+    screen.feed(termstream.Tokenizer().feed(("n\r\n" * room).encode()))
+    assert len(screen.scrollback) == 12 and screen.scrollback_erased == scrolled
+    # The next row pushes the oldest, an erased one, out.
+    screen.feed(termstream.Tokenizer().feed(b"x\r\n"))
+    assert screen.scrollback_erased == scrolled - 1
+    rows = screen.capture_contents().split("\n")
+    assert rows[0] == f"old {scrolled}" and "" not in rows[:-1]
+    # The byte budget evicting erased rows counts them down too, and never
+    # drops a real row from the capture.
+    tight = Screen(20, 4, scrollback=100, scrollback_cost=400)
+    tight.feed(termstream.Tokenizer().feed("".join(f"old {i}\r\n" for i in range(10)).encode()))
+    tight.feed(termstream.Tokenizer().feed(f"{E}[3J".encode()))
+    erased = tight.scrollback_erased
+    tight.feed(termstream.Tokenizer().feed((("r" * 19 + "\r\n") * 30).encode()))
+    assert tight.scrollback_erased < erased
+    rows = tight.capture_contents().split("\n")
+    assert all(r == "r" * 19 or r.startswith("old ") for r in rows[:-1])
+
+
 def test_ed3_blanks_the_scrollback_and_leaves_the_cursor():
     """VTE keeps the rows and blanks them (measured, pinned by the golden)."""
     screen = feed("".join(f"gone {i}\r\n" for i in range(1, 50)) + f"{E}[3Jstill")

@@ -67,6 +67,10 @@ class RedrawGuard:
         self._watchdog = 0
         self.dropped = 0  # commits swallowed, for the checks
         self.expired = 0  # watchdog expiries, for the checks and the log
+        # The generation whose answer may still arrive after the watchdog
+        # lowered the guard: swallowed once when it does, instead of being
+        # typed into the pty as an OSC string.
+        self._late: int | None = None
 
     # -- the service's frames
 
@@ -109,6 +113,7 @@ class RedrawGuard:
             self.expired += 1
             self.in_redraw = False
             log.warning("redraw guard: no answer to the sentinel in %d ms; lowering it", WATCHDOG_MS)
+            self._late = self.generation
             self._lower("the watchdog")
 
     def _lower(self, why: str) -> None:
@@ -124,11 +129,18 @@ class RedrawGuard:
         when the guard swallowed it (the sentinel's answer lowers the
         guard; the answer itself never goes)."""
         if not self.up:
+            if self._late is not None and self._answers(data, self._late):
+                self._late = None
+                self.dropped += 1
+                return False  # the watchdog's sentinel, answered late
             return True
         self.dropped += 1
-        wanted = SENTINEL_BASE + self.generation % SENTINEL_SPAN
-        for match in _ANSWER_RE.finditer(data):
-            if int(match.group(1)) == wanted:
-                self._lower("the sentinel's answer")
-                break
+        if self._answers(data, self.generation):
+            self._late = None
+            self._lower("the sentinel's answer")
         return False
+
+    @staticmethod
+    def _answers(data: bytes, generation: int) -> bool:
+        wanted = SENTINEL_BASE + generation % SENTINEL_SPAN
+        return any(int(m.group(1)) == wanted for m in _ANSWER_RE.finditer(data))

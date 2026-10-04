@@ -1008,16 +1008,23 @@ class Screen:
     def _append_scrollback(self, runs: tuple, wrapped: bool) -> None:
         scrollback = self.scrollback
         if len(scrollback) == scrollback.maxlen:
+            # The row cap: the append pushes the oldest row out.
             self.scrollback_bytes -= _runs_cost(scrollback[0])
+            self._erased_row_left()
         scrollback.append(runs)
         self.scrollback_wrapped.append(wrapped)
-        if self.scrollback_erased and len(self.scrollback) == self.scrollback.maxlen:
-            self.scrollback_erased -= 1  # the oldest row, an erased one, was pushed out
         self.scrollback_bytes += _runs_cost(runs)
         # The byte budget: the oldest rows go first, as with the row count.
         while self.scrollback_bytes > self._scrollback_budget and len(scrollback) > 1:
             self.scrollback_bytes -= _runs_cost(scrollback.popleft())
             self.scrollback_wrapped.popleft()
+            self._erased_row_left()
+
+    def _erased_row_left(self) -> None:
+        """The oldest scrollback row was pushed out: if it was one ED 3
+        blanked (they are always the oldest), the count follows."""
+        if self.scrollback_erased:
+            self.scrollback_erased -= 1
 
     def _linefeed(self) -> None:
         grid = self.grid
