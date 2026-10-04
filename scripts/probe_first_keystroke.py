@@ -46,7 +46,8 @@ FOCUS_ON, FOCUS_OFF = "\x1b[?1004h", "\x1b[?1004l"
 # What the CLI sets (F1): mouse tracking with any-motion and SGR encoding
 # (fullscreen mode), the kitty keyboard flags, modifyOtherKeys, bracketed
 # paste.
-MOUSE_ON, MOUSE_OFF = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h", "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l"
+MOUSE_ON = "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"
+MOUSE_OFF = "\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1006l"
 KITTY_ON, KITTY_OFF = "\x1b[>5u", "\x1b[<u"
 MOK_ON, MOK_OFF = "\x1b[>4;2m", "\x1b[>4;0m"
 PASTE_ON, PASTE_OFF = "\x1b[?2004h", "\x1b[?2004l"
