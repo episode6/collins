@@ -103,8 +103,13 @@ _PROPS = (
     "can_background",
 )
 _SIGNALLED = {"busy": "busy-changed", "unread": "unread-changed"}
-# State keys whose change moves what a row shows (settings: the
-# cli_title_sessions switch).
+# The settings whose flip moves what a row's name is: whether the CLI's
+# own titles show, and whether PR titles name sessions (the latter writes
+# generated names on the service, which then arrive as their own change;
+# watched so a flip is never missed).
+_TITLE_SWITCHES = ("cli_title_sessions", "pr_title_sessions")
+# State keys whose change moves what a row shows (settings: the title
+# switches above, and only on a flip).
 _NAME_KEYS = frozenset({"names", "generated_names", "cli_titles", "settings"})
 
 
@@ -141,6 +146,7 @@ class RemoteStore(GObject.Object):
         self._missing: set[str] = set()  # lookups that found nothing, until the next rows
         self._summary = {"total": 0, "hidden": 0, "size": 0, "projects": (), "chats": 0}
         self._projects: frozenset[str] = frozenset()
+        self._title_switches = {name: bool(state.get_setting(name)) for name in _TITLE_SWITCHES}
         link.on("item", self._on_item)
         link.on("rows", self._on_rows)
         link.on("put-away", self._on_put_away)
@@ -243,7 +249,16 @@ class RemoteStore(GObject.Object):
         `item` event, when its refresh comes, carries the same value."""
         if key not in _NAME_KEYS and key != "favorites":
             return
-        if key != "settings" and entry is not None:
+        if key == "settings":
+            # Only the title switches move a name, and only when they flip
+            # (what the store's apply_cli_titles / apply_pr_titles waited
+            # for): any other setting written re-projects nothing.
+            switches = {name: bool(self.state.get_setting(name)) for name in _TITLE_SWITCHES}
+            if switches == self._title_switches:
+                return
+            self._title_switches = switches
+            self._reproject(list(self._items))
+        elif entry is not None:
             self._reproject([entry])
         else:
             self._reproject(list(self._items))
@@ -278,7 +293,11 @@ class RemoteStore(GObject.Object):
 
     def _reproject(self, session_ids) -> None:
         """Put a row's name and star back in line with the mirror (after an
-        optimistic write, or its revert)."""
+        optimistic write, or its revert). The name and the star only: a
+        star's flip does not move the row into Favorites here (its
+        `group_key` and the list's order wait for the service's `rows`, one
+        round trip; none on the loopback). PR-1.12 revisits that once the
+        socket makes the round trip visible."""
         for session_id in session_ids:
             item = self._items.get(session_id)
             if item is None:

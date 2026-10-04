@@ -165,6 +165,32 @@ def test_a_refusal_reverts_to_what_arrived_meanwhile(mirror):
     assert state.get_name("a") == "Theirs"
 
 
+def test_two_writes_in_flight_and_an_event_between(mirror):
+    """The first write's late reply must not confirm its value when an
+    event landed after it went: what was heard is per send, not per mark."""
+    state, link, _timers, toasts, _changes = mirror
+    state.set_name("a", "first")
+    link.event("names", "other", entry="a")  # another client's, after ours
+    state.set_name("a", "second")
+    assert len(link.sent) == 2  # both unanswered
+    link.reply(0)  # the first is taken: but "other" came after it
+    assert state.get_name("a") == "second"  # the second still holds
+    link.refuse(0)  # the second is refused
+    assert state.get_name("a") == "other"  # back to the service's last word
+    assert len(toasts) == 1
+
+
+def test_two_writes_in_flight_settle_on_the_last(mirror):
+    state, link, _timers, _toasts, _changes = mirror
+    state.set_name("a", "first")
+    state.set_name("a", "second")
+    link.reply(0)
+    assert state.get_name("a") == "second"
+    link.reply(0)
+    assert state.get_name("a") == "second"
+    assert not state.is_pending("names", "a")
+
+
 def test_a_whole_map_event_keeps_the_pending_entries(mirror):
     state, link, _timers, _toasts, _changes = mirror
     state.set_name("a", "Mine")

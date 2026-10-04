@@ -102,8 +102,9 @@ from . import ptyserver, storefeed, termstream
 
 log = logging.getLogger(__name__)
 
-# The requests of the store and state half, besides every ``store.*`` and
-# ``trust.*`` type: refused as `unknown` by a core with no store.
+# The requests of the store and state half, besides every ``store.*`` type:
+# refused as `unknown` by a core with no store. ``trust.*`` is not gated: the
+# CLI's folder trust is a file of the service's machine, not the store's.
 _STORE_REQUESTS = frozenset({"subscribe", "state.get", "state.set"})
 
 
@@ -137,7 +138,7 @@ class ServiceCore:
         state_dir: Path | None = None,
         record: Callable[[int, dict | None], None] | None = None,
         record_next_id: Callable[[int], None] | None = None,
-        next_id: int = 1,
+        next_id: int | None = None,
         get_setting: Callable[[str], Any] = lambda key: None,
         environment: Callable[[], dict[str, str]] | None = None,
         on_stream_event: Callable[[int, object], None] | None = None,
@@ -166,7 +167,8 @@ class ServiceCore:
         if state is not None:
             record = record or state.set_pty
             record_next_id = record_next_id or state.set_pty_next_id
-            next_id = state.pty_next_id if next_id == 1 else next_id
+            if next_id is None:
+                next_id = state.pty_next_id
             get_setting = state.get_setting
         self._get_setting = get_setting
         self._sandbox_plan = sandbox_plan or (lambda box: None)
@@ -175,7 +177,7 @@ class ServiceCore:
             state_dir=state_dir,
             record=record,
             record_next_id=record_next_id,
-            next_id=next_id,
+            next_id=1 if next_id is None else next_id,
             on_event=on_stream_event,
         )
         self._clients: set[int] = set()  # id(client)
@@ -233,7 +235,7 @@ class ServiceCore:
             return protocol.refuse(
                 message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
             )
-        if message.type in _STORE_REQUESTS or message.type.startswith(("store.", "trust.")):
+        if message.type in _STORE_REQUESTS or message.type.startswith("store."):
             if self.feed is None:
                 return protocol.refuse(
                     message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}

@@ -240,6 +240,20 @@ def test_a_name_written_on_the_state_reaches_the_row(world):
     assert remote.get_item(ids["alpha2"]).favorite
 
 
+def test_only_a_title_switch_flip_reprojects_the_rows(world, monkeypatch):
+    _store, remote, state, ids, _link = world
+    calls = []
+    original = remote._reproject
+    monkeypatch.setattr(remote, "_reproject", lambda sids: (calls.append(list(sids)), original(sids)))
+    state.set_setting("archive_worktree", "always")  # unrelated: nothing moves
+    state.set_setting("cli_title_sessions", True)  # already on: no flip
+    assert calls == []
+    state.set_setting("cli_title_sessions", False)  # a flip: every row
+    assert len(calls) == 1 and set(calls[0]) == set(remote.row_ids())
+    state.set_setting("pr_title_sessions", True)  # the other switch
+    assert len(calls) == 2
+
+
 def test_a_write_from_elsewhere_reaches_the_mirror(world):
     store, remote, state, ids, _link = world
     store.state.set_emoji(ids["alpha1"], "🦊")  # the service's own write

@@ -141,8 +141,13 @@ class RemoteState(AppState):
         self._capture: list | None = None
         self._listeners: list[Callable[[str, str | None, bool], None]] = []
         self._draft_timers: dict[str, Any] = {}
-        # Pending writes an event has spoken for since they went out.
-        self._heard: set[Mark] = set()
+        # How many events have landed, per key (any event of it), per
+        # key whole (an event with no entry) and per entry: a write takes
+        # a snapshot when it goes out, and its reply confirms it only when
+        # no event has spoken for its key or entry since (`_since`).
+        self._any_events: dict[str, int] = {}
+        self._whole_events: dict[str, int] = {}
+        self._entry_events: dict[Mark, int] = {}
         super().__init__(migrate=False, device=True, ui=ui)
         for name in SHARED_KEYS:
             self._shown[name] = copy.deepcopy(self.export_key(name))
@@ -281,16 +286,27 @@ class RemoteState(AppState):
 
     def _send_write(self, message: dict, mark: Mark, value) -> None:
         """Send one `state.set`. Taken, it is what the service holds unless
-        an event for the same key or entry arrived after it went (the
-        service's echo, or a later write): that one is the last word."""
-        self._heard.discard(mark)
+        an event for the same key or entry arrived after *this* send went
+        (the service's echo, or a later write): that one is the last word.
+        Per send, not per mark: two writes of one entry can be in flight at
+        once, and an event between them has spoken after the first only."""
+        sent_at = self._since(mark)
 
         def taken(_fields: dict) -> None:
-            if mark not in self._heard:
+            if self._since(mark) == sent_at:
                 self._confirm(mark, value)
             self._settle([mark], None)
 
         self._link.send(message, taken, lambda refusal: self._settle([mark], refusal))
+
+    def _since(self, mark: Mark) -> tuple[int, int]:
+        """The event count that speaks for *mark*: any event of its key
+        for a whole-key write; for an entry, the key's whole-key events and
+        the entry's own."""
+        name, entry = mark
+        if entry is None:
+            return (self._any_events.get(name, 0), 0)
+        return (self._whole_events.get(name, 0), self._entry_events.get(mark, 0))
 
     def _confirm(self, mark: Mark, value) -> None:
         name, entry = mark
@@ -379,10 +395,11 @@ class RemoteState(AppState):
         entry = event.get("entry")
         value = event.get("value")
         self._confirm((name, entry), value)
+        self._any_events[name] = self._any_events.get(name, 0) + 1
         if entry is None:
-            self._heard.update(mark for mark in self._pending if mark[0] == name)
+            self._whole_events[name] = self._whole_events.get(name, 0) + 1
         else:
-            self._heard.update({(name, entry), (name, None)} & self._pending.keys())
+            self._entry_events[(name, entry)] = self._entry_events.get((name, entry), 0) + 1
         if entry is None:
             if self._pending.get((name, None), 0) > 0:
                 return  # the whole key waits on a reply
