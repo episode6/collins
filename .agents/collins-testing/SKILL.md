@@ -82,6 +82,13 @@ Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 
 ## Writing an e2e check
 
+A check that drives widgets with **no `App`** behind them and reaches the
+service (a PR page's gh requests, a job, the model catalog: anything
+through `apilink.current()`) must opt in to the harness loopback with
+`apilink.allow_harness()` (as `check_pr_page_patch.py` does); in the real
+app that fallback is refused, so a window-less Preferences can't be served
+by a core with no store.
+
 Copy `scripts/check_new_chat.py`'s preamble rather than retyping it. The
 essentials, all of which are read at import time somewhere in `collins`:
 

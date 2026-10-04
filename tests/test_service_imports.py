@@ -37,7 +37,7 @@ def test_the_service_and_the_api_load_no_gtk():
     assert "collins.service.core" in modules and "collins.api.loopback" in modules
     # PR-1.11's: the session tools, the notification history, the jobs and
     # token use are the service's, and as GTK-free as the rest.
-    for name in ("tools", "notifications", "jobs", "tokenuse"):
+    for name in ("tools", "notifications", "jobs", "tokenuse", "prfeed", "sandbox", "diffs"):
         assert f"collins.service.{name}" in modules, name
     root = Path(collins.__file__).resolve().parent.parent
     result = subprocess.run(

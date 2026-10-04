@@ -57,7 +57,7 @@ def _formatted(text: str, args: dict | None) -> str | None:
         return text
     try:
         return text.format_map(dict(args))
-    except (KeyError, ValueError, IndexError, AttributeError):
+    except (KeyError, ValueError, IndexError, AttributeError, TypeError):
         return None
 
 

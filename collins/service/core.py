@@ -431,8 +431,14 @@ class ServiceCore:
     def _on_pty_exit(self, pty: ptyserver.Pty) -> None:
         """A shell's child exited: its history, from its model while the
         model is still whole (§3.15). A shell filed under no key (a fork's,
-        a page closed for good, a tab with no session yet) writes nothing."""
-        if pty.kind != "shell" or not pty.history:
+        a page closed for good, a tab with no session yet) writes nothing.
+        An agent's exit closes the shell the tools opened for its session
+        with no client attached (SessionTools.agent_exited)."""
+        if pty.kind != "shell":
+            if self.tools is not None and pty.session:
+                self.tools.agent_exited(pty.session)
+            return
+        if not pty.history:
             return
         panelhistory.save(pty.history, pty.screen.capture_contents(), pty.ordinal)
 

@@ -6,7 +6,6 @@ with a client attached (a `tool` event to the active client and a reply
 that settles it, at once or at the bound) and with none (§3.7's last
 column)."""
 
-
 import pytest
 
 from collins import mcptools, notifycenter, proctree
@@ -306,14 +305,14 @@ def test_a_call_nobody_answers_ends_at_the_bound(world):
     ((ms, _fn, _args),) = world["timers"].due.values()
     assert ms == int(tools_mod.TOOL_BOUND_S * 1000) < 15_000  # under the shim's call timeout
     world["timers"].fire_all()
-    assert got.resolved and got._result == (False, tools_mod.NO_ANSWER)
+    assert got.resolved and got.result() == (False, tools_mod.NO_ANSWER)
 
 
 def test_a_client_that_goes_away_answers_its_calls(world):
     client = attach(world, answer=lambda event: None)
     got = world["tools"].dispatch(4242, "read_terminal", {})
     world["tools"].client_gone(client)
-    assert got.resolved and got._result[0] is False and world["timers"].due == {}
+    assert got.resolved and got.result()[0] is False and world["timers"].due == {}
 
 
 def test_the_sandbox_reading_travels_with_the_event(world):
@@ -369,14 +368,14 @@ def test_show_diff_is_queued_then_applied_when_a_client_subscribes(world):
     client = attach(world, answer=lambda event: (True, "Shows the staged diff."))
     assert world["tools"].apply_pending_diffs(client) == 1
     assert client.events[0]["name"] == "show_diff" and client.events[0]["arguments"] == {"what": "staged"}
-    assert got.resolved and got._result == (True, "Shows the staged diff.")
+    assert got.resolved and got.result() == (True, "Shows the staged diff.")
     assert world["state"].pending == {} and world["timers"].due == {}
 
 
 def test_show_diff_with_nobody_coming_answers_queued(world):
     got = world["tools"].dispatch(4242, "show_diff", {"what": "branch"})
     world["timers"].fire_all()
-    assert got.resolved and got._result[0] is True and got._result[1].startswith("Queued")
+    assert got.resolved and got.result()[0] is True and got.result()[1].startswith("Queued")
     assert world["state"].pending == {"sid-1": {"what": "branch"}}  # still applied on attach
 
 
@@ -484,3 +483,89 @@ def test_a_tool_event_crosses_the_loopback_and_its_reply_settles_the_call(tmp_pa
         assert [e["t"] for e in seen] == ["tool"] and seen[0]["handle"] == session.handle
     finally:
         server.shutdown()
+
+
+# -- the review's fixes ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("client", [False, True])
+def test_a_call_the_protocol_cannot_carry_is_refused_not_answered_headless(world, client):
+    """An argument past a protocol bound is refused, attached or not: never
+    taken for "no client" (notify_user recorded unread, show_diff queued)."""
+    if client:
+        attached = attach(world)
+    session = world["sessions"][0]
+    huge = "x" * (protocol.TEXT_MAX + 1)
+    for name, args in (("notify_user", {"message": huge}), ("show_diff", {"what": huge})):
+        got = world["tools"]._handler(name)(session, args, False)
+        assert got == (False, tools_mod.ARGS_DONT_FIT), name
+    assert world["state"].notifications == [] and world["state"].pending == {}
+    assert world["store"].unread == []
+    if client:
+        assert attached.events == []
+
+
+class ClosingPtys(FakePtys):
+    def __init__(self, ptys):
+        super().__init__(ptys)
+        self.closed = []
+
+    def close(self, pty_id):
+        self.closed.append(pty_id)
+        self.ptys.pop(pty_id, None)
+
+
+def test_one_headless_shell_per_session_closed_with_its_agent(world):
+    shells = ClosingPtys([])
+    world["tools"].ptys = shells
+    spawned = []
+
+    def spawn(session, sandboxed):
+        pty_id = 20 + len(spawned)
+        spawned.append(pty_id)
+        shells.ptys[pty_id] = FakePty(pty_id, session.session_id)
+        return pty_id
+
+    world["tools"]._spawn_shell = spawn
+    assert world["tools"].dispatch(4242, "run_in_terminal", {"command": "make"}) == (
+        True,
+        "Running in new Terminal 1.",
+    )
+    shells.ptys[20].busy = True
+    got = world["tools"].dispatch(4242, "run_in_terminal", {"command": "ls"})
+    assert got[0] is False and "busy" in got[1] and spawned == [20]  # reused, never a second
+    shells.ptys[20].busy = False
+    assert world["tools"].dispatch(4242, "run_in_terminal", {"command": "ls"}) == (
+        True,
+        "Running in Terminal 1.",
+    )
+    world["tools"].agent_exited("sid-1")
+    assert shells.closed == [20] and world["tools"]._headless_shells == {}
+    assert world["tools"].dispatch(4242, "run_in_terminal", {"command": "ls"})[0] is True
+    assert spawned == [20, 21]
+
+
+def test_a_headless_shell_of_a_session_no_longer_held_goes_too(world):
+    shells = ClosingPtys([FakePty(30, "gone")])
+    world["tools"].ptys = shells
+    world["tools"]._headless_shells["gone"] = 30
+    world["tools"].agent_exited("sid-1")  # another session's exit
+    assert shells.closed == [30]
+
+
+def test_the_harness_link_needs_an_opt_in(monkeypatch):
+    from collins import apilink
+    from collins.api.loopback import RequestRefused
+
+    made = []
+    monkeypatch.setattr(apilink, "_current", None)
+    monkeypatch.setattr(apilink, "_fallback_link", None)
+    monkeypatch.setattr(apilink, "_harness", False)
+    monkeypatch.setattr(apilink, "_fallback", lambda: made.append(1))
+    assert apilink.current() is None and made == []
+    with pytest.raises(RequestRefused) as refused:
+        apilink.call({"t": "pr.detail", "url": "https://github.com/o/r/pull/1"})
+    assert refused.value.error == protocol.ERROR_GONE
+    monkeypatch.setattr(apilink, "_fallback", None)
+    apilink.allow_harness()
+    assert apilink._harness is True

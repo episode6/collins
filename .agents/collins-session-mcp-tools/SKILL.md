@@ -167,7 +167,9 @@ and flags the session; `show_diff` records the session's pending load
 (`apply_pending_diffs`), then answers "queued"; the diff tools work on the
 service's `diffnotes` store over its own read of the diff (`service/
 diffs.py`); `read_terminal` / `run_in_terminal` reach the session's shell
-ptys on the pty server; `start_session` is refused (in Phase 1 a session's
+ptys on the pty server (`run_in_terminal` opens at most one shell of its
+own per session, reused and refused when busy, closed when the session's
+agent pty exits); `start_session` is refused (in Phase 1 a session's
 logic lives in its client's tab; it moves into the service in PR-1.12).
 
 **Deferred replies.** The whole dispatch runs on the main loop, so a handler

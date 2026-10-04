@@ -44,7 +44,9 @@ attach_pr             the session's own PR list             the same
 start_session         the active client's window spawns     refused: in Phase 1 a session's logic
                       the sibling (a new tab)               runs in its client's tab (escalated)
 read_terminal,        the active client (Phase 1: the       the session's shell ptys on the pty server,
-run_in_terminal       vte backend's shells are widgets)     read through the model; a new one spawned
+run_in_terminal       vte backend's shells are widgets)     read through the model; one of its own spawned
+                                                            when none is idle (one at most, reused; busy
+                                                            is refused), closed when the agent exits
 show_image            the lightbox, recorded too            recorded as an attachment; the reply says
                                                             nobody is looking
 notify_user           the client's delivery table; the      recorded in the history, the row unread and
@@ -58,6 +60,10 @@ diff_context,         the git page (its loaded diff), the   the service's `diffn
 annotate_diff, ...    marks written through to the          own read of the session's diff
                       service's store
 ====================  ====================================  ===========================================
+
+A call whose `tool` event the protocol refuses (an argument past one of
+its bounds) is refused (`ARGS_DONT_FIT`), whoever is attached: it is
+never taken for "no client attached" and answered headless.
 
 Error strings and replies are agent-facing English, as they always were
 (§3.14: tool replies to the agent stay English). GLib only; nothing here
@@ -73,6 +79,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from .. import attachrecords, editorfiles, mcptools, notifycenter, proctree, remoteimages
+from ..api import protocol
 from ..prstatus import parse_pr_url
 from ..shellinput import shell_command
 
@@ -80,8 +87,13 @@ log = logging.getLogger(__name__)
 
 # How long a UI-bound call waits for its client's reply: under the shim's
 # own call timeout (mcp_shim._CALL_TIMEOUT, 15 s), so the agent hears
-# Collins' words rather than a transport timeout. The client's own
-# deadlines (a show_diff's load, a start_session's spawn) are shorter.
+# Collins' words rather than a transport timeout. That leaves about a
+# second for the answer to cross back to the shim, which the loopback (and
+# a local socket) needs a fraction of; PR-1.12's remote link may want more.
+# It stays above the client's own deadlines (a show_diff's load and a
+# start_session's spawn are 12 s, gitloads.SHOW_DIFF_DEADLINE_S and
+# toolclient._START_SESSION_DEADLINE_MS) on purpose: their failure says
+# what went wrong, and must reach the agent before this generic one.
 TOOL_BOUND_S = 14.0
 # How long a show_diff with no client attached waits for one before
 # answering "queued" (§3.7: up to 10 s).
@@ -91,6 +103,7 @@ PENDING_DIFF_WAIT_S = 10.0
 SERVICE_TOOLS = frozenset({"set_session_title", "attach_pr"})
 
 NOT_RESOLVED = "The session isn't resolved in Collins yet — try again in a moment"
+ARGS_DONT_FIT = "The arguments don't fit the protocol Collins hands them to its window over"
 NO_CLIENT = "No Collins window is open to show that in"
 NO_ANSWER = "Collins didn't answer in time; the request may still land"
 SHOW_IMAGE_RECORDED = (
@@ -106,7 +119,7 @@ def _settled(result: mcptools.ToolResult) -> mcptools.ToolResult:
     """A DeferredResult that is already resolved, as its ``(ok, text)``: the
     shape a handler that finished at once always answered with."""
     if isinstance(result, mcptools.DeferredResult) and result.resolved:
-        return result._result  # noqa: SLF001 - the one reader of a settled promise
+        return result.result()
     return result
 
 
@@ -173,6 +186,10 @@ class SessionTools:
         # show_diff calls made with no client attached, waiting for one:
         # session key -> the deferred replies to settle when it comes.
         self._waiting_diffs: dict[str, list[tuple[mcptools.DeferredResult, int]]] = {}
+        # session id -> the shell run_in_terminal spawned for it with no
+        # client attached: at most one each, closed with the session's
+        # agent (agent_exited).
+        self._headless_shells: dict[str, int] = {}
 
     # -- who is calling, and what it is offered ---------------------------------
 
@@ -254,7 +271,9 @@ class SessionTools:
 
     def _forward(self, session, name: str, args: dict, sandboxed: bool) -> mcptools.ToolResult | None:
         """Hand the call to the session's active client as a `tool` event;
-        None when no client is attached."""
+        None when no client is attached. An event the protocol refuses (an
+        argument past one of its bounds) refuses the call, whoever is
+        attached: it is never taken for "no client" and answered headless."""
         call_id = f"call-{next(self._ids)}"
         deferred = mcptools.DeferredResult()
         event = {
@@ -266,6 +285,10 @@ class SessionTools:
             "arguments": dict(args),
             "sandboxed": bool(sandboxed),
         }
+        checked = protocol.validate(dict(event), protocol.SERVICE)
+        if isinstance(checked, protocol.Refusal):
+            log.warning("tools: a %s call the protocol can't carry: %s", name, checked.msgid)
+            return False, ARGS_DONT_FIT
         call = _Call(call_id, deferred, None, name)
         self._calls[call_id] = call
         client = self._send_tool(session, event)
@@ -522,6 +545,30 @@ class SessionTools:
         ]
         return True, mcptools.terminal_reply(sections, args.get("lines", mcptools.TERMINAL_DEFAULT_LINES))
 
+    def _headless_shell(self, session) -> int | None:
+        """The shell run_in_terminal opened for *session* with no client
+        attached, while its pty lives."""
+        pty_id = self._headless_shells.get(session.session_id or "")
+        if pty_id is not None and pty_id not in self.ptys.ptys:
+            del self._headless_shells[session.session_id]
+            return None
+        return pty_id
+
+    def agent_exited(self, session_id: str | None) -> None:
+        """The session's agent pty exited (ServiceCore's exit hook): the
+        shell opened for it headless goes too. Sessions the service no
+        longer holds lose theirs at the same moment."""
+        held = {s.session_id for s in self._sessions() if s.session_id}
+        for key, pty_id in list(self._headless_shells.items()):
+            if key != session_id and key in held:
+                continue
+            del self._headless_shells[key]
+            if self.ptys is not None and pty_id in self.ptys.ptys:
+                try:
+                    self.ptys.close(pty_id)
+                except (KeyError, OSError):
+                    pass
+
     def _headless_run_in_terminal(self, session, args: dict, sandboxed: bool = False):
         shells = self._shell_ptys(session, sandboxed)
         kind = "Sandboxed shell" if sandboxed else "Terminal"
@@ -541,9 +588,21 @@ class SessionTools:
         else:
             target = next(((n, pty) for n, pty in numbered if not pty.has_running_command()), None)
             if target is None:
+                # One shell of its own per session, no more: nobody closes
+                # a page that was never drawn, so a session running
+                # commands with no client attached reuses it, and is told
+                # it is busy rather than handed another.
+                own = self._headless_shell(session)
+                if own is not None:
+                    number = next((n for n, pty in numbered if pty.id == own), len(numbered))
+                    return False, (
+                        f"{kind} {number} is busy running a command — wait for it, or "
+                        "name an idle one with 'terminal'"
+                    )
                 pty_id = self._spawn_shell(session, sandboxed) if self._spawn_shell is not None else None
                 if pty_id is None:
                     return False, "Collins couldn't open a terminal in this session"
+                self._headless_shells[session.session_id] = pty_id
                 target = (len(numbered) + 1, self.ptys.get(pty_id))
                 opened = True
         self.ptys.write(target[1].id, shell_command(args["command"].rstrip("\n") + "\n").encode())

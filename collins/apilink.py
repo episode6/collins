@@ -119,15 +119,21 @@ class LoopbackLink(Link):
 # The client modules that ask the service for something outside the two
 # mirrors (a PR action, a job, the model catalog, a tool's reply: PR-1.11)
 # reach it through `current()`: the app's own link (`set_current`, at
-# startup), or, for a widget built with no app behind it (an e2e check
-# driving it alone), a link of its own on the loopback a tab with no app
-# gets (`set_fallback`: terminal.service_loopback, registered when that
-# module loads), connected on first use and never subscribed. With neither
-# (a unit test), `current()` is None and the caller fails soft.
+# startup). A widget built with no app behind it (an e2e check driving it
+# alone, a probe script) may get a link of its own on the loopback a tab
+# with no app gets (`set_fallback`: terminal.service_loopback, registered
+# when that module loads), connected on first use and never subscribed --
+# but only once the script has said so (`allow_harness`): that loopback's
+# core has no store and no state, so in the real app (Preferences opened
+# from the status icon before a window exists, say) it would serve PR
+# requests with nothing behind them and refuse the rest, silently. With no
+# app link and no opt-in, `current()` is None and `call` refuses with
+# ``gone``: the caller fails soft, visibly.
 
 _current: Link | None = None
 _fallback = None  # () -> api.loopback.LoopbackServer
 _fallback_link: LoopbackLink | None = None
+_harness = False
 
 
 def set_current(link: Link | None) -> None:
@@ -140,11 +146,18 @@ def set_fallback(loopback_factory) -> None:
     _fallback = loopback_factory
 
 
+def allow_harness() -> None:
+    """A script driving widgets with no app behind them (an e2e check, a
+    probe) opts in to the fallback link (see above)."""
+    global _harness
+    _harness = True
+
+
 def current() -> Link | None:
     global _fallback_link
     if _current is not None:
         return _current
-    if _fallback is None:
+    if _fallback is None or not _harness:
         return None
     if _fallback_link is None or _fallback_link.client is None or _fallback_link.client.closed:
         link = LoopbackLink()

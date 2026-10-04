@@ -163,7 +163,7 @@ class DiffNotes:
 
         self._spawn(work)
         # Already in (an inline read): the answer itself, as a page answers.
-        return deferred._result if deferred.resolved else deferred  # noqa: SLF001
+        return deferred.result() if deferred.resolved else deferred
 
     def context(self, session, args: dict) -> mcptools.ToolResult:
         def answer(got) -> tuple[bool, str]:

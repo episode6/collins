@@ -36,6 +36,7 @@ GLib only; nothing here imports GTK.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable
 
@@ -68,8 +69,9 @@ def event_for(row: Notification) -> dict:
     return event
 
 
-def _key(event: dict) -> tuple:
-    return tuple(sorted((k, repr(v)) for k, v in event.items()))
+def _key(event: dict) -> str:
+    """An event's identity for the change check: its JSON, keys sorted."""
+    return json.dumps(event, sort_keys=True, ensure_ascii=False)
 
 
 class ServiceNotifications:
@@ -110,7 +112,10 @@ class ServiceNotifications:
     def _on_changed(self) -> None:
         """Persist what is persisted, then tell every subscriber what moved:
         rows that appeared or changed (oldest first, so each lands on top in
-        order), then rows that left."""
+        order), then rows that left. Each change rebuilds every row's event
+        to compare it with what was published: O(rows), and rows are capped
+        at notifycenter.ROW_CAP (200) plus the finished runs' rows, so a
+        change costs a few hundred small dicts at most."""
         self.state.set_notifications(self.center.to_records())
         rows = self.center.rows()
         current = {row.id: event_for(row) for row in rows}
