@@ -487,8 +487,13 @@ nothing changed. On `server` (spec §3.4, swap 2 of §3.5):
   echo from before the tab's first allocation reads differently in
   `capture_contents` on the two backends until the program repaints
   (`check_attach_redraw.py` compares from the first line written at the
-  settled grid for that reason). `capture_contents` joins soft-wrapped
-  rows as VTE's `write_contents_sync` does.
+  settled grid for that reason). `capture_contents` is held to VTE's
+  `write_contents_sync` by the goldens' `capture` read (three wrap
+  scenarios in `scenarios.SYNTHETIC`, every scenario compared after
+  `scenarios.normalise_capture`): soft-wrapped rows joined, and the rows
+  `ED 3` blanked left out (VTE's text reads show them, measured in
+  PR-1.2; its capture does not, measured in PR-1.7:
+  `Screen.scrollback_erased` counts them, carried in the model file).
 - **The first keystroke after focus** (F11's unexplained loss) is the
   harness, not the client. `scripts/probe_first_keystroke.py` drives the
   glue with real input through the headless shell's own bus: with `cat`
@@ -588,8 +593,8 @@ PR-1.5).
   validates every field and bound, clamps the file's caps to the model's
   constants, and raises on anything off) is written to
   `$XDG_STATE_HOME/collins/pty/<id>.model` (0600 in a 0700 directory) at
-  most every `SAVE_INTERVAL_MS` while output arrives, at exit and at
-  shutdown: the dump on the loop, the encoding and the write on a worker
+  most every `SAVE_INTERVAL_MS` while output arrives and while the pty
+  lives (see the retention rule below): the dump on the loop, the encoding and the write on a worker
   thread (one in flight per pty, a save asked for meanwhile following it,
   the landing at `PRIORITY_DEFAULT`); `COLLINS_PTY_STATE_DIR` overrides the
   directory (tests, captures). `PtyServer.load_model(path)` gives the
