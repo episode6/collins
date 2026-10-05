@@ -79,9 +79,19 @@ def test_the_trees_and_quick_opens_sites_are_gone():
     for prefix in ("filetree:", "quickopen:"):
         left = sorted(s for s in found if s.startswith(prefix))
         assert not left, left
-    # The pane's one left is the rename's, PR-2.5's.
-    assert sorted(s for s in found if s.startswith("editor:")) == ["editor:EditorPane._rename:Path.rename"]
+    assert not sorted(s for s in found if s.startswith("editor:"))
     for name in ("list_dir", "walk_files", "repository_root", "follow_scope", "is_inside", "_is_file"):
+        left = sorted(s for s in found if s.startswith(f"editorfiles:{name}:"))
+        assert not left, left
+
+
+def test_the_file_operations_sites_are_gone():
+    """PR-2.5: the rename, the paste and the clipboard's reads touch no
+    disk on the client (the service's `fs.rename`, `fs.paste`, `fs.mkdir`;
+    the rules in `projectfiles`, which the service runs)."""
+    found = pathless.walk()
+    assert not sorted(s for s in found if s.startswith(("editor:", "fileclipboard:", "filetree:")))
+    for name in ("rename_target", "paste_target", "paste_entries", "unique_target", "_exists"):
         left = sorted(s for s in found if s.startswith(f"editorfiles:{name}:"))
         assert not left, left
 

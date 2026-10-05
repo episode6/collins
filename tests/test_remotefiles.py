@@ -5,7 +5,10 @@ spec §3.23, PR-2.3), through a fake link: `read` and `write` are `fs.read`
 apart, the watcher sends `fs.watch` under a handle of its own and hands
 each `file-changed` for that handle to its listener, `unwatch` sends
 `fs.unwatch` once, a reconnect's `reset` sends every live watch again, and
-a refusal's words are translated and filled."""
+a refusal's words are translated and filled. PR-2.5: `rename_path`,
+`paste_files` and `make_dir` are `fs.rename` / `fs.paste` / `fs.mkdir`
+with their outcomes, and `clipboard_scope` reads the link's service id
+and local proof (D35)."""
 
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ import pytest
 from collins import apilink, remotefiles
 from collins.api import protocol
 from collins.api.protocol import RequestRefused
+from collins.projectfiles import PasteError, RenameError
 
 
 class FakeLink(apilink.Link):
@@ -244,3 +248,77 @@ def test_reset_tells_its_listeners_after_resending(link):
     del tree  # held weakly: a tree that is gone is not called
     remotefiles.reset()
     assert heard == ["tree"]
+
+
+# -- file operations and the clipboard (PR-2.5) -----------------------------------------------
+
+
+def test_rename_path_is_an_fs_rename_call_and_its_reason_is_told(link):
+    link.answers["fs.rename"] = {"mtime": 42}
+    assert remotefiles.rename_path("/srv/p/a.txt", "/srv/p/b.txt", "/srv/p") == 42
+    assert link.calls[-1][0] == {
+        "t": "fs.rename", "path": "/srv/p/a.txt", "target": "/srv/p/b.txt", "root": "/srv/p"
+    }
+    link.answers["fs.rename"] = {"mtime": None}
+    assert remotefiles.rename_path("/srv/p/pkg", "/srv/p/package", "/srv/p") is None
+    taken = RequestRefused(protocol.ERROR_REFUSED, "The name is taken", {"reason": "exists"})
+    link.answers["fs.rename"] = taken
+    with pytest.raises(RequestRefused) as refused:
+        remotefiles.rename_path("/srv/p/a.txt", "/srv/p/b.txt", "/srv/p")
+    assert remotefiles.rename_reason(refused.value) is RenameError.EXISTS
+    assert remotefiles.rename_reason(RequestRefused(protocol.ERROR_FAILED, "boom", {})) is None
+    assert remotefiles.rename_reason(RequestRefused(protocol.ERROR_REFUSED, "", {"reason": "odd"})) is None
+
+
+def test_paste_files_is_an_fs_paste_call_with_an_outcome_per_entry(link):
+    link.answers["fs.paste"] = {
+        "placed": ["/srv/p/pkg/a (copy).txt"],
+        "results": [
+            {"source": "/srv/p/a.txt", "target": "/srv/p/pkg/a (copy).txt", "error": None, "message": ""},
+            {"source": "/tmp/x.txt", "target": None, "error": "source_outside", "message": ""},
+            {"source": "/srv/p/b.txt", "target": None, "error": "failed", "message": "Permission denied"},
+            {"source": "/srv/p/c.txt", "target": None, "error": "newer_rule", "message": ""},
+        ],
+    }
+    entries = ["/srv/p/a.txt", "/tmp/x.txt", "/srv/p/b.txt", "/srv/p/c.txt"]
+    outcomes = remotefiles.paste_files(entries, "/srv/p/pkg", True, "/srv/p")
+    assert link.calls[-1][0] == {
+        "t": "fs.paste",
+        "entries": ["/srv/p/a.txt", "/tmp/x.txt", "/srv/p/b.txt", "/srv/p/c.txt"],
+        "target": "/srv/p/pkg",
+        "cut": True,
+        "root": "/srv/p",
+    }
+    assert outcomes == [
+        remotefiles.PasteOutcome("/srv/p/a.txt", "/srv/p/pkg/a (copy).txt", None, ""),
+        remotefiles.PasteOutcome("/tmp/x.txt", None, PasteError.SOURCE_OUTSIDE, ""),
+        remotefiles.PasteOutcome("/srv/p/b.txt", None, PasteError.FAILED, "Permission denied"),
+        # A rule this client does not know reads as a failure, never as a landing.
+        remotefiles.PasteOutcome("/srv/p/c.txt", None, PasteError.FAILED, ""),
+    ]
+
+
+def test_make_dir_is_an_fs_mkdir_call(link):
+    link.answers["fs.mkdir"] = {}
+    assert remotefiles.make_dir("/srv/p/new", "/srv/p") is None
+    assert link.calls[-1][0] == {"t": "fs.mkdir", "path": "/srv/p/new", "root": "/srv/p"}
+    taken = RequestRefused(protocol.ERROR_REFUSED, "The name is taken", {"reason": "exists"})
+    link.answers["fs.mkdir"] = taken
+    with pytest.raises(RequestRefused) as refused:
+        remotefiles.make_dir("/srv/p/new", "/srv/p")
+    assert refused.value.details["reason"] == "exists"
+
+
+def test_clipboard_scope_is_the_links_service_and_local_proof(link, monkeypatch):
+    """D35: `collins://<service id>/<path>` URIs for the link's service,
+    `file:` URIs only when the link proved `local`."""
+    assert remotefiles.clipboard_scope() == remotefiles.ClipboardScope(None, False)
+    link.hello = {"service_id": "svc1", "caps": ["files"]}
+    link.local = True
+    assert remotefiles.clipboard_scope() == remotefiles.ClipboardScope("svc1", True)
+    link.local = False
+    assert remotefiles.clipboard_scope() == remotefiles.ClipboardScope("svc1", False)
+    link.hello = {"service_id": ""}
+    assert remotefiles.clipboard_scope().service_id is None
+    monkeypatch.setattr(apilink, "_current", None)
+    assert remotefiles.clipboard_scope() == remotefiles.ClipboardScope(None, False)

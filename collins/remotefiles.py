@@ -36,6 +36,14 @@ pattern: the work on a daemon thread, its answer landed at
 - `Watcher.watch(path, listener, kind=WATCH_DIR)` watches a directory's
   entries; its listener hears `dir-changed {handle, path}`.
 
+PR-2.5 adds the tree's file operations, blocking like the rest:
+`rename_path(path, target, root)` is `fs.rename` (the renamed file's
+mtime; `rename_reason` names the rule a refusal broke), `paste_files
+(entries, target, cut, root)` is `fs.paste` (a `PasteOutcome` per entry),
+`make_dir(path, root)` is `fs.mkdir`; and `clipboard_scope()` is what the
+file clipboard may say (D35): the link's `service_id` and its `local`
+proof.
+
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
 `apilink.current()` as every other ask of the service. GTK-free; the
@@ -57,6 +65,7 @@ from . import apilink
 from .api import protocol
 from .api.protocol import RequestRefused
 from .i18n import _
+from .projectfiles import PasteError, RenameError
 
 log = logging.getLogger(__name__)
 
@@ -234,6 +243,115 @@ def off_main(
         GLib.idle_add(lambda: land(*result) and False, priority=GLib.PRIORITY_DEFAULT)
 
     threading.Thread(target=run, name=name, daemon=True).start()
+
+
+# -- file operations and the clipboard (PR-2.5) -----------------------------------------------
+
+
+@dataclass
+class PasteOutcome:
+    """What became of one clipboard entry (`fs.paste`'s result): *target*
+    is where it landed (None when it didn't), *error* why not
+    (`editorfiles.PasteError`), *message* the OS's words for a FAILED one.
+    The shape `editorfiles.paste_entries` answered before the paste moved
+    to the service, with paths as strings."""
+
+    source: str
+    target: str | None = None
+    error: PasteError | None = None
+    message: str = ""
+
+
+def rename_path(path: str, target: str, root: str) -> int | None:
+    """`fs.rename` of *path* to *target* (the same directory's) inside
+    *root*: blocking, on the caller's thread (a worker's). The renamed
+    file's mtime (None for a folder, or a name that was unchanged).
+    Raises `RequestRefused`; `rename_reason` names the rule a refusal
+    broke."""
+    fields = apilink.call(
+        {"t": "fs.rename", "path": str(path), "target": str(target), "root": str(root)},
+        timeout=CALL_TIMEOUT_S,
+    )
+    mtime = fields.get("mtime")
+    return int(mtime) if isinstance(mtime, int) and not isinstance(mtime, bool) else None
+
+
+def rename_reason(refusal: RequestRefused) -> RenameError | None:
+    """The rule a refused `fs.rename` broke (its `reason`), or None for a
+    refusal that names none (a failure, a root the service does not know)."""
+    try:
+        return RenameError(refusal.details.get("reason"))
+    except ValueError:
+        return None
+
+
+def paste_files(entries: list[str], target: str, cut: bool, root: str) -> list[PasteOutcome]:
+    """`fs.paste` of *entries* into the folder *target* inside *root*, a
+    move when *cut*: blocking, on the caller's thread. One outcome per
+    entry, in order. Raises `RequestRefused` (the whole request: an
+    invalid list, a root the service does not know)."""
+    fields = apilink.call(
+        {
+            "t": "fs.paste",
+            "entries": [str(e) for e in entries],
+            "target": str(target),
+            "cut": bool(cut),
+            "root": str(root),
+        },
+        timeout=CALL_TIMEOUT_S,
+    )
+    outcomes: list[PasteOutcome] = []
+    for item in fields.get("results") or ():
+        if not isinstance(item, dict):
+            continue
+        error = item.get("error")
+        try:
+            paste_error = PasteError(error) if error is not None else None
+        except ValueError:
+            paste_error = PasteError.FAILED
+        landed = item.get("target")
+        outcomes.append(
+            PasteOutcome(
+                str(item.get("source", "")),
+                str(landed) if isinstance(landed, str) else None,
+                paste_error,
+                str(item.get("message") or ""),
+            )
+        )
+    return outcomes
+
+
+def make_dir(path: str, root: str) -> None:
+    """`fs.mkdir` of the folder *path* inside *root*: blocking, on the
+    caller's thread. Raises `RequestRefused` (its `reason` one of
+    `protocol.FS_MKDIR_REASONS`)."""
+    apilink.call({"t": "fs.mkdir", "path": str(path), "root": str(root)}, timeout=CALL_TIMEOUT_S)
+
+
+@dataclass(frozen=True)
+class ClipboardScope:
+    """What the file clipboard may say (D35): the service whose paths it
+    carries (`collins://<service_id>/<path>`), and whether this client is
+    `local` to it, so a `file:` URI names the same file on both sides."""
+
+    service_id: str | None
+    local: bool
+
+
+def clipboard_scope() -> ClipboardScope:
+    """The current link's scope: its hello's `service_id` and its `local`
+    proof (`SocketLink.local`). With no link, no service and not local:
+    nothing is put on the clipboard but the plain text, and nothing is
+    read back. PR-2.8's `app.local` gate takes `local` over from here."""
+    link = apilink.current()
+    if link is None:
+        return ClipboardScope(None, False)
+    hello = getattr(link, "hello", None) or {}
+    service_id = hello.get("service_id") if isinstance(hello, dict) else None
+    return ClipboardScope(
+        str(service_id) if isinstance(service_id, str) and service_id else None,
+        bool(getattr(link, "local", False)),
+    )
 
 
 class Watcher:
