@@ -84,7 +84,12 @@ PR-2.5 adds the tree's file operations, the rules in `projectfiles`
   is the next "(copy N)", D44). Each source is confined on the worker to
   `allowed` (a client that is not `local` may name a source only inside
   a root the service knows: `source_outside`, per entry; one inside
-  *another* known root is allowed, D43); the `results`, one per entry,
+  *another* known root is allowed, D43), asked twice: about the source
+  resolved through its links, then about the held path of the directory
+  it is read from (D47: `projectfiles` works under held directory
+  descriptors, so a parent swapped for a link out after the first
+  answer is refused by the second; a root itself, whose parent is
+  inside no root, is therefore no source); the `results`, one per entry,
   carry its landing with the landed file's `mtime` (null for a folder or
   a failure) or its `PasteError` (an open string: a client maps one it
   does not know to `failed`), and travel chunked past a frame. At most

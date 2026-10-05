@@ -358,7 +358,14 @@ def test_paste_entries_asks_source_allowed_on_the_resolved_source(tmp_path):
     sources = [str(root / "a.txt"), str(outside), str(root / "link.txt")]
     outcomes = paste_entries(root, root / "pkg", sources, False, allowed)
     assert [o.error for o in outcomes] == [None, PasteError.SOURCE_OUTSIDE, PasteError.SOURCE_OUTSIDE]
-    assert asked == [str(root.resolve() / "a.txt"), str(outside.resolve()), str(outside.resolve())]
+    # The pre-check on each source's realpath, and (D47) the held parent
+    # directory's own path for the one that passed it.
+    assert asked == [
+        str(root.resolve() / "a.txt"),
+        str(root.resolve()),
+        str(outside.resolve()),
+        str(outside.resolve()),
+    ]
     assert sorted(os.listdir(root / "pkg")) == ["a.txt"]
 
 
@@ -482,22 +489,15 @@ def test_a_cuts_paste_never_writes_through_a_planted_symlink(tmp_path, monkeypat
 
 
 def _force_cross_filesystem(monkeypatch):
-    """The move's `EXDEV` branch without a second mount: the primitive and
-    a directory's `os.rename` answer as another filesystem would."""
+    """The move's `EXDEV` branch without a second mount: the primitive
+    answers as another filesystem would (the placeholder path is never
+    reached: `EXDEV` from step 1 is step 3 at once)."""
     import errno
 
     def exdev(*args, **kwargs):
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     monkeypatch.setattr(projectfiles, "_rename_noreplace", exdev)
-    real_rename = projectfiles.os.rename
-
-    def rename(src, dst, *args, **kwargs):
-        if os.path.isdir(src):
-            raise OSError(errno.EXDEV, "Invalid cross-device link")
-        return real_rename(src, dst, *args, **kwargs)
-
-    monkeypatch.setattr(projectfiles.os, "rename", rename)
 
 
 def test_a_cut_across_filesystems_is_an_exclusive_copy_then_the_source_removed(tmp_path, monkeypatch):
@@ -594,7 +594,7 @@ def test_a_cut_of_a_folder_never_replaces_an_entry_planted_inside_its_placeholde
     entry planted inside it fails `ENOTEMPTY`, which counts as the name
     taken: the paste lands as "(copy)" and the placeholder stays with
     what is not ours (D44 as amended, D46)."""
-    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
     (tmp_path / "dest").mkdir()
     (tmp_path / "tree").mkdir()
     (tmp_path / "tree" / "a.txt").write_text("a")
@@ -605,7 +605,10 @@ def test_a_cut_of_a_folder_never_replaces_an_entry_planted_inside_its_placeholde
         real_mkdir(path, *args, **kwargs)
         if not planted:
             planted.append(path)
-            (Path(path) / "theirs.txt").write_text("theirs")
+            inside = os.path.join(path, "theirs.txt")
+            fd = os.open(inside, os.O_WRONLY | os.O_CREAT, 0o644, dir_fd=kwargs.get("dir_fd"))
+            os.write(fd, b"theirs")
+            os.close(fd)
 
     monkeypatch.setattr(projectfiles.os, "mkdir", mkdir_then_plant)
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move=True)
@@ -643,7 +646,7 @@ def _inodes(paths):
 @pytest.mark.parametrize("primitive", ["renameat2", "placeholder"])
 def test_a_cut_moves_every_kind_of_entry_with_its_inode_kept(tmp_path, monkeypatch, primitive):
     if primitive == "placeholder":
-        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
     elif projectfiles._RENAMEAT2 is None:
         pytest.skip("no renameat2 in this libc")
     src, entries = _stage_move_matrix(tmp_path)
@@ -670,7 +673,7 @@ def test_a_name_taken_in_between_is_the_next_copy_for_a_paste_and_exists_for_a_r
     tmp_path, monkeypatch, primitive, taken_by
 ):
     if primitive == "placeholder":
-        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
     elif projectfiles._RENAMEAT2 is None:
         pytest.skip("no renameat2 in this libc")
 
@@ -723,7 +726,7 @@ def test_a_name_taken_in_between_is_the_next_copy_for_a_paste_and_exists_for_a_r
 def test_the_placeholder_path_refuses_a_rename_it_cannot_do_and_leaves_no_placeholder(tmp_path, monkeypatch):
     if os.geteuid() == 0:
         pytest.skip("root renames anywhere")
-    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
     locked = tmp_path / "locked"
     locked.mkdir()
     (locked / "a.txt").write_text("A")
@@ -739,53 +742,739 @@ def test_the_placeholder_path_refuses_a_rename_it_cannot_do_and_leaves_no_placeh
     assert os.listdir(tmp_path / "dest") == [] and os.listdir(locked) == ["a.txt"]
 
 
+def _record_calls(monkeypatch) -> list[tuple]:
+    """A recording wrapper on the `os` calls an undo is made of: `("made",
+    fd)` for a file created exclusively, `("lstat", name)`, `("unlink",
+    name)` and `("close", fd)`, in the order they were called."""
+    events: list[tuple] = []
+    real_open, real_close = projectfiles.os.open, projectfiles.os.close
+    real_lstat, real_unlink = projectfiles.os.lstat, projectfiles.os.unlink
+
+    def open_(path, flags, mode=0o777, *, dir_fd=None):
+        fd = real_open(path, flags, mode, dir_fd=dir_fd)
+        if flags & os.O_EXCL:
+            events.append(("made", fd))
+        return fd
+
+    def close(fd):
+        events.append(("close", fd))
+        return real_close(fd)
+
+    def lstat(path, *, dir_fd=None):
+        events.append(("lstat", os.fspath(path)))
+        return real_lstat(path, dir_fd=dir_fd)
+
+    def unlink(path, *, dir_fd=None):
+        events.append(("unlink", os.fspath(path)))
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "open", open_)
+    monkeypatch.setattr(projectfiles.os, "close", close)
+    monkeypatch.setattr(projectfiles.os, "lstat", lstat)
+    monkeypatch.setattr(projectfiles.os, "unlink", unlink)
+    return events
+
+
+def _put(dir_fd: int, name: str, text: str) -> None:
+    """Another writer's file at *name* of the held directory, replacing
+    whatever is there (write-temp-and-rename, as editors and agents do)."""
+    fd = os.open(name + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644, dir_fd=dir_fd)
+    try:
+        os.write(fd, text.encode())
+    finally:
+        os.close(fd)
+    os.rename(name + ".tmp", name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+
+
 def test_the_placeholder_path_never_removes_something_swapped_over_its_placeholder(tmp_path, monkeypatch):
-    """A failed rename removes the file placeholder only while `lstat`
-    still shows the inode made: something swapped over it meanwhile is
-    not ours and stays."""
+    """The placeholder's descriptor is held across the rename; a failed
+    rename removes the placeholder only while `lstat` still shows the
+    held inode: something swapped over it meanwhile is not ours and
+    stays. The order: made `O_EXCL`, the rename, the undo's `lstat`, no
+    `unlink`, and only then the descriptor closed (D46 as amended)."""
     import errno
 
-    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
     (tmp_path / "dest").mkdir()
     (tmp_path / "a.txt").write_text("A")
+    before = _fds()
+    events = _record_calls(monkeypatch)
     real_rename = projectfiles.os.rename
 
-    def swap_then_refuse(src, dst, *args, **kwargs):
-        os.unlink(dst)
-        Path(dst).write_text("someone else's")
+    def swap_then_refuse(src, dst, *, src_dir_fd, dst_dir_fd):
+        monkeypatch.setattr(projectfiles.os, "rename", real_rename)
+        _put(dst_dir_fd, dst, "someone else's")
+        events.append(("rename", dst))
         raise OSError(errno.EACCES, "Permission denied")
 
     monkeypatch.setattr(projectfiles.os, "rename", swap_then_refuse)
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
-    monkeypatch.setattr(projectfiles.os, "rename", real_rename)
-    assert outcome.error is PasteError.FAILED
+    monkeypatch.undo()
+    assert outcome.error is PasteError.FAILED and "denied" in outcome.message
     assert (tmp_path / "dest" / "a.txt").read_text() == "someone else's"
+    assert (tmp_path / "a.txt").read_text() == "A"
+    (placeholder,) = [fd for kind, fd in events if kind == "made"]
+    renamed = events.index(("rename", "a.txt"))
+    assert events.index(("made", placeholder)) < renamed
+    assert ("close", placeholder) not in events[:renamed]  # held across the rename
+    after = events[renamed:]
+    assert after.index(("lstat", "a.txt")) < after.index(("close", placeholder))  # the undo, then the close
+    assert ("unlink", "a.txt") not in after  # the stranger's inode is not the held one
+    assert _fds() == before
+
+
+def test_the_placeholder_path_removes_its_own_placeholder_whatever_was_done_to_it(tmp_path, monkeypatch):
+    """The held descriptor is the identity, not a stat tuple: a chmod or a
+    hard link from outside between the placeholder's making and the
+    failed rename (each moves its ctime) leaves it ours, and it goes."""
+    import errno
+
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "a.txt").write_text("A")
+
+    def touch_then_refuse(src, dst, *, src_dir_fd, dst_dir_fd):
+        os.chmod(dst, 0o644, dir_fd=dst_dir_fd)
+        os.link(dst, tmp_path / "elsewhere" / "theirs", src_dir_fd=dst_dir_fd)
+        raise OSError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(projectfiles.os, "rename", touch_then_refuse)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
+    assert outcome.error is PasteError.FAILED and _fds() == before
+    assert os.listdir(tmp_path / "dest") == [] and (tmp_path / "a.txt").read_text() == "A"
+    assert os.listdir(tmp_path / "elsewhere") == ["theirs"]  # their link is theirs
+
+
+def test_the_placeholder_path_meeting_another_filesystem_takes_the_copy_path(tmp_path, monkeypatch):
+    """`EXDEV` from the placeholder's rename: the placeholder undone, then
+    step 3, the exclusive copy and the source removed."""
+    import errno
+
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
+
+    def exdev(*args, **kwargs):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(projectfiles.os, "rename", exdev)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("A")
+    os.chmod(tmp_path / "a.txt", 0o640)
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "f").write_text("f")
+    before = _fds()
+    sources = [str(tmp_path / "a.txt"), str(tmp_path / "tree")]
+    outcomes = paste_entries(tmp_path, tmp_path / "dest", sources, move=True)
+    assert [o.error for o in outcomes] == [None, None] and _fds() == before
+    assert (tmp_path / "dest" / "a.txt").read_text() == "A"
+    # The copy's mode, not the placeholder's 0600.
+    assert stat.S_IMODE(os.stat(tmp_path / "dest" / "a.txt").st_mode) == 0o640
+    assert (tmp_path / "dest" / "tree" / "sub" / "f").read_text() == "f"
+    assert sorted(os.listdir(tmp_path)) == ["dest"]
+
+
+# -- the holds (D47): nothing is named by path again once the hold is lost ---------------
+
+
+def _fds() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+def _swap_for_link(path: Path, to: Path) -> None:
+    """*path* (a directory or a file) replaced by a symlink to *to*."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+    path.symlink_to(to)
+
+
+def test_a_destination_swapped_for_a_link_out_after_the_check_is_refused_outside(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    (root / "dest").mkdir(parents=True)
+    (root / "a.txt").write_text("A")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real = projectfiles.paste_target
+
+    def check_then_swap(*args, **kwargs):
+        target, error = real(*args, **kwargs)
+        if target is not None:
+            _swap_for_link(root / "dest", outside)
+        return target, error
+
+    monkeypatch.setattr(projectfiles, "paste_target", check_then_swap)
+    before = _fds()
+    (outcome,) = paste_entries(root, root / "dest", [str(root / "a.txt")])
+    assert outcome.error is PasteError.OUTSIDE and os.listdir(outside) == [] and _fds() == before
+    # The hold is taken once for the whole clipboard: a cut the same.
+    (outcome,) = paste_entries(root, root / "dest", [str(root / "a.txt")], move=True)
+    assert outcome.error is PasteError.OUTSIDE and (root / "a.txt").exists() and os.listdir(outside) == []
+
+
+def test_a_source_whose_parent_is_swapped_for_a_link_out_is_source_outside_with_nothing_read(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "project"
+    (root / "dest").mkdir(parents=True)
+    (root / "sub").mkdir()
+    (root / "sub" / "a.txt").write_text("mine")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    canary = outside / "a.txt"
+    canary.write_text("canary")
+    asked: list[str] = []
+
+    def allowed(path: str) -> bool:
+        asked.append(path)
+        if len(asked) == 1:
+            _swap_for_link(root / "sub", outside)  # after the realpath pre-check passed
+        return path.startswith(str(root.resolve()))
+
+    before = _fds()
+    (outcome,) = paste_entries(root, root / "dest", [str(root / "sub" / "a.txt")], False, allowed)
+    assert outcome.error is PasteError.SOURCE_OUTSIDE
+    assert asked[1] == str(outside.resolve())  # the held parent's own path, confined
+    assert os.listdir(root / "dest") == [] and canary.read_text() == "canary" and _fds() == before
+
+
+def test_a_subdirectory_swapped_for_a_link_out_during_the_walk_is_copied_as_a_link(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    (root / "dest").mkdir(parents=True)
+    (root / "tree" / "sub").mkdir(parents=True)
+    (root / "tree" / "sub" / "inner.txt").write_text("inner")
+    (root / "tree" / "top.txt").write_text("top")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("secret")
+    real_scandir = projectfiles.os.scandir
+    swapped: list = []
+
+    def swap_on_first(fd):
+        if not swapped:
+            swapped.append(fd)
+            _swap_for_link(root / "tree" / "sub", outside)
+        return real_scandir(fd)
+
+    monkeypatch.setattr(projectfiles.os, "scandir", swap_on_first)
+    before = _fds()
+    (outcome,) = paste_entries(root, root / "dest", [str(root / "tree")])
+    assert outcome.error is None and _fds() == before
+    copied = root / "dest" / "tree"
+    assert (copied / "top.txt").read_text() == "top"
+    assert (copied / "sub").is_symlink() and os.readlink(copied / "sub") == str(outside)
+    assert sorted(os.listdir(copied)) == ["sub", "top.txt"]  # the link itself, nothing from outside copied in
+    assert os.listdir(outside) == ["secret.txt"] and (outside / "secret.txt").read_text() == "secret"
+
+
+def test_a_link_planted_inside_the_new_tree_at_a_subdirectorys_name_is_an_error_entry(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "project"
+    (root / "dest").mkdir(parents=True)
+    (root / "tree" / "sub").mkdir(parents=True)
+    (root / "tree" / "sub" / "inner.txt").write_text("inner")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_mkdir = projectfiles.os.mkdir
+
+    def plant(path, *args, **kwargs):
+        real_mkdir(path, *args, **kwargs)
+        if os.fspath(path) == "sub":
+            dir_fd = kwargs.get("dir_fd")
+            os.rmdir(path, dir_fd=dir_fd)
+            os.symlink(str(outside), path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "mkdir", plant)
+    before = _fds()
+    (outcome,) = paste_entries(root, root / "dest", [str(root / "tree")])
+    # An error entry for the subdirectory, the tree landed short. (Linux
+    # answers `ENOTDIR` for a link opened `O_DIRECTORY|O_NOFOLLOW`, `ELOOP`
+    # without `O_DIRECTORY`: either way it is not followed.)
+    assert outcome.error is PasteError.FAILED and _fds() == before
+    # `copytree`'s shape: the entry's two paths as the request named them, then the words.
+    assert repr((str(root / "tree" / "sub"), str(root / "dest" / "tree" / "sub")))[:-1] in outcome.message
+    assert "Not a directory" in outcome.message or "symbolic link" in outcome.message
+    assert os.listdir(outside) == []  # nothing written through
+    assert (root / "dest" / "tree" / "sub").is_symlink()  # the planted link, left as it is
+
+
+def test_a_source_swapped_before_the_unlink_leaves_the_stranger_and_counts_the_move_done(
+    tmp_path, monkeypatch
+):
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("mine")
+    real_lstat = projectfiles.os.lstat
+
+    def swap_then_answer(path, *args, **kwargs):
+        if os.fspath(path) == "a.txt" and _dir_of(kwargs.get("dir_fd")) == str(tmp_path.resolve()):
+            (tmp_path / "a.txt").unlink()
+            (tmp_path / "a.txt").write_text("stranger")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(projectfiles.os, "lstat", swap_then_answer)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
+    assert outcome.error is None and outcome.target == tmp_path / "dest" / "a.txt" and _fds() == before
+    assert (tmp_path / "dest" / "a.txt").read_text() == "mine"
+    assert (tmp_path / "a.txt").read_text() == "stranger"
+
+
+def test_a_cross_filesystem_file_whose_target_is_swapped_before_the_failing_unlink_leaves_the_stranger(
+    tmp_path, monkeypatch
+):
+    """R1: the copy's descriptor is held across the source's `unlink`; when
+    that fails the undo compares the held descriptor with what is at the
+    name now, and a file another writer put there is not ours."""
+    import errno
+
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("mine")
+    before = _fds()
+    events = _record_calls(monkeypatch)
+    recording_unlink = projectfiles.os.unlink
+    dest_fd = os.open(tmp_path / "dest", os.O_RDONLY | os.O_DIRECTORY)
+
+    def swap_target_then_refuse(path, *, dir_fd=None):
+        if _dir_of(dir_fd) == str(tmp_path.resolve()):
+            # The source's unlink: first a stranger replaces the copy, then the refusal.
+            _put(dest_fd, "a.txt", "stranger")
+            events.append(("source-unlink", path))
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return recording_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "unlink", swap_target_then_refuse)
+    try:
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
+    finally:
+        monkeypatch.undo()
+        os.close(dest_fd)
+    assert outcome.error is PasteError.FAILED and "denied" in outcome.message
+    assert (tmp_path / "dest" / "a.txt").read_text() == "stranger"
+    assert (tmp_path / "a.txt").read_text() == "mine"
+    (copy,) = [fd for kind, fd in events if kind == "made"]
+    refused = events.index(("source-unlink", "a.txt"))
+    assert ("close", copy) not in events[:refused]  # held across the source's unlink
+    after = events[refused:]
+    assert after.index(("lstat", "a.txt")) < after.index(("close", copy))  # the undo, then the close
+    assert ("unlink", "a.txt") not in after  # the undo found a stranger and unlinked nothing
+    assert _fds() == before
+
+
+def test_a_source_gone_before_or_at_its_unlink_keeps_the_copy_and_counts_the_move_done(
+    tmp_path, monkeypatch
+):
+    """The undo is for a source that is still there (an `unlink` refused
+    is all-or-nothing). A source that vanished after it was copied, before
+    the check or between the check and the `unlink`, is the move done:
+    the copy is the only one left and stays."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("mine")
+    (tmp_path / "b.txt").write_text("mine too")
+    real_lstat, real_unlink = projectfiles.os.lstat, projectfiles.os.unlink
+
+    def vanish_before_the_check(path, *, dir_fd=None):
+        if os.fspath(path) == "a.txt" and _dir_of(dir_fd) == str(tmp_path.resolve()):
+            real_unlink(tmp_path / "a.txt")
+        return real_lstat(path, dir_fd=dir_fd)
+
+    def vanish_at_the_unlink(path, *, dir_fd=None):
+        if os.fspath(path) == "b.txt" and _dir_of(dir_fd) == str(tmp_path.resolve()):
+            real_unlink(tmp_path / "b.txt")
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "lstat", vanish_before_the_check)
+    monkeypatch.setattr(projectfiles.os, "unlink", vanish_at_the_unlink)
+    before = _fds()
+    sources = [str(tmp_path / "a.txt"), str(tmp_path / "b.txt")]
+    outcomes = paste_entries(tmp_path, tmp_path / "dest", sources, move=True)
+    monkeypatch.undo()
+    assert [o.error for o in outcomes] == [None, None] and _fds() == before
+    assert (tmp_path / "dest" / "a.txt").read_text() == "mine"
+    assert (tmp_path / "dest" / "b.txt").read_text() == "mine too"
+    assert sorted(os.listdir(tmp_path)) == ["dest"]
+
+
+def test_a_tree_copied_across_whose_source_was_replaced_is_left_and_the_move_done(
+    tmp_path, monkeypatch
+):
+    """The top source directory's descriptor is held to the check: a name
+    that no longer holds it (the tree moved aside, a stranger's in its
+    place) is not removed."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "tree").mkdir()
+    (tmp_path / "tree" / "f").write_text("f")
+    real_lstat = projectfiles.os.lstat
+
+    def replace_before_the_check(path, *, dir_fd=None):
+        if os.fspath(path) == "tree" and _dir_of(dir_fd) == str(tmp_path.resolve()):
+            os.rename(tmp_path / "tree", tmp_path / "aside")
+            (tmp_path / "tree").mkdir()
+            (tmp_path / "tree" / "theirs").write_text("theirs")
+        return real_lstat(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "lstat", replace_before_the_check)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move=True)
+    monkeypatch.undo()
+    assert outcome.error is None and _fds() == before
+    assert (tmp_path / "dest" / "tree" / "f").read_text() == "f"
+    assert (tmp_path / "tree" / "theirs").read_text() == "theirs"
+    assert (tmp_path / "aside" / "f").read_text() == "f"
+
+
+def test_a_link_moved_across_is_pinned_on_both_sides(tmp_path, monkeypatch):
+    """A link cut across filesystems: the new link and the source link are
+    each pinned `O_PATH|O_NOFOLLOW`. The source's `unlink` refused with
+    the new link in place, the link is undone; refused after a stranger
+    replaced the new link, the stranger stays; and the file the link
+    names is never touched."""
+    import errno
+
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "real.txt").write_text("real")
+    (tmp_path / "ln").symlink_to("real.txt")
+    real_unlink = projectfiles.os.unlink
+    swap = [False]
+
+    def refuse_source(path, *, dir_fd=None):
+        if os.fspath(path) == "ln" and _dir_of(dir_fd) == str(tmp_path.resolve()):
+            if swap[0]:
+                real_unlink(tmp_path / "dest" / "ln")
+                (tmp_path / "dest" / "ln").write_text("stranger")
+            raise PermissionError(errno.EACCES, "Permission denied")
+        return real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "unlink", refuse_source)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "ln")], move=True)
+    assert outcome.error is PasteError.FAILED and os.listdir(tmp_path / "dest") == [] and _fds() == before
+    swap[0] = True
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "ln")], move=True)
+    assert outcome.error is PasteError.FAILED and _fds() == before
+    landed = tmp_path / "dest" / "ln"
+    assert not landed.is_symlink() and landed.read_text() == "stranger"
+    assert os.readlink(tmp_path / "ln") == "real.txt" and (tmp_path / "real.txt").read_text() == "real"
+    monkeypatch.undo()
+    _force_copy_path(monkeypatch)
+    os.unlink(tmp_path / "dest" / "ln")
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "ln")], move=True)
+    assert outcome.error is None and os.readlink(tmp_path / "dest" / "ln") == "real.txt"
+    assert not os.path.lexists(tmp_path / "ln") and (tmp_path / "real.txt").read_text() == "real"
+
+
+def test_a_rename_whose_directory_is_swapped_for_a_link_out_is_outside(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    (root / "sub").mkdir(parents=True)
+    (root / "sub" / "a.txt").write_text("A")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "a.txt").write_text("theirs")
+    real = projectfiles.rename_target
+
+    def check_then_swap(*args, **kwargs):
+        answer = real(*args, **kwargs)
+        _swap_for_link(root / "sub", outside)
+        return answer
+
+    monkeypatch.setattr(projectfiles, "rename_target", check_then_swap)
+    before = _fds()
+    assert rename_entry(root, root / "sub" / "a.txt", root / "sub" / "b.txt") == (None, RenameError.OUTSIDE)
+    assert os.listdir(outside) == ["a.txt"] and (outside / "a.txt").read_text() == "theirs"
+    assert _fds() == before
+
+
+def test_the_held_path_is_the_kernels_and_is_never_resolved_again(tmp_path):
+    """`_held_path` answers where the descriptor is, whatever path it was
+    opened by; a removed directory is None; one really named "x (deleted)"
+    is itself; and `_held_inside` compares that answer as it stands: a
+    component of it turned into a link into the root since is not
+    followed back in."""
+    root = tmp_path / "project"
+    (root / "sub").mkdir(parents=True)
+    (tmp_path / "way-in").symlink_to(root)
+    fd = os.open(tmp_path / "way-in" / "sub", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert projectfiles._held_path(fd) == str(root.resolve() / "sub")
+        assert projectfiles._held_inside(tmp_path / "way-in", projectfiles._held_path(fd))
+        assert projectfiles._held_inside(root / "sub", projectfiles._held_path(fd))
+        assert not projectfiles._held_inside(root / "su", projectfiles._held_path(fd))
+        os.rmdir(root / "sub")
+        assert projectfiles._held_path(fd) is None
+        (root / "sub (deleted)").mkdir()  # a stranger at the very path the kernel prints
+        assert projectfiles._held_path(fd) is None
+    finally:
+        os.close(fd)
+    named = os.open(root / "sub (deleted)", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert projectfiles._held_path(named) == str(root.resolve() / "sub (deleted)")
+    finally:
+        os.close(named)
+    outside = tmp_path / "outside"
+    (outside / "x").mkdir(parents=True)
+    held = os.open(outside / "x", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        path = projectfiles._held_path(held)
+        os.rename(outside, tmp_path / "moved")
+        outside.symlink_to(root)  # the old path now leads into the root
+        (root / "x").mkdir()
+        assert projectfiles.is_inside(root, path)  # what resolving it again would say
+        assert not projectfiles._held_inside(root, path)
+    finally:
+        os.close(held)
+
+
+def test_a_folder_really_named_deleted_takes_a_paste_a_rename_and_a_mkdir(tmp_path):
+    folder = tmp_path / "old (deleted)"
+    folder.mkdir()
+    (tmp_path / "a.txt").write_text("A")
+    (outcome,) = paste_entries(tmp_path, folder, [str(tmp_path / "a.txt")])
+    assert outcome.error is None and (folder / "a.txt").read_text() == "A"
+    assert rename_entry(tmp_path, folder / "a.txt", folder / "b.txt") == (folder / "b.txt", None)
+    assert make_directory(tmp_path, folder / "made") is None and (folder / "made").is_dir()
+    (outcome,) = paste_entries(tmp_path, tmp_path, [str(folder / "b.txt")], move=True)
+    assert outcome.error is None and (tmp_path / "b.txt").read_text() == "A"
+
+
+def test_a_destination_removed_after_the_check_is_not_a_dir(tmp_path, monkeypatch):
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("A")
+    real_open_dir = projectfiles._open_dir
+
+    def open_then_remove(path):
+        fd = real_open_dir(path)
+        if Path(path).name == "dest":
+            os.rmdir(path)
+        return fd
+
+    monkeypatch.setattr(projectfiles, "_open_dir", open_then_remove)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")])
+    assert outcome.error is PasteError.NOT_A_DIR and _fds() == before
     assert (tmp_path / "a.txt").read_text() == "A"
 
 
-def test_the_placeholders_identity_survives_a_reused_inode_number():
-    """ext4 hands a just-freed inode number straight back to the next file
-    made in the directory (CI showed it), so the inode alone would call a
-    swapped file ours: its ctime, size and type tell them apart."""
-    placeholder = os.stat_result((0o100600, 7, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0), {"st_ctime_ns": 100})
-    swapped = os.stat_result((0o100644, 7, 1, 1, 0, 0, 14, 0.0, 0.0, 0.0), {"st_ctime_ns": 200})
-    assert projectfiles._identity(placeholder) != projectfiles._identity(swapped)
-    same = os.stat_result((0o100600, 7, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0), {"st_ctime_ns": 100})
-    assert projectfiles._identity(placeholder) == projectfiles._identity(same)
-    a_dir = os.stat_result((0o040700, 7, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0), {"st_ctime_ns": 100})
-    assert projectfiles._identity(placeholder) != projectfiles._identity(a_dir)
+def test_a_mkdir_whose_parent_is_swapped_for_a_link_out_is_outside(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    (root / "sub").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real = projectfiles._exists
+
+    def check_then_swap(path):
+        answer = real(path)
+        _swap_for_link(root / "sub", outside)
+        return answer
+
+    monkeypatch.setattr(projectfiles, "_exists", check_then_swap)
+    before = _fds()
+    assert make_directory(root, root / "sub" / "made") is MkdirError.OUTSIDE
+    assert os.listdir(outside) == [] and _fds() == before
+
+
+def test_a_target_swapped_for_a_link_out_between_the_bytes_and_the_metadata_touches_nothing_outside(
+    tmp_path, monkeypatch
+):
+    """R2: the metadata goes on the destination descriptor, never by path."""
+    root = tmp_path / "project"
+    (root / "dest").mkdir(parents=True)
+    source = root / "run.sh"
+    source.write_text("#!/bin/sh\n")
+    os.chmod(source, 0o755)
+    os.utime(source, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+    victim = tmp_path / "victim.txt"
+    victim.write_text("victim")
+    os.chmod(victim, 0o600)
+    os.utime(victim, ns=(1_500_000_000_000_000_000, 1_500_000_000_000_000_000))
+    real_fchmod = projectfiles.os.fchmod
+
+    def swap_then_chmod(fd, mode):
+        (root / "dest" / "run.sh").unlink()
+        (root / "dest" / "run.sh").symlink_to(victim)
+        return real_fchmod(fd, mode)
+
+    monkeypatch.setattr(projectfiles.os, "fchmod", swap_then_chmod)
+    (outcome,) = paste_entries(root, root / "dest", [str(source)])
+    assert outcome.error is None
+    st = os.stat(victim)
+    assert oct(st.st_mode & 0o777) == oct(0o600) and st.st_mtime_ns == 1_500_000_000_000_000_000
+    assert (root / "dest" / "run.sh").is_symlink()  # the stranger's link, untouched
+
+
+def test_the_copy_keeps_mode_xattr_and_the_nanosecond_mtime(tmp_path):
+    source = tmp_path / "f.bin"
+    source.write_bytes(b"x" * 100_000)
+    os.chmod(source, 0o640)
+    os.utime(source, ns=(1_600_000_000_123_456_789, 1_600_000_000_987_654_321))
+    try:
+        os.setxattr(source, "user.probe", b"v")
+        xattr = True
+    except OSError:
+        xattr = False
+    (tmp_path / "dest").mkdir()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(source)])
+    st = os.stat(outcome.target)
+    assert oct(st.st_mode & 0o777) == oct(0o640)
+    assert st.st_mtime_ns == 1_600_000_000_987_654_321 and st.st_atime_ns == 1_600_000_000_123_456_789
+    if xattr:
+        assert os.getxattr(outcome.target, "user.probe") == b"v"
+
+
+def test_a_copy_failing_after_bytes_went_leaves_nothing_at_the_destination(tmp_path, monkeypatch):
+    import errno
+
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "big.bin").write_bytes(b"x" * 100_000)
+    real_sendfile = projectfiles.os.sendfile
+
+    def write_then_fail(out_fd, in_fd, offset, count):
+        sent = real_sendfile(out_fd, in_fd, offset, 1000)
+        assert sent == 1000
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(projectfiles.os, "sendfile", write_then_fail)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "big.bin")])
+    assert outcome.error is PasteError.FAILED and "Input/output" in outcome.message
+    assert os.listdir(tmp_path / "dest") == [] and _fds() == before
+    # And a cut across filesystems, the same.
+    _force_copy_path(monkeypatch)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "big.bin")], move=True)
+    assert outcome.error is PasteError.FAILED and os.listdir(tmp_path / "dest") == []
+    assert (tmp_path / "big.bin").exists() and _fds() == before
+
+
+@pytest.mark.parametrize("primitive", ["renameat2", "placeholder", "copy"])
+def test_no_descriptor_is_left_open_on_any_refusal_or_failure(tmp_path, monkeypatch, primitive):
+    """Every hold is closed in a `finally`: the count of open descriptors
+    is the same after each refused or failed copy, move, rename and mkdir,
+    on each of the move's three paths."""
+    if os.geteuid() == 0:
+        pytest.skip("root writes anywhere")
+    if primitive == "placeholder":
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
+    elif primitive == "copy":
+        _force_copy_path(monkeypatch)
+    elif projectfiles._RENAMEAT2 is None:
+        pytest.skip("no renameat2 in this libc")
+    dest, locked, closed = tmp_path / "dest", tmp_path / "locked", tmp_path / "closed"
+    for folder in (dest, locked, closed, tmp_path / "tree" / "sub"):
+        folder.mkdir(parents=True)
+    os.mkfifo(tmp_path / "pipe")
+    os.mkfifo(tmp_path / "tree" / "sub" / "pipe")
+    (tmp_path / "tree" / "f").write_text("f")
+    (tmp_path / "unreadable.txt").write_text("U")
+    os.chmod(tmp_path / "unreadable.txt", 0)
+    (tmp_path / "ok.txt").write_text("ok")
+    (tmp_path / "ln").symlink_to("ok.txt")
+    for name in ("a.txt", "taken.txt"):
+        (locked / name).write_text(name)
+    (locked / "ln").symlink_to("a.txt")
+    (locked / "folder").mkdir()
+    (locked / "folder" / "f").write_text("f")
+    os.chmod(locked, 0o555)  # nothing leaves it, nothing lands in it
+    os.chmod(closed, 0o555)
+    failed, missing = PasteError.FAILED, PasteError.MISSING
+    before = _fds()
+    try:
+        # Copies: a FIFO, a device, a file that cannot be read, one that is gone, a tree holding a FIFO.
+        sources = [tmp_path / "pipe", "/dev/null", tmp_path / "unreadable.txt", tmp_path / "gone"]
+        sources = [str(source) for source in sources]
+        assert [o.error for o in paste_entries(tmp_path, dest, sources)] == [failed, failed, failed, missing]
+        assert _fds() == before and os.listdir(dest) == []
+        (outcome,) = paste_entries(tmp_path, dest, [str(tmp_path / "tree")])
+        assert outcome.error is failed and "Not a regular file" in outcome.message and _fds() == before
+        assert (dest / "tree" / "f").read_text() == "f"  # landed short, `copytree`'s own shape
+        shutil.rmtree(dest / "tree")
+        # Into a folder that takes nothing: a file, a link, a tree, copied and cut.
+        into = [str(tmp_path / "ok.txt"), str(tmp_path / "ln"), str(tmp_path / "tree")]
+        for move in (False, True):
+            assert [o.error for o in paste_entries(tmp_path, closed, into, move)] == [failed] * 3
+            assert _fds() == before and os.listdir(closed) == []
+        # Out of a folder that gives nothing up: a file, a link, a tree, cut.
+        out = [str(locked / "a.txt"), str(locked / "ln"), str(locked / "folder")]
+        assert [o.error for o in paste_entries(tmp_path, dest, out, True)] == [failed] * 3
+        assert _fds() == before
+        assert sorted(os.listdir(locked)) == ["a.txt", "folder", "ln", "taken.txt"]
+        # A file or a link whose source could not be unlinked is undone; a tree is kept (D46).
+        assert os.listdir(dest) == (["folder"] if primitive == "copy" else [])
+        # A destination that is gone, a rename onto a taken name and one refused, a mkdir refused.
+        (outcome,) = paste_entries(tmp_path, tmp_path / "gone-dest", [str(tmp_path / "ok.txt")])
+        assert outcome.error is PasteError.NOT_A_DIR and _fds() == before
+        assert rename_entry(tmp_path, locked / "a.txt", locked / "taken.txt") == (None, RenameError.EXISTS)
+        assert rename_entry(tmp_path, tmp_path / "gone", tmp_path / "new") == (None, RenameError.MISSING)
+        with pytest.raises(PermissionError):
+            rename_entry(tmp_path, locked / "a.txt", locked / "b.txt")
+        with pytest.raises(PermissionError):
+            make_directory(tmp_path, locked / "made")
+        assert make_directory(tmp_path, locked / "folder") is MkdirError.EXISTS
+        assert _fds() == before
+        assert sorted(os.listdir(locked)) == ["a.txt", "folder", "ln", "taken.txt"]
+    finally:
+        os.chmod(locked, 0o755)
+        os.chmod(closed, 0o755)
+
+
+def test_a_held_descriptor_keeps_its_inode_number(tmp_path):
+    """The undo's premise (D46 as amended): an inode number is free only
+    once the last link and the last descriptor are gone, so a file whose
+    descriptor the service holds cannot be the one swapped over its name,
+    whatever the filesystem's reuse habit. A thousand rounds of create,
+    hold, unlink, create again: the new file never has the held one's
+    `(st_dev, st_ino)`. The unheld variant of the same round (create,
+    close, unlink, create again) is recorded, not asserted: ext4 hands the
+    number straight back (CI's runner, where the first check on the inode
+    alone removed a stranger's file), tmpfs does not."""
+    name = tmp_path / "f"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+
+    def make() -> tuple[int, os.stat_result]:
+        fd = os.open(name, flags, 0o600)
+        return fd, os.fstat(fd)
+
+    reused_held = reused_free = 0
+    for _ in range(1000):
+        fd, free = make()
+        os.close(fd)
+        os.unlink(name)
+        fd, again = make()
+        os.close(fd)
+        os.unlink(name)
+        reused_free += projectfiles._same_inode(again, free)
+
+        fd, held = make()
+        try:
+            os.unlink(name)
+            other, swapped = make()
+            os.close(other)
+            os.unlink(name)
+            reused_held += projectfiles._same_inode(swapped, held)
+        finally:
+            os.close(fd)
+    print(f"inode number reused while held: {reused_held}/1000; unheld: {reused_free}/1000")
+    assert reused_held == 0
 
 
 def _force_copy_path(monkeypatch):
-    """The copy path without a second mount: the primitive and `os.rename`
-    answer `EXDEV`, as another filesystem would."""
+    """The copy path without a second mount: the primitive answers `EXDEV`,
+    as another filesystem would."""
     import errno
 
     def exdev(*args, **kwargs):
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     monkeypatch.setattr(projectfiles, "_rename_noreplace", exdev)
-    monkeypatch.setattr(projectfiles.os, "rename", exdev)
+
+
+def _dir_of(dir_fd) -> str | None:
+    """The held directory a patched `os` call was given, by its own path."""
+    return None if dir_fd is None else os.readlink(f"/proc/self/fd/{dir_fd}")
 
 
 def test_a_file_copied_across_whose_source_cannot_be_unlinked_leaves_nothing_at_the_destination(
@@ -802,7 +1491,7 @@ def test_a_file_copied_across_whose_source_cannot_be_unlinked_leaves_nothing_at_
     real_unlink = projectfiles.os.unlink
 
     def refuse_source(path, *args, **kwargs):
-        if os.fspath(path) == str(tmp_path / "a.txt"):
+        if _dir_of(kwargs.get("dir_fd")) == str(tmp_path.resolve()):
             raise PermissionError(errno.EACCES, "Permission denied", str(path))
         return real_unlink(path, *args, **kwargs)
 
@@ -929,18 +1618,24 @@ def test_a_source_swapped_for_a_link_after_the_islink_check_is_refused(tmp_path,
     (tmp_path / "dest").mkdir()
     source = tmp_path / "a.txt"
     source.write_text("A")
-    real_islink = projectfiles.os.path.islink
+    real_stat = projectfiles.os.stat
+    seen: list = []
 
-    def swap(path):
-        answer = real_islink(path)
-        if os.fspath(path) == str(source) and not answer:
-            source.unlink()
-            source.symlink_to(victim)
+    def swap(path, *args, **kwargs):
+        # The copy's own stat (the second one under the held directory, after
+        # `_is_dir_entry`'s) says regular; the open right after it meets a link.
+        answer = real_stat(path, *args, **kwargs)
+        if os.fspath(path) == "a.txt" and kwargs.get("dir_fd") is not None and stat.S_ISREG(answer.st_mode):
+            seen.append(path)
+            if len(seen) == 2:
+                source.unlink()
+                source.symlink_to(victim)
         return answer
 
-    monkeypatch.setattr(projectfiles.os.path, "islink", swap)
+    monkeypatch.setattr(projectfiles.os, "stat", swap)
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(source)])
-    assert outcome.error is PasteError.FAILED and os.listdir(tmp_path / "dest") == []
+    assert outcome.error is PasteError.FAILED and "symbolic" in outcome.message
+    assert os.listdir(tmp_path / "dest") == [] and victim.read_text() == "secret"
 
 
 def test_renameat2_answers_the_name_taken_and_not_here(tmp_path, monkeypatch):
@@ -951,14 +1646,29 @@ def test_renameat2_answers_the_name_taken_and_not_here(tmp_path, monkeypatch):
 
     if projectfiles._RENAMEAT2 is None:
         pytest.skip("no renameat2 in this libc")
+    cwd = projectfiles._AT_FDCWD
     (tmp_path / "a").write_text("a")
     (tmp_path / "b").write_text("b")
-    assert projectfiles._rename_noreplace(tmp_path / "a", tmp_path / "c") is True
+    assert projectfiles._rename_noreplace(cwd, tmp_path / "a", cwd, tmp_path / "c") is True
     with pytest.raises(FileExistsError):
-        projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "b")
+        projectfiles._rename_noreplace(cwd, tmp_path / "c", cwd, tmp_path / "b")
     with pytest.raises(FileNotFoundError):
-        projectfiles._rename_noreplace(tmp_path / "gone", tmp_path / "d")
+        projectfiles._rename_noreplace(cwd, tmp_path / "gone", cwd, tmp_path / "d")
     assert sorted(os.listdir(tmp_path)) == ["b", "c"]
+    # Under held directories, as the operations call it.
+    fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert projectfiles._rename_noreplace(fd, "c", fd, "d") is True
+        with pytest.raises(FileExistsError):
+            projectfiles._rename_noreplace(fd, "d", fd, "b")
+    finally:
+        os.close(fd)
+    # A NUL in either name is refused before the call, as `os.rename` refuses it.
+    with pytest.raises(ValueError):
+        projectfiles._rename_noreplace(cwd, tmp_path / "d", cwd, str(tmp_path / "cut") + "\x00/../../x")
+    with pytest.raises(ValueError):
+        projectfiles._rename_noreplace(cwd, "d\x00", cwd, tmp_path / "e")
+    assert sorted(os.listdir(tmp_path)) == ["b", "d"]
 
     class Fake:
         def __init__(self, code):
@@ -970,13 +1680,13 @@ def test_renameat2_answers_the_name_taken_and_not_here(tmp_path, monkeypatch):
 
     for code in sorted(projectfiles._NOT_HERE_ERRNOS):
         monkeypatch.setattr(projectfiles, "_RENAMEAT2", Fake(code))
-        assert projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "e") is False
+        assert projectfiles._rename_noreplace(cwd, tmp_path / "d", cwd, tmp_path / "e") is False
     monkeypatch.setattr(projectfiles, "_RENAMEAT2", Fake(errno.EXDEV))
     with pytest.raises(OSError) as raised:
-        projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "e")
+        projectfiles._rename_noreplace(cwd, tmp_path / "d", cwd, tmp_path / "e")
     assert raised.value.errno == errno.EXDEV
     monkeypatch.setattr(projectfiles, "_RENAMEAT2", None)
-    assert projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "e") is False
+    assert projectfiles._rename_noreplace(cwd, tmp_path / "d", cwd, tmp_path / "e") is False
 
 
 def test_a_writer_that_takes_every_name_is_no_room_and_nothing_is_overwritten(tmp_path, monkeypatch):
@@ -1071,3 +1781,71 @@ def test_copied_files_keep_their_mode_and_times(tmp_path):
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(source)])
     st = os.stat(outcome.target)
     assert oct(st.st_mode & 0o777) == oct(0o750) and st.st_mtime_ns == 1_600_000_000_000_000_000
+
+
+
+def test_a_copied_tree_keeps_what_copytree_kept(tmp_path):
+    """The walk's parity with `shutil.copytree(symlinks=True)` and `copy2`:
+    every file's bytes, mode and nanosecond times, every directory's mode
+    and times (set after its entries, so filling it did not move them), a
+    `user.` xattr on a file and on a directory, a link as a link (to a
+    file, to a directory, dangling), an empty directory, a name that is
+    not UTF-8."""
+    tree = tmp_path / "tree"
+    (tree / "pkg" / "deep").mkdir(parents=True)
+    (tree / "empty").mkdir()
+    (tree / "pkg" / "run.sh").write_text("#!/bin/sh\n")
+    (tree / "pkg" / "deep" / "data.bin").write_bytes(os.urandom(70_000))
+    (tree / "top.txt").write_text("top")
+    odd = os.fsencode(tree) + b"/bad-\xff-name"
+    with open(odd, "wb") as handle:
+        handle.write(b"odd")
+    (tree / "to-file").symlink_to("top.txt")
+    (tree / "to-dir").symlink_to("pkg")
+    (tree / "dangling").symlink_to("nowhere")
+    os.chmod(tree / "pkg" / "run.sh", 0o750)
+    os.chmod(tree / "top.txt", 0o400)
+    xattr = True
+    try:
+        os.setxattr(tree / "top.txt", "user.probe", b"on a file")
+        os.setxattr(tree / "pkg", "user.probe", b"on a directory")
+    except OSError:
+        xattr = False
+    stamp = 1_600_000_000_123_456_789
+    entries = sorted(tree.rglob("*"), reverse=True) + [tree]  # children before their directory
+    for index, path in enumerate(entries):
+        if not path.is_symlink():
+            os.utime(path, ns=(stamp + index, stamp + 1000 + index))
+    os.chmod(tree / "pkg" / "deep", 0o500)  # the copy must fill a directory it then makes read-only
+    os.chmod(tree / "empty", 0o711)
+    (tmp_path / "dest").mkdir()
+    before = _fds()
+    try:
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tree)])
+        assert outcome.error is None and _fds() == before
+        copied = tmp_path / "dest" / "tree"
+        assert sorted(os.listdir(os.fsencode(copied))) == sorted(os.listdir(os.fsencode(tree)))
+        for index, path in enumerate(entries):
+            twin = copied / path.relative_to(tree)
+            if path.is_symlink():
+                assert twin.is_symlink() and os.readlink(twin) == os.readlink(path)
+                continue
+            was, now = os.stat(path), os.stat(twin)
+            assert stat.S_IFMT(now.st_mode) == stat.S_IFMT(was.st_mode), path
+            assert stat.S_IMODE(now.st_mode) == stat.S_IMODE(was.st_mode), path
+            assert now.st_mtime_ns == stamp + 1000 + index, path
+            if not path.is_dir():  # a directory's atime moves with every listing, this test's too
+                assert now.st_atime_ns == stamp + index, path
+            assert now.st_ino != was.st_ino
+        data = Path("pkg") / "deep" / "data.bin"
+        assert (copied / data).read_bytes() == (tree / data).read_bytes()
+        with open(os.fsencode(copied) + b"/bad-\xff-name", "rb") as handle:
+            assert handle.read() == b"odd"
+        if xattr:
+            assert os.getxattr(copied / "top.txt", "user.probe") == b"on a file"
+            assert os.getxattr(copied / "pkg", "user.probe") == b"on a directory"
+    finally:
+        for folder in (tree, tmp_path / "dest" / "tree"):
+            if (folder / "pkg" / "deep").is_dir():
+                os.chmod(folder / "pkg" / "deep", 0o755)
+
