@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-30. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -17,10 +17,15 @@ mkdir -p "$ROOT/dist"
 # -- python package -----------------------------------------------------------
 SITE="$BUILD/usr/lib/python3/dist-packages/collins"
 mkdir -p "$SITE"
-cp "$ROOT"/collins/*.py "$SITE/"
-if [ -d "$ROOT/collins/locale" ]; then
-  cp -r "$ROOT/collins/locale" "$SITE/"
-fi
+# The whole package, every subpackage (service/, api/, and any later one):
+# a flat collins/*.py copy once shipped a .deb that died at app.py's first
+# import. locale/ rides along when present. ci.yml's packaging job extracts
+# the built .deb and imports collins.app from it.
+tar -C "$ROOT" --exclude='__pycache__' --exclude='*.pyc' -cf - collins \
+  | tar -C "$BUILD/usr/lib/python3/dist-packages" -xf -
+# collins/icons, sounds and the desktop/metainfo names are symlinks into
+# data/ for the wheel; here they would dangle, and the icons ship below.
+find "$SITE" -type l -delete
 
 # -- executable ---------------------------------------------------------------
 mkdir -p "$BUILD/usr/bin"
