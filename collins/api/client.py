@@ -457,21 +457,27 @@ class SocketLink(apilink.Link):
             frames, slim = protocol.split_request(message)
         except ValueError as exc:
             raise RequestRefused(protocol.ERROR_INVALID, f"{message.get('t')}: {exc}", {}) from None
-        if frames:
-            encoded = [GLib.Bytes.new(frame) for frame in frames]
+        if not frames:
+            self._send_text(channel, slim)
+            return
+        encoded = [GLib.Bytes.new(frame) for frame in frames]
+        text = protocol.encode(slim)
 
-            def do_send_frames():
-                ws = channel.ws
-                if ws is None or ws.get_state() != Soup.WebsocketState.OPEN:
-                    return
-                try:
-                    for frame in encoded:
-                        ws.send_message(Soup.WebsocketDataType.BINARY, frame)
-                except GLib.Error as exc:
-                    log.error("api client: send failed: %s", exc)
+        def do_send():
+            # One job for the frames and the request behind them: two
+            # threads' chunked requests on one connection must not
+            # interleave, or the server joins the wrong bytes.
+            ws = channel.ws
+            if ws is None or ws.get_state() != Soup.WebsocketState.OPEN:
+                return
+            try:
+                for frame in encoded:
+                    ws.send_message(Soup.WebsocketDataType.BINARY, frame)
+                ws.send_text(text)
+            except GLib.Error as exc:
+                log.error("api client: send failed: %s", exc)
 
-            self._post(do_send_frames)
-        self._send_text(channel, slim)
+        self._post(do_send)
 
     def _blocking(self, channel: _Channel, message: dict, timeout: float) -> dict:
         """Send on *channel* and wait for the reply (any thread but the I/O

@@ -53,6 +53,7 @@ GLib and Gio only; nothing here imports GTK.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import stat as stat_mod
@@ -328,7 +329,9 @@ def write_file(
     write, truncate, fsync), so every link sees the text and the owner and
     mode stay; any other existing file by a temporary file beside it,
     given the old mode, compared again right before the one `os.replace`
-    (the window between the compare and the write is the replace alone);
+    (the window between the compare and the write is the replace alone;
+    a file the user may not write, 0444 of their own, is refused
+    Permission denied as `g_file_replace` refused it, never swapped out);
     a file that is not there is created ``0o666`` under the umask, as
     GLib creates one. The reply's fields: the mtime and size read off the
     written descriptor (the temporary's, before the replace: the inode
@@ -365,6 +368,11 @@ def write_file(
         finally:
             os.close(fd)
         return {"mtime": mtime_us(written), "size": written.st_size, "encoding": encoding}
+    if not os.access(real, os.W_OK):
+        # A read-only file of the user's own (0444 in a writable directory):
+        # the replace could swap it out, but the saver this replaces refused
+        # with Permission denied, and so does this (a chmod is a decision).
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), real)
     fd, temp = tempfile.mkstemp(prefix=".collins-", suffix=".tmp", dir=directory)
     try:
         try:
