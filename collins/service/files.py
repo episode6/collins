@@ -971,18 +971,18 @@ class Files:
 
     def names(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`fs.names {root}`: `names_reply` on a thread, for a root the
-        client may name (`allowed`: a session's, or anything for a
-        `local` client)."""
+        client may name (a session's, or anything for a `local` client:
+        `_confine` on the worker against the roots computed here, as
+        `walk` does; review of PR 614: the resolving check does not
+        belong on the main loop)."""
         root = self._path(message, "root")
         if isinstance(root, dict):
             return root
-        if not allowed(self.core, client, root):
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": root[: protocol.ARG_TEXT_MAX]}
-            )
+        allowed_roots = self._roots(client)
 
         def work() -> dict:
             try:
+                _confine(allowed_roots, root)
                 fields = names_reply(root)
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)

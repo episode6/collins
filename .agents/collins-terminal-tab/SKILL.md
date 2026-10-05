@@ -393,7 +393,9 @@ bounded by `protocol.TRANSCRIPT_LINKS_*`, the path off the store's row and
 checked by `transcript_path_allowed`); the client never opens it, and
 `transcriptlinks.completions` (pure) still decides what the screen
 corroborates. `_RootNameLinks` asks `fs.names {root}` (non-directory names,
-5000 at most, off the main loop; the answer is dropped when the root moved or
+5000 at most, `names` a `protocol.CHUNKED_JSON_FIELDS` so a full bound of long
+names travels as blob frames, confined on the worker like `fs.walk`, off the
+main loop; the answer is dropped when the root moved or
 a newer ask overtook it, kept when the service cannot answer) and holds a
 `fs.watch {kind: dir}` on the root (`self._monitor` is its handle) whose
 `dir-changed` re-asks through the same 500 ms leading-edge throttle. A link

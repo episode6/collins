@@ -956,7 +956,12 @@ REPLIES = {
         "results_bytes": 2,
     },
     "fs.mkdir": {},
-    "fs.names": {"names": ["README.md", "pyproject.toml"], "truncated": False},
+    "fs.names": {
+        "names": ["README.md", "pyproject.toml"],
+        "truncated": False,
+        "names_chunked": False,
+        "names_bytes": 2,
+    },
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
@@ -1780,3 +1785,15 @@ def test_a_paste_results_error_is_an_open_string():
     too_long = {"re": 9, "ok": True, "results": [{**result, "error": "x" * (p.SHORT_MAX + 1)}]}
     assert isinstance(p.validate_response(too_long, "fs.paste"), p.Refusal)
     assert "placed" not in p.TYPES["fs.paste"].request.reply
+
+
+def test_fs_names_chunks_as_json_like_a_walks_paths():
+    """PR-2.6 review: 5000 names of 255 characters are past a frame."""
+    names = [f"{index:05d}-{'n' * 249}" for index in range(p.FS_NAMES_MAX)]
+    reply = {"re": 4, "ok": True, "names": names, "truncated": False}
+    assert not isinstance(p.validate_response(reply, "fs.names"), p.Refusal)
+    frames, slim = p.split_reply(reply)
+    assert frames and "names" not in slim and slim["names_chunked"] is True
+    data = b"".join(p.unpack_frame(frame)[1] for frame in frames)
+    assert p.join_reply(slim, data)["names"] == names
+    assert "names" in p.CHUNKED_JSON_FIELDS and "names" in p.CHUNKED_FIELDS
