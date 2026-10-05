@@ -238,7 +238,7 @@ def test_read_and_write_are_deferreds_settled_later(served):
 def test_a_worker_that_raises_settles_failed(served, monkeypatch):
     core, client, project, _events = served
 
-    def boom(path, max_bytes):
+    def boom(path, max_bytes, roots=None):
         raise RuntimeError("disk on fire")
 
     monkeypatch.setattr(files, "read_file", boom)
@@ -337,3 +337,128 @@ def test_file_stat_of_a_directory_is_gone(tmp_path):
     (tmp_path / "f").write_text("x")
     mtime, size, gone = files.file_stat(str(tmp_path / "f"))
     assert (size, gone) == (1, False) and mtime == mtime_of(tmp_path / "f")
+
+
+# -- the seeded watch and the saver's cases (the review of PR 609) -----------------------------
+
+
+def test_a_watch_seeded_with_an_older_mtime_reports_the_change_at_once(served):
+    """A change between the client's read and its watch (or while it was
+    away): the first stat differs from the seed, so one `file-changed`
+    arrives without any monitor event."""
+    core, client, project, events = served
+    path = project / "a.txt"
+    was = mtime_of(path)
+    path.write_text("changed before the watch\n")
+    os.utime(path, ns=(0, (was + 5_000_000) * 1000))
+    client.request({"t": "fs.watch", "path": str(path), "kind": "file", "handle": "w1", "mtime": was})
+    assert pump(1.0, lambda: changes(events))
+    event = changes(events)[0]
+    assert event["mtime"] == mtime_of(path) and event["gone"] is False
+    # A seed that matches the file is no event; a null seed never is.
+    same = {"t": "fs.watch", "path": str(path), "kind": "file", "handle": "w2", "mtime": mtime_of(path)}
+    client.request(same)
+    client.request({"t": "fs.watch", "path": str(path), "kind": "file", "handle": "w3"})
+    pump(0.3)
+    assert len(changes(events)) == 1
+    # A seed for a file that is gone is `gone` at once.
+    path.unlink()
+    client.request({"t": "fs.watch", "path": str(path), "kind": "file", "handle": "w4", "mtime": was})
+    assert pump(1.0, lambda: any(e["gone"] for e in changes(events)))
+
+
+def test_watches_per_client_are_bounded(served, monkeypatch):
+    core, client, project, _events = served
+    monkeypatch.setattr(files, "MAX_WATCHES_PER_CLIENT", 2)
+    path = str(project / "a.txt")
+    client.request({"t": "fs.watch", "path": path, "kind": "file", "handle": "w1"})
+    client.request({"t": "fs.watch", "path": path, "kind": "file", "handle": "w2"})
+    client.request({"t": "fs.watch", "path": path, "kind": "file", "handle": "w1"})  # a replace is fine
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.watch", "path": path, "kind": "file", "handle": "w3"})
+    assert refused.value.error == protocol.ERROR_REFUSED
+
+
+def test_write_through_a_hard_link_updates_both_names(served):
+    core, client, project, _events = served
+    a, b = project / "a.txt", project / "b.txt"
+    os.link(a, b)
+    client.request({"t": "fs.write", "path": str(a), "text": "linked\n", "expect_mtime": None})
+    assert a.read_text() == b.read_text() == "linked\n" and a.stat().st_nlink == 2
+
+
+def test_write_into_a_read_only_directory_writes_the_writable_file_in_place(served):
+    core, client, project, _events = served
+    if os.geteuid() == 0:
+        pytest.skip("root writes anywhere")
+    sub = project / "ro"
+    sub.mkdir()
+    target = sub / "f.txt"
+    target.write_text("old\n")
+    sub.chmod(0o555)
+    try:
+        reply = client.request({"t": "fs.write", "path": str(target), "text": "new\n", "expect_mtime": None})
+        assert target.read_text() == "new\n" and reply["size"] == 4
+        # A stale compare still holds in place: nothing written.
+        target.write_text("theirs\n")
+        os.utime(target, ns=(0, (reply["mtime"] + 5_000_000) * 1000))
+        with pytest.raises(inproc.RequestRefused) as refused:
+            client.request(
+                {"t": "fs.write", "path": str(target), "text": "mine\n", "expect_mtime": reply["mtime"]}
+            )
+        assert refused.value.error == protocol.ERROR_STALE and target.read_text() == "theirs\n"
+    finally:
+        sub.chmod(0o755)
+
+
+def test_a_recreated_file_gets_the_umask_mode_not_the_temp_files(served):
+    core, client, project, _events = served
+    path = project / "fresh.txt"
+    client.request({"t": "fs.write", "path": str(path), "text": "x\n", "expect_mtime": None})
+    umask = os.umask(0)
+    os.umask(umask)
+    assert stat.S_IMODE(path.stat().st_mode) == (0o666 & ~umask)
+
+
+def test_the_reply_mtime_is_the_written_files_own(served):
+    """The mtime in the reply is read off the written descriptor, so it is
+    exactly what the file carries after the replace and what the next
+    read answers (a write right after by someone else is not mistaken for
+    ours)."""
+    core, client, project, _events = served
+    path = project / "a.txt"
+    reply = client.request({"t": "fs.write", "path": str(path), "text": "ours\n", "expect_mtime": None})
+    assert reply["mtime"] == mtime_of(path) == client.request({"t": "fs.read", "path": str(path)})["mtime"]
+
+
+def test_confinement_is_checked_on_the_worker_against_the_resolved_file(served, tmp_path):
+    """The roots are computed on the main loop and the check runs on the
+    worker right before the open, on the file the path resolves to."""
+    core, client, project, _events = served
+    client.local = False
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    link = project / "link.txt"
+    link.symlink_to(outside)
+    for message in (
+        {"t": "fs.read", "path": str(link)},
+        {"t": "fs.write", "path": str(link), "text": "x", "expect_mtime": None},
+    ):
+        with pytest.raises(inproc.RequestRefused) as refused:
+            client.request(message)
+        assert refused.value.error == protocol.ERROR_REFUSED and refused.value.msgid == files.OUTSIDE_MSGID
+    assert outside.read_text() == "secret"
+    inside = project / "inside.txt"
+    inside.write_text("fine")
+    (project / "link2.txt").symlink_to(inside)
+    assert client.request({"t": "fs.read", "path": str(project / "link2.txt")})["text"] == "fine"
+
+
+def test_read_of_a_fifo_is_refused_not_waited_on(served):
+    core, client, project, _events = served
+    fifo = project / "pipe"
+    os.mkfifo(fifo)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.read", "path": str(fifo)})
+    assert refused.value.error == protocol.ERROR_REFUSED and "not a file" in refused.value.msgid

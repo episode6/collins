@@ -92,12 +92,23 @@ class _OpenFile:
         # is refused `stale`: the "changed on disk" dialog), the encoding
         # the save writes back, and the handle of the service's watch.
         self.mtime: int | None = None
+        self.size: int | None = None
         self.encoding = "utf-8"
+        # The line ending a save puts back when the buffer's implicit
+        # trailing newline is on (what `_fill` stripped).
+        self.newline = "\n"
+        # Whether the buffer has ever held the file: a save before the
+        # first fill would write an empty buffer over it (the view is not
+        # editable until then either).
+        self.filled = False
         self.watch_handle: str | None = None
         # A `file-changed` that arrived while a save or load of this buffer
         # was in flight: judged against the new mtime once that lands.
         self.pending_change: dict | None = None
         self.saving = False
+        # A save asked for while one was in flight: sent from _on_saved
+        # with the new mtime, its waiters answered with that save's.
+        self.save_again: list | None = None
         self.font_provider: Gtk.CssProvider | None = None
         # Which load this buffer is waiting on, and where to put the cursor
         # when it lands. Bumped per load so a superseded one (a rename that
@@ -135,6 +146,7 @@ class EditorPane(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._root = Path(root)
         self._open: dict[str, _OpenFile] = {}  # path str -> _OpenFile
+        self._watched: dict[str, _OpenFile] = {}  # a watch's handle -> the file it watches
         self._pages: dict[str, Adw.TabPage] = {}
         self._page_key: dict[Adw.TabPage, str] = {}
         self._close_confirmed: set[Adw.TabPage] = set()  # discard-changes already agreed to
@@ -788,6 +800,7 @@ class EditorPane(Gtk.Box):
         view.set_monospace(True)
         view.set_auto_indent(True)
         view.set_extra_menu(self._view_extra_menu)
+        view.set_editable(False)  # until the first fill: nothing typed into an empty buffer is saved
 
         opened = _OpenFile(path, buffer, view)
         self._apply_font(opened)
@@ -853,7 +866,7 @@ class EditorPane(Gtk.Box):
 
     def _open_image_page(self, key: str, path: Path) -> None:
         """A read-only `Gtk.Picture` page — images never get a buffer
-        (`load_guard` would refuse them as binary), so none of the
+        (`fs.read` would refuse them as binary), so none of the
         save/dirty/search machinery applies: `_open` stays text-only and
         every `_open` consumer skips these pages."""
         guard = editorfiles.image_guard(path)
@@ -938,17 +951,31 @@ class EditorPane(Gtk.Box):
         self._sync_status()
         self._settle_pending_change(opened)
 
-    @staticmethod
-    def _fill(opened: _OpenFile, read: remotefiles.FileText) -> None:
+    def _fill(self, opened: _OpenFile, read: remotefiles.FileText) -> None:
         """The buffer's text replaced by what the service read, outside the
         undo history (as the loader's load was), and the file's facts kept
-        for the save that follows."""
+        for the save that follows. The file's final newline is stripped
+        when the buffer's implicit trailing newline is on (what the loader
+        did; `_do_save` puts it back), so a file does not show an empty
+        last line."""
+        text = read.text
+        newline = "\n"
+        if opened.buffer.get_implicit_trailing_newline():
+            if text.endswith("\r\n"):
+                text, newline = text[:-2], "\r\n"
+            elif text.endswith("\n"):
+                text = text[:-1]
         opened.buffer.begin_irreversible_action()
-        opened.buffer.set_text(read.text)
+        opened.buffer.set_text(text)
         opened.buffer.end_irreversible_action()
         opened.buffer.set_modified(False)
+        opened.newline = newline
         opened.mtime = read.mtime
+        opened.size = read.size
         opened.encoding = read.encoding
+        opened.filled = True
+        opened.view.set_editable(True)
+        remotefiles.watcher().update(opened.watch_handle, read.mtime)
 
     def _guard_message(self, path: Path, guard) -> str:
         LG = editorfiles.LoadGuard
@@ -979,9 +1006,26 @@ class EditorPane(Gtk.Box):
         flows use it to only proceed past a Save that actually landed. The
         write runs on the service (`fs.write`, PR-2.3) from a worker thread;
         with *expect* None it writes regardless of what is on disk (the
-        close flows' Save and the Overwrite the user confirmed)."""
+        close flows' Save and the Overwrite the user confirmed). A buffer
+        the file never filled is not saved (an empty buffer over the file);
+        a save while one is in flight waits for it and goes next, with the
+        mtime that save answers (two quick Ctrl+S are two writes, no
+        spurious "changed on disk")."""
+        if not opened.filled:
+            self._notify(_("{name} is still loading.").format(name=opened.path.name))
+            if on_done is not None:
+                on_done(False)
+            return
+        if opened.saving:
+            if opened.save_again is None:
+                opened.save_again = []
+            if on_done is not None:
+                opened.save_again.append(on_done)
+            return
         start, end = opened.buffer.get_bounds()
         text = opened.buffer.get_text(start, end, True)
+        if text and opened.buffer.get_implicit_trailing_newline():
+            text += opened.newline  # what `_fill` stripped (the saver's implicit newline)
         path = str(opened.path)
         encoding = opened.encoding
         opened.saving = True
@@ -992,8 +1036,11 @@ class EditorPane(Gtk.Box):
 
     def _on_saved(self, opened: _OpenFile, on_done, expect: int | None, kind: str, value) -> None:
         opened.saving = False
+        waiters, opened.save_again = opened.save_again, None
         if kind != "ok":
             refusal: RequestRefused = value
+            for waiter in waiters or ():
+                waiter(False)
             if remotefiles.is_stale(refusal) and expect is not None:
                 dialogs.confirm_dialog(
                     self.get_root(),
@@ -1015,8 +1062,30 @@ class EditorPane(Gtk.Box):
             self._settle_pending_change(opened)
             return
         written: remotefiles.Written = value
+        if written.encoding != opened.encoding:
+            # The read's encoding could not carry the text: it was saved as
+            # UTF-8, which the user should hear once.
+            self._notify(
+                _("{name} was saved as UTF-8: its {encoding} encoding couldn't carry the text.").format(
+                    name=opened.path.name, encoding=opened.encoding
+                )
+            )
         opened.mtime = written.mtime
+        opened.size = written.size
         opened.encoding = written.encoding
+        remotefiles.watcher().update(opened.watch_handle, written.mtime)
+        if waiters is not None:
+            # Typed into while the save was in flight: saved again now, over
+            # exactly what was just written.
+            if on_done is not None:
+                waiters.insert(0, on_done)
+
+            def done_all(ok: bool) -> None:
+                for waiter in waiters:
+                    waiter(ok)
+
+            self._do_save(opened, done_all, expect=written.mtime)
+            return
         opened.buffer.set_modified(False)
         self._settle_pending_change(opened)
         if on_done is not None:
@@ -1058,17 +1127,39 @@ class EditorPane(Gtk.Box):
         `file-changed` for it (debounced there) lands in `_check_external`.
         Idempotent: a file that gets re-watched (a rename, a restarted load)
         must not leave the watch on its old path running."""
-        watcher = remotefiles.watcher()
-        watcher.unwatch(opened.watch_handle)
-        opened.watch_handle = watcher.watch(
-            str(opened.path), lambda event: self._check_external(opened, event)
-        )
+        self._unwatch(opened)
+        handle = remotefiles.watcher().watch(str(opened.path), self._on_file_changed, mtime=opened.mtime)
+        opened.watch_handle = handle
+        self._watched[handle] = opened
+
+    def _unwatch(self, opened: _OpenFile) -> None:
+        if opened.watch_handle is not None:
+            self._watched.pop(opened.watch_handle, None)
+            remotefiles.watcher().unwatch(opened.watch_handle)
+            opened.watch_handle = None
+
+    def _on_file_changed(self, event: dict) -> None:
+        """The watcher's listener (a bound method, held weakly there, so a
+        pane that was dropped without `shutdown` is not kept alive by its
+        watches): the `_OpenFile` is looked up by the event's handle."""
+        opened = self._watched.get(str(event.get("handle")))
+        if opened is not None:
+            self._check_external(opened, event)
+
+    def shutdown(self) -> None:
+        """The pane's tab is closing for good: every file's watch on the
+        service is dropped (`TerminalTab.release_editor`). Without this
+        the watches, and through their listener the pane and its buffers,
+        would live as long as the module's watcher."""
+        for opened in list(self._open.values()):
+            self._unwatch(opened)
+        self._watched.clear()
 
     def _check_external(self, opened: _OpenFile, event: dict) -> None:
-        """A `file-changed` for *opened*: judged against the mtime of the
-        buffer's last read or write. One that arrives while a save or load
-        is in flight waits for it (`pending_change`): the save's own write
-        is what the monitor saw, and the reply's mtime says so."""
+        """A `file-changed` for *opened*: judged against the mtime and size
+        of the buffer's last read or write. One that arrives while a save
+        or load is in flight waits for it (`pending_change`): the save's
+        own write is what the monitor saw, and the reply's mtime says so."""
         if self._open.get(str(opened.path)) is not opened or event.get("handle") != opened.watch_handle:
             return  # closed or re-watched meanwhile
         if opened.saving or opened.loading:
@@ -1081,7 +1172,7 @@ class EditorPane(Gtk.Box):
             opened.mtime = None
             opened.buffer.set_modified(True)  # nothing on disk to save over silently
             self._notify(_("{name} was deleted.").format(name=opened.path.name))
-        elif event.get("mtime") != opened.mtime:
+        elif (event.get("mtime"), event.get("size")) != (opened.mtime, opened.size):
             if opened.buffer.get_modified():
                 self._show_banner(
                     _("{name} changed on disk.").format(name=opened.path.name),
@@ -1330,8 +1421,7 @@ class EditorPane(Gtk.Box):
         self._pages.pop(key, None)
         self._page_key.pop(page, None)
         if opened is not None:
-            remotefiles.watcher().unwatch(opened.watch_handle)
-            opened.watch_handle = None
+            self._unwatch(opened)
 
     # -- search --------------------------------------------------------------
 

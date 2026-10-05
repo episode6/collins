@@ -29,8 +29,10 @@ unit tests drive it through a fake link.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -128,7 +130,11 @@ class Watcher:
         self._link_of = link_of
         self._lock = threading.Lock()
         self._next = 1
-        self._watches: dict[str, tuple[str, Listener]] = {}  # handle -> (path, listener)
+        # handle -> _Watch; a listener that is a bound method is held
+        # weakly (`weakref.WeakMethod`), so a pane dropped without its
+        # `shutdown` does not live on through its watches: a dead listener's
+        # watch is dropped at the next event.
+        self._watches: dict[str, _Watch] = {}
         self._installed_on: apilink.Link | None = None
 
     def install(self, link: apilink.Link) -> None:
@@ -153,17 +159,31 @@ class Watcher:
         and writes come back refused."""
         return self._installed_on is not None
 
-    def watch(self, path: str, listener: Listener) -> str:
+    def watch(self, path: str, listener: Listener, mtime: int | None = None) -> str:
         """Watch *path* for *listener*: the handle, which `unwatch` takes.
-        Non-blocking (`send`); a refusal is logged and the watch kept, so
-        a reconnect's `reset` asks again. With no link installed the watch
-        is kept and nothing is sent (a service with no `files` cap)."""
+        *mtime* is the file as the caller last read or wrote it: the
+        service's first stat is compared against it, so a change in
+        between is one `file-changed` at once (`update` keeps it current
+        for a reconnect's `reset`). Non-blocking (`send`); a refusal is
+        logged and the watch kept, so a reconnect's `reset` asks again.
+        With no link installed the watch is kept and nothing is sent (a
+        service with no `files` cap)."""
         with self._lock:
             handle = f"w{self._next}"
             self._next += 1
-            self._watches[handle] = (path, listener)
-        self._send_watch(handle, path)
+            self._watches[handle] = _Watch(path, listener, mtime)
+        self._send_watch(handle)
         return handle
+
+    def update(self, handle: str | None, mtime: int | None) -> None:
+        """The file was read or written again: *mtime* is what a
+        reconnect's `reset` seeds the watch with."""
+        if handle is None:
+            return
+        with self._lock:
+            watch = self._watches.get(handle)
+            if watch is not None:
+                watch.mtime = mtime
 
     def unwatch(self, handle: str | None) -> None:
         if handle is None:
@@ -184,32 +204,59 @@ class Watcher:
         """A reconnect: the service's watches are gone; every live one is
         sent again under its handle."""
         with self._lock:
-            live = list(self._watches.items())
-        for handle, (path, _listener) in live:
-            self._send_watch(handle, path)
+            live = list(self._watches)
+        for handle in live:
+            self._send_watch(handle)
 
-    def _send_watch(self, handle: str, path: str) -> None:
+    def _send_watch(self, handle: str) -> None:
         link = self._link_of()
-        if link is None or not self.installed:
+        with self._lock:
+            watch = self._watches.get(handle)
+        if link is None or not self.installed or watch is None:
             return
+        path = watch.path
+        message = {"t": "fs.watch", "path": path, "kind": protocol.WATCH_FILE, "handle": handle}
+        if watch.mtime is not None:
+            message["mtime"] = watch.mtime
         link.send(
-            {"t": "fs.watch", "path": path, "kind": protocol.WATCH_FILE, "handle": handle},
+            message,
             on_refused=lambda refusal: log.warning(
                 "remotefiles: a watch of %s was refused: %s", path, refusal.msgid
             ),
         )
 
     def _on_changed(self, event: dict) -> None:
-        handle = event.get("handle")
+        handle = str(event.get("handle"))
         with self._lock:
-            known = self._watches.get(str(handle))
-        if known is None:
+            watch = self._watches.get(handle)
+        if watch is None:
             return
-        _path, listener = known
+        listener = watch.listener()
+        if listener is None:
+            self.unwatch(handle)  # its owner is gone: the watch goes with it
+            return
         try:
             listener(dict(event))
         except Exception:
             log.exception("remotefiles: a file-changed listener failed")
+
+
+class _Watch:
+    """One watch of the client's: the path, the listener (weakly, for a
+    bound method) and the mtime the service's watch is seeded with."""
+
+    __slots__ = ("path", "_ref", "mtime")
+
+    def __init__(self, path: str, listener: Listener, mtime: int | None) -> None:
+        self.path = path
+        self.mtime = mtime
+        if inspect.ismethod(listener):
+            self._ref: Callable[[], Listener | None] = weakref.WeakMethod(listener)
+        else:
+            self._ref = lambda: listener
+
+    def listener(self) -> Listener | None:
+        return self._ref()
 
 
 _WATCHER = Watcher()
