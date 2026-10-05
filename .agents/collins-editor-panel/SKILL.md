@@ -271,7 +271,12 @@ touches the disk.
   refreshes the tree, re-keys an open file a cut moved
   (`_retarget_open(old, new, mtime)`, which also takes back the "was
   deleted" mark a `file-changed {gone}` set when the service's watch saw
-  the file leave its old path before the paste answered), spends the cut
+  the file leave its old path before the paste answered — for the moved
+  entry itself with the reply's mtime, and for an open file *inside* a
+  moved or renamed folder with the mtime it expected before the `gone`,
+  `_OpenFile.gone_mtime`, since the move kept it; the re-watch seeds the
+  service with it, so a file that really differs is told at once), spends
+  the cut
   (`_spend_cut`: what failed stays on the clipboard, still cut) and names
   a failure in the banner. `paste_files` sends the clipboard in slices of
   `protocol.FS_PASTE_MAX` (1000), one request each, and joins the
