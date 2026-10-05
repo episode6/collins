@@ -240,6 +240,7 @@ class FakeHost:
         self.resolved: list[str] = []
         self.forks: list[str] = []
         self.cwds: list = []
+        self.inputs: list[str] = []  # what write_text announced, in order
 
     def alive(self):
         return self.is_alive
@@ -284,6 +285,9 @@ class FakeHost:
 
     def cwd_polled(self, cwd):
         self.cwds.append(cwd)
+
+    def input_sent(self, text):
+        self.inputs.append(text)
 
     def painted(self) -> list[str]:
         return [e[1] for e in self.events if e[0] == "paint"]
@@ -973,6 +977,25 @@ def test_redraws_count_only_once_a_turn_was_asked_for(rig):
     assert not session.redraw_counts(startup_held=False)
     session.echo_gate.arm()
     assert session.redraw_counts(startup_held=False)
+
+
+def test_the_sessions_own_writes_reach_the_echo_gate(rig):
+    """A prompt the app types (new chat, composer, start_session) takes the
+    service's road, never the VTE's commit: the session pokes and arms its
+    own gate, and tells the host before the bytes land, while the pty is
+    still pristine (the baseline's last snapshot)."""
+    session, term, host, _clock = rig
+    boxes: list[str] = []
+    host.input_sent = lambda text: boxes.append(term.box)  # the box as the host hears it
+    assert not session.echo_gate.armed
+    session.write_text("hello")
+    assert term.box == "hello" and not session.echo_gate.armed
+    session.write_text("\r")
+    assert term.box == ""  # submitted
+    assert session.echo_gate.armed
+    # Told before each write landed: the "\r" was announced with "hello"
+    # still in the box.
+    assert boxes == ["", "hello"]
 
 
 def test_a_progress_quiet_overrules_the_redraw(rig):

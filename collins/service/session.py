@@ -329,8 +329,8 @@ class SessionHost(Protocol):
       `resend_composed`, `stash_draft`, `focus_terminal`, `paint`,
       `transcript_landed`, `session_resolved`, `fork_resolved`,
       `cwd_polled`, `sandbox_changed`, `mark_stale_shells`,
-      `process_exited` (and `transcript_reset`, `transcript_landed`'s
-      twin).
+      `process_exited`, `input_sent` (and `transcript_reset`,
+      `transcript_landed`'s twin).
     - Things the service itself will do: `spawn_shell` (becomes
       `PtyServer.spawn`) and `shown_prs` (service state: the PRs shown are
       the ones the service last handed out).
@@ -424,6 +424,14 @@ class SessionHost(Protocol):
 
     def process_exited(self, status: int) -> None:
         """The shell on the pty exited with *status* (what closes the tab)."""
+        ...
+
+    def input_sent(self, text: str) -> None:
+        """The session is about to type *text* into the pty (`write_text`):
+        an injected prompt, a switch, a close flow's keystrokes. Told
+        before the write lands, so a "\\r" in it is still the last pristine
+        instant of a fresh spawn (the window's process baseline snapshots
+        there, as it does on a VTE `commit` carrying one)."""
         ...
 
 
@@ -628,7 +636,20 @@ class Session:
     # -- writing to the pty ---------------------------------------------------
 
     def write_text(self, text: str) -> None:
-        """Type *text* into the terminal's child, as keystrokes."""
+        """Type *text* into the terminal's child, as keystrokes.
+
+        Every write the app makes goes through here, so this is where the
+        echo gate hears about it (`EchoGate.poked`: the redraw answering
+        these keystrokes is not the agent working, and a carriage return
+        among them is the submit that arms the gate). Through PR-1.8 the
+        write was VTE's `feed_child`, whose `commit` signal told the window
+        the same thing; on the service's pty the bytes never pass the
+        client's VTE, so the session says it itself — and tells the host
+        first, while the pty is still pristine (`SessionHost.input_sent`:
+        the window's process baseline takes its last snapshot there).
+        """
+        self.host.input_sent(text)
+        self.echo_gate.poked(text)
         self.pty.write(text.encode())
 
     # -- the processes behind the terminal -----------------------------------
