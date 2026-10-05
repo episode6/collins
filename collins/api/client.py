@@ -448,6 +448,31 @@ class SocketLink(apilink.Link):
 
         self._post(do_send)
 
+    def _send_request(self, channel: _Channel, message: dict) -> None:
+        """A request on *channel*: one text frame, or, for one the frame cap
+        can't hold (`protocol.split_request`: a `fs.write`'s text), its
+        TAG_BLOB frames ahead of the slim request on the same connection.
+        Raises RequestRefused ``invalid`` for a request too large even so."""
+        try:
+            frames, slim = protocol.split_request(message)
+        except ValueError as exc:
+            raise RequestRefused(protocol.ERROR_INVALID, f"{message.get('t')}: {exc}", {}) from None
+        if frames:
+            encoded = [GLib.Bytes.new(frame) for frame in frames]
+
+            def do_send_frames():
+                ws = channel.ws
+                if ws is None or ws.get_state() != Soup.WebsocketState.OPEN:
+                    return
+                try:
+                    for frame in encoded:
+                        ws.send_message(Soup.WebsocketDataType.BINARY, frame)
+                except GLib.Error as exc:
+                    log.error("api client: send failed: %s", exc)
+
+            self._post(do_send_frames)
+        self._send_text(channel, slim)
+
     def _blocking(self, channel: _Channel, message: dict, timeout: float) -> dict:
         """Send on *channel* and wait for the reply (any thread but the I/O
         one)."""
@@ -463,7 +488,12 @@ class SocketLink(apilink.Link):
             if channel.ws is None:
                 raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
             channel.pending[message["id"]] = pending
-        self._send_text(channel, message)
+        try:
+            self._send_request(channel, message)
+        except RequestRefused:
+            with self._lock:
+                channel.pending.pop(message["id"], None)
+            raise
         if not pending.event.wait(timeout):
             with self._lock:
                 channel.pending.pop(message["id"], None)
@@ -557,7 +587,15 @@ class SocketLink(apilink.Link):
                     log.warning("api client: %s refused: not connected", checked.type)
                 return
             self._primary.pending[message["id"]] = pending
-        self._send_text(self._primary, message)
+        try:
+            self._send_request(self._primary, message)
+        except RequestRefused as refusal:
+            with self._lock:
+                self._primary.pending.pop(message["id"], None)
+            if on_refused is not None:
+                on_refused(refusal)
+            else:
+                log.warning("api client: %s refused: %s", checked.type, refusal.msgid)
 
     def send_event(self, message: dict) -> None:
         """A client event on the primary (`resize`, `focus`, `theme`,
@@ -625,7 +663,7 @@ class SocketLink(apilink.Link):
             if not wanted:
                 return  # no request of ours: a late chunk, or not for this link
             buffer = channel.blobs.setdefault(header.stream, bytearray())
-            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.GIT_OUTPUT_MAX:
+            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.CHUNKED_MAX:
                 channel.blobs.pop(header.stream, None)  # out of order or over the bound: the reply is refused
                 return
             buffer += data

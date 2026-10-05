@@ -141,7 +141,7 @@ def test_hello_answers_the_services_facts(served):
     reply = client.hello()
     assert reply["ok"] and reply["protocol"] == protocol.PROTOCOL
     assert reply["min_protocol"] == protocol.MIN_PROTOCOL
-    assert set(reply["caps"]) == {"local", "debug", "git"}
+    assert set(reply["caps"]) == {"local", "debug", "git", "files"}
     assert reply["local_proof"] == {"path": server.proof_file, "length": 32}
     assert reply["service_id"] and reply["version"]
     assert "client-1" in server.clients and server.clients["client-1"].device == "laptop"
@@ -612,4 +612,62 @@ def test_the_pr_blob_is_named_by_url_and_served_by_kind_pr(served, monkeypatch):
     assert refused["ok"] and refused["error"].startswith("Not a commit") and "url" not in refused
     status, _h, _b = _http_get(path, f"kind=pr&repository=o/r&ref={sha}&path=../x.png", mine)
     assert status == 400 and len(calls) == 2
+
+
+# -- files over the API (PR-2.3): a chunked request, a chunked reply -------------------------
+
+
+def test_a_request_over_the_frame_cap_arrives_in_chunks_and_is_joined(served, tmp_path):
+    """A `fs.write` whose text exceeds MAX_FRAME goes as TAG_BLOB frames
+    ahead of a slim request (`protocol.split_request`, what the client's
+    link does); the server joins them before validating, writes the file,
+    and the `fs.read` of it comes back chunked the same way."""
+    server, path = served
+    client = _local_client(server, path)
+    target = tmp_path / "big.txt"
+    text = "".join(f"line {i} " + "y" * 100 + "\n" for i in range(15000))
+    message = {"t": "fs.write", "id": client._next, "path": str(target), "text": text, "expect_mtime": None}
+    client._next += 1
+    frames, slim = protocol.split_request(message)
+    assert frames and slim["text_chunked"] and slim["text_bytes"] == len(text.encode())
+    for frame in frames:
+        client.send_binary(frame)
+    client.send(slim)
+    reply = {}
+
+    def arrived():
+        for text_frame in client.texts:
+            if protocol.response_id(text_frame) == message["id"]:
+                reply.update(text_frame)
+                return True
+        return False
+
+    assert pump(10, arrived), "no reply to the chunked fs.write"
+    assert reply["ok"] and reply["size"] == len(text.encode()) and target.read_text() == text
+    read = client.request({"t": "fs.read", "path": str(target)}, timeout=10)
+    assert read["ok"] and read["text_chunked"] and read["text_bytes"] == len(text.encode())
+    chunks = b"".join(
+        data for header, data in client.frames
+        if header.tag == protocol.TAG_BLOB and header.stream == (read["re"] & protocol.STREAM_MASK)
+    )
+    joined = protocol.join_reply(read, chunks)
+    assert joined["text"] == text and joined["mtime"] == reply["mtime"]
+    client.close()
+
+
+def test_a_chunked_request_short_of_its_bytes_is_invalid(served, tmp_path):
+    server, path = served
+    client = _local_client(server, path)
+    message = {
+        "t": "fs.write", "id": client._next, "path": str(tmp_path / "x.txt"), "text": "a" * 2_000_000,
+        "expect_mtime": None,
+    }
+    client._next += 1
+    frames, slim = protocol.split_request(message)
+    client.send_binary(frames[0])  # the second never comes
+    client.send(slim)
+    assert pump(5, lambda: any(protocol.response_id(t) == message["id"] for t in client.texts))
+    reply = next(t for t in client.texts if protocol.response_id(t) == message["id"])
+    assert reply["ok"] is False and reply["error"] == protocol.ERROR_INVALID
+    assert not (tmp_path / "x.txt").exists()
     client.close()

@@ -7,7 +7,6 @@ import pytest
 from collins.editorfiles import (
     _MAX_HIGHLIGHT_BYTES,
     _MAX_IMAGE_BYTES,
-    _MAX_OPEN_BYTES,
     LIGHTBOX_BUTTON_STRIP,
     LIGHTBOX_MIN_H,
     LIGHTBOX_MIN_W,
@@ -19,6 +18,7 @@ from collins.editorfiles import (
     RenameError,
     RerootAction,
     fence_language_id,
+    first_line,
     follow_scope,
     format_copied_files,
     gallery_step,
@@ -30,14 +30,12 @@ from collins.editorfiles import (
     lightbox_zoom_slot,
     lightbox_zoombar_inside,
     list_dir,
-    load_guard,
     pane_layout,
     parse_copied_files,
     paste_entries,
     paste_target,
     path_from_file_uri,
     plan_reroot,
-    read_first_line,
     rename_target,
     renamed_path,
     should_highlight,
@@ -81,84 +79,28 @@ def test_guess_language_unknown_shebang_interpreter_is_none():
     assert guess_language_id("script", "not a shebang") is None
 
 
-# -- read_first_line ----------------------------------------------------------
+# -- first_line (of the text fs.read answered) ---------------------------------
 
 
-def test_read_first_line_strips_line_ending(tmp_path):
-    f = tmp_path / "script"
-    f.write_text("#!/bin/bash\necho hi\n")
-    assert read_first_line(f) == "#!/bin/bash"
+def test_first_line_strips_line_ending():
+    assert first_line("#!/bin/bash\necho hi\n") == "#!/bin/bash"
 
 
-def test_read_first_line_crlf(tmp_path):
-    f = tmp_path / "script"
-    f.write_bytes(b"#!/usr/bin/env python3\r\nprint(1)\r\n")
-    assert read_first_line(f) == "#!/usr/bin/env python3"
+def test_first_line_crlf():
+    assert first_line("#!/usr/bin/env python3\r\nprint(1)\r\n") == "#!/usr/bin/env python3"
 
 
-def test_read_first_line_missing_file_is_empty(tmp_path):
-    assert read_first_line(tmp_path / "missing") == ""
+def test_first_line_of_nothing_is_empty():
+    assert first_line("") == ""
 
 
-def test_read_first_line_caps_bytes(tmp_path):
-    f = tmp_path / "long"
-    f.write_text("x" * 4096)
-    assert read_first_line(f) == "x" * 512
+def test_first_line_caps_chars():
+    assert first_line("x" * 4096) == "x" * 512
 
 
-def test_read_first_line_feeds_shebang_guess(tmp_path):
-    f = tmp_path / "deploy"
-    f.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
-    assert guess_language_id(f, read_first_line(f)) == "sh"
-
-
-# -- load_guard -----------------------------------------------------------------
-
-
-def test_load_guard_ok_for_plain_text(tmp_path):
-    f = tmp_path / "a.txt"
-    f.write_text("hello")
-    assert load_guard(f) == LoadGuard.OK
-
-
-def test_load_guard_missing_path_is_not_a_file(tmp_path):
-    assert load_guard(tmp_path / "missing.txt") == LoadGuard.NOT_A_FILE
-
-
-def test_load_guard_directory_is_not_a_file(tmp_path):
-    assert load_guard(tmp_path) == LoadGuard.NOT_A_FILE
-
-
-def test_load_guard_binary_detected_by_nul_byte(tmp_path):
-    f = tmp_path / "a.bin"
-    f.write_bytes(b"hello\x00world")
-    assert load_guard(f) == LoadGuard.BINARY
-
-
-def test_load_guard_too_large(tmp_path):
-    f = tmp_path / "big.txt"
-    with f.open("wb") as fh:
-        fh.seek(_MAX_OPEN_BYTES)
-        fh.write(b"x")
-    assert load_guard(f) == LoadGuard.TOO_LARGE
-
-
-def test_load_guard_at_size_cap_is_ok(tmp_path):
-    f = tmp_path / "cap.txt"
-    f.write_bytes(b"x" * _MAX_OPEN_BYTES)
-    assert load_guard(f) == LoadGuard.OK
-
-
-def test_load_guard_unreadable(tmp_path):
-    f = tmp_path / "noperm.txt"
-    f.write_text("hi")
-    os.chmod(f, 0o000)
-    try:
-        if os.access(f, os.R_OK):  # root in the test environment: skip
-            return
-        assert load_guard(f) == LoadGuard.UNREADABLE
-    finally:
-        os.chmod(f, 0o644)
+def test_first_line_feeds_shebang_guess(tmp_path):
+    line = first_line("#!/usr/bin/env bash\nset -euo pipefail\n")
+    assert guess_language_id(tmp_path / "deploy", line) == "sh"
 
 
 # -- is_image_path ----------------------------------------------------------------
@@ -422,20 +364,17 @@ def test_lightbox_layout_zero_size_image_does_not_divide_by_zero():
 # -- should_highlight -----------------------------------------------------------
 
 
-def test_should_highlight_small_file(tmp_path):
-    f = tmp_path / "a.py"
-    f.write_text("x")
-    assert should_highlight(f) is True
+def test_should_highlight_small_file():
+    assert should_highlight(1) is True
+    assert should_highlight(_MAX_HIGHLIGHT_BYTES) is True
 
 
-def test_should_highlight_false_above_cap(tmp_path):
-    f = tmp_path / "big.py"
-    f.write_bytes(b"x" * (_MAX_HIGHLIGHT_BYTES + 1))
-    assert should_highlight(f) is False
+def test_should_highlight_false_above_cap():
+    assert should_highlight(_MAX_HIGHLIGHT_BYTES + 1) is False
 
 
-def test_should_highlight_true_for_missing_file():
-    assert should_highlight("/nonexistent/path") is True
+def test_should_highlight_true_for_an_unknown_size():
+    assert should_highlight(None) is True
 
 
 # -- is_inside --------------------------------------------------------------------

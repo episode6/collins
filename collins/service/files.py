@@ -9,8 +9,34 @@ through `Gio.File.trash` — never an unlink — the same mover
 a root the service knows (`allowed`): a live session's working
 directory, a session's cwd or project root the store knows, or anything
 for a client that proved it is `local` (§3.2: same machine, same uid, a
-client already trusted with a shell). The editor's `fs.read` / `fs.write`
-/ `fs.watch` and the rest of the table land in PR-2.3 onwards.
+client already trusted with a shell). `is_inside` resolves symlinks, so a
+link out of a root is outside it.
+
+PR-2.3 adds the editor's requests, served by `Files`:
+
+- `fs.read {path, max}`: the file's bytes, decoded as UTF-8 or, when they
+  are not UTF-8, as latin-1 with the encoding flagged (so the save writes
+  them back the same way); `binary` (a NUL in the first 8 KiB) with an
+  empty text; the `mtime` (microseconds) the save that follows expects
+  and the `size`. Refused `refused` over `max` (FILE_TEXT_MAX at most),
+  for a path that is not a regular file, and outside every root.
+- `fs.write {path, text, expect_mtime, encoding}`: the text written by a
+  temporary file in the same directory and one `os.replace` (the mode of
+  the file it replaces kept), **after** the file's mtime is compared with
+  `expect_mtime`: a file that moved underneath the client is refused
+  `stale` and left exactly as it is (the client raises its "changed on
+  disk" dialog and asks again with `expect_mtime: null` to overwrite). A
+  text latin-1 cannot carry is written as UTF-8 and the reply says so.
+- `fs.watch {path, kind: file, handle}` / `fs.unwatch {handle}`: one
+  `Gio.FileMonitor` per client and handle (`_FileWatch`, the editor's
+  monitor moved here), debounced 300 ms, then a stat on a thread and one
+  `file-changed {handle, path, mtime, size, gone}` per burst whose stat
+  moved. A directory's watch (`kind: dir`) is PR-2.4's and is refused.
+
+**Nothing blocks the main loop**: every read, write and stat runs on a
+daemon thread and answers through a `protocol.Deferred` settled on the
+main loop at `PRIORITY_DEFAULT` (`_later`; a worker that raises settles a
+`failed` refusal, so the client is never left waiting).
 
 GLib and Gio only; nothing here imports GTK.
 """
@@ -19,7 +45,10 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterable, Sequence
+import stat as stat_mod
+import tempfile
+import threading
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 from gi.repository import Gio, GLib
@@ -30,6 +59,13 @@ from ..editorfiles import is_inside
 from ..sessions import worktree_project_root
 
 log = logging.getLogger(__name__)
+
+# A NUL in this many leading bytes makes a file binary (editorfiles'
+# sniff, now the service's).
+BINARY_SNIFF_BYTES = 8192
+# The editor's monitor debounce, now the service's: long enough that a
+# run of quick writes (an agent's edit tool) coalesces into one check.
+WATCH_DEBOUNCE_MS = 300
 
 
 def roots(core) -> list[str]:
@@ -134,3 +170,385 @@ def handle_trash(core, client, message: protocol.Message, later=None) -> dict | 
         return protocol.reply(re_id, trashed=trashed, removed=[])
 
     return later("fs-trash", work, re_id) if later is not None else work()
+
+
+# -- the editor's files (PR-2.3) -----------------------------------------------------------
+
+
+def mtime_us(st: os.stat_result) -> int:
+    """A stat's mtime as the wire carries it: microseconds since the epoch
+    (`protocol._MTIME`; nanoseconds would pass the integer bound)."""
+    return st.st_mtime_ns // 1000
+
+
+def file_stat(path: str) -> tuple[int | None, int | None, bool]:
+    """(mtime, size, gone) of *path*: what `file-changed` carries and what
+    `fs.write` compares. A path that is not a regular file is gone."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None, None, True
+    if not stat_mod.S_ISREG(st.st_mode):
+        return None, None, True
+    return mtime_us(st), st.st_size, False
+
+
+class ReadRefused(Exception):
+    """`read_file` could not answer: the refusal's code, words and args."""
+
+    def __init__(self, error: str, msgid: str, details: dict | None = None) -> None:
+        super().__init__(msgid)
+        self.error = error
+        self.msgid = msgid
+        self.details = details or {}  # not `args`: that is BaseException's
+
+
+def read_file(path: str, max_bytes: int) -> dict:
+    """`fs.read`'s work (a worker thread): the reply's fields, or a
+    `ReadRefused`."""
+    name = os.path.basename(path)[: protocol.ARG_TEXT_MAX]
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        raise ReadRefused(protocol.ERROR_GONE, "{name} is not there", {"name": name}) from None
+    except OSError as exc:
+        raise ReadRefused(
+            protocol.ERROR_FAILED, "Couldn't read {name}: {error}",
+            {"name": name, "error": (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]},
+        ) from None
+    if not stat_mod.S_ISREG(st.st_mode):
+        raise ReadRefused(protocol.ERROR_REFUSED, "{name} is not a file", {"name": name})
+    if st.st_size > max_bytes:
+        raise ReadRefused(
+            protocol.ERROR_REFUSED, "{name} is too large to open in the editor",
+            {"name": name, "size": st.st_size, "max": max_bytes},
+        )
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read(max_bytes + 1)
+    except OSError as exc:
+        raise ReadRefused(
+            protocol.ERROR_FAILED, "Couldn't read {name}: {error}",
+            {"name": name, "error": (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]},
+        ) from None
+    if len(data) > max_bytes:  # grew between the stat and the read
+        raise ReadRefused(
+            protocol.ERROR_REFUSED, "{name} is too large to open in the editor",
+            {"name": name, "size": len(data), "max": max_bytes},
+        )
+    fields = {"mtime": mtime_us(st), "size": len(data), "binary": False}
+    if b"\x00" in data[:BINARY_SNIFF_BYTES]:
+        return {**fields, "text": "", "encoding": protocol.FILE_ENCODING_UTF8, "binary": True}
+    try:
+        text = data.decode("utf-8")
+        encoding = protocol.FILE_ENCODING_UTF8
+    except UnicodeDecodeError:
+        text = data.decode("latin-1")
+        encoding = protocol.FILE_ENCODING_LATIN1
+    return {**fields, "text": text, "encoding": encoding}
+
+
+class WriteStale(Exception):
+    """`write_file` found the file's mtime moved from `expect_mtime`."""
+
+    def __init__(self, mtime: int | None) -> None:
+        super().__init__("stale")
+        self.mtime = mtime
+
+
+def write_file(path: str, text: str, expect_mtime: int | None, encoding: str) -> dict:
+    """`fs.write`'s work (a worker thread): the text to *path* by a
+    temporary file in its directory and one replace, after the mtime
+    check (`WriteStale` when it moved; an OSError is the caller's
+    `failed`). The reply's fields: the new mtime and size, and the
+    encoding written (UTF-8 when latin-1 could not carry the text)."""
+    # The file itself, through any symlink: the editor opens a link inside
+    # the project to a file inside it, and a save must land in the file,
+    # not turn the link into a copy (what `g_file_replace` did).
+    path = os.path.realpath(path)
+    mtime, _size, gone = file_stat(path)
+    if expect_mtime is not None and (gone or mtime != expect_mtime):
+        raise WriteStale(mtime)
+    try:
+        data = text.encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        data = text.encode("utf-8")
+        encoding = protocol.FILE_ENCODING_UTF8
+    directory = os.path.dirname(path) or "."
+    mode = None
+    try:
+        mode = stat_mod.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        pass
+    fd, temp = tempfile.mkstemp(prefix=".collins-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mode is not None:
+            os.chmod(temp, mode)
+        os.replace(temp, path)
+    except OSError:
+        try:
+            os.unlink(temp)
+        except OSError:
+            pass
+        raise
+    st = os.stat(path)
+    return {"mtime": mtime_us(st), "size": st.st_size, "encoding": encoding}
+
+
+def _dispatch_default(fn: Callable[[], object]) -> None:
+    GLib.idle_add(lambda: fn() and False, priority=GLib.PRIORITY_DEFAULT)
+
+
+def _spawn_default(fn: Callable[[], None], name: str) -> None:
+    threading.Thread(target=fn, name=name, daemon=True).start()
+
+
+class Files:
+    """The editor's `fs.*` requests and the file watches (see the module
+    docstring). *core* is the `ServiceCore` (for the roots a path is
+    confined to); *dispatch* lands a thread's answer on the main loop and
+    *spawn* runs one (a test's inline)."""
+
+    def __init__(
+        self,
+        core,
+        dispatch: Callable[[Callable[[], object]], None] | None = None,
+        spawn: Callable[[Callable[[], None], str], None] | None = None,
+    ) -> None:
+        self.core = core
+        self._dispatch = dispatch or _dispatch_default
+        self._spawn = spawn or _spawn_default
+        self._watches: dict[tuple[int, str], _FileWatch] = {}
+
+    # -- routing -------------------------------------------------------------------------
+
+    def handle(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        kind = message.type
+        if kind == "fs.read":
+            return self.read(message, client)
+        if kind == "fs.write":
+            return self.write(message, client)
+        if kind == "fs.watch":
+            return self.watch(message, client)
+        if kind == "fs.unwatch":
+            return self.unwatch(message, client)
+        return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
+
+    def client_gone(self, client) -> None:
+        for key, watch in list(self._watches.items()):
+            if key[0] == id(client):
+                watch.stop()
+                del self._watches[key]
+
+    def shutdown(self) -> None:
+        for watch in self._watches.values():
+            watch.stop()
+        self._watches.clear()
+
+    def _path(self, message: protocol.Message, client) -> str | dict:
+        """The request's path, confined; else the refusal."""
+        path = message.get("path")
+        if not isinstance(path, str) or not os.path.isabs(path) or not allowed(self.core, client, path):
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "{path} is outside every root the service knows",
+                {"path": str(path)[: protocol.ARG_TEXT_MAX]},
+            )
+        return path
+
+    def _later(self, message: protocol.Message, name: str, work: Callable[[], dict]) -> protocol.Deferred:
+        """*work* on a thread, its reply dict settled on the main loop; a
+        worker that raises settles a `failed` refusal."""
+        deferred = protocol.Deferred()
+
+        def run() -> None:
+            try:
+                reply = work()
+            except Exception as exc:
+                log.exception("files: %s failed on its thread", name)
+                reply = protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "{what} failed: {error}",
+                    {"what": name, "error": str(exc)[: protocol.ARG_TEXT_MAX]},
+                )
+            self._dispatch(lambda: deferred.settle(reply))
+
+        self._spawn(run, name)
+        return deferred
+
+    # -- fs.read ---------------------------------------------------------------------------
+
+    def read(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        path = self._path(message, client)
+        if isinstance(path, dict):
+            return path
+        max_bytes = message.get("max")
+        if not isinstance(max_bytes, int) or max_bytes < 1:
+            max_bytes = protocol.FILE_TEXT_MAX
+        max_bytes = min(max_bytes, protocol.FILE_TEXT_MAX)
+
+        def work() -> dict:
+            try:
+                fields = read_file(path, max_bytes)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
+            return protocol.reply(message.id, **fields)
+
+        return self._later(message, "fs-read", work)
+
+    # -- fs.write --------------------------------------------------------------------------
+
+    def write(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        path = self._path(message, client)
+        if isinstance(path, dict):
+            return path
+        text = message.get("text")
+        if not isinstance(text, str):
+            return protocol.refuse(
+                message.id, protocol.ERROR_INVALID, "{field} must be a string", {"field": "text"}
+            )
+        expect = message.get("expect_mtime")
+        expect_mtime = expect if isinstance(expect, int) and not isinstance(expect, bool) else None
+        encoding = message.get("encoding")
+        if encoding not in protocol.FILE_ENCODINGS:
+            encoding = protocol.FILE_ENCODING_UTF8
+        name = os.path.basename(path)[: protocol.ARG_TEXT_MAX]
+
+        def work() -> dict:
+            try:
+                fields = write_file(path, text, expect_mtime, encoding)
+            except WriteStale:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_STALE, "{name} changed on disk", {"name": name}
+                )
+            except OSError as exc:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "Couldn't save {name}: {error}",
+                    {"name": name, "error": (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]},
+                )
+            return protocol.reply(message.id, **fields)
+
+        return self._later(message, "fs-write", work)
+
+    # -- the watch -------------------------------------------------------------------------
+
+    def watch(self, message: protocol.Message, client) -> dict:
+        path = self._path(message, client)
+        if isinstance(path, dict):
+            return path
+        if message.get("kind") != protocol.WATCH_FILE:
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "A {kind} watch is not served yet",
+                {"kind": str(message.get("kind"))[: protocol.SHORT_MAX]},
+            )
+        handle = str(message.get("handle"))
+        key = (id(client), handle)
+        old = self._watches.pop(key, None)
+        if old is not None:
+            old.stop()
+        watch = _FileWatch(self, path, handle, client)
+        self._watches[key] = watch
+        watch.start()
+        return protocol.reply(message.id)
+
+    def unwatch(self, message: protocol.Message, client) -> dict:
+        watch = self._watches.pop((id(client), str(message.get("handle"))), None)
+        if watch is not None:
+            watch.stop()
+        return protocol.reply(message.id)
+
+    def watching(self, client, handle: str) -> bool:
+        return (id(client), handle) in self._watches
+
+
+class _FileWatch:
+    """One client's watch of one file, by its handle: the editor's
+    `Gio.FileMonitor`, debounce and stat, here. The stat at the start
+    seeds `last`; every later burst whose stat differs is one
+    `file-changed`."""
+
+    def __init__(self, files: Files, path: str, handle: str, client) -> None:
+        self.files = files
+        self.path = path
+        self.handle = handle
+        self.client = client
+        self._monitor: Gio.FileMonitor | None = None
+        self._debounce = 0
+        self._checking = False
+        self._stale = False
+        self._stopped = False
+        self.last: tuple[int | None, int | None, bool] = file_stat(path)
+
+    def start(self) -> None:
+        try:
+            monitor = Gio.File.new_for_path(self.path).monitor_file(Gio.FileMonitorFlags.NONE, None)
+        except GLib.Error as exc:
+            log.debug("files: no monitor on %s: %s", self.path, exc.message)
+            return
+        monitor.connect("changed", self._on_event)
+        self._monitor = monitor
+
+    def stop(self) -> None:
+        self._stopped = True
+        if self._monitor is not None:
+            self._monitor.cancel()
+            self._monitor = None
+        if self._debounce:
+            GLib.source_remove(self._debounce)
+            self._debounce = 0
+
+    def _on_event(self, *_args) -> None:
+        if self._stopped:
+            return
+        if self._debounce:
+            return  # the burst already has its check queued
+        self._debounce = GLib.timeout_add(WATCH_DEBOUNCE_MS, self._fire)
+
+    def _fire(self) -> bool:
+        self._debounce = 0
+        self.check()
+        return GLib.SOURCE_REMOVE
+
+    def check(self) -> None:
+        if self._stopped:
+            return
+        if self._checking:
+            self._stale = True
+            return
+        self._checking = True
+        path = self.path
+
+        def work() -> None:
+            found = file_stat(path)
+            self.files._dispatch(lambda: self._checked(found))
+
+        self.files._spawn(work, "fs-watch")
+
+    def _checked(self, found: tuple[int | None, int | None, bool]) -> None:
+        self._checking = False
+        if self._stopped:
+            return
+        stale, self._stale = self._stale, False
+        if found != self.last:
+            self.last = found
+            self._deliver(found)
+        if stale:
+            self.check()
+
+    def _deliver(self, found: tuple[int | None, int | None, bool]) -> None:
+        mtime, size, gone = found
+        try:
+            self.client.deliver(
+                {
+                    "t": "file-changed",
+                    "handle": self.handle,
+                    "path": self.path,
+                    "mtime": mtime,
+                    "size": size,
+                    "gone": gone,
+                }
+            )
+        except Exception:
+            log.exception("files: a file-changed delivery failed")

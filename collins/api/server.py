@@ -83,6 +83,7 @@ CLIENT_HEADER = "Collins-Client"
 SOCKET_NAME = "api.sock"
 PROOF_NAME = "local-proof"
 HELLO_TIMEOUT_S = 5  # a connection with no hello by then is closed
+MAX_CHUNKED_REQUESTS = 8  # transfers held per connection ahead of their request (PR-2.3)
 
 
 # ---- paths -----------------------------------------------------------------------
@@ -341,6 +342,10 @@ class Connection:
         self.client: SocketClient | None = None
         self.channel = protocol.CHANNEL_PRIMARY
         self.closed = False
+        # TAG_BLOB frames ahead of a chunked request (`protocol.
+        # split_request`: a `fs.write`'s text), by stream (the request id
+        # masked to 32 bits), joined back by `_on_text` (PR-2.3).
+        self._chunks: dict[int, bytearray] = {}
         ws.set_max_incoming_payload_size(protocol.MAX_INCOMING)
         ws.set_keepalive_interval(protocol.KEEPALIVE_INTERVAL_S)
         try:
@@ -409,6 +414,21 @@ class Connection:
         except ValueError as exc:
             log.warning("api: a frame the protocol can't read: %s", exc)
             return
+        stream = protocol.chunk_stream(message.get("id"))
+        if stream is not None:
+            # A request whose text went ahead as TAG_BLOB frames
+            # (`protocol.split_request`) is put back together before it
+            # is validated; one short of its bytes is `invalid`.
+            chunks = self._chunks.pop(stream, None)
+            joined = protocol.join_request(message, bytes(chunks) if chunks is not None else None)
+            if joined is None:
+                self.send_text(
+                    protocol.refuse(
+                        message["id"], protocol.ERROR_INVALID, "The request's chunks did not all arrive"
+                    )
+                )
+                return
+            message = joined
         checked = protocol.validate(message, protocol.CLIENT)
         if isinstance(checked, protocol.Refusal):
             reply = checked.to_message()
@@ -500,6 +520,18 @@ class Connection:
             return
         if header.tag == protocol.TAG_INPUT and data:
             self.server.core.input(header.stream, data, self.client)
+        elif header.tag == protocol.TAG_BLOB:
+            buffer = self._chunks.setdefault(header.stream, bytearray())
+            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.CHUNKED_MAX:
+                # Out of order or over the bound: the request is refused
+                # when it arrives short of its bytes.
+                self._chunks.pop(header.stream, None)
+                return
+            buffer += data
+            if len(self._chunks) > MAX_CHUNKED_REQUESTS:
+                # A client that sends chunks and never the request they
+                # belong to: the oldest transfer goes.
+                self._chunks.pop(next(iter(self._chunks)))
 
     def _on_error(self, _ws, error: GLib.Error) -> None:
         log.info("api: a connection errored: %s", error.message)
@@ -722,7 +754,7 @@ class ApiServer:
         # `git`: this service serves git.*, fs.trash, git-changed and the
         # blob GET (PR-2.1); a client installs its git transport only on
         # seeing it, and runs git locally against an older service.
-        caps = [protocol.CAP_LOCAL, protocol.CAP_GIT]
+        caps = [protocol.CAP_LOCAL, protocol.CAP_GIT, protocol.CAP_FILES]
         if self.debug:
             caps.append(protocol.CAP_DEBUG)
         state = getattr(self.core, "state", None)

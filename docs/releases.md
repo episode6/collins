@@ -38,6 +38,18 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The editor's files go over the service's socket.** Opening a file in
+  the editor panel asks the service for its text, saving hands the text
+  back, and the file monitor that reloads a buffer the agent rewrote runs
+  on the service and pushes the change to the window. A save expects the
+  file as the editor last read or wrote it: one that changed underneath is
+  refused before a byte is written and the editor asks before overwriting
+  (the same "changed on disk" question as before, now answered by the
+  service's check rather than a stat in the window). Files that are not
+  UTF-8 are read as latin-1 and written back the same way; a file over
+  5 MiB is refused as before; a 5 MiB file crosses the socket in chunks.
+  Nothing looks different; the window no longer opens a project file for
+  the editor (the third chunk of the split's Phase 2).
 - **Git goes over the service's socket.** The git page, the footer's
   branch, the sidebar's *Git pull* / *Checkout* and *Open on GitHub* and
   the diff's images now run every `git` on the service: the window sends

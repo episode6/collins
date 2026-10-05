@@ -300,6 +300,21 @@ each taken from the code the message replaces:
   ``GET /api/blob?kind=git`` on the same socket is a blob's bytes
   (`api.server`), never a path on the wire; ``kind=pr`` is a PR file's
   (PR-2.2), at the URL `pr.blob` answers.
+- Files over the API (§3.23, PR-2.3; behind the ``files`` cap). `fs.read`
+  answers a file's text with the encoding it was decoded as (UTF-8, or
+  latin-1 for bytes that are not UTF-8, so the save writes them back the
+  same way), its mtime in microseconds and its size, or ``binary``;
+  `fs.write` takes the text and ``expect_mtime``, the mtime the client's
+  last read or write answered, and is refused ``stale`` with nothing
+  written when the file's mtime moved (null writes regardless: the
+  Overwrite the user confirmed); `fs.watch` / `fs.unwatch` name a watch by
+  the client's ``handle`` (one client may watch a path twice) and
+  `file-changed` is its event, the file's stat after the service's 300 ms
+  debounce, ``gone`` when it is no more. A file is at most FILE_TEXT_MAX
+  (5 MiB), so its text may exceed a frame: `split_request` / `join_request`
+  chunk a request the way `split_reply` chunks a reply, on the first of
+  CHUNKED_FIELDS the message holds (``stdout``, ``text``), the server
+  joining a request's chunks before it validates the request.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -327,7 +342,8 @@ MIN_PROTOCOL = 1
 CAP_LOCAL = "local"  # the service offers the local-extras proof (§3.2)
 CAP_DEBUG = "debug"  # the service runs with COLLINS_DEBUG_API=1 and serves debug.* (D27)
 CAP_GIT = "git"  # git over the API: git.*, fs.trash, git-changed, GET /api/blob?kind=git (PR-2.1)
-CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG, CAP_GIT})
+CAP_FILES = "files"  # files over the API: fs.read, fs.write, fs.watch / fs.unwatch, file-changed (PR-2.3)
+CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG, CAP_GIT, CAP_FILES})
 
 # The client's second connection (D26): a hello carrying ``channel: "sync"``
 # opens the channel `Link.call` blocks on; the primary (the default) carries
@@ -410,12 +426,19 @@ ERRORS = frozenset(
     }
 )
 
-# A reply's one field the transport may carry outside the text frame
-# (`split_reply` / `join_reply`): `git.run`'s stdout, which a whole diff
-# can take past MAX_FRAME. The field travels as TAG_BLOB frames whose
-# `stream` is the request's id (masked to 32 bits, STREAM_MASK) ahead of
-# the reply, which then says `stdout_chunked` and `stdout_bytes`.
+# The fields the transport may carry outside the text frame
+# (`split_reply` / `join_reply`, `split_request` / `join_request`):
+# `git.run`'s stdout, which a whole diff can take past MAX_FRAME (PR-2.1),
+# and `fs.read`'s / `fs.write`'s text, a file of up to FILE_TEXT_MAX
+# (PR-2.3). The field travels as TAG_BLOB frames whose `stream` is the
+# request's id (masked to 32 bits, STREAM_MASK) ahead of the message,
+# which then says `<field>_chunked` and `<field>_bytes`; a request's
+# chunks go ahead of the request on the connection that carries it and
+# the service joins them before it validates. One field per message is
+# ever chunked: the first of CHUNKED_FIELDS the message holds as text.
 CHUNKED_FIELD = "stdout"
+CHUNKED_FIELDS = ("stdout", "text")
+CHUNKED_MAX = 64 * 1024 * 1024  # the most bytes a chunked field runs to, either way
 STREAM_MASK = 0xFFFF_FFFF
 
 # A `spawn` refused because the service runs that session already (its
@@ -622,6 +645,25 @@ _REPO_PATHS = Field(K_LIST, high=REPO_PATHS_MAX, item=_s(MAX_PATH, low=1))
 PLAN_OPS = frozenset(
     {"add", "reset", "apply-cached", "apply-cached-reverse", "apply-worktree-reverse", "checkout", "trash"}
 )
+# Files over the API (§3.23, PR-2.3). A file the editor opens is at most
+# FILE_TEXT_MAX bytes (editorfiles' open cap); its text crosses chunked
+# (CHUNKED_FIELDS) when it does not fit a frame. An mtime is microseconds
+# since the epoch, as git.info's index_mtime is. A watch is named by the
+# client's handle, so one client may watch the same path twice (two
+# editors on it). The encodings are the two a read answers: UTF-8, or
+# latin-1 for bytes that are not UTF-8 (flagged, so the save writes them
+# back the same way).
+FILE_TEXT_MAX = 5 * 1024 * 1024
+FILE_ENCODING_UTF8 = "utf-8"
+FILE_ENCODING_LATIN1 = "latin-1"
+FILE_ENCODINGS = frozenset({FILE_ENCODING_UTF8, FILE_ENCODING_LATIN1})
+WATCH_FILE = "file"
+WATCH_DIR = "dir"
+WATCH_KINDS = frozenset({WATCH_FILE, WATCH_DIR})
+_HANDLE = Field(K_STR, low=1, high=64, pattern=_ID_RE)
+_FILE_TEXT = _s(FILE_TEXT_MAX)
+_MTIME = _i(0, SIZE_MAX)
+_ENCODING = Field(K_STR, choices=FILE_ENCODINGS, high=SHORT_MAX)
 
 _TERM = Field(
     K_OBJ,
@@ -2092,6 +2134,87 @@ _TABLE: tuple[MessageType, ...] = (
             },
         ),
     ),
+    # -- files over the API (§3.23, PR-2.3): the editor's files
+    MessageType(
+        "fs.read",
+        "A file's text off the service's machine, with the mtime the save that follows expects.",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                # Refused `refused` over this many bytes (FILE_TEXT_MAX when
+                # left out).
+                "max": _i(1, FILE_TEXT_MAX),
+            },
+            reply={
+                # Empty for a binary file (`binary`: a NUL in its first 8 KiB).
+                "text": _req(_FILE_TEXT),
+                "encoding": _req(_ENCODING),
+                "mtime": _req(_MTIME),
+                "size": _req(_i(0, SIZE_MAX)),
+                "binary": _req(_BOOL),
+                # Set by the transport when the text went ahead as TAG_BLOB
+                # frames (CHUNKED_FIELDS): the client joins them back.
+                "text_chunked": _BOOL,
+                "text_bytes": _i(0, SIZE_MAX),
+            },
+        ),
+    ),
+    MessageType(
+        "fs.write",
+        "Write a file's text on the service's machine, refused stale when its mtime moved.",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                "text": _req(_FILE_TEXT),
+                # The mtime the client's last read or write of the file
+                # answered: a file whose mtime differs now is refused
+                # `stale` and left as it is. Null writes regardless (the
+                # Overwrite the user confirmed, or a file that is new).
+                "expect_mtime": _req(_null(_MTIME)),
+                # How the text is written back: the read's encoding; UTF-8
+                # when left out, and when latin-1 cannot carry the text.
+                "encoding": _ENCODING,
+                # Set by the transport when the text went ahead as TAG_BLOB
+                # frames (CHUNKED_FIELDS): the service joins them back.
+                "text_chunked": _BOOL,
+                "text_bytes": _i(0, SIZE_MAX),
+            },
+            reply={"mtime": _req(_MTIME), "size": _req(_i(0, SIZE_MAX)), "encoding": _req(_ENCODING)},
+        ),
+    ),
+    MessageType(
+        "fs.watch",
+        "Watch a file for this client: a Gio.FileMonitor on the service (a directory's is PR-2.4's).",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                "kind": _req(Field(K_STR, choices=WATCH_KINDS, high=SHORT_MAX)),
+                # The client's name for the watch: what `file-changed`
+                # carries back and what `fs.unwatch` names. A handle
+                # watched again replaces its earlier watch.
+                "handle": _req(_HANDLE),
+            }
+        ),
+    ),
+    MessageType(
+        "fs.unwatch",
+        "Stop a watch of this client's, by its handle.",
+        request=_request({"handle": _req(_HANDLE)}),
+    ),
+    MessageType(
+        "file-changed",
+        "A watched file moved: its stat now (null when gone), debounced 300 ms on the service.",
+        event=_event(
+            SERVICE,
+            {
+                "handle": _req(_HANDLE),
+                "path": _req(_PATH),
+                "mtime": _req(_null(_MTIME)),
+                "size": _req(_null(_i(0, SIZE_MAX))),
+                "gone": _req(_BOOL),
+            },
+        ),
+    ),
     # -- the service itself (§3.10)
     MessageType(
         "service.restart",
@@ -2609,47 +2732,88 @@ class Deferred:
             callback(reply)
 
 
-def split_reply(reply: dict) -> tuple[list[bytes], dict]:
-    """*reply* as the transport sends it: unchanged when it fits a frame;
-    else, when it holds CHUNKED_FIELD as text, the TAG_BLOB frames that
-    carry that field's UTF-8 (stream: the request id masked to 32 bits,
-    offset: the byte offset) and the reply with the field replaced by
-    ``stdout_chunked`` and ``stdout_bytes``. Raises ValueError when the
-    reply fits no frame even so."""
-    text = json.dumps(reply, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+def chunked_field(message: dict) -> str | None:
+    """The one field of *message* that may travel in TAG_BLOB frames: the
+    first of CHUNKED_FIELDS it holds as text."""
+    for name in CHUNKED_FIELDS:
+        if isinstance(message.get(name), str):
+            return name
+    return None
+
+
+def chunk_stream(message_id) -> int | None:
+    """The TAG_BLOB stream a chunked message's frames travel under: its
+    id (a request's ``id``, a reply's ``re``) masked to 32 bits."""
+    return (message_id & STREAM_MASK) if _is_int(message_id) else None
+
+
+def split_message(message: dict, id_key: str) -> tuple[list[bytes], dict]:
+    """*message* as the transport sends it: unchanged when it fits a
+    frame; else, when it holds one of CHUNKED_FIELDS as text and an
+    integer under *id_key* (``re`` for a reply, ``id`` for a request),
+    the TAG_BLOB frames that carry that field's UTF-8 (stream: the id
+    masked to 32 bits, offset: the byte offset) and the message with the
+    field replaced by ``<field>_chunked`` and ``<field>_bytes``. Raises
+    ValueError when the message fits no frame even so, or the field runs
+    past CHUNKED_MAX."""
+    text = json.dumps(message, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     if len(text.encode("utf-8", "surrogatepass")) <= MAX_FRAME:
-        return [], reply
-    field_text = reply.get(CHUNKED_FIELD)
-    re_id = reply.get("re")
-    if not isinstance(field_text, str) or not _is_int(re_id):
+        return [], message
+    field = chunked_field(message)
+    stream = chunk_stream(message.get(id_key))
+    if field is None or stream is None:
         raise ValueError("message exceeds the frame limit")
-    data = field_text.encode("utf-8", "replace")
+    data = message[field].encode("utf-8", "replace")
+    if len(data) > CHUNKED_MAX:
+        raise ValueError("message exceeds the chunked limit")
     frames = [
-        pack_frame(TAG_BLOB, 0, re_id & STREAM_MASK, offset, data[offset : offset + MAX_PAYLOAD])
+        pack_frame(TAG_BLOB, 0, stream, offset, data[offset : offset + MAX_PAYLOAD])
         for offset in range(0, len(data), MAX_PAYLOAD)
     ]
-    slim = {key: value for key, value in reply.items() if key != CHUNKED_FIELD}
-    slim["stdout_chunked"] = True
-    slim["stdout_bytes"] = len(data)
-    encode(slim)  # raises when the rest of the reply is itself too large
+    slim = {key: value for key, value in message.items() if key != field}
+    slim[field + "_chunked"] = True
+    slim[field + "_bytes"] = len(data)
+    encode(slim)  # raises when the rest of the message is itself too large
     return frames, slim
 
 
-def join_reply(reply: dict, chunks: bytes | None) -> dict:
-    """The receiver's half of `split_reply`: a reply saying
-    ``stdout_chunked`` gets its field back from the *chunks* collected
+def join_message(message: dict, chunks: bytes | None) -> dict | None:
+    """The receiver's half of `split_message`: a message saying
+    ``<field>_chunked`` gets its field back from the *chunks* collected
     for its stream (decoded with replacement); one short of
-    ``stdout_bytes`` is refused as ``invalid`` by the caller (None)."""
-    if not reply.get("stdout_chunked"):
-        return reply
-    joined = dict(reply)
-    joined.pop("stdout_chunked", None)
-    wanted = joined.pop("stdout_bytes", None)
+    ``<field>_bytes`` is refused as ``invalid`` by the caller (None)."""
+    field = next((f for f in CHUNKED_FIELDS if message.get(f + "_chunked")), None)
+    if field is None:
+        return message
+    joined = dict(message)
+    joined.pop(field + "_chunked", None)
+    wanted = joined.pop(field + "_bytes", None)
     data = chunks or b""
     if wanted is not None and len(data) != wanted:
         return None
-    joined[CHUNKED_FIELD] = data.decode("utf-8", "replace")
+    joined[field] = data.decode("utf-8", "replace")
     return joined
+
+
+def split_reply(reply: dict) -> tuple[list[bytes], dict]:
+    """`split_message` for a reply (its id is ``re``): the service's half."""
+    return split_message(reply, "re")
+
+
+def join_reply(reply: dict, chunks: bytes | None) -> dict | None:
+    """`join_message` for a reply: the client's half."""
+    return join_message(reply, chunks)
+
+
+def split_request(request: dict) -> tuple[list[bytes], dict]:
+    """`split_message` for a request (its id is ``id``): the client's
+    half, for a `fs.write` whose text does not fit a frame (PR-2.3)."""
+    return split_message(request, "id")
+
+
+def join_request(request: dict, chunks: bytes | None) -> dict | None:
+    """`join_message` for a request: the service's half, before `validate`."""
+    return join_message(request, chunks)
 
 
 # ---- versions ----------------------------------------------------------------

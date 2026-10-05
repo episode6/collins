@@ -279,6 +279,9 @@ class ServiceCore:
         self.git = gitfeed.GitFeed(self)
         # A PR file's blob GET (PR-2.2, `kind=pr`): gh on a thread, no store.
         self.pr_blobs = prfeed.PrBlobs()
+        # Files over the API (PR-2.3): the editor's reads, writes and
+        # file watches, answered off the main loop.
+        self.files = files_mod.Files(self)
         self.tools: tools_mod.SessionTools | None = None
         self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
         # The sandbox host and the live grants (start_sandbox_host), the
@@ -361,6 +364,7 @@ class ServiceCore:
         self._clients.discard(id(client))
         self.jobs.forget(client.deliver)
         self.git.client_gone(client)
+        self.files.client_gone(client)
         self._subscribers = [c for c in self._subscribers if c is not client]
         if self.tools is not None:
             self.tools.client_gone(client)
@@ -1227,6 +1231,16 @@ class ServiceCore:
 
     def _req_fs_trash(self, message: protocol.Message, client: Client) -> dict | protocol.Deferred:
         return files_mod.handle_trash(self, client, message, later=self.git._later)
+
+    # -- files over the API (PR-2.3; service.files): the editor's files
+
+    def _files(self, message: protocol.Message, client: Client) -> dict | protocol.Deferred:
+        return self.files.handle(message, client)
+
+    _req_fs_read = _files
+    _req_fs_write = _files
+    _req_fs_watch = _files
+    _req_fs_unwatch = _files
 
     # -- the diffs' marks (PR-1.11; service.diffs)
 
@@ -2372,6 +2386,7 @@ class ServiceCore:
     def shutdown(self) -> None:
         self.cancel_restart()
         self.git.shutdown()
+        self.files.shutdown()
         if self.background is not None:
             self.background.stop()
         if self._sweep_source:

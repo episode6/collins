@@ -108,6 +108,21 @@ import it. It holds:
   `gone`, `refused`, `failed`); a receiver accepts any code-shaped string.
   `msgid` is an English source string with `{name}` placeholders, for the
   client's `i18n._()` and `format_map`.
+- Files over the API (§3.23, PR-2.3; the `files` cap): `fs.read {path,
+  max}` answers a file's `text`, `encoding` (`utf-8` or `latin-1`),
+  `mtime` (microseconds), `size` and `binary`; `fs.write {path, text,
+  expect_mtime, encoding}` is refused `stale` with nothing written when
+  the file's mtime moved from `expect_mtime` (null writes regardless);
+  `fs.watch {path, kind, handle}` / `fs.unwatch {handle}` are per-client
+  `Gio.FileMonitor`s on the service pushing `file-changed {handle, path,
+  mtime, size, gone}`, debounced 300 ms. The handlers are
+  `service/files.py`'s `Files`, the client's `remotefiles.py`. A message
+  over the frame cap is chunked **either way**: `split_message` /
+  `join_message` on the first of `CHUNKED_FIELDS` (`stdout`, `text`) a
+  message holds, as `TAG_BLOB` frames under the request id ahead of a slim
+  message saying `<field>_chunked` / `<field>_bytes`; the server joins a
+  chunked request (`join_request`) before validating it, the client's link
+  a chunked reply (`join_reply`).
 - Framing: `encode` (refuses over `MAX_FRAME`, 1 MiB, and NaN / lone
   surrogates) and `decode` (refuses over `MAX_INCOMING`, 16 MiB, NaN,
   non-objects, nesting Python can't parse). The binary header is

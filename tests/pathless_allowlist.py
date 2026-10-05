@@ -64,18 +64,14 @@ ALLOWLIST = frozenset(
         "window:MainWindow._on_open_ghostty:subprocess.Popen",
         "window:MainWindow._open_session_file:Path.is_dir",
         "window:MainWindow._visible_project_dir:Path.is_dir",
-        # -- the editor's files (PR-2.3) -------------------------------------------
-        "editor:EditorPane._watch_external_changes:Gio.File.new_for_path.monitor_file",
+        # -- the editor's files (PR-2.3): the monitor, the first-line read, the
+        # highlight stat and the load guard went to the service; the rest here
+        # are `fs.stat` reads (PR-2.4), left where the list first put them --------
         "editor:EditorPane.request_root:Path.is_dir",
-        "editorfiles:read_first_line:open",
-        "editorfiles:should_highlight:Path.stat",
         "editor:EditorPane.set_agent_files:Path.is_file",
         "editorfiles:image_guard:Path.is_file",
         "editorfiles:image_guard:Path.open",
         "editorfiles:image_guard:Path.stat",
-        "editorfiles:load_guard:Path.is_file",
-        "editorfiles:load_guard:Path.open",
-        "editorfiles:load_guard:Path.stat",
         # The file row's "is there a file to open" check (the editor and the
         # Open In… apps): `fs.stat` once PR-2.3 brings it; the one git-page
         # site still on this machine's disk.
