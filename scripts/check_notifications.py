@@ -191,6 +191,25 @@ def finish_edge(app: App, session_id: str) -> None:
         )
 
 
+def _focus_facts(win, sheet) -> str:
+    """Where the keyboard is, in enough detail to read a failure off CI."""
+    focus = win.get_focus()
+    chain = []
+    widget = focus
+    while widget is not None and len(chain) < 8:
+        chain.append(type(widget).__name__)
+        widget = widget.get_parent()
+    label = tooltip = ""
+    if focus is not None:
+        label = getattr(focus, "get_label", lambda: "")() or ""
+        tooltip = focus.get_tooltip_text() or ""
+    active = Gtk.Window.get_property(win, "is-active")
+    return (
+        f"focus={type(focus).__name__ if focus else None} label={label!r} tooltip={tooltip!r} "
+        f"chain={chain} sheet_mapped={sheet.get_mapped()} rows={len(sheet.rows())} window_active={active}"
+    )
+
+
 def steps(app: App):
     """Each step runs after the one before had an idle to settle in."""
     center = app.notification_center
@@ -293,7 +312,7 @@ def steps(app: App):
     def focus_in_sheet():
         focus = win.get_focus()
         check("the sheet took the keyboard", focus is not None and focus.is_ancestor(sheet),
-              type(focus).__name__ if focus else "None")
+              _focus_facts(win, sheet))
     yield focus_in_sheet
 
     # -- a row click ------------------------------------------------------------
@@ -323,7 +342,7 @@ def steps(app: App):
         focus = win.get_focus()
         check("the keyboard is still in the sheet, on the row that was clicked",
               focus is not None and focus.is_ancestor(sheet) and focus is rows[1],
-              type(focus).__name__ if focus else "None")
+              _focus_facts(win, sheet))
     yield after_click
 
     def close_by_split():
