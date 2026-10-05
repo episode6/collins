@@ -56,6 +56,20 @@ terminal is a childless VTE painted from the service's output stream for its
 pty, so a fresh window attaching mid-turn is redrawn from the screen model.
 Details, startup and what quitting means are on [The service](/guide/service).
 
+The window runs no git of its own. Every `git` the git page, the footer's
+branch label, the sidebar's menus or a project row's *Git pull* needs runs on
+the service: the window names the command it wants (one of a fixed set of
+builders) and its arguments, never a command line, and the service runs what
+its own builder makes of them. A repository's branch, trunk, GitHub page and
+freshness come from one `git.info` answer per directory that the window keeps
+and the service's `git-changed` events refresh; the page's file watch lives
+on the service; a stage, discard or revert is a plan the service re-checks
+against the file as it is now before applying it; and the bytes of a file at
+a commit, in the index or in the working tree (the diff's images) are a plain
+HTTP `GET` on the same socket. The window opens no project file for any of
+this, which is what a window on another machine needs; the editor's files
+and the rest follow in the later chunks of the split.
+
 ## Worktrees
 
 With **Start new sessions in a git worktree** on (or the *New git worktree*

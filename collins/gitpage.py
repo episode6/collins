@@ -54,13 +54,14 @@ Freshness rides the tab footer's 2 s tick, forwarded by the host while
 the page is mapped: gitinfo.tree_signature covers the index, HEAD and the
 parent ref (a commit or staging done from a shell or by the agent
 reloads what is shown), gitinfo.refs_signature a branch written anywhere
-or a push (the stack and the commits list are re-read). Edits to the
-working tree are caught by Gio.FileMonitors on the loaded files'
-directories (at most MAX_DIR_MONITORS, else the repository root alone),
-debounced _WATCH_DEBOUNCE_MS into a gitops.tree_state_signature compare
-on a thread and a reload by key when it moved, plus a slow tick every
-_WATCH_SLOW_TICKS ticks that compares regardless (an untracked file in a
-directory nobody watches). Commit and range loads have no monitors.
+or a push (the stack and the commits list are re-read); over the API
+those reads are the per-cwd mirror's, refreshed once per tick
+(gitinfo.refresh). Edits to the working tree are caught by the service's
+watch (remotegit.Mirror.watch → `git.watch`: its monitors on the loaded
+files' directories, its debounce, a gitops.tree_state_signature compare
+and a slow tick, service.gitfeed) whose `git-changed` event reloads by
+key when the tree state moved (_on_git_changed). Commit and range loads
+have no watch.
 
 The parent branch — the branch the current one stacks on, what the "vs"
 load diffs against and the current group's commits stop at — is git's
@@ -126,6 +127,7 @@ from . import (  # noqa: E402
     mcptools,
     openwith,
     prefslayout,
+    remotegit,
 )
 from .commitcard import CommitCard  # noqa: E402
 from .diffview import DiffView  # noqa: E402
@@ -177,9 +179,8 @@ _CARD = "card"
 # working-tree load may hold before the repository root alone is watched,
 # how long after the last event the tree state is compared, and every how
 # many 2 s ticks it is compared regardless (10 s).
-MAX_DIR_MONITORS = 64
-_WATCH_DEBOUNCE_MS = 300
-_WATCH_SLOW_TICKS = 5
+# The watch's bounds (the monitors' cap, the debounce, the slow tick) are
+# the service's: service.gitfeed.MAX_DIR_MONITORS and its kin.
 
 # The action group the view's keys and header menu act on, inserted on the
 # page under this prefix (keybindings' `git.*`).
@@ -306,11 +307,11 @@ class GitPage(Adw.Bin):
         self._loading = False
         self._pending_load: gitloads.Loaded | None = None
         self._tree_state: str | None = None
-        self._monitors: list[Gio.FileMonitor] = []
-        self._watch_source = 0
-        self._watch_checking = False
-        self._watch_stale = False
-        self._watch_ticks = 0
+        # The watch is the service's (remotegit.Mirror.watch, PR-2.1): the
+        # cwd it is installed for, and the last tree state its git-changed
+        # event carried while a read was out (compared when the read lands).
+        self._watched_cwd: str | None = None
+        self._watch_stale: str | None = None
         # The last whole settings dict apply_settings saw: what a key that
         # writes an option applies locally when no window action is there
         # to persist it (a page in a bare test window).
@@ -743,6 +744,9 @@ class GitPage(Adw.Bin):
         if not self.get_mapped() or self._closing:
             return
         cwd = self._cwd_provider()
+        # Over the API the reads below are the per-cwd mirror's: refreshed
+        # once here, so this tick sees what moved since the last.
+        gitinfo.refresh(cwd)
         root = gitinfo.repo_root(cwd)
         if root is None:
             # The tree went away under the view (a worktree removed): take
@@ -870,7 +874,7 @@ class GitPage(Adw.Bin):
             return
         self._closing = True
         self._gen += 1
-        self._drop_monitors()
+        self._drop_watch()
         dark_id = getattr(self, "_dark_id", 0)
         if dark_id:
             Adw.StyleManager.get_default().disconnect(dark_id)
@@ -989,6 +993,7 @@ class GitPage(Adw.Bin):
         self._resolve_parent()
         parent_moved = self._parent_target != target_before
         if parent_moved:
+            gitinfo.refresh(self._cwd_provider())  # the mirror's entry may predate the move
             self._signature = gitinfo.tree_signature(self._cwd_provider(), self._parent_name)
             self._sync_header()
             self.emit("title-changed")
@@ -1059,6 +1064,7 @@ class GitPage(Adw.Bin):
         if self._closing or self._opened or self._opening:
             return
         cwd = self._cwd_provider()
+        gitinfo.refresh(cwd)  # a tree that turned up since the mirror's last look (recheck_tree)
         root = gitinfo.repo_root(cwd)
         if root is None or not cwd:
             self._show_not_a_repo()
@@ -1128,7 +1134,7 @@ class GitPage(Adw.Bin):
         self._pending_navigate = None
         self._tree_state = None
         self._gen += 1
-        self._drop_monitors()
+        self._drop_watch()
         self._diffview.load((), None, None)
         self.commit_card.clear()
         self.operation_bar.clear()
@@ -1175,7 +1181,7 @@ class GitPage(Adw.Bin):
             read = gitops.read_diff(cwd, loaded, parent_target, untracked)
             # A half-finished rebase / merge / cherry-pick / revert is the
             # working tree's business: the bar over the diff names it.
-            operation = gitops.in_progress(gitinfo.git_dir(cwd)) if working else None
+            operation = gitops.in_progress_at(cwd) if working else None
             # One `git log -1` names the commit for the breadcrumb, the
             # sidebar's ▸ and the commit card alike.
             message = gitloads.commit_message(cwd, show_ref) if show_ref else None
@@ -1251,11 +1257,11 @@ class GitPage(Adw.Bin):
         self.sidebar.refresh_files(_file_summaries(read.files), loaded, self._options.untracked, read.status)
         working = loaded in ("unstaged", "staged")
         self._tree_state = state
-        # An event that arrived while this read was out (marked stale by
-        # _watch_check, which runs no compare beside a read) is compared
-        # now; the monitors are re-made first, which clears the mark.
-        stale = self._watch_stale
-        self._install_monitors(read.files if working else None)
+        # A git-changed that arrived while this read was out carried a
+        # state this read may not have seen (its worker sampled before
+        # the read): compared now, after the watch is re-made.
+        stale, self._watch_stale = self._watch_stale, None
+        self._install_watch(read.files if working else None)
         self._sync_context()
         self._sync_search_label()
         if reread:
@@ -1264,16 +1270,19 @@ class GitPage(Adw.Bin):
             self._read_diff(loaded)  # its worker samples the tree state anew: no compare needed
             return GLib.SOURCE_REMOVE
         self._run_pending_navigate()
-        if stale and working:
-            self._watch_check()
+        if working and stale is not None and stale != self._tree_state:
+            self._tree_state = stale
+            log.debug("gitpage: the working tree moved during the read; reloading")
+            self._read_diff(loaded)
         return GLib.SOURCE_REMOVE
 
     def _tick(self, moved: bool, parent_moved: bool) -> None:
         """The 2 s tick's second half (after the branch, parent and
         signatures were re-read): a moved base reloads a branch diff, a
-        moved index / HEAD re-reads the load, and every _WATCH_SLOW_TICKS
-        ticks a working-tree load's tree state is compared regardless of
-        the monitors (an untracked file in a directory none watches)."""
+        moved index / HEAD re-reads the load. The working tree's state is
+        the service's watch's business (its slow tick compares it
+        regardless of the monitors: an untracked file in a directory none
+        watches), landing here as a git-changed (_on_git_changed)."""
         if not self._opened:
             return
         if parent_moved and self._loaded == "branch":
@@ -1281,98 +1290,71 @@ class GitPage(Adw.Bin):
             return
         if moved:
             self._read_diff(self._loaded)
-            return
-        self._watch_ticks += 1
-        if self._watch_ticks >= _WATCH_SLOW_TICKS:
-            self._watch_ticks = 0
-            self._watch_check()
 
-    # -- the watch --
+    # -- the watch (the service's, PR-2.1) --
 
-    def _install_monitors(self, files: Sequence[diffmodel.File] | None) -> None:
-        """Watch the directories the loaded working-tree *files* sit in (the
-        old path of a rename too) — the repository root alone with more
-        than MAX_DIR_MONITORS of them, or with no file at all (an untracked
-        file may appear anywhere). None (a commit or range load) watches
-        nothing: the tick covers HEAD and the refs."""
-        self._drop_monitors()
-        root = self._repo_root
-        if files is None or root is None:
+    def _install_watch(self, files: Sequence[diffmodel.File] | None) -> None:
+        """Watch the working tree for the loaded *files* — on the service
+        (`git.watch`: it puts its monitors on the files' directories, the
+        old path of a rename too, the repository root alone past its
+        bound or with no file at all, and compares the tree state on
+        its debounce and slow tick, pushing `git-changed`). None (a commit
+        or range load) watches nothing: the tick covers HEAD and the
+        refs."""
+        self._drop_watch()
+        cwd = self._cwd_provider()
+        if files is None or self._repo_root is None or not cwd:
             return
-        dirs: set[str] = set()
+        paths: list[str] = []
         for file in files:
             for path in (file.path, file.previous_path):
                 if path:
-                    dirs.add(os.path.dirname(os.path.join(str(root), path)))
-        if not dirs or len(dirs) > MAX_DIR_MONITORS:
-            dirs = {str(root)}
-        for directory in sorted(dirs):
-            try:
-                monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.NONE, None)
-            except GLib.Error as exc:
-                log.debug("gitpage: no monitor on %s: %s", directory, exc.message)
-                continue
-            monitor.connect("changed", self._on_tree_event)
-            self._monitors.append(monitor)
+                    paths.append(path)
+        mirror = remotegit.mirror()
+        mirror.on_changed(cwd, self._on_git_changed)
+        # The read's own sample seeds the service's compare, so an edit
+        # between the read and the watch's first look is still a move.
+        # The handle is this page's: another page on the same tree keeps
+        # its own watch, and this page's unwatch takes down only this one.
+        mirror.watch(cwd, paths, state=self._tree_state, handle=self.watch_handle)
+        self._watched_cwd = cwd
 
-    def _drop_monitors(self) -> None:
-        for monitor in self._monitors:
-            monitor.cancel()
-        self._monitors = []
-        if self._watch_source:
-            GLib.source_remove(self._watch_source)
-            self._watch_source = 0
-        self._watch_stale = False
+    @property
+    def watch_handle(self) -> str:
+        """The page's name for its watch on the service (`git.watch`'s
+        `handle`): one per page object."""
+        return f"gitpage-{id(self):x}"
 
-    def _on_tree_event(self, _monitor, file: Gio.File, _other, _event: Gio.FileMonitorEvent) -> None:
-        """A watched directory changed: not for `.git` itself (its own
-        churn is the tick's business), debounced into one compare."""
-        if self._closing or not self._opened:
-            return
-        if file is not None and file.get_basename() == ".git":
-            return
-        if self._watch_source:
-            GLib.source_remove(self._watch_source)
-        self._watch_source = GLib.timeout_add(_WATCH_DEBOUNCE_MS, self._watch_fire)
+    @property
+    def watching(self) -> bool:
+        """Whether the page has the service watching its working tree (a
+        working-tree load is up); the probe the e2e reads."""
+        return self._watched_cwd is not None
 
-    def _watch_fire(self) -> bool:
-        self._watch_source = 0
-        self._watch_check()
-        return GLib.SOURCE_REMOVE
+    def _drop_watch(self) -> None:
+        if self._watched_cwd is not None:
+            mirror = remotegit.mirror()
+            mirror.off_changed(self._watched_cwd, self._on_git_changed)
+            mirror.unwatch(self.watch_handle)
+            self._watched_cwd = None
+        self._watch_stale = None
 
-    def _watch_check(self) -> None:
-        """Compare the tree state on a thread and reload by key when it
-        moved. One compare at a time, and none beside a read in flight —
-        either marks the event stale, and the compare (_watch_checked) or
-        the read (_diff_read) re-runs this when it lands, so an edit
-        during a read is drawn rather than dropped."""
+    def _on_git_changed(self, event: dict) -> None:
+        """The service's `git-changed` for the watched tree: a moved tree
+        state reloads by key; one that lands beside a read in flight is
+        kept for the read's landing (_diff_read), so an edit during a
+        read is drawn rather than dropped. The index and HEAD moves are
+        the tick's, as before."""
         if self._closing or not self._opened or self._loaded not in ("unstaged", "staged"):
             return
-        if self._loading or self._watch_checking:
-            self._watch_stale = True
+        state = event.get("state")
+        if self._loading:
+            self._watch_stale = state
             return
-        self._watch_checking = True
-        gen = self._gen
-        cwd = self._cwd_provider()
-
-        def work() -> None:
-            state = gitops.tree_state_signature(cwd)
-            GLib.idle_add(self._watch_checked, gen, state, priority=GLib.PRIORITY_DEFAULT)
-
-        threading.Thread(target=work, name="git-page-watch", daemon=True).start()
-
-    def _watch_checked(self, gen: int, state: str | None) -> bool:
-        self._watch_checking = False
-        if gen != self._gen or self._closing or not self._opened:
-            return GLib.SOURCE_REMOVE
-        stale, self._watch_stale = self._watch_stale, False
         if state != self._tree_state:
             self._tree_state = state
             log.debug("gitpage: the working tree moved under the watch; reloading")
             self._read_diff(self._loaded)
-        elif stale:
-            self._watch_check()
-        return GLib.SOURCE_REMOVE
 
     # -- the sidebar --------------------------------------------------------------------
 
@@ -1537,7 +1519,12 @@ class GitPage(Adw.Bin):
                 if action == gitmodel.MENU_UNSTAGE:
                     return gitops.unstage_paths(cwd, paths)
                 if code == "?":
-                    return _trash_paths(root, [path])
+                    # The trash is the service's: the same plan the view's
+                    # Discard file makes, through run_plan (gitfeed).
+                    plan = gitpatch.Plan(gitpatch.OP_TRASH, (path,), None, None, "")
+                    context = gitops.PlanContext("unstaged", path)
+                    result = gitops.run_plan(root, plan, context=context)
+                    return gitops.GitResult(result.ok, result.stdout, result.stderr, result.unreachable)
                 return gitops.checkout_paths(cwd, [path])
             except Exception as err:  # the worker's last line of defence
                 return gitops.GitResult(False, "", str(err) or err.__class__.__name__)
@@ -1733,6 +1720,7 @@ class GitPage(Adw.Bin):
         a second time, refresh the lists (the stack first: a commit moved
         HEAD), and reload the view now."""
         cwd = self._cwd_provider()
+        gitinfo.refresh(cwd)  # the mirror's entry predates the mutation
         self._signature = gitinfo.tree_signature(cwd, self._parent_name)
         self._refs_signature = gitinfo.refs_signature(cwd)
         self._refresh_branch_stack()
@@ -1788,7 +1776,7 @@ class GitPage(Adw.Bin):
                     result = gitops.abort_operation(cwd, kind)
                 else:
                     result = gitops.continue_operation(cwd, kind)
-                still = gitops.in_progress(gitinfo.git_dir(cwd)) if result.ok else None
+                still = gitops.in_progress_at(cwd) if result.ok else None
             except Exception as err:  # the worker's last line of defence
                 return gitops.GitResult(False, "", str(err) or err.__class__.__name__), None
             return result, still
@@ -1923,14 +1911,35 @@ class GitPage(Adw.Bin):
             return
         three_way = request.three_way(plan)
         self._diffview.set_busy(True)
+        # What the plan was made against, for the service's stale check
+        # (§3.23): the hunk's stable key for a hunk or lines plan, every
+        # key of the file for a whole-file apply, none for the path-level
+        # ops (add / reset / checkout / trash act on the path as it is).
+        file = request.file
+        keys: tuple[str, ...] = ()
+        if plan.op in gitops._APPLY_OPS:
+            hunk_index = request.hunk_index if request.hunk_index is not None else plan.hunk_index
+            if hunk_index is not None and 0 <= hunk_index < len(file.hunks):
+                keys = (diffmodel.stable_key(file, file.hunks[hunk_index]),)
+            else:
+                keys = tuple(diffmodel.stable_keys(file))
+        context = gitops.PlanContext(
+            request.load, file.path, file.previous_path, self._parent_target, keys
+        )
 
         def work() -> gitops.ApplyResult:
-            return gitops.run_plan(cwd, plan, three_way=three_way, trash=_trash_paths)
+            return gitops.run_plan(cwd, plan, three_way=three_way, context=context)
 
         def done(answer: object) -> None:
             self._diffview.set_busy(False)
             if not isinstance(answer, gitops.ApplyResult):
                 self._toast(_("git failed"))
+                return
+            if answer.stale:
+                # The service re-read the file and a key moved: the words
+                # promise a reload, as a planner's stale refusal does.
+                self._toast(answer.stderr or _("The file changed since the request: reloading"))
+                self._read_diff(self._loaded)
                 return
             self._toast(
                 gitpatch.outcome_words(plan, answer.ok, answer.three_way, answer.conflicts, answer.stderr)
@@ -2139,16 +2148,9 @@ class GitPage(Adw.Bin):
         self._diffview.grab_focus()
 
 
-def _trash_paths(root: str, paths: Sequence[str]) -> gitops.GitResult:
-    """gitops.run_plan's mover for OP_TRASH: each path under *root* to the
-    system trash through Gio (never an unlink — the file exists nowhere
-    else). Worker thread; the first failure is the answer."""
-    for path in paths:
-        try:
-            Gio.File.new_for_path(os.path.join(root, path)).trash(None)
-        except GLib.Error as exc:
-            return gitops.GitResult(False, "", exc.message or _("trash failed"))
-    return gitops.GitResult(True, "", "")
+# The trash of a discarded untracked file is the service's
+# (`collins.service.files.trash_paths`, through `git.plan`): the page
+# opens no project file and moves none (PR-2.1, §3.23).
 
 
 def _file_summaries(files: Sequence[diffmodel.File]) -> tuple[gitmodel.FileSummary, ...]:

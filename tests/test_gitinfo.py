@@ -432,7 +432,7 @@ def test_nowhere_at_all(tmp_path):
 
 def test_no_git_on_path(repo, monkeypatch):
     """Nothing to ask, so nothing is claimed."""
-    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
+    monkeypatch.setattr("collins.gitfiles.shutil.which", lambda _name: None)
     assert has_changes(repo) is False
 
 
@@ -493,7 +493,7 @@ def test_no_names_asks_nothing(repo):
 
 
 def test_ignored_names_without_git(repo, monkeypatch):
-    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
+    monkeypatch.setattr("collins.gitfiles.shutil.which", lambda _name: None)
     assert ignored_names(repo, ["a.txt"]) == set()
 
 
@@ -558,7 +558,7 @@ def test_index_mtime_reads_the_index(tmp_path):
     index = repo / ".git" / "index"
     index.write_bytes(b"DIRC")
     os.utime(index, ns=(1_000_000_000, 1_234_567_890_123))
-    assert index_mtime(repo) == 1_234_567_890_123
+    assert index_mtime(repo) == 1_234_567_890  # microseconds: the wire's unit, locally too
     assert index_mtime(tmp_path) is None
 
 
@@ -575,7 +575,7 @@ def test_index_mtime_is_the_worktrees_own(tmp_path):
     (worktree / ".git").write_text(f"gitdir: {wt_git_dir}\n")
     assert index_mtime(worktree) is None
     (wt_git_dir / "index").write_bytes(b"wt")
-    assert index_mtime(worktree) == (wt_git_dir / "index").stat().st_mtime_ns
+    assert index_mtime(worktree) == (wt_git_dir / "index").stat().st_mtime_ns // 1000
 
 
 # -- head_sha -----------------------------------------------------------------
@@ -784,12 +784,12 @@ def test_tree_signature_moves_with_index_head_and_base(tmp_path):
     feat.write_text(f"{SHA_A}\n")
     index = repo / ".git" / "index"
     index.write_bytes(b"1")
-    os.utime(index, ns=(1_000, 1_000))
+    os.utime(index, ns=(1_000_000, 1_000_000))
     first = tree_signature(repo, "main")
-    assert first == (1_000, SHA_A, "0123456789abcdef0123456789abcdef01234567", ())
+    assert first == (1_000, SHA_A, "0123456789abcdef0123456789abcdef01234567", ())  # microseconds
     assert tree_signature(repo, "main") == first  # stable while nothing moves
 
-    os.utime(index, ns=(2_000, 2_000))
+    os.utime(index, ns=(2_000_000, 2_000_000))
     second = tree_signature(repo, "main")
     assert second != first
 
@@ -929,7 +929,7 @@ def test_refs_signature_reads_the_common_dir_of_a_worktree(tmp_path):
 
 
 def test_refs_signature_bounds_its_walk(tmp_path, monkeypatch):
-    monkeypatch.setattr("collins.gitinfo._REFS_DIR_LIMIT", 3)
+    monkeypatch.setattr("collins.gitfiles.REFS_DIR_LIMIT", 3)  # the walk moved to gitfiles (PR-2.1)
     repo = make_repo(tmp_path / "repo")
     for name in ("a/b", "c/d", "e/f", "g/h"):
         with_remote_branch(repo, "origin", name, SHA_A)

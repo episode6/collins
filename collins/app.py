@@ -38,6 +38,7 @@ from . import (
     prmenu,
     ptyclient,
     remotediffs,
+    remotegit,
     sandboxstatus,
     statusicon,
     tooltipmute,
@@ -2214,8 +2215,24 @@ class App(Adw.Application):
         self.notification_center.on_finished.append(self._on_run_finished)
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
+        # Git goes over the link too (PR-2.1, §3.23): gitinfo reads the
+        # per-cwd mirror and gitops' runners send builders by name — when
+        # the service says it serves them (the `git` capability); against
+        # an older service git stays this machine's, as before.
+        self._install_git_transport()
         self.store.subscribe()
         self._refresh_service_status()
+
+    def _install_git_transport(self) -> None:
+        """Route git through the service when its hello lists the `git`
+        capability, locally otherwise — decided on every hello (the first
+        connect and each reconnect: the service may be another build)."""
+        link = self._service_link
+        if protocol.CAP_GIT in (link.hello.get("caps") or ()):
+            remotegit.install(link)
+        else:
+            log.warning("the service has no git capability: git runs locally")
+            remotegit.uninstall()
 
     def _refresh_service_status(self) -> None:
         """The sandbox probe's verdict so far (the service's; a client never
@@ -2261,6 +2278,8 @@ class App(Adw.Application):
         mirror = remotediffs.mirror_for(self._service_link)
         if mirror is not None:
             mirror.reset()
+        self._install_git_transport()  # this service's capabilities, not the last one's
+        remotegit.reset()
         try:
             self.store.subscribe()
         except RequestRefused as refusal:

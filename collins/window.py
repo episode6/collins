@@ -5975,7 +5975,7 @@ class MainWindow(Adw.ApplicationWindow):
             lines = stdout.strip().splitlines()
             self._git_pull_done(project, lines[-1].strip() if lines else "")
 
-        self._run_git(cwd, ["pull", "--no-edit"], _("Git pull failed"), done)
+        self._run_git(cwd, gitops.pull_argv(), _("Git pull failed"), done)
 
     def _on_git_checkout(self, _action, param: GLib.Variant) -> None:
         """The project row's "Checkout main": switch the project root the
@@ -5992,9 +5992,13 @@ class MainWindow(Adw.ApplicationWindow):
         if not branch:
             return
         project = project_name_for_cwd(cwd)
+        try:
+            argv = gitops.checkout_branch_argv(branch)
+        except ValueError:
+            return  # a name git would read as an option or a range: not a branch
         self._run_git(
             cwd,
-            ["checkout", branch],
+            argv,
             _("Git checkout failed"),
             lambda _stdout: self.sidebar.toast_overlay.add_toast(
                 Adw.Toast(
@@ -6013,7 +6017,10 @@ class MainWindow(Adw.ApplicationWindow):
         and hand the outcome back to the main loop: *done* with git's stdout
         on success, an error dialog titled *failed_title* with git's stderr
         (or stdout, or "git failed", whichever has words) otherwise. The run
-        goes through gitops.run_git, like every other git call.
+        goes through gitops.run_git, like every other git call — over the
+        API, on the service's git (PR-2.1): *args* is a builder's argv
+        (pull_argv, checkout_branch_argv), and a service with no git
+        answers unreachable with the reason, which the dialog shows.
 
         Anything interactive is cut off up front: there is no terminal here
         to answer a username prompt, so GIT_TERMINAL_PROMPT=0 turns one into
@@ -6021,9 +6028,6 @@ class MainWindow(Adw.ApplicationWindow):
         and GIT_EDITOR=true does the same for any editor git finds a reason to
         launch.
         """
-        if shutil.which("git") is None:
-            dialogs.error_dialog(self, failed_title, _("git was not found on PATH."))
-            return
 
         def work() -> None:
             result = gitops.run_git(

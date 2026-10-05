@@ -124,6 +124,9 @@ class _Channel:
         self.ws: Soup.WebsocketConnection | None = None
         self.pending: dict[int, _Pending] = {}
         self.closing = False  # the link asked for the close
+        # TAG_BLOB frames ahead of a chunked reply, by stream (the request
+        # id masked to 32 bits): joined back by `protocol.join_reply`.
+        self.blobs: dict[int, bytearray] = {}
 
     @property
     def open(self) -> bool:
@@ -474,14 +477,51 @@ class SocketLink(apilink.Link):
             return value
         raise value
 
-    def _request(self, message: dict) -> dict:
+    def _request(self, message: dict, timeout: float | None = None) -> dict:
         """`Link.call`: the sync channel, blocking; `subscribe` on the
-        primary with the main thread draining (see the module docstring)."""
+        primary with the main thread draining (see the module docstring).
+        *timeout* replaces CALL_TIMEOUT_S for a reply known to take longer
+        (a git run with its own timeout)."""
         if not self.connected:
             raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
+        wait = CALL_TIMEOUT_S if timeout is None else max(0.1, float(timeout))
         if message.get("t") == "subscribe" and threading.current_thread() is threading.main_thread():
-            return self._primary_blocking(message, CALL_TIMEOUT_S)
-        return self._blocking(self._sync, message, CALL_TIMEOUT_S)
+            return self._primary_blocking(message, wait)
+        return self._blocking(self._sync, message, wait)
+
+    def http_get(
+        self, path_query: str, headers: dict[str, str] | None = None, timeout: float = 60.0
+    ) -> tuple[int, dict[str, str], bytes]:
+        """A plain HTTP GET on the service's socket (`GET /api/blob`,
+        §3.11): (status, the response's ETag / Content-Type headers, the
+        body). Blocking, on the calling thread — a worker's, never the
+        I/O thread — with a `Soup.Session` of its own, since libsoup's
+        sync API is per thread and the link's session lives on its
+        thread. Raises `ConnectionLost` when nothing answers."""
+        if self._on_io_thread():
+            raise RuntimeError("http_get cannot run on the link's own thread")
+        session = Soup.Session(remote_connectable=Gio.UnixSocketAddress.new(self.path))
+        session.set_timeout(int(max(1.0, timeout)))
+        message = Soup.Message.new("GET", "http://collins" + path_query)
+        if message is None:
+            raise ValueError(f"not a URL path: {path_query!r}")
+        # The service confines a blob by the client it is for (its `local`
+        # proof): the header names this link's hello (api.server.CLIENT_HEADER).
+        message.get_request_headers().replace("Collins-Client", self.client_id)
+        for name, value in (headers or {}).items():
+            message.get_request_headers().replace(name, value)
+        try:
+            body = session.send_and_read(message, None)
+        except GLib.Error as err:
+            raise ConnectionLost(err.message) from None
+        status = int(message.get_status())
+        response = message.get_response_headers()
+        got = {}
+        for name in ("ETag", "Content-Type", "Content-Length"):
+            value = response.get_one(name)
+            if value is not None:
+                got[name] = value
+        return status, got, bytes(body.get_data() or b"")
 
     def _primary_blocking(self, message: dict, timeout: float) -> dict:
         done: list = []
@@ -562,8 +602,33 @@ class SocketLink(apilink.Link):
                 self._on_text(channel, payload)
             elif channel is self._primary:
                 self._on_binary(payload)
+            else:
+                self._on_chunk(channel, payload)
         except Exception:
             log.exception("api client: a frame's handling failed")
+
+    def _on_chunk(self, channel: _Channel, payload: bytes) -> None:
+        """A TAG_BLOB frame on the sync channel: part of a chunked reply
+        (`protocol.split_reply`), kept until its reply arrives. Anything
+        else in binary on that channel is dropped."""
+        try:
+            header, data = protocol.unpack_frame(payload)
+        except ValueError as exc:
+            log.warning("api client: a binary frame the protocol can't read: %s", exc)
+            return
+        if protocol.check_frame(header, protocol.SERVICE) is not None or header.tag != protocol.TAG_BLOB:
+            return
+        with self._lock:
+            wanted = any(
+                (re_id & protocol.STREAM_MASK) == header.stream for re_id in channel.pending
+            )
+            if not wanted:
+                return  # no request of ours: a late chunk, or not for this link
+            buffer = channel.blobs.setdefault(header.stream, bytearray())
+            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.GIT_OUTPUT_MAX:
+                channel.blobs.pop(header.stream, None)  # out of order or over the bound: the reply is refused
+                return
+            buffer += data
 
     def _on_text(self, channel: _Channel, payload: bytes) -> None:
         try:
@@ -590,9 +655,17 @@ class SocketLink(apilink.Link):
     def _on_response(self, channel: _Channel, re_id: int, message: dict) -> None:
         with self._lock:
             pending = channel.pending.pop(re_id, None)
+            chunks = channel.blobs.pop(re_id & protocol.STREAM_MASK, None)
         if pending is None:
             return
-        answer = protocol.validate_response(message, pending.type)
+        joined = protocol.join_reply(message, bytes(chunks) if chunks is not None else None)
+        if joined is None:
+            self._complete(
+                pending,
+                ("err", RequestRefused(protocol.ERROR_INVALID, "The reply's chunks did not all arrive", {})),
+            )
+            return
+        answer = protocol.validate_response(joined, pending.type)
         if isinstance(answer, protocol.Refusal):
             result = ("err", RequestRefused(protocol.ERROR_INVALID, answer.msgid, dict(answer.args)))
         elif answer.ok:
