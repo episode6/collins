@@ -240,6 +240,8 @@ def run(root: str) -> int:
     check("the open buffer follows the move", wait_for(lambda: moved_to in pane._open and under not in pane._open), list(pane._open))
     followed = pane._open[moved_to]
     check("with its edits", followed.buffer.get_text(followed.buffer.get_start_iter(), followed.buffer.get_end_iter(), True) == "print('edited')\n")
+    check("and the moved file's mtime from the paste's result", followed.mtime == os.stat(moved_to).st_mtime_ns // 1000, (followed.mtime, os.stat(moved_to).st_mtime_ns // 1000))
+    check("still dirty with its edits, not marked deleted", followed.buffer.get_modified() and not followed.gone_marked)
     check("the cut is spent", wait_for(lambda: not fileclipboard.has_files(clipboard)), mimes(clipboard))
     check("the tree reveals it under docs", wait_for(lambda: selected_name(tree) == "main2.py" and (1, "main2.py") in rows(tree)), rows(tree))
 

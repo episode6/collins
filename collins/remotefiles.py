@@ -39,10 +39,12 @@ pattern: the work on a daemon thread, its answer landed at
 PR-2.5 adds the tree's file operations, blocking like the rest:
 `rename_path(path, target, root)` is `fs.rename` (the renamed file's
 mtime; `rename_reason` names the rule a refusal broke), `paste_files
-(entries, target, cut, root)` is `fs.paste` (a `PasteOutcome` per entry),
-`make_dir(path, root)` is `fs.mkdir`; and `clipboard_scope()` is what the
-file clipboard may say (D35): the link's `service_id` and its `local`
-proof.
+(entries, target, cut, root)` is `fs.paste` (a `PasteOutcome` per entry,
+each landed file's mtime with it; the entries go in slices of
+`protocol.FS_PASTE_MAX`, one request each, and the wait is as long as the
+move takes, `PASTE_TIMEOUT_S`: D41, D42), `make_dir(path, root)` is
+`fs.mkdir`; and `clipboard_scope()` is what the file clipboard may say
+(D35): the link's `service_id` and its `local` proof.
 
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
@@ -71,6 +73,12 @@ log = logging.getLogger(__name__)
 
 # A read or write of a file of FILE_TEXT_MAX over a loaded service.
 CALL_TIMEOUT_S = 60.0
+# An `fs.paste`: a folder copy or a cut across filesystems takes as long as
+# it takes, and the client waits for it (D41) — the sync channel pipelines
+# calls, so nothing else waits behind it, and the link's death ends the
+# wait sooner (`_fail_pending`). A day is a guard against a hung service
+# thread, not a deadline.
+PASTE_TIMEOUT_S = 24 * 3600.0
 
 Listener = Callable[[dict], None]
 
@@ -252,14 +260,17 @@ def off_main(
 class PasteOutcome:
     """What became of one clipboard entry (`fs.paste`'s result): *target*
     is where it landed (None when it didn't), *error* why not
-    (`editorfiles.PasteError`), *message* the OS's words for a FAILED one.
-    The shape `editorfiles.paste_entries` answered before the paste moved
-    to the service, with paths as strings."""
+    (`editorfiles.PasteError`), *message* the OS's words for a FAILED one,
+    *mtime* the landed file's (None for a folder, or nothing landed: what
+    an editor holding a moved file open takes). The shape
+    `editorfiles.paste_entries` answered before the paste moved to the
+    service, with paths as strings."""
 
     source: str
     target: str | None = None
     error: PasteError | None = None
     message: str = ""
+    mtime: int | None = None
 
 
 def rename_path(path: str, target: str, root: str) -> int | None:
@@ -287,19 +298,38 @@ def rename_reason(refusal: RequestRefused) -> RenameError | None:
 
 def paste_files(entries: list[str], target: str, cut: bool, root: str) -> list[PasteOutcome]:
     """`fs.paste` of *entries* into the folder *target* inside *root*, a
-    move when *cut*: blocking, on the caller's thread. One outcome per
-    entry, in order. Raises `RequestRefused` (the whole request: an
-    invalid list, a root the service does not know)."""
-    fields = apilink.call(
-        {
-            "t": "fs.paste",
-            "entries": [str(e) for e in entries],
-            "target": str(target),
-            "cut": bool(cut),
-            "root": str(root),
-        },
-        timeout=CALL_TIMEOUT_S,
-    )
+    move when *cut*: blocking, on the caller's thread, for as long as the
+    move takes (`PASTE_TIMEOUT_S`, D41). One outcome per entry, in order.
+
+    The entries go in slices of `protocol.FS_PASTE_MAX`, one request each
+    (D42): a slice refused before anything landed raises its
+    `RequestRefused` as one request's would (an invalid list, a root the
+    service does not know: the "Couldn't paste" banner); one refused after
+    something landed ends the batching, its entries and the unsent ones
+    answered as `FAILED` outcomes carrying the refusal's words, so the
+    caller always sees one outcome per entry, spends the cut only for
+    what landed and counts the rest."""
+    entries = [str(e) for e in entries]
+    outcomes: list[PasteOutcome] = []
+    for start in range(0, len(entries), protocol.FS_PASTE_MAX):
+        batch = entries[start : start + protocol.FS_PASTE_MAX]
+        message = {"t": "fs.paste", "entries": batch, "target": str(target), "cut": bool(cut)}
+        message["root"] = str(root)
+        try:
+            fields = apilink.call(message, timeout=PASTE_TIMEOUT_S)
+        except RequestRefused as refusal:
+            if not any(o.target is not None for o in outcomes):
+                raise
+            words = refusal_words(refusal)
+            outcomes.extend(PasteOutcome(entry, None, PasteError.FAILED, words) for entry in entries[start:])
+            return outcomes
+        outcomes.extend(_paste_outcomes(fields))
+    return outcomes
+
+
+def _paste_outcomes(fields: dict) -> list[PasteOutcome]:
+    """One request's `results` as outcomes: an `error` this client does
+    not know reads as `FAILED`, never as a landing."""
     outcomes: list[PasteOutcome] = []
     for item in fields.get("results") or ():
         if not isinstance(item, dict):
@@ -310,12 +340,14 @@ def paste_files(entries: list[str], target: str, cut: bool, root: str) -> list[P
         except ValueError:
             paste_error = PasteError.FAILED
         landed = item.get("target")
+        mtime = item.get("mtime")
         outcomes.append(
             PasteOutcome(
                 str(item.get("source", "")),
                 str(landed) if isinstance(landed, str) else None,
                 paste_error,
                 str(item.get("message") or ""),
+                int(mtime) if isinstance(mtime, int) and not isinstance(mtime, bool) else None,
             )
         )
     return outcomes

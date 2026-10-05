@@ -22,8 +22,10 @@ spec §3.23, D35), so what goes out depends on `remotefiles.clipboard_scope`:
 The same are read back, in that order of preference: Collins' own payload
 first (another service's URIs are dropped: its paths mean nothing here),
 then — when local — the GNOME payload and whatever GDK can turn into a
-file list. A `file:` URI from a file manager is a path on this machine,
-which the service can only paste when it is this machine.
+file list; a payload that yields no path falls through to the next, so a
+local client reading another local Collins' copy still gets the `file:`
+formats beside it. A `file:` URI from a file manager is a path on this
+machine, which the service can only paste when it is this machine.
 """
 
 from __future__ import annotations
@@ -123,14 +125,34 @@ def read_files(
     process, and a sync read would freeze the window while it did."""
     scope = scope or remotefiles.clipboard_scope()
     formats = clipboard.get_formats()
+    # The formats to try, in order of preference; a payload that yields no
+    # path (Collins' own naming another service's files; an owner that
+    # advertised a format and then failed to hand it over) falls through
+    # to the next, so a local client beside another local Collins still
+    # reads the `file:` formats the same clipboard carries.
+    attempts: list[Callable[[Callable[[list[str], bool], None]], None]] = []
     if formats.contain_mime_type(COLLINS_COPIED_FILES) and scope.service_id is not None:
-        _read_payload(clipboard, COLLINS_COPIED_FILES, scope, on_ready)
-    elif scope.local and formats.contain_mime_type(GNOME_COPIED_FILES):
-        _read_payload(clipboard, GNOME_COPIED_FILES, scope, on_ready)
-    elif scope.local and (formats.contain_mime_type(URI_LIST) or formats.contain_gtype(Gdk.FileList)):
-        _read_file_list(clipboard, on_ready)
-    else:
-        on_ready([], False)
+        attempts.append(lambda done: _read_payload(clipboard, COLLINS_COPIED_FILES, scope, done))
+    if scope.local and formats.contain_mime_type(GNOME_COPIED_FILES):
+        attempts.append(lambda done: _read_payload(clipboard, GNOME_COPIED_FILES, scope, done))
+    if scope.local and (formats.contain_mime_type(URI_LIST) or formats.contain_gtype(Gdk.FileList)):
+        attempts.append(lambda done: _read_file_list(clipboard, done))
+
+    def next_attempt() -> None:
+        if not attempts:
+            on_ready([], False)
+            return
+        attempt = attempts.pop(0)
+
+        def done(paths: list[str], cut: bool) -> None:
+            if paths or not attempts:
+                on_ready(paths, cut)
+            else:
+                next_attempt()
+
+        attempt(done)
+
+    next_attempt()
 
 
 def _read_payload(
@@ -140,7 +162,9 @@ def _read_payload(
     on_ready: Callable[[list[str], bool], None],
 ) -> None:
     """Collins' own payload or the GNOME one: the operation, then URIs,
-    parsed for the scope (`editorfiles.parse_copied_files`)."""
+    parsed for the scope (`editorfiles.parse_copied_files`). An owner
+    that advertised the format and then failed to hand it over reads as
+    nothing (the caller's next format, if any)."""
 
     def opened(_clipboard, result) -> None:
         try:
@@ -148,12 +172,7 @@ def _read_payload(
         except GLib.Error:
             stream = None
         if stream is None:
-            # The owner advertised the format and then failed to hand it over;
-            # the file list may still be readable (a local client's).
-            if scope.local:
-                _read_file_list(clipboard, on_ready)
-            else:
-                on_ready([], False)
+            on_ready([], False)
             return
         _read_all(
             stream,
