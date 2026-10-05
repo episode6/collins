@@ -65,6 +65,38 @@ PR-2.4 adds the tree's, quick open's and the roots' requests:
   Every watch is confined on a thread and installed when that lands
   (`_pending`), and one Gio cannot make a monitor for is refused.
 
+PR-2.5 adds the tree's file operations, the rules in `projectfiles`
+(moved there from `editorfiles`, the client's module):
+
+- `fs.rename {path, target, root}`: `projectfiles.rename_entry`: a rename
+  in place (the target is the same directory's and exactly the name
+  asked, else refused `not_a_name`), never over anything (`exists`: at
+  the check, and at the placement, which is exclusive, D44), of an entry
+  that is there (`missing`), both resolved inside *root* (`outside`: a
+  rename across roots, or through a link out). A refusal carries the
+  rule as its `reason` (`protocol.FS_RENAME_REASONS`) for the client's
+  own words. The reply's `mtime` is the renamed file's (null for a
+  folder): an editor holding it open takes it.
+- `fs.paste {entries, target, cut, root}`: `projectfiles.paste_entries`
+  into the folder *target* inside *root*: a copy, or a move for a cut,
+  never over anything (a taken name lands as "name (copy)", and the
+  placement is exclusive against every writer: a name taken in between
+  is the next "(copy N)", D44). Each source is confined on the worker to
+  `allowed` (a client that is not `local` may name a source only inside
+  a root the service knows: `source_outside`, per entry; one inside
+  *another* known root is allowed, D43); the `results`, one per entry,
+  carry its landing with the landed file's `mtime` (null for a folder or
+  a failure) or its `PasteError` (an open string: a client maps one it
+  does not know to `failed`), and travel chunked past a frame. At most
+  `FS_PASTE_MAX` entries per request; the client sends a longer clipboard
+  in slices (D42).
+- `fs.mkdir {path, root}`: `projectfiles.make_directory`: one folder
+  inside *root*, never over anything; a refusal's `reason` is one of
+  `protocol.FS_MKDIR_REASONS`.
+- Each request's *root* is confined on the worker (`_confine`, as the
+  listing's is), never on the main loop: the known roots are computed
+  there and every resolving check runs on the thread.
+
 **Nothing blocks the main loop**: every read, write and stat runs on a
 daemon thread and answers through a `protocol.Deferred` settled on the
 main loop at `PRIORITY_DEFAULT` (`_later`; a worker that raises settles a
@@ -88,7 +120,17 @@ from gi.repository import Gio, GLib
 
 from .. import gitinfo, gitops
 from ..api import protocol
-from ..projectfiles import is_inside, list_entries, walk_files
+from ..projectfiles import (
+    MkdirError,
+    PasteOutcome,
+    RenameError,
+    is_inside,
+    list_entries,
+    make_directory,
+    paste_entries,
+    rename_entry,
+    walk_files,
+)
 from ..sessions import worktree_project_root
 
 log = logging.getLogger(__name__)
@@ -495,6 +537,43 @@ def _spawn_default(fn: Callable[[], None], name: str) -> None:
 # shared by every tab).
 MAX_WATCHES_PER_CLIENT = 4096
 
+# The words of a refused rename or mkdir, by the rule it broke (the
+# client has its own, keyed by the refusal's `reason`; these are for a
+# client that does not). They name no file: the client puts the name in
+# front.
+RENAME_MSGIDS = {
+    RenameError.EMPTY: "A name is needed",
+    RenameError.NOT_A_NAME: "A rename keeps its folder and takes a bare name",
+    RenameError.EXISTS: "The name is taken",
+    RenameError.MISSING: "The entry is not there",
+    RenameError.OUTSIDE: OUTSIDE_MSGID,
+}
+MKDIR_MSGIDS = {
+    MkdirError.NOT_A_NAME: "A folder takes a bare name",
+    MkdirError.EXISTS: "The name is taken",
+    MkdirError.OUTSIDE: OUTSIDE_MSGID,
+    MkdirError.NO_PARENT: "The folder it would go in is not there",
+}
+
+
+def _paste_result(outcome: PasteOutcome) -> dict:
+    """One `fs.paste` result (`protocol._FS_PASTE_RESULT`) from an outcome:
+    where it landed, the landed file's mtime (null for a folder, a link
+    that names no file, or a failure: what an editor holding a moved file
+    open takes, `_retarget_open`), the rule it broke."""
+    mtime = None
+    if outcome.target is not None:
+        mtime, _size, gone = file_stat(str(outcome.target))
+        if gone:
+            mtime = None
+    return {
+        "source": str(outcome.source),
+        "target": None if outcome.target is None else str(outcome.target),
+        "mtime": mtime,
+        "error": None if outcome.error is None else outcome.error.value,
+        "message": outcome.message[: protocol.ARG_TEXT_MAX],
+    }
+
 
 class Files:
     """The editor's `fs.*` requests and the file watches (see the module
@@ -535,6 +614,12 @@ class Files:
             return self.listing(message, client)
         if kind == "fs.walk":
             return self.walk(message, client)
+        if kind == "fs.rename":
+            return self.rename(message, client)
+        if kind == "fs.paste":
+            return self.paste(message, client)
+        if kind == "fs.mkdir":
+            return self.mkdir(message, client)
         return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
 
     def client_gone(self, client) -> None:
@@ -710,6 +795,114 @@ class Files:
             return protocol.reply(message.id, **fields)
 
         return self._later(message, "fs-walk", work)
+
+    # -- fs.rename, fs.paste, fs.mkdir (PR-2.5) --------------------------------------------
+
+    def rename(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        """`fs.rename {path, target, root}`: `rename_entry` on a thread
+        (see the module docstring); the refusal's `reason` is the rule.
+        The `root` is one the client may name: confined on the worker
+        (`_confine`, as `fs.list`'s is) against the roots computed here."""
+        path = self._path(message)
+        if isinstance(path, dict):
+            return path
+        target = self._path(message, "target")
+        if isinstance(target, dict):
+            return target
+        root = self._path(message, "root")
+        if isinstance(root, dict):
+            return root
+        allowed_roots = self._roots(client)
+
+        def work() -> dict:
+            try:
+                _confine(allowed_roots, root)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
+            try:
+                landed, error = rename_entry(root, path, target)
+            except OSError as exc:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "Couldn't rename: {error}", {"error": _os_error(exc)}
+                )
+            if error is not None:
+                return protocol.refuse(
+                    message.id,
+                    protocol.ERROR_GONE if error is RenameError.MISSING else protocol.ERROR_REFUSED,
+                    RENAME_MSGIDS[error],
+                    {"reason": error.value},
+                )
+            if landed is None:
+                return protocol.reply(message.id, mtime=None)  # the name came back unchanged
+            mtime, _size, gone = file_stat(str(landed))
+            return protocol.reply(message.id, mtime=None if gone else mtime)
+
+        return self._later(message, "fs-rename", work)
+
+    def paste(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        """`fs.paste {entries, target, cut, root}`: `paste_entries` on a
+        thread, the `root` and each source confined there (the roots
+        computed here, on the main loop; None for a `local` client). The
+        reply's `results` carry each landed file's mtime (`_paste_result`)
+        and travel chunked past a frame (`CHUNKED_JSON_FIELDS`)."""
+        entries = message.get("entries")
+        if not isinstance(entries, list) or not all(isinstance(e, str) and os.path.isabs(e) for e in entries):
+            return protocol.refuse(
+                message.id, protocol.ERROR_INVALID, "{field} must be a list of absolute paths",
+                {"field": "entries"},
+            )
+        target = self._path(message, "target")
+        if isinstance(target, dict):
+            return target
+        root = self._path(message, "root")
+        if isinstance(root, dict):
+            return root
+        cut = bool(message.get("cut"))
+        allowed_roots = self._roots(client)
+
+        def source_allowed(real: str) -> bool:
+            return allowed_roots is None or any(is_inside(r, real) for r in allowed_roots)
+
+        def work() -> dict:
+            try:
+                _confine(allowed_roots, root)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
+            outcomes = paste_entries(root, target, list(entries), cut, source_allowed)
+            return protocol.reply(message.id, results=[_paste_result(o) for o in outcomes])
+
+        return self._later(message, "fs-paste", work)
+
+    def mkdir(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        """`fs.mkdir {path, root}`: `make_directory` on a thread (the
+        `root` confined there); the refusal's `reason` is the rule."""
+        path = self._path(message)
+        if isinstance(path, dict):
+            return path
+        root = self._path(message, "root")
+        if isinstance(root, dict):
+            return root
+        allowed_roots = self._roots(client)
+
+        def work() -> dict:
+            try:
+                _confine(allowed_roots, root)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
+            try:
+                error = make_directory(root, path)
+            except OSError as exc:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "Couldn't make the folder: {error}",
+                    {"error": _os_error(exc)},
+                )
+            if error is not None:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, MKDIR_MSGIDS[error], {"reason": error.value}
+                )
+            return protocol.reply(message.id)
+
+        return self._later(message, "fs-mkdir", work)
 
     # -- the watch -------------------------------------------------------------------------
 

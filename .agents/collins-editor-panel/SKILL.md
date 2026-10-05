@@ -39,10 +39,14 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   see "The tree, quick open and roots" below). Icons and
   colors per extension from `filetypes.py` (bundled `ft-*-symbolic` Octicons;
   color classes defined in `app.py`'s scheme provider, Seti-inspired). Context
-  menus (new file/folder, rename, copy/cut/paste, trash, reveal) act through
-  `editorfiles.rename_target` / `paste_target` / `unique_target` /
-  `paste_entries`; the clipboard payloads (`Gdk.FileList`, `text/uri-list`,
-  `x-special/gnome-copied-files` for cut) are `fileclipboard.py`'s. A file
+  menus (Add to chat, Copy, Cut, Paste, Rename…, Open In…) act through the
+  service's `fs.rename` / `fs.paste` (`remotefiles.rename_path` /
+  `paste_files`; the rules `projectfiles.rename_target` / `paste_target` /
+  `unique_target` / `paste_entries` run there); the clipboard payloads
+  (Collins' own `x-collins/copied-files` of `collins://` URIs, and for a
+  `local` client `Gdk.FileList`, `text/uri-list`,
+  `x-special/gnome-copied-files` for cut) are `fileclipboard.py`'s (see
+  "File operations and the clipboard" below). A file
   row (and an Agent files row) also gets the git page's *Open In…* submenu
   (`openwithrows.file_open_with_menu` over the `footer_apps` setting the
   pane relays through `set_footer_apps`, plus *Default app* via xdg-open);
@@ -228,6 +232,151 @@ pathless walker reads as `Path` methods):
   the git page's file-row menu (`GitSidebar._file_on_disk`; the
   right-click asks off the main loop, the e2e probes block) all ask it.
 
+**File operations and the clipboard are the service's** (split-service
+spec §3.23, PR-2.5, D35). The rename and paste rules moved out of
+`editorfiles` into `projectfiles.py` with the directory reads
+(`RenameError` / `PasteError` are re-exported for the editor's messages,
+and `rename_name_error`, the pure name check, for the client to run
+first); nothing in `editor.py`, `filetree.py` or `fileclipboard.py`
+touches the disk.
+
+- `fs.rename {path, target, root}` (`EditorPane._rename` →
+  `remotefiles.rename_path` on a worker through `_off_main`): the name is
+  checked on the client (`editorfiles.rename_name_error`: empty or
+  path-shaped → the banner, unchanged → nothing, no round trip), the rest
+  on the service (`projectfiles.rename_entry`: the entry is there, the
+  target is the same directory's — a rename never moves things elsewhere,
+  a paste of a cut does — the name is free, a broken symlink counts as
+  taken, both resolve inside *root*: a rename across roots or through a
+  link out is `outside`). A refusal carries the rule as its `reason`
+  (`protocol.FS_RENAME_REASONS`; `remotefiles.rename_reason` turns it
+  back into a `RenameError` for `_rename_error_message`); a failure
+  (permissions) comes with the OS's words. The reply's `mtime` is the
+  renamed file's (null for a folder): `_retarget_open(old, new, mtime)`
+  re-keys the open tabs as before and takes that mtime for the file at
+  `new` when it differs, then re-watches, so the next save expects the
+  file as it is. Then `forget_dir` / `refresh_dir` / `reveal` in that
+  order (the tree's listings are asynchronous).
+- `fs.paste {entries, target, cut, root}` (`_paste` → `remotefiles.
+  paste_files`, landing in `_pasted`): `projectfiles.paste_entries` on the
+  service, a copy or a move for a cut, never over anything (a taken name
+  lands as "name (copy)", `unique_target`), a folder never into itself.
+  Each source is confined on the worker: a client that is not `local`
+  may name a source only inside a root the service knows
+  (`PasteError.SOURCE_OUTSIDE`, per entry — the rest of the clipboard
+  still lands; a source inside *another* known root is fine: the one
+  clipboard moves a cut from project B's tree into project A's, D43); a
+  `local` client may paste anything, and the service does the copy. The
+  reply's `results` are one `remotefiles.PasteOutcome` per entry (source,
+  target, error, message, and the landed file's `mtime`; paths as
+  strings; a `CHUNKED_JSON_FIELD`, since a thousand deep paths echoed
+  twice pass a frame; there is no `placed` list, D42); `_pasted`
+  refreshes the tree, re-keys an open file a cut moved
+  (`_retarget_open(old, new, mtime)`, which also takes back the "was
+  deleted" mark a `file-changed {gone}` set when the service's watch saw
+  the file leave its old path before the paste answered — for the moved
+  entry itself with the reply's mtime, and for an open file *inside* a
+  moved or renamed folder with the mtime it expected before the `gone`,
+  `_OpenFile.gone_mtime`, since the move kept it; the re-watch seeds the
+  service with it, so a file that really differs is told at once. The
+  claim "clean when the `gone` came" (`gone_marked`) dies with the first
+  change to the buffer's text (`_on_buffer_changed`), with a fill
+  (`_fill`) and with a save landing (`_on_saved`), so an edit typed while
+  a move ran, or after a deleted file was saved again, is never shown as
+  saved; the mtime is restored for a dirty buffer too, so its next save
+  keeps its stale check, and the "was deleted" banner is withdrawn either
+  way), spends the cut
+  (`_spend_cut`: what failed stays on the clipboard, still cut) and names
+  a failure in the banner. `paste_files` sends the clipboard in slices of
+  `protocol.FS_PASTE_MAX` (1000), one request each, and joins the
+  outcomes (a slice refused before anything landed raises as one
+  request's would; one refused after something landed ends the batching
+  with its entries and the unsent ones as `FAILED` outcomes carrying the
+  refusal's words), and waits `PASTE_TIMEOUT_S` (a day: a guard, not a
+  deadline; the link's death ends the wait sooner) rather than
+  `CALL_TIMEOUT_S`, since a folder copy takes as long as it takes and the
+  sync channel pipelines the other calls (D41).
+- **Placement is exclusive (D44)**: "never over anything" holds against
+  every writer, not only Collins' own requests — the agent writes in the
+  same folders, and a planted symlink at the chosen name must not be
+  written through. `projectfiles` lands a file copy by opening the target
+  `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (`_copy_file_exclusive`: the
+  source opened `O_NOFOLLOW` too and read only when it is a regular
+  file, so a FIFO, a device or a link swapped in after the check is
+  `failed`; the bytes by an `os.sendfile` loop with `copyfileobj`'s
+  read-write loop as shutil's fallback, `_copy_bytes`; then `copystat`
+  with `follow_symlinks=False`), a tree by `shutil.copytree` with that
+  copy function and `dirs_exist_ok` False (`_copy_tree_exclusive`:
+  `makedirs` at the top and every subdirectory is the exclusive step,
+  links stay links). **A move** (a cut's paste, and a rename;
+  `_move_exclusive`) is `renameat2(RENAME_NOREPLACE)` through `ctypes`
+  (`_rename_noreplace`, the symbol looked up once at import): `rename`'s
+  own semantics for a file, a directory, a link, a FIFO alike, no
+  ownership or read permission needed, the inode kept; `EEXIST` is the
+  name taken, `EINVAL` / `ENOSYS` / `ENOTSUP` or no such symbol take the
+  placeholder path (`_move_by_placeholder`: a file's target created
+  `O_CREAT|O_EXCL|O_NOFOLLOW` then replaced by `os.rename`, removed on a
+  failed rename only while `lstat` still shows the placeholder made
+  (`_identity`: the inode plus its ctime, size and type, since ext4
+  hands a just-freed inode number straight back — CI showed it); a
+  directory's `os.mkdir` then `os.rename`, `ENOTEMPTY` meaning someone
+  put something in it, so it stays and the name counts as taken), `EXDEV`
+  from either takes the copy path (`_move_by_copy`: the exclusive copy
+  then `unlink` / `rmtree` of the source, as `shutil.move` does). What a
+  failed move leaves (D46): only what the operation made and that holds
+  nothing of anyone else's is removed — a file copied across whose source
+  cannot then be unlinked is removed again (`failed` with the `unlink`'s
+  words, nothing at the destination, a retry the same), a tree whose
+  `rmtree` fails is kept with both halves. `EEXIST` at a paste's target
+  is the next name of `unique_target`'s sequence (`paste_entries`' loop;
+  `no_room` after the hundredth), at a rename's it is `exists`. **No
+  lock** serializes the operations: two requests cannot land one name,
+  and a lock would hold every client's rename behind a long copy. The
+  tests in `test_projectfiles.py` make each race deterministic by
+  patching `unique_target` / `rename_target` to plant something at the
+  name they answer, and run the move matrix on the real primitive and on
+  the placeholder path (`_rename_noreplace` patched to False) and the
+  copy path (the primitive and `os.rename` patched to `EXDEV`). Still as
+  before: a cross-filesystem cut that fails mid-tree leaves the partial
+  copy at the destination (a retry lands as "tree (copy)") and its
+  `message` is `shutil.Error`'s list.
+- `fs.rename` is `_move_exclusive` too (the inode kept; `exists` when
+  the name was taken between the check and the rename), the request's
+  `root` is confined on the worker like `fs.list`'s (never `allowed` on
+  the main loop), a target name with surrounding whitespace is refused
+  `not_a_name` (the dialog's trimming is the client's, before the
+  request), and `fs.mkdir` takes a folder called `~` (`name_error`, the
+  pure name check `rename_name_error` and `make_directory` share).
+- `fs.mkdir {path, root}` (`remotefiles.make_dir`; `projectfiles.
+  make_directory`): one folder inside the root, never over anything; the
+  refusal's `reason` is one of `protocol.FS_MKDIR_REASONS`. Served for
+  Phase 3's path picker (*New folder*); the tree has no caller yet.
+- **The clipboard** (`fileclipboard.set_files` / `has_files` /
+  `read_files`, each taking a `remotefiles.ClipboardScope` or reading the
+  link's: its hello's `service_id` and its `local` proof): Copy and Cut
+  always put Collins' own `x-collins/copied-files` payload on the
+  clipboard (the GNOME payload's shape — the operation, then one
+  `collins://<service id>/<path>` URI per line, `editorfiles.collins_uri`)
+  and the paths as plain text; only a `local` client adds the `file:`
+  payloads (`Gdk.FileList`, `text/uri-list`, `x-special/gnome-copied-files`),
+  since a `file:` URI names a file on the client's machine. Reading
+  prefers Collins' own payload (`editorfiles.parse_copied_files(text,
+  service_id, local)`: another service's URIs are dropped; `file:` URIs
+  only when local), then — local only — the GNOME payload and GDK's file
+  list; a payload that yields no path falls through to the next format
+  (`read_files`' attempts chain), so a local client beside another local
+  Collins still reads the `file:` formats the same clipboard carries.
+  `has_files` judges the formats alone, so another service's payload does
+  not grey Paste out; the read yields nothing (when not local). A hostile
+  line `urlsplit` refuses is dropped, not raised, and a name that is not
+  UTF-8 round-trips byte for byte (`collins_uri` / `path_from_collins_
+  uri`). PR-2.8's `app.local` gate takes `local` over from the link's
+  flag.
+- `check_filetree_ops.py` drives all of it against a scratch service:
+  the rename with the file open (key, mtime, watch), the renamed folder,
+  the refusals, Copy / Paste / Cut through the service, the spent cut,
+  the empty clipboard, the non-local scope's formats and reads, `fs.mkdir`.
+
 **Following the session** (`request_root` / `offer_root`): the tab's cwd tick
 calls `_maybe_follow_editor`, whose scope is the service's (`cwd.settle`:
 `projectfiles.follow_scope` after the settling); `plan_reroot` decides which
@@ -299,5 +448,5 @@ close state joins all three.
 
 Related: `collins-terminal-tab`, `collins-panel-dock`,
 `collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`,
-`check_editor_save.py`, `check_filetree.py`), `collins-session-mcp-tools` (the API's message
+`check_editor_save.py`, `check_filetree.py`, `check_filetree_ops.py`), `collins-session-mcp-tools` (the API's message
 table in `api/protocol.py`: the `fs.*` types).
