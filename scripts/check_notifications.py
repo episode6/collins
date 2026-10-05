@@ -291,7 +291,6 @@ def steps(app: App):
 
     def focus_in_sheet():
         focus = win.get_focus()
-        e2e_service.settle()
         check("the sheet took the keyboard", focus is not None and focus.is_ancestor(sheet),
               type(focus).__name__ if focus else "None")
     yield focus_in_sheet
@@ -317,11 +316,9 @@ def steps(app: App):
         check("the message moved under Earlier",
               section_titles(win) == ["Unread 1", "Earlier"], str(section_titles(win)))
         rows = sheet.rows()
-        e2e_service.settle()
         check("the read row lost its guide line",
               "unread" not in rows[1].get_css_classes() and rows[1].notification is shared["msg"])
         focus = win.get_focus()
-        e2e_service.settle()
         check("the keyboard is still in the sheet, on the row that was clicked",
               focus is not None and focus.is_ancestor(sheet) and focus is rows[1],
               type(focus).__name__ if focus else "None")
@@ -642,7 +639,6 @@ def steps(app: App):
         win.is_active = lambda: True
         # The app's tool dispatch, end to end: the reply is one of the three.
         ok, reply = app.tool_client.notify_user((win, shared["tab_b"]), {"message": "Through the tool"})
-        e2e_service.settle()
         check("the notify_user tool replies 'in Collins' for a card",
               ok and reply == "The user was notified in Collins.", reply)
     yield message_unfocused
@@ -710,7 +706,6 @@ def steps(app: App):
         e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         row = center.rows()[0]  # a fresh row: the visit above read the coalesced one
-        e2e_service.settle()
         check("an unfocused bell is a desktop notification and an unread bell row",
               row.kind == notifycenter.KIND_BELL and not row.read and row.session_id == SESSION_B
               and SESSION_B in win._desktop_keys, f"{row.kind} read={row.read}")
@@ -853,7 +848,6 @@ def steps(app: App):
         e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         row = center.rows()[0]
-        e2e_service.settle()
         check("an unfocused placeholder message is a desktop notification under the placeholder id",
               "placeholder-90" in win._desktop_keys and row.session_id == "placeholder-90" and not row.read)
         win._set_placeholder_unread("placeholder-90", False)  # the handoff takes the green row down first
@@ -1046,9 +1040,7 @@ def steps(app: App):
               rows[0].title == "Collins 9.9.9 is available"
               and updatecheck.running_version() in rows[0].body,
               f"{rows[0].title!r} {rows[0].body!r}")
-        e2e_service.settle()
         check("and the sound was asked for", played == ["default"], str(played))
-        e2e_service.settle()
         check("no desktop notification while Collins is focused", not app._update_desktop_sent)
         shared["update_row"] = rows[0]
     yield update_in_collins
