@@ -158,6 +158,8 @@ PHASE_ONE_TYPES = [
     "store.flags",
     # PR-2.6: the transcript's links.
     "store.transcript-tail",
+    # PR-2.8: the Markdown export's text.
+    "store.transcript-export",
     "trust.check",
     "trust.grant",
     "pty",
@@ -541,6 +543,7 @@ SAMPLES = {
         "can_background": True,
     },
     ("store.transcript-tail", p.REQUEST): {"session": ID},
+    ("store.transcript-export", p.REQUEST): {"session": ID},
     ("trust.check", p.REQUEST): {"path": "/home/u/project"},
     ("trust.grant", p.REQUEST): {"path": "/home/u/project", "scope": "launch"},
     ("pty", p.EVENT): {
@@ -826,6 +829,11 @@ REPLIES = {
     "store.forget": {},
     "store.flags": {},
     "store.transcript-tail": {"links": ["https://example.test/a", "src/a.py:3"]},
+    "store.transcript-export": {
+        "text": "# A session\n\n_No messages._\n",
+        "text_chunked": False,
+        "text_bytes": 0,
+    },
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
     "panel.key": {},
