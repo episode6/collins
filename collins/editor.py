@@ -113,9 +113,13 @@ class _OpenFile:
         self.pending_change: dict | None = None
         # A `gone` marked a clean buffer modified ("was deleted."): a rename
         # or a cut's paste that lands afterwards with the file's new place
-        # and mtime takes the mark back (`_retarget_open`); a buffer that
-        # was dirty before the `gone` keeps its own mark.
+        # takes the mark back (`_retarget_open`); a buffer that was dirty
+        # before the `gone` keeps its own mark. `gone_mtime` is what the
+        # buffer expected before the `gone`: a file under a moved folder has
+        # no mtime of its own in the reply, and a move keeps the inode (or
+        # `copystat`s its times), so that one is restored.
         self.gone_marked = False
+        self.gone_mtime: int | None = None
         self.saving = False
         # A save asked for while one was in flight: sent from _on_saved
         # with the new mtime, its waiters answered with that save's.
@@ -686,15 +690,24 @@ class EditorPane(Gtk.Box):
             # from recreating the old name; a rename keeps the file's mtime,
             # so the one the next save expects stays — unless the service
             # answered another, which is then the truth.
-            if mtime is not None and Path(moved) == new:
-                if opened.mtime != mtime:
-                    opened.mtime = mtime
-                if opened.gone_marked:
-                    opened.gone_marked = False
-                    opened.buffer.set_modified(False)
-                    deleted = _("{name} was deleted.").format(name=old.name)
-                    if self._banner.get_title() == deleted and self._banner.get_revealed():
-                        self._banner.set_revealed(False)
+            if mtime is not None and Path(moved) == new and opened.mtime != mtime:
+                opened.mtime = mtime
+            if opened.gone_marked:
+                # The file is right here under its new name: the mark a
+                # `gone` set is taken back. A file inside a moved folder has
+                # no mtime in the reply; the one it expected before the
+                # `gone` is restored (the move kept it), and the re-watch
+                # below seeds the service with it, so a file that really
+                # differs is one `file-changed` at once, never a silent
+                # save over it.
+                if opened.mtime is None:
+                    opened.mtime = opened.gone_mtime
+                opened.gone_marked = False
+                opened.gone_mtime = None
+                opened.buffer.set_modified(False)
+                deleted = _("{name} was deleted.").format(name=Path(key).name)
+                if self._banner.get_title() == deleted and self._banner.get_revealed():
+                    self._banner.set_revealed(False)
             if opened.loading:
                 # The load in flight is reading the old path, so it is
                 # already doomed: start it again from the new one, which
@@ -1364,6 +1377,7 @@ class EditorPane(Gtk.Box):
         if event.get("gone"):
             if opened.mtime is None:
                 return  # already told
+            opened.gone_mtime = opened.mtime
             opened.mtime = None
             opened.gone_marked = not opened.buffer.get_modified()
             opened.buffer.set_modified(True)  # nothing on disk to save over silently

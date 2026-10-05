@@ -185,13 +185,24 @@ def run(root: str) -> int:
     check("no banner", not banner(pane), banner(pane))
 
     # -- a renamed folder takes the open file along --------------------------------------
+    # A `gone` for the open file that beats the rename's reply (the service's
+    # watch saw its old path vanish under the moved folder, D41's S1 race for
+    # a nested file): the clean buffer is marked deleted, and the re-key takes
+    # the mark back and restores the mtime it expected.
+    moved.buffer.set_modified(False)
+    pane._on_file_changed({"t": "file-changed", "handle": moved.watch_handle, "path": main2, "gone": True})
+    check("a gone marks the clean buffer deleted", moved.gone_marked and moved.mtime is None and moved.buffer.get_modified() and "was deleted" in banner(pane), (moved.gone_marked, moved.mtime, banner(pane)))
     source = os.path.join(root, "source")
     pane._rename(os.path.join(root, "src"), "source")
     check("the folder is renamed on disk", wait_for(lambda: os.path.isdir(source) and not os.path.exists(os.path.join(root, "src"))), os.listdir(root))
     under = os.path.join(source, "main2.py")
     check("the open file under it is re-keyed", wait_for(lambda: under in pane._open and main2 not in pane._open), list(pane._open))
+    nested = pane._open[under]
+    check("the gone mark is taken back and the mtime restored", not nested.gone_marked and nested.mtime == mtime == os.stat(under).st_mtime_ns // 1000 and not nested.buffer.get_modified(), (nested.gone_marked, nested.mtime, mtime))
+    check("and the deleted banner withdrawn", "was deleted" not in banner(pane), banner(pane))
     check("and still watched", wait_for(lambda: pane._open[under].watch_handle is not None and watcher.watching(pane._open[under].watch_handle)))
     check("the tree lists the renamed folder", wait_for(lambda: (0, "source") in rows(tree) and (0, "src") not in rows(tree)), rows(tree))
+    nested.buffer.set_modified(True)  # its edits are unsaved again, as the cut below expects
 
     # -- refusals: a taken name, a path-shaped name ---------------------------------------
     readme = os.path.join(root, "README.md")
