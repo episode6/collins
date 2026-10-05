@@ -46,15 +46,21 @@ if REPO not in sys.path:
 # must never be (sandboxplan.plan_dir).
 import tempfile  # noqa: E402
 
+# With no runtime directory at all (CI's container) nothing is set: the
+# plan files then go under the check's scratch state home and the API
+# socket under its bounded fallback, as `sandboxplan.plan_dir` and
+# `api.server.runtime_dir` have it, and /tmp is never the plan's home.
 _old_runtime = os.environ.get("XDG_RUNTIME_DIR")
-RUNTIME_DIR = tempfile.mkdtemp(prefix="cr-", dir=_old_runtime if _old_runtime else None)
-# The headless compositor's socket is named relative to the runtime
-# directory the check was started under: make it absolute first, or GTK
-# finds no display (CI's Xvfb names its display in DISPLAY and is unmoved).
-_wayland = os.environ.get("WAYLAND_DISPLAY")
-if _old_runtime and _wayland and not _wayland.startswith("/"):
-    os.environ["WAYLAND_DISPLAY"] = os.path.join(_old_runtime, _wayland)
-os.environ["XDG_RUNTIME_DIR"] = RUNTIME_DIR
+RUNTIME_DIR: str | None = None
+if _old_runtime:
+    RUNTIME_DIR = tempfile.mkdtemp(prefix="cr-", dir=_old_runtime)
+    # The headless compositor's socket is named relative to the runtime
+    # directory the check was started under: make it absolute first, or
+    # GTK finds no display (CI's Xvfb names its display in DISPLAY).
+    _wayland = os.environ.get("WAYLAND_DISPLAY")
+    if _wayland and not _wayland.startswith("/"):
+        os.environ["WAYLAND_DISPLAY"] = os.path.join(_old_runtime, _wayland)
+    os.environ["XDG_RUNTIME_DIR"] = RUNTIME_DIR
 
 from collins.api import server as api_server  # noqa: E402
 
@@ -91,9 +97,10 @@ def _stop(proc: subprocess.Popen) -> None:
 def _stop_all() -> None:
     for proc in list(_services):
         _stop(proc)
-    import shutil
+    if RUNTIME_DIR:
+        import shutil
 
-    shutil.rmtree(RUNTIME_DIR, ignore_errors=True)
+        shutil.rmtree(RUNTIME_DIR, ignore_errors=True)
     if _stubs_data:
         for path in (_stubs_data, _stubs_data + ".calls.jsonl"):
             try:
