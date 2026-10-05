@@ -1,6 +1,22 @@
 collins (0.1.5) UNRELEASED; urgency=medium
 
-  * Next release, in development.
+  * New dependency gir1.2-soup-3.0 (libsoup 3): the socket between the
+    window and its session service.
+  * The service is its own process: collins-service runs every session,
+    terminal, sandbox and gh call, and the window is a client of it over a
+    Unix socket. Quitting or crashing the window ends no session. The
+    window starts the service on demand (its systemd user unit,
+    /usr/lib/systemd/user/collins-service.service, is installed but never
+    enabled or started by the package, which restarts nothing on
+    upgrade); collins-service --check says what a headless box needs.
+  * Detach a tab to leave its session running as a sidebar row; Quit
+    leaves sessions running and the next launch reopens the tabs; Restart
+    service in the main menu runs new service code after an upgrade.
+  * App state is split in two: state.json for sessions and projects,
+    ui-state.json for this computer. The first launch migrates and keeps
+    state.json.pre-split.
+  * Fixes: closing a worktree session answers the CLI's numbered exit
+    dialog; the .deb now ships every subpackage and the service command.
 
  -- Geoff Hackett <ghackett@episode6.com>  Sun, 27 Sep 2026 20:45:00 -0400
 

@@ -64,7 +64,7 @@ session, and a single `-f` fails silently). The CLI also *moves* a transcript
 to the worktree's project directory the moment a session enters one; the
 service follows it (`ServiceCore.sync_transcript_paths` on every refresh of
 its store: a live session whose transcript path is gone is re-aimed at the
-path the scan found, PR-1.12d), and the client hears the session's
+path the scan found), and the client hears the session's
 `transcript_path` and the row's `path`, never stat-ing a transcript.
 
 ## The store (`store.py`) and the view-model (`models.py`)
@@ -79,7 +79,7 @@ whether rows must be rebuilt. `SessionItem` properties the sidebar binds to:
 `attention` | `background`), `state` (`""` | `interrupted`), `busy`, `unread`,
 `syncing`, `backgrounding`, `can_background`, `background` (`""` |
 `running` | `pending`: the service's word that the row's conversation runs
-as a /bg agent, PR-1.12d), `running`. `unread-changed`,
+as a /bg agent), `running`. `unread-changed`,
 `busy-changed` and `archived` signals fire from the setters so the badge and
 notification center follow without callers remembering to announce.
 
@@ -100,14 +100,22 @@ question "does this header stand for a folder with nothing in it";
 
 ## The store and the state over the API (`remotestore.py`, `remotestate.py`)
 
-Since PR-1.10 (split-service spec §3.8, §3.15) the `SessionStore` and the
-`AppState` above are **the service's**: `service.core.ServiceCore` owns
-them (`ServiceCore.with_state()` builds the state with `migrate=True,
-device=False`; `start_store()` the store) and `service/storefeed.py`
-publishes them. Everything in the UI — `app.state`, `app.store`,
-`window.state`, `window.store`, the sidebar, Preferences, the tabs' settings
-dict — holds the client's **mirrors** on one `api.client.SocketLink`
-(`App._start_service_client`):
+Collins is two processes (split-service spec §3.1): the `SessionStore` and
+the `AppState` above are **the service's** (`collins-service`, a GTK-free
+process). `service.core.ServiceCore` owns them (`ServiceCore.with_state()`
+builds the state with `migrate=True, device=False`; `start_store()` the
+store) and `service/storefeed.py` publishes them. Everything in the window
+— `app.state`, `app.store`, `window.state`, `window.store`, the sidebar,
+Preferences, the tabs' settings dict — holds the client's **mirrors** on one
+`api.client.SocketLink` the connection manager (`connection.py`) keeps up.
+The link has two WebSockets: the primary carries the subscription, every
+event, every output frame and `send`; the **sync channel** answers `call`,
+which blocks its caller (the main thread included) for up to 10 s. Never
+`call` from the link's I/O thread (its callbacks): it deadlocks on its own
+reply. `subscribe` is the one `call` sent on the primary: its snapshot lands
+as events ahead of the reply and the main thread drains the landing queue
+while it waits, so the mirrors are filled when it returns. A reconnect
+resubscribes and `reset()`s and refills both mirrors.
 
 - `RemoteState` *is* an `AppState` (subclass): the same methods and
   attributes, every read local. Its `_load` reads only `ui-state.json`;
@@ -127,14 +135,14 @@ dict — holds the client's **mirrors** on one `api.client.SocketLink`
   `SessionItem`s and the store's lookups and mutators. The snapshot sends
   an `item` per row and one `rows`; each service refresh sends the items
   that moved (changed fields only) then `rows`, which is the client's
-  `refreshed`. **Busy, unread and status are the service's**: since
-  PR-1.12a the tracker runs there (`service/tracking.py`, D29) and sets
+  `refreshed`. **Busy, unread and status are the service's**:
+  the tracker runs there (`service/tracking.py`, D29) and sets
   `busy` and a counted finish's `unread` on the items itself; the client
   sends `store.flags` only for what the person did at its screen —
-  `status`, `unread: false` (and a notification's flag by focus, the
-  placeholder handoff) — and `busy`, `backgrounding` and `can_background`
-  from a client are refused (the last two are the service's background
-  agents' since PR-1.12d, below). The property
+  `status`, `unread: false` (`unread: true` is still accepted: a
+  notification's flag by focus, the placeholder handoff) — and `busy`,
+  `backgrounding` and `can_background` from a client are refused (the last
+  two are the background agents', below). The property
   moves when the `item` comes back (a moment later, over the socket). The
   sandbox host and the live grants are the core's too
   (`ServiceCore.start_sandbox_host`); the box a resumed or forked session
@@ -166,13 +174,35 @@ where only the service can. A new **state key** goes in
 itself. Folder trust is `store.folder_trust` / `trust_folder`
 (`trust.check` / `trust.grant`), the CLI's config being the service
 machine's. `store.pr_store` is the mirror of the service store's
-`PrStore` (`remoteprs.RemotePrStore`, PR-1.11), and the sandbox host keeps
+`PrStore` (`remoteprs.RemotePrStore`), and the sandbox host keeps
 the service's own `AppState`. `notifications`, `diff_notes` and
 `pending_diffs` are written by the service alone (not `writable`): the
 history through its notification center, the marks through
 `service/diffs.py`, the pending show_diffs by the tools.
 
-**Long-running operations are jobs** (PR-1.11): a `job.start` request
+**The service's files and the proof.** `$XDG_RUNTIME_DIR/collins/<app id>/`
+holds `api.sock` (0600), `service.lock` (an `flock` held for the service's
+life: the single-instance guard) and `local-proof` (32 random bytes minted
+at each start; with no runtime dir, `~/.local/state/collins/<app id>/`).
+The `local` capability is proven by reading that file, and **the client
+computes the path for its own app id itself** (`api.client.read_local_proof`:
+`O_NOFOLLOW`, a regular 0600 file of its own uid holding exactly 32 bytes,
+else it sends no `local` at all): a service that names a path in its hello
+is never obeyed, or a hostile remote would read `~/.ssh/id_ed25519`.
+Nothing is gated on `local` yet. The window's tabs are `open_tabs` (session
+ids, or `pty:<id>` for an unresolved one, in tab order) in the per-service
+block of `ui-state.json`, written on every open, close and reorder, frozen
+while the link is down, reopened at launch and on a reconnect (attached
+where the CLI still runs, else resumed); a shell-only tab is never in it.
+
+**A spawn is refused while the session runs.** A `spawn` for a session that
+already has a live agent pty whose CLI runs (not a fork's, nor against a
+fork's origin) is refused `refused` with `protocol.ALREADY_RUNNING_MSGID`
+and the pty id in `args`, so two CLIs never write one transcript; the
+window attaches to the named pty instead. A shell-only agent pty is closed
+and the resume proceeds.
+
+**Long-running operations are jobs**: a `job.start` request
 (kind and arguments, answered with an id) and `job` events (`running`
 with progress or a partial result, then `done`, `failed`, `refused` or
 `cancelled`), run by `service/jobs.py`'s `JobRunner` on daemon threads and
@@ -284,7 +314,7 @@ moves on); `.running.busy` is the moving blue barber pole; `.unread` pulses
 green. An animated property outranks later plain rules, so the unread
 animation's selector excludes every status that outranks it.
 
-**Running rows** (PR-1.12c, spec §3.21, D31). `SessionItem.running` is
+**Running rows** (spec §3.21, D31). `SessionItem.running` is
 the service's word that an agent pty runs the session: an `item` field
 (`StoreFeed.item_fields` asks `ServiceCore.running_sessions`, and
 `refresh_running` sends it when a pty spawns, resolves or exits) and the
@@ -322,7 +352,7 @@ below the agent (`proctree.has_live_descendant`, minus the persisted
 plumbing baseline so MCP servers don't read as work), and for sessions
 attached to a background agent the `claude agents --json` busy status
 (`bgstatus.BackgroundBusyWatch`, since a `/bg` agent's env is scrubbed and
-speaks no progress). All of it runs on the service since PR-1.12a
+speaks no progress). All of it runs on the service
 (`service/tracking.py` `ServiceActivity`, `tests/test_tracking.py`).
 Ungated sources are held on fresh spawns until the gate arms
 (`ServiceActivity.startup_held`): on a "\r" in a client's input frame (an
@@ -335,8 +365,7 @@ host `input_sent`, which the service's `SessionRecord` hands to
 `ServiceActivity.input_sent` for the baseline's last pristine snapshot; the
 app's writes take the service's pty, never the VTE, so a new-chat send, a
 composer send or `start_session` would otherwise never arm it — the
-regression that left every such tab without a pole after PR-1.9, fixed in
-PR 602 and carried into the service here). The busy→idle edge is
+regression that once left every such tab without a pole, fixed in PR 602). The busy→idle edge is
 `ServiceActivity._on_finished`: a counted one flags unread, tells the
 session's clients (who refresh PRs: `MainWindow.run_finished`), and is the
 edge any "do this when the session is done" feature should ride — but it is
@@ -361,8 +390,7 @@ loops, hooks, the auto-mode classifier, thinking and 40 s tool runs, with
 0/3 flapping only in the first seconds of a turn's stream; `COLLINS_LOG=DEBUG`
 logs each hint reading and each finish the tracker lands or disarms.
 
-**Background agents** run on the service since PR-1.12d (split-service
-spec §3.22): `service/bgagents.py`'s `BackgroundAgents`, built by
+**Background agents** run on the service (split-service spec §3.22): `service/bgagents.py`'s `BackgroundAgents`, built by
 `ServiceCore.start_background()`, owns `bgstatus.BackgroundStatusPoller`
 (which polls `background_agents()` on a file monitor over `~/.claude/jobs/`
 — used only as a wake-up, never parsed — plus explicit events; the
@@ -451,7 +479,7 @@ stamps `archived_at` (first archive wins; a restore drops it; archives from
 before the stamp are stamped at first read, never earlier). The
 `auto_delete_archived_after` / `auto_delete_archived_unit` pair (0 = never,
 the default; month = 30 d, year = 365 d) is read by `autodelete.maybe_sweep`,
-which the service runs on its own timer since PR-1.12d
+which the service runs on its own timer
 (`ServiceCore.start_housekeeping`: after the store's first scan, then
 hourly; the e2e probe's door is `debug.sandbox` → `sweep_archived`); a
 cache file (`archive-sweep.json`, the service machine's) holds it to one
@@ -477,7 +505,7 @@ root) before a worktree launch.
 first scan the app **reaps chat dirs no discovered session points at** — which
 is why every throwaway instance must set `COLLINS_CHATS_DIR`. A swept or
 trashed chat folder is made again by the service before a spawn in it (an
-agent's or a panel shell's, PR-1.12d) and by the `chats.trust` job given a
+agent's or a panel shell's) and by the `chats.trust` job given a
 `cwd`; the client never creates one.
 
 **Project icons** (`projecticons.py`): a `project-icon.svg` at a project's

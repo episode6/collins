@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-04. Full change history: git log for this file.
+fork. Last modified: 2026-10-05. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -189,10 +189,12 @@ your `~/.config/collins/` state, so an update is always safe mid-stream.
 | **From source** | `git pull` in the checkout. The launcher from `./data/install.sh` points at the checkout, so it needs no re-run. |
 
 Restart Collins afterwards — a running instance keeps the old code until it
-is relaunched. If any sessions are still working, close the window with
-**Keep Running (Hide Window)** and relaunch: the hidden window comes back,
-but on the old code; use the menu's **Quit** (sessions can be backgrounded
-first) for a real restart.
+is relaunched. The session service is a separate process and keeps *its* old
+code too: Quit leaves it (and every session) running, so after an upgrade use
+the main menu's **Restart service** (now, or when no session is busy; it
+resumes your open tabs) to run the new service. The window and a service one
+protocol version apart keep working together meanwhile. If sessions are still
+working and you only want the window on new code, **Quit** and relaunch.
 
 ## First run
 

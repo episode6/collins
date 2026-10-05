@@ -2,93 +2,149 @@
 
 Collins is two programs. **`collins-service`** runs your sessions: every
 agent's pty, the terminal panel's shells, the sandboxes, the shared state
-(`state.json`), the session tools' MCP socket, the GitHub CLI calls and
-everything that spends tokens. **`collins`**, the window, is a client of
-it: it connects over a Unix socket, renders each session in a terminal
-and hosts the workbench around it. Quitting the window, or losing it to a
-crash, ends nothing: the agents keep working on the service, and the next
-window picks them up.
+(`state.json`), the session tools' MCP socket, every `gh` and `git` call
+Collins makes for you, and everything that spends tokens. **`collins`**,
+the window, is a client of it: it connects over a Unix socket, renders each
+session in a terminal and hosts the workbench around it. Quitting the
+window, or losing it to a crash, ends nothing: the agents keep working on
+the service, and the next window picks them up.
 
-::: tip Where things are
-This page describes the split as of this release: both halves still run
-on the same machine. A service on another machine, reached over ssh, is
-the next phase.
+Nothing about the window looks different because of the split, by design.
+What changed is what *quit* and *close* mean, below.
+
+::: tip Same machine, for now
+Both halves run on the same machine and the same user. A service on another
+machine, reached over ssh, is the next phase; the socket and the protocol
+are built for it.
 :::
 
 ## What runs where
 
 | The service | The window |
 | --- | --- |
-| Agent processes, on ptys it holds | A terminal per session, painted from the service's stream |
-| The screen model of record for every pty | The sidebar, composer, editor, git page, PR pages |
-| `state.json`: names, favorites, archives, drafts, notifications, the pty table | `ui-state.json`: appearance, geometry, keybindings, panel layouts |
-| The session tools' MCP socket, the sandboxes | Notifications, the status icon, Caffeine Mode |
-| `gh`, `git`, titles, the usage panel's fetch, login repair | What you see and type |
+| Agent processes, on ptys it holds; the screen model of record for each | A terminal per session, painted from the service's stream |
+| `~/.claude`: transcripts, the CLI's trust entries, its login | The sidebar, composer, editor, git page, PR pages |
+| `state.json`: names, favorites, archives, drafts, PR records, notifications, the pty table | `ui-state.json`: appearance, geometry, keybindings, panel layouts, `open_tabs` |
+| Busy and finished-run detection, `/bg` handoffs, the agent list | Notification cards, sounds, the status icon, Caffeine Mode |
+| The session tools' MCP socket, the sandboxes and their grants | Dialogs and what you type |
+| `gh`, `git` reads for PRs, titles, usage, icon generation, login repair | The update check (it describes the window's package) |
 
-## Starting and stopping
+The window never reads a session's state off its own terminal: busy, the
+session a terminal belongs to, whether a prompt would land are the
+service's facts, sent as events. The window keeps a mirror of the store and
+of the settings that the service keeps current.
 
-You never start the service by hand. When the window starts it looks for
-the service's socket (`$XDG_RUNTIME_DIR/collins/<app id>/api.sock`) and,
-finding none, starts one: through `systemctl --user start
-collins-service.service` where the unit is installed, else by spawning
-`collins-service` itself. The unit ships with the packages and is written
-by `collins --install-desktop` for a pip install; it is never enabled by
-a package, so nothing runs until a window asks.
+## Starting
 
-The service keeps running after the window quits. To stop it:
+You never start the service by hand. When the window starts it looks for the
+service's socket and, finding none, starts one: `systemctl --user start
+collins-service.service` where `systemctl` exists and the unit is
+installed, else it spawns `collins-service` itself, detached. The unit
+ships with the `.deb`, the RPM, the PPA and the AUR package and is written
+by `collins --install-desktop` for a pip install. **The packages do not
+enable it**: nothing runs until a window asks, and nothing starts at login.
+To have it run from login, enable it yourself:
+
+```bash
+systemctl --user enable collins-service.service
+```
+
+A service spawned without the unit has no restart policy; one the unit
+runs is restarted on failure. The debug instance (`./start-debug`, app id
+`com.episode6.Collins.Debug`) always spawns its own, with no unit, beside
+your real one. It shares your config directory and so your `state.json`:
+run the debug instance and the real one one at a time.
+
+A second `collins-service` for the same app id finds the first and exits 0.
+
+A package upgrade never restarts a running service: the new window keeps
+talking to the old service for as long as their protocols overlap. To
+run the new service code, use **Restart service** (below).
+
+## Quitting, detaching and reopening
+
+A tab is a view over a session's terminal on the service.
+
+- **Detach** (the tab menu, a session row's menu) closes the view and
+  leaves the session running. The row becomes a *running row* (yellow, with
+  the barber pole while the agent works); opening it attaches to the
+  session as it stands, mid-turn included.
+- **Close** is unchanged: the agent is asked to exit, with the same
+  confirmations.
+- **Quit** detaches every tab. With sessions running, the quit dialog says
+  so and offers *Quit*, *Stop Sessions and Quit* (each agent asked to exit
+  first, as quitting always did before the service) and *Keep Running (Hide
+  Window)*. The status icon belongs to the window: it goes with it, though
+  the sessions keep running.
+- **Reopening.** The window records the tabs it has open on this service
+  (`open_tabs` in `ui-state.json`) and reopens them at the next launch and
+  after a reconnect: a session the service still runs is attached, one that
+  ended meanwhile (a restart, a crash of the service) is resumed with
+  `claude --resume`.
+- A crash or `kill -9` of the window ends nothing.
+
+A session counts as running only while its CLI runs: a shell left behind
+after the agent exited is not a running row, and opening that session
+resumes it. The service refuses to spawn a second CLI on a session that is
+already running ("This session is already running in the Collins service");
+the window attaches instead.
+
+If the connection drops while a window is open, the window shows a
+"Reconnecting to the Collins service" banner, finds or restarts the
+service with a growing backoff (1, 2, 5, 10, then every 30 s) and attaches
+every tab again from the service's screen model.
+
+## Restarting and stopping
+
+**Restart service** (the main menu) says what it costs (how many sessions
+run, how many are working), and ends every session the way *Stop Sessions
+and Quit* does. *Restart Now* does it at once; *Restart When Idle* has the
+service wait until no session is busy, shown as "Restarting when idle"
+with a Cancel where the reconnect banner goes. The service disconnects its
+windows first, so a window sees the link go rather than each session end,
+reconnects to the new service and resumes every open tab.
+
+A crash of the service ends every agent, as a crash of the old single
+process did; the sessions are resumable, and the window's reconnect brings
+them back.
+
+**The protocol mismatch dialog.** A service and a window speak the same
+protocol or one apart; outside that the window refuses to connect and names
+both versions. If the service is the older it offers *Restart Service* (the
+service is sent SIGTERM) and *Quit*; if the service is newer, the dialog
+asks you to upgrade Collins and the window quits. A restarted service that
+still speaks another protocol gets the same ending.
+
+To stop the service outright:
 
 ```bash
 systemctl --user stop collins-service.service   # the unit
 kill $(pgrep -f collins-service)                 # a spawned one
 ```
 
-Stopping ends every session the way *Stop sessions and quit* does: each
-agent is asked to exit (the CLI's own exit keystrokes, a worktree dialog
-answered, a bounded wait, then the process ended for good), its session
-id is recorded, and the next window finds them resumable. A second
-`collins-service` for the same app id finds the first's lock and exits
-at once.
+Either is SIGTERM: every session is ended as above and its id is recorded
+(`resume_on_start` in `state.json`), and the service exits 0, so the unit
+does not restart it by itself. The next window starts it again.
 
-::: warning Until the next release's session lifecycle lands
-A session that is still running in the service cannot be opened again
-from the sidebar yet: the service refuses to start a second copy of it
-("This session is already running in the Collins service"). Attaching to
-the running one is the next piece of the split.
-::: A client's `service.restart` does the same and exits
-cleanly, so the unit does not restart it by itself; the window that
-asked reconnects and starts it again.
+## Where things live
 
-If the connection drops while a window is open, the window shows a
-"Reconnecting to the Collins service" banner, finds or restarts the
-service with a growing backoff, and attaches every tab again from the
-service's screen model.
+| What | Where |
+| --- | --- |
+| The API socket | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` (0600, directory 0700) |
+| Single-instance lock | `service.lock` beside it, held for the service's life |
+| The local proof | `local-proof` beside it: 32 random bytes, 0600, minted at each start |
+| The session tools' socket | `mcp.sock` beside it |
+| With no `$XDG_RUNTIME_DIR` | `~/.local/state/collins/<app id>/` for all of the above; a path too long for a Unix socket falls back to a 0700 directory under the temp directory |
+| Service state | `~/.config/collins/state.json` |
+| This device's state, `open_tabs` | `~/.config/collins/ui-state.json` |
 
-## Quitting, detaching and reopening
-
-A tab is a view over a session's terminal on the service. **Detach**
-closes the view and leaves the session running; its sidebar row becomes a
-running row, and opening it attaches again. **Quit** detaches every tab
-(unless *When quitting with running sessions* says otherwise: *Stop
-Sessions* asks each agent to exit first, as quitting always did before the
-service). The window remembers the tabs it had open on this service
-(`open_tabs` in `ui-state.json`) and reopens them at the next launch, and
-after a reconnect: a session the service still runs is attached, one that
-ended meanwhile (a restart, a crash of the service) is resumed. A crash of
-the window ends nothing; the next launch finds the tabs where they were.
-
-**Restart service** (the main menu) ends every session with the service:
-the dialog says how many, and how many are working. *Restart Now* sends
-`service.restart`; *Restart When Idle* asks the service to wait until no
-session is busy (it looks every 2 s), shown as "Restarting when idle" with
-a Cancel in the banner's place. The service closes its clients before it
-ends the sessions, so a window sees the link go, not each session end, and
-resumes every open tab once it has reconnected to the new service. A
-service that refuses this window's protocol gets a dialog naming both
-versions. When the service is the older one it offers *Restart Service*
-(the service is sent SIGTERM, since it answers nothing else) and *Quit*;
-a newer service is left running and the dialog asks for an upgrade of
-Collins. If the restarted service still speaks another protocol, the
-window says so and quits.
+The proof is how the window finds out it shares the service's filesystem:
+it computes the proof's path for its own app id, opens it without following
+a symlink, requires a regular 0600 file of its own uid holding exactly 32
+bytes, and sends the contents back. A service that merely *names* a path
+gets nothing read. Nothing in the window is gated on it yet; it is the
+check later phases hide local-only actions behind. The socket is not a
+security boundary: every client is already trusted with a shell.
 
 ## `collins-service --check`
 
@@ -106,25 +162,32 @@ claude:       /home/you/.local/bin/claude
 bwrap:        /usr/bin/bwrap
 ```
 
+It exits 1 when `$XDG_RUNTIME_DIR` is unset or `claude` is not on the
+login shell's `PATH`.
+
 - **Lingering.** Without `loginctl enable-linger`, the user manager, the
   service and `$XDG_RUNTIME_DIR` go away at logout and do not exist at
-  boot.
+  boot. On a headless box, `loginctl enable-linger` is the first step.
 - **The CLI on `PATH`.** Shells spawn with the service's environment
-  overlaid by a login-shell capture (`$SHELL -lic 'env -0'`, once at
-  start), which is what finds `~/.local/bin/claude` and your `PATH` on a
-  box with no desktop. `SSH_AUTH_SOCK` is yours to provide there, as it is
-  over ssh.
+  overlaid by a login-shell capture (`$SHELL -lic 'env -0'`, once at start,
+  5 s, failing soft), which is what finds `~/.local/bin/claude` and your
+  `PATH` on a box with no desktop. It never overrides a variable the
+  service was started with. `SSH_AUTH_SOCK` is yours to provide there, as
+  it is over ssh.
 
-`--print-socket` starts the service if needed and prints the socket's
-path; a second `collins-service` for the same app id finds the live
-socket and exits.
+`collins-service --print-socket` starts the service if needed and prints the
+socket's path.
 
-## The debug instance
+## Logging
 
-`./start-debug` runs the window under the app id
-`com.episode6.Collins.Debug`, and that window spawns a service of its own
-under the same id (`collins-service --app-id com.episode6.Collins.Debug`,
-no unit) beside your real one: its own socket, but the same config
-directory and so the same `state.json`. Two services writing one state
-file is one too many: run the debug instance and the real one one at a
-time.
+`COLLINS_LOG=INFO` (or `DEBUG`) turns on the service's logging, to stderr:
+under the unit that is the journal (`journalctl --user -u
+collins-service`). A service spawned by the window sends its output to
+`/dev/null` unless `COLLINS_LOG` is set in the window's environment, in
+which case it inherits the window's stdout and stderr.
+
+## Requirements
+
+`libsoup` 3 (`gir1.2-soup-3.0`, `libsoup3`) carries the socket and is a
+dependency of every package. The service imports no GTK: it runs on a box
+with no display.

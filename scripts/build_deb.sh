@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 # Build a Debian package: dist/collins_<version>_all.deb
 set -euo pipefail
 
@@ -96,7 +96,9 @@ INSTALLED_SIZE="$(du -sk "$BUILD" --exclude=DEBIAN | cut -f1)"
 # Keep Depends in step with debian/control -- this package is the only channel
 # Debian has, and gtksourceview5 is a hard requirement (editor.py exits with
 # an install hint when it is missing, which apt should have made unnecessary).
-# libspelling is only recommended: composer.py degrades to an unchecked text
+# gir1.2-soup-3.0 is the socket between the window and collins-service
+# (collins/api/client.py, collins/service/main.py): a missing typelib is a
+# window that cannot start its service. libspelling is only recommended: composer.py degrades to an unchecked text
 # box without it. The two version floors are the measured ones: GTK 4.10 for
 # Gtk.FileDialog/FontDialog, libadwaita 1.5 for Adw.AlertDialog and friends.
 cat > "$BUILD/DEBIAN/control" <<EOF
@@ -105,8 +107,8 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5
-Recommends: gir1.2-glib-2.0, gir1.2-spelling-1
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5, gir1.2-soup-3.0, python3-markdown-it, python3-linkify-it
+Recommends: gir1.2-glib-2.0, gir1.2-spelling-1, gir1.2-gstreamer-1.0, gir1.2-gst-plugins-base-1.0, bubblewrap, bindfs, fuse3
 Installed-Size: $INSTALLED_SIZE
 Maintainer: episode6 <support@episode6.com>
 Homepage: https://github.com/episode6/collins
