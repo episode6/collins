@@ -204,6 +204,8 @@ _NOT_A_REPO = "not-a-repo"
 # How often a `git-changed` compare waiting on a mutation in flight looks
 # again (the mutation re-seeds the signatures as it lands, PR-2.2).
 _COMPARE_RETRY_MS = 200
+# No tree state kept for after a mutation (a kept one may be None).
+_NO_STATE = object()
 
 
 class GitPage(Adw.Bin):
@@ -335,6 +337,9 @@ class GitPage(Adw.Bin):
         # end. The retry source while a mutation runs.
         self._compare_due = False
         self._compare_retry = 0
+        # The tree state a `git-changed` brought while a mutation was in
+        # flight (_NO_STATE: none kept).
+        self._deferred_state: object = _NO_STATE
         # How many `git-changed` events the page compared its signatures
         # on (the e2e's probe).
         self.changes_heard = 0
@@ -1240,6 +1245,10 @@ class GitPage(Adw.Bin):
         if loaded == "branch" and self._resolve_parent() is None:
             return
         self._loading = True
+        if not self.sidebar.busy:
+            # This read samples the tree state after any mutation: a state
+            # kept from while one was in flight is old news.
+            self._deferred_state = _NO_STATE
         gen = self._gen
         cwd = self._cwd_provider()
         parent_target = self._parent_target
@@ -1451,6 +1460,7 @@ class GitPage(Adw.Bin):
         self._watch_tree = False
         self._watch_stale = None
         self._compare_due = False
+        self._deferred_state = _NO_STATE
         if self._compare_retry:
             GLib.source_remove(self._compare_retry)
             self._compare_retry = 0
@@ -1463,7 +1473,11 @@ class GitPage(Adw.Bin):
         then, on a working-tree load, a moved tree state reloads by key —
         one that lands beside a read in flight is kept for the read's
         landing (_diff_read), so an edit during a read is drawn rather
-        than dropped."""
+        than dropped. A state that arrives while the sidebar's mutation
+        is in flight (the watch's 2 s tick can see it half done) is kept
+        for after it: the mutation's own reload, which samples the state
+        after it, drops it (_read_diff); one with no reload is compared
+        on the retry."""
         if self._closing or not self._opened:
             return
         cwd = event.get("cwd")
@@ -1472,6 +1486,14 @@ class GitPage(Adw.Bin):
         if self._loaded not in ("unstaged", "staged"):
             return
         state = event.get("state")
+        if self.sidebar.busy:
+            self._deferred_state = state
+            self._schedule_retry()
+            return
+        self._state_moved(state)
+
+    def _state_moved(self, state: str | None) -> None:
+        """A tree state the watch pushed, against the one the page drew."""
         if self._loading:
             self._watch_stale = state
             return
@@ -1493,8 +1515,7 @@ class GitPage(Adw.Bin):
             return
         if self.sidebar.busy:
             self._compare_due = True
-            if not self._compare_retry:
-                self._compare_retry = GLib.timeout_add(_COMPARE_RETRY_MS, self._retry_compare)
+            self._schedule_retry()
             return
         self._compare_due = False
         if counted:
@@ -1502,10 +1523,25 @@ class GitPage(Adw.Bin):
         if self._check_root(cwd):
             self._compare_signatures(cwd)
 
+    def _schedule_retry(self) -> None:
+        if not self._compare_retry:
+            self._compare_retry = GLib.timeout_add(_COMPARE_RETRY_MS, self._retry_compare)
+
     def _retry_compare(self) -> bool:
+        """What waited on a mutation in flight: still busy, look again;
+        else the signatures' compare, then a kept tree state no reload
+        has covered since."""
         self._compare_retry = 0
-        if self._compare_due and self._watched_cwd is not None:
+        if self._closing or self._watched_cwd is None:
+            return GLib.SOURCE_REMOVE
+        if self.sidebar.busy:
+            self._schedule_retry()
+            return GLib.SOURCE_REMOVE
+        if self._compare_due:
             self._compare_on_event(self._watched_cwd)
+        state, self._deferred_state = self._deferred_state, _NO_STATE
+        if state is not _NO_STATE and self._opened and self._loaded in ("unstaged", "staged"):
+            self._state_moved(state)
         return GLib.SOURCE_REMOVE
 
     # -- the sidebar --------------------------------------------------------------------

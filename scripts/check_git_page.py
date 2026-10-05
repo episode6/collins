@@ -162,7 +162,14 @@ def log_shas(repo: str, *range_args: str) -> list[str]:
 
 
 def git_out(repo: str, *args: str) -> str:
-    return subprocess.run([GIT, *args], cwd=repo, check=True, capture_output=True, text=True).stdout
+    # The check's own probes must not move the tree it watches: a plain
+    # `git status` refreshes the index's stat data and rewrites it, which
+    # the service's watch reports as a move (PR-2.2: the page compares on
+    # every `git-changed`, not only when the check ticks it). Collins' own
+    # reads run with --no-optional-locks; so do these.
+    return subprocess.run(
+        [GIT, "--no-optional-locks", *args], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout
 
 
 def card_title(page: GitPage) -> str:
