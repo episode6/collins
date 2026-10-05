@@ -493,27 +493,43 @@ class EditorPane(Gtk.Box):
         )
 
     def _rename(self, path: str, new_name: str) -> None:
-        target, error = editorfiles.rename_target(self._root, path, new_name)
-        if error is not None:
-            self._notify(self._rename_error_message(Path(path).name, new_name.strip(), error))
-            return
-        if target is None:
+        """The rename, on the service (`fs.rename`, §3.23): the name is
+        checked here first (`rename_name_error`, pure: an empty or
+        path-shaped name never makes a round trip), the rest — the entry
+        is there, the name is free, both inside the root — on the service,
+        which does the rename and answers the renamed file's mtime."""
+        name = new_name.strip()
+        verdict = editorfiles.rename_name_error(path, name)
+        if verdict is False:
             return  # the name came back unchanged
-        try:
-            Path(path).rename(target)
-        except OSError as err:
-            self._notify(
-                _("Couldn't rename {name}: {message}").format(
-                    name=Path(path).name, message=err.strerror or str(err)
-                )
-            )
+        if verdict is not None:
+            self._notify(self._rename_error_message(Path(path).name, name, verdict))
             return
-        self._retarget_open(Path(path), target)
-        # The old path is now nothing: a directory renamed out from under the
-        # tree leaves its rows and its monitor watching a name that's gone.
-        self._tree.forget_dir(path)
-        self._tree.refresh_dir(target.parent)
-        self._tree.reveal(target)
+        target = str(Path(path).parent / name)
+        root = str(self._root)
+
+        def land(kind: str, value) -> None:
+            if self._shut:
+                return
+            if kind != "ok":
+                reason = remotefiles.rename_reason(value)
+                if reason is not None:
+                    self._notify(self._rename_error_message(Path(path).name, name, reason))
+                else:
+                    self._notify(
+                        _("Couldn't rename {name}: {message}").format(
+                            name=Path(path).name, message=remotefiles.refusal_words(value)
+                        )
+                    )
+                return
+            self._retarget_open(Path(path), Path(target), mtime=value)
+            # The old path is now nothing: a directory renamed out from under the
+            # tree leaves its rows and its monitor watching a name that's gone.
+            self._tree.forget_dir(path)
+            self._tree.refresh_dir(Path(target).parent)
+            self._tree.reveal(Path(target))
+
+        self._off_main(lambda: remotefiles.rename_path(path, target, root), land)
 
     def _rename_error_message(self, name: str, new_name: str, error) -> str:
         RE = editorfiles.RenameError
@@ -542,31 +558,47 @@ class EditorPane(Gtk.Box):
     def _paste(self, dest_dir: str, paths: list[str], move: bool) -> None:
         """*paths* as the clipboard handed them over — possibly several, and
         possibly from outside the project (a copy taken in a file manager is
-        exactly what paste is for). Nothing is ever overwritten: a name
-        already taken lands as "name (copy)" instead."""
+        exactly what paste is for, on a local client; the service refuses a
+        source outside every root it knows for any other). Nothing is ever
+        overwritten: a name already taken lands as "name (copy)" instead.
+        The copies and moves are the service's (`fs.paste`, §3.23)."""
         if not paths:
             self._notify(_("There's nothing on the clipboard to paste here."))
             return
-        outcomes = editorfiles.paste_entries(self._root, dest_dir, paths, move)
+        root = str(self._root)
+
+        def land(kind: str, value) -> None:
+            if self._shut:
+                return
+            if kind != "ok":
+                self._notify(_("Couldn't paste: {message}").format(message=remotefiles.refusal_words(value)))
+                return
+            self._pasted(dest_dir, value, move)
+
+        self._off_main(lambda: remotefiles.paste_files(paths, dest_dir, move, root), land)
+
+    def _pasted(self, dest_dir: str, outcomes: list[remotefiles.PasteOutcome], move: bool) -> None:
+        """What the service's paste did: the tree refreshed where things
+        landed and left, an open file that moved re-keyed, the cut spent."""
         pasted = [outcome for outcome in outcomes if outcome.target is not None]
         for outcome in pasted:
             if not move:
                 continue
-            self._retarget_open(outcome.source, outcome.target)
+            self._retarget_open(Path(outcome.source), Path(outcome.target))
             # What moved is now nothing: a directory moved out from under the
             # tree leaves its rows and its monitor watching a path that's gone.
             self._tree.forget_dir(outcome.source)
-            self._tree.refresh_dir(outcome.source.parent)
+            self._tree.refresh_dir(Path(outcome.source).parent)
         self._tree.refresh_dir(dest_dir)
         if len(pasted) == 1:
-            self._tree.reveal(pasted[0].target)
+            self._tree.reveal(Path(pasted[0].target))
         if move and pasted:
             self._spend_cut(outcomes)
         failed = [outcome for outcome in outcomes if outcome.error is not None]
         if failed:
             self._notify(self._paste_error_message(failed))
 
-    def _spend_cut(self, outcomes: list[editorfiles.PasteOutcome]) -> None:
+    def _spend_cut(self, outcomes: list[remotefiles.PasteOutcome]) -> None:
         """What is left of a cut once a paste of it has moved what it could.
         A cut is spent the moment it lands — what it named isn't there any
         more, so a second paste could only report it missing — but only for
@@ -578,7 +610,7 @@ class EditorPane(Gtk.Box):
         if clipboard.get_content() is None:
             return  # someone else's cut — not ours to rewrite
         still_cut = [
-            str(outcome.source)
+            outcome.source
             for outcome in outcomes
             if outcome.target is None and outcome.error is not editorfiles.PasteError.MISSING
         ]
@@ -587,7 +619,7 @@ class EditorPane(Gtk.Box):
         else:
             clipboard.set_content(None)
 
-    def _paste_error_message(self, failed: list[editorfiles.PasteOutcome]) -> str:
+    def _paste_error_message(self, failed: list[remotefiles.PasteOutcome]) -> str:
         """Why a paste didn't happen — named, the way the rename errors are.
         Several at once (a clipboard full of files, half of them gone) is
         counted rather than listed: a banner is one line."""
@@ -598,7 +630,7 @@ class EditorPane(Gtk.Box):
                 len(failed),
             ).format(count=len(failed))
         outcome = failed[0]
-        name = outcome.source.name
+        name = Path(outcome.source).name
         PE = editorfiles.PasteError
         if outcome.error is PE.MISSING:
             return _("{name} is no longer there.").format(name=name)
@@ -610,16 +642,20 @@ class EditorPane(Gtk.Box):
             return _("That folder is no longer there.")
         if outcome.error is PE.OUTSIDE:
             return _("{name} can't be pasted outside this project.").format(name=name)
+        if outcome.error is PE.SOURCE_OUTSIDE:
+            return _("{name} is outside every project the service knows.").format(name=name)
         if outcome.error is PE.NO_ROOM:
             return _("There are already too many copies of {name} here.").format(name=name)
         return _("Couldn't paste {name}: {message}").format(name=name, message=outcome.message)
 
-    def _retarget_open(self, old: Path, new: Path) -> None:
+    def _retarget_open(self, old: Path, new: Path, mtime: int | None = None) -> None:
         """Follow a rename through the open tabs: the renamed file — or every
         open file inside a renamed folder — keeps its buffer, its unsaved
         changes and its place in the strip, now pointed at the new path.
         Reopening it as a fresh tab instead would throw away edits that
-        haven't been saved yet."""
+        haven't been saved yet. *mtime* is the renamed file's as the service
+        answered it (`fs.rename`): the open file at *new* takes it, so the
+        next save expects the file as it is."""
         for key in list(self._pages):
             moved = editorfiles.renamed_path(old, new, key)
             if moved is None or moved == key:
@@ -635,7 +671,10 @@ class EditorPane(Gtk.Box):
             opened.path = Path(moved)
             # A save writes to `opened.path`, so this is what keeps Ctrl+S
             # from recreating the old name; a rename keeps the file's mtime,
-            # so the one the next save expects stays.
+            # so the one the next save expects stays — unless the service
+            # answered another, which is then the truth.
+            if mtime is not None and Path(moved) == new and opened.mtime != mtime:
+                opened.mtime = mtime
             if opened.loading:
                 # The load in flight is reading the old path, so it is
                 # already doomed: start it again from the new one, which

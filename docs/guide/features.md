@@ -487,8 +487,14 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - Real editing: line numbers, bracket matching, undo/redo, find in file
   (`Ctrl+F`), save (`Ctrl+S`), and **180 languages'** worth of syntax
   highlighting via GtkSourceView — the engine behind GNOME Text Editor. The
-  tree's right-click menu covers rename, copy, cut and paste, through the
-  system clipboard, so files round-trip with your file manager — and, on a
+  tree's right-click menu covers rename, copy, cut and paste, carried out
+  by the service (a rename stays in its folder and never lands on a taken
+  name; a paste never overwrites, landing as "name (copy)" instead; a cut
+  moves, and an open file follows its rename or move with its unsaved
+  edits). Copies travel through the system clipboard as Collins' own
+  `collins://` references to the service's files — and, when the service is
+  this machine, as ordinary file URIs too, so files round-trip with your
+  file manager — and, on a
   file (an Agent files row too), the same **Open In…** submenu as the git
   page's files list: your *Footer apps* that take a file, then *Default
   app* (`xdg-open`).

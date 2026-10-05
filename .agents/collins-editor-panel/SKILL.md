@@ -39,10 +39,14 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   see "The tree, quick open and roots" below). Icons and
   colors per extension from `filetypes.py` (bundled `ft-*-symbolic` Octicons;
   color classes defined in `app.py`'s scheme provider, Seti-inspired). Context
-  menus (new file/folder, rename, copy/cut/paste, trash, reveal) act through
-  `editorfiles.rename_target` / `paste_target` / `unique_target` /
-  `paste_entries`; the clipboard payloads (`Gdk.FileList`, `text/uri-list`,
-  `x-special/gnome-copied-files` for cut) are `fileclipboard.py`'s. A file
+  menus (Add to chat, Copy, Cut, Paste, Rename…, Open In…) act through the
+  service's `fs.rename` / `fs.paste` (`remotefiles.rename_path` /
+  `paste_files`; the rules `projectfiles.rename_target` / `paste_target` /
+  `unique_target` / `paste_entries` run there); the clipboard payloads
+  (Collins' own `x-collins/copied-files` of `collins://` URIs, and for a
+  `local` client `Gdk.FileList`, `text/uri-list`,
+  `x-special/gnome-copied-files` for cut) are `fileclipboard.py`'s (see
+  "File operations and the clipboard" below). A file
   row (and an Agent files row) also gets the git page's *Open In…* submenu
   (`openwithrows.file_open_with_menu` over the `footer_apps` setting the
   pane relays through `set_footer_apps`, plus *Default app* via xdg-open);
@@ -228,6 +232,68 @@ pathless walker reads as `Path` methods):
   the git page's file-row menu (`GitSidebar._file_on_disk`; the
   right-click asks off the main loop, the e2e probes block) all ask it.
 
+**File operations and the clipboard are the service's** (split-service
+spec §3.23, PR-2.5, D35). The rename and paste rules moved out of
+`editorfiles` into `projectfiles.py` with the directory reads
+(`RenameError` / `PasteError` are re-exported for the editor's messages,
+and `rename_name_error`, the pure name check, for the client to run
+first); nothing in `editor.py`, `filetree.py` or `fileclipboard.py`
+touches the disk.
+
+- `fs.rename {path, target, root}` (`EditorPane._rename` →
+  `remotefiles.rename_path` on a worker through `_off_main`): the name is
+  checked on the client (`editorfiles.rename_name_error`: empty or
+  path-shaped → the banner, unchanged → nothing, no round trip), the rest
+  on the service (`projectfiles.rename_entry`: the entry is there, the
+  target is the same directory's — a rename never moves things elsewhere,
+  a paste of a cut does — the name is free, a broken symlink counts as
+  taken, both resolve inside *root*: a rename across roots or through a
+  link out is `outside`). A refusal carries the rule as its `reason`
+  (`protocol.FS_RENAME_REASONS`; `remotefiles.rename_reason` turns it
+  back into a `RenameError` for `_rename_error_message`); a failure
+  (permissions) comes with the OS's words. The reply's `mtime` is the
+  renamed file's (null for a folder): `_retarget_open(old, new, mtime)`
+  re-keys the open tabs as before and takes that mtime for the file at
+  `new` when it differs, then re-watches, so the next save expects the
+  file as it is. Then `forget_dir` / `refresh_dir` / `reveal` in that
+  order (the tree's listings are asynchronous).
+- `fs.paste {entries, target, cut, root}` (`_paste` → `remotefiles.
+  paste_files`, landing in `_pasted`): `projectfiles.paste_entries` on the
+  service, a copy or a move for a cut, never over anything (a taken name
+  lands as "name (copy)", `unique_target`), a folder never into itself.
+  Each source is confined on the worker: a client that is not `local`
+  may name a source only inside a root the service knows
+  (`PasteError.SOURCE_OUTSIDE`, per entry — the rest of the clipboard
+  still lands); a `local` client may paste anything, and the service does
+  the copy. The reply's `results` are one `remotefiles.PasteOutcome` per
+  entry (source, target, error, message; paths as strings) and `placed`
+  the paths that landed; `_pasted` refreshes the tree, re-keys an open
+  file a cut moved, spends the cut (`_spend_cut`: what failed stays on
+  the clipboard, still cut) and names a failure in the banner.
+- `fs.mkdir {path, root}` (`remotefiles.make_dir`; `projectfiles.
+  make_directory`): one folder inside the root, never over anything; the
+  refusal's `reason` is one of `protocol.FS_MKDIR_REASONS`. Served for
+  Phase 3's path picker (*New folder*); the tree has no caller yet.
+- **The clipboard** (`fileclipboard.set_files` / `has_files` /
+  `read_files`, each taking a `remotefiles.ClipboardScope` or reading the
+  link's: its hello's `service_id` and its `local` proof): Copy and Cut
+  always put Collins' own `x-collins/copied-files` payload on the
+  clipboard (the GNOME payload's shape — the operation, then one
+  `collins://<service id>/<path>` URI per line, `editorfiles.collins_uri`)
+  and the paths as plain text; only a `local` client adds the `file:`
+  payloads (`Gdk.FileList`, `text/uri-list`, `x-special/gnome-copied-files`),
+  since a `file:` URI names a file on the client's machine. Reading
+  prefers Collins' own payload (`editorfiles.parse_copied_files(text,
+  service_id, local)`: another service's URIs are dropped; `file:` URIs
+  only when local), then — local only — the GNOME payload and GDK's file
+  list. `has_files` judges the formats alone, so another service's
+  payload does not grey Paste out; the read yields nothing. PR-2.8's
+  `app.local` gate takes `local` over from the link's flag.
+- `check_filetree_ops.py` drives all of it against a scratch service:
+  the rename with the file open (key, mtime, watch), the renamed folder,
+  the refusals, Copy / Paste / Cut through the service, the spent cut,
+  the empty clipboard, the non-local scope's formats and reads, `fs.mkdir`.
+
 **Following the session** (`request_root` / `offer_root`): the tab's cwd tick
 calls `_maybe_follow_editor`, whose scope is the service's (`cwd.settle`:
 `projectfiles.follow_scope` after the settling); `plan_reroot` decides which
@@ -299,5 +365,5 @@ close state joins all three.
 
 Related: `collins-terminal-tab`, `collins-panel-dock`,
 `collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`,
-`check_editor_save.py`, `check_filetree.py`), `collins-session-mcp-tools` (the API's message
+`check_editor_save.py`, `check_filetree.py`, `check_filetree_ops.py`), `collins-session-mcp-tools` (the API's message
 table in `api/protocol.py`: the `fs.*` types).

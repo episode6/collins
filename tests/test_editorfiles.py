@@ -13,9 +13,8 @@ from collins.editorfiles import (
     LIGHTBOX_SHADOW_PAD,
     LoadGuard,
     PaneLayout,
-    PasteError,
-    RenameError,
     RerootAction,
+    collins_uri,
     fence_language_id,
     first_line,
     format_copied_files,
@@ -28,15 +27,12 @@ from collins.editorfiles import (
     lightbox_zoombar_inside,
     pane_layout,
     parse_copied_files,
-    paste_entries,
-    paste_target,
+    path_from_collins_uri,
     path_from_file_uri,
     plan_reroot,
-    rename_target,
     renamed_path,
     reroot_counterparts,
     should_highlight,
-    unique_target,
 )
 from collins.projectfiles import FollowScope, follow_scope, is_inside, list_dir, list_entries, walk_files
 
@@ -537,74 +533,6 @@ def test_walk_files_missing_root_is_empty(tmp_path):
     assert walk_files(tmp_path / "nope") == ([], False)
 
 
-# -- rename_target -------------------------------------------------------------
-
-
-def test_rename_target_is_the_new_name_in_the_same_directory(tmp_path):
-    _touch(tmp_path, "pkg/old.py")
-    target, error = rename_target(tmp_path, tmp_path / "pkg/old.py", "new.py")
-    assert error is None
-    assert target == tmp_path / "pkg" / "new.py"
-
-
-def test_rename_target_renames_directories_too(tmp_path):
-    (tmp_path / "pkg").mkdir()
-    target, error = rename_target(tmp_path, tmp_path / "pkg", "package")
-    assert (target, error) == (tmp_path / "package", None)
-
-
-def test_rename_target_trims_surrounding_whitespace(tmp_path):
-    _touch(tmp_path, "a.txt")
-    target, error = rename_target(tmp_path, tmp_path / "a.txt", "  b.txt  ")
-    assert (target, error) == (tmp_path / "b.txt", None)
-
-
-def test_rename_target_unchanged_name_is_nothing_to_do(tmp_path):
-    _touch(tmp_path, "a.txt")
-    assert rename_target(tmp_path, tmp_path / "a.txt", "a.txt") == (None, None)
-
-
-def test_rename_target_empty_name_is_refused(tmp_path):
-    _touch(tmp_path, "a.txt")
-    assert rename_target(tmp_path, tmp_path / "a.txt", "   ") == (None, RenameError.EMPTY)
-
-
-def test_rename_target_refuses_anything_that_isnt_a_bare_name(tmp_path):
-    _touch(tmp_path, "a.txt")
-    path = tmp_path / "a.txt"
-    for name in ("sub/b.txt", "../b.txt", "/etc/passwd", ".", "..", "b\x00.txt"):
-        assert rename_target(tmp_path, path, name) == (None, RenameError.NOT_A_NAME), name
-
-
-def test_rename_target_refuses_an_existing_name(tmp_path):
-    _touch(tmp_path, "a.txt")
-    _touch(tmp_path, "b.txt")
-    assert rename_target(tmp_path, tmp_path / "a.txt", "b.txt") == (None, RenameError.EXISTS)
-
-
-def test_rename_target_refuses_an_existing_name_that_is_a_broken_symlink(tmp_path):
-    _touch(tmp_path, "a.txt")
-    (tmp_path / "b.txt").symlink_to(tmp_path / "gone.txt")
-    assert rename_target(tmp_path, tmp_path / "a.txt", "b.txt") == (None, RenameError.EXISTS)
-
-
-def test_rename_target_refuses_when_the_source_is_gone(tmp_path):
-    assert rename_target(tmp_path, tmp_path / "a.txt", "b.txt") == (None, RenameError.MISSING)
-
-
-def test_rename_target_refuses_landing_outside_the_project(tmp_path):
-    root = tmp_path / "project"
-    root.mkdir()
-    _touch(root, "a.txt")
-    # A rename inside a directory that is itself a symlink out of the project
-    # keeps the bare name and still lands outside it.
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (outside / "a.txt").write_text("x")
-    (root / "link").symlink_to(outside)
-    assert rename_target(root, root / "link" / "a.txt", "b.txt") == (None, RenameError.OUTSIDE)
-
-
 # -- renamed_path --------------------------------------------------------------
 
 
@@ -620,200 +548,6 @@ def test_renamed_path_leaves_untouched_paths_alone():
     assert renamed_path("/p/pkg", "/p/package", "/p/other/b.py") is None
     # A prefix match on the name, not on the directory, is not a match.
     assert renamed_path("/p/pkg", "/p/package", "/p/pkg2/b.py") is None
-
-
-# -- unique_target -------------------------------------------------------------
-
-
-def test_unique_target_keeps_a_free_name(tmp_path):
-    assert unique_target(tmp_path, "a.txt") == tmp_path / "a.txt"
-
-
-def test_unique_target_numbers_around_a_taken_name(tmp_path):
-    _touch(tmp_path, "a.txt")
-    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy).txt"
-    _touch(tmp_path, "a (copy).txt")
-    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy 2).txt"
-    _touch(tmp_path, "a (copy 2).txt")
-    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy 3).txt"
-
-
-def test_unique_target_keeps_the_suffix_and_handles_dotfiles(tmp_path):
-    _touch(tmp_path, "archive.tar")
-    (tmp_path / ".bashrc").write_text("x")
-    (tmp_path / "pkg").mkdir()
-    assert unique_target(tmp_path, "archive.tar") == tmp_path / "archive (copy).tar"
-    assert unique_target(tmp_path, ".bashrc") == tmp_path / ".bashrc (copy)"
-    assert unique_target(tmp_path, "pkg") == tmp_path / "pkg (copy)"
-
-
-def test_unique_target_keeps_a_tarballs_whole_extension(tmp_path):
-    _touch(tmp_path, "archive.tar.gz")
-    _touch(tmp_path, "notes.2026.txt")
-    assert unique_target(tmp_path, "archive.tar.gz") == tmp_path / "archive (copy).tar.gz"
-    # Only ".tar" earns the exception: any other dot in a name is part of it.
-    assert unique_target(tmp_path, "notes.2026.txt") == tmp_path / "notes.2026 (copy).txt"
-
-
-def test_unique_target_counts_a_broken_symlink_as_taken(tmp_path):
-    (tmp_path / "a.txt").symlink_to(tmp_path / "gone.txt")
-    assert unique_target(tmp_path, "a.txt") == tmp_path / "a (copy).txt"
-
-
-def test_unique_target_gives_up_once_every_name_is_taken(tmp_path):
-    _touch(tmp_path, "a.txt")
-    _touch(tmp_path, "a (copy).txt")
-    for n in range(2, 101):
-        _touch(tmp_path, f"a (copy {n}).txt")
-    assert unique_target(tmp_path, "a.txt") is None
-
-
-# -- paste_target --------------------------------------------------------------
-
-
-def test_paste_target_is_the_name_inside_the_destination(tmp_path):
-    _touch(tmp_path, "a.txt")
-    (tmp_path / "pkg").mkdir()
-    target, error = paste_target(tmp_path, tmp_path / "pkg", tmp_path / "a.txt")
-    assert (target, error) == (tmp_path / "pkg" / "a.txt", None)
-
-
-def test_paste_target_sidesteps_a_name_already_there(tmp_path):
-    _touch(tmp_path, "a.txt")
-    target, error = paste_target(tmp_path, tmp_path, tmp_path / "a.txt")
-    assert (target, error) == (tmp_path / "a (copy).txt", None)
-
-
-def test_paste_target_takes_a_source_from_outside_the_project(tmp_path):
-    root = tmp_path / "project"
-    root.mkdir()
-    _touch(tmp_path, "elsewhere/a.txt")
-    target, error = paste_target(root, root, tmp_path / "elsewhere" / "a.txt")
-    assert (target, error) == (root / "a.txt", None)
-
-
-def test_paste_target_refuses_a_destination_outside_the_project(tmp_path):
-    root = tmp_path / "project"
-    root.mkdir()
-    _touch(root, "a.txt")
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    assert paste_target(root, outside, root / "a.txt") == (None, PasteError.OUTSIDE)
-
-
-def test_paste_target_refuses_a_destination_that_is_gone(tmp_path):
-    _touch(tmp_path, "a.txt")
-    assert paste_target(tmp_path, tmp_path / "nope", tmp_path / "a.txt") == (
-        None,
-        PasteError.NOT_A_DIR,
-    )
-
-
-def test_paste_target_refuses_a_source_that_is_gone(tmp_path):
-    assert paste_target(tmp_path, tmp_path, tmp_path / "gone.txt") == (None, PasteError.MISSING)
-
-
-def test_paste_target_refuses_a_folder_into_itself_or_its_own_contents(tmp_path):
-    (tmp_path / "pkg" / "sub").mkdir(parents=True)
-    pkg = tmp_path / "pkg"
-    assert paste_target(tmp_path, pkg, pkg) == (None, PasteError.INTO_ITSELF)
-    assert paste_target(tmp_path, pkg / "sub", pkg) == (None, PasteError.INTO_ITSELF)
-
-
-def test_paste_target_copying_a_folder_beside_itself_is_fine(tmp_path):
-    (tmp_path / "pkg").mkdir()
-    target, error = paste_target(tmp_path, tmp_path, tmp_path / "pkg")
-    assert (target, error) == (tmp_path / "pkg (copy)", None)
-
-
-def test_paste_target_moving_into_the_folder_it_came_from_is_nothing_to_do(tmp_path):
-    _touch(tmp_path, "pkg/a.txt")
-    assert paste_target(tmp_path, tmp_path / "pkg", tmp_path / "pkg" / "a.txt", move=True) == (
-        None,
-        None,
-    )
-    # Copying it there is still a copy, though.
-    target, error = paste_target(tmp_path, tmp_path / "pkg", tmp_path / "pkg" / "a.txt")
-    assert (target, error) == (tmp_path / "pkg" / "a (copy).txt", None)
-
-
-# -- paste_entries -------------------------------------------------------------
-
-
-def test_paste_entries_copies_a_file_and_leaves_the_original(tmp_path):
-    _touch(tmp_path, "a.txt")
-    (tmp_path / "pkg").mkdir()
-    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "a.txt")])
-    assert outcome.target == tmp_path / "pkg" / "a.txt"
-    assert outcome.error is None
-    assert (tmp_path / "pkg" / "a.txt").read_text() == "x"
-    assert (tmp_path / "a.txt").exists()
-
-
-def test_paste_entries_moves_a_file_for_a_cut(tmp_path):
-    _touch(tmp_path, "a.txt")
-    (tmp_path / "pkg").mkdir()
-    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "a.txt")], move=True)
-    assert outcome.target == tmp_path / "pkg" / "a.txt"
-    assert not (tmp_path / "a.txt").exists()
-
-
-def test_paste_entries_copies_a_whole_folder(tmp_path):
-    _touch(tmp_path, "pkg/sub/a.txt")
-    (tmp_path / "dest").mkdir()
-    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "pkg")])
-    assert outcome.target == tmp_path / "dest" / "pkg"
-    assert (tmp_path / "dest" / "pkg" / "sub" / "a.txt").read_text() == "x"
-
-
-def test_paste_entries_never_overwrites_what_is_already_there(tmp_path):
-    _touch(tmp_path, "a.txt")
-    (tmp_path / "pkg").mkdir()
-    (tmp_path / "pkg" / "a.txt").write_text("mine")
-    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "a.txt")])
-    assert outcome.target == tmp_path / "pkg" / "a (copy).txt"
-    assert (tmp_path / "pkg" / "a.txt").read_text() == "mine"
-
-
-def test_paste_entries_copies_a_symlink_as_a_symlink(tmp_path):
-    _touch(tmp_path, "a.txt")
-    (tmp_path / "link.txt").symlink_to(tmp_path / "a.txt")
-    (tmp_path / "pkg").mkdir()
-    (outcome,) = paste_entries(tmp_path, tmp_path / "pkg", [str(tmp_path / "link.txt")])
-    assert outcome.target == tmp_path / "pkg" / "link.txt"
-    assert (tmp_path / "pkg" / "link.txt").is_symlink()
-
-
-def test_paste_entries_carries_on_past_one_that_cant_be_pasted(tmp_path):
-    _touch(tmp_path, "a.txt")
-    _touch(tmp_path, "b.txt")
-    (tmp_path / "pkg").mkdir()
-    outcomes = paste_entries(
-        tmp_path,
-        tmp_path / "pkg",
-        [str(tmp_path / "a.txt"), str(tmp_path / "gone.txt"), str(tmp_path / "b.txt")],
-    )
-    assert [o.target for o in outcomes] == [
-        tmp_path / "pkg" / "a.txt",
-        None,
-        tmp_path / "pkg" / "b.txt",
-    ]
-    assert [o.error for o in outcomes] == [None, PasteError.MISSING, None]
-
-
-def test_paste_entries_reports_a_failed_copy_with_the_os_message(tmp_path):
-    source = tmp_path / "a.txt"
-    source.write_text("x")
-    dest = tmp_path / "pkg"
-    dest.mkdir()
-    dest.chmod(0o500)  # readable, not writable: the copy itself fails
-    try:
-        (outcome,) = paste_entries(tmp_path, dest, [str(source)])
-    finally:
-        dest.chmod(0o700)
-    assert outcome.target is None
-    assert outcome.error is PasteError.FAILED
-    assert outcome.message
 
 
 # -- the gnome-copied-files payload --------------------------------------------
@@ -840,6 +574,33 @@ def test_parse_copied_files_takes_an_unknown_operation_as_a_copy():
     assert parse_copied_files("file:///a") == ([], False)  # no operation line at all
     assert parse_copied_files("link\nfile:///a") == (["/a"], False)
     assert parse_copied_files("") == ([], False)
+
+
+# -- the collins:// URIs of the file clipboard (D35) -------------------------------
+
+
+def test_collins_uri_names_the_service_and_the_path():
+    assert collins_uri("svc1", "/home/u/p/a.txt") == "collins://svc1/home/u/p/a.txt"
+    assert collins_uri("svc1", "/home/u/p/a b#1.txt") == "collins://svc1/home/u/p/a%20b%231.txt"
+    assert path_from_collins_uri(collins_uri("svc1", "/home/u/p/a b#1.txt"), "svc1") == "/home/u/p/a b#1.txt"
+
+
+def test_path_from_collins_uri_is_for_one_service():
+    assert path_from_collins_uri("collins://svc1/p/a.txt", "svc1") == "/p/a.txt"
+    assert path_from_collins_uri("collins://svc2/p/a.txt", "svc1") is None  # another service's paths
+    assert path_from_collins_uri("collins://svc1/p/a.txt", None) is None  # no service, no paths
+    assert path_from_collins_uri("file:///p/a.txt", "svc1") is None
+    assert path_from_collins_uri("collins://svc1", "svc1") is None  # no path at all
+
+
+def test_parse_copied_files_reads_collins_uris_and_file_uris_only_when_local():
+    text = "cut\ncollins://svc1/p/a.txt\ncollins://svc2/p/b.txt\nfile:///p/c.txt\nhttp://x/y"
+    assert parse_copied_files(text, "svc1", local=True) == (["/p/a.txt", "/p/c.txt"], True)
+    # Not local: a file: URI names a file on the wrong machine.
+    assert parse_copied_files(text, "svc1", local=False) == (["/p/a.txt"], True)
+    # No service known: only this machine's files, and only when local.
+    assert parse_copied_files(text, None, local=True) == (["/p/c.txt"], True)
+    assert parse_copied_files(text, None, local=False) == ([], True)
 
 
 # -- following the session's working directory ---------------------------------

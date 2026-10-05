@@ -224,6 +224,10 @@ PHASE_ONE_TYPES = [
     "fs.stat",
     "fs.list",
     "fs.walk",
+    # PR-2.5: file operations (the same `files` cap).
+    "fs.rename",
+    "fs.paste",
+    "fs.mkdir",
     "service.restart",
     "service.status",
 ]
@@ -722,6 +726,18 @@ SAMPLES = {
     ("fs.stat", p.REQUEST): {"path": "/home/u/project/a.txt", "root": "/home/u/project"},
     ("fs.list", p.REQUEST): {"path": "/home/u/project/src", "hidden": False, "root": "/home/u/project"},
     ("fs.walk", p.REQUEST): {"root": "/home/u/project", "hidden": True},
+    ("fs.rename", p.REQUEST): {
+        "path": "/home/u/project/a.txt",
+        "target": "/home/u/project/b.txt",
+        "root": "/home/u/project",
+    },
+    ("fs.paste", p.REQUEST): {
+        "entries": ["/home/u/project/a.txt", "/home/u/other/c.txt"],
+        "target": "/home/u/project/src",
+        "cut": False,
+        "root": "/home/u/project",
+    },
+    ("fs.mkdir", p.REQUEST): {"path": "/home/u/project/new", "root": "/home/u/project"},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -911,6 +927,20 @@ REPLIES = {
         "entries_bytes": 2,
     },
     "fs.walk": {"paths": ["a.txt", "src/b.py"], "truncated": False, "paths_chunked": False, "paths_bytes": 2},
+    "fs.rename": {"mtime": 1700000000000000},
+    "fs.paste": {
+        "placed": ["/home/u/project/src/a.txt"],
+        "results": [
+            {
+                "source": "/home/u/project/a.txt",
+                "target": "/home/u/project/src/a.txt",
+                "error": None,
+                "message": "",
+            },
+            {"source": "/home/u/other/c.txt", "target": None, "error": "source_outside", "message": ""},
+        ],
+    },
+    "fs.mkdir": {},
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",

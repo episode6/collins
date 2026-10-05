@@ -1,22 +1,26 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """The project's directory reads, run by the service (split-service spec
-§3.23, PR-2.4).
+§3.23, PR-2.4 and PR-2.5).
 
 What the editor's file tree, quick open and the follow rule read off the
 disk: a directory's entries (`list_entries`, `list_dir`), every file
 under a root (`walk_files`), the repository a path sits in
 (`repository_root`), the symlink-resolving containment check every
 `fs.*` request is confined by (`is_inside`) and whether the editor should
-follow the agent's working directory (`follow_scope`).
+follow the agent's working directory (`follow_scope`); and what the
+tree's context menu does to the disk: a rename in place
+(`rename_target`, `rename_entry`), a paste that never overwrites
+(`unique_target`, `paste_target`, `paste_entries`) and a new folder
+(`make_directory`).
 
 They moved here out of `editorfiles` (a module the client calls, which
 the pathless walker reads) when the tree and quick open went over the
 API: the service runs them for `fs.list`, `fs.walk`, `fs.stat` and
 `cwd.settle` (`service/files.py`, `service/session.py`), and the client
 reaches them only through those requests, the way `gitfiles.py` holds
-the `.git` reads behind `git.info` (PR-2.1). The rename and paste rules
-still in `editorfiles` (PR-2.5's) call `is_inside` from here until they
-move too.
+the `.git` reads behind `git.info` (PR-2.1). The rename, paste and new
+folder rules followed in PR-2.5, served as `fs.rename`, `fs.paste` and
+`fs.mkdir`.
 
 Stdlib only (plus `sessions.worktree_project_root`, a string rule)."""
 
@@ -24,7 +28,10 @@ from __future__ import annotations
 
 import enum
 import os
+import shutil
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .sessions import worktree_project_root
@@ -203,3 +210,295 @@ def follow_scope(root: str | Path, cwd: str | None) -> FollowScope:
     # repository at all is its own boundary.
     project = worktree_project_root(str(root)) or repository_root(root) or str(root)
     return FollowScope.AUTO if is_inside(project, cwd) else FollowScope.OFFER
+
+
+# -- renaming, pasting and a new folder (PR-2.5) -------------------------------------------
+#
+# The file tree's Rename, Copy / Cut / Paste rules, run by the service for
+# `fs.rename` / `fs.paste` / `fs.mkdir` (`service/files.py`). They moved
+# here from `editorfiles` with the directory reads' reason: the client
+# calls `editorfiles`, which the pathless walker reads, and these touch
+# the disk. The two enums are re-exported from `editorfiles` for the
+# client's messages, which switch on them; `rename_name_error` is pure and
+# the client runs it first, so an empty or path-shaped name never makes a
+# round trip.
+
+# How many "(copy N)" names a paste will try before giving up on finding a
+# free one (see `unique_target`).
+_MAX_COPY_SUFFIXES = 100
+
+
+class RenameError(enum.Enum):
+    """Why a rename asked for in the file tree can't happen. Each one gets
+    its own message in editor.py — "that didn't work" says nothing about
+    which of these it was. The values cross the wire as `fs.rename`'s
+    refusal ``reason``."""
+
+    EMPTY = "empty"
+    NOT_A_NAME = "not_a_name"  # a path, not a name: separators, "." or ".."
+    EXISTS = "exists"
+    MISSING = "missing"  # what's being renamed is already gone
+    OUTSIDE = "outside"
+
+
+class PasteError(enum.Enum):
+    """Why something on the clipboard can't be pasted where it was asked for.
+    One entry per rule, for the same reason `RenameError` has them: "that
+    didn't work" says nothing about which rule it broke. The values cross
+    the wire in `fs.paste`'s per-entry results."""
+
+    MISSING = "missing"  # what the clipboard names is no longer on disk
+    OUTSIDE = "outside"  # the destination isn't inside the project
+    # The source is inside no root the service knows (a client that is not
+    # `local` may only name what a session exposed: §3.23)
+    SOURCE_OUTSIDE = "source_outside"
+    NOT_A_DIR = "not_a_dir"  # the destination folder is gone
+    INTO_ITSELF = "into_itself"  # a folder pasted into itself or its contents
+    NO_ROOM = "no_room"  # every "(copy N)" name is taken
+    FAILED = "failed"  # the copy/move itself failed; `message` says why
+
+
+def rename_name_error(path: str | Path, new_name: str) -> RenameError | None | bool:
+    """The pure half of `rename_target`: `RenameError.EMPTY` or
+    `NOT_A_NAME` when *new_name* is no bare name, False when it is the
+    name *path* already has (nothing to do), None when the rename is
+    worth asking the disk about. No disk is read: the client runs this
+    before the request."""
+    name = new_name.strip()
+    if not name:
+        return RenameError.EMPTY
+    # The .name comparison catches separators (and "." on its own, whose name
+    # is empty); ".." survives it, and "\0" is the one character Path carries
+    # happily right up to the syscall that rejects it.
+    if name in (".", "..") or "\x00" in name or Path(name).name != name:
+        return RenameError.NOT_A_NAME
+    if name == Path(path).name:
+        return False
+    return None
+
+
+def rename_target(
+    root: str | Path, path: str | Path, new_name: str
+) -> tuple[Path | None, RenameError | None]:
+    """Where renaming *path* to *new_name* would land: `(target, None)` for a
+    rename worth doing, `(None, None)` when the name is unchanged (nothing to
+    do, and nothing to complain about), `(None, error)` otherwise.
+
+    Only ever a rename *in place* — the entry keeps its directory, so this
+    takes a bare name and refuses anything with a path in it. Everything
+    else is checked here rather than left to `os.rename`, whose own answer
+    to renaming onto an existing file is to silently replace it."""
+    path = Path(path)
+    verdict = rename_name_error(path, new_name)
+    if verdict is False:
+        return None, None
+    if verdict is not None:
+        return None, verdict
+    name = new_name.strip()
+    try:
+        if not path.exists() and not path.is_symlink():
+            return None, RenameError.MISSING
+    except OSError:
+        return None, RenameError.MISSING
+    target = path.parent / name
+    # Belt and braces behind the bare-name check above: the same rule the
+    # tree and the editor apply to everything else they touch — nothing
+    # outside the project. The entry itself has to be inside it too (a
+    # rename across roots, or of something the root does not hold).
+    if not is_inside(root, path.parent) or not is_inside(root, target):
+        return None, RenameError.OUTSIDE
+    try:
+        if target.exists() or target.is_symlink():
+            return None, RenameError.EXISTS
+    except OSError:
+        return None, RenameError.EXISTS
+    return target, None
+
+
+def rename_entry(
+    root: str | Path, path: str | Path, target: str | Path
+) -> tuple[Path | None, RenameError | None]:
+    """`fs.rename`'s work: *path* renamed to *target*, which must be the
+    same directory's (`rename_target` decides, from *target*'s name; a
+    target in another directory is `NOT_A_NAME`: a rename never moves
+    things elsewhere — a paste of a cut does). `(target, None)` once it is
+    done, `(None, None)` for an unchanged name, `(None, error)` when it was
+    refused; an `OSError` from the rename itself is the caller's."""
+    path, target = Path(path), Path(target)
+    if target.parent != path.parent:
+        return None, RenameError.NOT_A_NAME
+    landing, error = rename_target(root, path, target.name)
+    if landing is None:
+        return None, error
+    os.rename(path, landing)
+    return landing, None
+
+
+def _exists(path: Path) -> bool:
+    """Whether *path* is taken — a broken symlink included, which `exists()`
+    alone says nothing about and which `rename`/`copy` would still clobber.
+    An unreadable answer counts as taken: nothing here should write over
+    something it couldn't look at."""
+    try:
+        return path.exists() or path.is_symlink()
+    except OSError:
+        return True
+
+
+def _copy_split(name: str) -> tuple[str, str]:
+    """*name* cut into the part "(copy)" goes after and the extension it goes
+    before. `Path.suffix` alone stops at the last dot, which makes
+    `archive.tar.gz` into `archive.tar (copy).gz`; the `.tar` of a compressed
+    tarball is part of the extension, and that pair is the one compound
+    suffix worth the exception — the same one GNOME's own file manager
+    makes. A leading dot is a name, not an extension: `.bashrc` splits whole,
+    so a dotfile's copy stays a dotfile."""
+    stem, suffix = Path(name).stem, Path(name).suffix
+    if suffix and Path(stem).suffix == ".tar":
+        stem, suffix = Path(stem).stem, ".tar" + suffix
+    return stem, suffix
+
+
+def unique_target(directory: str | Path, name: str) -> Path | None:
+    """Where an entry called *name* can land in *directory* without replacing
+    anything: `name` itself when it is free, then "name (copy).ext",
+    "name (copy 2).ext"… None once even those are taken (a directory holding
+    a hundred copies of one name is doing something else entirely).
+
+    Never handing back an existing path is the point: both `shutil.copy2` and
+    `shutil.move` overwrite what they land on without a word, and a paste is
+    nobody's idea of a way to delete a file."""
+    directory = Path(directory)
+    stem, suffix = _copy_split(name)
+    for attempt in range(_MAX_COPY_SUFFIXES + 1):
+        if attempt == 0:
+            candidate = name
+        elif attempt == 1:
+            candidate = f"{stem} (copy){suffix}"
+        else:
+            candidate = f"{stem} (copy {attempt}){suffix}"
+        target = directory / candidate
+        if not _exists(target):
+            return target
+    return None
+
+
+def paste_target(
+    root: str | Path, dest_dir: str | Path, source: str | Path, move: bool = False
+) -> tuple[Path | None, PasteError | None]:
+    """Where pasting *source* into *dest_dir* would land: `(target, None)` for
+    a paste worth doing, `(None, None)` when there is nothing to do (a cut
+    entry pasted back into the folder it came from), `(None, error)` otherwise.
+
+    *source* is deliberately allowed to live outside the project — a copy
+    taken in a file manager is exactly what paste is for (`paste_entries`'
+    *source_allowed* is where the service draws its own line) — but the
+    destination never is, and a folder can't be pasted into itself or into
+    anything it contains, which would either fail halfway or recurse."""
+    dest = Path(dest_dir)
+    src = Path(source)
+    if not is_inside(root, dest):
+        return None, PasteError.OUTSIDE
+    if not dest.is_dir():
+        return None, PasteError.NOT_A_DIR
+    if not _exists(src):
+        return None, PasteError.MISSING
+    if src.is_dir() and is_inside(src, dest):
+        return None, PasteError.INTO_ITSELF
+    if move and _same_dir(src.parent, dest):
+        return None, None  # already where the paste would put it
+    target = unique_target(dest, src.name)
+    if target is None:
+        return None, PasteError.NO_ROOM
+    return target, None
+
+
+def _same_dir(one: Path, other: Path) -> bool:
+    try:
+        return one.resolve() == other.resolve()
+    except OSError:
+        return False
+
+
+@dataclass
+class PasteOutcome:
+    """What became of one clipboard entry. *target* is where it landed (None
+    when it didn't), *error* why not, and *message* the OS's own words for a
+    `FAILED` one."""
+
+    source: Path
+    target: Path | None = None
+    error: PasteError | None = None
+    message: str = ""
+
+
+def paste_entries(
+    root: str | Path,
+    dest_dir: str | Path,
+    sources: list[str],
+    move: bool = False,
+    source_allowed: Callable[[str], bool] | None = None,
+) -> list[PasteOutcome]:
+    """Paste every entry in *sources* into *dest_dir* — copying, or moving
+    when *move* (a cut). One outcome per source, in order: a clipboard holding
+    several files is normal (it came from a file manager), and one of them
+    being gone is no reason to drop the rest. *source_allowed*, when given,
+    is asked about each source first (the service's confinement: a source
+    inside no root it knows is `SOURCE_OUTSIDE` for a client that is not
+    `local`), on the source resolved through its symlinks.
+
+    Symlinks are copied as symlinks rather than followed: the tree already
+    refuses to show one that leaves the project, and following one here would
+    quietly duplicate whatever it points at into the repo."""
+    outcomes: list[PasteOutcome] = []
+    for source in sources:
+        src = Path(source)
+        if source_allowed is not None and not source_allowed(os.path.realpath(src)):
+            outcomes.append(PasteOutcome(src, None, PasteError.SOURCE_OUTSIDE))
+            continue
+        target, error = paste_target(root, dest_dir, src, move)
+        if target is None:
+            outcomes.append(PasteOutcome(src, None, error))
+            continue
+        try:
+            if move:
+                shutil.move(str(src), str(target))
+            elif src.is_dir() and not src.is_symlink():
+                shutil.copytree(src, target, symlinks=True)
+            else:
+                shutil.copy2(src, target, follow_symlinks=False)
+        except (OSError, shutil.Error) as err:
+            message = getattr(err, "strerror", None) or str(err)
+            outcomes.append(PasteOutcome(src, None, PasteError.FAILED, message))
+            continue
+        outcomes.append(PasteOutcome(src, target))
+    return outcomes
+
+
+class MkdirError(enum.Enum):
+    """Why `make_directory` did not: the values are `fs.mkdir`'s refusal
+    ``reason``."""
+
+    NOT_A_NAME = "not_a_name"
+    EXISTS = "exists"
+    OUTSIDE = "outside"
+    NO_PARENT = "no_parent"  # the folder it would go in is not there
+
+
+def make_directory(root: str | Path, path: str | Path) -> MkdirError | None:
+    """`fs.mkdir`'s work: one new folder at *path*, inside *root* (its
+    parent resolved through its symlinks has to be inside the root too, so
+    a link out of the project makes nothing outside it); never one over
+    something that is there. An `OSError` from the mkdir itself is the
+    caller's."""
+    path = Path(path)
+    if rename_name_error(path.parent / "~", path.name) is not None:
+        return MkdirError.NOT_A_NAME
+    if not is_inside(root, path.parent) or not is_inside(root, path):
+        return MkdirError.OUTSIDE
+    if not path.parent.is_dir():
+        return MkdirError.NO_PARENT
+    if _exists(path):
+        return MkdirError.EXISTS
+    os.mkdir(path)
+    return None
