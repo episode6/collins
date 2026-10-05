@@ -2041,7 +2041,7 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "git.watch",
-        "Watch a working tree for this client: the page's directory monitors, on the service.",
+        "Watch a tree for this client: the page's directory monitors and its 2 s tick, on the service.",
         request=_request(
             {
                 "cwd": _req(_PATH),
@@ -2053,6 +2053,10 @@ _TABLE: tuple[MessageType, ...] = (
                 # The tree-state digest the page's read sampled: the
                 # watch's first compare is against it.
                 "state": _null(_s(64)),
+                # False (PR-2.2): a commit, range or branch load's watch,
+                # the index, HEAD and the refs on the 2 s tick alone — no
+                # monitors, no state digest. Absent is true.
+                "working_tree": _BOOL,
             }
         ),
     ),

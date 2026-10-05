@@ -456,7 +456,11 @@ def check_sidebar(repo: str) -> None:
     # -- mutations: stage all, commit --------------------------------------------------------
     # Each reloads the view exactly once: the page's read is counted
     # through its own method.
+    # The service's git-changed for each mutation's own move (its refs
+    # tick sees the index, PR-2.2) is compared against the signatures the
+    # mutation re-seeded as it landed: no second reload.
     reads_before = len(reads)
+    heard = page.changes_heard
     sidebar.stage_all()
     landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
     check("stage_all reloads the view once", landed, len(reads) - reads_before)
@@ -467,19 +471,20 @@ def check_sidebar(repo: str) -> None:
         wait_for(lambda: [f.path for f in sidebar.file_rows().staged] == ["a.txt"] and not sidebar.file_rows().unstaged),
         sidebar.file_rows(),
     )
-    page.poll_tick()
+    check("the service's git-changed for the index move came", wait_for(lambda: page.changes_heard > heard), page.changes_heard - heard)
     wait_for(page.settled)
     wait_for(lambda: False, timeout=0.3)
-    check("the following tick reloads nothing more", len(reads) == reads_before + 1, len(reads) - reads_before)
+    check("the following git-changed reloads nothing more", len(reads) == reads_before + 1, len(reads) - reads_before)
     reads_before = len(reads)
+    heard = page.changes_heard
     sidebar.commit("native commit", None)
     landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
     check("commit reloads the view once", landed, len(reads) - reads_before)
     check("and made the commit", git_out(repo, "log", "-1", "--format=%s").strip() == "native commit", git_out(repo, "log", "-1", "--format=%s"))
-    page.poll_tick()
+    check("the service's git-changed for the commit came", wait_for(lambda: page.changes_heard > heard), page.changes_heard - heard)
     wait_for(page.settled)
     wait_for(lambda: False, timeout=0.3)
-    check("the following tick reloads nothing more", len(reads) == reads_before + 1, len(reads) - reads_before)
+    check("the following git-changed reloads nothing more", len(reads) == reads_before + 1, len(reads) - reads_before)
     landed = wait_for(lambda: [r.sha for r in sidebar.commit_rows() if r.kind == "commit" and r.group == "current"] == log_shas(repo, "main..HEAD"))
     check("the commits list gained the commit", landed, [r.label for r in sidebar.commit_rows()])
 
@@ -508,8 +513,9 @@ def check_sidebar(repo: str) -> None:
         wait_for(lambda: [f.path for f in sidebar.file_rows().staged] == ["a.txt"] and not sidebar.file_rows().unstaged),
         sidebar.file_rows(),
     )
+    heard = page.changes_heard
     git(repo, "reset", "-q", "--hard", "HEAD")
-    page.poll_tick()
+    wait_for(lambda: page.changes_heard > heard)
     wait_for(page.settled)
     check("the tree is clean again for what follows", wait_for(lambda: not sidebar.file_rows().staged and not sidebar.file_rows().unstaged), sidebar.file_rows())
 
@@ -590,14 +596,13 @@ def check_sidebar(repo: str) -> None:
     check("and the confirmed abort took the bar down", landed and not bar.get_visible(), (landed, bar.get_visible()))
     check("with the tree back where it stood", git_out(repo, "status", "--porcelain") == "" and gitops.in_progress(os.path.join(repo, ".git")) is None, git_out(repo, "status", "--porcelain"))
     check("and the view reloaded once", len(reads) == reads_before + 1, len(reads) - reads_before)
-    # A cherry-pick stopped from a shell: the tick's signature (the marker
-    # is part of it) brings the bar up; the conflict resolved and staged,
+    # A cherry-pick stopped from a shell: the service's git-changed (the
+    # marker is part of the tree digest its tick reads) brings the bar up; the conflict resolved and staged,
     # the next tick re-words the hint; Continue finishes it with no editor.
     picked = subprocess.run([GIT, "-c", "user.email=t@example.com", "-c", "user.name=Test", "cherry-pick", native_sha], cwd=repo, capture_output=True, text=True)
     check("a cherry-pick of the same commit stops on the clash", picked.returncode != 0, picked.stderr)
-    page.poll_tick()
     landed = wait_for(lambda: page.settled() and bar.operation is not None and bar.operation.kind == "cherry-pick")
-    check("the tick brings the bar up for a cherry-pick started elsewhere", landed and bar.title_text() == "Cherry-pick in progress", (landed, bar.get_visible(), bar.title_text()))
+    check("the git-changed brings the bar up for a cherry-pick started elsewhere", landed and bar.title_text() == "Cherry-pick in progress", (landed, bar.get_visible(), bar.title_text()))
     # The action row's Resolve all conflicts ▾ comes up with the CONFLICTS
     # section, its two items worded for the pick; theirs asks once (the
     # sides named, the button Resolve all), then checks the pick's copy
@@ -624,10 +629,11 @@ def check_sidebar(repo: str) -> None:
 
     # -- an ask that lands while a read is out re-reads --------------------------------------
     # The read runs at once but lands late (gated), so it carries the tree
-    # before the `git add`; the tick meanwhile sees the index move and asks
-    # for the same load. The landed read must not stand in for that ask:
-    # the tick's signature already moved past the add, so nothing else
-    # would ever reload, and the view would show a.txt as unstaged for good.
+    # before the `git add`; the service's git-changed meanwhile carries the
+    # index move and the page's compare asks for the same load. The landed
+    # read must not stand in for that ask: the compare's signature already
+    # moved past the add, so nothing else would ever reload, and the view
+    # would show a.txt as unstaged for good.
     gate = threading.Event()
     real_read_diff = gitops.read_diff
     git_reads: list[object] = []  # the reads git actually ran (a parked ask is a _read_diff call, not a read)
@@ -645,8 +651,8 @@ def check_sidebar(repo: str) -> None:
         page.load("unstaged")
         wait_for(lambda: len(git_reads) == 1)  # the worker is past its read, held before landing
         git(repo, "add", "a.txt")
-        page.poll_tick()
-        check("the tick parked its ask behind the read in flight", page._pending_load == "unstaged" and not page.settled(), (page._pending_load, page.settled()))
+        wait_for(lambda: page._pending_load == "unstaged")
+        check("the git-changed compare parked its ask behind the read in flight", page._pending_load == "unstaged" and not page.settled(), (page._pending_load, page.settled()))
         gate.set()
         landed = wait_for(lambda: len(git_reads) == 2 and page.settled())
     finally:
@@ -678,8 +684,8 @@ def check_sidebar(repo: str) -> None:
         wait_for(lambda: len(git_reads) == 1)
         check("the click queued its reveal behind the load", page._pending_navigate == ("a.txt", "unstaged") and page.loaded == "unstaged", page._pending_navigate)
         git(repo, "add", "a.txt")
-        page.poll_tick()
-        check("the tick parked a re-read again", page._pending_load == "unstaged", page._pending_load)
+        wait_for(lambda: page._pending_load == "unstaged")
+        check("the git-changed compare parked a re-read again", page._pending_load == "unstaged", page._pending_load)
         gate.set()
         landed = wait_for(lambda: len(git_reads) == 2 and page.settled())
     finally:
@@ -688,7 +694,7 @@ def check_sidebar(repo: str) -> None:
     check("the re-read landed and the queued reveal ran on it: a.txt is gone, so it toasted", landed and page._pending_navigate is None and toasts == ["a.txt isn't in this diff"], (toasts, page._pending_navigate))
     check("the unstaged view is empty again", wait_for(lambda: page.diff_view.file_rows() == []), page.diff_view.file_rows())
     git(repo, "commit", "-qm", "pending committed")
-    page.poll_tick()
+    page.check_now()
     wait_for(page.settled)
 
     # -- the page size pages the current group ------------------------------------------------
@@ -1211,6 +1217,7 @@ def check_native(repo: str) -> None:
     )
     check("a picture added by the commit shows its one side", dict((label, p) for label, _b, p in view.badge_rows()).get("pic.png") is True)
     check("no monitors on a commit load", not page.watching)
+    check("but the service's 2 s tick of its index, HEAD and refs", page.watching_refs)
     page.load("unstaged")
     check("back to the working tree", wait_for(lambda: page.settled() and page.loaded == "unstaged"))
     check("monitors are back", page.watching)
@@ -1882,7 +1889,7 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         view.set_busy(False)
         git(repo, "commit", "-qm", "staged edit")
         edit_sha = head_sha(repo)
-        page.poll_tick()
+        page.check_now()
         page.load({"show": edit_sha})
         check("the commit of the staged edit loads", wait_for(lambda: page.settled() and page.shows({"show": edit_sha}), timeout=5.0), page.loaded)
         check("the words read Revert, with no discard", view.file_action_labels("staged.txt") == ("Revert file", None) and view.hunk_action_labels("staged.txt", 0) == ("Revert hunk", None), (view.file_action_labels("staged.txt"), view.hunk_action_labels("staged.txt", 0)))
@@ -1920,7 +1927,7 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         write_file(repo, "staged.txt", ten.replace("staged 6", "staged SIX"))
         git(repo, "add", "staged.txt")
         git(repo, "commit", "-qm", "six")
-        page.poll_tick()
+        page.check_now()
         wait_for(page.settled)
         check("Revert hunk of the older commit over the moved context", view.click_hunk_action("staged.txt", 0) and wait_for(idle, timeout=5.0))
         merged = open(os.path.join(repo, "staged.txt")).read()
@@ -1946,7 +1953,7 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         write_file(repo, "blob.bin", bytes(range(0, 256, 2)) * 8)
         git(repo, "add", "blob.bin")
         git(repo, "commit", "-qm", "binary")
-        page.poll_tick()
+        page.check_now()
         page.load("unstaged")
         check("off the commit", wait_for(lambda: page.settled() and page.loaded == "unstaged", timeout=5.0))
         page.load({"show": "HEAD"})
