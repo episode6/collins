@@ -39,7 +39,7 @@ def test_transport_numbers_are_the_specs():
 
 
 def test_capabilities_and_error_codes_are_closed():
-    assert p.CAPABILITIES == {"local", "debug", "git"}
+    assert p.CAPABILITIES == {"local", "debug", "git", "files"}
     assert p.ERRORS == {
         "unknown",
         "invalid",
@@ -213,6 +213,12 @@ PHASE_ONE_TYPES = [
     "git-changed",
     "git.plan",
     "fs.trash",
+    # PR-2.3: the editor's files over the API (behind the `files` cap).
+    "fs.read",
+    "fs.write",
+    "fs.watch",
+    "fs.unwatch",
+    "file-changed",
     "service.restart",
     "service.status",
 ]
@@ -686,6 +692,26 @@ SAMPLES = {
         "keys": ["a.txt|deadbeef|0/1"],
     },
     ("fs.trash", p.REQUEST): {"paths": ["/home/u/project/untracked.txt"]},
+    ("fs.read", p.REQUEST): {"path": "/home/u/project/a.txt", "max": 1024},
+    ("fs.write", p.REQUEST): {
+        "path": "/home/u/project/a.txt",
+        "text": "one\n",
+        "expect_mtime": 1700000000000000,
+        "encoding": "utf-8",
+        "text_chunked": False,
+        "text_bytes": 4,
+    },
+    ("fs.watch", p.REQUEST): {
+        "path": "/home/u/project/a.txt", "kind": "file", "handle": "w1", "mtime": 1700000000000000,
+    },
+    ("fs.unwatch", p.REQUEST): {"handle": "w1"},
+    ("file-changed", p.EVENT): {
+        "handle": "w1",
+        "path": "/home/u/project/a.txt",
+        "mtime": 1700000000000000,
+        "size": 4,
+        "gone": False,
+    },
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -855,6 +881,18 @@ REPLIES = {
         "conflicts": False,
     },
     "fs.trash": {"trashed": ["/home/u/project/untracked.txt"], "removed": ["/home/u/project/gone.txt"]},
+    "fs.read": {
+        "text": "one\n",
+        "encoding": "utf-8",
+        "mtime": 1700000000000000,
+        "size": 4,
+        "binary": False,
+        "text_chunked": False,
+        "text_bytes": 4,
+    },
+    "fs.write": {"mtime": 1700000000000000, "size": 4, "encoding": "latin-1"},
+    "fs.watch": {},
+    "fs.unwatch": {},
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",

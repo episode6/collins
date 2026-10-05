@@ -38,6 +38,7 @@ from . import (
     prmenu,
     ptyclient,
     remotediffs,
+    remotefiles,
     remotegit,
     sandboxstatus,
     statusicon,
@@ -2220,6 +2221,9 @@ class App(Adw.Application):
         # the service says it serves them (the `git` capability); against
         # an older service git stays this machine's, as before.
         self._install_git_transport()
+        # And the editor's files (PR-2.3): behind the `files` capability,
+        # decided on every hello like git's.
+        self._install_file_transport()
         self.store.subscribe()
         self._refresh_service_status()
 
@@ -2233,6 +2237,18 @@ class App(Adw.Application):
         else:
             log.warning("the service has no git capability: git runs locally")
             remotegit.uninstall()
+
+    def _install_file_transport(self) -> None:
+        """The editor's reads, writes and file watches go to the service
+        when its hello lists the `files` capability (PR-2.3, §3.23);
+        without it the editor opens nothing (every open lands in its
+        banner) and sends no watch — decided on every hello, like git's."""
+        link = self._service_link
+        if protocol.CAP_FILES in (link.hello.get("caps") or ()):
+            remotefiles.install(link)
+        else:
+            log.warning("the service has no files capability: the editor cannot open files")
+            remotefiles.uninstall()
 
     def _refresh_service_status(self) -> None:
         """The sandbox probe's verdict so far (the service's; a client never
@@ -2280,6 +2296,8 @@ class App(Adw.Application):
             mirror.reset()
         self._install_git_transport()  # this service's capabilities, not the last one's
         remotegit.reset()
+        self._install_file_transport()
+        remotefiles.reset()  # the editors' watches, installed on the new service again
         try:
             self.store.subscribe()
         except RequestRefused as refusal:

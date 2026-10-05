@@ -27,9 +27,9 @@ from .sessions import worktree_project_root
 # what the agent just wrote" file tree.
 SKIP_DIR_NAMES = {".git", "node_modules", "__pycache__", ".venv", "target", "dist", "build"}
 
-_BINARY_SNIFF_BYTES = 8192
-_MAX_HIGHLIGHT_BYTES = 512 * 1024  # opened normally below this...
-_MAX_OPEN_BYTES = 5 * 1024 * 1024  # ...refused outright above this
+# Highlighted below this; still opened above it (the open cap itself is
+# the service's, protocol.FILE_TEXT_MAX).
+_MAX_HIGHLIGHT_BYTES = 512 * 1024
 # Images get their own, far larger cap (screenshots of 4K monitors are
 # routinely multi-MB): this only guards the image viewer against decoding
 # something absurd, not against ordinary photos.
@@ -61,6 +61,11 @@ _MAX_DIR_ENTRIES = 5000
 
 
 class LoadGuard(enum.Enum):
+    """Why a file may not open: `image_guard`'s answers, and the words the
+    editor gives the service's `fs.read` refusals (the text guards — a
+    regular file, the size cap, the NUL sniff — are the service's since
+    PR-2.3, `service.files.read_file`)."""
+
     OK = "ok"
     TOO_LARGE = "too_large"
     BINARY = "binary"
@@ -261,40 +266,12 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
     return None
 
 
-def read_first_line(path: str | Path, max_bytes: int = 512) -> str:
-    """The first line of *path* (line ending stripped), decoded leniently —
-    just enough for `guess_language_id`'s shebang sniff. Empty string when
-    the file can't be read."""
-    try:
-        with open(path, "rb") as fh:
-            raw = fh.readline(max_bytes)
-    except OSError:
-        return ""
-    return raw.decode("utf-8", "replace").rstrip("\r\n")
-
-
-def load_guard(path: str | Path) -> LoadGuard:
-    """Whether *path* looks safe to load into the editor. Binary = a NUL byte
-    in the first 8 KB. Refuses outright above ~5 MB; a caller opening
-    anything past `should_highlight`'s threshold should turn highlighting
-    off rather than refuse it."""
-    p = Path(path)
-    try:
-        if not p.is_file():
-            return LoadGuard.NOT_A_FILE
-        size = p.stat().st_size
-    except OSError:
-        return LoadGuard.UNREADABLE
-    if size > _MAX_OPEN_BYTES:
-        return LoadGuard.TOO_LARGE
-    try:
-        with p.open("rb") as f:
-            head = f.read(_BINARY_SNIFF_BYTES)
-    except OSError:
-        return LoadGuard.UNREADABLE
-    if b"\x00" in head:
-        return LoadGuard.BINARY
-    return LoadGuard.OK
+def first_line(text: str, max_chars: int = 512) -> str:
+    """The first line of *text* (line ending stripped, cut at *max_chars*)
+    — just enough for `guess_language_id`'s shebang sniff. The text is
+    what `fs.read` answered (PR-2.3): the client reads no file itself."""
+    head = text.split("\n", 1)[0][:max_chars]
+    return head.rstrip("\r\n")
 
 
 def is_image_path(path: str | Path) -> bool:
@@ -305,9 +282,9 @@ def is_image_path(path: str | Path) -> bool:
 
 
 def image_guard(path: str | Path) -> LoadGuard:
-    """`load_guard`'s sibling for the image viewers: images are binary by
-    nature, so only existence, readability and (a much larger) size cap are
-    checked — never BINARY."""
+    """The guard for the image viewers (the text files' is the service's
+    `fs.read`): images are binary by nature, so only existence,
+    readability and (a much larger) size cap are checked — never BINARY."""
     p = Path(path)
     try:
         if not p.is_file():
@@ -445,15 +422,13 @@ def path_from_file_uri(uri: str) -> str | None:
     return path or None
 
 
-def should_highlight(path: str | Path) -> bool:
-    """Above ~512 KB, a file is still opened (see `load_guard`) but with
+def should_highlight(size: int | None) -> bool:
+    """Above ~512 KB, a file is still opened (`fs.read` allows 5 MiB) but with
     syntax highlighting switched off — GtkSource re-highlights on every
     keystroke, and that cost is only worth paying for files this size or
-    smaller."""
-    try:
-        return Path(path).stat().st_size <= _MAX_HIGHLIGHT_BYTES
-    except OSError:
-        return True
+    smaller. *size* is the one `fs.read` answered (PR-2.3); None (not
+    known) highlights."""
+    return size is None or size <= _MAX_HIGHLIGHT_BYTES
 
 
 def is_inside(root: str | Path, path: str | Path) -> bool:

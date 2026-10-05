@@ -11,6 +11,8 @@ pull it in; only a source checkout can hit this).
 
 from __future__ import annotations
 
+import logging
+import threading
 from pathlib import Path
 
 import gi
@@ -40,16 +42,20 @@ from . import (  # noqa: E402
     openwith,
     openwithrows,
     paneldnd,
+    remotefiles,
 )
+from .api import protocol  # noqa: E402
+from .api.protocol import RequestRefused  # noqa: E402
 from .filetree import FileTree  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 _MAX_RECENT_FILES = 20  # cap on files a session's editor_state remembers
 _MAX_AGENT_FILES = 8  # rows in the "agent files" list pinned above the tree
-# How long after a file-monitor event to actually check the file: long
-# enough that a run of quick writes (an agent's edit tool) coalesces into one
-# check, short enough that "the editor matches disk" still feels immediate.
-_EXTERNAL_CHANGE_DEBOUNCE_MS = 300
+# The debounce between a file-monitor event and the check of the file lives
+# on the service now (service.files.WATCH_DEBOUNCE_MS, PR-2.3): one
+# `file-changed` per burst of an agent's quick writes.
 _TREE_INITIAL_WIDTH = 180
 # The pane's own floor once it can show one column at a time. The breakpoint
 # bin doesn't report its child's minimum (see __init__), so this is the
@@ -77,18 +83,39 @@ class _OpenFile:
     """One open buffer, independent of whether its tab-strip page is the one
     currently showing."""
 
-    def __init__(self, path: Path, buffer, view, gfile) -> None:
+    def __init__(self, path: Path, buffer, view) -> None:
         self.path = path
         self.buffer = buffer
         self.view = view
-        self.gfile = gfile
-        self.monitor: Gio.FileMonitor | None = None
+        # The file as the service last read or wrote it for this buffer
+        # (PR-2.3): the mtime a save sends as `expect_mtime` (a moved one
+        # is refused `stale`: the "changed on disk" dialog), the encoding
+        # the save writes back, and the handle of the service's watch.
+        self.mtime: int | None = None
+        self.size: int | None = None
+        self.encoding = "utf-8"
+        # The line ending a save puts back when the buffer's implicit
+        # trailing newline is on (what `_fill` stripped).
+        self.newline = "\n"
+        # Whether the buffer has ever held the file: a save before the
+        # first fill would write an empty buffer over it (the view is not
+        # editable until then either).
+        self.filled = False
+        self.watch_handle: str | None = None
+        # A `file-changed` that arrived while a save or load of this buffer
+        # was in flight: judged against the new mtime once that lands.
+        self.pending_change: dict | None = None
+        self.saving = False
+        # A save asked for while one was in flight: sent from _on_saved
+        # with the new mtime, its waiters answered with that save's.
+        self.save_again: list | None = None
         self.font_provider: Gtk.CssProvider | None = None
         # Which load this buffer is waiting on, and where to put the cursor
         # when it lands. Bumped per load so a superseded one (a rename that
         # restarted it) can be told apart from the live one — see _start_load.
         self.load_id = 0
         self.loading = False
+        self.reloading = False  # the load in flight refills a buffer that already showed the file
         self.pending_cursor: list | None = None
 
 
@@ -119,6 +146,8 @@ class EditorPane(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self._root = Path(root)
         self._open: dict[str, _OpenFile] = {}  # path str -> _OpenFile
+        self._watched: dict[str, _OpenFile] = {}  # a watch's handle -> the file it watches
+        self._shut = False  # `shutdown` ran: a read or write landing later installs nothing
         self._pages: dict[str, Adw.TabPage] = {}
         self._page_key: dict[Adw.TabPage, str] = {}
         self._close_confirmed: set[Adw.TabPage] = set()  # discard-changes already agreed to
@@ -581,16 +610,15 @@ class EditorPane(Gtk.Box):
                 page.set_title(Path(moved).name)
                 continue
             opened.path = Path(moved)
-            # The saver writes wherever the GtkSource.File points, so this is
-            # what keeps Ctrl+S from recreating the old name.
-            opened.gfile.set_location(Gio.File.new_for_path(moved))
+            # A save writes to `opened.path`, so this is what keeps Ctrl+S
+            # from recreating the old name; a rename keeps the file's mtime,
+            # so the one the next save expects stays.
             if opened.loading:
-                # The load in flight is still opening the old path (the loader
-                # opens lazily), so it is already doomed: start it again from
-                # the new one, which supersedes it.
-                self._start_load(opened, opened.pending_cursor)
+                # The load in flight is reading the old path, so it is
+                # already doomed: start it again from the new one, which
+                # supersedes it.
+                self._start_load(opened, opened.pending_cursor, reload=opened.reloading)
             else:
-                opened.gfile.check_file_on_disk()
                 self._watch_external_changes(opened)
             self._open[moved] = opened
             page.set_title(("• " if opened.buffer.get_modified() else "") + opened.path.name)
@@ -760,23 +788,12 @@ class EditorPane(Gtk.Box):
         if editorfiles.is_image_path(path):
             self._open_image_page(key, path)
             return
-        guard = editorfiles.load_guard(path)
-        if guard != editorfiles.LoadGuard.OK:
-            self._notify(self._guard_message(path, guard))
-            return
+        # The guards on what may be loaded (a regular file, under the size
+        # cap, not binary) are the service's now: `fs.read` refuses or
+        # flags, and _on_loaded tells the user (PR-2.3).
 
         buffer = GtkSource.Buffer()
         self._apply_scheme(buffer)
-        manager = GtkSource.LanguageManager.get_default()
-        language = manager.guess_language(key, None)
-        if language is None:
-            hint = editorfiles.guess_language_id(
-                path, editorfiles.read_first_line(path)
-            )
-            if hint:
-                language = manager.get_language(hint)
-        if language is not None and editorfiles.should_highlight(path):
-            buffer.set_language(language)
 
         view = GtkSource.View(buffer=buffer)
         view.set_show_line_numbers(self._show_line_numbers)
@@ -784,9 +801,9 @@ class EditorPane(Gtk.Box):
         view.set_monospace(True)
         view.set_auto_indent(True)
         view.set_extra_menu(self._view_extra_menu)
+        view.set_editable(False)  # until the first fill: nothing typed into an empty buffer is saved
 
-        gfile = GtkSource.File(location=Gio.File.new_for_path(key))
-        opened = _OpenFile(path, buffer, view, gfile)
+        opened = _OpenFile(path, buffer, view)
         self._apply_font(opened)
         self._open[key] = opened
 
@@ -807,26 +824,50 @@ class EditorPane(Gtk.Box):
 
         self._select_page(page)
 
-    def _start_load(self, opened: _OpenFile, restore_cursor: list | None) -> None:
-        """(Re)fill the buffer from wherever its `GtkSource.File` now points.
+    def _start_load(self, opened: _OpenFile, restore_cursor: list | None, reload: bool = False) -> None:
+        """(Re)fill the buffer from the file at `opened.path`, read on the
+        service (`fs.read`, PR-2.3) from a worker thread; the text lands in
+        `_on_loaded` at PRIORITY_DEFAULT.
 
         Carries the `_OpenFile` rather than the path it was opened under: a
         rename re-keys the page while a big file is still loading, and a
-        completion holding the old path would find nothing to finish. The
-        loader opens its file lazily, so that rename also *breaks* the load in
-        flight — `_retarget_open` starts a fresh one, and `load_id` is what
-        makes the broken one's failure a no-op instead of a banner."""
+        completion holding the old path would find nothing to finish. That
+        rename also makes the read in flight one of the wrong path —
+        `_retarget_open` starts a fresh one, and `load_id` is what makes the
+        superseded one's answer a no-op instead of a banner. *reload* says
+        the buffer already showed the file (a failure keeps the page)."""
         opened.load_id += 1
         opened.loading = True
+        opened.reloading = reload
         opened.pending_cursor = restore_cursor
-        loader = GtkSource.FileLoader.new(opened.buffer, opened.gfile)
-        loader.load_async(
-            GLib.PRIORITY_DEFAULT, None, callback=self._on_loaded, user_data=(opened, opened.load_id)
+        load_id = opened.load_id
+        path = str(opened.path)
+        self._off_main(
+            lambda: remotefiles.read(path),
+            lambda kind, value: self._on_loaded(opened, load_id, kind, value),
         )
+
+    @staticmethod
+    def _off_main(work, land) -> None:
+        """*work* on a daemon thread (a blocking call of the service's);
+        `land(kind, value)` on the main loop at PRIORITY_DEFAULT with
+        ``("ok", result)`` or ``("refused", RequestRefused)``."""
+
+        def run() -> None:
+            try:
+                result = ("ok", work())
+            except RequestRefused as refusal:
+                result = ("refused", refusal)
+            except Exception as exc:  # the link gone mid-call, a bug: a banner, never a hang
+                log.exception("editor: a file request failed")
+                result = ("refused", RequestRefused(protocol.ERROR_FAILED, str(exc), {}))
+            GLib.idle_add(lambda: land(*result) and False, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=run, name="editor-files", daemon=True).start()
 
     def _open_image_page(self, key: str, path: Path) -> None:
         """A read-only `Gtk.Picture` page — images never get a buffer
-        (`load_guard` would refuse them as binary), so none of the
+        (`fs.read` would refuse them as binary), so none of the
         save/dirty/search machinery applies: `_open` stays text-only and
         every `_open` consumer skips these pages."""
         guard = editorfiles.image_guard(path)
@@ -852,42 +893,92 @@ class EditorPane(Gtk.Box):
         self._page_key[page] = key
         self._select_page(page)
 
-    def _on_loaded(self, loader: GtkSource.FileLoader, result: Gio.AsyncResult, data: tuple) -> None:
-        opened, load_id = data
+    def _on_loaded(self, opened: _OpenFile, load_id: int, kind: str, value) -> None:
+        if self._shut:
+            return  # the tab closed while the read was in flight: nothing to fill or watch
         if load_id != opened.load_id:
             return  # a newer load (a rename's) owns this buffer now
         opened.loading = False
+        reload = opened.reloading
+        opened.reloading = False
         restore_cursor = opened.pending_cursor
         # Looked up under the file's *current* path, since a rename may have
         # moved it since the load started — and by identity, so a page closed
         # and reopened meanwhile isn't mistaken for this one.
         key = str(opened.path)
         still_open = self._open.get(key) is opened
-        try:
-            loader.load_finish(result)
-        except GLib.Error as err:
-            self._notify(
-                _("Couldn't open {name}: {message}").format(
-                    name=opened.path.name, message=err.message
+        if not still_open:
+            return
+        failure: str | None = None
+        if kind != "ok":
+            failure = remotefiles.refusal_words(value)
+        elif value.binary:
+            failure = self._guard_message(opened.path, editorfiles.LoadGuard.BINARY)
+        if failure is not None:
+            if reload:
+                self._notify(
+                    _("Couldn't reload {name}: {message}").format(name=opened.path.name, message=failure)
                 )
-            )
-            if still_open:
+                # A `file-changed` that waited for this reload is judged all
+                # the same: the file may be gone or binary now, and that
+                # event is what tells the buffer so (review of PR 609).
+                self._settle_pending_change(opened)
+            else:
+                self._notify(
+                    _("Couldn't open {name}: {message}").format(name=opened.path.name, message=failure)
+                )
                 page = self._pages.get(key)
                 if page is not None:
                     self._teardown_page(page, key)
                     self._tab_view.close_page(page)
             return
-        if not still_open:
-            return
-        opened.buffer.set_modified(False)
+        read: remotefiles.FileText = value
+        if not reload:
+            manager = GtkSource.LanguageManager.get_default()
+            language = manager.guess_language(key, None)
+            if language is None:
+                hint = editorfiles.guess_language_id(opened.path, editorfiles.first_line(read.text))
+                if hint:
+                    language = manager.get_language(hint)
+            if language is not None and editorfiles.should_highlight(read.size):
+                opened.buffer.set_language(language)
+        self._fill(opened, read)
         if restore_cursor:
             self._apply_cursor(opened, restore_cursor)
         else:
-            # FileLoader leaves the insert mark at the end of the loaded
-            # text; every other editor opens a file at the top.
+            # set_text leaves the insert mark at the end of the loaded text;
+            # every other editor opens a file at the top.
             opened.buffer.place_cursor(opened.buffer.get_start_iter())
-        self._watch_external_changes(opened)
+        if not reload:
+            self._watch_external_changes(opened)
         self._sync_status()
+        self._settle_pending_change(opened)
+
+    def _fill(self, opened: _OpenFile, read: remotefiles.FileText) -> None:
+        """The buffer's text replaced by what the service read, outside the
+        undo history (as the loader's load was), and the file's facts kept
+        for the save that follows. The file's final newline is stripped
+        when the buffer's implicit trailing newline is on (what the loader
+        did; `_do_save` puts it back), so a file does not show an empty
+        last line."""
+        text = read.text
+        newline = "\n"
+        if opened.buffer.get_implicit_trailing_newline():
+            if text.endswith("\r\n"):
+                text, newline = text[:-2], "\r\n"
+            elif text.endswith("\n"):
+                text = text[:-1]
+        opened.buffer.begin_irreversible_action()
+        opened.buffer.set_text(text)
+        opened.buffer.end_irreversible_action()
+        opened.buffer.set_modified(False)
+        opened.newline = newline
+        opened.mtime = read.mtime
+        opened.size = read.size
+        opened.encoding = read.encoding
+        opened.filled = True
+        opened.view.set_editable(True)
+        remotefiles.watcher().update(opened.watch_handle, read.mtime)
 
     def _guard_message(self, path: Path, guard) -> str:
         LG = editorfiles.LoadGuard
@@ -907,39 +998,109 @@ class EditorPane(Gtk.Box):
             self._save(opened)
 
     def _save(self, opened: _OpenFile) -> None:
-        opened.gfile.check_file_on_disk()
-        if opened.gfile.is_externally_modified():
-            dialogs.confirm_dialog(
-                self.get_root(),
-                _("{name} changed on disk").format(name=opened.path.name),
-                _("Overwrite it with the changes you made here?"),
-                _("Overwrite"),
-                lambda: self._do_save(opened),
-                default_response="cancel",
-            )
-            return
-        self._do_save(opened)
+        """Ctrl+S: the write expects the mtime of the last read or write;
+        a file that moved underneath the buffer is refused `stale` by the
+        service (nothing written) and the user is asked before it is
+        overwritten (`_on_saved`)."""
+        self._do_save(opened, expect=opened.mtime)
 
-    def _do_save(self, opened: _OpenFile, on_done=None) -> None:
+    def _do_save(self, opened: _OpenFile, on_done=None, expect: int | None = None) -> None:
         """`on_done(success)` runs once the async save resolves — the close
-        flows use it to only proceed past a Save that actually landed."""
-        saver = GtkSource.FileSaver.new(opened.buffer, opened.gfile)
-        saver.save_async(
-            GLib.PRIORITY_DEFAULT, None, callback=self._on_saved, user_data=(opened, on_done)
-        )
-
-    def _on_saved(self, saver: GtkSource.FileSaver, result: Gio.AsyncResult, data: tuple) -> None:
-        opened, on_done = data
-        try:
-            saver.save_finish(result)
-        except GLib.Error as err:
-            self._notify(
-                _("Couldn't save {name}: {message}").format(name=opened.path.name, message=err.message)
-            )
+        flows use it to only proceed past a Save that actually landed. The
+        write runs on the service (`fs.write`, PR-2.3) from a worker thread;
+        with *expect* None it writes regardless of what is on disk (the
+        close flows' Save and the Overwrite the user confirmed). A buffer
+        the file never filled is not saved (an empty buffer over the file);
+        a save while one is in flight waits for it and goes next, with the
+        mtime that save answers (two quick Ctrl+S are two writes, no
+        spurious "changed on disk")."""
+        if not opened.filled:
+            self._notify(_("{name} is still loading.").format(name=opened.path.name))
             if on_done is not None:
                 on_done(False)
             return
+        if opened.saving:
+            if opened.save_again is None:
+                opened.save_again = []
+            if on_done is not None:
+                opened.save_again.append(on_done)
+            return
+        if opened.reloading and not opened.buffer.get_modified():
+            # Ctrl+S in the middle of a silent reload: nothing of the user's
+            # to write, and the read in flight is about to move the mtime.
+            if on_done is not None:
+                on_done(True)
+            return
+        start, end = opened.buffer.get_bounds()
+        text = opened.buffer.get_text(start, end, True)
+        if text and opened.buffer.get_implicit_trailing_newline():
+            text += opened.newline  # what `_fill` stripped (the saver's implicit newline)
+        path = str(opened.path)
+        encoding = opened.encoding
+        opened.saving = True
+        self._off_main(
+            lambda: remotefiles.write(path, text, expect, encoding),
+            lambda kind, value: self._on_saved(opened, on_done, expect, kind, value),
+        )
+
+    def _on_saved(self, opened: _OpenFile, on_done, expect: int | None, kind: str, value) -> None:
+        opened.saving = False
+        if self._shut:
+            if on_done is not None:
+                on_done(kind == "ok")
+            return
+        waiters, opened.save_again = opened.save_again, None
+        if kind != "ok":
+            refusal: RequestRefused = value
+            for waiter in waiters or ():
+                waiter(False)
+            if remotefiles.is_stale(refusal) and expect is not None:
+                dialogs.confirm_dialog(
+                    self.get_root(),
+                    _("{name} changed on disk").format(name=opened.path.name),
+                    _("Overwrite it with the changes you made here?"),
+                    _("Overwrite"),
+                    lambda: self._do_save(opened, on_done),
+                    default_response="cancel",
+                    on_dismiss=(lambda: on_done(False)) if on_done is not None else None,
+                )
+                return
+            self._notify(
+                _("Couldn't save {name}: {message}").format(
+                    name=opened.path.name, message=remotefiles.refusal_words(refusal)
+                )
+            )
+            if on_done is not None:
+                on_done(False)
+            self._settle_pending_change(opened)
+            return
+        written: remotefiles.Written = value
+        if written.encoding != opened.encoding:
+            # The read's encoding could not carry the text: it was saved as
+            # UTF-8, which the user should hear once.
+            self._notify(
+                _("{name} was saved as UTF-8: its {encoding} encoding couldn't carry the text.").format(
+                    name=opened.path.name, encoding=opened.encoding
+                )
+            )
+        opened.mtime = written.mtime
+        opened.size = written.size
+        opened.encoding = written.encoding
+        remotefiles.watcher().update(opened.watch_handle, written.mtime)
+        if waiters is not None:
+            # Typed into while the save was in flight: saved again now, over
+            # exactly what was just written.
+            if on_done is not None:
+                waiters.insert(0, on_done)
+
+            def done_all(ok: bool) -> None:
+                for waiter in waiters:
+                    waiter(ok)
+
+            self._do_save(opened, done_all, expect=written.mtime)
+            return
         opened.buffer.set_modified(False)
+        self._settle_pending_change(opened)
         if on_done is not None:
             on_done(True)
 
@@ -975,35 +1136,60 @@ class EditorPane(Gtk.Box):
     # -- external changes ----------------------------------------------------
 
     def _watch_external_changes(self, opened: _OpenFile) -> None:
-        # Idempotent: a file that gets re-watched (a rename, a restarted load)
-        # must not leave the monitor on its old path running.
-        if opened.monitor is not None:
-            opened.monitor.cancel()
-            opened.monitor = None
-        try:
-            monitor = Gio.File.new_for_path(str(opened.path)).monitor_file(Gio.FileMonitorFlags.NONE, None)
-        except GLib.Error:
+        """The file's monitor, on the service (`fs.watch`, PR-2.3): every
+        `file-changed` for it (debounced there) lands in `_check_external`.
+        Idempotent: a file that gets re-watched (a rename, a restarted load)
+        must not leave the watch on its old path running."""
+        self._unwatch(opened)
+        if self._shut:
             return
-        pending = {"queued": False}
+        handle = remotefiles.watcher().watch(str(opened.path), self._on_file_changed, mtime=opened.mtime)
+        opened.watch_handle = handle
+        self._watched[handle] = opened
 
-        def on_changed(*_args) -> None:
-            if pending["queued"]:
-                return
-            pending["queued"] = True
-            GLib.timeout_add(_EXTERNAL_CHANGE_DEBOUNCE_MS, self._check_external, opened, pending)
+    def _unwatch(self, opened: _OpenFile) -> None:
+        if opened.watch_handle is not None:
+            self._watched.pop(opened.watch_handle, None)
+            remotefiles.watcher().unwatch(opened.watch_handle)
+            opened.watch_handle = None
 
-        monitor.connect("changed", on_changed)
-        opened.monitor = monitor
+    def _on_file_changed(self, event: dict) -> None:
+        """The watcher's listener (a bound method, held weakly there, so a
+        pane that was dropped without `shutdown` is not kept alive by its
+        watches): the `_OpenFile` is looked up by the event's handle."""
+        opened = self._watched.get(str(event.get("handle")))
+        if opened is not None:
+            self._check_external(opened, event)
 
-    def _check_external(self, opened: _OpenFile, pending: dict) -> bool:
-        pending["queued"] = False
-        if self._open.get(str(opened.path)) is not opened:
-            return GLib.SOURCE_REMOVE  # closed meanwhile
-        opened.gfile.check_file_on_disk()
-        if opened.gfile.is_deleted():
+    def shutdown(self) -> None:
+        """The pane's tab is closing for good: every file's watch on the
+        service is dropped (`TerminalTab.release_editor`). Without this
+        the watches, and through their listener the pane and its buffers,
+        would live as long as the module's watcher. A read or write still
+        in flight lands on `_shut` and installs nothing."""
+        self._shut = True
+        for opened in list(self._open.values()):
+            self._unwatch(opened)
+        self._watched.clear()
+
+    def _check_external(self, opened: _OpenFile, event: dict) -> None:
+        """A `file-changed` for *opened*: judged against the mtime and size
+        of the buffer's last read or write. One that arrives while a save
+        or load is in flight waits for it (`pending_change`): the save's
+        own write is what the monitor saw, and the reply's mtime says so."""
+        if self._open.get(str(opened.path)) is not opened or event.get("handle") != opened.watch_handle:
+            return  # closed or re-watched meanwhile
+        if opened.saving or opened.loading:
+            opened.pending_change = event
+            return
+        opened.pending_change = None
+        if event.get("gone"):
+            if opened.mtime is None:
+                return  # already told
+            opened.mtime = None
             opened.buffer.set_modified(True)  # nothing on disk to save over silently
             self._notify(_("{name} was deleted.").format(name=opened.path.name))
-        elif opened.gfile.is_externally_modified():
+        elif (event.get("mtime"), event.get("size")) != (opened.mtime, opened.size):
             if opened.buffer.get_modified():
                 self._show_banner(
                     _("{name} changed on disk.").format(name=opened.path.name),
@@ -1012,25 +1198,20 @@ class EditorPane(Gtk.Box):
                 )
             else:
                 self._reload_from_disk(opened)
-        return GLib.SOURCE_REMOVE
+
+    def _settle_pending_change(self, opened: _OpenFile) -> None:
+        """The `file-changed` that waited for a save or load, judged now."""
+        event = opened.pending_change
+        if event is not None:
+            opened.pending_change = None
+            self._check_external(opened, event)
 
     def _reload_from_disk(self, opened: _OpenFile) -> None:
+        if opened.loading:
+            return  # the load in flight brings what is on disk now
         it = opened.buffer.get_iter_at_mark(opened.buffer.get_insert())
-        pos = (it.get_line(), it.get_line_offset())
-        loader = GtkSource.FileLoader.new(opened.buffer, opened.gfile)
-        loader.load_async(GLib.PRIORITY_DEFAULT, None, callback=self._on_reloaded, user_data=(opened, pos))
-
-    def _on_reloaded(self, loader: GtkSource.FileLoader, result: Gio.AsyncResult, data: tuple) -> None:
-        opened, pos = data
-        try:
-            loader.load_finish(result)
-        except GLib.Error as err:
-            self._notify(
-                _("Couldn't reload {name}: {message}").format(name=opened.path.name, message=err.message)
-            )
-            return
-        opened.buffer.set_modified(False)
-        self._apply_cursor(opened, pos)
+        pos = [it.get_line(), it.get_line_offset()]
+        self._start_load(opened, pos, reload=True)
 
     def _apply_cursor(self, opened: _OpenFile, pos) -> None:
         if not isinstance(pos, (list, tuple)) or len(pos) != 2:
@@ -1256,8 +1437,8 @@ class EditorPane(Gtk.Box):
         opened = self._open.pop(key, None)
         self._pages.pop(key, None)
         self._page_key.pop(page, None)
-        if opened is not None and opened.monitor is not None:
-            opened.monitor.cancel()
+        if opened is not None:
+            self._unwatch(opened)
 
     # -- search --------------------------------------------------------------
 

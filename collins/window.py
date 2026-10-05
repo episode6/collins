@@ -811,6 +811,7 @@ class MainWindow(Adw.ApplicationWindow):
             for tab in self._terminal_tabs():
                 if behavior == "exit" or not tab.has_running_command():
                     tab.release_pty()
+                tab.release_editor()  # the window's panes go with it: their watches too
             self._close_for_good()
             return False  # nothing running or unsaved; continue with the normal close
         if not self._quit_asking:  # one flow for however many sessions/buffers
@@ -5762,8 +5763,10 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_editor_state(tab)
             self._save_composer_draft(tab)
             # The panel shells' ptys end with the tab, after the
-            # service has written their history from their models.
+            # service has written their history from their models; the
+            # editor's file watches with them.
             tab.release_panel_ptys()
+            tab.release_editor()
         session_id = self._session_id_of(page)
         if session_id:
             # Only if this page is the one actually bound to the session.

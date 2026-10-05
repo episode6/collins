@@ -31,7 +31,24 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import gi
+# A service of this check's own (PR-2.3: the pane's files are read on the
+# service), on a scratch tree and a fresh app id, so nothing of the user's
+# is read or reaped. Set before anything of collins is imported.
+_SCRATCH = tempfile.mkdtemp(prefix="collins-en-")
+_RUN = "r" + "".join(c for c in os.path.basename(_SCRATCH) if c.isalnum())
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{_RUN}"
+os.environ["COLLINS_PROJECTS_DIR"] = os.path.join(_SCRATCH, "projects")
+os.environ["COLLINS_CLAUDE_CONFIG"] = os.path.join(_SCRATCH, "claude.json")
+os.environ["COLLINS_CHATS_DIR"] = os.path.join(_SCRATCH, "chats")
+os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
+os.environ["XDG_STATE_HOME"] = os.path.join(_SCRATCH, "state")
+os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
+os.makedirs(os.environ["COLLINS_PROJECTS_DIR"])
+with open(os.environ["COLLINS_CLAUDE_CONFIG"], "w") as _fh:
+    _fh.write("{}")
+
+import e2e_service  # noqa: E402
+import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -39,6 +56,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
+from collins import remotefiles  # noqa: E402
 from collins.editor import EditorPane  # noqa: E402
 
 PASSED = 0
@@ -82,9 +100,14 @@ def columns(pane: EditorPane) -> tuple[bool, bool, bool]:
 def main() -> int:
     root = tempfile.mkdtemp(prefix="collins-editor-narrow-")
     try:
+        # The pane opens its files through the service (fs.read, PR-2.3):
+        # a harness link, the editor's file module installed on it.
+        link = e2e_service.harness_link()
+        remotefiles.install(link)
         return run(root)
     finally:
         shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(_SCRATCH, ignore_errors=True)
 
 
 def run(root: str) -> int:

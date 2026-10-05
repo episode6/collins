@@ -497,7 +497,14 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - **External changes are the normal case** — the agent is rewriting these
   files while you look at them. A clean buffer reloads silently, cursor and
   scroll preserved; a buffer with your own edits gets a banner instead, so
-  nothing is overwritten without asking.
+  nothing is overwritten without asking. A save over a file that changed
+  underneath you since the editor last read or wrote it is refused by the
+  service before a byte is written and asks first (*Overwrite*).
+- **The files are the service's.** The editor reads, writes and watches
+  every file through `collins-service` (the same socket the agent's
+  terminal comes over), never from the window itself — which is what an
+  editor on another machine needs. Files up to 5 MiB open; one that is
+  not UTF-8 is read as latin-1 and written back the same way.
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — and the whole editor can **pop out** into a window of its
   own on a second monitor, then dock back with one click.
