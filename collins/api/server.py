@@ -50,6 +50,18 @@ sink's pending list; what libsoup already took is sent. Output frames are
 sent to this client for this pty so far; a redraw's frames carry the same
 counter and are neither counted nor acked.
 
+**Plain HTTP on the same listener** (§3.2, §3.11). `GET /api/blob?kind=…`
+is a blob's bytes, never a path: each kind in `BLOB_KINDS` names a core
+attribute whose `blob(client, raw_query, if_none_match, respond)` does the
+work on a thread and answers through *respond* on the main loop (`git`,
+`pr`, and since PR-2.7 `file`, `remote` and `icon`: `service.blobs`).
+`PUT /api/upload?session=&name=` (PR-2.7) is a drop's or a paste's bytes,
+handed to `core.upload_blobs.put` and answered with the written path as
+JSON; its cap (`uploads.MAX_BYTES`) is checked on the headers by an early
+handler (411 with no Content-Length, 413 past the cap), so libsoup never
+buffers a body the cap refuses. Both name their client by the
+``Collins-Client`` header.
+
 Gio and libsoup only; nothing here imports GTK.
 """
 

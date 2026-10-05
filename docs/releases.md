@@ -38,6 +38,20 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **Drops, pastes and pictures go over the service's socket.** An image
+  dropped or pasted into the composer or onto the terminal is sent to the
+  service and saved under `~/.local/share/collins/uploads/<session>/`,
+  which goes when the session is trashed or deleted (one dropped before the
+  session has an id waits in `uploads/_pending/` for a week); a dropped
+  file is mentioned by its own path as before, and sent over as a copy only
+  when the window runs on another machine. The lightbox, the attachments
+  panel, the composer's previews, the editor's image tabs, PR body images
+  and the sidebar's project icons now fetch their pictures from the service
+  into the window's blob cache instead of reading files, and `show_image`
+  of a URL is downloaded by the service. Nothing looks different; the
+  window no longer opens a project's image or icon itself (the seventh
+  chunk of the split's Phase 2). The old `~/.cache/collins/dropped-images/`
+  is no longer written and is left in place.
 - **The editor's tree, quick open and roots go over the service's socket.**
   The file tree lists a folder by asking the service (the folder's entries
   and the names git ignores in one answer, off the window's main loop,
