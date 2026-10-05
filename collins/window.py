@@ -885,6 +885,20 @@ class MainWindow(Adw.ApplicationWindow):
                 return page
         return None
 
+    @staticmethod
+    def _pty_runs_cli(pty: int) -> bool:
+        """Whether agent pty *pty* still runs its CLI (`pty.info`'s
+        running command): only then is opening its session an attach.
+        Unknown (no link, a refusal) reads as running: the attach finds
+        out, and falls back to a resume when it is refused."""
+        link = apilink.current()
+        if link is None:
+            return True
+        try:
+            return bool(link.call({"t": "pty.info", "pty": pty}).get("running_command", True))
+        except RequestRefused:
+            return True
+
     def _pty_shown_on_device(self, pty: int) -> bool:
         """Whether some window of this app shows agent pty *pty*."""
         app = self.get_application()
@@ -2021,7 +2035,12 @@ class MainWindow(Adw.ApplicationWindow):
         # a second time (D31): a tab over its pty, its facts arriving with
         # the attach. A fork always starts its own.
         attach_pty = None if fork else self.store.pty_for(session.session_id)
-        if attach_pty is not None and self._pty_shown_on_device(attach_pty):
+        if attach_pty is not None and (
+            self._pty_shown_on_device(attach_pty) or not self._pty_runs_cli(attach_pty)
+        ):
+            # Shown here already, or a shell whose CLI has exited: the
+            # resume below is what the service takes for that one (it
+            # closes the shell-only pty and spawns the session afresh).
             attach_pty = None
         if attach_pty is not None:
             attach_id = self.store.agent_ptys().get(attach_pty, {}).get("session") or attach_id
