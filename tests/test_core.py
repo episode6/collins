@@ -889,6 +889,23 @@ def test_spawned_shells_never_see_the_probe_or_systemd_variables(server, tmp_pat
         assert name not in env
 
 
+def _live_in_group(pgrp: int) -> list[int]:
+    """The pids of the processes in *pgrp* that are not zombies."""
+    found = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as fh:
+                stat = fh.read()
+        except OSError:
+            continue
+        fields = stat.rsplit(")", 1)[1].split()
+        if len(fields) > 3 and fields[0] != "Z" and int(fields[2]) == pgrp:
+            found.append(int(name))
+    return found
+
+
 def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup(tmp_path, monkeypatch):
     from collins.service import ptyserver
     from collins.service import session as session_mod
@@ -918,10 +935,10 @@ def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup
     assert pump(15, lambda: bool(done))
     assert pty not in core.ptys.ptys
     assert not os.path.exists(f"/proc/{child}") or open(f"/proc/{child}/stat").read().split()[2] == "Z"
-    # The job's own group went too: nothing is left in it.
-    pump(1.0)
-    with pytest.raises(ProcessLookupError):
-        os.killpg(job, 0)
+    # The job's own group went too: nothing alive is left in it (a
+    # container with no reaper as pid 1 keeps the killed ones as zombies,
+    # which `killpg(pgrp, 0)` would still find).
+    assert pump(5, lambda: not _live_in_group(job)), _live_in_group(job)
     # The flow ran: the exit budget (2 ticks), then SIGHUP ignored, then the
     # grace and SIGKILL; well under the stop bound.
     assert done[0] - started < 10
