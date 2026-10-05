@@ -15,7 +15,9 @@ and (PR-2.4) watches a directory too, one `dir-changed` per debounce;
 whether the path is inside a root; `fs.list` answers a directory's entries
 in the tree's order with the ignored names marked, cut at 5000 and saying
 so, confined to a known root and to the root it names; `fs.walk` answers a
-root's files, capped at 20 000; every read and write is a `Deferred`
+root's files, capped at 20 000; `fs.names` (PR-2.6) a root's non-directory
+names for the bare root-name links, bounded at 5000, a root outside every
+root refused unless the client is `local`; every read and write is a `Deferred`
 settled off the main loop, and a worker that raises settles `failed`.
 
 The core over the in-process harness (tests/inproc.py) with the worker
@@ -518,7 +520,90 @@ def test_walk_is_confined_to_a_known_root(served, tmp_path):
     assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
 
 
-def test_stat_list_and_walk_are_deferreds_settled_later(served):
+def test_names_answers_the_non_directory_names_of_a_root(served, tmp_path):
+    core, client, project, _events = served
+    (project / "README.md").write_text("r")
+    (project / ".env").write_text("e")
+    (project / "src").mkdir()
+    (project / "elsewhere").symlink_to(tmp_path)  # a link to a directory is a directory
+    (project / "alias.txt").symlink_to(project / "a.txt")  # a link to a file is a file
+    (project / "dangling").symlink_to(project / "nope")  # a link naming nothing is not a directory
+    reply = client.request({"t": "fs.names", "root": str(project)})
+    assert reply == {"names": [".env", "README.md", "a.txt", "alias.txt", "dangling"], "truncated": False}
+
+
+def test_names_is_bounded_and_leaves_out_a_name_over_the_bound(served, monkeypatch):
+    core, client, project, _events = served
+    (project / "a-name-over-the-bound").write_text("long")
+    monkeypatch.setattr(protocol, "FS_NAME_MAX", 12)  # the filesystem's own is 255
+    assert "a-name-over-the-bound" not in files.names_reply(str(project))["names"]
+    monkeypatch.setattr(protocol, "FS_NAME_MAX", 1024)
+    for index in range(protocol.FS_NAMES_MAX + 2):
+        (project / f"f{index:05d}").touch()
+    reply = client.request({"t": "fs.names", "root": str(project)})
+    assert len(reply["names"]) == protocol.FS_NAMES_MAX == 5000 and reply["truncated"] is True
+    assert all(len(name) <= protocol.FS_NAME_MAX for name in reply["names"])
+
+
+def test_a_full_bound_of_long_names_chunks_through_the_real_framing(tmp_path):
+    """Review of PR 614: 5000 names of 250 characters validate but are
+    past a frame as one message; `names` travels as TAG_BLOB frames like a
+    walk's paths, and the client's join gives the list back."""
+    for index in range(protocol.FS_NAMES_MAX + 1):
+        (tmp_path / f"{index:05d}-{'n' * 244}.txt").touch()
+    fields = files.names_reply(str(tmp_path))
+    assert len(fields["names"]) == protocol.FS_NAMES_MAX and fields["truncated"] is True
+    reply = protocol.reply(77, **fields)
+    assert not isinstance(protocol.validate_response(reply, "fs.names"), protocol.Refusal)
+    with pytest.raises(ValueError, match="frame limit"):
+        protocol.encode(reply)  # unchunked, it would not fit
+    frames, slim = protocol.split_reply(reply)
+    assert frames and "names" not in slim and slim["names_chunked"] is True
+    data = b"".join(protocol.unpack_frame(frame)[1] for frame in frames)
+    joined = protocol.join_reply(slim, data)
+    assert joined["names"] == fields["names"] and "names_chunked" not in joined
+    assert not isinstance(protocol.validate_response(joined, "fs.names"), protocol.Refusal)
+
+
+def test_names_skips_a_name_that_is_not_text(tmp_path):
+    (tmp_path / "ok.txt").write_text("x")
+    try:
+        (tmp_path / os.fsdecode(b"bad-\xff.txt")).write_text("x")
+    except OSError:
+        pytest.skip("this filesystem refuses a non-UTF-8 name")
+    assert files.names_reply(str(tmp_path)) == {"names": ["ok.txt"], "truncated": False}
+
+
+def test_names_of_a_missing_root_is_gone(served):
+    core, client, project, _events = served
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.names", "root": str(project / "gone")})
+    assert refused.value.error == protocol.ERROR_GONE
+
+
+def test_names_is_confined_to_a_known_root_unless_local(served, tmp_path):
+    core, client, project, _events = served
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "secret.txt").write_text("s")
+    # A local client may name any root...
+    assert client.request({"t": "fs.names", "root": str(other)})["names"] == ["secret.txt"]
+    # ...a client that is not local, only a root the service knows.
+    client.local = False
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.names", "root": str(other)})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    assert client.request({"t": "fs.names", "root": str(project)})["names"] == ["a.txt"]
+    with pytest.raises(inproc.RequestRefused):
+        client.request({"t": "fs.names", "root": str(other)})
+    # A link out of a known root is outside it.
+    (project / "escape").symlink_to(other)
+    with pytest.raises(inproc.RequestRefused):
+        client.request({"t": "fs.names", "root": str(project / "escape")})
+
+
+def test_stat_list_walk_and_names_are_deferreds_settled_later(served):
     core, client, project, _events = served
     landed: list = []
     core.files = files.Files(core, dispatch=landed.append)
@@ -526,6 +611,7 @@ def test_stat_list_and_walk_are_deferreds_settled_later(served):
         {"t": "fs.stat", "id": 1, "path": str(project / "a.txt")},
         {"t": "fs.list", "id": 2, "path": str(project), "hidden": False, "root": str(project)},
         {"t": "fs.walk", "id": 3, "root": str(project), "hidden": False},
+        {"t": "fs.names", "id": 4, "root": str(project)},
     ):
         raw = core.handle(protocol.validate(frame, protocol.CLIENT), client)
         assert isinstance(raw, protocol.Deferred) and not raw.settled
@@ -731,6 +817,7 @@ def test_list_and_walk_confine_on_the_worker(served, monkeypatch):
     reply = client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)})
     assert [e["name"] for e in reply["entries"]] == ["a.txt"]
     assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
+    assert client.request({"t": "fs.names", "root": str(project)})["names"] == ["a.txt"]
     client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
     assert core.files.watching(client, "d1")
 
