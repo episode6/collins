@@ -271,7 +271,9 @@ session, routed to its owner window) → `MainWindow.detach_page` → the
 editor's Save Changes? only → the page goes into `_detached_pages` and
 `close_page` → `_on_close_page` skips every ask and the graceful close and
 calls `TerminalTab.detach_pty()` (a `detach`, the client closed) instead of
-`release_pty()`; the panel shells still end (their history written by the
+`release_pty()` (`detach_page` refuses a page mid-close, `_page_settling`,
+and closes a tab whose CLI has exited instead; the row menu asks
+`can_detach_session`); the panel shells still end (their history written by the
 service). The tab's `destroy` also detaches (no longer `release_pty`): a
 window that closes for real leaves its sessions running. **Opening a
 running session attaches** (D31): `open_session` asks `store.pty_for(id)`
@@ -285,7 +287,11 @@ entry of `open_tabs`), with a placeholder row like a fresh tab's.
 
 Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit`, by
 `quit_with_running_sessions`: **detach** (the default since PR-1.12c, D30:
-`_quitting` set and the window closed; every tab detaches on destroy),
+`do_detach` records `open_tabs` with `_close_for_good`, marks every
+running tab `_detached_pages` and closes all pages with `_close_ok`, so a
+page mid-close drains and a shell-only tab ends, and the last page's close
+reissues the window's; a non-last window's tabs are kept by
+`App.keep_open_tabs`),
 **exit** (*Stop Sessions and Quit*: close all with `_close_ok`, as quitting
 always did; with nothing busy the fast path releases each pty), background
 (the /bg queue), **hide** (the window hides, sessions keep running, the
@@ -326,7 +332,9 @@ service. *Idle* is `ServiceCore.restart_when_idle` (polls
 Cancel in the reconnect banner (`MainWindow.set_restart_pending`). The
 service's stop now ends its clients **before** its sessions
 (`Service.stop`), so a client sees the link go, not one `pty-exited` per
-session. A `hello` refused `protocol` raises `api.client.ProtocolMismatch`:
+session. *Restart Service* is offered only for an older service
+(`mismatch.service < mismatch.client`). A `hello` refused `protocol`
+raises `api.client.ProtocolMismatch`:
 at startup `App._mismatch_at_startup` asks over a bare window on a nested
 loop (*Restart Service*: `connection.stop_service` SIGTERMs the socket's
 peer, found by `SO_PEERCRED`, then `start_local` again; *Quit*); on a

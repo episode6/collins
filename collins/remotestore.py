@@ -284,7 +284,15 @@ class RemoteStore(GObject.Object):
         subscription's word and a view's alike; the second is a no-op)."""
         row = self._agent_ptys.pop(event.get("pty"), None)
         if row is not None:
-            self._sync_running(row.get("session") or "")
+            session_id = row.get("session") or ""
+            if session_id and not self._table_runs(session_id):
+                # The table's word is the newer: an `item` field saying
+                # running from before the exit must not hold the row up
+                # until the service's own `item` lands (PR-1.12c review).
+                fields = self._fields.get(session_id)
+                if fields is not None:
+                    fields["running"] = False
+            self._sync_running(session_id)
 
     def _sync_running(self, session_id: str) -> None:
         """Put a row's `running` in line with what the service said of it

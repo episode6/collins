@@ -2645,9 +2645,11 @@ class SessionSidebar(Gtk.Box):
             # over to a fresh one instead — the agent keeps running, its
             # terminal is only reparented.
             open_section.append_item(item(_("Move to new window"), "move-session-new-window"))
-        if row.item.status in _IN_TAB_STATUSES:
+        can_detach = getattr(self.get_root(), "can_detach_session", None)
+        if row.item.status in _IN_TAB_STATUSES and (can_detach is None or can_detach(session_id)):
             # Stop looking without ending it (§3.21): the tab closes, the
             # session runs on in the Collins service, and the row says so.
+            # Not while a close is under way, nor for a shell whose CLI left.
             open_section.append_item(item(_("Detach"), "detach-session"))
         if _GHOSTTY:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))

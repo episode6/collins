@@ -450,9 +450,15 @@ def test_service_restart_now_idle_and_cancel_are_served(tmp_path, monkeypatch):
         cancel = client.request({"t": "service.restart", "when": "cancel"})
         assert cancel["ok"] is True and not core.restart_pending
         assert restarts == []
+        # Idle, then now: the waiting one is called off and fires never.
+        monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+        assert client.request({"t": "service.restart", "when": "idle"})["ok"] is True
         now = client.request({"t": "service.restart", "when": "now"})
         assert now["ok"] is True
         assert pump(2, lambda: restarts == ["now"])
+        core.activity.count = 0
+        pump(0.3)
+        assert restarts == ["now"] and not core.restart_pending
         client.close()
     finally:
         server.stop()

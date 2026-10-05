@@ -33,6 +33,7 @@ def world(app_state, projects_dir, tmp_path):
     core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
     store = SessionStore(service_state)
     core.start_store(store)
+    store._core = core  # the tests' way to the service's records
     store._last_sessions = discover_sessions()
     store._apply()
     server = loopback.LoopbackServer(core)
@@ -294,19 +295,26 @@ def _pump(seconds, until):
     return until()
 
 
-def _spawn(link, cwd, **extra):
+def _spawn(link, cwd, store, **extra):
+    """An agent pty whose CLI (`sleep 300` under /bin/sh) runs, its row in
+    the table once the /proc poll's read (made by hand here) says so."""
     message = {"t": "spawn", "kind": "agent", "cwd": str(cwd), "cols": 80, "rows": 24}
-    return link.call({**message, "command_override": "true", **extra})["pty"]
+    pty = link.call({**message, "command_override": "sleep 300", **extra})["pty"]
+    core = store._core
+    record = core.sessions[pty]
+    assert _pump(5, lambda: record.session.has_running_command())
+    record.refresh_process_facts()
+    return pty
 
 
 def test_a_running_session_is_a_running_row_until_its_pty_exits(world, tmp_path, monkeypatch):
-    monkeypatch.setenv("SHELL", "/bin/cat")
-    _store, remote, _state, ids, link = world
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    store, remote, _state, ids, link = world
     heard = []
     remote.connect("running-changed", lambda _s, sid: heard.append(sid))
     item = remote.get_item(ids["alpha1"])
     assert item.running is False and remote.pty_for(ids["alpha1"]) is None
-    pty = _spawn(link, tmp_path, session=ids["alpha1"])
+    pty = _spawn(link, tmp_path, store, session=ids["alpha1"])
     # The pty table's row and the item field both say so.
     assert item.running is True and remote.is_running(ids["alpha1"])
     assert remote.pty_for(ids["alpha1"]) == pty and remote.pty_running(pty)
@@ -319,9 +327,9 @@ def test_a_running_session_is_a_running_row_until_its_pty_exits(world, tmp_path,
 
 
 def test_a_fresh_spawn_is_an_unresolved_running_pty(world, tmp_path, monkeypatch):
-    monkeypatch.setenv("SHELL", "/bin/cat")
-    _store, remote, _state, _ids, link = world
-    pty = _spawn(link, tmp_path)
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    store, remote, _state, _ids, link = world
+    pty = _spawn(link, tmp_path, store)
     assert remote.unresolved_ptys() == {pty: str(tmp_path)}
     link.call({"t": "close", "pty": pty, "mode": "kill"})
     assert _pump(8, lambda: remote.unresolved_ptys() == {})
@@ -352,6 +360,16 @@ def test_a_table_row_names_the_session_and_its_exit_clears_it(world):
     assert remote.pty_for(ids["alpha1"]) is None
     link.dispatch({"t": "pty-exited", "pty": 41, "status": 0, "table": True})
     assert item.running is False and remote.pty_for(ids["alpha2"]) is None
+    # An `item` field from before the exit does not hold the row up: the
+    # table's exit with no `item` event after it clears `running`.
+    link.dispatch({"t": "item", "session": ids["alpha2"], "running": True})
+    link.dispatch({"t": "pty", "pty": 44, "kind": "agent", "session": ids["alpha2"], "table": True})
+    link.dispatch({"t": "pty-exited", "pty": 44, "status": None, "table": True})
+    assert item.running is False and not remote.is_running(ids["alpha2"])
+    # A fork's row names no session: an unresolved pty, its origin unmarked.
+    link.dispatch({"t": "pty", "pty": 45, "kind": "agent", "cwd": "/w", "table": True})
+    assert remote.unresolved_ptys() == {45: "/w"} and not remote.is_running(ids["alpha2"])
+    link.dispatch({"t": "pty-exited", "pty": 45, "status": 0, "table": True})
     # A reset forgets the table: the next snapshot brings it whole.
     link.dispatch({"t": "pty", "pty": 43, "kind": "agent", "session": ids["alpha2"], "table": True})
     remote.reset()

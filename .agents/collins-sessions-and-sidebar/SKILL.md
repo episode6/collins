@@ -288,7 +288,13 @@ mirrors only, never to a view). `RemoteStore` keeps the table
 (`agent_ptys`, `pty_for(session)` through the forward chain,
 `unresolved_ptys`, `pty_running`) and emits `running-changed`. A fork's
 pty names the forked id once a sandboxed fork's resolver found it, else
-nothing (`ServiceCore.agent_pty_sessions`). A `SessionRow` whose session
+nothing (`ServiceCore.agent_pty_sessions`), and a fork's spawn is never
+refused for its origin's pty, nor the origin's for a fork's. Only a pty
+whose CLI runs is in the table: the facts' `running_command`
+(`SessionRecord._send_changed` → `ServiceCore.cli_changed`) adds the row
+when the CLI comes up and sends a table `pty-exited` (status null, the
+pty alive) when it leaves, so a shell alone is no running row. A table
+exit also clears the session's `running` field in the mirror. A `SessionRow` whose session
 runs with no tab here takes the `detached` class (yellow), and
 `row.session-child.detached.busy` poles in yellow (the service's busy
 verdict reaches such a row too); an unresolved pty with no tab on this

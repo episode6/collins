@@ -1241,7 +1241,11 @@ class AppState:
             # is committed with the read; a throwaway reader (migrate
             # False, or the service's device=False) keeps it in memory and
             # writes nothing, as it writes nothing else. Only a value that
-            # moved is written (a fresh device sets the marker alone).
+            # moved is written (a fresh device sets the marker alone). The
+            # pre-split (v0.1.4) path, `migrating`, carries the moved
+            # `detach` in ui_settings into the device's half that
+            # _commit_migration writes (ui-state.json first), so it is not
+            # saved twice here.
             self.ui.settings.update(moved)
             if "quit_with_running_sessions" in moved and self._device and self._migrate and not migrating:
                 try:

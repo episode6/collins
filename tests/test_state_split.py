@@ -714,3 +714,13 @@ def test_the_apps_own_instance_commits_the_move_with_the_read(app_state):
     app_state.AppState()
     saved = json.loads(app_state._ui_state_file().read_text(encoding="utf-8"))["device"]["settings"]
     assert saved == {"quit_with_running_sessions": "ask"}
+
+
+def test_the_services_instance_leaves_ui_state_alone(app_state):
+    """The service's AppState (migrate, device=False) reads the device's
+    file but never writes it: an ``ask`` stays on disk for the client."""
+    _write_ui_settings(app_state, {"quit_with_running_sessions": "ask"})
+    before = app_state._ui_state_file().read_text(encoding="utf-8")
+    state = app_state.AppState(migrate=True, device=False)
+    state.set_setting("git_log_page", 30)
+    assert app_state._ui_state_file().read_text(encoding="utf-8") == before

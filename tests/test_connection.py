@@ -314,3 +314,21 @@ def test_service_pid_reads_the_listeners_credentials(tmp_path):
         listener.close()
     assert connection.service_pid(str(tmp_path / "none.sock")) is None
     assert connection.pid_is_alive(os.getpid())
+
+
+def test_a_restart_wait_that_outlives_its_bound_proceeds():
+    """An old service that will not go (a stuck close flow) holds the
+    reconnect up for RESTART_WAIT_S only, then the find and start go on:
+    the service's own single-instance lock (service.lock) is the real
+    guard against two services, this wait only spares the race."""
+    world = World(live=True)
+    world.manager.start_local()
+    world.manager._pid_alive = lambda pid: True  # never goes
+    world.manager.expect_restart(4242)
+    world.live = False
+    world.link.on_lost("closed")
+    for _ in range(int(connection.RESTART_WAIT_S * 1000 / (connection.POLL_MS * 5)) + 10):
+        world.fire()
+        if world.started:
+            break
+    assert world.started == ["com.example.Test"]

@@ -276,6 +276,10 @@ class ServiceCore:
         # what to call, and the poll's source.
         self._restart_waiting: Callable[[], None] | None = None
         self._restart_source = 0
+        # Agent pty id -> whether its CLI runs (the facts' running_command,
+        # hosting.SessionRecord._send_changed): a session counts as running
+        # only while it does (cli_changed).
+        self._cli_running: dict[int, bool] = {}
         pruned = self.ptys.prune_models()
         if pruned:
             log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
@@ -468,9 +472,15 @@ class ServiceCore:
         if options is not None and message.get("sandbox") and not options.sandbox_plan:
             options = self._box_for_launch(message, options)
         wanted = message.get("session")
-        if wanted:
+        # A fork starts its own conversation: no running pty of its origin
+        # stands in for it, and none is closed for it (PR-1.12c review).
+        if wanted and not message.get("fork"):
             for live in self._records():
                 if live.pty_id not in self.ptys.ptys or live.session.session_id != wanted:
+                    continue
+                if live.session.fork:
+                    # A fork's pty is no view of the session it forked
+                    # from: neither attached to nor closed for it.
                     continue
                 if live.session.has_running_command():
                     # Two CLIs on one transcript would both write it; the
@@ -528,6 +538,10 @@ class ServiceCore:
             self.activity.started(record, fresh=fresh)
         pty = self.ptys.get(record.pty_id)
         # Every subscriber's sidebar hears of the new agent pty (PR-1.12c).
+        # The broadcast is queued before the reply is returned, but the
+        # requester's client lands the reply first (a `call` returns before
+        # the events the reply implies are drained, api.client), so its tab
+        # knows its own pty by the time the table names it.
         self.publish_pty(record.pty_id)
         return protocol.reply(
             message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
@@ -1053,6 +1067,7 @@ class ServiceCore:
         drops the session once the exit is reported."""
         if pty.kind != "shell":
             ran = self.agent_pty_sessions(include_finished=True).get(pty.id)
+            self._cli_running.pop(pty.id, None)
             record = self.sessions.pop(pty.id, None)
             # The subscribers' word that the agent's row left the table
             # (PR-1.12c): its session runs no more.
@@ -1772,16 +1787,21 @@ class ServiceCore:
     # -- the pty table as the subscription carries it (PR-1.12c, §3.21)
 
     def agent_pty_sessions(self, include_finished: bool = False) -> dict[int, str | None]:
-        """Every live agent pty and the session it runs: the id a resume
-        or a resolved fresh spawn runs under; for a fork, the forked
-        conversation's id once its resolver found it, else None (a fork's
-        pty is no view of the session it forked from); None for a fresh
-        spawn that has not resolved yet."""
+        """Every live agent pty whose CLI runs, and the session it runs: the
+        id a resume or a resolved fresh spawn runs under; for a fork, the
+        forked conversation's id once its resolver found it, else None (a
+        fork's pty is no view of the session it forked from); None for a
+        fresh spawn that has not resolved yet. A pty whose CLI has exited
+        (the shell alone, or the CLI not up yet) is no running session and
+        is left out (`cli_changed`, the /proc poll's word); *include_finished*
+        (the exit's own read) takes every agent pty, finished or not."""
         table: dict[int, str | None] = {}
         for pty_id, pty in self.ptys.ptys.items():
             if pty.kind == "shell" or (getattr(pty, "_finished", False) and not include_finished):
                 continue
             record = self.sessions.get(pty_id)
+            if not include_finished and record is not None and not self._cli_running.get(pty_id):
+                continue
             if record is None:
                 table[pty_id] = pty.session or None
             elif record.session.fork:
@@ -1802,6 +1822,8 @@ class ServiceCore:
         pty = self.ptys.ptys.get(pty_id)
         if pty is None or getattr(pty, "_finished", False):
             return None
+        if pty.kind != "shell" and pty_id in self.sessions and not self._cli_running.get(pty_id):
+            return None  # its CLI is not running: no row (cli_changed)
         event: dict = {
             "t": "pty",
             "pty": pty_id,
@@ -1819,6 +1841,28 @@ class ServiceCore:
         if pid:
             event["pid"] = pid
         return event
+
+    def cli_changed(self, record: hosting.SessionRecord, running: bool) -> None:
+        """The session's CLI came up or went (the facts' `running_command`,
+        re-read by the /proc poll and on a foreground flip): its pty joins
+        the table, or leaves it with the table's word (a `pty-exited` with
+        ``table: true``; the pty itself lives on, the shell alone), and the
+        item's `running` follows (PR-1.12c review)."""
+        pty_id = record.pty_id
+        if pty_id is None or pty_id not in self.ptys.ptys:
+            return
+        running = bool(running)
+        if self._cli_running.get(pty_id, False) == running:
+            return
+        if not running:
+            ran = self.agent_pty_sessions().get(pty_id)
+        self._cli_running[pty_id] = running
+        if running:
+            self.publish_pty(pty_id)
+            return
+        self._broadcast({"t": "pty-exited", "pty": pty_id, "status": None, "table": True})
+        if self.feed is not None and ran:
+            self.feed.refresh_running({ran})
 
     def publish_pty(self, pty_id: int) -> None:
         """An agent pty spawned or resolved: every subscriber is sent its

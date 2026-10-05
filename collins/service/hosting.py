@@ -371,6 +371,12 @@ class SessionRecord:
                 self._sent[name] = value
         if changed:
             self.send(changed)
+        if "running_command" in fields:
+            # The pty table's word on whether the session runs (PR-1.12c):
+            # told on every read, the core keeps only the flips.
+            cli_changed = getattr(self.core, "cli_changed", None)
+            if cli_changed is not None:
+                cli_changed(self, bool(fields["running_command"]))
 
     def snapshot(self) -> dict:
         """Every fact, for a client attaching."""

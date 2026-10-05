@@ -2277,6 +2277,14 @@ class App(Adw.Application):
         # What was open comes back (§3.21): a tab whose pty the service
         # still runs reattached above; one whose session ended with the
         # service (a restart, a crash) is resumed, as a relaunch does.
+        open_windows = [
+            w for w in self.get_windows() if isinstance(w, MainWindow) and not w.closed_for_good
+        ]
+        if not open_windows:
+            # The last window quit and froze open_tabs; this reconnect
+            # landed before the shutdown: nothing to reopen, nothing to
+            # write over the quit's list.
+            return
         self._open_tabs_frozen = False
         window = self._main_window()
         entries = self.state.get_open_tabs()
@@ -2286,15 +2294,35 @@ class App(Adw.Application):
 
     # -- the device's open tabs (§3.21) -------------------------------------------
 
+    def keep_open_tabs(self, entries: list[str]) -> None:
+        """A window that closed while others stay: its tabs are still open
+        tabs of this device (their sessions run on, and come back at the
+        next launch) until one of them is closed for good elsewhere."""
+        kept = getattr(self, "_kept_open_tabs", [])
+        self._kept_open_tabs = kept + [e for e in entries if e not in kept]
+
+    def forget_kept_tab(self, session_id: str | None, pty: int | None) -> None:
+        """A tab closed for good (not detached): no kept entry of a closed
+        window stands for its session any more."""
+        gone = {session_id, f"pty:{pty}" if pty is not None else None} - {None}
+        kept = getattr(self, "_kept_open_tabs", [])
+        if any(entry in gone for entry in kept):
+            self._kept_open_tabs = [e for e in kept if e not in gone]
+            self.persist_open_tabs()
+
     def open_tab_entries(self) -> list[str]:
         """Every open window's tabs, as `open_tabs` entries, window by
-        window (the most recently focused first)."""
+        window (the most recently focused first), then those a closed
+        window left running (keep_open_tabs)."""
         entries: list[str] = []
         for window in self.get_windows():
             if isinstance(window, MainWindow) and not window.closed_for_good:
                 for entry in window.open_tab_entries():
                     if entry not in entries:
                         entries.append(entry)
+        for entry in getattr(self, "_kept_open_tabs", []):
+            if entry not in entries:
+                entries.append(entry)
         return entries
 
     def persist_open_tabs(self, now: bool = False) -> None:
@@ -2361,52 +2389,80 @@ class App(Adw.Application):
 
     # -- the protocol mismatch (§3.21) ---------------------------------------------------
 
-    def _mismatch_text(self, mismatch) -> tuple[str, str]:
+    def _mismatch_text(self, mismatch) -> tuple[str, str, bool]:
+        """The dialog's heading and body, and whether *Restart Service* is
+        offered: only when the service is the older one. Stopping a newer
+        service would end every session for a restart that starts the same
+        newer service again; that one asks for an upgrade of Collins."""
         service = mismatch.service if mismatch.service is not None else "?"
+        can_restart = isinstance(mismatch.service, int) and mismatch.service < mismatch.client
         heading = _("Collins and its service speak different protocols")
-        body = _(
-            "The Collins service speaks protocol {service} and this Collins speaks "
-            "protocol {client}. Restarting the service starts the one this Collins "
-            "came with; every session it runs ends, and resumes when it is reopened."
-        ).format(service=service, client=mismatch.client)
-        return heading, body
+        if can_restart:
+            body = _(
+                "The Collins service speaks protocol {service} and this Collins speaks "
+                "protocol {client}. Restarting the service starts the one this Collins "
+                "came with; every session it runs ends, and resumes when it is reopened."
+            ).format(service=service, client=mismatch.client)
+        else:
+            body = _(
+                "The Collins service speaks protocol {service} and this Collins speaks "
+                "protocol {client}. The service is newer: upgrade Collins to use it."
+            ).format(service=service, client=mismatch.client)
+        return heading, body, can_restart
 
-    def _mismatch_at_startup(self, mismatch) -> None:
-        """The first connect found a service this Collins cannot talk to:
-        ask, before any window exists (a dialog over a bare window, its own
-        loop), then restart the service and connect again, or quit."""
-        log.warning("the service refused this client's protocol: %s", mismatch)
+    def _ask_before_any_window(self, heading: str, body: str, choices: list) -> str:
+        """An answer asked before any window exists: a dialog over a bare
+        window, on a loop of its own. Escape and closing answer "quit"."""
         answer = {"value": "quit"}
-        # While the dialog's loop runs, a second launch's activate finds no
-        # app yet (do_activate): the mirrors are built once this returns.
+        # While the loop runs, a second launch's activate finds no app yet
+        # (do_activate): the mirrors are built once the startup goes on.
         self._mismatch_asking = True
         loop = GLib.MainLoop()
         host = Adw.Window(title=traymodel.APP_NAME, default_width=520, default_height=260)
         host.set_content(Adw.StatusPage(icon_name=APP_ID, title=traymodel.APP_NAME))
         host.connect("close-request", lambda *_a: (loop.quit(), False)[1])
-        heading, body = self._mismatch_text(mismatch)
 
         def answered(response: str) -> None:
-            answer["value"] = response
+            answer["value"] = "quit" if response == "cancel" else response
             loop.quit()
 
         host.present()
         dialogs.answer_dialog(
-            host,
-            heading,
-            body,
-            [("quit", _("Quit"), ""), ("restart", _("Restart Service"), "destructive")],
-            lambda response: answered("quit" if response == "cancel" else response),
-            default_response="restart",
+            host, heading, body, choices, answered, default_response=choices[-1][0]
         )
         loop.run()
         self._mismatch_asking = False
         host.destroy()
-        if answer["value"] != "restart":
+        return answer["value"]
+
+    def _mismatch_at_startup(self, mismatch) -> None:
+        """The first connect found a service this Collins cannot talk to:
+        ask (before any window exists), then restart the service and
+        connect again, or quit. A second mismatch after the restart (the
+        service that started is newer still) says so and quits; a service
+        that does not come up at all is the startup's fatal path, as for any
+        first connect that fails."""
+        log.warning("the service refused this client's protocol: %s", mismatch)
+        heading, body, can_restart = self._mismatch_text(mismatch)
+        choices = [("quit", _("Quit"), "")]
+        if can_restart:
+            choices.append(("restart", _("Restart Service"), "destructive"))
+        if self._ask_before_any_window(heading, body, choices) != "restart":
             log.info("quitting: the service speaks another protocol")
-            os._exit(0)
+            sys.exit(0)
         self._stop_service_and_wait()
-        self._connection.start_local()
+        try:
+            self._connection.start_local()
+        except ProtocolMismatch as again:
+            log.warning("the restarted service refused this client's protocol: %s", again)
+            service = again.service if again.service is not None else "?"
+            self._ask_before_any_window(
+                heading,
+                _("The service that started still speaks protocol {service}; "
+                  "upgrade Collins.").format(service=service),
+                [("quit", _("Quit"), "suggested")],
+            )
+            sys.exit(0)
 
     def _stop_service_and_wait(self) -> None:
         """SIGTERM the service on our socket (it refused our hello, so it
@@ -2423,10 +2479,10 @@ class App(Adw.Application):
         """A reconnect found a service this Collins cannot talk to (an
         upgrade restarted it): the same question, over the window."""
         window = self._main_window()
-        heading, body = self._mismatch_text(mismatch)
+        heading, body, can_restart = self._mismatch_text(mismatch)
 
         def answered(response: str) -> None:
-            if response == "restart":
+            if response == "restart" and can_restart:
                 from .api import server as api_server
 
                 pid = connection.stop_service(api_server.socket_path(self.get_application_id()))
@@ -2438,13 +2494,16 @@ class App(Adw.Application):
         if window is None:
             answered("quit")
             return
+        choices = [("quit", _("Quit"), "")]
+        if can_restart:
+            choices.append(("restart", _("Restart Service"), "destructive"))
         dialogs.answer_dialog(
             window,
             heading,
             body,
-            [("quit", _("Quit"), ""), ("restart", _("Restart Service"), "destructive")],
+            choices,
             lambda response: answered("quit" if response == "cancel" else response),
-            default_response="restart",
+            default_response=choices[-1][0],
         )
 
     def _on_run_finished(self, session_id: str) -> None:

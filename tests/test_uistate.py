@@ -98,3 +98,12 @@ def test_the_mirror_reads_and_writes_this_devices_block(app_state, tmp_path):
     state.set_open_tabs([SID_B])
     saved = json.loads(ui_path.read_text(encoding="utf-8"))
     assert saved["services"][SERVICE]["open_tabs"] == [SID_B]
+
+
+def test_a_pty_entry_outside_the_protocols_range_never_reaches_an_attach():
+    huge = "pty:" + "9" * 100
+    assert uistate.open_tab_pty(huge) is None
+    assert uistate.open_tab_pty("pty:4294967296") is None  # 2**32
+    assert uistate.open_tab_pty("pty:4294967295") == 2**32 - 1
+    assert uistate.open_tab_pty("pty:\u0661") is None  # a non-ASCII digit
+    assert uistate.clean_open_tabs([huge, "pty:4294967296", "pty:3"]) == ["pty:3"]

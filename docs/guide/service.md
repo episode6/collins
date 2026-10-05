@@ -84,8 +84,11 @@ a Cancel in the banner's place. The service closes its clients before it
 ends the sessions, so a window sees the link go, not each session end, and
 resumes every open tab once it has reconnected to the new service. A
 service that refuses this window's protocol gets a dialog naming both
-versions, with *Restart Service* (the service is sent SIGTERM, since it
-answers nothing else) and *Quit*.
+versions. When the service is the older one it offers *Restart Service*
+(the service is sent SIGTERM, since it answers nothing else) and *Quit*;
+a newer service is left running and the dialog asks for an upgrade of
+Collins. If the restarted service still speaks another protocol, the
+window says so and quits.
 
 ## `collins-service --check`
 

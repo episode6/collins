@@ -50,6 +50,8 @@ with open(f"{E2E}/claude.json", "w", encoding="utf-8") as fh:
 os.makedirs(f"{E2E}/config/collins", exist_ok=True)
 with open(STATE_FILE, "w", encoding="utf-8") as fh:
     # "ask": the quit dialog shows, so its *Quit* is what this check presses.
+    # quit_detach_migrated: the one-shot ask -> detach move (PR-1.12c) has
+    # run already, so the seeded "ask" stays "ask" (state.migrate_device_settings).
     fh.write(json.dumps({"settings": {
         "welcome_seen": True, "gh_welcome_dismissed": True, "title_model": "none",
         "quit_with_running_sessions": "ask", "quit_detach_migrated": True,
@@ -82,6 +84,8 @@ while True:
     for b in chunk:
         if b == 0x7F:
             text = text[:-1]
+        elif b == 0x03:
+            sys.exit(0)  # Ctrl+C: the graceful close's keystrokes end it
         elif b == 0x0D:
             sys.stdout.write("\r\n" + "you said: " + text + "\r\n")
             text = ""
@@ -171,6 +175,11 @@ def steps():
     yield 800
     for _ in range(50):
         if app.store.get_item(sid) is not None:
+            break
+        yield 200
+    # The service's table names the running CLI (its /proc poll's word).
+    for _ in range(50):
+        if app.store.pty_running(pty):
             break
         yield 200
     # Detach, from the row menu's action.
@@ -316,7 +325,11 @@ def steps():
     if tab is not None:
         capture = tab._client.request({"t": "debug.screen", "pty": pty_id}).get("capture") or ""
         check("the reopened screen holds the typing", TYPED in capture, capture[-200:])
-    app.quit()
+    # Quit again, on Stop Sessions: this time the session ends with it.
+    app.state.set_setting("quit_with_running_sessions", "exit")
+    yield 300
+    app.quit_all_windows()
+    state["quit_asked"] = True
 
 
 generator = steps()
@@ -331,8 +344,28 @@ def tick() -> bool:
     return GLib.SOURCE_REMOVE
 
 
+state: dict = {}
 GLib.timeout_add(250, tick)
 app.run([])
+
+# -- after a quit on Stop Sessions: the service runs no pty -----------------------------
+
+from collins.api import server as api_server  # noqa: E402
+from collins.api.client import SocketLink  # noqa: E402
+
+check("the second Collins quit on Stop Sessions", state.get("quit_asked") is True)
+link = SocketLink(api_server.socket_path(os.environ["COLLINS_APP_ID"]), device="check")
+link.connect()
+stopped = None
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    stopped = link.call({"t": "service.status"})
+    if stopped.get("ptys") == 0:
+        break
+    time.sleep(0.25)
+check("Stop Sessions and Quit released every pty", (stopped or {}).get("ptys") == 0, stopped)
+check("…where Quit had left them", len(rows) >= 1, rows)
+link.shutdown()
 print(f"\n{PASSED} passed, {FAILED} failed")
 shutil.rmtree(E2E, ignore_errors=True)
 sys.exit(1 if FAILED else 0)

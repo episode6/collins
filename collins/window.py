@@ -806,12 +806,13 @@ class MainWindow(Adw.ApplicationWindow):
             self._release_all_editor_windows()
             self._save_panel_data()
             self._persist_last_session()
-            if behavior == "exit":
-                # Stop sessions and quit, with nothing busy to drain: what
-                # is left (an exited CLI's shell, an unstarted thread) ends
-                # with the window, as it always did. Otherwise each tab
-                # detaches as the window goes, and its session runs on.
-                for tab in self._terminal_tabs():
+            # Stop sessions and quit, with nothing busy to drain: what is
+            # left (an unstarted thread) ends with the window, as it always
+            # did. A tab whose CLI has exited ends with it whatever the
+            # setting: a shell alone is no session to leave running. The
+            # rest detach as the window goes, their sessions running on.
+            for tab in self._terminal_tabs():
+                if behavior == "exit" or not tab.has_running_command():
                     tab.release_pty()
             self._close_for_good()
             return False  # nothing running or unsaved; continue with the normal close
@@ -829,10 +830,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _close_for_good(self) -> None:
         """This window is going for real: the device's open tabs are written
-        one last time — with this window's own when it is the last one (a
-        quit: they come back at the next launch), without them when others
-        stay (its tabs are left running, rows in the sidebar) — and, for
-        the last window, no write follows (§3.21)."""
+        one last time with this window's own (they come back at the next
+        launch) — kept by the app when other windows stay (`App.keep_open_tabs`:
+        its tabs are left running, rows in the sidebar, and still reopen) —
+        and, for the last window, no write follows (§3.21)."""
         if self.closed_for_good:
             return
         app = self.get_application()
@@ -841,6 +842,8 @@ class MainWindow(Adw.ApplicationWindow):
             if isinstance(w, MainWindow) and w is not self and not w.closed_for_good
         ]
         if others:
+            if hasattr(app, "keep_open_tabs"):
+                app.keep_open_tabs(self.open_tab_entries())
             self.closed_for_good = True
             if hasattr(app, "persist_open_tabs"):
                 app.persist_open_tabs(now=True)
@@ -854,9 +857,14 @@ class MainWindow(Adw.ApplicationWindow):
         """This window's tabs as `open_tabs` entries, in tab order: the
         session id of a tab showing a live pty, ``pty:<id>`` for one whose
         session has not resolved (or a fork, whose id is its origin's).
-        A new-chat screen, an ended session and a chat view have none."""
+        A new-chat screen, an ended session, a chat view and a page mid-close
+        (the person is ending it) have none."""
         entries: list[str] = []
-        for tab in self._terminal_tabs():
+        for i in range(self.tab_view.get_n_pages()):
+            page = self.tab_view.get_nth_page(i)
+            tab = page.get_child()
+            if not isinstance(tab, TerminalTab) or self._page_settling(page):
+                continue
             pty = tab.pty_id
             if pty is None:
                 continue
@@ -898,6 +906,17 @@ class MainWindow(Adw.ApplicationWindow):
             return bool(link.call({"t": "pty.info", "pty": pty}).get("running_command", True))
         except RequestRefused:
             return True
+
+    def can_detach_session(self, session_id: str) -> bool:
+        """Whether the row menu's *Detach* has anything to do: the session's
+        tab is open in some window, its CLI runs, and no close is under way
+        (see detach_page)."""
+        owner = self._owner_window(session_id)
+        page = owner._page_for(session_id) if owner is not None else None
+        if page is None or owner._page_settling(page):
+            return False
+        tab = page.get_child()
+        return isinstance(tab, TerminalTab) and tab.pty_id is not None and tab.has_running_command()
 
     def _pty_shown_on_device(self, pty: int) -> bool:
         """Whether some window of this app shows agent pty *pty*."""
@@ -1270,12 +1289,31 @@ class MainWindow(Adw.ApplicationWindow):
 
         def do_detach() -> None:
             # Plain Quit (§3.21, D30): nothing is asked of any agent. The
-            # window closes, every tab detaches as it goes and its session
-            # keeps running in the Collins service; open_tabs brings each
-            # back at the next launch.
+            # open tabs are recorded (open_tabs brings each back at the next
+            # launch), then every tab detaches and its session keeps running
+            # in the Collins service — except a page already mid-close (a
+            # graceful exit, a /bg handoff), which drains as do_quit's do,
+            # and a shell whose CLI has exited, which ends. _on_close_page
+            # reissues the window close once the last page is gone.
             self._quit_asking = False
             self._quitting = True
-            GLib.idle_add(self.close, priority=GLib.PRIORITY_DEFAULT)
+            self._close_for_good()
+            pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
+            for page in pages:
+                self._close_ok.add(page)
+                tab = page.get_child()
+                if (
+                    isinstance(tab, TerminalTab)
+                    and not self._page_settling(page)
+                    and tab.pty_id is not None
+                    and tab.has_running_command()
+                ):
+                    self._detached_pages.add(page)
+            if not pages:
+                GLib.idle_add(self.close, priority=GLib.PRIORITY_DEFAULT)
+                return
+            for page in pages:
+                self.tab_view.close_page(page)
 
         can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
                              for i in range(self.tab_view.get_n_pages()))
@@ -1300,11 +1338,24 @@ class MainWindow(Adw.ApplicationWindow):
             if busy == 1
             else _("{n} sessions keep running in the Collins service").format(n=busy)
         )
-        body = _("Quit closes Collins and leaves every agent working; the tabs "
-                 "come back the next time Collins opens. Stop Sessions and Quit "
-                 "asks each agent to exit first.")
+        app = self.get_application()
+        other_windows = any(
+            isinstance(w, MainWindow) and w is not self and not w.closed_for_good
+            for w in (app.get_windows() if app is not None else [])
+        )
+        if other_windows:
+            body = _("This window closes and its agents keep working; their tabs come "
+                     "back the next time Collins opens. Stop Sessions and Quit asks "
+                     "each agent to exit first.")
+        else:
+            body = _("Quit closes Collins and leaves every agent working; the tabs "
+                     "come back the next time Collins opens. Stop Sessions and Quit "
+                     "asks each agent to exit first.")
         body += " " + _("Keep Running hides the window and leaves every "
                         "session exactly as it is.")
+        if not getattr(app, "tray_host_present", False):
+            body += " " + _("Without a status icon, a hidden window comes back by "
+                            "launching Collins again.")
         if not self.state.get_setting("quit_notice_shown"):
             # Once per device: the icon going is no sign the agents did.
             body += " " + _("Collins's status icon leaves with the window; "
@@ -5764,10 +5815,20 @@ class MainWindow(Adw.ApplicationWindow):
         tab = page.get_child()
         if not isinstance(tab, TerminalTab) or tab.is_new_chat or tab.pty_id is None:
             return False
+        if self._page_settling(page):
+            # Mid-close (a graceful exit, a /bg handoff): the close runs to
+            # its end; a Detach now would leave its keystrokes going into a
+            # pty the person was told keeps running (PR-1.12c review).
+            return False
+        if not tab.has_running_command():
+            # The CLI has exited and the shell sits there alone: nothing to
+            # leave running. The page closes as it would (nothing to ask).
+            self.tab_view.close_page(page)
+            return False
 
         def go() -> None:
-            if self.tab_view.get_page(tab) is None:
-                return  # closed meanwhile
+            if self.tab_view.get_page(tab) is None or self._page_settling(page):
+                return  # closed, or a close began, meanwhile
             self._detached_pages.add(page)
             self.tab_view.close_page(page)
 
@@ -5858,6 +5919,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._closing_pages.discard(page)
         self._bg_closing.discard(page)
         self._detached_pages.discard(page)
+        if isinstance(tab, TerminalTab) and not detaching:
+            app = self.get_application()
+            if hasattr(app, "forget_kept_tab"):
+                app.forget_kept_tab(tab.session_id, tab.pty_id)
         if isinstance(tab, TerminalTab):
             if detaching:
                 tab.detach_pty()  # the pty runs on in the service (§3.21)
