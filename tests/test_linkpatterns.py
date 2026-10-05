@@ -5,19 +5,31 @@ the same patterns with Python's `re`, which the patterns deliberately
 restrict themselves to the shared syntax of (see collins/linkpatterns.py).
 """
 
+import os
 import re
 
 import pytest
 
+from collins import linkpatterns
 from collins.linkpatterns import (
     FILE_PATTERN,
     URL_PATTERN,
     bare_names_pattern,
-    resolve_file_reference,
-    resolve_wrapped_reference,
     resolve_wrapped_url,
     token_at_column,
 )
+
+
+# The gates ask the caller whether something is at a path (PR-2.6: the click
+# asks the service). These tests are about the grammar and the joins, so they
+# ask this machine's disk, as the attachment log does; the last tests pin that
+# the caller's answer is the one used.
+def resolve_file_reference(text, roots, exists=os.path.exists):
+    return linkpatterns.resolve_file_reference(text, roots, exists)
+
+
+def resolve_wrapped_reference(candidate, row_text, rows_above, rows_below, roots, exists=os.path.exists):
+    return linkpatterns.resolve_wrapped_reference(candidate, row_text, rows_above, rows_below, roots, exists)
 
 _RX = re.compile(URL_PATTERN)
 _FILE_RX = re.compile(FILE_PATTERN)
@@ -648,3 +660,27 @@ def test_token_at_column() -> None:
     assert token_at_column(text, 99) is None  # past the end
     assert token_at_column(text, -1) is None
     assert token_at_column(text, 17) == "done"
+
+
+def test_the_gates_use_the_callers_exists_and_never_the_local_disk() -> None:
+    asked: list[str] = []
+
+    def exists(path: str) -> bool:
+        asked.append(path)
+        return path == "/srv/project/collins/foo.py"
+
+    # Nothing of this is on this machine: only the caller's answer says it exists.
+    assert linkpatterns.resolve_path("collins/foo.py", ["/elsewhere", None, "/srv/project"], exists) == (
+        "/srv/project/collins/foo.py"
+    )
+    assert asked == ["/elsewhere/collins/foo.py", "/srv/project/collins/foo.py"]
+    assert linkpatterns.resolve_file_reference("collins/foo.py:12:5", ["/srv/project"], exists) == (
+        "/srv/project/collins/foo.py",
+        12,
+        5,
+    )
+    assert linkpatterns.resolve_file_reference("collins/nope.py", ["/srv/project"], exists) is None
+    stitched = linkpatterns.resolve_wrapped_reference(
+        "collins/fo", "  collins/fo", [], ["o.py"], ["/srv/project"], exists
+    )
+    assert stitched == ("/srv/project/collins/foo.py", None, None)
