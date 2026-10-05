@@ -141,6 +141,28 @@ Enter opens, Esc closes.
   shell's prompt, and `read_terminal` / `run_in_terminal` read and type
   through it. Nothing looks different by design, except what *quit* and
   *close* mean: see *Detach*, *Quit* and *Restart service* below.
+- **Local extras.** Every path Collins shows is a path on the service's
+  machine. A window running on that same machine proves it when it
+  connects, and keeps the things that hand such a path to something on
+  your desktop: **Open In…** (your *Footer apps*, the file manager, a
+  terminal, the default app) wherever it appears, the footer's app
+  launchers, its file manager button and the panel toggle's right-click,
+  **Open in Ghostty**, **Reveal transcript**, the attachments panel's
+  **Open With…** and **Show in Folder**, a Ctrl+click on a folder or on a
+  file outside the project (the default app), and real `file:` references
+  on the clipboard so a copied file round-trips with your file manager.
+  (The lightbox's **Open With…** is there either way: on the service's
+  machine it hands the app the file itself, elsewhere the window's own
+  copy of the picture.) A window that is **not** on the
+  service's machine has none of them: the items are left out, not greyed
+  out, because the app they would start is on one computer and the file
+  on another. Everything else is the same there: the editor, the git
+  page, pictures, web links, **Export as Markdown…** (the service reads
+  the transcript, the window writes the file where you say), and the file
+  tree's Copy, Cut and Paste, which work within Collins while other apps
+  get the paths as text. (Today the window and its service are always on
+  one machine, so nothing is missing; this is what a remote window will
+  see.)
 - Clicking a session opens it in an embedded **VTE terminal** running your
   `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
   the directory the session **last worked in** (worktree-aware), not just
@@ -412,7 +434,8 @@ auto-launched — below or beside the agent terminal, with **tabs of its own**:
 
 - Toggle it with `Ctrl+J` or the buttons in the session footer; `Ctrl+Shift+K`
   clears it (screen and saved history). Shells open in the agent's **current
-  working directory** (worktree-aware).
+  working directory** (worktree-aware), or in the home folder of the
+  service's machine when that directory is gone.
 - The tab row's **+** opens another shell tab; each tab's **✕** closes it,
   asking first if a command is still running. Typing `exit` closes a tab
   too, and closing the last one hides the panel.
@@ -1395,7 +1418,8 @@ flipped the switch is refused if it calls it anyway.
   their whole *project* is archived are left alone. A month counts as
   thirty days and a year as 365.
 - **Export as Markdown…** (right-click) writes a session transcript to a
-  readable Markdown file. **Move transcript to trash…** (recoverable) and
+  readable Markdown file: the service renders the transcript and the
+  window saves the text where you choose. **Move transcript to trash…** (recoverable) and
   **Delete permanently…** are the only actions that touch a transcript
   file, and always sit behind a confirmation.
 - The row's menu also carries the small stuff: **Reveal transcript** (the
@@ -1406,7 +1430,9 @@ flipped the switch is refused if it calls it anyway.
   checkout has a github.com remote.
 - **Open in [Ghostty](https://ghostty.org)** resumes a session in an
   external Ghostty window instead of an embedded tab (shown when `ghostty`
-  is on your `PATH`).
+  is on your `PATH`). It, **Reveal transcript** and **Open In…** are
+  *local extras* (see *Sessions & terminals*): a window on the service's
+  machine has them.
 
 ## Caffeine Mode
 

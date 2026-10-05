@@ -115,6 +115,25 @@ something about VTE or a real CLI is the point.
 
 ## Spawn, resume, attach
 
+**Where a spawn lands is the service's to say (D39, PR-2.8).** The tab
+and its panel shells never ask this device's disk whether a cwd is a
+directory: `TerminalTab.__init__` roots the editor at the cwd it was
+handed, `_service_spawn` sends that cwd, and the service applies the
+fallback: `Session._finish_spawn` for an agent (the repository of a
+worktree that is gone, else the service's `$HOME`, with its painted
+warning), `core.spawn_cwd` for a shell (a directory, else `$HOME`). The
+`spawn` reply's `cwd`, the pty's row and `pty` event, and `pty.info`'s
+`cwd` all say where the pty started. `_land_where_the_service_says`
+re-roots the editor there when it differs from what was asked (the
+editor's `root-changed` moves `link_root` and the bare-name links);
+`_land_where_the_pty_started` does the same for an attach, after an
+`fs.stat` says the tab's own root is no directory. `tab._cwd` is the
+session mirror's `cwd`, which follows the service's `session` event. A
+new path check in the tab is an `fs.stat` off the main loop
+(`remotefiles.off_main`), never `Path.is_dir`: `terminal.py` has no site
+left in the pathless walker, and `tests/test_client_is_pathless.py` pins
+that.
+
 A **sandboxed** launch (`SessionOptions.sandbox`, all of it on the service) types
 `python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead:
 `_launch_command` (from `_finish_spawn`, and again from the chip's
@@ -342,6 +361,13 @@ asks over the window.
 
 ## Footer and chrome
 
+**The footer's ways out of Collins are local extras** (§3.12, PR-2.8):
+the file manager button (`_files_btn`), the app launchers
+(`_set_footer_apps`) and the panel toggle's right-click with its tooltip
+line are built only when `apilink.is_local()` (which is `app.local`: the
+link's `local` proof, D11), and their handlers return early too. The
+rule for a new one is in Footguns.
+
 `_build_footer`: the live cwd (2 s poll of `/proc/<pid>/cwd` down the
 `_candidate_pids` chain, worktree-aware; click copies), the git branch
 (`gitinfo.current_branch`, no subprocess; click opens the git page), model
@@ -386,7 +412,12 @@ decision). **Because the answer is asynchronous the gesture is claimed on a
 candidate, resolved or not**: a click on a match that resolves nowhere is
 swallowed where it used to fall through to the terminal; a click on no
 candidate (the token under the pointer stands in) is not claimed and opens
-on the reply. The transcript is the service's file:
+on the reply. **The default app is a local extra** (§3.12, PR-2.8):
+`_launch_default` (a directory, a file outside the project) and
+`_launch_uri`'s `file:` URI with no path return at once unless
+`apilink.is_local()`; an http(s) link, the editor and the lightbox are
+not local extras and open for every client. The transcript is the
+service's file:
 `transcriptlinks.fetch(session)` is `store.transcript-tail`, answered by
 `service/transcripttail.py` (the last 2 MiB parsed once per size and mtime,
 bounded by `protocol.TRANSCRIPT_LINKS_*`, the path off the store's row and
@@ -937,6 +968,18 @@ The `Session` is the service's (spec §3.19). The pieces:
 
 ## Footguns
 
+- **A site that hands a path of the service's to something on this
+  device is a local extra**: another app, the file manager, a native
+  chooser's starting folder, a `file:` URI. It is offered only when
+  `apilink.is_local()` (hidden, never greyed out: §3.12), and the
+  function that touches the disk or starts the program asks
+  `apilink.is_local()` itself, because `tests/test_client_is_pathless.py`
+  reads the function's source for the ask
+  (`pathless_allowlist.LOCAL_EXTRAS`). The launchers
+  (`footerapps.launch_app` / `launch_app_file`, `openwith.
+  open_file_default` / `launch_terminal`, `openwith.
+  file_open_with_entries`) refuse by themselves, so a menu built on them
+  comes out empty: append an "Open In…" submenu only when it has items.
 - Redraws the app causes (typing a command, `feed_message`) look like agent
   output; `EchoGate` discounts them, and ungated sources are held on fresh
   spawns until the gate arms.

@@ -143,6 +143,14 @@ import it. It holds:
 The module docstring's "Shapes the spec left to this module" records each
 field shape chosen beyond the spec's text; read it before adding a field.
 
+PR-2.8's additions: `store.transcript-export {session}` (reply `text`,
+at most `TRANSCRIPT_EXPORT_MAX` characters, which is `CHUNKED_MAX // 4`
+so the text always fits a chunked field in UTF-8; `text_chunked` /
+`text_bytes` set by the transport), and `cwd` in the replies of `spawn`
+and `pty.info`: where the service started the pty (D39), the request's
+cwd or the service's fallback. Both are optional reply fields, so an
+older service's reply still validates.
+
 ## Identity and dispatch (`service/tools.py`, `toolclient.py`)
 
 The dispatcher is the service's: `SessionTools` (built by

@@ -302,11 +302,31 @@ mirror never waits for the service (a stale entry is served and
 refreshed by `send`); an explicit `gitinfo.refresh` waits
 `remotegit.MAIN_THREAD_TIMEOUT_S` (0.5 s) at most, a status its own
 budget (`MAIN_THREAD_STATUS_TIMEOUT_S`). The
-client opens no project file for git and runs no git:
+client opens no project file and runs no program of the project's:
 `tests/test_client_is_pathless.py` walks the GTK modules and the client
 helpers for filesystem and subprocess sites and holds them to
-`tests/pathless_allowlist.py`, which shrinks per Phase 2 chunk and never
-grows.
+`tests/pathless_allowlist.py`, the final list since PR-2.8, which never
+grows: `DEVICE` (this device's own files and programs: `ui-state.json`,
+the blob cache, the Markdown export's destination, the desktop entry,
+the update check, `buildinfo`, the service's process), `LOCAL_EXTRAS`
+(below) and `UNRULED` (three sites awaiting a spec ruling, pinned).
+
+**The local extras.** `apilink.is_local()` is the one reader of the
+link's `local` proof (D11), and `App.local` is it. What hands a path of
+the service's to something on this device hangs on it: every "Open In…"
+and footer app, the file manager, Open in Ghostty, Reveal transcript,
+the attachments panel's Open With and Show in Folder, a clicked folder's
+default app, `file:` URIs on the clipboard, a dropped file mentioned by
+its own path, a native chooser's starting folder. For a client that is
+not on the service's machine they are **hidden, not disabled**, and the
+function that reads the disk or starts the program asks
+`apilink.is_local()` itself: the pathless test reads its source for the
+ask. The lightbox's Open With is not one (not local, it hands over this
+device's cached copy), nor is the Markdown export: the service renders the transcript
+(`store.transcript-export`) and the window writes its own file. Nor is
+where a session or a shell starts: the client sends the cwd it has and
+the service's `spawn` falls back and says where the pty landed (`cwd` in
+the reply, the pty's row and `pty.info`; D39).
 
 ## Where state lives
 
