@@ -87,6 +87,24 @@ def test_the_cache_holds_a_few_transcripts(tmp_path):
     assert len(transcripttail._cache) == transcripttail.CACHE_ENTRIES
 
 
+def test_the_cache_drops_the_least_recently_used(tmp_path):
+    """Review of PR 614: a hit moves a transcript to the end, so the
+    session being clicked in outlives the ones read once."""
+    transcripttail._cache.clear()
+    paths = []
+    for index in range(transcripttail.CACHE_ENTRIES):
+        jsonl = tmp_path / f"{index}.jsonl"
+        jsonl.write_text(_entry("user", f"https://t{index}.test/") + "\n")
+        transcripttail.read_links(str(jsonl))
+        paths.append(str(jsonl))
+    transcripttail.read_links(paths[0])  # the first read is now the freshest
+    extra = tmp_path / "extra.jsonl"
+    extra.write_text(_entry("user", "https://extra.test/") + "\n")
+    transcripttail.read_links(str(extra))
+    assert paths[0] in transcripttail._cache and paths[1] not in transcripttail._cache
+    assert len(transcripttail._cache) == transcripttail.CACHE_ENTRIES
+
+
 def test_a_missing_file_is_empty(tmp_path):
     assert transcripttail.read_links(str(tmp_path / "nope.jsonl")) == []
 
