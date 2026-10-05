@@ -82,7 +82,7 @@ rpmbuild -bs \
     "$spec"
 
 rpmlintrc="$(dirname "$spec")/collins.rpmlintrc"
-rpmlint -r "$rpmlintrc" "$spec" "$out"/*.src.rpm
+rpmlint "$spec" "$out"/*.src.rpm  # the rpmlintrc filters fire on the binary rpm alone
 
 if $rebuild; then
     rpmbuild --rebuild \
