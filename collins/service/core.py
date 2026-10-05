@@ -1038,6 +1038,13 @@ class ServiceCore:
                     message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"
                 )
             if mode == "background" and self.background is not None:
+                # The gate, on the service (§5: a sandboxed session is never
+                # handed to the CLI's daemon, which would respawn it outside
+                # its box): a /bg that could not be tracked is refused, and
+                # the window falls back to the graceful exit.
+                blocker = self.background.blocker(record.session)
+                if blocker:
+                    return protocol.refuse(message.id, protocol.ERROR_REFUSED, blocker)
                 # The fork watch and the pre-emptive "detached" (PR-1.12d),
                 # before the /bg is typed: the agents listed so far are noted
                 # first.
@@ -1441,7 +1448,15 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_store_forget(self, message: protocol.Message, client: Client) -> dict:
-        self.forget_session(message.get("session"))
+        session_id = message.get("session")
+        if self.store.get_session(session_id) is not None:
+            # Its transcript is still there (a forget is what follows a trash
+            # or a delete, which take the session out of the store first):
+            # its records are not a client's to drop.
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "This session's transcript is still there"
+            )
+        self.forget_session(session_id)
         return protocol.reply(message.id)
 
     def forget_session(self, session_id: str, announce: bool = False) -> None:
@@ -1641,8 +1656,11 @@ class ServiceCore:
         self.background = background
         if self.activity is not None:
             self.activity.on_sessions_changed = background.sync_busy_poll
-        self.jobs._workers["session.repair"] = self._repair_job
-        self.jobs._workers["worktree.check"] = self._worktree_check_job
+        else:
+            # The busy feed has nobody to tell: start_activity first.
+            log.warning("background agents started with no tracker: the busy feed is off")
+        self.jobs.register("session.repair", self._repair_job)
+        self.jobs.register("worktree.check", self._worktree_check_job)
         self.store.connect("refreshed", lambda *_a: self.sync_transcript_paths())
         background.start()
         return background

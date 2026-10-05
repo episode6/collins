@@ -55,7 +55,10 @@ def background_blocker(
     tab attached to a live fork runs under the fork's own (stub, undiscovered)
     id, and the row standing in for it is the one it forked from.
 
-    Only one handoff runs at a time. bgstatus.match_background_fork() pairs on
+    Only one handoff runs at a time, and one session is never handed over
+    twice at once (*detach_in_flight* covers both: another session's handoff
+    waiting for its agent, or this session's own still pending).
+    bgstatus.match_background_fork() pairs on
     the conversation's first-message uuid and falls back to the working
     directory, and a fork that hasn't written its copy yet has no readable
     uuid — so two /bg handoffs in flight over the same project can be paired

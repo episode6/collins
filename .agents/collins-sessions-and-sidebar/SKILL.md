@@ -387,7 +387,17 @@ item says so) and, when no row is `backgrounding` any more, advances the
 quit-time /bg queue (`_on_detach_settled`); `_background_blocker` reads
 the same gate over the tab and the mirror for its reasons (the header
 button's tooltip, the close dialog's sentence). `window.py` imports
-nothing of `bgstatus` (`tests/test_client_boundary.py`).
+nothing of `bgstatus` (`tests/test_client_boundary.py`). The service
+applies the gate itself too: a `close {mode: background}` its `blocker`
+refuses (a sandboxed session, a fork, a handoff in flight — another
+session's, or this session's own still pending) is refused with the reason
+as msgid, nothing is marked, and the window's `_graceful_close` falls back
+to the graceful exit. Known gap: `open_session` attaches to a live fork
+when the row's `background` is `running`, which is chain-wide (any id of
+the chain listed), where the window used to ask whether the forward's
+*target* was listed; after an in-place detach of an older id of the
+chain it can bind the tab to a stale fork. Rare; the exact fix is a
+`listed` id field on the item, deferred.
 Current CLIs detach in place (same id keeps running); older ones forked to a
 new id, which `AppState.forward_session` tracks so the old row is replaced and
 names/favorites/panels carry over. Anything mapping session→row must go

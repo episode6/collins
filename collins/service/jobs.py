@@ -176,6 +176,12 @@ class JobRunner:
         self._ids = itertools.count(1)
         self.jobs: dict[str, Job] = {}
 
+    def register(self, kind: str, worker: Callable[[Job, dict], dict | None]) -> None:
+        """Run *kind* with *worker*: a job whose work needs the service's
+        own objects (the core registers its background agents' and the
+        worktree ask's)."""
+        self._workers[kind] = worker
+
     def start(self, kind: str, args: dict, deliver: Deliver) -> str:
         """Start a job of *kind* and return its id; its events go to
         *deliver*. A kind with no worker is refused as a job (its outcome

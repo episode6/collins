@@ -3263,7 +3263,12 @@ class MainWindow(Adw.ApplicationWindow):
         # a row made by this refresh took its `background` without a signal.
         for row_id in self.store.row_ids():
             item = self.store.get_item(row_id)
-            if item is not None and item.background and item.status != "background":
+            if (
+                item is not None
+                and item.background
+                and item.status != "background"
+                and self._page_for(row_id) is None
+            ):
                 self._sync_status(row_id)
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
@@ -4016,7 +4021,20 @@ class MainWindow(Adw.ApplicationWindow):
         # worktree dialog's answer, the shell's exit, the force-close
         # budgets — are the session's, on the service; a budget running
         # out comes back as the tab's "close-budget" (_on_tab_close_budget).
-        if not tab.session.begin_close(exit_text, page in self._bg_closing):
+        backgrounding = page in self._bg_closing
+        if not tab.session.begin_close(exit_text, backgrounding):
+            if backgrounding:
+                # The service's gate refused the /bg (bgagents.blocker: a
+                # sandboxed session, a handoff already in flight): exit
+                # cleanly instead, as the window's own gate falls back above.
+                log.warning("bg: the service refused to detach %s; exiting it cleanly instead",
+                            tab.session_id or "unresolved tab")
+                self._bg_closing.discard(page)
+                graceful = tab.provider.graceful_exit()
+                if self._bg_queue or self._bg_queue_dialog is not None:
+                    self._on_detach_settled()  # no handoff to wait for
+                if graceful and tab.session.begin_close(graceful, False):
+                    return
             self._close_confirmed(page)
 
     def _on_tab_close_budget(self, _tab: TerminalTab, _phase: str, page: Adw.TabPage) -> None:

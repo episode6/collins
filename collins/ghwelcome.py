@@ -184,8 +184,8 @@ def service_gh_status(tries: int = _STATUS_TRIES, pause_s: float = _STATUS_POLL_
 def _start(parent: Gtk.Widget, state: AppState) -> bool:
     def work() -> None:
         status = service_gh_status()
-        if status is None:
-            return  # nothing known, nothing to say
+        if status not in (ghsetup.MISSING, ghsetup.LOGGED_OUT):
+            return  # ready, unknown, or a word this build doesn't know: nothing to say
         GLib.idle_add(_land, parent, state, status)
 
     threading.Thread(target=work, daemon=True).start()

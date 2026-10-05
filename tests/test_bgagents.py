@@ -329,6 +329,88 @@ def test_a_worktree_a_background_agent_works_in_is_shared(world):
     assert bg.session_is_running(ids["alpha1"]) and not bg.session_is_running(ids["beta1"])
 
 
+def test_a_second_handoff_of_one_session_is_refused_while_the_first_is_pending(world):
+    store, state, ids = world
+    old = ids["alpha1"]
+    provider = FakeProvider([])
+    record = FakeRecord(FakeSession(old, provider))
+    deferred = []
+    bg, _poller, _timers, _sleeps = make(world, provider, record, deferred=deferred)
+    bg.start()
+    assert bg.handoff(record) == ""
+    bg.confirm_backgrounding(old)  # confirmed, still pending until listed
+    assert bg.handoff(record) == "in-flight"
+    assert len(deferred) == 1  # one watch, never two
+    assert bg.blocker(record.session) == "in-flight"
+    assert not item(store, old).can_background
+
+
+def test_a_restart_mid_handoff_is_paired_by_the_next_services_replay(world):
+    store, state, ids = world
+    old = ids["alpha1"]
+    fork = "fork-0004"
+    provider = FakeProvider([])
+    record = FakeRecord(FakeSession(old, provider))
+    deferred = []
+    first, _poller, _timers, _sleeps = make(world, provider, record, deferred=deferred)
+    first.start()
+    first.handoff(record)
+    first.stop()  # the service stops before the watch lands
+    assert old in state.get_pending_detaches()
+    provider.answers = [[BackgroundAgent(session_id=fork, job_id="j4", cwd="/home/user/alpha")]]
+    provider.asked = 0
+    deferred.pop()()  # the dead service's watch lands into a stopped instance: nothing
+    assert state.resolve_forward(old) == old
+    second, _poller2, _timers2, _sleeps2 = make(world, provider)
+    second.start()  # the replay
+    assert state.resolve_forward(old) == fork
+    assert state.get_pending_detaches() == {}
+
+
+def test_the_agent_list_confirms_an_in_place_detach_before_the_watch(world):
+    store, state, ids = world
+    old = ids["alpha1"]
+    provider = FakeProvider([])
+    record = FakeRecord(FakeSession(old, provider))
+    deferred = []
+    bg, poller, timers, _sleeps = make(world, provider, record, deferred=deferred)
+    bg.start()
+    bg.handoff(record)
+    poller.report({old})  # the jobs dir woke the poller first
+    assert old not in bg.pending and not bg.detaching
+    assert item(store, old).background == RUNNING and not item(store, old).backgrounding
+    assert old not in state.get_pending_detaches()
+    assert not timers.pending  # the safety timer went with it
+
+
+def test_a_refresh_hands_a_pending_detach_to_the_forks_discovered_row(world):
+    store, state, ids = world
+    old, fork = ids["alpha1"], ids["alpha2"]
+    provider = FakeProvider([])
+    record = FakeRecord(FakeSession(old, provider))
+    bg, _poller, _timers, _sleeps = make(world, provider, record, deferred=[])
+    bg.start()
+    bg.handoff(record)
+    state.forward_session(old, fork)  # the watch's record, its row already scanned
+    store._apply()
+    assert old not in bg.pending and item(store, fork).background == ""
+
+
+def test_an_exit_repolls_only_when_the_cache_lists_the_chain(world):
+    _store, state, ids = world
+    provider = FakeProvider([])
+    bg, poller, _timers, _sleeps = make(world, provider)
+    bg.start()
+    bg.session_ended(ids["alpha1"])
+    assert poller.refreshes == 0
+    state.forward_session(ids["alpha1"], "fork-0005")
+    poller.background_ids = {"fork-0005"}
+    bg.session_ended(ids["alpha1"])
+    assert poller.refreshes == 1
+    bg.session_ended(None)
+    assert poller.refreshes == 1
+
+
 def test_stop_leaves_no_timer_and_no_listener_and_lands_nothing(world):
     store, state, ids = world
     old = ids["alpha1"]

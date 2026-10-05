@@ -1294,7 +1294,7 @@ def test_store_forget_removes_the_history_file_and_the_box(app_state, projects_d
     _root, ids = projects_dir
     sid = ids["alpha1"]
     box = "0123456789abcdef0123456789abcdef"
-    core, _store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
     host = _Host()
     core.sandbox_host = host
     try:
@@ -1304,6 +1304,11 @@ def test_store_forget_removes_the_history_file_and_the_box(app_state, projects_d
         state.set_sandboxed(sid, True, box=box)
         state.set_session_draft(sid, "half a prompt")
         state.set_session_attachments(sid, [{"path": "/tmp/x.png"}])
+        # Its transcript is still there: not a client's to forget.
+        with pytest.raises(loopback.RequestRefused):
+            client.request({"t": "store.forget", "session": sid})
+        assert panelhistory.load(sid) and state.sandbox_box(sid) == box and host.forgotten == []
+        _gone(store, sid, ids["beta1"])  # trashed: the store lets go first
         client.request({"t": "store.forget", "session": sid})
         assert panelhistory.load(sid) is None
         assert host.forgotten == [box]
@@ -1312,6 +1317,134 @@ def test_store_forget_removes_the_history_file_and_the_box(app_state, projects_d
         # An unsandboxed session's forget marks nothing and forgets no box.
         client.request({"t": "store.forget", "session": ids["beta1"]})
         assert not state.is_sandboxed(ids["beta1"]) and host.forgotten == [box]
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def _gone(store, *session_ids):
+    """What a trash or a delete does to the store before the forget: the
+    sessions leave its scan."""
+    store._last_sessions = [s for s in store._last_sessions if s.session_id not in session_ids]
+    store._apply()
+
+
+def test_store_forget_keeps_a_live_sessions_box_and_takes_an_unknown_id(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    sid = ids["alpha1"]
+    box = "fedcba9876543210fedcba9876543210"
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    host = _Host()
+    core.sandbox_host = host
+    try:
+        pty = spawn_agent(client, tmp_path)["pty"]
+        core.sessions[pty].session.sandbox_box = box  # a live session runs in the box
+        core.state.set_sandboxed(sid, True, box=box)
+        _gone(store, sid)
+        client.request({"t": "store.forget", "session": sid})
+        assert core.state.sandbox_box(sid) == "" and host.forgotten == []  # kept for the live one
+        client.request({"t": "store.forget", "session": "00000000-aaaa-bbbb-cccc-000000000000"})
+        assert host.forgotten == [] and not core.state.is_sandboxed("00000000-aaaa-bbbb-cccc-000000000000")
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_moved_transcript_is_followed_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):
+    """`sync_transcript_paths` (what the window's `_sync_transcript_paths`
+    did): a live session whose transcript moved to another project
+    directory (worktree entry) is re-aimed on the store's refresh, and again
+    on a second move; a fork and a session whose path still exists are
+    left alone."""
+    monkeypatch.setenv("SHELL", CAT)
+    root, ids = projects_dir
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    try:
+        moving = core.sessions[spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]].session
+        staying = core.sessions[spawn_agent(client, tmp_path, session=ids["alpha2"])["pty"]].session
+        fork = core.sessions[spawn_agent(client, tmp_path, session=ids["beta1"], fork=True)["pty"]].session
+        for session, sid in ((moving, ids["alpha1"]), (staying, ids["alpha2"]), (fork, ids["beta1"])):
+            session.set_transcript_path(str(store.get_session(sid).jsonl_path))
+        fork_path = fork.transcript_path
+        staying_path = staying.transcript_path
+
+        def move(sid, project):
+            old = store.get_session(sid).jsonl_path
+            new_dir = root / project
+            new_dir.mkdir(exist_ok=True)
+            new = new_dir / f"{sid}.jsonl"
+            old.rename(new)
+            store._last_sessions = discover_sessions()
+            store._apply()
+            return str(new)
+
+        first = move(ids["alpha1"], "-home-user-alpha--claude-worktrees-one")
+        assert moving.transcript_path == first
+        second = move(ids["alpha1"], "-home-user-alpha--claude-worktrees-two")
+        assert moving.transcript_path == second
+        move(ids["beta1"], "-home-user-beta--claude-worktrees-one")
+        assert fork.transcript_path == fork_path  # a fork tails what it was pointed at
+        assert staying.transcript_path == staying_path
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_poll_setting_written_by_a_client_reaches_the_poller(app_state, projects_dir, tmp_path):
+    core, _store, poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    seen = []
+    poller.set_polling = seen.append
+
+    def setting(value):
+        return {"t": "state.set", "key": "settings", "entry": "background_status_poll", "value": value}
+
+    try:
+        client.request(setting(True))
+        client.request(setting(False))
+        assert seen == [True, False]
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_an_agent_spawn_in_a_chat_folder_makes_it_again(app_state, projects_dir, tmp_path, monkeypatch):
+    from collins import chats
+
+    monkeypatch.setenv("SHELL", CAT)
+    monkeypatch.setattr(chats, "CHATS_DIR", tmp_path / "chats")
+    folder = tmp_path / "chats" / "chat-swept"
+    assert chats.is_chat_cwd(str(folder)) and not folder.exists()
+    core, _store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    try:
+        pty = spawn_agent(client, folder)["pty"]
+        assert folder.is_dir()
+        assert core.sessions[pty].session.cwd == str(folder)  # not the fallback to $HOME
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_sandboxed_sessions_background_close_is_refused(app_state, projects_dir, tmp_path, monkeypatch):
+    """§5: the CLI's daemon would respawn a backgrounded agent outside its
+    box, so the service's gate refuses the /bg and marks nothing."""
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    watches = []
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    core.background._spawn = watches.append
+    try:
+        pty = spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]
+        session = core.sessions[pty].session
+        monkeypatch.setattr(type(session), "sandboxed", property(lambda self: True))
+        with pytest.raises(loopback.RequestRefused) as refused:
+            client.request({"t": "close", "pty": pty, "mode": "background", "text": "/bg\r"})
+        assert refused.value.msgid == "sandboxed"
+        assert watches == [] and core.state.get_pending_detaches() == {}
+        assert not store.get_item(ids["alpha1"]).backgrounding
+        assert not core.background.pending
     finally:
         srv.shutdown()
         pump(0.3)
