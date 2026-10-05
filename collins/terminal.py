@@ -2230,7 +2230,11 @@ class TerminalTab(Gtk.Box):
             self._rekey_panel_shells()
         except RequestRefused as exc:
             running = (exc.details or {}).get("pty")
-            if exc.msgid == protocol.ALREADY_RUNNING_MSGID and isinstance(running, int):
+            if (
+                exc.msgid == protocol.ALREADY_RUNNING_MSGID
+                and isinstance(running, int)
+                and not self.fork  # a fork never stands in for its origin
+            ):
                 # The service runs this session already (a sidebar that had
                 # not heard yet): show that pty instead (D31).
                 self._service_attach(running)

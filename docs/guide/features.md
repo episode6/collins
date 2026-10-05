@@ -301,7 +301,10 @@ Enter opens, Esc closes.
   yet shows as a running **New session** row under its project. Unsaved
   editor buffers still get their *Save Changes?* first; the terminal
   panel's shells end with the tab, their scrollback kept as on a close.
-  **Close** keeps its meaning: the agent is asked to exit.
+  Detach is not offered while the tab is already closing (an exit or a
+  `/bg` handoff runs to its end), and a tab whose agent has exited simply
+  closes: a shell alone is no running session, and its row is not a
+  running row. **Close** keeps its meaning: the agent is asked to exit.
 - **Quitting leaves the sessions running.** *Quit* closes the window and
   every tab detaches: the agents keep working in the service, and the next
   launch brings the tabs back — each attached where the service still runs
@@ -310,7 +313,11 @@ Enter opens, Esc closes.
   offers **Quit**, **Stop Sessions and Quit** (each agent asked to exit
   first, as quitting did before the service) and **Keep Running (Hide
   Window)**; the first time, it also says the status icon goes with the
-  window while the sessions keep running. The preference's choices are
+  window while the sessions keep running, and without a status icon it
+  says how a hidden window comes back. Closing one of several windows
+  says that window closes; its tabs are reopened at the next launch all
+  the same. A tab already closing finishes its close, and a tab whose
+  agent has exited ends with the window. The preference's choices are
   *Leave Running* (the default; an install that had *Ask* moves to it
   once), *Ask*, *Stop Sessions*, *Background Session* and *Hide Window*.
 - **Restart service** (the main menu) restarts the Collins service after
@@ -320,8 +327,8 @@ Enter opens, Esc closes.
   relaunching did before the service. **Restart When Idle** waits on the
   service until no session is busy; meanwhile "Restarting when idle"
   stands where the reconnect banner goes, with **Cancel**. A window that
-  finds a service speaking a protocol it does not offers the same
-  restart, or Quit.
+  finds an older service speaking a protocol it does not offers the same
+  restart, or Quit; a newer service asks for Collins to be upgraded.
 - The window title names the focused session, and the sidebar is
   **resizable**, its width remembered. The next launch reopens the tabs
   that were open when Collins quit; with none, it opens with no session —

@@ -107,6 +107,10 @@ def _record_map(raw: object) -> dict[str, dict]:
 # How many open tabs a block keeps, and how long an entry may be: a session
 # id is a uuid, ``pty:<id>`` a few digits more.
 OPEN_TABS_MAX = 256
+# The protocol's pty ids (api.protocol's _PTY: 1 to U32_MAX), spelled out:
+# this module imports nothing of the API.
+_PTY_MAX = 2**32 - 1
+_PTY_DIGITS = len(str(_PTY_MAX))
 _OPEN_TAB_MAX_LEN = 128
 
 
@@ -123,7 +127,7 @@ def clean_open_tabs(raw: object) -> list[str]:
             continue
         if any(ord(c) < 32 or c == "\x7f" for c in entry) or entry in clean:
             continue
-        if entry.startswith("pty:") and not (entry[4:].isdigit() and int(entry[4:]) > 0):
+        if entry.startswith("pty:") and open_tab_pty(entry) is None:
             continue
         clean.append(entry)
         if len(clean) >= OPEN_TABS_MAX:
@@ -132,10 +136,15 @@ def clean_open_tabs(raw: object) -> list[str]:
 
 
 def open_tab_pty(entry: str) -> int | None:
-    """The pty id an ``open_tabs`` entry names (``pty:<id>``), else None."""
-    if isinstance(entry, str) and entry.startswith("pty:") and entry[4:].isdigit():
-        return int(entry[4:])
-    return None
+    """The pty id an ``open_tabs`` entry names (``pty:<id>``, an id in the
+    protocol's pty range, 1 to 2**32 - 1), else None."""
+    if not (isinstance(entry, str) and entry.startswith("pty:")):
+        return None
+    digits = entry[4:]
+    if not digits.isascii() or not digits.isdigit() or len(digits) > _PTY_DIGITS:
+        return None
+    pty = int(digits)
+    return pty if 1 <= pty <= _PTY_MAX else None
 
 
 def _block(raw: object) -> dict:

@@ -197,9 +197,10 @@ service decides which keys a client writes: a device setting, an unknown
 setting or one of the wrong type is `refused`), every `store.*` mutation
 and `trust.*`, with `collins/service/storefeed.py` turning each save and
 refresh into events per subscriber (archived sessions only once paged
-in). The activity tracker still runs in the client (the window's), and
-its verdicts go to the service as `store.flags` and come back as `item`
-fields. PR-1.11 put the rest behind requests and events: the PR hub and
+in). The activity tracker runs on the service (`service/tracking.py`,
+since PR-1.12a): its verdicts set `busy` and a counted finish's `unread`
+on the store's items, which reach the client as `item` fields; the client
+sends `store.flags` only for what the person did at its screen. PR-1.11 put the rest behind requests and events: the PR hub and
 every `gh` call (`service/prfeed.py`), the notification history
 (`service/notifications.py`; rows carry their text as msgid and args,
 each client translating with `i18n.translate`), the session tools
