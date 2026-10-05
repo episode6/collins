@@ -30,7 +30,8 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
 - **File column** (`self._editors`): an `Adw.TabBar` + `Adw.TabView` of open
   files (a `GtkSource.View` per file, `_OpenFile` bookkeeping: buffer, monitor,
   dirty state), a search bar, and an image page for pictures
-  (`editorfiles.image_guard`, shown through `animatedimage.load`).
+  (`editorfiles.image_guard`, shown through `animatedimage.load` of the blob
+`pictures.fetch` lands: `kind=file`, PR-2.7; the page opens on the landing).
 - `filetree.FileTree`: a `Gtk.ListView` over a `Gtk.TreeListModel`, lazily
   populated by the service's `fs.list` on first expansion (honours
   `editor_show_hidden_files`; the ignored names come in the same answer;

@@ -43,11 +43,23 @@ Drops and pastes: a capture-phase `Gtk.DropTarget` on the view (the text
 view's own handler would paste `file://` URIs) with `set_gtypes([Gdk.Texture,
 Gdk.FileList])` in preference order; pastes hook `paste-clipboard` ahead of
 the default handler and decide on `get_formats().union_deserialize_gtypes()`.
-Raw images are saved under the cache dir (`dropimages.save_png`, `drop-` /
-`paste-` prefixes, pruned after a week) and mentioned as `@path`; dropped files
-are mentioned in place (`dropimages.mention_text`). A preview strip shows
-image thumbnails; removing one takes its mention (`remove_mention`, refuses
-on ambiguity). File-reference chips were deliberately never built.
+Raw images are **uploaded to the service** (PR-2.7: `remoteuploads.upload_png`,
+`PUT /api/upload`, named by `dropimages.png_name` with `drop-` / `paste-`
+prefixes) and the mention names the path the service answers; dropped files
+are mentioned in place (`dropimages.mention_text`) only when the link proved
+`local` (`remoteuploads.is_local`), else each is read on a worker
+(`Gio.File.load_bytes` after a size check) and uploaded under its basename
+(`remoteuploads.upload_files`). The upload lands in
+`~/.local/share/collins/uploads/<session id>/` (removed with the session) —
+the host's `upload_session()` — or `_pending/` when there is no id yet (the
+new-chat screen, a tab that hasn't resolved: D37, swept after a week); the
+service uniquifies the name. Every upload and its mention land after the
+PUT, at `PRIORITY_DEFAULT`. A preview strip shows image thumbnails, each a
+blob (`pictures.fetch` of the path, `kind=file`, the host's
+`image_session()` naming the session for D38's confinement) decoded from
+the blob cache; the thumb goes up empty and fills, or goes when it won't
+decode. Removing one takes its mention (`remove_mention`, refuses on
+ambiguity). File-reference chips were deliberately never built.
 
 ## The cut and the paste-back (`TerminalTab`)
 

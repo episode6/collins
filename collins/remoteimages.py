@@ -4,11 +4,14 @@
 
 An agent that already has a picture on the web — a CI artifact, a chart it
 just published, a rendered doc — shouldn't have to spend a `curl` and a temp
-file before Collins can put it on screen. `app._mcp_show_image` sends any
-`http(s)` argument here instead of resolving it as a path: the bytes land in
-the cache directory and the lightbox shows *that* file, so everything
-downstream of it (the decode, "Open With…", the failure status page) keeps
-working on a plain path.
+file before Collins can put it on screen. The **service** fetches it (split-
+service spec §3.23, PR-2.7): `service.tools` downloads a show_image URL
+through `service.blobs.RemoteBlobs` before the call goes to a window, and
+the same feed answers `GET /api/blob?kind=remote` (a PR body's images, a
+gallery row) from its cache (`default_directory`, on the service's
+machine), so a window — on this machine or another — only ever receives
+bytes. On the client this module is `looks_remote` / `url_error` and the
+prune the blob cache borrows.
 
 Kept GTK-free and stdlib-only (urllib, not libsoup) so the whole fetch —
 redirects, the size cap, the content-type gate — is exercised headless
@@ -16,7 +19,7 @@ against a local server in `tests/test_remoteimages.py`, the way the rest of
 the MCP plumbing is; and so a small feature adds no runtime typelib the app
 doesn't already need.
 
-The fetch blocks, so app.py runs it on a worker thread and defers the
+The fetch blocks, so the service runs it on a worker thread and defers the
 session's reply (`mcptools.DeferredResult`) rather than stalling the main
 loop. Every bound here sits under the shim's 15s call timeout
 (`mcp_shim._CALL_TIMEOUT`): a fetch the agent has already given up waiting
