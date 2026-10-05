@@ -69,7 +69,7 @@ import gi
 gi.require_version("Soup", "3.0")
 from gi.repository import Gio, GLib, Soup  # noqa: E402
 
-from .. import __version__, mcptools, sandboxplan
+from .. import __version__, mcptools, sandboxplan, uploads
 from . import protocol
 
 log = logging.getLogger(__name__)
@@ -77,6 +77,22 @@ log = logging.getLogger(__name__)
 WS_PATH = "/api/ws"
 # Plain HTTP on the same listener (§3.2): a blob's bytes, never a path.
 BLOB_PATH = "/api/blob"
+# A drop's or a paste's bytes, written into the uploads directory (§3.11,
+# PR-2.7): `PUT /api/upload?session=<id>&name=<basename>`, answered with
+# the path as JSON.
+UPLOAD_PATH = "/api/upload"
+# The blob kinds (`kind=`), each the name of a core attribute whose
+# `blob(client, raw_query, if_none_match, respond)` answers it: a git blob
+# (gitfeed.GitFeed, PR-2.1), a PR file through gh (prfeed.PrBlobs, PR-2.2),
+# an image file, an image off the web, a project icon (service.blobs,
+# PR-2.7).
+BLOB_KINDS = {
+    "git": "git",
+    "pr": "pr_blobs",
+    "file": "file_blobs",
+    "remote": "remote_blobs",
+    "icon": "icon_blobs",
+}
 # The header a blob GET names its client by (the hello's client_id), so
 # the `local` capability's confinement applies to it (gitfeed.blob).
 CLIENT_HEADER = "Collins-Client"
@@ -551,6 +567,26 @@ class Connection:
 # ---- the server -----------------------------------------------------------------
 
 
+def _responder(msg: Soup.ServerMessage) -> Callable[[int, dict, bytes], None]:
+    """The *respond(status, headers, body)* a paused HTTP message is
+    answered through (main loop): the headers, the body, the status, and
+    the message unpaused."""
+
+    def respond(status: int, headers: dict, body: bytes) -> None:
+        try:
+            response = msg.get_response_headers()
+            for name, value in headers.items():
+                response.replace(name, value)
+            if body:
+                msg.set_response(headers.get("Content-Type") or "application/octet-stream",
+                                 Soup.MemoryUse.COPY, body)
+            msg.set_status(status, None)
+        finally:
+            msg.unpause()
+
+    return respond
+
+
 class ApiServer:
     """See the module docstring. *core* is the `ServiceCore`; *on_restart*
     is called with the `service.restart` request's ``when`` and the asking
@@ -598,6 +634,10 @@ class ApiServer:
         self.server = Soup.Server()
         self.server.add_websocket_handler(WS_PATH, None, None, self._on_websocket)
         self.server.add_handler(BLOB_PATH, self._on_blob)
+        # The upload's cap is checked on its headers, before libsoup reads
+        # a byte of the body (an early handler that sets a status stops it).
+        self.server.add_early_handler(UPLOAD_PATH, self._on_upload_headers)
+        self.server.add_handler(UPLOAD_PATH, self._on_upload)
         self.server.listen(Gio.UnixSocketAddress.new(self.path), Soup.ServerListenOptions(0))
         os.chmod(self.path, 0o600)  # F7: created 0775 under the default umask
         self.proof = secrets.token_bytes(protocol.LOCAL_PROOF_BYTES)
@@ -648,8 +688,8 @@ class ApiServer:
         (the hello's client_id, for the `local` capability's confinement
         of a git blob; a PR file is a gh read and needs none); a request
         with none, or one of a client the server does not know, is
-        confined like a remote client's. Any other ``kind`` is 404 until
-        the later chunks serve it (``file`` and ``icon``, PR-2.7)."""
+        confined like a remote client's. The kinds are `BLOB_KINDS`'; any
+        other is 404."""
         if not self.accepting or msg.get_method() != "GET":
             msg.set_status(405, None)
             return
@@ -663,9 +703,7 @@ class ApiServer:
         # listener is not a Unix socket, is what makes this a credential.
         client_id = msg.get_request_headers().get_one(CLIENT_HEADER) or ""
         client = self.clients.get(client_id)
-        # kind=git is a git blob (gitfeed.GitFeed.blob, PR-2.1), kind=pr a
-        # PR file through gh (prfeed.PrBlobs.blob, PR-2.2); the same shape.
-        feed_name = {"git": "git", "pr": "pr_blobs"}.get(params.get("kind") or "")
+        feed_name = BLOB_KINDS.get(params.get("kind") or "")
         if feed_name is None:
             msg.set_status(404, None)
             return
@@ -677,20 +715,40 @@ class ApiServer:
         uri = msg.get_uri()
         raw_query = uri.get_query() if uri is not None else ""
         msg.pause()
+        feed.blob(client, raw_query or "", if_none_match, _responder(msg))
 
-        def respond(status: int, headers: dict, body: bytes) -> None:
-            try:
-                response = msg.get_response_headers()
-                for name, value in headers.items():
-                    response.replace(name, value)
-                if body:
-                    msg.set_response(headers.get("Content-Type") or "application/octet-stream",
-                                     Soup.MemoryUse.COPY, body)
-                msg.set_status(status, None)
-            finally:
-                msg.unpause()
+    def _on_upload_headers(self, _server, msg: Soup.ServerMessage, _path, _query, *_rest) -> None:
+        """A PUT's headers, before its body: no Content-Length (a chunked
+        body) is 411 and one past `uploads.MAX_BYTES` 413, so libsoup
+        never buffers a body the cap refuses."""
+        if msg.get_method() != "PUT":
+            return
+        headers = msg.get_request_headers()
+        if headers.get_encoding() != Soup.Encoding.CONTENT_LENGTH:
+            msg.set_status(411, None)
+        elif headers.get_content_length() > uploads.MAX_BYTES:
+            msg.set_status(413, None)
 
-        feed.blob(client, raw_query or "", if_none_match, respond)
+    def _on_upload(self, _server, msg: Soup.ServerMessage, _path, _query, *_rest) -> None:
+        """`PUT /api/upload?session=&name=` (§3.11, PR-2.7): the body to
+        `service.blobs.UploadBlobs.put` (the write on its thread), the
+        path back as JSON. The client is named as a blob GET names it."""
+        if msg.get_status() in (411, 413):
+            return  # refused on the headers
+        if not self.accepting or msg.get_method() != "PUT":
+            msg.set_status(405, None)
+            return
+        feed = getattr(self.core, "upload_blobs", None)
+        if feed is None:
+            msg.set_status(404, None)
+            return
+        client = self.clients.get(msg.get_request_headers().get_one(CLIENT_HEADER) or "")
+        body = msg.get_request_body().flatten()
+        data = bytes(body.get_data() or b"") if body is not None else b""
+        uri = msg.get_uri()
+        raw_query = uri.get_query() if uri is not None else ""
+        msg.pause()
+        feed.put(client, raw_query or "", data, _responder(msg))
 
     def _on_websocket(self, _server, _msg, _path, ws, *_rest) -> None:
         if not self.accepting:

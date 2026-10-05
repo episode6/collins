@@ -45,6 +45,7 @@ from . import (  # noqa: E402
     remotediffs,
     remotefiles,
     remoteprs,
+    remoteuploads,
     sandboxchip,
     sandboxstatus,
     themes,
@@ -69,7 +70,7 @@ from .gitinfo import (  # noqa: E402
 from .gitpage import ICON as GIT_PAGE_ICON  # noqa: E402
 from .gitpage import GitPage  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
-from .lightbox import present_image_lightbox  # noqa: E402
+from .lightbox import show_image  # noqa: E402
 from .linkpatterns import (  # noqa: E402
     FILE_PATTERN,
     STITCH_URL_ROWS,
@@ -730,8 +731,14 @@ def _present_image(terminal: Vte.Terminal, path: str) -> None:
                     "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
                 )
 
-        present_image_lightbox(
-            terminal, path, can_open_in_editor=can_edit, on_open_in_editor=on_open
+        # The picture is the service's blob (`kind=file`, PR-2.7), fetched
+        # before the lightbox floats.
+        show_image(
+            terminal,
+            path,
+            session=tab.image_session() if tab is not None else "",
+            can_open_in_editor=can_edit,
+            on_open_in_editor=on_open,
         )
 
     if tab is None:
@@ -3718,6 +3725,7 @@ class TerminalTab(Gtk.Box):
             open_image=self._show_attachment,
             forget=self.forget_attachment,
             notify=self.feed_message,
+            session_key=self.image_session,
         )
         view.set_size_request(attachpanel.PANEL_WIDTH, -1)
         view.connect("close-requested", lambda *_a: self.close_attachments())
@@ -3797,6 +3805,18 @@ class TerminalTab(Gtk.Box):
         revealer.set_reveal_child(False)
         self.grab_terminal_focus()
 
+    def image_session(self) -> str:
+        """What this tab names its session by in a blob GET (PR-2.7): its id,
+        or the service's handle while unresolved — the key the service's
+        registry of the paths this session's agent named is kept under
+        (D38)."""
+        return self.session.session_id or self.session.handle or ""
+
+    def upload_session(self) -> str | None:
+        """The session id a drop's upload is filed under, or None (no id
+        yet: the pending directory, D37)."""
+        return self.session.session_id or None
+
     def _show_attachment(
         self,
         one: attachrecords.Attachment,
@@ -3804,13 +3824,14 @@ class TerminalTab(Gtk.Box):
         navigate: Callable[[int], None],
     ) -> None:
         """Open a row's picture in the lightbox, with the caption it was
-        shown under. Same editor gating as every other image this tab opens:
-        the button appears only for a file this session could edit — which a
-        downloaded copy of a remote image never is. *navigate* is the panel's
-        arrow-key hook, walking its gallery to the previous/next picture.
-        Whether the session could edit it is the service's answer
-        (`ask_can_open_in_editor`); a remote image's copy is this device's
-        cache, never the project's, so it is never asked."""
+        shown under. *path* is the record's key (a path on the service's
+        machine or a URL), fetched as a blob. Same editor gating as every
+        other image this tab opens: the button appears only for a file this
+        session could edit — which a remote image never is. *navigate* is
+        the panel's arrow-key hook, walking its gallery to the
+        previous/next picture. Whether the session could edit it is the
+        service's answer (`ask_can_open_in_editor`); a remote image is a
+        URL, never the project's, so it is never asked."""
 
         def present(can_edit: bool) -> None:
             if self.get_root() is None:
@@ -3823,9 +3844,10 @@ class TerminalTab(Gtk.Box):
                         "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
                     )
 
-            present_image_lightbox(
+            show_image(
                 self,
                 path,
+                session=self.image_session(),
                 can_open_in_editor=can_edit,
                 on_open_in_editor=on_open,
                 caption=one.caption or one.context,
@@ -4084,11 +4106,14 @@ class TerminalTab(Gtk.Box):
         """Dropping onto the agent terminal references the payload in the
         chat, the same way "Add to chat" does. Two payloads are claimed:
 
-        - files (Gdk.FileList — a file manager drag): the mention names the
-          dropped file itself, wherever it lives;
+        - files (Gdk.FileList — a file manager drag): a `local` client's
+          mention names the dropped file itself, wherever it lives; any
+          other uploads each file to the service first (`remoteuploads`,
+          PR-2.7) and mentions the copy, since the CLI reads it there;
         - raw image data (Gdk.Texture — a drag from a browser, a screenshot
           tool, an image viewer): there is no path to mention, so a PNG copy
-          is saved first and the mention names the copy (see dropimages.py).
+          is uploaded first and the mention names the copy (see
+          dropimages.py).
 
         Texture is listed first so a drag offering both — a browser image
         drag carries the source URL *and* the pixels — resolves to the
@@ -4132,24 +4157,33 @@ class TerminalTab(Gtk.Box):
         return False
 
     def _drop_texture(self, texture: Gdk.Texture) -> bool:
-        """Raw image data: save the PNG copy, mention the copy."""
+        """Raw image data: upload the PNG copy (PR-2.7), mention the copy
+        once the service has written it."""
         try:
-            data = texture.save_to_png_bytes().get_data()
-            directory = dropimages.default_directory()
-            dropimages.prune_stale(directory)
-            path = dropimages.save_png(bytes(data), directory)
-        except (GLib.Error, OSError):
+            data = bytes(texture.save_to_png_bytes().get_data())
+        except GLib.Error:
             self.feed_message(_("couldn't save a copy of the dropped image"))
             return False
-        return self._mention_dropped_paths([str(path)])
+
+        def uploaded(path: str | None, error: str | None) -> None:
+            if path is None:
+                self.feed_message(
+                    _("couldn't save a copy of the dropped image: {reason}").format(reason=error)
+                )
+                return
+            self._mention_dropped_paths([path])
+
+        remoteuploads.upload_png(data, dropimages.DROP_PREFIX, self.upload_session(), uploaded)
+        return True
 
     def _drop_files(self, files: list[Gio.File]) -> bool:
-        """Dropped files: mention each one directly. Skipped entries (a
-        remote URI with no local path) are counted, not echoed — a URI is
-        outside content arriving at first contact, and feed_message writes
-        raw bytes to the tty."""
-        paths = [p for f in files if (p := f.get_path()) is not None]
-        skipped = len(files) - len(paths)
+        """Dropped files: mention each one directly when this client shares
+        the service's machine (`local`), else upload each and mention the
+        copies (PR-2.7). Skipped entries (a remote URI with no local path)
+        are counted, not echoed — a URI is outside content arriving at first
+        contact, and feed_message writes raw bytes to the tty."""
+        local = [f for f in files if f.get_path() is not None]
+        skipped = len(files) - len(local)
         if skipped:
             self.feed_message(
                 ngettext(
@@ -4158,7 +4192,21 @@ class TerminalTab(Gtk.Box):
                     skipped,
                 ).format(n=skipped)
             )
-        return self._mention_dropped_paths(paths)
+        if remoteuploads.is_local():
+            return self._mention_dropped_paths([f.get_path() for f in local])
+        if not local:
+            return False
+
+        def uploaded(paths: list[str], errors: list[str]) -> None:
+            if errors:
+                self.feed_message(
+                    _("couldn't send a dropped file: {reason}").format(reason=errors[0])
+                )
+            if paths:
+                self._mention_dropped_paths(paths)
+
+        remoteuploads.upload_files(local, self.upload_session(), uploaded)
+        return True
 
     def _mention_dropped_paths(self, paths: list[str]) -> bool:
         """Type a mention token for each path into the input box — typed,
@@ -4251,6 +4299,10 @@ class TerminalTab(Gtk.Box):
                 path, self.current_agent_cwd()
             ),
             notify=self.feed_message,
+            # Drops and pastes are uploaded for this tab's session, and the
+            # previews' blobs asked for it (PR-2.7).
+            upload_session=self.upload_session,
+            image_session=self.image_session,
             # The chrome's model picker, persistent for the button that owns
             # it (its content refills itself each show); what a pick means —
             # posting the switch command to the chat — is this tab's business,

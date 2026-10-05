@@ -51,6 +51,7 @@ from . import (
     panelhistory,
     pkgrepos,
     remotefiles,
+    remoteicons,
     sandboxstatus,
     uistate,
     updatecheck,
@@ -85,7 +86,6 @@ from .licenses import legal_sections
 from .models import SessionItem
 from .notifycenter import Notification, NotificationCenter, sound_display_name
 from .prefs import PreferencesDialog
-from .projecticons import project_icon_data
 from .providers import SessionOptions, available_providers, default_provider, get_provider
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
@@ -5181,19 +5181,20 @@ class MainWindow(Adw.ApplicationWindow):
         """The icon a session's notification wears: the project's own
         project-icon.svg where it ships one, else the app icon.
 
-        Resolved exactly like the sidebar's project header — project_icon_data
-        on the repository root, so a session running in a worktree wears its
+        Resolved exactly like the sidebar's project header — the service's
+        icon of the repository root (`remoteicons`, PR-2.7: what is held
+        now; the sidebar has asked for every project's by then), so a session running in a worktree wears its
         project's icon rather than none — so the banner and the row a click
         lands on can't show different artwork for the same project. A session
         the store hasn't discovered yet is asked where it is running instead,
         which is the case the notification is most useful in: a brand-new tab
         the user walked away from.
 
-        The vetted bytes go over as a GBytesIcon rather than the path as a
+        The vetted bytes go over as a GBytesIcon rather than a path as a
         GFileIcon. The notification's icon is rendered by whatever daemon
-        shows the banner, not by us, and project_icon_data is the gate that
-        keeps repo-controlled artwork from reaching an image loader unread —
-        handing over a path would send the raw file instead and skip it.
+        shows the banner, not by us, and `usable_icon_bytes` (applied on the
+        service and again on landing) is the gate that keeps repo-controlled
+        artwork from reaching an image loader unread.
 
         The app icon is named explicitly rather than left to the daemon's
         desktop-file lookup: a demo or debug instance runs under its own
@@ -5206,7 +5207,7 @@ class MainWindow(Adw.ApplicationWindow):
             cwd = session.cwd
         else:
             cwd = tab.current_agent_cwd() if isinstance(tab, TerminalTab) else None
-        data = project_icon_data(worktree_project_root(cwd) or cwd) if cwd else None
+        data = remoteicons.icon_bytes(worktree_project_root(cwd) or cwd) if cwd else None
         if data is not None:
             return Gio.BytesIcon.new(GLib.Bytes.new(data))
         return Gio.ThemedIcon.new(_app_icon_name(self))
@@ -5326,7 +5327,11 @@ class MainWindow(Adw.ApplicationWindow):
                     break
         if not cwd:
             return None
-        data = project_icon_data(worktree_project_root(cwd) or cwd)
+        # The service's icon (PR-2.7): what is held now; a fetch that brings
+        # a different answer redraws the sheet.
+        data = remoteicons.icon_bytes(
+            worktree_project_root(cwd) or cwd, lambda _data: self.notify_sheet.schedule_refresh()
+        )
         return svg_texture(data, size)
 
     # -- what the status icon shows ------------------------------------------

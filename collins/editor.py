@@ -42,6 +42,7 @@ from . import (  # noqa: E402
     openwith,
     openwithrows,
     paneldnd,
+    pictures,
     remotefiles,
 )
 from .api import protocol  # noqa: E402
@@ -968,13 +969,26 @@ class EditorPane(Gtk.Box):
         (`fs.read` would refuse them as binary), so none of the
         save/dirty/search machinery applies: `_open` stays text-only and
         every `_open` consumer skips these pages. The guard ran first
-        (`_image_stat_landed`)."""
-        # Through animatedimage like every other image surface, so a GIF
-        # opened here plays rather than showing its first frame.
-        paintable = animatedimage.load(key)
-        if paintable is None:
-            self._notify(_("{name} couldn't be decoded as an image.").format(name=path.name))
-            return
+        (`_image_stat_landed`).
+
+        The picture is the service's blob (`GET /api/blob?kind=file`,
+        PR-2.7), fetched off the main loop; the page opens when it lands."""
+        pictures.forget(key)  # a fresh look: the file may have changed
+
+        def landed(file, error) -> None:
+            if self._shut or key in self._pages:
+                return
+            # Through animatedimage like every other image surface, so a GIF
+            # opened here plays rather than showing its first frame.
+            paintable = animatedimage.load(file) if file is not None else None
+            if paintable is None:
+                self._notify(_("{name} couldn't be decoded as an image.").format(name=path.name))
+                return
+            self._show_image_page(key, path, paintable)
+
+        pictures.fetch(key, landed)
+
+    def _show_image_page(self, key: str, path: Path, paintable) -> None:
         picture = Gtk.Picture.new_for_paintable(paintable)
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.CONTAIN)

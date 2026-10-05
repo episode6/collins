@@ -28,8 +28,11 @@ ALLOWLIST = frozenset(
         "blobcache:fetch:Path.write_text",
         "blobcache:fetch:os.replace",  # the fetch's own temporary into place
         "blobcache:fetch:os.unlink",
+        # The one read of a fetched blob's bytes, refused outside the cache:
+        # every decoder (animatedimage, pictures, imagediff, remoteicons)
+        # reads through it (PR-2.7, in place of imagediff's own read_bytes).
+        "blobcache:read:Path.read_bytes",
         "blobcache:fetch:os.utime",  # a 304 marks the blob used: the prune clock (PR-2.2)
-        "imagediff:_paintable:Path.read_bytes",  # a fetched blob decoded: the blobcache file (PR-2.2)
         "remoteimages:prune_stale:Path.is_file",
         "remoteimages:prune_stale:Path.iterdir",
         "remoteimages:prune_stale:Path.stat",
@@ -104,19 +107,13 @@ ALLOWLIST = frozenset(
         "window:MainWindow._on_new_chat_send:Path.exists",
         "window:MainWindow._refresh_alt_new_session_item:Path.exists",
         "window:MainWindow._worktree_for_new_session:Path.exists",
-        # -- uploads, attachments, lightbox, icons (PR-2.7) ------------------------------
-        # The lightbox's guard: it shows the service's files and this device's
-        # cached blobs alike, so it stays until the lightbox is on the blob GET
-        # (the editor's image pages guard over `fs.stat` since PR-2.4).
+        # -- uploads, attachments, lightbox, icons (PR-2.7): the project icon is
+        # the service's `kind=icon` blob, every picture a blob decoded from its
+        # bytes through `blobcache.read`. Left: `image_guard`, which nothing
+        # calls now that the editor's image pages guard over `fs.stat` (PR-2.4)
+        # and the lightbox is on the blob GET ------------------------------------
         "editorfiles:image_guard:Path.is_file",
         "editorfiles:image_guard:Path.open",
         "editorfiles:image_guard:Path.stat",
-        "projecticons:project_icon_data:Path.read_bytes",
-        "projecticons:project_icon_path:Path.is_file",
-        "projecticons:project_icon_path:Path.stat",
-        "animatedimage:_animation:PixbufAnimation.new_from_file",
-        "animatedimage:load:Texture.new_from_filename",
-        "composer:ComposerView._add_preview:Texture.new_from_filename",
-        "pictures:thumbnail:Pixbuf.new_from_file_at_scale",
     }
 )
