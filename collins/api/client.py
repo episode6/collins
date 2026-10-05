@@ -27,7 +27,7 @@ replies of `send` reach the mirrors and the terminals in the order the
 service sent them. The one request `call` sends on the primary is
 `subscribe`: its snapshot arrives as events ahead of its reply on the same
 connection, and the main thread drains the queue while it waits, so the
-mirrors are filled when `subscribe` returns, as they were on the loopback
+mirrors are filled when `subscribe` returns
 (the connection manager asks for it at startup and on every reconnect, and
 nowhere else does a main-thread call drain).
 
@@ -42,8 +42,8 @@ makes the link lost: every pending call fails ``gone``, the other channel
 is closed, and `on_lost` is called once on the main loop. The link keeps
 its handlers and its `PtyClient`s and can `connect` again
 (`connection.ConnectionManager` does, with its backoff); a `PtyClient`
-is what a tab or a panel shell holds in place of Phase 1's loopback
-client: `request`, `send_input`, `send_event`, `close`, `closed`, with
+is what a tab or a panel shell holds:
+`request`, `send_input`, `send_event`, `close`, `closed`, with
 output frames and events routed to it by the ptys it spawned or attached.
 
 Gio and libsoup only; nothing here imports GTK. Every frame is foreign
@@ -737,8 +737,8 @@ class SocketLink(apilink.Link):
     # -- the per-tab clients -----------------------------------------------------------
 
     def pty_client(self, on_output: OutputCallback, on_event: EventCallback, device: str = "") -> PtyClient:
-        """A client for one tab or panel shell: the surface Phase 1's
-        loopback client had (`request`, `send_input`, `send_event`,
+        """A client for one tab or panel shell: the surface a tab's
+        pty needs (`request`, `send_input`, `send_event`,
         `close`, `closed`), fed the output frames and events of the ptys it
         spawns or attaches."""
         client = PtyClient(self, on_output, on_event, device or self.device)

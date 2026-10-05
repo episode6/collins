@@ -33,7 +33,7 @@ and *Delete permanently* actions, both behind a confirmation. See
 
 ## Does anything leave my machine?
 
-Nothing about your sessions does, and Collins has no service of its own.
+Nothing about your sessions does. Collins' own service (`collins-service`) listens on a Unix socket on your machine and nowhere else.
 Everything goes through the `claude` CLI and the login you already have: resuming sessions runs `claude` in a
 terminal; auto-titling and icon generation run headless `claude -p` jobs
 with none of your skills, MCP servers, or the CLI's tools loaded

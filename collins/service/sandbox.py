@@ -13,9 +13,8 @@ project defaults, the tool switches), the live grants
 becomes a client of `sandbox.*` requests and `sandbox` events, and **every
 decision is made here, from the service's own records** (the user's rule
 from PR 582): a client asks, the service decides, by the box the request
-names, against the plan the service's records hold for that box (through
-Phase 1 the plan of the session that runs in it, the app's lookup, as for a
-sandboxed panel shell).
+names, against the plan the service's records hold for that box (the plan of
+the session that runs in it, as for a sandboxed panel shell).
 
 - `sandbox.plan`: the plan the box was launched with (`load_plan`).
 - `sandbox.grants`: what the chip draws, worked out exactly as the chip

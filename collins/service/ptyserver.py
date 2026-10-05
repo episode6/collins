@@ -25,8 +25,8 @@ signal mask cleared), `chdir`, exec. A failed exec (an argv that is not
 there, a cwd that is not) is reported back through a close-on-exec pipe,
 and `spawn` raises `SpawnError` (an `OSError` subclass carrying the child's
 errno) with the master closed and the child reaped: a caller sees the
-failure where it asked, not as an exit 127 a moment later. In Phase 1 the
-fork runs inside the GTK app (the loopback of PR-1.7), a threaded process;
+failure where it asked, not as an exit 127 a moment later. The
+fork runs inside the service, a threaded process;
 that is acceptable because nothing Python-heavy runs between fork and exec
 (no allocation of note, no locks taken, the same thing `pty.fork` and VTE
 do), and PR-1.12 moves the whole server into the service process. The
@@ -144,7 +144,7 @@ child closed the slave) and the status comes later. `close(pty)` sends
 SIGHUP to the child's process group and closes the master, which ends a
 well-behaved child; one that ignores SIGHUP is sent SIGKILL after
 `CLOSE_GRACE_MS`. `signal` sends anything else. `shutdown()` saves every
-model and closes every pty (Phase 1: stopping the service ends every
+model and closes every pty (stopping the service ends every
 agent, §3.10), waiting a bounded time for the saves in flight.
 
 The saved model
@@ -162,7 +162,7 @@ overrides the directory; tests, captures and e2e checks use it; the
 directory is made 0700 and the file 0600) at most once per
 `SAVE_INTERVAL_MS` while output arrives, for as long as the pty lives. The dump
 is taken on the loop (tens of milliseconds for a full scrollback, which is
-accepted for now and noted for PR-1.12's own loop); the JSON encoding and
+accepted for now and noted for the service's own loop); the JSON encoding and
 the write run on a worker thread, one in flight per pty, a save that was
 asked for meanwhile following it, the result landing at
 `GLib.PRIORITY_DEFAULT` (CLAUDE.md's rule for anything that advances a
@@ -1080,7 +1080,7 @@ class PtyServer:
         return GLib.SOURCE_REMOVE
 
     def shutdown(self) -> None:
-        """Save every model and close every pty (§3.10, Phase 1), and wait
+        """Save every model and close every pty (§3.10), and wait
         a bounded time for the saves in flight."""
         ptys = list(self.ptys.values())
         for pty in ptys:

@@ -162,8 +162,8 @@ the glue, as the tab's.
   input queued before the spawn is sent straight after. A refusal is fed to
   the widget where a spawn error goes. A sandboxed shell asks with
   `sandbox` and the session's `sandbox_box` (`box_lookup`); the service
-  finds the plan by the box (`ServiceCore`'s `sandbox_plan`, in Phase 1
-  `App._sandbox_plan_of_box` over the tabs' `Session`s), spawns
+  finds the plan by the box (`ServiceCore`'s `sandbox_plan`, over the
+  service's `Session`s), spawns
   `providers.sandboxed_shell_argv(plan, $SHELL)` and queues the `cd` into
   the workspace itself; `sandbox_plan` is the pty's `plan`. The client
   still checks `plan_lookup()` first, so "no plan" is the same message and
@@ -191,12 +191,12 @@ the glue, as the tab's.
   pty's stream right after the attach, before the main loop can read the
   shell's first byte (`_history_paint`, in `TEXT_MAX` pieces); a sandboxed
   shell with no plan yet keeps it for the spawn that finds one.
-- **A shell closed by `exit` loses its history.** Its
-  page closes and its ordinal drops out of the next save's keep-set; the service writes no
-  history of its own at `pty-exited` because the key is still the tab's.
-  Until PR-1.11 moves the key into the service (spec amended: a `history`
-  key on `spawn` or a `panel.key` request, the history written from the
-  model at `pty-exited` for kind `shell` before the model is dropped).
+- **A shell closed by `exit` loses its history.** Its page closes and its
+  ordinal drops out of the next save's keep-set. When a shell's child exits
+  with its page still open, the service writes the history itself from the
+  model (before the model is dropped) under the key `spawn`'s `history` or
+  a `panel.key` request gave it; once the page is closed for good the key
+  is none, so a closed shell's history goes with it.
 - **The end.** `pty-exited` is `child-exited` (`_on_pty_exited`); the X
   closing a shell page calls `page_closed()` → `release_pty()` (`close`,
   detach, the client closed; idempotent), and so do the shell's own
@@ -206,8 +206,8 @@ the glue, as the tab's.
   re-attaches to be redrawn from it, then sends Ctrl+L.
 - **The theme.** `apply_settings` sends the shell's colours as the
   `theme` event (`ClientTerminal.set_term(_service_term(theme, terminal))`,
-  the tab's builder shared). The term is the client's (`LoopbackClient.
-  term`, read by its sinks), and a pty's queries are answered from its
+  the tab's builder shared). The term is the client's (the client's
+  `term`, read by its sinks), and a pty's queries are answered from its
   active client's (`PtyServer.pty_term`; the last one seen while none is
   active), so the service answers as this terminal would even beside a
   new-chat screen with no agent pty.

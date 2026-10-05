@@ -48,9 +48,9 @@ there). A device key never leaves the device; the service refuses one
 written through the API. When the service refuses a write the mirror
 reverts and the window shows a toast, "Not saved: <reason>" (the
 service's msgid, translated here); the dialog's row is not re-synced, so
-it shows the refused value until it is opened again. On the loopback
-the write and its echo are done before `set_setting` returns, so a check
-reading `AppState()` off disk right after still sees it.
+it shows the refused value until it is opened again. The service's echo
+lands a moment after `set_setting` returns (over the socket), so a check
+reading `AppState()` off disk waits for it (`e2e_service.settle`).
 
 To add a setting:
 

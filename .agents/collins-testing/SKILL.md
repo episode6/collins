@@ -55,22 +55,30 @@ bash .agents/capture-screenshots/scripts/with-headless-display.sh \
 python3 scripts/run_e2e.py --list --shard 2/5       # …and its estimate; no display needed
 ```
 
-The store and state over the API (PR-1.10) have three modules of their
-own. `tests/test_remote_state.py` drives `remotestate.RemoteState` through
-a fake link that holds every reply until the test answers it (a refused
-write reverts, notifies and toasts; an event landing while a write is
-unanswered does not clobber it; the draft debounce, with a fake timer;
-`get_setting`'s routing). `tests/test_remote_store.py` runs the real
-`ServiceCore` (its own `AppState` and a `SessionStore` fed the
-`projects_dir` sessions) behind the suite's in-process harness
-(`tests/inproc.py`: `LoopbackServer` / `LoopbackLink` over a core, the
-same dicts and bytes the socket carries, no socket and no thread; the
-product's loopback went with PR-1.12b) with both mirrors on it: the
-snapshot, an `item` moving one property and its
-signal, every mutation, archived paging, the service refusing a device
-setting. `tests/test_service_imports.py` imports every module of
-`collins.service` and `collins.api` in a subprocess and fails on any
-`gi.repository` widget library (GLib, GObject and Gio are allowed).
+The service and the mirrors have modules of their own. `tests/test_remote_state.py`
+drives `remotestate.RemoteState` through a fake link that holds every reply
+until the test answers it (a refused write reverts, notifies and toasts; an
+event landing while a write is unanswered does not clobber it; the draft
+debounce, with a fake timer; `get_setting`'s routing). `tests/test_remote_store.py`
+runs the real `ServiceCore` (its own `AppState` and a `SessionStore` fed the
+`projects_dir` sessions) behind `tests/inproc.py`, the unit suite's in-process
+harness (`LoopbackServer` / `LoopbackLink` over a core: the same dicts and
+bytes a socket carries, validated both ways, no socket and no thread; test
+code only, nothing in `collins/` imports it) with both mirrors on it: the
+snapshot, an `item` moving one property and its signal, every mutation,
+archived paging, the service refusing a device setting. Where the socket
+itself is the subject (`test_api_client.py`, `test_service_main.py`),
+`tests/liveservice.py` starts a real `collins-service` subprocess on scratch
+directories. `tests/test_api_server.py` runs a real `Soup.Server` on a
+scratch socket; `test_connection.py` drives the connection manager's state
+machine with fakes. `tests/test_service_imports.py` imports every module of
+`collins.service` and `collins.api` in a fresh subprocess and fails on any
+`gi.repository` widget library (GLib, GObject and Gio are allowed): the
+service must run with no display. `tests/test_client_boundary.py` reads
+`window.py` and `app.py` with `ast` (the window is a GTK module the suite
+cannot import) and fails if the client does again what the service now does:
+the agent-list poller, a transcript read for a /bg handoff, a chat folder,
+the archive sweep.
 
 Real ptys are fine in the unit suite: `tests/test_ptyserver.py` spawns
 `cat` and `sh -c` children on ptys the server owns and iterates the
@@ -85,7 +93,7 @@ Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 
 ## Writing an e2e check
 
-**The probe** (PR-1.12a, D27). A session's logic runs on the service, so a
+**The probe** (D27). A session's logic runs on the service, so a
 check never reads a tab's privates: `tab.probe(name)`,
 `tab.probe_set(name, value)` and `tab.probe_call(name, *args, **kwargs)`
 are the `debug.session.*` requests (a dotted name walks from the
@@ -94,12 +102,14 @@ are the `debug.session.*` requests (a dotted name walks from the
 `debug.screen` / `debug.pty` read a pty's model and process facts, and
 `debug.sandbox` calls the sandbox host, the live grants or the core. The
 service serves them only with `COLLINS_DEBUG_API=1` in its environment:
-every check sets it in its preamble (the service is in-process) and
-`run_e2e.py` sets it for the subprocess. A probe answers None with no pty
+every check sets it in its preamble and `e2e_service.start_service()`
+passes it to the service it spawns (a service the app starts never has it).
+`debug_patch`, `debug_find_handle`, `debug_spy_writes` and `debug_tools_*`
+are the core's methods behind `debug.sandbox`. A probe answers None with no pty
 (before a new chat's Send, after the exit) and raises on a refusal. Keep a
 check's assertions as they were: only the call path moves.
 
-**Every check starts its own service** (PR-1.12b). The service is its
+**Every check starts its own service.** The service is its
 own process, so a check that builds an `App()` calls
 `e2e_service.start_service()` right before `App()`: after its scratch
 tree, every `COLLINS_*` / `XDG_*` override and the `claude` shim on
@@ -129,15 +139,25 @@ service is `debug.sandbox` with target `core` and name `debug_patch`
 (`check_composer_paste_back.py`'s piece limits); the tools' dispatcher is
 `debug_tools_list` / `debug_tools_dispatch` the same way.
 
-**A write's outcome lands a moment later.** On the loopback a `state.set`,
-a `store.flags`, a `notify.post` was answered, saved and echoed as an
-event inside the call. Over the socket the reply and the event land on the
-main loop afterwards, so a check that reads the outcome off disk
+**Two checks own the process boundary.** `check_service_survives_client.py`
+starts a session, SIGKILLs the app, starts a second app on the same service
+and opens the running row (the screen compared with `debug.screen`);
+`check_detach_reopen.py` covers detach, the running row, reopen on attach,
+*Stop Sessions* (`service.status.ptys` empty) and `open_tabs` surviving a
+relaunch. A check that needs the service's own files finds them where
+`api.server` says: `api.sock`, `service.lock` and `local-proof` under
+`$XDG_RUNTIME_DIR/collins/<app id>/` (the helper's scratch runtime dir).
+
+**A write's outcome lands a moment later.** A `state.set`, a `store.flags` or a
+`notify.post` is optimistic in the mirror and answered by the service over
+the socket: the reply and the event land on the main loop afterwards, so a check that reads the outcome off disk
 (`AppState().get_setting`, `state.json`), off a mirror (`center.rows()`,
 a green row) or off a tab (`session-resolved` from a probed
 `host.session_resolved`) pumps first: `e2e_service.settle()` (150 ms,
 then until nothing is pending) or `wait_until(predicate)`. Never loosen
-the assertion; wait for it. A check that must observe a transient (the
+the assertion; wait for it. **Never `call` from the link's own I/O thread**
+(`SocketLink.call` raises there): a blocking `call` is for the main thread
+or a worker thread, never a callback the link's thread runs. A check that must observe a transient (the
 clone dialog's box locked before the fast fake clone finishes) keeps a
 bare pending-pump for that step.
 

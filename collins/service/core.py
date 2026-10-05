@@ -95,7 +95,7 @@ replies back.
 
 Spawning is the core's: a client asks for an agent's or a shell's pty in a
 directory at a grid, and the core runs the user's `$SHELL` there with the
-service's own environment (the app's, in Phase 1) plus the two declarations
+service's own environment (the login-shell capture, `service.main`) plus the two declarations
 that coax the CLI's progress announcements out (`session.agent_environment`,
 decided by the `progress_termprop` setting at spawn, as the VTE path did).
 For an agent the `Session` is built first and `Session.spawn` settles the
@@ -118,8 +118,8 @@ declarations (a panel shell never had them). A sandboxed one (``sandbox``
 with the session's ``sandbox_box``) runs `providers.sandboxed_shell_argv`
 around the shell, the launcher a sandboxed session's typed line starts
 with, on the plan the service's own records hold for that box (the
-*sandbox_plan* lookup: in Phase 1 the `Session` the box belongs to, still
-held by its tab), and is refused when there is none; the plan is the pty's
+*sandbox_plan* lookup: the `Session` the box belongs to), and is refused when there is none;
+the plan is the pty's
 (its row's ``plan``, read back as the shell's `sandbox_plan`), and a cwd
 inside the box's workspace other than where bwrap lands the shell is one
 queued ``cd`` away, typed before anything else. ``clear`` on a shell wipes
@@ -1915,8 +1915,7 @@ class ServiceCore:
     def _tool_client(self, session) -> Client | None:
         """The session's active client (D20): of the subscribed clients,
         the one whose device is the active client of the session's agent
-        pty, else the one that subscribed last. Through Phase 1 there is
-        one subscriber, the app's own connection."""
+        pty, else the one that subscribed last."""
         if not self._subscribers:
             return None
         device = None
@@ -2020,8 +2019,7 @@ class ServiceCore:
 
     def _req_panel_history(self, message: protocol.Message, client: Client) -> dict:
         """The tab's three saves (a draft save, the tab's close, the quit):
-        `write_panel_history` as a request (PR-1.12b; through Phase 1 it
-        was the loopback's one shortcut, D21)."""
+        `write_panel_history` as a request (PR-1.12b)."""
         shells: dict[int, int | str] = {}
         keep: set[int] = set()
         for entry in message.get("shells") or []:
@@ -2067,8 +2065,8 @@ class ServiceCore:
 
     def debug_spy_writes(self, pty_id: int) -> None:
         """Record every byte written to *pty_id* from now on
-        (`debug_written` reads them): what a check used to read by
-        wrapping the loopback's `PtyServer.write`."""
+        (`debug_written` reads them): what a check cannot read by
+        wrapping `PtyServer.write` in its own process."""
         if getattr(self, "_write_spy", None) is None:
             self._write_spy: dict[int, list[str]] = {}
             real_write = self.ptys.write

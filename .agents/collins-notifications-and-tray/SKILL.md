@@ -25,8 +25,8 @@ appeared, changed or left, `removed`). `app.notification_center` is the
 mirror, `remotenotify.RemoteNotifications`: the center's API, every write a
 request — `post` (`notify.post`: the service mints the id and time,
 coalesces a bell, replaces an update), `remove`, `clear`, `set_green`
-(`notify.green`; green is still decided by the client's edges in Phase 1,
-as the tracker runs there), `rekey_session`, and the reads (`seen`, told
+(`notify.green`; a counted finish is decided by the service's tracker,
+which sends the `finished:<session>` notify event), `rekey_session`, and the reads (`seen`, told
 to every other client), applied here first. Listeners hear one `changed`
 per write. Each client applies the delivery table below with its own
 focus; the card, sound, desktop notification, flash, tray, dock badge and

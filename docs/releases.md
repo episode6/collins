@@ -38,85 +38,61 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
-- **Detach, Quit and reopening.** *Detach* (the tab menu and a session
-  row's menu) closes a tab and leaves its session running in the Collins
-  service; its row becomes a running row (yellow, poled while the agent
-  works), and opening it attaches to the running session instead of
-  resuming it twice. Quitting detaches every tab by default (the quit
-  preference's new *Leave Running*, which an install on *Ask* moves to
-  once) and the next launch reopens the tabs, attached where they still
-  run, resumed where not; the quit dialog offers *Quit*, *Stop Sessions
-  and Quit* and *Keep Running (Hide Window)*. *Restart service* in the
-  main menu restarts the service now or once no session is busy, and the
-  tabs resume on the new one; a service speaking another protocol is
-  offered the same restart.
-
-- **Background agents are the service's.** Watching the agent list for
-  `/bg` sessions (the yellow lines), pairing a `/bg` with the agent it
-  becomes, finishing a pairing a restart interrupted, *Repair session
-  link*, and the agent list's word on whether a background agent is
-  working now run in the Collins service, as does following a transcript
-  the CLI moved when its session entered a worktree, reading which
-  worktree an archive would trash, letting go of a deleted session's
-  scrollback and sandbox, remaking a chat's folder, checking whether `gh`
-  is set up and the daily automatic delete of old archived sessions. The
-  window keeps its dialogs and its quit-time *Background* queue, and
-  shows what the service says. Nothing looks different, by design.
-
-- **The service is its own process.** Collins is now two programs:
-  `collins-service` runs the sessions (every agent's pty, the terminal
-  panel's shells, the sandboxes, the shared state, the session tools' MCP
-  socket, the GitHub CLI calls, everything that spends tokens) and the
-  window is a client of it over a Unix socket. The window starts the
-  service when none is running (through its systemd user unit, shipped
-  with the packages and written by `collins --install-desktop`, else by
-  spawning it) and reconnects with a banner if the link drops. Quitting
-  the window ends nothing: the agents keep working, and the next window
-  picks them up. `collins-service --check` says what a headless box
-  needs. See the guide's new *The service* page. libsoup 3 is a new
-  dependency (`gir1.2-soup-3.0`, `libsoup3`).
-- **The session runs on the service.** Everything a session tab did behind
-  its terminal — launching the agent (the sandbox plan, a reaped worktree
-  put back, a worktree launch watched), reading and typing into the CLI's
-  input box (the composer's cut and paste-back, model and effort switches,
-  "Add to chat"), finding a new session's transcript, the busy pole and the
-  finished-run verdict, and the graceful close — now runs in the service
-  half of the app; the window shows what the service tells it and asks for
-  what it wants. Nothing looks different, by design; a resume whose
-  worktree the CLI had removed starts its shell in the directory a moment
-  before the checkout lands. If a tab misbehaves, report the session and
-  the step.
-- **Session tabs on the service's pty server.** Every session tab
-  runs on the in-app half of the headless service Collins is being split
-  into: the shell runs on a pty the service holds, the service answers
-  the terminal's queries and keeps a screen model of record, and the
-  terminal you see is painted from the service's stream (a fresh terminal
-  attaching to a running session is redrawn from the model, scrollback
-  and colours included). The terminal panel's shells, the sandboxed one
-  included, run on the service the same way: their scrollback is saved
-  from the service's screen model and painted back into a reopened shell
-  before its prompt, and the agent's `read_terminal` / `run_in_terminal`
-  read and type through the service. Nothing looks different, by design;
-  if a tab misbehaves, report the session and the step.
-- **The sidebar and Preferences talk to the in-app service.** Sessions, the
-  sidebar's rows and every saved setting and record now belong to the
-  service half of the app, and the window works on a copy it keeps in
-  step; nothing looks different, except that a change the service
-  refuses is put back with a "Not saved" notice.
-- **Pull requests, notifications, session tools and the rest join the
-  service.** Every `gh` call (statuses, the PR page, merges, reviews,
-  comments, image previews), the notification history and its unread
-  count, the session tools sessions call back with, the Sandboxed chip's
+- **Collins is two programs: a service and a window.** `collins-service`
+  runs your sessions (every agent's terminal, the terminal panel's shells,
+  the sandboxes, the shared state, the session tools' MCP socket, every
+  `gh` and `git` call, everything that spends tokens) and the window is a
+  client of it over a Unix socket. Quitting the window, or losing it to a
+  crash, ends nothing: the agents keep working, and the next window picks
+  them up, mid-turn included. The window starts the service when none is
+  running (through its systemd user unit, shipped with the packages and
+  written by `collins --install-desktop`, never enabled by a package, else
+  by spawning it) and shows a "Reconnecting" banner if the link drops.
+  `collins-service --check` says what a headless box needs
+  (`loginctl enable-linger`, the CLI on `PATH`). Nothing else looks
+  different, by design. See the guide's new *The service* page. libsoup 3
+  is a new dependency (`gir1.2-soup-3.0`, `libsoup3`). A package upgrade
+  never restarts a running service: use *Restart service* to run the new
+  code.
+- **Detach, Quit, Restart service and reopening.** *Detach* (the tab menu
+  and a session row's menu) closes a tab and leaves its session running;
+  its row becomes a running row (yellow, poled while the agent works), and
+  opening it attaches to the running session instead of resuming it twice.
+  Quitting detaches every tab by default (the quit preference's new *Leave
+  Running*, which an install on *Ask* moves to once) and the next launch
+  reopens the tabs, attached where they still run, resumed where not; the
+  quit dialog offers *Quit*, *Stop Sessions and Quit* and *Keep Running
+  (Hide Window)*. The status icon belongs to the window and goes with it.
+  *Restart service* in the main menu restarts the service now or once no
+  session is busy, and the tabs resume on the new one; a service speaking
+  another protocol than the window is offered the same restart.
+- **What moved behind the socket.** The session's own logic (launching
+  the agent, the sandbox plan, reading and typing into the CLI's input
+  box, the composer's cut and paste-back, model and effort switches,
+  finding a new session's transcript, the busy pole and the finished-run
+  verdict, the graceful close) is the service's, as are every agent's and
+  every panel shell's terminal (the service keeps a screen model of
+  record, so a window attaching to a running session is redrawn from it,
+  scrollback and colours included, and a shell's scrollback is saved from
+  it), the session store and every setting, every `gh` call (statuses, the
+  PR page, merges, reviews, comments, image previews), the notification
+  history and its unread count, the session tools, the Sandboxed chip's
   grants and switches, the notes and highlights on a session's diff, the
   usage panel, the model list, project icons, the login repair, cloning a
-  repository, moving a session's worktree to the trash and back, and a
-  new chat's folder now run in the service half of the app; the window
-  asks and shows. Notifications are stored as their source text and
-  shown in the language Collins runs in, so a bell or a finished run
-  rung under one language reads in another after a switch (an older
-  row shows the text it was saved with, translated where that is
-  Collins' own English). The service also saves a panel
-  shell's scrollback itself when the shell exits.
+  repository, moving a worktree to the trash and back, and a new chat's
+  folder. Background agents too: the agent list behind the yellow lines,
+  pairing a `/bg` with the agent it becomes, finishing a pairing a restart
+  interrupted, *Repair session link*, whether a background agent is working
+  now, following a transcript the CLI moved when its session entered a
+  worktree, reading which worktree an archive would trash, and the daily
+  automatic delete of old archived sessions. The window keeps its dialogs
+  and its quit-time *Background* queue and shows what the service says. A
+  setting change the service refuses is put back with a "Not saved" notice.
+  Notifications are stored as their source text and shown in the language
+  Collins runs in, so a bell or a finished run rung under one language
+  reads in another after a switch (an older row shows the text it was saved
+  with, translated where that is Collins' own English). If a tab
+  misbehaves, report the session and the step.
 - **App state is now two files.** `~/.config/collins/state.json` keeps what
   describes your sessions and projects and what Collins does for them
   (names, favorites, archives, drafts, pull request records, the sandbox,
@@ -124,37 +100,30 @@ downloads of each version, see the
   of the repository, the session tools). What describes *this computer* —
   window geometry, the sidebar's width, fonts, themes, keybindings, sounds,
   the status icon, Caffeine, the composer's, editor's and git page's
-  appearance, and each session's dock layout and editor state — now lives
-  beside it in `ui-state.json`. The first launch moves the keys over and
-  leaves a copy of the old file as `state.json.pre-split` (never
-  overwritten: a later migration writes a dated sibling). Nothing changes
-  in Preferences. To go back to an earlier version, restore
-  `state.json.pre-split` over `state.json` (the older build ignores
-  `ui-state.json`); anything changed after the upgrade in the moved keys
-  is then as it was before it. An older version started on the new
-  `state.json` without that restore runs on default appearance settings
-  and empty panel layouts; coming back to this version brings yours back
-  from `ui-state.json`, keeping whatever the older version changed
-  meanwhile. Note that `./start-debug` shares the real config directory,
-  so a debug launch of this version migrates the real file. Groundwork for
-  running sessions in a service separate from the window.
+  appearance, each session's dock layout and editor state, and the tabs
+  that were open — now lives beside it in `ui-state.json`. The first launch
+  moves the keys over and leaves a copy of the old file as
+  `state.json.pre-split` (never overwritten: a later migration writes a
+  dated sibling). Nothing changes in Preferences. To go back to an earlier
+  version, restore `state.json.pre-split` over `state.json` (the older build
+  ignores `ui-state.json`); anything changed after the upgrade in the moved
+  keys is then as it was before it. An older version started on the new
+  `state.json` without that restore runs on default appearance settings and
+  empty panel layouts; coming back to this version brings yours back from
+  `ui-state.json`, keeping whatever the older version changed meanwhile.
+  Note that `./start-debug` shares the real config directory, so a debug
+  launch of this version migrates the real file.
 - **Closing a worktree session answers the CLI's exit dialog again.**
   Claude Code 2.1.285 numbers the dialog's items (`❯ 1. Keep worktree`),
   which the graceful close no longer recognised, so closing a worktree tab
   waited on a dialog it would have answered before. Both the numbered and
   the older layout are recognised now.
-- **A prompt Collins typed starts the pole again.** Since the session tabs
-  moved onto the service's pty, a turn started from the new-chat screen,
-  the composer or the `start_session` tool never counted as the tab's
-  first submit: the sidebar's working pole, the unread flag and the
-  finished-run notification all waited for an Enter typed into the
-  terminal itself. Every prompt Collins sends now counts, whichever way it
-  was sent.
 - **The release .deb ships the whole package.** `scripts/build_deb.sh`
   copied only the top-level modules, so the .deb attached to a GitHub
   release lacked `collins/service/` and `collins/api/` and could not start.
-  It now copies every subpackage, and CI installs the built .deb into a
-  scratch root and imports the app from it.
+  It now copies every subpackage, installs the service's command and user
+  unit, and depends on `gir1.2-soup-3.0` (and the markdown libraries); CI
+  installs the built .deb into a scratch root and imports the app from it.
 
 ### v0.1.4 — 2026-09-27
 

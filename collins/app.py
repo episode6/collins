@@ -2138,9 +2138,8 @@ class App(Adw.Application):
     # offered, the tools a session's own data serves) and serves the socket
     # every session's MCP shim relays through (ServiceCore.start_mcp). The
     # app is a client of the UI-bound ones: toolclient.ToolClient answers the
-    # `tool` events with the tab their session lives in. Through Phase 1 the
-    # service's records of its sessions are the tabs' own Sessions, which is
-    # the sessions are its own (ServiceCore.sessions, PR-1.12a).
+    # `tool` events with the tab their session lives in. The service's
+    # records of its sessions are its own (ServiceCore.sessions).
 
     def _start_session_tools(self) -> None:
         """This client's half of the session tools (the dispatcher, the
@@ -2200,7 +2199,7 @@ class App(Adw.Application):
         """The two mirrors on the link (see remotestate, remotestore) and
         the first subscription. `subscribe` is the one call whose snapshot
         is drained inside the call (api.client), so both are filled before
-        anything reads them, as they were on the loopback."""
+        anything reads them."""
         link = self._service_link
         # Every other ask of the service (PRs, jobs, tools, token use)
         # goes over the same connection (apilink.current).

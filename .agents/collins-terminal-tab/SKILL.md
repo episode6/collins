@@ -24,16 +24,15 @@ a shell), `linkpatterns.py` / `transcriptlinks.py` (what counts as a link),
 mode, attachments), `vtehtml.py` (reading dim text back out of VTE),
 `proctree.py` (`/proc` walks), `taborder.py` (tabs follow the sidebar order).
 
-## `Session` and its ports (where the logic lives now)
+## `Session` and its ports (where the logic lives)
 
-Since PR-1.6 of the split (`~/specs/collins/split-service-and-client.md`
-§3.5) the tab is a widget around a **`Session`**
-(`collins/service/session.py`, GTK-free: GLib/Gio only) — and since
-PR-1.12a (§3.19) that session is **the service's**, one per live agent
-pty in `ServiceCore.sessions`, while `tab.session` is its mirror
-(`clientsession.ClientSession`; see "The session on the service" below).
-Read the rest of this skill with that in mind — the mechanisms are
-unchanged, but most of the methods it names are the session's now:
+Collins is two processes (spec `~/specs/collins/split-service-and-client.md`,
+§3.1, §3.5, §3.19): `collins-service` owns the ptys and every session, the
+window is a client of it. The tab is a widget around a **`Session`**
+(`collins/service/session.py`, GTK-free: GLib/Gio only) that lives **on the
+service**, one per live agent pty in `ServiceCore.sessions`; `tab.session` is
+its mirror (`clientsession.ClientSession`, see "The session on the service").
+Most of the methods this skill names are the session's, not the tab's:
 
 | Lives in `Session` | Stays in `TerminalTab` / `MainWindow` |
 | --- | --- |
@@ -43,7 +42,7 @@ unchanged, but most of the methods it names are the session's now:
 | writes: `inject_prompt(_unfocused)`, `switch_model/effort`, the open-cut (`begin_cut` → settle → apply → verify), `send_composed`, `restore_draft` (paste-back), `foreign_paste_in_box` | the composer widget, its open/close/dock, the stash (`_stash_draft`) |
 | `/proc`: `candidate_pids`, `agent_is_running`, `agent_pid`, `has_running_command`, `current_agent_cwd`, `has_background_descendant`, `owns_pid_ancestors` | — |
 | transcript: the `TranscriptModel`, its monitor/poll/debounce, `request_update` and its landing, the PRs it tracks (`tracked_prs`, `restored_prs`, `attached_prs`), the resolver (`start_resolver`, `arm_resolver`), `current_model/effort/permission_mode`, `finish_witness` | chips, labels, attachments, the editor's agent files (`_on_transcript_landed`, `_on_transcript_reset`) |
-| activity: `echo_gate`, `spinner`, `progress`, `finish_ledger`, `redraw_counts` | the `ActivityTracker`, ids, unread — `MainWindow` reads the watches through `_session_of(page)` (its per-page watch dicts are gone) |
+| activity: `echo_gate`, `spinner`, `progress`, `finish_ledger`, `redraw_counts` | the tracker itself is the service's (`service/tracking.py`); the window keeps "the person typed here" (`unread: false`) and attention |
 | the cwd poll (`start_cwd_poll`, mapped-only) and `settle_cwd` (the follow debounce) | what following means (`_maybe_follow_editor`, the shells' offer) |
 | the close's keystrokes and polls: `begin_close`, the nudges, the worktree "keep", the shell's exit, the force budgets (`CLOSE_POLL_MS`, `EXIT_*`, `BG_*`, `SHELL_EXIT_TICKS`), `end_close`, `nudge_exit` | every decision about a close (`_graceful_close`, the asks, `_close_confirmed` passed in as the force) |
 
@@ -56,53 +55,51 @@ aliases.
 **The ports** (`collins/service/ports.py`, `typing.Protocol`s):
 `PtyPort` — `write`, `resize`, `child_pid`, `foreground_pgrp`;
 `ScreenPort` — `rows`, `cursor`, `columns`, `tail_is_faint`,
-`first_column`, `capture_contents`, plus three a moved reader needed
-(`row_count` for the echo gate's grid, `row_text` for `takes_prompt`'s one
-line read on every key press, `visible_text` for the worktree matchers that
-read soft-wrapped lines whole). Row indices are relative to the screen's
-cursor-anchored first row. Today they are `terminal.VtePtyPort` and
-`terminal.VteScreenPort`, adapters over the tab's own `Vte.Terminal` making
-exactly the reads the tab always made; later swaps put `PtyServer` and
-`termscreen` behind the same ports.
+`first_column`, `capture_contents`, plus `row_count` (the echo gate's grid),
+`row_text` (`takes_prompt`'s one line read on every key press) and
+`visible_text` (the worktree matchers that read soft-wrapped lines whole).
+Row indices are relative to the screen's cursor-anchored first row. The
+implementations are `hosting.RecordPtyPort` / `RecordScreenPort`, over the
+service's `PtyServer` pty and `termscreen.Screen`; the unit tests'
+`FakeTerminal` is the third.
 
 **How the tab talks to it.** Down: every old name on the tab is a forwarder
 (`tab.takes_prompt()`, `tab.session_id`, `tab._options`, `tab.sandboxed`,
-`tab.current_agent_cwd()`, ...) to the mirror, so the window and the app
-didn't change; the privates the e2e checks read (`_initial_command`,
-`_visible_screen_text()`, `_pasted_back`, `_child_pid`, `finish_ledger`,
-`_transcript.set_path`) are probes now (`tab.probe("initial_command")`,
-`tab.probe_call("visible_screen_text")`, `tab.probe_call("child_pid")`,
-`tab.probe_set("session_id", x)`, `tab.probe_call("transcript.set_path",
-p)`). Up: the session reports through a `SessionHost` listener (`alive`,
-`mapped`, `paint`, `focus_terminal`, `spawn_shell`, `session_resolved`,
-`transcript_landed`, `process_exited`, ...) which the service's
-`hosting.SessionRecord` implements: as `session`, `cut`, `composer`,
-`focus.terminal`, `shells` and `close` events to the pty's attached
-clients, which the tab turns into its existing signals (`focus` stays the
+`tab.current_agent_cwd()`, ...) to the mirror, which answers from the last
+`session` event (no round trip: D28) or makes a request. The privates the
+e2e checks read (`_initial_command`, `_visible_screen_text()`,
+`_pasted_back`, `_child_pid`, `finish_ledger`, `_transcript.set_path`) are
+the **probe**: `tab.probe("initial_command")`, `tab.probe_call(
+"visible_screen_text")`, `tab.probe_set("session_id", x)`,
+`tab.probe_call("transcript.set_path", p)`, which are `debug.*` requests the
+service serves **only when it runs with `COLLINS_DEBUG_API=1`** (otherwise
+`unknown`). Never use it in product code. Up: the session reports through a
+`SessionHost` listener (`alive`, `mapped`, `paint`, `focus_terminal`,
+`spawn_shell`, `session_resolved`, `transcript_landed`, `process_exited`,
+...) which `hosting.SessionRecord` implements as `session`, `cut`,
+`composer`, `focus.terminal`, `shells` and `close` events to the pty's
+attached clients; the tab turns them into its signals (`focus` stays the
 client's own event, `focused` required). A composer's open-cut reaches the
-composer through a `CutSink` (`hosting.CutSink`: `alive` is "the client
-is still attached and hasn't called the cut off"; `seed`, `refuse` and —
-for a cut that ends with nothing to seed, an empty box or one that never
-settles — `ended` are `cut` events by handle, `seeded` / `refused` /
-`cancelled`; a seeded cut's handle is let go of at once, and `cut.cancel`
-reaches only the asking client's cuts, calling the session's chain off
-when it is that client's). The tab's decisions on those events are
-`ClientSession.cut_action` (seed an open composer, `_restore_or_stash` for
-one that closed meanwhile, lower one whose box can't be read) and
-`ClientSession.close_action` (`budget` → the forced close), GTK-free and
-tested in `tests/test_clientsession.py`. `input_sent` is the one host call that never
-reaches a client: every write the session makes (`Session.write_text`: an
-injected prompt, a switch, a close flow's keys) is announced *before* the
-bytes go to the pty, and on the service's pty they never pass a client's
-VTE, so they never arrive as an input frame — the session pokes and arms
-its own `echo_gate` in `write_text` (PR 602), and `SessionRecord.input_sent`
+composer through a `CutSink` (`hosting.CutSink`: `alive` is "the client is
+still attached and hasn't called the cut off"; `seed`, `refuse` and, for a
+cut that ends with nothing to seed, `ended` are `cut` events by handle,
+`seeded` / `refused` / `cancelled`; a seeded cut's handle is let go of at
+once, and `cut.cancel` reaches only the asking client's cuts). The tab's
+decisions on those events are `ClientSession.cut_action` (seed an open
+composer, `_restore_or_stash` for one that closed meanwhile, lower one whose
+box can't be read) and `ClientSession.close_action` (`budget` → the forced
+close), GTK-free and tested in `tests/test_clientsession.py`. `input_sent`
+is the one host call that never reaches a client: every write the session
+makes (`Session.write_text`: an injected prompt, a switch, a close flow's
+keys) is announced *before* the bytes go to the pty and never passes a
+client's VTE, so it never arrives as an input frame. The session pokes and
+arms its own `echo_gate` in `write_text`, and `SessionRecord.input_sent`
 hands the text to `ServiceActivity.input_sent`, which takes the process
-baseline's last pristine snapshot on a "\\r", as `on_input` does for a
-typed Enter. A fresh spawn whose turns were only ever sent that way would
-otherwise sit in its startup hold for good (no pole, no unread flag, no
-finished notification); `scripts/check_injected_prompt_pole.py` drives the
-road end to end through the probe (`activity.startup_held_for`,
-`echo_gate.armed`).
+baseline's last pristine snapshot on a "\r", as `on_input` does for a typed
+Enter. Without it a fresh spawn whose turns were only ever sent that way
+sits in its startup hold for good (no pole, no unread flag, no finished
+notification); `scripts/check_injected_prompt_pole.py` drives the road end
+to end through the probe (`activity.startup_held_for`, `echo_gate.armed`).
 
 **Testing a state machine.** `tests/test_session.py` builds a `Session`
 over fakes: a `FakeTerminal` that is both ports and models just enough of
@@ -118,7 +115,7 @@ something about VTE or a real CLI is the point.
 
 ## Spawn, resume, attach
 
-A **sandboxed** launch (`SessionOptions.sandbox`) types
+A **sandboxed** launch (`SessionOptions.sandbox`, all of it on the service) types
 `python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead:
 `_launch_command` (from `_finish_spawn`, and again from the chip's
 *Restart to apply*, `restart_sandboxed`) writes the plan through
@@ -152,8 +149,8 @@ that says so, with a bypass mode dropped. A `"toast"` signal carries a
 tab's short message to the window's toast overlay. See
 `collins-sandboxed-sessions`.
 
-A tab spawns the user's `$SHELL` (via `Vte.Terminal.spawn_async`) in the
-session's resume cwd — the **last** cwd its transcript recorded, mapped back
+A tab asks the service to spawn the user's `$SHELL` (a `spawn` request, see
+"The tab on the pty server") in the session's resume cwd — the **last** cwd its transcript recorded, mapped back
 through worktree recovery — with the environment from
 `agent_environment()` (`service/session.py`; the app's env plus `ConEmuANSI=ON` and
 `TERM_PROGRAM=kitty`, which are the two spoofs that make the CLI emit
@@ -165,9 +162,9 @@ True)` lists the session — the daemon refuses a plain resume for any id it
 still lists. `attach` is not exclusive: a second client can attach to the same
 job, which is how live sessions are probed without typing into them.
 
-`Vte.Terminal.set_size(cols, rows)` before spawn reaches the child's winsize
-even for a never-shown tab (background spawns mirror the visible terminal or
-use 120x40). A never-selected tab never realizes; VTE still emits `bell` for it
+The VTE's `set_size(cols, rows)` before the `spawn` request is the grid the
+pty starts at, even for a never-shown tab (background spawns mirror the
+visible terminal or use 120x40). A never-selected tab never realizes; VTE still emits `bell` for it
 but rings no audible bell.
 
 **The transcript resolver.** A fresh tab has no session id until the CLI
@@ -264,9 +261,9 @@ bare kill-line at column 0 rings the bell — and force-closes if the shell
 ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close
 (`close {mode: background}`) has the service mark the row `backgrounding`
 (yellow, disabled) until the daemon lists the job or a timeout, and its fork
-watch (`service/bgagents.py`, PR-1.12d) handles older CLIs that fork.
+watch (`service/bgagents.py`) handles older CLIs that fork.
 
-**Detach** (PR-1.12c, spec §3.21, D12): `win.detach-session` (the tab
+**Detach** (spec §3.21, D12): `win.detach-session` (the tab
 menu's item targets "" = the menu's page; the row menu's names the
 session, routed to its owner window) → `MainWindow.detach_page` → the
 editor's Save Changes? only → the page goes into `_detached_pages` and
@@ -287,7 +284,7 @@ for a session with no id yet (a running "New session" row, a `pty:<id>`
 entry of `open_tabs`), with a placeholder row like a fresh tab's.
 
 Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit`, by
-`quit_with_running_sessions`: **detach** (the default since PR-1.12c, D30:
+`quit_with_running_sessions`: **detach** (the default, D30:
 `do_detach` records `open_tabs` with `_close_for_good`, marks every
 running tab `_detached_pages` and closes all pages with `_close_ok`, so a
 page mid-close drains and a shell-only tab ends, and the last page's close
@@ -307,7 +304,7 @@ Window)*; its first showing adds the status-icon sentence
 `_close_ok` also covers the no-dialog paths. A hidden window keeps every
 page alive with no `Gio.Application.hold()`.
 
-**open_tabs** (§3.21): `App.persist_open_tabs` (debounced 250 ms) writes
+**open_tabs** (§3.21; this device's, in `ui-state.json`): `App.persist_open_tabs` (debounced 250 ms) writes
 every open window's `open_tab_entries()` — a tab with a live pty, as its
 session id or `pty:<id>` for an unresolved one or a fork — through
 `AppState.set_open_tabs` into the per-service block of `ui-state.json`, on
@@ -316,7 +313,8 @@ the link is down (tabs whose ptys went with the service close as their
 reattach fails; that must not shrink the record) and after the last
 window's quit. `MainWindow.reopen_tabs()` (the launch, from
 `do_activate`) and `App._on_connected` after a reconnect (after
-`reattach_tabs`) reopen each entry not shown: attached when the service
+`reattach_tabs`: every tab re-`attach`es its pty for a redraw, and one whose
+pty is gone is marked ended and offers resume) reopen each entry not shown: attached when the service
 runs it, resumed when not (a `pty:` entry that no longer runs is dropped);
 a session the store has not scanned yet waits for its first refresh. With
 `open_tabs` empty the launch falls back to `restore_last_session`.
@@ -383,7 +381,7 @@ property (creation order diverges from position).
 
 The split (`~/specs/collins/split-service-and-client.md`) moves the pty out
 of the tab into a headless service; `collins/service/termstream.py` (GTK-free,
-stdlib only, not yet wired into the app) is the first piece. One
+stdlib only) is what every pty's output on the service goes through. One
 `StreamFilter` per pty; `feed(bytes)` returns `Filtered(forward, replies,
 tokens, events)`:
 
@@ -428,14 +426,15 @@ VTE (update the tables and the module docstring's measurements).
 
 ## The service's screen model (termscreen)
 
-`collins/service/termscreen.py` (GTK-free, stdlib only, not yet wired into
-the app) is the terminal of record of the split: one `Screen` per pty,
+`collins/service/termscreen.py` (GTK-free, stdlib only) is the terminal of
+record: one `Screen` per pty,
 fed the tokens `termstream`'s tokenizer cuts (`apply(token)`; as the
 `ScreenHook` of a `StreamFilter` it also answers CPR and DECRQSS from the
-screen as it stands at the query). Every automated read the tab makes
-today off VTE will be made of it once PR-1.7 swaps the backend:
+screen as it stands at the query). Every automated read of a terminal
+(`takes_prompt`, the echo gate, the spinner column, `capture_contents`) is
+made of it, never of a client's VTE:
 
-- **Reads** (the `ScreenPort` of spec §3.5): `rows()`, `cursor()` (the
+- **Reads** (the `ScreenPort`): `rows()`, `cursor()` (the
   column is `cols` while a wrap is pending, as VTE reports it),
   `row_text(row)`, `tail_is_faint(row, column, foreground, background,
   palette)` (the dim-tail question `takes_prompt` asks, answered as
@@ -507,26 +506,37 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
 
 ## The tab on the pty server (ptyclient, the socket, core)
 
-**PR-1.12b: the service is its own process.** The "loopback" below is
-history: `terminal.SERVICE_LOOPBACK`, `service_loopback()` and
-`api/loopback.py` are gone (D21). A tab's (and a panel shell's) client is
-`api.client.PtyClient` from `terminal._pty_client` on the app's
-`SocketLink` (`apilink.current()`): the same `request` / `send_input` /
-`send_event` / `close` surface, fed the output frames and events of the
-ptys it spawned or attached. `request` blocks on the link's sync channel;
-the events a reply implies (`session`, `pty`) land on the main loop after
-it returns, so nothing reads a mirror for a fact the reply itself
-carries. `TerminalTab.reattach()` and `PanelTerminal.reattach()` are what
-the connection manager calls after a reconnect (a redraw from the
-service's model; a pty the service lost reads as the shell's exit).
-`save_panel_history` is the `panel.history` request. `App.do_shutdown`
-closes the link and ends nothing on the service.
+**The wiring.** The app owns one `api.client.SocketLink` (`apilink.current()`)
+to the service and a `connection.ConnectionManager` that finds or starts
+`collins-service` (the unit via `systemctl --user start` for the default app
+id, else a detached spawn), connects both channels, subscribes, and on a
+loss backs off (1, 2, 5, 10, then every 30 s) and reconnects. A tab's (and a
+panel shell's) client is an `api.client.PtyClient` from
+`terminal._pty_client`: `request`, `send_input`, `send_event`, `close`, fed the
+output frames and events of the ptys it spawned or attached. Tests and
+harness checks reach the link through `scripts/e2e_service.py`.
 
-Since PR-1.9 of the split a session tab has one backend: the service's pty
-server (PR-1.7 added it beside the tab's own in-widget pty; PR-1.9 deleted
-that one, with `COLLINS_PTY_BACKEND`, `ptyclient.PTY_BACKEND`,
-`terminal.VtePtyPort` / `VteScreenPort` and every `spawn_async`). Spec §3.4,
-swap 2 of §3.5:
+**Two connections, one rule** (D26). The link has a **primary** WebSocket
+(the subscription, every event, output and input frames, `send`) and a
+**sync channel** (`call`, which blocks its calling thread, the main thread
+included, on a `threading.Event` for up to 10 s, then `gone`). Both are
+driven by one daemon thread running its own `GLib.MainContext`; what
+arrives lands on the main loop through one ordered queue at
+`PRIORITY_DEFAULT`. Footguns: **never `call` from that I/O thread** (it
+would wait on itself), and never expect an event to have landed when a
+`call` returns: the events a reply implies (`session`, `pty`) land after it,
+so read the fact the reply carries, not a mirror. `subscribe` is the one
+call sent on the primary, and the main thread drains the landing queue while
+it waits, so the mirrors are full when it returns. A lost link fails every
+pending call `gone` and calls `on_lost` once.
+
+`TerminalTab.reattach()` and `PanelTerminal.reattach()` are what the
+manager's reconnect calls (a redraw from the service's model; a pty the
+service lost reads as the shell's exit, and the tab shows "ended" and offers
+resume). `save_panel_history` is the `panel.history` request.
+`App.do_shutdown` closes the link and ends nothing on the service.
+
+**One backend.** A session tab has the service's pty server only, spec §3.4:
 
 - **The terminal has no child.** `TerminalTab.terminal` is a
   `ptyclient.ClientVte` (a `Vte.Terminal` that reports its own allocation,
@@ -537,7 +547,7 @@ swap 2 of §3.5:
   event, `pty-exited` is what `child-exited` was (`tab._on_pty_exited` →
   `Session.shell_exited`; a status the service does not know is -1). The
   ports are `hosting.RecordPtyPort` and `RecordScreenPort` on the service over its
-  pty and `termscreen.Screen` (PR-1.12a; the dim judgement with the
+  pty and `termscreen.Screen` (the dim judgement with the
   active client's `term`, palette included): the model is the screen as
   anchored to the cursor already, so row indices are the model's own;
   `row_text` cuts a row's cells, `visible_text` joins on the wrap flags.
@@ -570,7 +580,7 @@ swap 2 of §3.5:
   `attach` reply's `modes` lists what the preamble re-asserted; if
   `?1004h` is among them the real focus state is sent when the guard
   comes down. The attach is also where the session's facts arrive whole
-  (the `session` event, PR-1.12a). `ClientTerminal.dropped_commits` counts what the guard
+  (the `session` event). `ClientTerminal.dropped_commits` counts what the guard
   swallowed (`check_attach_redraw.py` asserts it and that no sentinel
   answer reached the pty). A commit carrying NUL (Ctrl+Space, Ctrl+@)
   reaches `commit` as an empty C string of size 1 and is sent as `\0`
@@ -586,19 +596,17 @@ swap 2 of §3.5:
   widget alone.
 - **The tab's end.** `TerminalTab.release_pty()` (from
   `MainWindow._on_close_page`, the final close) sends `close` (mode
-  `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
-  SIGKILL after the grace), detaches and closes its `PtyClient`:
+  `kill`: SIGHUP to the foreground job's group and the shell's plus the
+  master closed, with SIGKILL after the grace), detaches and closes its `PtyClient`:
   closing a tab ends the session (D12). `TerminalTab.detach_pty()` is
-  *Detach*'s and a destroyed tab's (PR-1.12c): the pty runs on.
+  *Detach*'s and a destroyed tab's: the pty runs on.
   `App.do_shutdown` closes the panel shells' ptys and the link; the
   agents' ptys live on (§3.10) and the next client attaches.
-- **The wiring.** `App._start_service` builds the `SocketLink` and the
-  `ConnectionManager`, which finds or starts `collins-service` (the
-  `ServiceCore.with_state` over the service's own `AppState`; the pty
-  half: `spawn`, `attach`, `detach`, `paint`, `close`; the
-  `resize`/`focus`/`theme`/`ack` events; the store and state half, see
-  `collins-sessions-and-sidebar`) and connects both channels; a tab
-  built without an app gets a link through `scripts/e2e_service.py`.
+- **The service's side** is `ServiceCore` (`ServiceCore.with_state` over the
+  service's own `AppState`): the pty half serves `spawn`, `attach`,
+  `detach`, `paint`, `close` and takes the `resize` / `focus` / `theme` /
+  `ack` events; the store and state half is in
+  `collins-sessions-and-sidebar`.
 - **What differs, by design.** A row written before a resize is kept by
   the model as it was (no reflow, D19) where VTE re-wraps it: a shell's
   echo from before the tab's first allocation reads differently in
@@ -608,8 +616,8 @@ swap 2 of §3.5:
   `write_contents_sync` by the goldens' `capture` read (three wrap
   scenarios in `scenarios.SYNTHETIC`, every scenario compared after
   `scenarios.normalise_capture`): soft-wrapped rows joined, and the rows
-  `ED 3` blanked left out (VTE's text reads show them, measured in
-  PR-1.2; its capture does not, measured in PR-1.7:
+  `ED 3` blanked left out (VTE's text reads show them, measured;
+  its capture does not:
   `Screen.scrollback_erased` counts them, carried in the model file).
 - **The first keystroke after focus** (F11's unexplained loss) is the
   harness, not the client. `scripts/probe_first_keystroke.py` drives the
@@ -623,9 +631,7 @@ swap 2 of §3.5:
   key after the **first** click into the window never reached GTK at all
   (a capture-phase key controller on the window saw nothing, no commit,
   the guard down), while the key after a second click arrived in every
-  run (on the server backend, then the `vte` one's control run: lost in 2 of
-  4 on VTE's own child, the key never seen by GTK either, delivered when it
-  was; PR-1.9 deleted the control). The key never reached GTK;
+  run (the same on VTE's own child in the old control run). The key never reached GTK;
   the compositor's keyboard focus not having moved yet to the window the
   click activated is the likely cause (the toplevel reports
   `is_active()` False throughout under the headless shell). A harness
@@ -633,13 +639,13 @@ swap 2 of §3.5:
   loses that key.
 - **Running the suite on it:** `python3 scripts/run_e2e.py`; a single
   check: `python3 scripts/check_x.py`.
-- **The panel shells** (PR-1.8) are the same, each a `ClientTerminal` over
-  a `shell` pty with its own loopback client; see `collins-panel-dock`,
+- **The panel shells** are the same, each a `ClientTerminal` over
+  a `shell` pty with its own `PtyClient`; see `collins-panel-dock`,
   "Panel shells on the pty server".
 
 ## The session on the service (hosting, tracking, finish, clientsession)
 
-PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
+The `Session` is the service's (spec §3.19). The pieces:
 
 - **`service/hosting.py`.** `SessionRecord`, one per live agent pty
   (`ServiceCore.sessions`, by pty id, built by `spawn` for kind `agent`
@@ -694,7 +700,7 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   shell's `spawn` names); a resume or fork with no box is minted one
   there (`_box_for_launch`).
 - **`service/tracking.py`.** `ServiceActivity` (`start_activity`): the
-  window's `ActivityTracker` moved whole, fed by `termstream.Progress`
+  one activity tracker, fed by `termstream.Progress`
   events in place of the termprop (`on_progress`, through the
   `progress_termprop` setting), the output settle in place of
   `contents-changed` (`on_settled`: `Session.redraw_counts`), the input
@@ -714,7 +720,7 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   pty's clients, which refresh the pull requests and mark the greens as
   owed an announcement; a session with no row hears `busy` / `finished`
   by its handle (the placeholder row). `service/finish.py` is the judge
-  (`FinishJudge`: `_judge_finish` / `_hold_finish` word for word; `held`
+  (`FinishJudge`; `held`
   is what `check_pr_refresh_on_finish` reads by probe).
 - **`clientsession.py`.** `ClientSession`, the tab's mirror: the fields
   under the attribute names the forwarders read, the reads that answer
@@ -730,10 +736,31 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   the close event. The window keeps `_clear_unread` (a keystroke is
   presence), the attention mark off `contents-changed`, the /bg
   orchestration and the notification delivery; `store.flags` keeps
-  `status`, `unread` and the handoff's two flags and refuses `busy`.
-- **The cwd tick** stays on the client (2 s while mapped, over the mirror's
-  `agent_cwd`, which the service's own poll publishes on change): the
+  `status` and `unread: false` and refuses `busy`, `backgrounding` and
+  `can_background` (the service's, `service/bgagents.py`).
+- **The cwd tick** is a client 2 s tick while mapped, over the mirror's
+  `agent_cwd`, which the service's own poll publishes on change: the
   footer's branch and the git page's freshness ride it.
+- **Running means the CLI runs.** A session counts as running (the row's
+  `running`, `open_tabs`, attach-on-activate) only while its CLI does:
+  `ServiceCore.cli_changed` follows the `running_command` fact, publishing
+  the pty's table row when the CLI comes up and a table `pty-exited` with
+  status null when it leaves while the shell lives. A shell left after the
+  CLI exited is resumed over (the service closes that pty).
+- **The spawn refusal.** An agent `spawn` for a session that already has a
+  live agent pty whose CLI runs is refused `{"error": "refused", "msgid":
+  "This session is already running in the Collins service", "args": {"pty":
+  <id>}}`: two CLIs must never write one transcript. The client attaches
+  to the named pty instead. Fork spawns and fork records are exempt (a
+  fork's tab must not land on its parent's pty).
+- **The debug API** (D27): `debug.*` requests (`debug_patch`,
+  `debug_find_handle`, `debug_spy_writes`, `debug_tools_*`, a session
+  attribute read, written or called by name, a pty's screen and process
+  facts), served only with `COLLINS_DEBUG_API=1` in the service's
+  environment, which `scripts/e2e_service.py` sets for a check's service and
+  which is stripped from spawned shells. A monkeypatch in a check's own
+  process no longer reaches the service: stubs go in
+  `scripts/e2e_stubs.py` or `debug_patch`.
 - **Testing.** `tests/test_core.py` (a spawn builds a session, the attach's
   snapshot, the facts moving with the screen, the requests, a client's
   departure cancelling its cut, the probe gated on the flag, `busy`
@@ -745,10 +772,9 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
 
 ## The service's pty server (ptyserver)
 
-`collins/service/ptyserver.py` (GLib only, nothing from GTK; wired into the
-app through `service.core.ServiceCore` and the loopback, used by every tab) is the table of terminals the service owns, one
-`Pty` per agent session and, from PR-1.8, per panel shell (spec §3.3,
-PR-1.5).
+`collins/service/ptyserver.py` (GLib only, nothing from GTK; served by
+`service.core.ServiceCore`) is the table of terminals the service owns, one
+`Pty` per agent session and per panel shell (spec §3.3).
 
 - **Lifetime.** `PtyServer.spawn(kind, argv, cwd, env, cols, rows, …)`
   does `os.openpty()`, sets the window size on the slave, forks, and in the
@@ -770,9 +796,9 @@ PR-1.5).
   that ignored it; `shutdown()` closes every pty, waits a bounded time
   for the saves in flight, then finishes each on the spot (status
   unknown: the reap no longer lands on a stopping service), its row
-  recorded gone and its model file removed with it (Phase 1: stopping the
-  service ends every agent). A `Pty` implements the `PtyPort` of §3.5 (`write`,
-  `resize`, `child_pid`, `foreground_pgrp`) for the `Session` of PR-1.7,
+  recorded gone and its model file removed with it (stopping the
+  service ends every agent; so does a crash of it). A `Pty` implements the `PtyPort` (`write`,
+  `resize`, `child_pid`, `foreground_pgrp`) for its `Session`,
   and for a panel shell `shell_pid` (a sandboxed one's shell inside the
   box), `has_running_command` and `process_cwd`; `clear(pty)` swaps in a
   fresh model and `capture(pty)` reads a live pty's text ("" once gone:
@@ -786,7 +812,7 @@ PR-1.5).
   `send_event(dict)`; `drop_queued()` and a `device` attribute are
   optional; sinks are keyed by identity.
 - **The active client's colours answer the queries** (§3.3): a client's
-  `theme` event sets its own term (`LoopbackClient.term`, which its sinks
+  `theme` event sets its own term (the client's `term`, which its sinks
   read), and a pty's responder takes its active sink's
   (`PtyServer.pty_term`, re-applied whenever the active client or a
   term changes), the last term any client sent while none is active.
@@ -848,9 +874,9 @@ PR-1.5).
   service), and every `*.model` whose id is not in the table is pruned at
   service start (`prune_models`, from `ServiceCore`). The panel history
   and the transcript carry what a person needs after the exit; the file
-  exists for a live pty's re-adoption (PR-3.6).
+  exists for a live pty's re-adoption by a restarted service (not built yet).
 - **The `ptys` table.** The server's `record(pty_id, row | None)` callable
-  (`AppState.set_pty`, wired in PR-1.7) keeps a row per live pty in
+  (`AppState.set_pty`) keeps a row per live pty in
   `state.json` (§3.8): kind, session, cwd, pid, cols, rows, box, plan,
   options. A spawn and an exit are written at once; size changes are
   coalesced to one write a second.
