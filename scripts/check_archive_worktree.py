@@ -373,7 +373,16 @@ def step_trash_undone() -> bool:
     # the setting says: it is still working in there.
     put_back()
     win.state.set_setting("archive_worktree", "always")
-    win._bg_status.background_ids.add(SESSION)
+    # The agent list's poller is the service's since PR-1.12d: the probe
+    # adds the session to the ids it last read.
+    app._service_link.call(
+        {
+            "t": "debug.sandbox",
+            "target": "core",
+            "name": "background_call",
+            "args": ["poller.background_ids.add", SESSION],
+        }
+    )
     archive()
     return later(step_background)
 

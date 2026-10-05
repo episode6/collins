@@ -19,6 +19,11 @@ Everything GitHub goes through `gh` — already authenticated, host-aware
 empty menu, and a launch that finds `gh` missing or signed out shows the
 `ghwelcome` notice until "Don't show this again" (`gh_welcome_dismissed`).
 Signed-in-ness is `gh auth token` (local, no network), never `gh auth status`.
+The `gh` in question is the service's (PR-1.12d): the service runs
+`ghsetup.check` on a thread when a client subscribes (dropping its last
+answer first) and `service.status` carries the verdict as `gh` (`ready`,
+`missing`, `logged-out`; absent until known); `ghwelcome` polls that from
+a worker thread, never runs gh itself. The clone job keeps its own check.
 
 ## On the service (PR-1.11)
 
@@ -330,7 +335,8 @@ alphabet.
 ## Footguns
 
 - Redirecting `XDG_CONFIG_HOME` does **not** reliably hide gh's credentials
-  (keyring); force `ghsetup.check` in captures of the notice.
+  (keyring); force `ghsetup.check` in captures of the notice — in the
+  service's process (an e2e stub), since the check runs there.
 - The auto-opened PR page (`open_pr_panel_on_attach`, on by default) opens on a 250 ms
   timeout with `focus=False`; from the chip cascade's idle it segfaulted.
 - `prstatus`'s listener registry is module-global; the test suite's autouse

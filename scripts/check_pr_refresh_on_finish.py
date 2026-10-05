@@ -384,10 +384,10 @@ def step_page_reread() -> bool:
         return later(step_page_reread, 500)
     check("a finish edge re-reads the open PR page", page_loads() == [PR_URL], page_loads())
     # A detach's parting progress-clear lands here as a finish too, and must
-    # spend nothing: the run is being handed on, not completing. The window
-    # marks a detach on its rows (`backgrounding`, the client flag the
-    # service's tracker reads, PR-1.12a) as well as in its own set.
-    state["win"]._mark_backgrounding(SESSION)
+    # spend nothing: the run is being handed on, not completing. The service
+    # marks a detach on its rows (`backgrounding`, which its tracker reads;
+    # the handoff is service.bgagents' since PR-1.12d), reached by the probe.
+    background_call("mark_backgrounding", SESSION)
     age_the_throttles()
     forget_page_loads()
     state["before"] = status_fetches()
@@ -401,9 +401,16 @@ def step_detaching() -> bool:
         status_fetches() == state["before"] and not page_loads(),
         f"{state['before']} -> {status_fetches()}, {page_loads()}",
     )
-    state["win"]._detaching.discard(SESSION)
-    state["win"]._set_row_backgrounding(SESSION, False)
+    background_call("confirm_backgrounding", SESSION)
     return done()
+
+
+def background_call(name: str, *args) -> None:
+    """A method of the service's background agents (the window's /bg
+    orchestration before PR-1.12d), through the probe."""
+    app._service_link.call(
+        {"t": "debug.sandbox", "target": "core", "name": "background_call", "args": [name, *args]}
+    )
 
 
 def done() -> bool:

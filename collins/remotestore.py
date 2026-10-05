@@ -26,11 +26,17 @@ transcript is read here: the per-refresh I/O stays on the service.
 
 **Busy is the service's** (rule 3 of §3.1, D29): `set_busy` only sends
 `store.flags`, and the row changes when the service's `item` event comes
-back. The flags this client decides — `unread`, `status`, the /bg
-orchestration's `backgrounding` and `can_background` — are applied to the
-row at once (D16) and sent; a refusal puts the old value back. The window's
-handlers on the store's signals (the green row's rise, `_reraise_green`)
-count on that edge being synchronous, as it was on the loopback.
+back. The flags this client decides — `unread`, `status` — are applied to
+the row at once (D16) and sent; a refusal puts the old value back. The
+window's handlers on the store's signals (the green row's rise,
+`_reraise_green`) count on that edge being synchronous, as it was on the
+loopback. **The background agents are the service's too** (§3.22,
+PR-1.12d): a row's `background` (its conversation runs as a /bg agent),
+`backgrounding` (a /bg in flight) and `can_background` (the gate) arrive
+as `item` fields only, and each move of one is `background-changed`, what
+the window's yellow lines and quit-time /bg queue follow. `forgotten` is
+the service letting go of a session's records by itself (the archive
+sweep): the window drops what this device kept for it.
 
 **Archived sessions are paged.** The snapshot carries the sessions with
 rows. The ones kept out of sight are fetched when they are first needed:
@@ -101,9 +107,13 @@ _PROPS = (
     "syncing",
     "backgrounding",
     "can_background",
+    "background",
     "running",
 )
 _SIGNALLED = {"busy": "busy-changed", "unread": "unread-changed"}
+# The background agents' facts (the service's, PR-1.12d): any move of one
+# is `background-changed`.
+_BACKGROUND = frozenset({"background", "backgrounding", "can_background"})
 # The settings whose flip moves what a row's name is: whether the CLI's
 # own titles show, and whether PR titles name sessions (the latter writes
 # generated names on the service, which then arrive as their own change;
@@ -130,6 +140,12 @@ class RemoteStore(GObject.Object):
         # or a row's `running` flipped (PR-1.12c, §3.21). The session id
         # whose row it moves, "" for a fresh spawn not yet resolved.
         "running-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # A row's background-agent facts moved (`background`,
+        # `backgrounding`, `can_background`; PR-1.12d): its session id.
+        "background-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # The service let go of a session's records by itself (the archive
+        # sweep's trash): its session id.
+        "forgotten": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, link, state, pr_store=None) -> None:
@@ -167,6 +183,7 @@ class RemoteStore(GObject.Object):
         link.on("pty-exited", self._on_pty_exited)
         link.on("rows", self._on_rows)
         link.on("put-away", self._on_put_away)
+        link.on("forgotten", lambda event: self.emit("forgotten", event["session"]))
         state.connect_changed(self._on_state_changed)
 
     # -- the subscription -----------------------------------------------------------
@@ -371,6 +388,8 @@ class RemoteStore(GObject.Object):
                 self.emit(_SIGNALLED[prop], item.session_id, bool(value))
             if announce and prop == "running":
                 self.emit("running-changed", item.session_id)
+            if announce and prop in _BACKGROUND:
+                self.emit("background-changed", item.session_id)
 
     def _reproject(self, session_ids) -> None:
         """Put a row's name and star back in line with the mirror (after an
@@ -701,22 +720,18 @@ class RemoteStore(GObject.Object):
     def set_unread(self, session_id: str, flag: bool) -> None:
         self._flag(session_id, "unread", bool(flag))
 
-    def set_backgrounding(self, session_id: str, flag: bool) -> None:
-        self._flag(session_id, "backgrounding", bool(flag))
-
-    def set_can_background(self, session_id: str, flag: bool) -> None:
-        self._flag(session_id, "can_background", bool(flag))
-
     def _flag(self, session_id: str, prop: str, value) -> None:
         """A verdict for a row: sent only when it would change the row (the
         store's setters are no-ops otherwise, and a row the client lacks is
         one the service lacks). A flag this client decides (`unread`,
-        `status`, the /bg orchestration's two: D29) is applied to the row
+        `status`: D29) is applied to the row
         at once, so what listens on the store's signals (the green row's
         rise in `App._sync_green`, the window's `_reraise_green`, which
         counts on the edge being synchronous) sees it inside the call, as
         on the loopback; the service's `item` echo confirms it (D16).
-        `busy` is the service's verdict and is only ever sent."""
+        `busy` is the service's verdict and is only ever sent (and
+        refused); the background agents' three facts are never sent
+        (PR-1.12d)."""
         item = self._items.get(session_id)
         if item is None or item.get_property(prop) == value:
             return

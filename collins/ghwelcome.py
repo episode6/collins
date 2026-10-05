@@ -2,7 +2,10 @@
 
 Shown on a launch where `gh` is missing or signed out (see ghsetup for how
 that is asked, and why it is asked locally) — a first launch especially, where
-a tool that isn't there reads as a feature that doesn't exist.
+a tool that isn't there reads as a feature that doesn't exist. The `gh` in
+question is the Collins service's, which runs every PR call: the service asks
+ghsetup when a client subscribes, and this reads its answer off
+`service.status` (`gh`, PR-1.12d, split-service spec §3.22).
 
 It comes back every such launch until it is told not to, and the only thing
 that tells it is the "Don't show this again" box in it. Dismissing without
@@ -32,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Iterable
 
 import gi
@@ -40,7 +44,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from . import ghsetup, practions, prmenu  # noqa: E402
+from . import apilink, ghsetup, practions, prmenu  # noqa: E402
+from .api.protocol import RequestRefused  # noqa: E402
 from .copylabel import enable_copy_on_click, open_uri  # noqa: E402
 from .i18n import _  # noqa: E402
 from .prstatus import PullRequest  # noqa: E402
@@ -58,6 +63,11 @@ DISMISSED_SETTING = "gh_welcome_dismissed"
 # keeps the notice off the first paint, and lands it while someone is still
 # looking at a new window rather than mid-sentence in a session.
 _DELAY_MS = 1500
+# The service asks gh when this client subscribes and answers in
+# `service.status` once it knows: asked again this often, this many times,
+# before the launch says nothing.
+_STATUS_POLL_S = 0.5
+_STATUS_TRIES = 30
 
 # An AlertDialog sizes itself to its heading, so a wide extra child has to ask
 # (see the rename dialogs); wide enough here for the sample rows to read as
@@ -153,9 +163,29 @@ def maybe_show(parent: Gtk.Widget, state: AppState) -> None:
     GLib.timeout_add(_DELAY_MS, lambda: _start(parent, state))
 
 
+def service_gh_status(tries: int = _STATUS_TRIES, pause_s: float = _STATUS_POLL_S) -> str | None:
+    """The service's word on its gh (`service.status`'s ``gh``: ghsetup's
+    READY, MISSING or LOGGED_OUT), waiting for the check the service runs
+    when a client subscribes; None when it never said (an older service, or
+    no link). Blocks: call it off the main loop."""
+    for attempt in range(max(1, tries)):
+        try:
+            status = apilink.call({"t": "service.status"}).get("gh")
+        except (RequestRefused, RuntimeError, OSError) as error:
+            log.info("ghsetup: the service's status could not be read: %s", error)
+            return None
+        if isinstance(status, str) and status:
+            return status
+        if attempt + 1 < tries:
+            time.sleep(pause_s)
+    return None
+
+
 def _start(parent: Gtk.Widget, state: AppState) -> bool:
     def work() -> None:
-        status = ghsetup.check()
+        status = service_gh_status()
+        if status is None:
+            return  # nothing known, nothing to say
         GLib.idle_add(_land, parent, state, status)
 
     threading.Thread(target=work, daemon=True).start()
