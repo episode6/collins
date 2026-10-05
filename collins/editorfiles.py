@@ -15,7 +15,6 @@ widgets, clipboard payloads and GtkSource calls.
 from __future__ import annotations
 
 import enum
-import os
 import shutil
 import urllib.parse
 from collections.abc import Collection
@@ -554,17 +553,6 @@ def reroot_counterparts(old_root: str | Path, new_root: str | Path, open_paths: 
         if moved is not None and moved != path:
             found.append(moved)
     return found
-
-
-def lexically_inside(root: str | Path, path: str | Path) -> bool:
-    """Whether *path*, normalised but not resolved (no disk read), is *root*
-    or under it. The editor's synchronous first answer to an open; the
-    symlink-resolving answer is the service's (`fs.stat`'s `inside`)."""
-    root_text = os.path.normpath(os.fspath(root))
-    path_text = os.path.normpath(os.fspath(path))
-    if not os.path.isabs(root_text) or not os.path.isabs(path_text):
-        return False
-    return path_text == root_text or path_text.startswith(root_text.rstrip("/") + "/")
 
 
 def image_stat_guard(kind: str, size: int | None) -> LoadGuard:

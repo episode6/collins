@@ -895,8 +895,12 @@ class EditorPane(Gtk.Box):
             # A fresh open is confined to this pane's root (`open_file`'s
             # guard); a reload is not: a file left open outside the root
             # by a re-root goes on reloading from where it is.
-            if not reload and not remotefiles.stat_path(path, root).inside:
-                raise RequestRefused(protocol.ERROR_REFUSED, _OUTSIDE_MSGID, {})
+            if not reload:
+                found = remotefiles.stat_path(path, root)
+                # Nothing there is the read's `gone` to say, not "outside"
+                # (the service answers `inside: false` for a missing path).
+                if found.kind != "missing" and not found.inside:
+                    raise RequestRefused(protocol.ERROR_REFUSED, _OUTSIDE_MSGID, {})
             return remotefiles.read(path)
 
         self._off_main(work, lambda kind, value: self._on_loaded(opened, load_id, kind, value))

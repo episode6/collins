@@ -685,3 +685,50 @@ def test_a_read_only_file_of_ones_own_is_refused_not_swapped_out(served):
         assert not [name for name in os.listdir(project) if name.startswith(".collins-")]
     finally:
         path.chmod(0o644)
+
+
+# -- the Fable review of PR 611 ------------------------------------------------------------
+
+
+def test_a_watch_unwatched_while_it_is_confined_installs_nothing(served):
+    """The watch is confined on a thread and installed when that lands: an
+    `fs.unwatch` of the handle first makes the landing install nothing."""
+    core, client, project, _events = served
+    landings: list = []
+    core.files = files.Files(core, dispatch=landings.append, spawn=lambda fn, name: fn())
+    frame = {"t": "fs.watch", "id": 3, "path": str(project), "kind": "dir", "handle": "d1"}
+    raw = core.handle(protocol.validate(frame, protocol.CLIENT), client)
+    assert isinstance(raw, protocol.Deferred) and not raw.settled and landings
+    unwatch = protocol.validate({"t": "fs.unwatch", "id": 4, "handle": "d1"}, protocol.CLIENT)
+    core.files.unwatch(unwatch, client)
+    landings.pop()()
+    assert raw.settled and raw.reply["ok"] and not core.files.watching(client, "d1")
+
+
+def test_a_watch_gio_cannot_monitor_is_refused_failed(served, monkeypatch):
+    core, client, project, _events = served
+    monkeypatch.setattr(files._DirWatch, "start", lambda self: "No space left on device")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
+    assert refused.value.error == protocol.ERROR_FAILED
+    assert refused.value.details["error"] == "No space left on device"
+    assert not core.files.watching(client, "d1")
+
+
+def test_the_watch_bound_holds_a_tree_of_folders(served):
+    assert files.MAX_WATCHES_PER_CLIENT == 4096
+
+
+def test_list_and_walk_confine_on_the_worker(served, monkeypatch):
+    """`allowed` (which resolves every root) is not called on the main
+    loop for a listing or a walk: the roots are, and `_confine` runs on the
+    worker."""
+    core, client, project, _events = served
+    client.local = False
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    monkeypatch.setattr(files, "allowed", lambda *a: pytest.fail("allowed() on the main loop"))
+    reply = client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)})
+    assert [e["name"] for e in reply["entries"]] == ["a.txt"]
+    assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
+    client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
+    assert core.files.watching(client, "d1")

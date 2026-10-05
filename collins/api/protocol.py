@@ -463,6 +463,11 @@ STREAM_MASK = 0xFFFF_FFFF
 # args name the running `pty`): the client attaches to it instead (D31).
 ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
 
+# `fs.list` / `fs.walk` refused ``gone`` because the folder is not there
+# (PR-2.4): the tree drops the folder's rows on it, and only on it — a
+# ``gone`` for a lost connection leaves them as they were.
+FOLDER_GONE_MSGID = "The folder is not there"
+
 # Which peer may send each binary tag.
 FRAME_SENDERS: Mapping[int, frozenset[str]] = {
     TAG_OUTPUT: frozenset({SERVICE}),

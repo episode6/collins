@@ -178,12 +178,31 @@ pathless walker reads as `Path` methods):
   weakly by the watcher): the service's `monitor_directory`, debounced
   300 ms into one `dir-changed {handle, path}` per burst, and the tree lists
   again (`_list`: one listing per folder in flight, a change meanwhile
-  re-lists once it lands; `_epoch` turns over with the root). The root has
-  no watch (PR-2.6's root watch is the links'). `_splice` keeps the node of
-  every entry still there, so a folder expanded inside a refreshed one
-  stays expanded; a folder that left the listing is forgotten (its store
-  and watch). `forget_dir`, `set_root` and `shutdown` (from
+  re-lists once it lands; `_epoch` turns over with the root). The root is
+  watched too (it is the folder always open). Only what is on screen holds
+  a watch: a collapse drops the folder's and every folder's under it
+  (`_close_dir`, parked in `_parked`, the rows kept; GTK collapses the rows
+  under a collapsed one, so they come back closed), and a re-expansion
+  watches and lists it again (`_open_dir`). The service bounds watches per
+  client (`files.MAX_WATCHES_PER_CLIENT`, 4096: every tab's open files,
+  expanded folders and quick-open roots share it). `_splice` keeps the node
+  of every entry still there (a dimming change is `_Node.set_dim`, in
+  place), so a folder expanded inside a refreshed one stays expanded; a
+  folder that left the listing is forgotten (its store and watch). A
+  listing refused `gone` with `protocol.FOLDER_GONE_MSGID` empties the
+  folder's rows and forgets it (the root keeps its store and watch); one
+  refused any other way (no service, no `files` cap) leaves the rows, and
+  the reconnect lists every folder shown again (`_on_reconnect`, through
+  `remotefiles.Watcher.on_reset`), so a pane made while the service was
+  unreachable fills in. `forget_dir`, `set_root` and `shutdown` (from
   `EditorPane.shutdown`) unwatch.
+- On the service, `fs.list`, `fs.walk` and every `fs.watch` are confined
+  on the worker (`files._confine` against `_roots(client)`, computed on the
+  main loop, as `fs.read` / `fs.write` do); `fs.list`'s client-named
+  `root` is held to the known roots too. A watch is installed when its
+  confinement lands (`Files._pending`: an `fs.unwatch` first wins), and one
+  Gio cannot make a monitor for is refused `failed`. A walk also stops
+  queueing folders at `projectfiles.WALK_DIRS_CAP` (50 000).
 - `reveal(path)` is a walk that waits: it goes as far as the rows already
   listed, expands and opens the next folder, and resumes from each
   listing's landing (`_continue_reveal`); a newer reveal or a re-root

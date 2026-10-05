@@ -39,8 +39,11 @@ SKIP_DIR_NAMES = {".git", "node_modules", "__pycache__", ".venv", "target", "dis
 # on it. Sorted first, so what's dropped is always the tail, alphabetically.
 # The wire's bound too (protocol.FS_LIST_MAX).
 MAX_DIR_ENTRIES = 5000
-# The most files quick open indexes under one root (protocol.FS_WALK_MAX).
+# The most files quick open indexes under one root (protocol.FS_WALK_MAX),
+# and the most folders a walk queues: a tree of empty folders would
+# otherwise grow the queue without bound (review of PR 611).
 WALK_CAP = 20_000
+WALK_DIRS_CAP = 50_000
 
 # An entry's kind, as `fs.list` answers it: a file, a directory, or a
 # symlink to a directory inside the root (shown as a folder, never expanded:
@@ -121,7 +124,7 @@ def list_dir(
 
 
 def walk_files(
-    root: str | Path, show_hidden: bool = False, cap: int = WALK_CAP
+    root: str | Path, show_hidden: bool = False, cap: int = WALK_CAP, dirs_cap: int = WALK_DIRS_CAP
 ) -> tuple[list[str], bool]:
     """Every file under *root* as project-relative POSIX paths, breadth-first
     (so shallow files land early and quick-open's ties favour them). Reuses
@@ -129,21 +132,28 @@ def walk_files(
     nodes, symlinks escaping *root* — and never descends into a symlinked
     directory at all, exactly like the file tree's expansion rule, so a link
     cycle can't wedge the walk. Returns `(paths, truncated)`; *truncated* is
-    True when the *cap* stopped the walk early."""
+    True when the *cap* (files) or *dirs_cap* (folders queued) stopped the
+    walk early."""
     root = Path(root)
     paths: list[str] = []
     queue: deque[tuple[Path, str]] = deque([(root, "")])
+    queued = 1
+    dirs_cut = False
     while queue:
         directory, prefix = queue.popleft()
         entries, _truncated = list_entries(directory, show_hidden, root=root)
         for name, kind in entries:
             if kind == KIND_DIR:
+                if queued >= dirs_cap:
+                    dirs_cut = True  # the folders already queued are still walked
+                    continue
+                queued += 1
                 queue.append((directory / name, f"{prefix}{name}/"))
             elif kind == KIND_FILE:
                 if len(paths) >= cap:
                     return paths, True
                 paths.append(f"{prefix}{name}")
-    return paths, False
+    return paths, dirs_cut
 
 
 def repository_root(path: str | Path) -> str | None:

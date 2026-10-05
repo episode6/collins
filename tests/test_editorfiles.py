@@ -1128,3 +1128,11 @@ def test_image_stat_guard():
     assert image_stat_guard("dir", None) is LoadGuard.NOT_A_FILE
     assert image_stat_guard("missing", None) is LoadGuard.NOT_A_FILE
     assert image_stat_guard("file", _MAX_IMAGE_BYTES + 1) is LoadGuard.TOO_LARGE
+
+
+def test_walk_files_caps_the_folders_it_queues(tmp_path):
+    for index in range(5):
+        (tmp_path / f"d{index}").mkdir()
+        (tmp_path / f"d{index}" / "f.txt").write_text("x")
+    paths, truncated = walk_files(tmp_path, dirs_cap=3)
+    assert truncated is True and paths == ["d0/f.txt", "d1/f.txt"]

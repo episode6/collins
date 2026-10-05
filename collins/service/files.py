@@ -62,6 +62,8 @@ PR-2.4 adds the tree's, quick open's and the roots' requests:
   `monitor_directory` per client and handle (under the same bound as the
   file watches), debounced 300 ms into one `dir-changed {handle, path}`
   per burst. The client lists the directory again; nothing is stat'ed.
+  Every watch is confined on a thread and installed when that lands
+  (`_pending`), and one Gio cannot make a monitor for is refused.
 
 **Nothing blocks the main loop**: every read, write and stat runs on a
 daemon thread and answers through a `protocol.Deferred` settled on the
@@ -441,6 +443,18 @@ def stat_path(path: str) -> dict:
     return {"kind": kind, "size": None, "mtime": mtime_us(st)}
 
 
+def _confine(roots: Sequence[str] | None, *paths: str) -> None:
+    """Each of *paths* resolves inside one of *roots* (the service's,
+    computed on the main loop; None for a `local` client, which may name
+    anything), else a `ReadRefused` ``refused``. Run on the worker: the
+    containment check resolves every root and path through its symlinks."""
+    if roots is None:
+        return
+    for path in paths:
+        if not any(is_inside(root, path) for root in roots):
+            raise ReadRefused(protocol.ERROR_REFUSED, OUTSIDE_MSGID)
+
+
 def list_reply(path: str, hidden: bool, root: str) -> dict:
     """`fs.list`'s fields (a worker thread): the entries with git's
     ignored names marked, and whether the listing was cut. A directory
@@ -448,7 +462,7 @@ def list_reply(path: str, hidden: bool, root: str) -> dict:
     if not is_inside(root, path):
         raise ReadRefused(protocol.ERROR_REFUSED, OUTSIDE_MSGID)
     if not os.path.isdir(path):
-        raise ReadRefused(protocol.ERROR_GONE, "The folder is not there")
+        raise ReadRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID)
     entries, truncated = list_entries(path, hidden, root=root)
     ignored = gitinfo.ignored_names(path, [name for name, _kind in entries]) if entries else set()
     return {
@@ -460,7 +474,7 @@ def list_reply(path: str, hidden: bool, root: str) -> dict:
 def walk_reply(root: str, hidden: bool) -> dict:
     """`fs.walk`'s fields (a worker thread)."""
     if not os.path.isdir(root):
-        raise ReadRefused(protocol.ERROR_GONE, "The folder is not there")
+        raise ReadRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID)
     paths, truncated = walk_files(root, hidden, cap=protocol.FS_WALK_MAX)
     return {"paths": paths, "truncated": truncated}
 
@@ -473,9 +487,13 @@ def _spawn_default(fn: Callable[[], None], name: str) -> None:
     threading.Thread(target=fn, name=name, daemon=True).start()
 
 
-# The most watches one client may hold (a file per open editor tab; a
-# client past this has leaked them).
-MAX_WATCHES_PER_CLIENT = 512
+# The most watches one client may hold: every tab's open files, its tree's
+# expanded folders (a collapsed one's watch is dropped) and quick open's
+# roots, on one connection. One Gio monitor is one inotify watch, and the
+# kernel's default allows 8192 per user and up to a million on current
+# systemd; a client past this has leaked them (review of PR 611: 512 was
+# shared by every tab).
+MAX_WATCHES_PER_CLIENT = 4096
 
 
 class Files:
@@ -494,6 +512,10 @@ class Files:
         self._dispatch = dispatch or _dispatch_default
         self._spawn = spawn or _spawn_default
         self._watches: dict[tuple[int, str], _FileWatch | _DirWatch] = {}
+        # (client, handle) -> the token of the watch being confined on a
+        # thread: an `fs.unwatch`, a newer `fs.watch` of the handle or the
+        # client going away while it is out makes its landing install nothing.
+        self._pending: dict[tuple[int, str], object] = {}
 
     # -- routing -------------------------------------------------------------------------
 
@@ -520,11 +542,14 @@ class Files:
             if key[0] == id(client):
                 watch.stop()
                 del self._watches[key]
+        for key in [k for k in self._pending if k[0] == id(client)]:
+            del self._pending[key]
 
     def shutdown(self) -> None:
         for watch in self._watches.values():
             watch.stop()
         self._watches.clear()
+        self._pending.clear()
 
     def _path(self, message: protocol.Message, field: str = "path") -> str | dict:
         """The request's path (its *field*), an absolute one; else the refusal."""
@@ -639,29 +664,26 @@ class Files:
 
     def listing(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`fs.list {path, hidden, root}`: `list_reply` on a thread, for a
-        directory the client may name (`allowed`) inside the *root* it
-        names (checked on the worker, against the resolved directory),
-        the root itself one the client may name too."""
+        directory the client may name inside the *root* it names (checked
+        on the worker, against the resolved directory). The root the
+        client names is what a listed symlink must stay inside
+        (`list_entries`), so it is held to the same rule as the path: a
+        known root or under one, never a looser ancestor that would let a
+        link out of the project be listed (review of PR 611). The known
+        roots are computed here, on the main loop; the resolving checks
+        run on the worker (`_confine`)."""
         path = self._path(message)
         if isinstance(path, dict):
             return path
         root = self._path(message, "root")
         if isinstance(root, dict):
             return root
-        # The root the client names is what a listed symlink must stay
-        # inside (`list_entries`), so it is held to the same rule as the
-        # path: a known root (or under one), never a looser ancestor that
-        # would let a link out of the project be listed (review of PR 611).
-        for named in (path, root):
-            if not allowed(self.core, client, named):
-                return protocol.refuse(
-                    message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID,
-                    {"path": named[: protocol.ARG_TEXT_MAX]},
-                )
+        allowed_roots = self._roots(client)
         hidden = bool(message.get("hidden"))
 
         def work() -> dict:
             try:
+                _confine(allowed_roots, path, root)
                 fields = list_reply(path, hidden, root)
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
@@ -671,18 +693,17 @@ class Files:
 
     def walk(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`fs.walk {root, hidden}`: `walk_reply` on a thread, for a root
-        the client may name (`allowed`: a session's)."""
+        the client may name (a session's: `_confine` on the worker against
+        the roots computed here)."""
         root = self._path(message, "root")
         if isinstance(root, dict):
             return root
-        if not allowed(self.core, client, root):
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": root[: protocol.ARG_TEXT_MAX]}
-            )
+        allowed_roots = self._roots(client)
         hidden = bool(message.get("hidden"))
 
         def work() -> dict:
             try:
+                _confine(allowed_roots, root)
                 fields = walk_reply(root, hidden)
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
@@ -692,18 +713,20 @@ class Files:
 
     # -- the watch -------------------------------------------------------------------------
 
-    def watch(self, message: protocol.Message, client) -> dict:
+    def watch(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`fs.watch {path, kind, handle, mtime}`: a `_FileWatch` (`kind:
         file`, seeded with the client's `mtime` when it sends one) or a
         `_DirWatch` (`kind: dir`) under the client's handle (the same
-        handle again replaces)."""
+        handle again replaces). The path is confined on a thread against
+        the roots computed here (review of PR 611: `allowed` resolves every
+        root on the main loop), and the watch installed when that lands —
+        unless an `fs.unwatch` of the handle, a newer `fs.watch` of it or
+        the client going away came first (`_pending`). A monitor Gio cannot
+        make (inotify's limit reached) is refused `failed`, never a watch
+        that silently watches nothing."""
         path = self._path(message)
         if isinstance(path, dict):
             return path
-        if not allowed(self.core, client, path):
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": path[: protocol.ARG_TEXT_MAX]}
-            )
         kind = message.get("kind")
         if kind not in protocol.WATCH_KINDS:
             return protocol.refuse(
@@ -712,25 +735,60 @@ class Files:
             )
         handle = str(message.get("handle"))
         key = (id(client), handle)
-        old = self._watches.pop(key, None)
-        if old is not None:
-            old.stop()
-        elif sum(1 for k in self._watches if k[0] == id(client)) >= MAX_WATCHES_PER_CLIENT:
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "Too many watches for one client ({max})",
-                {"max": MAX_WATCHES_PER_CLIENT},
-            )
         seed = message.get("mtime")
-        if kind == protocol.WATCH_DIR:
-            watch: _FileWatch | _DirWatch = _DirWatch(self, path, handle, client)
-        else:
-            watch = _FileWatch(self, path, handle, client, seed if isinstance(seed, int) else None)
-        self._watches[key] = watch
-        watch.start()
-        return protocol.reply(message.id)
+        allowed_roots = self._roots(client)
+        token = object()
+        self._pending[key] = token
+        deferred = protocol.Deferred()
+
+        def install(confined: bool) -> dict:
+            if self._pending.get(key) is not token:
+                return protocol.reply(message.id)  # unwatched or superseded meanwhile
+            del self._pending[key]
+            if not confined:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": path[: protocol.ARG_TEXT_MAX]}
+                )
+            old = self._watches.pop(key, None)
+            if old is not None:
+                old.stop()
+            elif sum(1 for k in self._watches if k[0] == id(client)) >= MAX_WATCHES_PER_CLIENT:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, "Too many watches for one client ({max})",
+                    {"max": MAX_WATCHES_PER_CLIENT},
+                )
+            if kind == protocol.WATCH_DIR:
+                watch: _FileWatch | _DirWatch = _DirWatch(self, path, handle, client)
+            else:
+                watch = _FileWatch(self, path, handle, client, seed if isinstance(seed, int) else None)
+            failure = watch.start()
+            if failure is not None:
+                watch.stop()
+                return protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "Couldn't watch it: {error}",
+                    {"error": failure[: protocol.ARG_TEXT_MAX]},
+                )
+            self._watches[key] = watch
+            return protocol.reply(message.id)
+
+        def run() -> None:
+            try:
+                _confine(allowed_roots, path)
+                confined = True
+            except ReadRefused:
+                confined = False
+            except Exception:
+                log.exception("files: confining a watch failed on its thread")
+                confined = False
+            self._dispatch(lambda: deferred.settle(install(confined)))
+
+        self._spawn(run, "fs-watch-confine")
+        return deferred
 
     def unwatch(self, message: protocol.Message, client) -> dict:
-        watch = self._watches.pop((id(client), str(message.get("handle"))), None)
+        key = (id(client), str(message.get("handle")))
+        self._pending.pop(key, None)
+        watch = self._watches.pop(key, None)
         if watch is not None:
             watch.stop()
         return protocol.reply(message.id)
@@ -761,15 +819,18 @@ class _FileWatch:
         self._stopped = False
         self.last: tuple[int | None, int | None, bool] | None = None
 
-    def start(self) -> None:
+    def start(self) -> str | None:
+        """The monitor and the seed's stat; Gio's words when it could make
+        no monitor (the watch is then refused, not kept watching nothing)."""
         try:
             monitor = Gio.File.new_for_path(self.path).monitor_file(Gio.FileMonitorFlags.NONE, None)
         except GLib.Error as exc:
-            log.debug("files: no monitor on %s: %s", self.path, exc.message)
-        else:
-            monitor.connect("changed", self._on_event)
-            self._monitor = monitor
+            log.info("files: no monitor on %s: %s", self.path, exc.message)
+            return exc.message or "no monitor"
+        monitor.connect("changed", self._on_event)
+        self._monitor = monitor
         self.check()  # the seed, against the client's
+        return None
 
     def stop(self) -> None:
         self._stopped = True
@@ -856,14 +917,16 @@ class _DirWatch:
         self._debounce = 0
         self._stopped = False
 
-    def start(self) -> None:
+    def start(self) -> str | None:
+        """The monitor; Gio's words when it could make none (refused)."""
         try:
             monitor = Gio.File.new_for_path(self.path).monitor_directory(Gio.FileMonitorFlags.NONE, None)
         except GLib.Error as exc:
-            log.debug("files: no directory monitor on %s: %s", self.path, exc.message)
-            return
+            log.info("files: no directory monitor on %s: %s", self.path, exc.message)
+            return exc.message or "no monitor"
         monitor.connect("changed", self._on_event)
         self._monitor = monitor
+        return None
 
     def stop(self) -> None:
         self._stopped = True

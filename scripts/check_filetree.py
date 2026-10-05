@@ -64,7 +64,7 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import quickopen, remotefiles  # noqa: E402
+from collins import apilink, quickopen, remotefiles  # noqa: E402
 from collins.editor import EditorPane  # noqa: E402
 
 PASSED = 0
@@ -162,7 +162,7 @@ def run(root: str) -> int:
     check("the symlinked folder shows as a folder with no expander", link_row is not None and link_row.get_item().is_dir and not link_row.is_expandable(), link_row)
     settle(0.4)
     check("a folder row the model bound is not listed until it is expanded", list(tree._stores) == [root], list(tree._stores))
-    check("and nothing is watched on the service yet", not tree._watches, tree._watches)
+    check("and only the root is watched on the service yet", list(tree._watches) == [root], tree._watches)
 
     # -- expansion, its watch, a file from a shell ---------------------------------------------
     src = row_of(tree, "src")
@@ -180,6 +180,32 @@ def run(root: str) -> int:
     check("and the folder open inside src stayed open through the refresh", row_of(tree, "pkg", 1) is not None and row_of(tree, "pkg", 1).get_expanded() and (2, "mod.py") in rows(tree), rows(tree))
     os.remove(os.path.join(src_path, "from_shell.py"))
     check("a file a shell removes goes", wait_for(lambda: (1, "from_shell.py") not in rows(tree)), rows(tree))
+
+    # -- the root is watched too; a folder that goes takes its rows ---------------------------
+    check("the root is watched on the service", root in tree._watches and watcher.watching(tree._watches[root]), tree._watches)
+    with open(os.path.join(root, "AT_ROOT.md"), "w") as fh:
+        fh.write("written at the root by a shell\n")
+    check("a file a shell writes at the root appears", wait_for(lambda: (0, "AT_ROOT.md") in rows(tree)), rows(tree))
+    os.makedirs(os.path.join(root, "doomed", "inner"))
+    check("a folder a shell makes at the root appears", wait_for(lambda: (0, "doomed") in rows(tree)), rows(tree))
+    row_of(tree, "doomed").set_expanded(True)
+    check("expanding it lists its child", wait_for(lambda: (1, "inner") in rows(tree)), rows(tree))
+    shutil.rmtree(os.path.join(root, "doomed"))
+    check("removing it takes its row and its children's", wait_for(lambda: (0, "doomed") not in rows(tree) and (1, "inner") not in rows(tree)), rows(tree))
+    check("and its watch", wait_for(lambda: os.path.join(root, "doomed") not in tree._watches), tree._watches)
+
+    # -- a collapse drops the folder's watches; a re-expansion lists and watches again ----------
+    pkg_path = os.path.join(src_path, "pkg")
+    src.set_expanded(False)
+    check("collapsing src drops its watch and pkg's", src_path not in tree._watches and pkg_path not in tree._watches, tree._watches)
+    with open(os.path.join(src_path, "while_collapsed.py"), "w") as fh:
+        fh.write("x\n")
+    src.set_expanded(True)
+    check("re-expanding src watches it again", wait_for(lambda: src_path in tree._watches), tree._watches)
+    check("and the file written while it was collapsed shows", wait_for(lambda: (1, "while_collapsed.py") in rows(tree)), rows(tree))
+    # GTK collapses the rows under a collapsed one: pkg comes back closed.
+    check("pkg came back closed, and unwatched", not row_of(tree, "pkg", 1).get_expanded() and pkg_path not in tree._watches, tree._watches)
+    os.remove(os.path.join(src_path, "while_collapsed.py"))
 
     # -- reveal through listings still to come --------------------------------------------
     src.set_expanded(False)
@@ -219,6 +245,26 @@ def run(root: str) -> int:
     check("the Agent files keep the project's files only", wait_for(lambda: pane._agent_paths == [os.path.join(src_path, "main.py"), os.path.join(root, "README.md")]), pane._agent_paths)
     check("and the list shows", pane._agent_box.get_visible())
 
+    # -- a fresh open of a missing file is "not there", not "outside" ----------------------------
+    missing = os.path.join(root, "never-was.py")
+    pane.open_file(missing)
+    check("a missing file is not opened", wait_for(lambda: missing not in pane._pages and pane._banner.get_revealed()), list(pane._pages))
+    check("and the banner does not call it outside the project", "outside this project" not in pane._banner.get_title(), pane._banner.get_title())
+    pane._banner.set_revealed(False)
+
+    # -- a pane made while the service is unreachable fills in on the reconnect -------------------
+    link = apilink.current()
+    apilink.set_current(None)
+    try:
+        orphan = EditorPane(root)
+        settle(0.5)
+        check("a pane with no service has an empty tree", rows(orphan._tree) == [], rows(orphan._tree))
+    finally:
+        apilink.set_current(link)
+    remotefiles.reset()  # what App._on_connected does
+    check("the reconnect lists its root", wait_for(lambda: (0, "README.md") in rows(orphan._tree)), rows(orphan._tree))
+    orphan.shutdown()
+
     # -- an open outside the root is refused on the load's worker --------------------------------
     pane.open_file(outside)
     check("a file outside the project is not opened", wait_for(lambda: outside not in pane._pages and pane._banner.get_revealed()), list(pane._pages))
@@ -232,7 +278,7 @@ def run(root: str) -> int:
     pane.request_root(other)
     check("a re-root to src moves the pane and the tree", wait_for(lambda: str(pane.root) == other and str(tree.root) == other), (pane.root, tree.root))
     check("the tree lists the new root", wait_for(lambda: (0, "main.py") in rows(tree)), rows(tree))
-    check("the old root's watches went with it", not tree._watches, tree._watches)
+    check("the old root's watches went with it, the new root watched", list(tree._watches) == [other], tree._watches)
 
     # -- shutdown -------------------------------------------------------------------------
     row_of(tree, "pkg").set_expanded(True)

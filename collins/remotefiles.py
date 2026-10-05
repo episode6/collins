@@ -251,6 +251,9 @@ class Watcher:
         # watch is dropped at the next event.
         self._watches: dict[str, _Watch] = {}
         self._installed_on: apilink.Link | None = None
+        # What hears a reconnect after the watches are re-sent (`on_reset`:
+        # a file tree lists its folders again), held weakly.
+        self._reset_listeners: list[Callable[[], Callable[[], None] | None]] = []
 
     def install(self, link: apilink.Link) -> None:
         """Hear the link's `file-changed` events (once per link: a
@@ -329,6 +332,24 @@ class Watcher:
             live = list(self._watches)
         for handle in live:
             self._send_watch(handle)
+        for ref in list(self._reset_listeners):
+            listener = ref()
+            if listener is None:
+                self._reset_listeners.remove(ref)
+                continue
+            try:
+                listener()
+            except Exception:
+                log.exception("remotefiles: a reset listener failed")
+
+    def on_reset(self, listener: Callable[[], None]) -> None:
+        """Call *listener* after every reconnect's `reset` (a bound method
+        is held weakly)."""
+        ref = weakref.WeakMethod(listener) if inspect.ismethod(listener) else (lambda: listener)
+        self._reset_listeners.append(ref)
+
+    def off_reset(self, listener: Callable[[], None]) -> None:
+        self._reset_listeners = [ref for ref in self._reset_listeners if ref() not in (None, listener)]
 
     def _send_watch(self, handle: str) -> None:
         link = self._link_of()
