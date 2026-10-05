@@ -40,7 +40,7 @@ from pathlib import Path
 from gi.repository import GObject
 
 from . import apilink, prdetail, prstatus
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import translate
 from .prstatus import PullRequest
 

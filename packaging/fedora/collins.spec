@@ -55,6 +55,7 @@ BuildRequires:  appstream
 # session reach it while it runs; without either the grant applies at the
 # session's next restart. bindfs is in EPEL on RHEL 10, fuse3 in its BaseOS.
 Requires:       python3-gobject
+Requires:       libsoup3
 Requires:       gtk4 >= 4.10
 Requires:       libadwaita >= 1.5
 Requires:       vte291-gtk4
@@ -102,6 +103,9 @@ install -Dm644 data/icons/com.episode6.Collins.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
 install -Dm644 data/com.episode6.Collins.metainfo.xml \
   %{buildroot}%{_metainfodir}/com.episode6.Collins.metainfo.xml
+# The session service's systemd user unit (not enabled: the app starts it).
+install -Dm644 data/collins-service.service \
+  %{buildroot}%{_userunitdir}/collins-service.service
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/com.episode6.Collins.desktop
@@ -115,6 +119,8 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 %files -f %{pyproject_files}
 %doc README.md
 %{_bindir}/collins
+%{_bindir}/collins-service
+%{_userunitdir}/collins-service.service
 %{_datadir}/applications/com.episode6.Collins.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
 %{_metainfodir}/com.episode6.Collins.metainfo.xml

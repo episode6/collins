@@ -54,7 +54,7 @@ from . import (
     updatecheck,
     welcome,
 )
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_SANDBOXED,
@@ -665,7 +665,16 @@ class MainWindow(Adw.ApplicationWindow):
         # everything — sidebar, tabs, editor. It looks the widget up on the
         # root window by this attribute name.
         self.lightbox_overlay = Gtk.Overlay(child=self.split)
-        self.set_content(self.lightbox_overlay)
+        # "Reconnecting to the Collins service" (spec §3.2, §3.20): shown
+        # from the link's loss until the connection manager is back,
+        # over content that stays readable.
+        self.reconnect_banner = Adw.Banner(title=_("Reconnecting to the Collins service"))
+        self.reconnect_banner.set_revealed(False)
+        content_with_banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content_with_banner.append(self.reconnect_banner)
+        self.lightbox_overlay.set_vexpand(True)
+        content_with_banner.append(self.lightbox_overlay)
+        self.set_content(content_with_banner)
         # The in-app notification cards (notifyoverlay): a stack at the
         # top-right of the content, in the same overlay — added before any
         # lightbox is, so a lightbox floats over the cards. The header bar
@@ -899,6 +908,29 @@ class MainWindow(Adw.ApplicationWindow):
             self.close()
         finally:
             self._quit_requested = False
+
+    def set_reconnecting(self, reconnecting: bool) -> None:
+        """Raise or lower the reconnect banner (`App._on_connection_state`)."""
+        banner = getattr(self, "reconnect_banner", None)
+        if banner is not None:
+            banner.set_revealed(bool(reconnecting))
+
+    def reattach_tabs(self) -> None:
+        """The link came back: every tab re-attaches its pty and its panel
+        shells theirs (spec §3.20)."""
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if not isinstance(tab, TerminalTab):
+                continue
+            try:
+                tab.reattach()
+            except Exception:
+                log.exception("a tab failed to reattach")
+            for shell in tab.panel_shells():
+                try:
+                    shell.reattach()
+                except Exception:
+                    log.exception("a panel shell failed to reattach")
 
     def _save_panel_data(self) -> None:
         for i in range(self.tab_view.get_n_pages()):

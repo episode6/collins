@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 
 log = logging.getLogger(__name__)
 
@@ -51,6 +51,11 @@ class DiffNotesMirror:
 
     def marks(self, key: str) -> Marks | None:
         return self._marks.get(key)
+
+    def reset(self) -> None:
+        """The link was lost and is back: the next snapshot's `diff.notes`
+        events are the marks; the pages' listeners stay."""
+        self._marks.clear()
 
     def listen(self, key: str, listener: Callable[[Marks], None]) -> None:
         self._listeners.setdefault(key, []).append(listener)

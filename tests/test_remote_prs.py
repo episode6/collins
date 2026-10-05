@@ -8,7 +8,7 @@ import pytest
 
 from collins import prdetail, prstatus, remoteprs
 from collins.api import protocol
-from collins.api.loopback import RequestRefused
+from collins.api.protocol import RequestRefused
 from collins.apilink import Link
 from collins.prstore import PrStore
 from collins.remoteprs import RemotePrStore

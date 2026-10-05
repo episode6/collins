@@ -76,7 +76,7 @@ from pathlib import Path
 from gi.repository import Gio, GObject
 
 from . import chats
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .models import SessionItem
 from .sessions import Session, worktree_project_root
 from .state import merge_project_order, move_in_order
@@ -162,6 +162,16 @@ class RemoteStore(GObject.Object):
 
     def start(self) -> None:
         """The service's store scans and watches by itself."""
+
+    def reset(self) -> None:
+        """The link was lost and is back (spec §3.20): forget what the
+        service last said so the next snapshot is taken whole. The items
+        and the model stay until the snapshot's `rows` reconciles them,
+        so the sidebar redraws once, not twice."""
+        self.known_sessions.clear()
+        self._fields.clear()
+        self._paged = False
+        self._missing.clear()
 
     # -- events ---------------------------------------------------------------------
 
@@ -574,11 +584,19 @@ class RemoteStore(GObject.Object):
     def _flag(self, session_id: str, prop: str, value) -> None:
         """A verdict for a row: sent only when it would change the row (the
         store's setters are no-ops otherwise, and a row the client lacks is
-        one the service lacks)."""
+        one the service lacks). A flag this client decides (`unread`,
+        `status`, the /bg orchestration's two: D29) is applied to the row
+        at once, so what listens on the store's signals (the green row's
+        rise in `App._sync_green`, the window's `_reraise_green`, which
+        counts on the edge being synchronous) sees it inside the call, as
+        on the loopback; the service's `item` echo confirms it (D16).
+        `busy` is the service's verdict and is only ever sent."""
         item = self._items.get(session_id)
         if item is None or item.get_property(prop) == value:
             return
         self._link.send({"t": "store.flags", "session": session_id, prop: value})
+        if prop != "busy":
+            self._set_props(item, {prop: value}, announce=True)
 
     # -- the CLI's folder trust (trust.*) -------------------------------------------
 

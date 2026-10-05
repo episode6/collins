@@ -289,7 +289,23 @@ MIN_PROTOCOL = 1
 # Capability names a service may list in its hello reply. A new type or field
 # ships behind a new name here; a peer uses it only when the other lists it.
 CAP_LOCAL = "local"  # the service offers the local-extras proof (§3.2)
-CAPABILITIES = frozenset({CAP_LOCAL})
+CAP_DEBUG = "debug"  # the service runs with COLLINS_DEBUG_API=1 and serves debug.* (D27)
+CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG})
+
+# The client's second connection (D26): a hello carrying ``channel: "sync"``
+# opens the channel `Link.call` blocks on; the primary (the default) carries
+# the subscription, the attaches and every event.
+CHANNEL_PRIMARY = "primary"
+CHANNEL_SYNC = "sync"
+CHANNELS = frozenset({CHANNEL_PRIMARY, CHANNEL_SYNC})
+
+# The client acks live output every ACK_BYTES fed to its VTE, or ACK_MS after
+# the last unacked frame, whichever first (§3.20); the service hands a sink
+# at most ACK_WINDOW unacked bytes before holding the rest in the sink's own
+# pending list.
+ACK_BYTES = 64 * 1024
+ACK_MS = 100
+ACK_WINDOW = 1024 * 1024
 
 # The local-extras proof: random bytes in a 0600 file the service names.
 LOCAL_PROOF_BYTES = 32
@@ -725,6 +741,7 @@ _TABLE: tuple[MessageType, ...] = (
                 "device": _HOST,
                 "locale": Field(K_STR, high=64, pattern=_LOCALE_RE),
                 "term": _TERM,
+                "channel": Field(K_STR, choices=CHANNELS, high=8),
             },
             reply={
                 "protocol": _req(_i(0, 65535)),
@@ -797,6 +814,11 @@ _TABLE: tuple[MessageType, ...] = (
         event=_event(CLIENT, {"term": _req(_TERM)}),
     ),
     MessageType(
+        "ack",
+        "The client has fed this much of a pty's live output to its terminal (flow control).",
+        event=_event(CLIENT, {"pty": _req(_PTY), "offset": _req(_i(0, U64_MAX))}),
+    ),
+    MessageType(
         "spawn",
         "Start a session or a panel shell in a new pty.",
         request=_request(
@@ -842,6 +864,25 @@ _TABLE: tuple[MessageType, ...] = (
         # before that session was spawned (a new-chat screen's shell), so
         # its history is re-filed when the session resolves.
         request=_request({"pty": _req(_PTY), "history": _req(_null(_ID)), "handle": _ID}),
+    ),
+    MessageType(
+        "panel.history",
+        "Write a session's panel history: each shell's scrollback, from its pty's model or as text.",
+        request=_request(
+            {
+                "key": _req(_ID),
+                "shells": _req(
+                    Field(
+                        K_LIST,
+                        high=64,
+                        item=Field(
+                            K_OBJ,
+                            fields={"ordinal": _req(_i(0, 10_000)), "pty": _PTY, "text": _TEXT},
+                        ),
+                    )
+                ),
+            }
+        ),
     ),
     MessageType(
         "pty.info",
@@ -1795,6 +1836,7 @@ _TABLE: tuple[MessageType, ...] = (
                 # not; absent where the service runs no live grants).
                 "sandbox": _s(ARG_TEXT_MAX),
                 "live": _s(ARG_TEXT_MAX),
+                "pid": _i(1, PID_MAX),
             }
         ),
     ),
@@ -1859,6 +1901,19 @@ class Refusal:
         if self.re is None:
             return None
         return refuse(self.re, self.error, self.msgid, self.args)
+
+
+class RequestRefused(Exception):
+    """A request the service refused, as a client sees it: `error` (one of
+    `ERRORS`, or a newer code shaped like one), the `msgid` and its
+    `details` (the msgid's args; not `args`, which is `BaseException`'s
+    tuple), for the client to translate."""
+
+    def __init__(self, error: str, msgid: str, details: dict | None = None) -> None:
+        super().__init__(error, msgid)
+        self.error = error
+        self.msgid = msgid
+        self.details = dict(details or {})
 
 
 class _Invalid(Exception):

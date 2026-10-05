@@ -59,7 +59,7 @@ from . import (
     notifycenter,
     remoteimages,
 )
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .lightbox import present_image_lightbox
 from .providers import SessionOptions
 from .sessions import worktree_project_root
@@ -449,9 +449,15 @@ class ToolClient:
         """The window and tab of the session the service binds a call from
         *shim_pid* to (`SessionTools.find`): who a call is from, as the
         client sees it."""
-        tools = getattr(self._app, "session_tools", None)
-        session = tools.find(shim_pid) if tools is not None else None
-        return self.found_for(session) if session is not None else None
+        # The walk is the service's (its /proc, its sessions); the e2e
+        # checks are its callers, so it goes through the probe (D27).
+        try:
+            handle = apilink.call(
+                {"t": "debug.sandbox", "target": "core", "name": "debug_find_handle", "args": [int(shim_pid)]}
+            ).get("value")
+        except RequestRefused:
+            return None
+        return self.found_for_handle(handle or "")
 
     # -- the events ------------------------------------------------------------
 

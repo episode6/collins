@@ -93,6 +93,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from collins import claudemodels, dialogs, i18n, icongen, titles  # noqa: E402
@@ -162,6 +163,11 @@ def later(fn, ms: int = 1500) -> bool:
 check("the shim's SVG passes the generated-icon gate", icongen.extract_svg(SVG) is not None)
 
 i18n.init(AppState().get_setting("language"))
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+# The model catalog the service answers with: the same canned list this
+# process patched over claudemodels (scripts/e2e_stubs.py).
+e2e_service.start_service(stubs={"models": claudemodels.model_records(CATALOG)})
 app = App()
 
 exit_code = 1

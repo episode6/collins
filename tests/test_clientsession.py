@@ -9,7 +9,7 @@ import pytest
 
 from collins import editorfiles
 from collins.api import protocol
-from collins.api.loopback import RequestRefused
+from collins.api.protocol import RequestRefused
 from collins.clientsession import ClientSession
 from collins.providers import ClaudeProvider, EnteredPrompt, SessionOptions
 

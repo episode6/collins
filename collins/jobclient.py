@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 from . import apilink
 from .api import protocol
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import _, translate
 
 log = logging.getLogger(__name__)

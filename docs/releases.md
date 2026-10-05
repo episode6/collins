@@ -38,6 +38,18 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The service is its own process.** Collins is now two programs:
+  `collins-service` runs the sessions (every agent's pty, the terminal
+  panel's shells, the sandboxes, the shared state, the session tools' MCP
+  socket, the GitHub CLI calls, everything that spends tokens) and the
+  window is a client of it over a Unix socket. The window starts the
+  service when none is running (through its systemd user unit, shipped
+  with the packages and written by `collins --install-desktop`, else by
+  spawning it) and reconnects with a banner if the link drops. Quitting
+  the window ends nothing: the agents keep working, and the next window
+  picks them up. `collins-service --check` says what a headless box
+  needs. See the guide's new *The service* page. libsoup 3 is a new
+  dependency (`gir1.2-soup-3.0`, `libsoup3`).
 - **The session runs on the service.** Everything a session tab did behind
   its terminal — launching the agent (the sandbox plan, a reaped worktree
   put back, a worktree launch watched), reading and typing into the CLI's

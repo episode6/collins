@@ -55,14 +55,11 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from collins import i18n, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
-from collins import apilink  # noqa: E402
-
-# No app behind the page: its gh requests go to a loopback of its own.
-apilink.allow_harness()
 from collins.prstatus import PullRequest  # noqa: E402
 
 PR_URL = "https://github.com/episode6/collins/pull/55"
@@ -105,6 +102,10 @@ def fake_detail_fetch(url: str) -> prdetail.PullRequestDetail:
 
 
 prdetail.fetch = fake_detail_fetch
+# No app behind the page: a service of this check's own, answering the
+# page's `pr.detail` with the same canned detail (scripts/e2e_stubs.py),
+# and a link to it as the current one (PR-1.12b).
+e2e_service.harness_link(stubs={"pr_detail": prdetail.detail_record(fake_detail_fetch(PR_URL))})
 
 # The page's host: what the header's actions would drive. None of them run
 # here, but the page reads a couple of its answers while building.

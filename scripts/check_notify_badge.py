@@ -92,6 +92,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from collins import i18n, notifycenter  # noqa: E402
@@ -148,73 +149,96 @@ def run_checks(app: App) -> None:
     def badge() -> int:
         return app.tray_view().unread
 
+    e2e_service.settle()
     check("the center starts empty", center.rows() == [] and badge() == 0)
+    e2e_service.settle()
     check("nothing is on disk", saved_notifications() == [])
 
     # -- a real row's flag, and the pole over it ----------------------------
     store.set_unread(SESSION, True)
     row = center.get(notifycenter.green_id(SESSION))
+    e2e_service.settle()
     check("a finished run is one synthetic row", row is not None and badge() == 1)
+    e2e_service.settle()
     check("the row is named after the session",
           row is not None and row.title == "Fix spinner animation" and row.project == "alpha-widgets",
           f"{row.title!r} / {row.project!r}" if row else "no row")
+    e2e_service.settle()
     check("the row's body is the finished-run text",
           row is not None and row.body == "Finished a run", row.body if row else "")
     set_busy(app, SESSION, True)
+    e2e_service.settle()
     check("a flagged session back at work leaves the badge",
           not center.is_green(SESSION) and badge() == 0)
+    e2e_service.settle()
     check("its flag is still up", store.get_item(SESSION).unread)
     set_busy(app, SESSION, False)
+    e2e_service.settle()
     check("the badge comes back when the turn ends", center.is_green(SESSION) and badge() == 1)
     store.set_unread(SESSION, False)
+    e2e_service.settle()
     check("the flag coming off removes the row", center.rows() == [] and badge() == 0)
+    e2e_service.settle()
     check("synthetic rows never touched the disk", saved_notifications() == [])
 
     # -- a placeholder's flag lives in the sidebar --------------------------
     win.sidebar.add_placeholder(PLACEHOLDER, PROJECT_DIR, "agent-claude-symbolic")
     win._on_session_finished(PLACEHOLDER)  # a placeholder's edge is the window's own
     row = center.get(notifycenter.green_id(PLACEHOLDER))
+    e2e_service.settle()
     check("a placeholder's finish is a row under its own key",
           row is not None and row.session_id == PLACEHOLDER and badge() == 1)
+    e2e_service.settle()
     check("the placeholder row names its project",
           row is not None and row.project == "alpha-widgets", row.project if row else "")
     view = app.tray_view()
+    e2e_service.settle()
     check("the placeholder is counted as a session, not a row",
           view.sessions == 1 and not any(e.action == "focus-session" for e in view.menu))
     win._on_activity_changed(PLACEHOLDER, True)
+    e2e_service.settle()
     check("a working placeholder leaves the badge",
           not center.is_green(PLACEHOLDER) and badge() == 0)
     win._on_activity_changed(PLACEHOLDER, False)
+    e2e_service.settle()
     check("and comes back when its turn ends", center.is_green(PLACEHOLDER) and badge() == 1)
 
     # -- the handoff: placeholder down, session up ---------------------------
     win.sidebar.remove_placeholder(PLACEHOLDER)
     win._sync_placeholder_green(PLACEHOLDER)
     store.set_unread(SESSION, True)
+    e2e_service.settle()
     check("the handoff leaves one row, under the session's key",
           center.green_sessions() == [SESSION] and badge() == 1, str(center.green_sessions()))
 
     # -- what reaches the disk ------------------------------------------------
     center.post(center.make(notifycenter.KIND_MESSAGE, SESSION, "Fix spinner animation",
                             "alpha-widgets", "Need a decision on the easing"))
+    e2e_service.settle()
     check("a message counts beside the green", badge() == 2)
     saved = saved_notifications()
+    e2e_service.settle()
     check("the message is on disk, the synthetic row is not",
           [r["kind"] for r in saved] == ["message"], str([r["kind"] for r in saved]))
     center.mark_session_read(SESSION)
+    e2e_service.settle()
     check("visiting the session reads everything it said; the green row stays until its flag drops",
           badge() == 0 and center.is_green(SESSION))
+    e2e_service.settle()
     check("the read flag is on disk", saved_notifications()[0]["read"] is True)
     store.set_unread(SESSION, False)
+    e2e_service.settle()
     check("the synthetic row leaves with the flag", not center.is_green(SESSION) and badge() == 0)
 
     # -- a row whose session went away --------------------------------------
     center.set_green("ghost-session", True)
     app._on_store_refreshed(store, False)
+    e2e_service.settle()
     check("a rescan drops a synthetic row with no item and no placeholder",
           not center.is_green("ghost-session"))
 
     # A fresh AppState reads the same list back.
+    e2e_service.settle()
     check("a fresh load sees the message", [r["kind"] for r in AppState().get_notifications()] == ["message"])
 
     # -- where the badge and the old per-tab count part company --------------
@@ -227,27 +251,36 @@ def run_checks(app: App) -> None:
     app.state.forward_session(SESSION, FORK)
     page = win.tab_view.append(Gtk.Label(label="fork tab"))
     win._pages[FORK] = page
+    e2e_service.settle()
     check("the original row stands in for the undiscovered fork",
           store.rows_representing(FORK) == [SESSION], str(store.rows_representing(FORK)))
     # The finish edge is the service's tracker's (PR-1.12a), reached by
     # the probe: a run marked busy under the fork's id, then finished.
     finish_edge(app, FORK)
+    e2e_service.settle()
     check("the fork's finish pulses the row it forked from", store.get_item(SESSION).unread)
     win._sync_status(FORK)
+    e2e_service.settle()
     check("the row keeps its flag: its tab is the fork's, through the chain",
           store.get_item(SESSION).unread and store.get_item(SESSION).status == "open",
           store.get_item(SESSION).status)
+    e2e_service.settle()
     check("the tab list never counted that pulse",
           FORK not in [s.session_id for s in win.tray_sessions()]
           and not any(s.unread for s in win.tray_sessions()))
+    e2e_service.settle()
     check("the badge counts it: one green row, badge 1",
           center.green_sessions() == [SESSION] and badge() == 1, str(center.green_sessions()))
     store.set_unread(SESSION, False)
+    e2e_service.settle()
     check("and lets it go with the flag", not center.is_green(SESSION) and badge() == 0)
 
 
 def main() -> int:
     i18n.init("")
+    # The service is its own process (PR-1.12b): started here, with this
+    # check's environment, before the app connects to it.
+    e2e_service.start_service()
     app = App()
     tries = 0
     exit_code = [1]

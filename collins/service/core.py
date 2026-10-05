@@ -366,7 +366,7 @@ class ServiceCore:
             return self._spawn_agent(message, client)
         shell = os.environ.get("SHELL") or "/bin/bash"
         cwd = message.get("cwd")
-        env = dict(self._environment())
+        env = self._spawn_env()
         cols = message.get("cols") or ptyserver.termscreen.DEFAULT_COLS
         rows = message.get("rows") or ptyserver.termscreen.DEFAULT_ROWS
         argv = [shell]
@@ -535,6 +535,14 @@ class ServiceCore:
             state.set_sandboxed(session_id, True, box=box)
         return providers.replace_options(options, sandbox_box=box)
 
+    def _spawn_env(self) -> dict[str, str]:
+        """The environment a shell spawns with: the service's own, less the
+        e2e probe's flag (D27: a child never sees it, so a check's agent
+        shell cannot tell it runs under a probing service)."""
+        env = dict(self._environment())
+        env.pop("COLLINS_DEBUG_API", None)
+        return env
+
     def spawn_agent_pty(self, record: hosting.SessionRecord, cwd: str) -> None:
         """The session's `spawn_shell`: the user's shell on a new pty in
         *cwd*, the record bound to it. A refusal is kept on the record for
@@ -547,7 +555,7 @@ class ServiceCore:
                 "agent",
                 [shell],
                 cwd,
-                dict(self._environment()),
+                self._spawn_env(),
                 cols,
                 rows,
                 session=session.session_id,
@@ -843,6 +851,7 @@ class ServiceCore:
             "busy": busy,
             "clients": len(self._clients),
             "started": self._started,
+            "pid": os.getpid(),
         }
         reason = sandboxplan.probe_reason()
         if reason is not None:
@@ -1533,7 +1542,7 @@ class ServiceCore:
                 "shell",
                 argv,
                 cwd,
-                dict(self._environment()),
+                self._spawn_env(),
                 session=session.session_id,
                 box=box,
                 plan=plan,
@@ -1583,7 +1592,20 @@ class ServiceCore:
         except KeyError:
             return
 
-    # -- the loopback's one shortcut (deleted with it, D21)
+    # -- the panel history (§3.15)
+
+    def _req_panel_history(self, message: protocol.Message, client: Client) -> dict:
+        """The tab's three saves (a draft save, the tab's close, the quit):
+        `write_panel_history` as a request (PR-1.12b; through Phase 1 it
+        was the loopback's one shortcut, D21)."""
+        shells: dict[int, int | str] = {}
+        for entry in message.get("shells") or []:
+            if "pty" in entry:
+                shells[int(entry["ordinal"])] = int(entry["pty"])
+            else:
+                shells[int(entry["ordinal"])] = str(entry.get("text") or "")
+        self.write_panel_history(str(message.get("key")), shells)
+        return protocol.reply(message.id)
 
     def write_panel_history(self, key: str, shells: dict[int, int | str]) -> None:
         """Write a session's panel history (spec §3.15): each shell under
@@ -1593,11 +1615,10 @@ class ServiceCore:
         shows).
         The mapping is the keep-set: files under ordinals it does not name
         are dropped, as `panelhistory.save_all` does; the path and the cap
-        are panelhistory's. In Phase 1 the tab decides the key (the session
-        id, or the draft id of a new-chat screen) and the moment (a draft
-        save, the tab's close, the app's quit, each before its shells end)
-        and asks through the loopback (a shortcut, D21); PR-1.10 moves
-        those decisions into the service with the session."""
+        are panelhistory's. The tab decides the key (the session id, or
+        the draft id of a new-chat screen) and the moment (a draft save,
+        the tab's close, the app's quit, each before its shells end) and
+        asks with `panel.history`."""
         texts: dict[int, str] = {}
         for ordinal, source in shells.items():
             if isinstance(source, str):
@@ -1605,6 +1626,105 @@ class ServiceCore:
             else:
                 texts[ordinal] = self.ptys.capture(int(source))
         panelhistory.save_all(key, texts)
+
+    # -- the e2e probe's write spy (D27; served through debug.sandbox target core)
+
+    def debug_spy_writes(self, pty_id: int) -> None:
+        """Record every byte written to *pty_id* from now on
+        (`debug_written` reads them): what a check used to read by
+        wrapping the loopback's `PtyServer.write`."""
+        if getattr(self, "_write_spy", None) is None:
+            self._write_spy: dict[int, list[str]] = {}
+            real_write = self.ptys.write
+
+            def spy(pty_id, data, sink=None):
+                written = self._write_spy.get(pty_id)
+                if written is not None:
+                    written.append(bytes(data).hex())
+                return real_write(pty_id, data, sink=sink)
+
+            self.ptys.write = spy
+        self._write_spy[pty_id] = []
+
+    def debug_patch(self, module: str, attr: str, value) -> object:
+        """Set *attr* of the service's *module* to *value* (a JSON value:
+        a limit a check lowers, a flag) and return the old one, JSON-shaped
+        or None: what a check patched in its own process while the service
+        ran there (D27, debug only)."""
+        import importlib
+
+        target = importlib.import_module(module)
+        old = getattr(target, attr, None)
+        setattr(target, attr, value)
+        return _jsonable(old)
+
+    def debug_find_handle(self, pid: int) -> str | None:
+        """The handle of the session the shim at *pid* descends from
+        (`SessionTools.find`; D27), or None."""
+        if self.tools is None:
+            return None
+        session = self.tools.find(int(pid))
+        return getattr(session, "handle", None) if session is not None else None
+
+    def debug_tools_list(self, pid: int) -> list[str]:
+        """The names of the tools the session at *pid* is offered, as the
+        MCP socket serves them (`SessionTools.list_tools`; D27)."""
+        if self.tools is None:
+            return []
+        return [tool["name"] for tool in self.tools.list_tools(int(pid))]
+
+    def debug_tools_dispatch(self, pid: int, tool: str, args: dict):
+        """One tool call as the dispatcher sees it arrive from *pid*, through
+        every gate (`SessionTools.dispatch`; D27): ``[ok, text]``, or
+        ``{"deferred": id}`` for a reply that waits on a client (a UI-bound
+        tool: the asking check is that client, so it polls
+        `debug_tools_result` from its own loop rather than blocking here)."""
+        if self.tools is None:
+            return [False, "no tools"]
+        result = self.tools.dispatch(int(pid), str(tool), dict(args or {}))
+        if isinstance(result, tuple):
+            return [bool(result[0]), str(result[1])]
+        deferred = getattr(self, "_debug_deferred", None)
+        if deferred is None:
+            deferred = self._debug_deferred = {}
+        call_id = f"d-{len(deferred) + 1}"
+        deferred[call_id] = result
+        return {"deferred": call_id}
+
+    def debug_tools_result(self, call_id: str):
+        """A deferred tool call's settled ``[ok, text]``, or None while it
+        waits."""
+        result = getattr(self, "_debug_deferred", {}).get(str(call_id))
+        if result is None or not result.resolved:
+            return None
+        ok, text = result.result()
+        return [bool(ok), str(text)]
+
+    def debug_written(self, pty_id: int) -> list[str]:
+        """The hex of every write recorded for *pty_id* since the spy."""
+        return list(getattr(self, "_write_spy", {}).get(pty_id, []))
+
+    # -- stopping (§3.10 item 1)
+
+    def stop_sessions(self) -> list[str]:
+        """End every session the way *Stop sessions and quit* does: the ids
+        of the live agent sessions are recorded as `resume_on_start` (a
+        client reopening its tabs finds them resumable; the next service
+        resumes nothing by itself) and every pty is closed (`shutdown`:
+        SIGHUP, the master closed, SIGKILL after the grace). Returns the
+        ids recorded."""
+        ids: list[str] = []
+        for record in self._records():
+            session_id = getattr(record.session, "session_id", None)
+            if session_id:
+                ids.append(str(session_id))
+        if self.state is not None:
+            try:
+                self.state.set_resume_on_start(ids)
+            except Exception:
+                log.exception("could not record the sessions to resume")
+        self.shutdown()
+        return ids
 
     def shutdown(self) -> None:
         if self.activity is not None:

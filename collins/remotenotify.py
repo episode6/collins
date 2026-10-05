@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 import time
 
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import translate
 from .notifycenter import (
     KIND_FINISHED,
@@ -62,6 +62,15 @@ class RemoteNotifications(NotificationCenter):
         # Who hears a counted finish (the service's verdict, D29): the app,
         # which hands it to the window holding the session's tab.
         self.on_finished: list = []
+
+    def reset(self) -> None:
+        """The link was lost and is back (spec §3.20): the history is the
+        service's; the next snapshot sends every row again."""
+        self._holding = 0
+        self._moved = False
+        if self._rows:
+            self._rows.clear()
+            self._changed()
 
     # -- events ---------------------------------------------------------------------
 
@@ -185,7 +194,30 @@ class RemoteNotifications(NotificationCenter):
         reply = self._request(message)
         if reply is None:
             return notification
-        return self.get(reply.get("notification", "")) or notification
+        row_id = str(reply.get("notification", ""))
+        existing = self.get(row_id)
+        if existing is not None:
+            return existing
+        # Shown at once (D16: written optimistically): the service's
+        # `notify` event, which lands after this reply over the socket,
+        # confirms the row's fields (its time, a coalesced bell's count).
+        row = Notification(
+            id=row_id,
+            session_id=notification.session_id,
+            title=notification.title,
+            project=notification.project,
+            kind=notification.kind,
+            body=notification.body,
+            when=self._clock(),
+            read=bool(notification.read),
+            count=1,
+            url=notification.url,
+            msgid=notification.text_id or " ",
+            args=dict(notification.args or {}),
+        )
+        self._rows.insert(0, row)
+        self._moved_now()
+        return row
 
     def mark_read(self, notification_id: str) -> bool:
         row = self.get(notification_id)
@@ -229,18 +261,34 @@ class RemoteNotifications(NotificationCenter):
         if not old or not new or old == new:
             return 0
         reply = self._request({"t": "notify.rekey", "session": old, "to": new})
-        return int(reply.get("moved", 0)) if reply else 0
+        if reply is None:
+            return 0
+        # Moved at once (D16): the window's handoff reads the rows under
+        # the new key right after this returns (re-sending their desktop
+        # notifications); the service's events confirm row by row.
+        super().rekey_session(old, new)
+        return int(reply.get("moved", 0))
 
     def clear(self) -> int:
         reply = self._request({"t": "notify.clear"})
-        return int(reply.get("removed", 0)) if reply else 0
+        if reply is None:
+            return 0
+        kept = [row for row in self._rows if row.kind == KIND_FINISHED]
+        if len(kept) != len(self._rows):
+            self._rows[:] = kept  # gone at once; the events confirm row by row
+            self._moved_now()
+        return int(reply.get("removed", 0))
 
     def remove(self, notification_id: str) -> bool:
         row = self.get(notification_id)
         if row is None or row.kind == KIND_FINISHED:
             return False
         reply = self._request({"t": "notify.remove", "ids": [notification_id]})
-        return bool(reply and reply.get("removed"))
+        removed = bool(reply and reply.get("removed"))
+        if removed and row in self._rows:
+            self._rows.remove(row)  # gone at once; the event confirms it
+            self._moved_now()
+        return removed
 
     def set_green(self, session_id: str, on: bool, *, title: str = "", project: str = "") -> bool:
         if not session_id:
@@ -253,4 +301,8 @@ class RemoteNotifications(NotificationCenter):
             message["title"] = title
             message["project"] = project
         reply = self._request(message)
-        return bool(reply and reply.get("changed"))
+        changed = bool(reply and reply.get("changed"))
+        if changed:
+            # The synthetic row, at once (D16); the service's event confirms.
+            super().set_green(session_id, on, title=title, project=project)
+        return changed

@@ -150,7 +150,8 @@ only kind) does what the session tab does (see `collins-terminal-tab`,
 "The tab on the pty server"): its `terminal` is a
 childless `ptyclient.ClientVte` and `_view` a `ClientTerminal` over a pty
 of kind `shell` on the service's `PtyServer`, through the shell's **own**
-loopback client (`service_loopback().connect`, one per shell). `_view` is
+`PtyClient` on the app's link (`terminal._pty_client`, one per shell;
+PR-1.12b). `_view` is
 the glue, as the tab's.
 
 - **Spawn.** `_service_spawn`: a `spawn` request (`kind` `shell`, the cwd,
@@ -172,7 +173,7 @@ the glue, as the tab's.
   the cwd `follow_cwd` and `_sync_cwd` compare against are the pty
   server's (`Pty.has_running_command`, `Pty.shell_pid` with the box's
   inner shell, `Pty.process_cwd` from `/proc`), all through the `pty.info`
-  request (PR-1.12a; the loopback's `pty_of` shortcut is gone). A shell's
+  request (PR-1.12a). A shell's
   `spawn` names its tab's session by `handle`, so the service re-files
   its history when that session resolves. Typing (`run_command`, the
   `cd`, Ctrl+L) is input frames (`_write`); `note()` is a `paint`.

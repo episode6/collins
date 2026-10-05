@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import shlex
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -50,7 +50,7 @@ from . import (  # noqa: E402
     transcriptlinks,
 )
 from .api import protocol  # noqa: E402
-from .api.loopback import LoopbackServer, RequestRefused  # noqa: E402
+from .api.protocol import RequestRefused  # noqa: E402
 from .claudemodels import short_name  # noqa: E402
 from .clientsession import ClientSession  # noqa: E402
 from .composer import ComposerPage, ComposerView  # noqa: E402
@@ -146,30 +146,21 @@ _UNLIMITED_CLAMP_WIDTH = 1_000_000
 # the service's own poll publishes (PR-1.12a).
 _CWD_TICK_MS = 2000
 
-# The service's end of the loopback (api.loopback.LoopbackServer over the
-# app's service.core.ServiceCore), the pty server every tab and
-# panel shell spawns its shell on and is fed from. Set by the app at startup; a tab
-# built without an app (a check driving the widget alone) gets one made on
-# the spot with no state writer, so the backend never depends on the app.
-SERVICE_LOOPBACK: LoopbackServer | None = None
 
 
-def service_loopback() -> LoopbackServer:
-    global SERVICE_LOOPBACK
-    if SERVICE_LOOPBACK is None:
-        from .service.core import ServiceCore
-
-        # A tab with no app behind it (a check driving the widget alone)
-        # never writes a model under the real state directory: only
-        # COLLINS_PTY_STATE_DIR, else a per-process temporary tree.
-        state_dir = os.environ.get("COLLINS_PTY_STATE_DIR") or tempfile.mkdtemp(prefix="collins-pty-")
-        SERVICE_LOOPBACK = LoopbackServer(ServiceCore(state_dir=Path(state_dir)))
-    return SERVICE_LOOPBACK
+_log = logging.getLogger(__name__)
 
 
-# A widget built with no app behind it reaches the service through the same
-# loopback (apilink.current: a PR page's gh calls, a job, a tool's reply).
-apilink.set_fallback(service_loopback)
+def _pty_client(on_output, on_event):
+    """A tab's or a panel shell's client of the service (spec §3.20): a
+    `api.client.PtyClient` on the app's link (`apilink.current`; an e2e
+    check driving the widget alone sets one of its own through
+    scripts/e2e_service.py). Without a link there is no service to spawn
+    on, which is a programming error, not a condition to fail soft on."""
+    link = apilink.current()
+    if link is None or not hasattr(link, "pty_client"):
+        raise RuntimeError("no service link: the app's connection manager has not connected")
+    return link.pty_client(on_output, on_event, ptyclient.device_name())
 
 # The environment an agent tab's shell spawns with — the app's own plus the
 # two declarations that coax the CLI's progress announcements out for VTE —
@@ -983,9 +974,7 @@ class PanelTerminal(Gtk.Box):
         # sandboxed shell with no plan yet has no pty to paint into).
         self._history_paint: str | None = None
         self.terminal = ptyclient.ClientVte()
-        self._client = service_loopback().connect(
-            self._on_service_output, self._on_service_event, ptyclient.device_name()
-        )
+        self._client = _pty_client(self._on_service_output, self._on_service_event)
         self._view = ptyclient.ClientTerminal(self.terminal, self._client, on_exited=self._on_pty_exited)
         self.terminal.set_scrollback_lines(10_000)
         self.terminal.set_scroll_on_output(False)
@@ -1221,6 +1210,19 @@ class PanelTerminal(Gtk.Box):
                 pass
         view.detach()
         client.close()
+
+    def reattach(self) -> None:
+        """The link came back (spec §3.20): show the shell's pty again; a
+        pty the service no longer has reads as the shell's exit, so the
+        next show spawns a fresh one."""
+        view, client = self._view, self._client
+        if client.closed or view.pty is None or view.exited:
+            return
+        client.claim(view.pty)
+        try:
+            view.attach(view.pty)
+        except (RequestRefused, ValueError):
+            self._on_pty_exited(None)
 
     def set_history_key(self, key: str | None, handle: str | None = None) -> None:
         """Re-file this shell's history on the service under *key* (the
@@ -1515,13 +1517,11 @@ class TerminalTab(Gtk.Box):
         self._terminal_fg: tuple[int, int, int] | None = None
         self._theme_name: str | None = None
         # The terminal has no child: it shows a pty of the service's pty
-        # server through the loopback (spec §3.4): fed by output frames, its
+        # server over the socket (spec §3.4): fed by output frames, its
         # commits sent back as input, the session reading the service's
         # screen model. `_view` is the glue.
         self.terminal = ptyclient.ClientVte()
-        self._client = service_loopback().connect(
-            self._on_service_output, self._on_service_event, ptyclient.device_name()
-        )
+        self._client = _pty_client(self._on_service_output, self._on_service_event)
         self._view = ptyclient.ClientTerminal(self.terminal, self._client, on_exited=self._on_pty_exited)
         # The session's logic is the service's (service/session.py, hosted
         # by service/hosting.py since PR-1.12a): everything the tab's
@@ -2340,6 +2340,22 @@ class TerminalTab(Gtk.Box):
                 pass
         self._view.detach()
         self._client.close()
+
+    def reattach(self) -> None:
+        """The link came back (spec §3.20): show the pty again (a redraw
+        from the service's model); a pty the service no longer has ends
+        the tab the way its exit would, and the row stays resumable."""
+        pty = self._view.pty
+        if self._client.closed or pty is None or self._view.exited:
+            return
+        self._client.claim(pty)
+        try:
+            self._view.attach(pty)
+        except RequestRefused as refusal:
+            _log.info("pty %s is gone after the reconnect: %s", pty, refusal.msgid)
+            self._on_pty_exited(None)
+        except ValueError:
+            self._on_pty_exited(None)
 
     def can_restart_sandboxed(self) -> bool:
         """Whether *Restart to apply* is on offer (the service's
@@ -5177,14 +5193,27 @@ class TerminalTab(Gtk.Box):
         untouched; tabs closed along the way drop out of the saved set.
 
         The service writes it, from each shell's
-        screen model (spec §3.15, `ServiceCore.write_panel_history`): the
+        screen model (spec §3.15, the `panel.history` request): the
         tab names the key and the shells, the moment being the same three
         (a draft save, the tab's close before its shells end, the quit)."""
         history_id = self._history_id()
         if self.fork or not history_id or not self._dock.ever_spawned:
             return
-        sources = {shell.hist: shell.history_source() for shell in self._dock.shell_pages()}
-        service_loopback().write_panel_history(history_id, sources)
+        shells = []
+        for shell in self._dock.shell_pages():
+            source = shell.history_source()
+            entry: dict = {"ordinal": int(shell.hist)}
+            if isinstance(source, str):
+                entry["text"] = source[: protocol.TEXT_MAX]
+            else:
+                entry["pty"] = int(source)
+            shells.append(entry)
+        if self._client.closed:
+            return
+        try:
+            self._client.request({"t": "panel.history", "key": history_id, "shells": shells})
+        except (RequestRefused, ValueError) as exc:
+            _log.warning("panel history of %s not written: %s", history_id, exc)
 
     def release_panel_ptys(self) -> None:
         """The tab is closing for good: end every panel shell's pty on the

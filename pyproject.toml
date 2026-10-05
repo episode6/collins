@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 [project]
 # The distribution name, the installed command and the import package are all
@@ -33,6 +33,9 @@ Issues = "https://github.com/episode6/collins/issues"
 
 [project.scripts]
 collins = "collins.app:main"
+# The headless session service (split-service spec §3.20): its own process,
+# found or started by the client, also the unit's ExecStart.
+collins-service = "collins.service.main:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -65,6 +68,8 @@ collins = [
     "sounds/*.oga",
     "com.episode6.Collins.desktop",
     "com.episode6.Collins.metainfo.xml",
+    # The systemd user unit `collins --install-desktop` installs (§3.10).
+    "collins-service.service",
 ]
 
 [tool.ruff]

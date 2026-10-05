@@ -72,6 +72,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
 from collins import i18n, trust  # noqa: E402
@@ -105,6 +106,9 @@ def saved_drafts() -> dict:
 
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(TRUSTED)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 
 tries = 0
@@ -143,6 +147,8 @@ def stash_before_the_id() -> bool:
     # service; the tab hears "session-resolved" off the session event).
     tab.probe_set("session_id", "sid-late")
     tab.probe_call("host.session_resolved", "sid-late")
+    e2e_service.settle()  # the session event lands over the socket a moment later
+    e2e_service.settle()  # the write lands over the socket a moment later
     check(
         "resolving files the draft under the session",
         saved_drafts().get("sid-late") == "a draft written before the id landed",
@@ -151,6 +157,7 @@ def stash_before_the_id() -> bool:
 
     # And a plain stash, now that the tab has an id to file it under.
     tab._stash_draft("a second draft, this one after")
+    e2e_service.settle()  # the write lands over the socket a moment later
     check(
         "a later stash replaces it rather than queueing",
         saved_drafts().get("sid-late") == "a second draft, this one after",
@@ -167,6 +174,7 @@ def adopt_a_saved_draft() -> bool:
     win.state.set_session_draft("sid-saved", "what the last run was writing")
     tab.probe_set("session_id", "sid-saved")
     tab.probe_call("host.session_resolved", "sid-saved")
+    e2e_service.settle()  # the session event lands over the socket a moment later
     check("the tab adopts the saved draft", tab._composer_stash == "what the last run was writing")
 
     composer = tab._ensure_composer()
@@ -176,7 +184,9 @@ def adopt_a_saved_draft() -> bool:
         composer.peek_text() == "what the last run was writing",
         composer.peek_text(),
     )
+    e2e_service.settle()  # the write lands over the socket a moment later
     check("…and the stash is spent", not tab._composer_stash, tab._composer_stash)
+    e2e_service.settle()  # the write lands over the socket a moment later
     check("…and so is the entry on disk", "sid-saved" not in saved_drafts(), saved_drafts())
 
     # Whatever arrives with the open — the cut of the CLI's box, the
@@ -202,7 +212,9 @@ def adopt_a_saved_draft() -> bool:
     tab._stash_draft("waiting for an empty box")
     composer.set_text("typed since")
     tab._restore_stashed_draft(composer)
+    e2e_service.settle()  # the write lands over the socket a moment later
     check("a written box is left alone", composer.peek_text() == "typed since", composer.peek_text())
+    e2e_service.settle()  # the write lands over the socket a moment later
     check(
         "…and the draft keeps waiting on disk",
         saved_drafts().get("sid-saved") == "waiting for an empty box",
@@ -219,6 +231,7 @@ def save_on_the_way_out() -> bool:
     tab._composer_stash = ""  # the box is the only draft now
     tab._composer.set_text("half a prompt, still on screen")
     win._save_composer_draft(tab)
+    e2e_service.settle()  # the write lands over the socket a moment later
     check(
         "an open composer's text is saved for the session",
         saved_drafts().get("sid-saved") == "half a prompt, still on screen",
@@ -227,11 +240,14 @@ def save_on_the_way_out() -> bool:
 
     tab._composer.set_text("")  # as a send leaves it
     win._save_composer_draft(tab)
+    e2e_service.settle()  # the write lands over the socket a moment later
     check("an emptied composer clears the entry", "sid-saved" not in saved_drafts(), saved_drafts())
+    e2e_service.settle()  # the write lands over the socket a moment later
     check("…and leaves the other session's alone", "sid-late" in saved_drafts(), saved_drafts())
 
     # Deleting a session's transcript takes its draft with it.
     win._forget_transcript("sid-late")
+    e2e_service.settle()  # the write lands over the socket a moment later
     check("forgetting a session drops its draft", saved_drafts() == {}, saved_drafts())
 
     # Take the shim's process group out before quitting; it never exits on

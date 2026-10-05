@@ -55,14 +55,11 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
 from collins import i18n, mdblocks, mdwidgets, pictures, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
-from collins import apilink  # noqa: E402
-
-# No app behind the page: its gh requests go to a loopback of its own.
-apilink.allow_harness()
 from collins.editor import GtkSource  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
@@ -139,6 +136,10 @@ def fake_detail(body: str) -> prdetail.PullRequestDetail:
 
 STAGED = {"detail": fake_detail(DESCRIPTION)}
 prdetail.fetch = lambda url: STAGED["detail"]
+# No app behind the page: a service of this check's own, answering the
+# page's `pr.detail` with the staged detail (scripts/e2e_stubs.py; `land`
+# restages it there), and a link to it as the current one (PR-1.12b).
+e2e_service.harness_link(stubs={"pr_detail": prdetail.detail_record(STAGED["detail"])})
 
 HOST = SimpleNamespace(
     archive=None, refresh=lambda: None, prompt_block=lambda: "", confirm_merges=lambda: True
@@ -208,6 +209,7 @@ def later(fn, ms: int = 150) -> bool:
 
 def land(detail: prdetail.PullRequestDetail, then) -> bool:
     STAGED["detail"] = detail
+    e2e_service.update_stubs(pr_detail=prdetail.detail_record(detail))
     page = state["page"]
     page._fetch(force=True)
 
