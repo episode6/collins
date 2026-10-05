@@ -46,7 +46,16 @@ os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
-os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"  # the blob cache the pictures are staged in
+# The scratch cache below is for the blob cache the pictures are staged in.
+# Mesa's shader cache lives under XDG_CACHE_HOME too, and must stay where
+# it was: with a cache that is empty on every run, the first frame of the
+# expanded description compiles its shaders (software GL under Xvfb) and
+# outlasts the 150 ms `later` before the fence's height is read, which is
+# then the text view's unvalidated 8 px.
+os.environ.setdefault(
+    "MESA_SHADER_CACHE_DIR", os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+)
+os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
