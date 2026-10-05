@@ -220,7 +220,9 @@ class BackgroundStatusPoller:
             ids = set(self._fetch())
         except Exception:
             ids = None  # keep the last-known set on unexpected failures
-        GLib.idle_add(self._apply, ids)
+        # It advances the handoff's state on the service (a pending /bg
+        # confirmed by the list): PRIORITY_DEFAULT, never default-idle.
+        GLib.idle_add(self._apply, ids, priority=GLib.PRIORITY_DEFAULT)
 
     def _apply(self, ids: set[str] | None) -> bool:
         self._refresh_running = False

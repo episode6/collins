@@ -278,7 +278,10 @@ class BackgroundAgents:
             is_sandboxed=bool(session.sandboxed),
             session_id=session_id,
             has_row=bool(session_id and self.store.rows_representing(session_id)),
-            detach_in_flight=bool(self.detaching),
+            # Another session's handoff waiting for its agent, or this one's
+            # own still pending: a second watch would race the first.
+            detach_in_flight=bool(self.detaching)
+            or bool(session_id and self.chain(session_id) & set(self.pending)),
         )
 
     def refresh_affordances(self) -> None:
@@ -313,18 +316,22 @@ class BackgroundAgents:
 
     # -- the handoff ----------------------------------------------------------------------
 
-    def handoff(self, record) -> None:
+    def handoff(self, record) -> str:
         """A session's ``close {mode: background}``: watch for its agent and
         treat it as backgrounded right away (the yellow line, the rows
-        disabled) until the agent list confirms it."""
+        disabled) until the agent list confirms it. Returns "" when the
+        handoff started, else why not (`blocker`'s reasons: one handoff of
+        a session at a time, never a sandboxed one or a fork)."""
         session = record.session
         session_id = session.session_id
-        if not session_id:
-            return
+        reason = self.blocker(session)
+        if reason:
+            log.info("bg: no handoff of %s (%s)", session_id or record.handle, reason)
+            return reason
         # Marked first, so a watch that lands at once finds it to confirm.
         self.mark_backgrounding(session_id)
-        if not session.fork:
-            self.watch_fork(record)
+        self.watch_fork(record)
+        return ""
 
     def watch_fork(self, record) -> None:
         """Confirm the session is running detached, and record its successor
