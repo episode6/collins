@@ -210,3 +210,82 @@ def test_a_box_it_cannot_read_is_gone(requests):
     message = protocol.validate(protocol.request("sandbox.plan", 1, box="f" * 32), protocol.CLIENT)
     raw = requests["served"].handle(message)
     assert raw["ok"] is False and raw["error"] == protocol.ERROR_GONE
+
+
+# -- drop and forget (rule 5) -------------------------------------------------------------
+
+
+def _drop_requests(monkeypatch, tmp_path, live=None):
+    """A SandboxRequests whose host derives into *tmp_path*'s plan dir."""
+    plan_dir = tmp_path / "plans"
+    plan_dir.mkdir()
+    monkeypatch.setattr(sandboxplan, "plan_dir", lambda app_id: str(plan_dir))
+    monkeypatch.setattr(sandboxplan, "load_plan", lambda path: PLAN if path == "/plans/p.json" else None)
+    released = []
+    monkeypatch.setattr(sandboxplan, "release_plan", released.append)
+    derived = str(plan_dir / "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.json")
+    sibling = "b" * 32
+    host = Host()
+    host.derive = lambda plan_path, cwd, live=(): (derived, sibling, "")
+    host.released, host.forgotten = [], []
+    host.release = host.released.append
+    host.forget_box = host.forgotten.append
+    served = SandboxRequests(
+        host=lambda: host,
+        grants=lambda: None,
+        plan_of=lambda box: "/plans/p.json" if box == BOX else None,
+        sessions=lambda: [],
+        broadcast=lambda e: None,
+        dispatch=lambda fn, *args: fn(*args),
+        app_id=lambda: "com.example.Test",
+        session_for_box=lambda box: live if box == live else None,
+    )
+    return served, host, released, derived, sibling
+
+
+def _msg(t, **fields):
+    checked = protocol.validate({"t": t, "id": 1, **fields}, protocol.CLIENT)
+    assert isinstance(checked, protocol.Message), checked
+    return checked
+
+
+def test_drop_releases_only_a_plan_this_service_derived_for_the_box(monkeypatch, tmp_path):
+    served, host, released, derived, sibling = _drop_requests(monkeypatch, tmp_path)
+    reply = served.handle(_msg("sandbox.derive", box=BOX, cwd="/home/u/project/sub"))
+    assert reply["plan"] == derived and reply["box"] == sibling
+    # Another path, even under the plan dir, is nobody's to unlink.
+    other = str(tmp_path / "plans" / "1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.json")
+    refused = served.handle(_msg("sandbox.drop", box=sibling, plan=other))
+    assert refused.get("error") == protocol.ERROR_REFUSED and released == []
+    # The derived plan named against another box is refused too.
+    refused = served.handle(_msg("sandbox.drop", box=BOX, plan=derived))
+    assert refused.get("error") == protocol.ERROR_REFUSED and released == []
+    served.handle(_msg("sandbox.drop", box=sibling, plan=derived))
+    assert released == [derived] and host.released == [sibling] and host.forgotten == [sibling]
+    # Once dropped, a second drop of the same plan has nothing to release.
+    refused = served.handle(_msg("sandbox.drop", box=sibling, plan=derived))
+    assert refused.get("error") == protocol.ERROR_REFUSED and released == [derived]
+
+
+def test_drop_refuses_a_plan_outside_the_plan_dir_even_when_derived(monkeypatch, tmp_path):
+    served, _host, released, _derived, sibling = _drop_requests(monkeypatch, tmp_path)
+    outside = str(tmp_path / "elsewhere" / "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.json")
+    served._derived[sibling] = {outside}  # even a derived path has to sit under the plan dir
+    refused = served.handle(_msg("sandbox.drop", box=sibling, plan=outside))
+    assert refused.get("error") == protocol.ERROR_REFUSED and released == []
+    named = str(tmp_path / "plans" / "probe.json")
+    served._derived[sibling] = {named}
+    refused = served.handle(_msg("sandbox.drop", box=sibling, plan=named))
+    assert refused.get("error") == protocol.ERROR_REFUSED and released == []
+
+
+def test_a_box_with_a_live_session_is_neither_dropped_nor_forgotten(monkeypatch, tmp_path):
+    live = "c" * 32
+    served, host, _released, _derived, _sibling = _drop_requests(monkeypatch, tmp_path, live=live)
+    refused = served.handle(_msg("sandbox.drop", box=live))
+    assert refused.get("error") == protocol.ERROR_REFUSED
+    refused = served.handle(_msg("sandbox.forget", box=live))
+    assert refused.get("error") == protocol.ERROR_REFUSED
+    assert host.forgotten == []
+    served.handle(_msg("sandbox.forget", box="d" * 32))
+    assert host.forgotten == ["d" * 32]

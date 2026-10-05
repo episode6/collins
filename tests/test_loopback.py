@@ -61,7 +61,10 @@ def server(tmp_path, monkeypatch):
     pump(0.3)
 
 
-def spawn(client, cwd="/tmp", cols=80, rows=24, kind="agent"):
+def spawn(client, cwd="/tmp", cols=80, rows=24, kind="shell"):
+    """A pty of *kind*: a plain shell by default (the pty half under test;
+    an agent's spawn builds a `Session` that types the agent's command in,
+    PR-1.12a)."""
     reply = client.request({"t": "spawn", "kind": kind, "cwd": cwd, "cols": cols, "rows": rows})
     return reply["pty"]
 
@@ -76,11 +79,11 @@ def test_spawn_attach_type_and_see_the_echo(server):
     assert redraw and redraw[-1] & protocol.FLAG_REDRAW_END
     client.send_input(pty, b"hello\r")
     assert pump(2, lambda: b"hello\r\nhello" in ends.live(pty))
-    assert client.screen_of(pty).rows()[0] == "hello"
-    assert client.pty_of(pty).child_pid() == server.records[pty]["pid"]
+    assert server.core.ptys.get(pty).screen.rows()[0] == "hello"
+    assert server.core.ptys.get(pty).child_pid() == server.records[pty]["pid"]
     announce = [e for e in ends.events if e["t"] == "pty"]
-    assert announce and announce[-1]["pid"] == client.pty_of(pty).child_pid()
-    assert announce[-1]["cwd"] == "/tmp" and announce[-1]["kind"] == "agent"
+    assert announce and announce[-1]["pid"] == server.core.ptys.get(pty).child_pid()
+    assert announce[-1]["cwd"] == "/tmp" and announce[-1]["kind"] == "shell"
 
 
 def child_environ(pid):
@@ -99,8 +102,8 @@ def test_the_spawn_environment_follows_the_progress_setting(server, tmp_path):
     ends = Client()
     try:
         client = srv.connect(ends.on_output, ends.on_event)
-        pty = spawn(client)
-        env = child_environ(client.pty_of(pty).child_pid())
+        pty = spawn(client, kind="agent")  # an agent's pty carries the declarations
+        env = child_environ(core.ptys.get(pty).child_pid())
     finally:
         srv.shutdown()
         pump(0.3)
@@ -112,8 +115,8 @@ def test_the_spawn_environment_follows_the_progress_setting(server, tmp_path):
     other = loopback.LoopbackServer(core)
     try:
         c2 = other.connect(ends.on_output, ends.on_event)
-        pty2 = spawn(c2)
-        env2 = child_environ(c2.pty_of(pty2).child_pid())
+        pty2 = spawn(c2, kind="agent")
+        env2 = child_environ(core.ptys.get(pty2).child_pid())
         assert b"ConEmuANSI" not in env2 and b"TERM_PROGRAM" not in env2
         assert env2[b"TERM"] == b"xterm-256color"
     finally:
@@ -145,14 +148,23 @@ def test_refusals_carry_the_protocols_error_and_a_msgid(server):
         client.request({"t": "attach", "pty": 99, "cols": 80, "rows": 24})
     assert caught.value.error == protocol.ERROR_GONE and caught.value.details == {"pty": 99}
     with pytest.raises(loopback.RequestRefused) as caught:
-        client.request({"t": "spawn", "kind": "agent", "cwd": "/nonexistent/dir", "cols": 80, "rows": 24})
+        client.request({"t": "spawn", "kind": "shell", "cwd": "/nonexistent/dir", "cols": 80, "rows": 24})
     assert caught.value.error == protocol.ERROR_FAILED
     assert "failed to start shell" in caught.value.msgid
     assert "/nonexistent/dir" in caught.value.details["msg"]
     assert server.core.ptys.ptys == {}  # nothing left in the table
+    # An agent's launch in a directory that is gone is the session's to
+    # settle (Session._finish_spawn: it starts in the repository or HOME
+    # and says so), so its spawn is answered, not refused.
+    pty = spawn(client, cwd="/nonexistent/dir", kind="agent")
+    assert server.core.ptys.get(pty).cwd != "/nonexistent/dir"
+    assert pump(2, lambda: "no longer exists" in server.core.ptys.get(pty).screen.capture_contents())
     with pytest.raises(loopback.RequestRefused) as caught:
-        client.request({"t": "service.status"})
+        client.request({"t": "service.restart", "when": "now"})
     assert caught.value.error == protocol.ERROR_UNKNOWN
+    # service.status is served (PR-1.12a): the counts and the probe's word.
+    status = client.request({"t": "service.status"})
+    assert status["protocol"] == protocol.PROTOCOL and status["ptys"] == 1 and "live" not in status
 
 
 def test_resize_focus_and_theme_events_reach_the_pty_server(server):
@@ -191,7 +203,7 @@ def test_paint_reaches_the_model_and_every_client(server):
     cb.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     ca.request({"t": "paint", "pty": pty, "text": "\r\n[note] painted\r\n"})
     assert b"[note] painted" in a.live(pty) and b"[note] painted" in b.live(pty)
-    assert "[note] painted" in ca.screen_of(pty).capture_contents()
+    assert "[note] painted" in server.core.ptys.get(pty).screen.capture_contents()
 
 
 def test_a_client_going_away_detaches_and_ends_nothing(server):

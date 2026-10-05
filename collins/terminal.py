@@ -10,7 +10,7 @@ import os
 import shlex
 import tempfile
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from pathlib import Path
 
 import gi
@@ -22,11 +22,11 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import (  # noqa: E402
-    activity,
-    apilink,  # noqa: E402
+    apilink,
     apppicker,
     attachpanel,
     attachrecords,
+    clientsession,
     composerkeys,
     dialogs,
     dropimages,
@@ -41,18 +41,18 @@ from . import (  # noqa: E402
     panelhistory,
     panellayout,
     prmenu,
-    ptyclient,  # noqa: E402
+    ptyclient,
     remotediffs,
     remoteprs,
     sandboxchip,
-    sandboxgrants,
-    sandboxplan,
+    sandboxstatus,
     themes,
     transcriptlinks,
 )
 from .api import protocol  # noqa: E402
 from .api.loopback import LoopbackServer, RequestRefused  # noqa: E402
 from .claudemodels import short_name  # noqa: E402
+from .clientsession import ClientSession  # noqa: E402
 from .composer import ComposerPage, ComposerView  # noqa: E402
 from .copylabel import copy_tooltip, enable_copy_on_click  # noqa: E402
 from .flash import flash  # noqa: E402
@@ -91,14 +91,14 @@ from .providers import (  # noqa: E402
 from .prstatus import (  # noqa: E402
     PullRequest,
     describe,
+    from_records,
     known,
     parse_pr_url,
     to_records,
 )
 from .prview import PrViewPage  # noqa: E402
-from .service.session import Session, agent_environment, bracketed_paste  # noqa: E402
+from .service.session import agent_environment, bracketed_paste  # noqa: E402
 from .shellinput import shell_command  # noqa: E402
-from .transcript import TranscriptModel  # noqa: E402
 
 # What a prompt is wrapped in when it must land as one paste (see
 # Session.inject_prompt_unfocused); kept under its old name here for the
@@ -141,30 +141,10 @@ _FONT_SCALE_STEP = 1.1
 # than any real window, so the clamp never actually constrains the terminal.
 _UNLIMITED_CLAMP_WIDTH = 1_000_000
 
-# The termprop VTE parses ConEmu-style OSC 9;4 progress sequences into — the
-# agent CLI's own busy/idle announcement, which the window turns into the
-# sidebar's pole (see activity.ProgressWatch). None on a VTE too old to have
-# termprops at all (pre-0.82), which also lacks the termprop-changed signal:
-# the wiring is skipped and the inferred sources carry the pole alone.
-PROGRESS_HINT_TERMPROP: str | None = getattr(Vte, "TERMPROP_PROGRESS_HINT", None)
-
-
-# The host side of sandboxing (sandboxplan.SandboxHost, bound to the app id
-# and state): how a sandboxed launch gets its plan (`prepare_launch(cwd, box)`
-# for the settled launch cwd — with the worktree a `-w` launch is narrowed
-# to — None when no box can be built), and what the
-# footer chip reads and writes — the workspace's grants, the guard on a new
-# one, whether the launched plan is stale. Set by the app at startup, like
-# providers.MCP_CONFIG_PATH; None means every sandboxed decision degrades
-# to an unsandboxed launch that says so.
-SANDBOX_HOST: sandboxplan.SandboxHost | None = None
-
-# The live grants of this instance (sandboxgrants.GrantMounts): every box a
-# tab launches registers with it, so a directory allowed while the session
-# runs is mounted into the running box, and unregisters before its plan is
-# rebuilt and when its shell exits. Set by the app beside SANDBOX_HOST;
-# None means a grant applies at the next restart, as a static bind.
-SANDBOX_GRANTS: sandboxgrants.GrantMounts | None = None
+# The cwd tick (service.session.CWD_POLL_MS): the footer's branch and the
+# git page's freshness check ride it on the client, over the agent's cwd
+# the service's own poll publishes (PR-1.12a).
+_CWD_TICK_MS = 2000
 
 # The service's end of the loopback (api.loopback.LoopbackServer over the
 # app's service.core.ServiceCore), the pty server every tab and
@@ -210,6 +190,11 @@ def _service_term(theme_name: str | None, terminal: Vte.Terminal) -> dict:
     if theme is not None:
         term["fg"] = "#" + theme["fg"]
         term["bg"] = "#" + theme["bg"]
+        palette = [f"#{c}" for c in theme.get("palette", ())]
+        if len(palette) == 16:
+            # What the service judges the box's dim ghost text against
+            # (termscreen's tail_is_faint, PR-1.12a).
+            term["palette"] = palette
     else:
         # VTE's defaults: the foreground it draws plain text in, the
         # background as it is drawn now.
@@ -803,106 +788,6 @@ def _capture_contents(terminal: Vte.Terminal) -> str:
     return (data or b"").decode("utf-8", errors="replace")
 
 
-class _TabHost:
-    """The `service.session.SessionHost` a TerminalTab hands its Session:
-    what the session tells the tab, and the few things it asks of a widget.
-    A class of its own rather than the tab itself, so the tab's namespace
-    stays the tab's."""
-
-    def __init__(self, tab: TerminalTab) -> None:
-        self._tab = tab
-
-    def alive(self) -> bool:
-        return self._tab.get_root() is not None
-
-    def paint(self, text: str) -> None:
-        self._tab.feed_message(text)
-
-    def focus_terminal(self) -> None:
-        self._tab.grab_terminal_focus()
-
-    def composer_open(self) -> bool:
-        return self._tab.composer_open()
-
-    def refocus_composer(self) -> None:
-        # Popovers undo a grab made during their own action: an idle later
-        # the one that asked for the switch has closed.
-        GLib.idle_add(self._tab._refocus_composer)
-
-    def resend_composed(self) -> None:
-        tab = self._tab
-        if tab._composer is not None and tab.composer_open():
-            tab._on_composer_send(None, tab._composer.peek_text())
-
-    def stash_draft(self, text: str) -> None:
-        self._tab._stash_draft(text)
-
-    def mapped(self) -> bool:
-        return self._tab.get_mapped()
-
-    def shown_prs(self) -> list[PullRequest]:
-        return self._tab._footer_prs
-
-    def transcript_reset(self) -> None:
-        self._tab._on_transcript_reset()
-
-    def transcript_landed(self, prs: list[PullRequest], lookup_empty: bool) -> None:
-        self._tab._on_transcript_landed(prs, lookup_empty)
-
-    def session_resolved(self, session_id: str) -> None:
-        self._tab._rekey_panel_shells()
-        self._tab.emit("session-resolved", session_id)
-
-    def fork_resolved(self, session_id: str) -> None:
-        self._tab.emit("fork-resolved", session_id)
-
-    def cwd_polled(self, cwd: str | None) -> None:
-        self._tab._on_cwd_polled(cwd)
-
-    def spawn_shell(self, cwd: str, env: list[str] | None) -> None:
-        # Run the user's interactive shell, which the session types the
-        # agent command into: aliases and env apply, and the tab drops to a
-        # prompt when the agent exits. The tab closes when the *shell* exits.
-        # *env* is not used: the service builds the shell's environment
-        # from its own (ServiceCore._req_spawn), progress declarations
-        # included, as a remote service would have to.
-        self._tab._service_spawn(cwd)
-
-    def sandbox_changed(self) -> None:
-        self._tab._sync_sandbox_chip()
-
-    def mark_stale_shells(self) -> None:
-        self._tab._mark_stale_sandboxed_shells()
-
-    def process_exited(self, status: int) -> None:
-        self._tab.emit("process-exited", status)
-
-    def input_sent(self, text: str) -> None:
-        self._tab.emit("input-sent", text)
-
-
-class _ComposerCut:
-    """The `service.session.CutSink` an open-cut lands in: the composer
-    that was opened, for as long as it is still this tab's and still up."""
-
-    def __init__(self, tab: TerminalTab, composer: ComposerView) -> None:
-        self._tab = tab
-        self._composer = composer
-
-    def alive(self) -> bool:
-        return self._tab._composer is self._composer and self._tab.composer_open()
-
-    def seed(self, text: str) -> None:
-        self._composer.seed_text(text)
-
-    def refuse(self) -> None:
-        # Whatever the composer had gathered in the meantime — the stash it
-        # was seeded with, a keystroke — goes back to the stash.
-        self._tab._stash_draft(self._composer.peek_text())
-        self._tab.close_composer(restore=False)
-        self._tab.feed_message(_("Composer: the input box holds a paste Collins can't read"))
-
-
 class PrChipRow(Gtk.Widget):
     """The footer's PR chips: as many as fit, and the newest ones are the ones.
 
@@ -1045,8 +930,12 @@ class PanelTerminal(Gtk.Box):
         plan_lookup: Callable[[], str | None] | None = None,
         box_lookup: Callable[[], str] | None = None,
         history_lookup: Callable[[], str | None] | None = None,
+        handle_lookup: Callable[[], str | None] | None = None,
     ) -> None:
-        """*history_lookup* (`() -> the key the tab's panel history is
+        """*handle_lookup* (`() -> the tab's session's handle`) names the
+        agent session this shell is a panel of, so the service re-files its
+        history when that session resolves (`ServiceCore.rekey_shells`,
+        PR-1.12a). *history_lookup* (`() -> the key the tab's panel history is
         filed under`, None for none) names the history file the service
         writes this shell's scrollback to when its child exits (`spawn`'s
         ``history``, PR-1.11). *plan_lookup* makes this the **sandboxed** kind: `() -> the
@@ -1065,6 +954,7 @@ class PanelTerminal(Gtk.Box):
         self._plan_lookup = plan_lookup
         self._box_lookup = box_lookup
         self._history_lookup = history_lookup
+        self._handle_lookup = handle_lookup
         # The plan file this shell's box was actually built from, once it
         # has spawned. A box outlives the plan it was built from: after the
         # session's *Restart to apply* the tab holds a new plan, and a
@@ -1215,6 +1105,9 @@ class PanelTerminal(Gtk.Box):
             # The service writes the scrollback here when the shell exits.
             request["history"] = history
             request["ordinal"] = self.hist
+        handle = self._handle_lookup() if self._handle_lookup is not None else None
+        if handle:
+            request["handle"] = handle
         if sandboxed:
             request["sandbox"] = True
             box = self._box_lookup() if self._box_lookup is not None else ""
@@ -1233,10 +1126,10 @@ class PanelTerminal(Gtk.Box):
             self._pending_input.clear()
             self.terminal.feed(_("failed to start shell: {msg}").format(msg=str(exc)).encode())
             return
-        found = self._service_pty()
-        self._child_pid = found.child_pid() if found is not None else None
+        found = self._pty_info()
+        self._child_pid = found.get("child_pid") if found is not None else None
         if sandboxed and found is not None:
-            self._spawn_plan = found.plan
+            self._spawn_plan = found.get("plan")
         history, self._history_paint = self._history_paint, None
         if history:
             self._paint(history)
@@ -1244,27 +1137,32 @@ class PanelTerminal(Gtk.Box):
         for data in pending:
             client.send_input(pty, data)
 
-    def _service_pty(self):
-        """The service's pty this shell shows (the loopback's `pty_of`), or
-        None: before the spawn, after the exit, once released."""
+    def _pty_info(self) -> dict | None:
+        """The service's word on this shell's pty (`pty.info`: its child,
+        the shell inside a box, the foreground, the shell's cwd, its
+        plan), or None: before the spawn, after the exit, once released."""
         view = self._view
         # `exited`: between `pty-exited` and the next spawn the view still
         # names the old pty, whose id the service has dropped (or, in the
         # beat before the reap lands, holds a finished pty with no master):
         # nothing is read from or written to it.
-        if view.pty is None or view.exited:
+        if view.pty is None or view.exited or self._client.closed:
             return None
         try:
-            return self._client.pty_of(view.pty)
-        except KeyError:
+            return self._client.request({"t": "pty.info", "pty": view.pty})
+        except (RequestRefused, ValueError):
             return None
+
+    def _has_pty(self) -> bool:
+        view = self._view
+        return view.pty is not None and not view.exited and not self._client.closed
 
     def _paint(self, text: str) -> bool:
         """Paint *text* into the stream of this shell's pty (the service's
         `paint`, rule 2 of §3.1), in pieces the protocol takes. False when
         there is no pty to paint into: the caller
         feeds the widget instead."""
-        if self._service_pty() is None:
+        if not self._has_pty():
             return False
         pty = self._view.pty
         step = protocol.TEXT_MAX
@@ -1301,8 +1199,7 @@ class PanelTerminal(Gtk.Box):
         pty's id, so the service captures its model, or the widget's text
         when it has no pty (a sandboxed shell that never found a plan
         still holds the history it was restored with)."""
-        found = self._service_pty()
-        if found is not None:
+        if self._has_pty():
             return int(self._view.pty)
         return _capture_contents(self.terminal)
 
@@ -1325,15 +1222,20 @@ class PanelTerminal(Gtk.Box):
         view.detach()
         client.close()
 
-    def set_history_key(self, key: str | None) -> None:
+    def set_history_key(self, key: str | None, handle: str | None = None) -> None:
         """Re-file this shell's history on the service under *key* (the
         tab's key moved: its session resolved, a draft became one or
-        stopped being one). A no-op with no pty."""
+        stopped being one), and name the session it belongs to (*handle*:
+        a shell opened on the new-chat screen learns it at the spawn). A
+        no-op with no pty."""
         view, client = self._view, self._client
         if client.closed or view.pty is None or view.exited:
             return
+        message: dict = {"t": "panel.key", "pty": view.pty, "history": key or None}
+        if handle:
+            message["handle"] = handle
         try:
-            client.request({"t": "panel.key", "pty": view.pty, "history": key or None})
+            client.request(message)
         except (RequestRefused, ValueError):
             pass
 
@@ -1347,14 +1249,14 @@ class PanelTerminal(Gtk.Box):
         spawned child for a plain shell; for a sandboxed one the shell
         inside the box, which the pty server finds below the launcher and
         bubblewrap. None until it exists."""
-        found = self._service_pty()
-        return found.shell_pid() if found is not None else None
+        found = self._pty_info()
+        return found.get("shell_pid") if found is not None else None
 
     def _shell_cwd(self, shell_pid: int) -> str | None:
         """The shell's working directory now: the service's ``/proc`` read
         of its pty's shell (Pty.process_cwd)."""
-        found = self._service_pty()
-        return found.process_cwd() if found is not None else None
+        found = self._pty_info()
+        return found.get("process_cwd") if found is not None else None
 
     def follow_cwd(self, cwd: str | None) -> bool:
         """`cd` this shell to *cwd* if it is sitting idle at its prompt —
@@ -1392,8 +1294,8 @@ class PanelTerminal(Gtk.Box):
         reports its process group in host pid numbers, so a bwrap-wrapped
         shell at its prompt reads idle like a plain one. The pty server
         answers (Pty.has_running_command), from the master it holds."""
-        found = self._service_pty()
-        return found.has_running_command() if found is not None else False
+        found = self._pty_info()
+        return bool(found.get("running_command")) if found is not None else False
 
     def run_command(self, command: str) -> None:
         """Type *command* into this shell and run it — behind a line reset,
@@ -1413,7 +1315,7 @@ class PanelTerminal(Gtk.Box):
         is nudged to repaint its prompt (\\x0c = Ctrl+L). The service wipes
         its model (what the history and the terminal tools read) and this
         terminal is redrawn from it."""
-        if self._service_pty() is not None:
+        if self._has_pty():
             pty = self._view.pty
             try:
                 self._client.request({"t": "clear", "pty": pty})
@@ -1439,9 +1341,11 @@ class PanelTerminal(Gtk.Box):
         model is the text of record (§3.3): its capture, the same text the
         panel history is written from; the widget's own text before a pty
         exists."""
-        found = self._service_pty()
-        if found is not None:
-            return self._client.screen_of(self._view.pty).capture_contents()
+        if self._has_pty():
+            try:
+                return str(self._client.request({"t": "pty.capture", "pty": self._view.pty}).get("text", ""))
+            except (RequestRefused, ValueError):
+                return ""
         return _capture_contents(self.terminal)
 
     def apply_settings(self, settings: dict) -> None:
@@ -1523,11 +1427,6 @@ class TerminalTab(Gtk.Box):
         # forked conversation: its id, for the sticky sandboxed set. The
         # tab itself stays bound to the id it was opened with.
         "fork-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
-        # The session is about to type str into its pty (an injected prompt,
-        # a model switch, a close flow's keys): the app's own input, which
-        # on the service's pty never passes the VTE and so never arrives as
-        # its "commit". The window feeds its echo gate from both.
-        "input-sent": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # A short message for the user, to float over the window as a toast
         # (the tab has no overlay of its own): the sandbox chip's refusal of
         # a directory, and the like. Plain text — the window escapes it.
@@ -1551,11 +1450,15 @@ class TerminalTab(Gtk.Box):
         # an image already on the list that changes nothing about it says
         # nothing.
         "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
-        # Emitted each time a transcript read lands on the main loop (see
-        # _on_transcript_landed), so a finish edge the window is holding for the
-        # transcript's word (MainWindow._hold_finish) can be judged the
-        # moment the word arrives rather than when its window runs out.
-        "transcript-updated": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # The service's activity verdicts for this tab's session, keyed by
+        # its handle (the placeholder row's, before the session has a row;
+        # a row's own flags travel on its item): busy went on or off, and a
+        # run finished (PR-1.12a, D29).
+        "activity-changed": (GObject.SignalFlags.RUN_FIRST, None, (bool,)),
+        "run-finished": (GObject.SignalFlags.RUN_FIRST, None, ()),
+        # The graceful close's budget ran out on the service: the window
+        # decides (a forced close). str = the phase ("agent" | "shell").
+        "close-budget": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # Emitted when this tab's stashed composer draft changes (str = the
         # draft, "" when it has been taken back or emptied), so the window
         # can save it against the session. See _stash_draft.
@@ -1620,35 +1523,33 @@ class TerminalTab(Gtk.Box):
             self._on_service_output, self._on_service_event, ptyclient.device_name()
         )
         self._view = ptyclient.ClientTerminal(self.terminal, self._client, on_exited=self._on_pty_exited)
-        self._pty = ptyclient.ServicePtyPort(self._client, self._view)
-        screen = ptyclient.ServiceScreenPort(self._client, self._view, self._theme_colours)
-        # The session's logic, out of the widget (see service/session.py):
-        # everything the tab's terminal is *for* — launching the agent,
-        # reading and writing its input box, the resolver, the transcript,
-        # activity, the close — over two ports on the terminal above. The
-        # tab's names for all of it forward there.
-        self.session = Session(
+        # The session's logic is the service's (service/session.py, hosted
+        # by service/hosting.py since PR-1.12a): everything the tab's
+        # terminal is *for* — launching the agent, reading and writing its
+        # input box, the resolver, the transcript, activity, the close. The
+        # tab holds its mirror (clientsession.ClientSession): the last
+        # `session` event's facts, read with no round trip, and the requests
+        # the tab makes of it. The tab's names for all of it forward there.
+        self.session = ClientSession(
+            request=self._client.request,
             provider=provider or get_provider("claude"),
-            pty=self._pty,
-            screen=screen,
-            host=_TabHost(self),
             session_id=session_id,
             fork=fork,
             options=options,
             command_override=command_override,
             cwd=cwd,
-            jsonl_path=jsonl_path,
-            # A VTE too old for termprops has no progress hint to watch.
-            progress=PROGRESS_HINT_TERMPROP is not None,
-            # Decided at spawn time, so a toggle mid-session can't half-apply
-            # to a shell that inherited the other choice; new tabs pick up a
-            # change.
-            progress_env=bool((settings or {}).get("progress_termprop", True)),
-            # Read live, as the app sets them at startup (and the checks
-            # swap them).
-            sandbox_host=lambda: SANDBOX_HOST,
-            sandbox_grants=lambda: SANDBOX_GRANTS,
+            jsonl_path=str(jsonl_path) if jsonl_path else None,
         )
+        # What the spawn request carries besides the identity above: a
+        # sandboxed fork's resolver mode (begin_session and the constructor
+        # tail decide).
+        self._fork_resolve = False
+        # The open-cuts in flight, by the handle the service gave each: the
+        # composer that asked, for as long as it is still this tab's and
+        # still up (`_on_cut_event`).
+        self._cuts: dict[str, ComposerView] = {}
+        # The client's cwd tick while mapped (see _on_cwd_polled).
+        self._cwd_tick: int | None = None
         # The new-chat screen, while the tab is one (None after begin_session
         # or for a tab that never was), and the draft id its panel history is
         # filed under meanwhile (see _history_id). The prompt Send hands over
@@ -1889,9 +1790,9 @@ class TerminalTab(Gtk.Box):
                 effort=(options.effort if options else "") or "",
                 pick_effort=self._can_switch_effort(),
                 sandbox_default=sandbox_default,
-                # The cached verdict only — never the blocking probe on the
-                # main loop; the app refreshes the box when it lands.
-                sandbox_available=sandboxplan.probe_reason() == "",
+                # The service's verdict as this client last heard it — never
+                # a probe of our own; the app refreshes the box when it lands.
+                sandbox_available=sandboxstatus.probe_reason() == "",
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
             self._new_chat.connect(
@@ -2020,20 +1921,16 @@ class TerminalTab(Gtk.Box):
 
         if settings:
             self.apply_settings(settings)
-        self.set_transcript_path(jsonl_path)
         if self._new_chat is not None:
             return  # nothing runs until the screen's Send (begin_session)
-        self.session.spawn(cwd, session_id)
-        if jsonl_path is None and session_id is None:
-            self._start_transcript_resolver(cwd)  # find the new session's transcript
-        elif fork and self.sandboxed:
-            # A fork keeps the original's id for the tab, but the CLI mints
-            # a new one for the conversation — and that one must be sticky
-            # too, or resuming the fork's own row later runs unboxed. The
-            # same resolver finds its transcript and reports the id on
-            # "fork-resolved" instead of binding the tab to it.
-            self.session.fork_resolve = True
-            self._start_transcript_resolver(cwd)
+        # A fork keeps the original's id for the tab, but the CLI mints a
+        # new one for the conversation — and that one must be sticky too,
+        # or resuming the fork's own row later runs unboxed. The service's
+        # resolver finds its transcript and reports the id on
+        # "fork-resolved" instead of binding the tab to it.
+        self._fork_resolve = bool(fork and self.sandboxed)
+        self.connect("map", lambda *_: self.session.arm_resolver())
+        self._service_spawn(cwd)
 
     # -- the session, forwarded ------------------------------------------------
     #
@@ -2044,10 +1941,6 @@ class TerminalTab(Gtk.Box):
     def session_id(self) -> str | None:
         """The session this tab runs, None until a fresh one resolves."""
         return self.session.session_id
-
-    @session_id.setter
-    def session_id(self, value: str | None) -> None:
-        self.session.session_id = value
 
     @property
     def fork(self) -> bool:
@@ -2070,47 +1963,20 @@ class TerminalTab(Gtk.Box):
     def _cwd(self) -> str | None:
         return self.session.cwd
 
-    @property
-    def _child_pid(self) -> int | None:
-        """The shell spawned on the agent's pty, None until it is."""
-        return self._pty.pid
+    # -- the probe (D27): the e2e checks' door past the protocol ----------------
 
-    @property
-    def _transcript(self) -> TranscriptModel:
-        return self.session.transcript
+    def probe(self, name: str):
+        """A session attribute on the service by (dotted) name, JSON-encoded
+        (`debug.session.get`): what the checks read where they read the
+        session's privates. Served only by a service running with
+        ``COLLINS_DEBUG_API=1``."""
+        return self.session.probe(name)
 
-    @property
-    def finish_ledger(self) -> activity.FinishLedger:
-        """Whether this tab's finish edges are real turns ending, judged off
-        the transcript (see activity.FinishLedger); armed by the first read
-        that lands, asked by the window at each edge."""
-        return self.session.finish_ledger
+    def probe_set(self, name: str, value) -> None:
+        self.session.probe_set(name, value)
 
-    @property
-    def _resolver_cwd(self) -> str | None:
-        return self.session.resolver_cwd
-
-    @property
-    def _initial_command(self) -> str | None:
-        """The command typed into the shell at the launch (None for a
-        plain shell)."""
-        return self.session.initial_command
-
-    @property
-    def _worktree_launch(self) -> bool:
-        return self.session.worktree_launch
-
-    @property
-    def _new_chat_prompt(self) -> str | None:
-        return self.session.new_chat_prompt
-
-    @property
-    def _pasted_back(self) -> dict[str, str]:
-        return self.session.pasted_back
-
-    @property
-    def _paste_back_pending(self) -> list[str] | None:
-        return self.session.paste_back_pending
+    def probe_call(self, name: str, *args):
+        return self.session.probe_call(name, *args)
 
     # -- the new-chat screen -------------------------------------------------
 
@@ -2150,15 +2016,9 @@ class TerminalTab(Gtk.Box):
     @property
     def sandbox_box(self) -> str:
         """The id of the box this tab's session runs in, "" for an
-        unsandboxed tab or before the launch settled: what the window
-        records against the session id once the resolver binds it."""
-        return self.session.sandbox_box
-
-    def take_sandbox_defaults_owed(self) -> bool:
-        """Whether this tab's box is still owed its first grants — it was
-        minted for a --continue launch, with none — and no longer after
-        this call: the window asks once, when the session resolves."""
-        return self.session.take_sandbox_defaults_owed()
+        unsandboxed tab or before the launch settled (the service records
+        it against the session id once the resolver binds it)."""
+        return self.session.sandbox_box or ""
 
     def new_chat_text(self) -> str:
         return self._new_chat.text() if self._new_chat is not None else ""
@@ -2258,17 +2118,12 @@ class TerminalTab(Gtk.Box):
         self._history_key = None
         self._rekey_panel_shells()
         self.session.options = options
+        self._stage.set_visible_child_name("terminal")
+        self._service_spawn(self._cwd, prompt=prompt)
         # Shells open right now, at a launch that will move into a worktree,
         # get the offer to move with it once the worktree exists.
-        self.session.shells_follow_armed = bool(options and options.worktree) and bool(
-            self._dock.shell_pages()
-        )
-        self._stage.set_visible_child_name("terminal")
-        self.session.hold_new_chat_prompt(prompt)
-        self.session.spawn(self._cwd, None)
-        self._start_transcript_resolver(self._cwd)
-        if prompt:
-            self.session.start_new_chat_prompt_poll()
+        if bool(options and options.worktree) and bool(self._dock.shell_pages()):
+            self.session.set_shells_follow_armed(True)
         self.grab_terminal_focus()
 
     def _note_new_chat_change(self) -> None:
@@ -2279,24 +2134,59 @@ class TerminalTab(Gtk.Box):
     # -- spawning ----------------------------------------------------------
     #
     # The launch — the command, the sandbox plan, the reaped worktree put
-    # back, the worktree launch watched, the restart — is the session's
-    # (Session.spawn and what follows it); the tab asks the service for the
-    # shell when asked (_TabHost.spawn_shell) and hears it land here.
+    # back, the worktree launch watched, the restart — is the session's,
+    # on the service (Session.spawn and what follows it, built by the
+    # service's `spawn` for an agent); the tab asks and shows.
 
-    def _service_spawn(self, cwd: str) -> None:
-        """The tab's `spawn_shell`: ask the service for an agent
-        pty in *cwd* at this terminal's grid (the service builds the shell's
-        environment, progress declarations included, from its own), show
-        it, and let the session type. A refusal is painted where the spawn
-        error goes. The session hears the spawn an idle later, at
-        PRIORITY_DEFAULT."""
-        view = self._view
+    def _service_spawn(self, cwd: str | None, prompt: str = "") -> None:
+        """Ask the service for this tab's session: a `spawn` of kind agent
+        carrying what the session is built from (the id to resume, the
+        fork, the options, the command override, the transcript, a
+        new-chat *prompt* to type once the CLI is at its box) at this
+        terminal's grid; then show its pty. The service builds the shell's
+        environment, progress declarations included, from its own, and the
+        session types. A refusal is painted where the spawn error goes."""
+        view, session = self._view, self.session
         cols, rows = view.grid()
-        try:
-            reply = self._client.request(
-                {"t": "spawn", "kind": "agent", "cwd": cwd, "cols": cols, "rows": rows}
+        request: dict = {"t": "spawn", "kind": "agent", "cols": cols, "rows": rows}
+        request["cwd"] = cwd or str(Path.home())
+        request["provider"] = session.provider.id
+        if session.session_id:
+            request["session"] = session.session_id
+        if session.fork:
+            request["fork"] = True
+        if session.command_override:
+            request["command_override"] = session.command_override
+        if session.transcript_path:
+            request["jsonl_path"] = session.transcript_path
+        if self._fork_resolve:
+            request["fork_resolve"] = True
+        if prompt:
+            request["prompt"] = prompt
+        options = session.options
+        if options is not None:
+            request.update(
+                model=options.model,
+                effort=options.effort,
+                permission_mode=options.permission_mode,
+                add_dirs=list(options.add_dirs),
+                worktree=bool(options.worktree),
+                worktree_name=options.worktree_name,
+                sandbox=bool(options.sandbox),
             )
-            view.attach(int(reply["pty"]))
+            if options.sandbox_box:
+                request["sandbox_box"] = options.sandbox_box
+            if options.sandbox_plan:
+                request["sandbox_plan"] = options.sandbox_plan
+        try:
+            reply = self._client.request(request)
+            session.pty = int(reply["pty"])
+            session.handle = str(reply.get("handle") or "")
+            view.attach(session.pty)
+            # The shells opened before the spawn (the new-chat screen's)
+            # learn the session they belong to, so the service re-files
+            # their history when it resolves (`rekey_shells`).
+            self._rekey_panel_shells()
         except RequestRefused as exc:
             reason = _(exc.msgid).format_map(exc.details) if exc.msgid else _("failed to start shell")
             self.feed_message(reason)
@@ -2304,12 +2194,6 @@ class TerminalTab(Gtk.Box):
         except (ValueError, KeyError) as exc:
             self.feed_message(_("failed to start shell: {msg}").format(msg=str(exc)))
             return
-        GLib.idle_add(self._service_spawned, priority=GLib.PRIORITY_DEFAULT)
-
-    def _service_spawned(self) -> bool:
-        if self._view.pty is not None:
-            self.session.shell_spawned()
-        return GLib.SOURCE_REMOVE
 
     def _theme_colours(self) -> tuple:
         """(foreground, background, palette) of the theme the terminal is
@@ -2332,15 +2216,114 @@ class TerminalTab(Gtk.Box):
         self._view.on_output(pty, data, flags)
 
     def _on_service_event(self, event: dict) -> None:
-        self._view.on_event(event)
+        """An event of this tab's connection: the session's (`session`,
+        `cut`, `composer`, `focus`, `shells`, `close`: §3.19) here, the
+        pty's to the view."""
+        kind = event.get("t")
+        if kind == "session":
+            self._on_session_event(event)
+        elif kind == "cut":
+            self._on_cut_event(event)
+        elif kind == "composer":
+            self._on_composer_event(event)
+        elif kind == "focus.terminal":
+            if event.get("pty") == self.session.pty:
+                self.grab_terminal_focus()
+        elif kind == "shells":
+            if event.get("pty") == self.session.pty and event.get("what") == "stale":
+                self._mark_stale_sandboxed_shells()
+        elif kind == "close":
+            if (
+                event.get("pty") == self.session.pty
+                and self.session.close_action(event.get("state")) == "force"
+            ):
+                self.emit("close-budget", str(event.get("phase") or ""))
+        else:
+            self._view.on_event(event)
+
+    def _on_session_event(self, event: dict) -> None:
+        """A `session` event: the mirror takes the fields, and what the tab
+        showed off the old values follows — the chips, labels, attachments
+        and agent files off a transcript landing, the footer's cwd, the
+        sandbox chip, and the signals the window's handlers stay on."""
+        if event.get("pty") != self.session.pty:
+            return
+        changed = self.session.apply(event)
+        if not changed:
+            return
+        if "reset" in changed:
+            self._on_transcript_reset()
+        if "landed" in changed:
+            self._on_transcript_landed(
+                from_records(self.session.prs), bool(event.get("lookup_empty"))
+            )
+        if "agent_cwd" in changed:
+            self._on_cwd_polled(self.session.agent_cwd)
+        if changed & {"sandboxed", "sandbox_plan_path", "sandbox_box", "options"}:
+            self._sync_sandbox_chip()
+        if "busy" in changed:
+            self.emit("activity-changed", bool(self.session.busy))
+        if "finished" in changed:
+            self.emit("run-finished")
+        if "session_id" in changed and self.session.session_id:
+            self.emit("session-resolved", self.session.session_id)
+        if "forked" in changed and self.session.forked:
+            self.emit("fork-resolved", self.session.forked)
+
+    def _on_cut_event(self, event: dict) -> None:
+        """A `cut` event: the open-cut the service ran for one of this
+        tab's composers landed (`seeded`: the box's text, appended), was
+        refused (the box holds a paste no read can recover: whatever the
+        composer gathered meanwhile goes back to the stash, the composer
+        is lowered without restoring, and the terminal says why), or was
+        called off."""
+        if event.get("pty") != self.session.pty:
+            return
+        composer = self._cuts.pop(str(event.get("handle") or ""), None)
+        if composer is None:
+            return
+        text = str(event.get("text") or "")
+        up = composer is self._composer and self.composer_open()
+        action = self.session.cut_action(event.get("state"), up)
+        if action == clientsession.CUT_SEED:
+            composer.seed_text(text)
+        elif action == clientsession.CUT_STASH:
+            # The cut landed after the composer closed: what it took out of
+            # the box goes where a closing composer's text goes.
+            self._restore_or_stash(text)
+        elif action == clientsession.CUT_REFUSE:
+            self._stash_draft(composer.peek_text())
+            self.close_composer(restore=False)
+            self.feed_message(_("Composer: the input box holds a paste Collins can't read"))
+
+    def _on_composer_event(self, event: dict) -> None:
+        """A `composer` event: the session asks this client's composer for
+        something — the keyboard back once the popover that asked for a
+        switch has closed (an idle later: popovers undo a grab made during
+        their own action), a send that waited out a cut re-sent with what
+        the composer holds now, or a draft the terminal wouldn't take kept
+        as the tab's stash."""
+        if event.get("pty") != self.session.pty:
+            return
+        what = event.get("what")
+        if what == "refocus":
+            GLib.idle_add(self._refocus_composer)
+        elif what == "resend":
+            if self._composer is not None and self.composer_open():
+                self._on_composer_send(None, self._composer.peek_text())
+        elif what == "stash":
+            self._stash_draft(str(event.get("text") or ""))
 
     def _on_pty_exited(self, status: int | None) -> None:
         # `pty-exited` is what `child-exited` was (§3.4): the shell on the
-        # service's pty is gone. *status* is an exit code, or minus the
+        # service's pty is gone, and the session's clean-up ran there
+        # (Session.shell_exited). *status* is an exit code, or minus the
         # signal number (os.waitstatus_to_exitcode), not VTE's raw wait
         # status; one the service does not know (a keeper crash, PR-3.6)
         # is shown as a signal exit nothing names.
-        self.session.shell_exited(-1 if status is None else int(status))
+        self.session.exit()
+        self._cuts.clear()
+        self.emit("process-exited", -1 if status is None else int(status))
 
     def release_pty(self) -> None:
         """The tab is closing for good: end its pty on the service (Phase
@@ -2358,26 +2341,17 @@ class TerminalTab(Gtk.Box):
         self._view.detach()
         self._client.close()
 
-    def _relaunch_without_worktree(self) -> None:
-        """Type the same new-session command again with the worktree dropped
-        (`Session.relaunch_without_worktree`)."""
-        self.session.relaunch_without_worktree()
-
     def can_restart_sandboxed(self) -> bool:
-        """Whether *Restart to apply* is on offer (`Session.can_restart_sandboxed`)."""
+        """Whether *Restart to apply* is on offer (the service's
+        `Session.can_restart_sandboxed`, as the mirror has it)."""
         return self.session.can_restart_sandboxed()
 
     def restart_sandboxed(self) -> bool:
-        """The footer chip's *Restart to apply* (`Session.restart_sandboxed`):
-        the CLI asked to exit, and this session resumed in the same shell
-        with a plan rebuilt from the state now. False when nothing can be
+        """The footer chip's *Restart to apply* (`sandbox.restart`): the CLI
+        asked to exit, and this session resumed in the same shell with a
+        plan rebuilt from the state now. False when nothing can be
         restarted."""
         return self.session.restart_sandboxed()
-
-    def _on_child_exited(self, terminal: Vte.Terminal, status: int) -> None:
-        # The shell is gone, and the box with it: the session tidies up
-        # after it (Session.shell_exited), then "process-exited" goes out.
-        self.session.shell_exited(status)
 
     # -- copy & paste ------------------------------------------------------
 
@@ -2733,11 +2707,25 @@ class TerminalTab(Gtk.Box):
         footer.append(toggle_btn)
         footer.append(self._git_toggle_btn)
         footer.append(self._editor_toggle_btn)
-        # Poll only while on screen; refresh immediately on every tab switch
-        # (Session.start_cwd_poll, whose every reading lands in
-        # _on_cwd_polled).
-        self.connect("map", lambda *_: self.session.start_cwd_poll())
+        # The service polls the agent's cwd for every live session and
+        # publishes it when it moves (the `session` event's agent_cwd,
+        # landing in _on_cwd_polled at once); the branch and the git page's
+        # freshness ride a tick of the tab's own, only while on screen, and
+        # a tab switch refreshes at once.
+        self.connect("map", lambda *_: self._start_cwd_tick())
         return footer
+
+    def _start_cwd_tick(self) -> None:
+        self._on_cwd_polled(self.session.current_agent_cwd())
+        if self._cwd_tick is None:
+            self._cwd_tick = GLib.timeout_add(_CWD_TICK_MS, self._on_cwd_tick)
+
+    def _on_cwd_tick(self) -> bool:
+        if not self.get_mapped():  # hidden/closed tab → resume on next map
+            self._cwd_tick = None
+            return GLib.SOURCE_REMOVE
+        self._on_cwd_polled(self.session.current_agent_cwd())
+        return GLib.SOURCE_CONTINUE
 
     def _on_cwd_polled(self, cwd: str | None) -> None:
         """One tick of the session's cwd poll: the footer's cwd and branch,
@@ -2809,7 +2797,7 @@ class TerminalTab(Gtk.Box):
         """
         if not self.session.shells_follow_armed:
             return
-        self.session.shells_follow_armed = False
+        self.session.set_shells_follow_armed(False)
         shells = [shell for shell in self._dock.shell_pages() if shell.ever_spawned]
         if not shells:
             return
@@ -2874,7 +2862,7 @@ class TerminalTab(Gtk.Box):
         until it has. Called wherever the transcript has just been read.
         The composer's picker button names the same read, so the two never
         disagree about what the session is answering with."""
-        model = self._transcript.model()
+        model = self.session.model
         if model == self._footer_model:
             return
         self._footer_model = model
@@ -2895,7 +2883,7 @@ class TerminalTab(Gtk.Box):
         """Name the effort level the session last answered at, or hide the
         chip until it has — the model label's twin, off the same read, and
         pushed to the composer's effort button the same way."""
-        effort = self._transcript.effort()
+        effort = self.session.effort
         if effort == self._footer_effort:
             return
         self._footer_effort = effort
@@ -3208,12 +3196,6 @@ class TerminalTab(Gtk.Box):
         while the tab is open."""
         self.session.restore_prs(records)
 
-    def attach_pr(self, pr: PullRequest) -> bool:
-        """Adopt a PR named from outside the transcript — the attach_pr
-        session tool. False when the session already tracks it
-        (`Session.attach_pr`)."""
-        return self.session.attach_pr(pr)
-
     # -- attachments --------------------------------------------------------
 
     def record_attachment(
@@ -3275,7 +3257,7 @@ class TerminalTab(Gtk.Box):
         """Take the images the last transcript update noticed. On the main
         loop, from `_on_transcript_landed`, with the scan itself already done on the
         update thread."""
-        scanned = self._transcript.attachments()
+        scanned = attachrecords.from_records(self.session.attachments)
         if scanned == self._scanned_attachments:
             return
         self._scanned_attachments = scanned
@@ -3869,7 +3851,8 @@ class TerminalTab(Gtk.Box):
         it. The trailing space both
         terminates the CLI's mention token and leaves the cursor ready for
         that sentence; the leading one keeps the token off the end of a
-        sentence already being written (see _mention_leading_space).
+        sentence already being written (Session.mention_leading_space, on
+        the service).
 
         The path resolves against the agent's cwd right now, not the
         directory the tab started in — an agent that has cd'd into a
@@ -3886,54 +3869,29 @@ class TerminalTab(Gtk.Box):
         the mention lands there (as the screen's own attach button lands
         its pick — see _on_composer_file_chosen). The path resolves
         against the project directory the session will start in."""
-        if self._new_chat is None and not self._agent_is_running():
-            self.feed_message(_("Add to chat: the agent isn't running in this tab"))
-            return
-        reference = self.provider.file_reference(
-            path, self.current_agent_cwd(), start_line, end_line
-        )
-        if reference is None:
-            self.feed_message(_("Add to chat isn't available for this file"))
-            return
         # An open composer *is* the input box right now — the CLI's own was
         # emptied into it — so every attach entry point lands there instead.
         # On the new-chat screen the screen's composer is that box.
-        if self._new_chat is not None:
-            self._new_chat.composer.insert_mention(reference + " ")
+        if self._new_chat is not None or self.composer_open():
+            reference = self.provider.file_reference(
+                path, self.current_agent_cwd(), start_line, end_line
+            )
+            if reference is None:
+                self.feed_message(_("Add to chat isn't available for this file"))
+                return
+            if self._new_chat is not None:
+                self._new_chat.composer.insert_mention(reference + " ")
+            else:
+                self._composer.insert_mention(reference + " ")
             return
-        if self.composer_open():
-            self._composer.insert_mention(reference + " ")
+        # Into the CLI's box: the service builds the reference against the
+        # agent's cwd and reads the cursor's line for the leading space
+        # (`mention`), and says why when it can't.
+        refused = self.session.mention(path, start_line, end_line)
+        if refused:
+            self.feed_message(refused)
             return
-        self.feed_child_text(self._mention_leading_space() + reference + " ")
         GLib.idle_add(self._focus_terminal_after_add_to_chat)
-
-    def _mention_leading_space(self) -> str:
-        """A space to put in front of a mention about to be typed, when the
-        input box has a sentence in it already (dropimages.leading_space
-        decides; this finds what it reads).
-
-        That is the line the cursor is on, up to the cursor — the same
-        screen `takes_prompt` reads, but read differently: this question is
-        asked mid-sentence, where the prompt marker is no longer the last
-        thing on the line, so what counts is the character immediately
-        before the cursor rather than where the marker sits. A cursor at
-        column 0 has nothing before it to read.
-        """
-        column, row = self.session.screen.cursor()
-        if column <= 0:
-            return ""
-        return dropimages.leading_space(self._row_text(row, column), column)
-
-    def _row_text(self, row: int, end_column: int) -> str:
-        """What row *row* says from its start up to *end_column* (exclusive).
-
-        The column is a count of cells, not of characters — a wide character
-        advances it by two — so callers comparing the two have to say which
-        they mean (dropimages.cell_width). Trailing cells that were never
-        written aren't reported at all, which is how a cursor sitting past
-        the end of a line gives a string shorter than its own column.
-        """
-        return self.session.screen.row_text(row, end_column)
 
     def _focus_terminal_after_add_to_chat(self) -> bool:
         """Move focus to the agent terminal once the "Add to chat" menu is
@@ -4065,7 +4023,7 @@ class TerminalTab(Gtk.Box):
         if self.composer_open():
             self._composer.insert_mention(text)
             return True
-        self.feed_child_text(self._mention_leading_space() + text)
+        self.session.write_mention(text)
         self.grab_terminal_focus()
         return True
 
@@ -4346,6 +4304,7 @@ class TerminalTab(Gtk.Box):
         if not self.composer_open():
             return
         text = self._composer.take_text()
+        self._cuts.clear()
         self.session.cancel_cut()  # the box is about to hold this text again
         self._composer_revealer.set_reveal_child(False)
         if restore:
@@ -4459,7 +4418,7 @@ class TerminalTab(Gtk.Box):
             if not docked:
                 self._composer_revealer.set_reveal_child(False)
 
-        self.session.send_composed(text, clear)
+        self.session.send_composed(text, clear, composer_open=True)
 
     def _sync_composer_overlay_btn(self) -> None:
         """Show the floating composer button only when it has something to do:
@@ -4542,17 +4501,21 @@ class TerminalTab(Gtk.Box):
         view.set_docked(False)
         self._composer_revealer.set_child(view)
         text = view.take_text()
+        self._cuts.clear()
         self.session.cancel_cut()  # as in close_composer: the text goes back
         self._restore_or_stash(text)
         self.grab_terminal_focus()
 
     def _begin_cut(self, composer: ComposerView) -> None:
         """Take the typed-but-unsent prompt out of the CLI's input box and
-        into *composer* — the open-cut, a chain of screen reads that settle
-        before they erase and verify after (`Session.begin_cut`). The
-        composer is reached through a `_ComposerCut` for as long as it is
-        still this tab's and still open."""
-        self.session.begin_cut(_ComposerCut(self, composer))
+        into *composer* — the open-cut, a chain of screen reads on the
+        service that settle before they erase and verify after
+        (`Session.begin_cut`). Its `cut` events reach the composer by the
+        handle the service answers with, for as long as it is still this
+        tab's and still open (`_on_cut_event`)."""
+        handle = self.session.begin_cut()
+        if handle:
+            self._cuts[handle] = composer
 
     def _pick_file_for_composer(self) -> None:
         """The composer's attach button: pick a file, landing its mention in
@@ -4593,27 +4556,30 @@ class TerminalTab(Gtk.Box):
             return
         composer.insert_mention(reference + " ")
 
-    def inject_prompt(self, text: str) -> None:
+    def inject_prompt(self, text: str, when_empty: bool = False) -> bool:
         """Type *text* into the agent, send it, and put the tab in front —
-        what the PR menu's prompt actions do (`Session.inject_prompt`)."""
-        self.session.inject_prompt(text)
+        what the PR menu's prompt actions do (`Session.inject_prompt`).
+        With *when_empty* the service types it only into a box it reads
+        as empty right now. Whether it went."""
+        return self.session.inject_prompt(text, when_empty=when_empty)
 
-    def inject_prompt_unfocused(self, text: str) -> None:
+    def inject_prompt_unfocused(self, text: str, when_empty: bool = False) -> bool:
         """Submit *text* to the agent as one bracketed paste, without taking
         focus or the view — a background spawn's start_session prompt
-        (`Session.inject_prompt_unfocused`)."""
-        self.session.inject_prompt_unfocused(text)
+        (`Session.inject_prompt_unfocused`). Whether it went."""
+        return self.session.inject_prompt_unfocused(text, when_empty=when_empty)
 
     def switch_model(self, model_id: str) -> None:
         """Post the provider's model-switch command to the chat — what a
         pick in either model menu (the footer label's, the composer's)
-        means (`Session.switch_model`)."""
-        self.session.switch_model(model_id)
+        means (`Session.switch_model`; whether the composer is up decides
+        the road the command takes)."""
+        self.session.switch_model(model_id, self.composer_open())
 
     def switch_effort(self, effort: str) -> None:
         """Post the provider's effort-switch command to the chat — what a
         pick in either effort menu means (`Session.switch_effort`)."""
-        self.session.switch_effort(effort)
+        self.session.switch_effort(effort, self.composer_open())
 
     def _refocus_composer(self) -> bool:
         if self._composer is not None and self.composer_open():
@@ -4622,14 +4588,14 @@ class TerminalTab(Gtk.Box):
 
     def takes_prompt(self) -> bool:
         """Whether a prompt sent right now would land in an empty input box
-        (`Session.takes_prompt`)."""
-        return self.session.takes_prompt()
+        (`Session.takes_prompt`, as the service last read it: D28)."""
+        return self.session.takes_prompt_now()
 
     def prompt_block(self) -> str:
         """Why a prompt sent to this tab wouldn't land, or "" when it would —
         the sentence a PR menu greys its prompt actions out with
         (`Session.prompt_block`)."""
-        return self.session.prompt_block()
+        return self.session.prompt_block_text()
 
     def entered_prompt(self) -> EnteredPrompt | None:
         """The prompt typed into the agent's input box and not yet sent, or
@@ -4653,32 +4619,12 @@ class TerminalTab(Gtk.Box):
             return True
         return self.session.unstarted_thread()
 
-    def _visible_screen_text(self) -> str:
-        """Everything on the terminal's visible screen, as plain text
-        (`Session.visible_screen_text`)."""
-        return self.session.visible_screen_text()
-
-    def worktree_exit_prompt_keystrokes(self) -> str | None:
-        """Keystrokes that accept the agent's "leaving a worktree" dialog if
-        it's showing right now, or None (`Session.worktree_exit_prompt_keystrokes`)."""
-        return self.session.worktree_exit_prompt_keystrokes()
-
-    def screen_first_column(self) -> tuple[tuple[str, ...], tuple[int, int]] | None:
-        """The first character of each visible screen row with the grid it
-        was read at, or None with no child (`Session.screen_first_column`)."""
-        return self.session.screen_first_column()
-
     # -- transcript --------------------------------------------------------
     #
     # The tail itself — the file monitor, the poll, the off-thread parse, the
-    # PRs it collects — and the resolver are the session's; what lands is
-    # shown here (_on_transcript_reset, _on_transcript_landed).
-
-    def set_transcript_path(self, jsonl_path: str | Path | None) -> None:
-        """Tail a transcript for what the tab reads out of it (touched files,
-        pull requests). Used on resume, and again once a brand-new session's
-        file appears on disk (`Session.set_transcript_path`)."""
-        self.session.set_transcript_path(jsonl_path)
+    # PRs it collects — and the resolver are the session's, on the service;
+    # what lands is shown here (_on_transcript_reset, _on_transcript_landed,
+    # off the `session` event's transcript fields).
 
     def _on_transcript_reset(self) -> None:
         """The session was pointed at another transcript: another session's
@@ -4698,30 +4644,18 @@ class TerminalTab(Gtk.Box):
         branch lookup that found nothing."""
         self._pr_refresh_btn.set_sensitive(True)
         # Same pane object wherever it lives (in-tab or popped out).
-        self._editor.set_agent_files(self._transcript.touched_files())
+        self._editor.set_agent_files(list(self.session.touched_files))
         self._harvest_attachments()
         self._refresh_model_label()
         self._refresh_effort_label()
         self._refresh_pr_chips(prs)
         if lookup_empty:  # even with PRs still showing: none of them is this branch's
             self._sync_pr_refresh_tooltip(not_found=True)
-        self.emit("transcript-updated")
 
     @property
     def transcript_path(self) -> str | None:
         """The transcript this tab is tailing, or None."""
         return self.session.transcript_path
-
-    def finish_witness(self) -> tuple[tuple[int, int], int | None]:
-        """What the transcript says right now, for the finish ledger
-        (`Session.finish_witness`)."""
-        return self.session.finish_witness()
-
-    def request_transcript_update(self) -> None:
-        """Re-read the transcript now rather than at the next poll — asked by
-        a finish edge the window is holding for the transcript's word. A read
-        already in flight is enough: its landing is the word."""
-        self.session.request_update()
 
     def _request_update(self, discover: bool = False) -> None:
         """Ask the session for a transcript read (`Session.request_update`);
@@ -4731,16 +4665,7 @@ class TerminalTab(Gtk.Box):
     def relocate_transcript(self, jsonl_path: str | Path) -> None:
         """Follow this tab's transcript to a new path — the CLI moved it on
         worktree entry (`Session.relocate_transcript`)."""
-        self.session.relocate_transcript(jsonl_path)
-
-    def _start_transcript_resolver(self, cwd: str | None) -> None:
-        """Find the new session's transcript (`Session.start_resolver`):
-        polled for as long as the tab is in the foreground, paused after ~3
-        min in the background, resumed whenever the tab is brought back."""
-        if not cwd:
-            return
-        self.connect("map", lambda *_: self.session.arm_resolver())
-        self.session.start_resolver(cwd)
+        self.session.relocate_transcript(str(jsonl_path))
 
     # -- secondary terminal panel ------------------------------------------
 
@@ -4773,6 +4698,7 @@ class TerminalTab(Gtk.Box):
             plan_lookup=lookup,
             box_lookup=box,
             history_lookup=self._shell_history_key,
+            handle_lookup=lambda: self.session.handle,
         )
         shell.hist = self._dock.next_hist_ordinal()
         return shell
@@ -5230,10 +5156,11 @@ class TerminalTab(Gtk.Box):
         it holds (the key and the moment are the service's to act on when
         a shell exits, §3.15)."""
         key = self._shell_history_key()
+        handle = self.session.handle or None
         for shell in self._dock.shell_pages():
             rekey = getattr(shell, "set_history_key", None)
             if rekey is not None:
-                rekey(key)
+                rekey(key, handle)
 
     def _history_id(self) -> str | None:
         """What this tab's panel scrollback is filed under: the session id,
@@ -5501,23 +5428,8 @@ class TerminalTab(Gtk.Box):
 
     def _agent_is_running(self) -> bool:
         """Whether the provider's CLI is alive in this terminal right now
-        (`Session.agent_is_running`)."""
+        (`Session.agent_is_running`, as the service last read it)."""
         return self.session.agent_is_running()
-
-    def owns_pid_ancestors(self, ancestors: set[int]) -> bool:
-        """Whether one of *ancestors* is a process this tab's terminal runs
-        (`Session.owns_pid_ancestors`)."""
-        return self.session.owns_pid_ancestors(ancestors)
-
-    def has_background_descendant(self, ignore: Collection[str] = frozenset()) -> bool:
-        """Whether the agent has something still running below it right now
-        (`Session.has_background_descendant`)."""
-        return self.session.has_background_descendant(ignore)
-
-    def background_descendant_cmdlines(self) -> set[str]:
-        """The cmdlines of everything running directly below this tab's agent
-        right now (`Session.background_descendant_cmdlines`)."""
-        return self.session.background_descendant_cmdlines()
 
     # -- helpers -----------------------------------------------------------
 

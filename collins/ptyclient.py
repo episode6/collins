@@ -7,13 +7,15 @@
 
 `ClientTerminal` binds one VTE widget to one pty of the service through a
 client of the API (`api.loopback.LoopbackClient` through Phase 1, the
-socket from PR-1.12): output frames are `feed()`, what VTE `commit`s goes
+socket from PR-1.12b): output frames are `feed()`, what VTE `commit`s goes
 back as input frames, the grid and the focus go as `resize` and `focus`
 events, and `pty-exited` is what `child-exited` used to be. Nothing
 reaches the VTE that did not come out of the service's stream for the pty,
 and nothing reaches the pty that did not go through the service (§3.1
 rule 2). Every session tab and panel shell runs on it; there is no other
-backend (PR-1.9 deleted the tab's own in-widget pty).
+backend (PR-1.9 deleted the tab's own in-widget pty). The session's own
+reads of the pty and the screen model are the service's since PR-1.12a
+(`service.hosting`); the tab holds `clientsession.ClientSession`.
 
 The redraw guard
 ----------------
@@ -52,7 +54,6 @@ from __future__ import annotations
 import logging
 import socket
 from collections.abc import Callable
-from typing import Any
 
 from gi.repository import GLib, Vte
 
@@ -304,137 +305,3 @@ def commit_bytes(text: str | None, size: int) -> bytes | None:
     if not data and size == 1:
         return b"\x00"
     return None
-
-
-class ServicePtyPort:
-    """`service.ports.PtyPort` over a service pty, through the client: a
-    write is an input frame, a resize the `resize` event; the pid and the
-    foreground group are read off the loopback's pty object (a shortcut
-    the socket replaces with the `pty` event's ``pid`` and a request:
-    see api.loopback)."""
-
-    def __init__(self, client, view: ClientTerminal) -> None:
-        self._client = client
-        self._view = view
-
-    @property
-    def pid(self) -> int | None:
-        return self.child_pid()
-
-    def _pty(self):
-        if self._view.pty is None:
-            return None
-        try:
-            return self._client.pty_of(self._view.pty)
-        except KeyError:
-            return None
-
-    def write(self, data: bytes) -> None:
-        if self._view.pty is not None:
-            self._client.send_input(self._view.pty, data)
-
-    def resize(self, cols: int, rows: int) -> None:
-        # The PtyPort of §3.5: a never-shown tab is sized before its spawn
-        # (window.start_background_session), and the grid goes to the
-        # service as the widget's allocation would have.
-        self._view.terminal.set_size(cols, rows)
-        self._view.send_grid()
-
-    def child_pid(self) -> int | None:
-        pty = self._pty()
-        return pty.child_pid() if pty is not None else None
-
-    def foreground_pgrp(self) -> int | None:
-        pty = self._pty()
-        return pty.foreground_pgrp() if pty is not None else None
-
-
-class ServiceScreenPort:
-    """`service.ports.ScreenPort` over the service's screen model
-    (`termscreen.Screen`), read through the loopback's `screen_of`. The
-    model is the screen as anchored to the cursor already (it has no
-    scroll position), so every row index is the model's own. *colours*
-    answers the theme's (foreground, background, 16-colour palette), read
-    live, each None while the terminal follows the system colours; the
-    model's `tail_is_faint` is today's read only with the colours the
-    terminal draws in."""
-
-    def __init__(self, client, view: ClientTerminal, colours: Callable[[], tuple]) -> None:
-        self._client = client
-        self._view = view
-        self._colours = colours
-
-    def _screen(self) -> Any:
-        if self._view.pty is None:
-            return None
-        try:
-            return self._client.screen_of(self._view.pty)
-        except KeyError:
-            return None
-
-    def rows(self) -> list[str]:
-        screen = self._screen()
-        return screen.rows() if screen is not None else []
-
-    def cursor(self) -> tuple[int, int]:
-        screen = self._screen()
-        return screen.cursor() if screen is not None else (0, 0)
-
-    def columns(self) -> int:
-        screen = self._screen()
-        return screen.columns() if screen is not None else self._view.grid()[0]
-
-    def row_count(self) -> int:
-        screen = self._screen()
-        return screen.row_count() if screen is not None else self._view.grid()[1]
-
-    def tail_is_faint(self, row: int, column: int) -> bool:
-        screen = self._screen()
-        if screen is None or not 0 <= row < screen.row_count():
-            return False
-        fg, bg, palette = self._colours()
-        kw = {}
-        if fg is not None:
-            kw["foreground"] = fg
-        if bg is not None:
-            kw["background"] = bg
-        if palette:
-            kw["palette"] = palette
-        return screen.tail_is_faint(row, column, **kw)
-
-    def first_column(self) -> tuple[str, ...]:
-        screen = self._screen()
-        return screen.first_column() if screen is not None else ()
-
-    def capture_contents(self) -> str:
-        screen = self._screen()
-        return screen.capture_contents() if screen is not None else ""
-
-    def row_text(self, row: int, end_column: int) -> str:
-        screen = self._screen()
-        if screen is None or not 0 <= row < screen.row_count():
-            return ""
-        return _cells_prefix(screen.cells(row), end_column)
-
-    def visible_text(self) -> str:
-        screen = self._screen()
-        if screen is None:
-            return ""
-        _, cursor_row = screen.cursor()
-        out: list[str] = []
-        wrapped = screen.grid.wrapped
-        for y in range(cursor_row + 1):
-            out.append(screen.row_text(y))
-            if y < cursor_row and not wrapped[y]:
-                out.append("\n")
-        return "".join(out)
-
-
-def _cells_prefix(cells: list, end_column: int) -> str:
-    """The text of a model row's cells up to *end_column* (cells,
-    exclusive), as `termscreen.line_text` gives the whole row: up to the
-    last cell written, a blank inside reading as a space, the second half
-    of a wide character nothing (its first half carries the text)."""
-    from .service.termscreen import line_text
-
-    return line_text(cells[:end_column])

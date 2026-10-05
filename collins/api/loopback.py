@@ -19,15 +19,13 @@ output frame reaches the client's callback before `send_output` returns,
 all on the one GLib loop, which is also why the loopback reports every
 live frame as drained the moment the callback took it.
 
-Two shortcuts the socket will not have, for the `Session` that still runs
-in the client's process through Phase 1: `screen_of(pty)` (the model the
-session's `ScreenPort` reads) and `pty_of(pty)` (the pty object its
-`PtyPort` asks for the child's pid and foreground group). Both go when
-the session moves into the service. A panel shell (PR-1.8) reads
-through the same two (its text for `read_terminal`, its foreground, its
-shell's cwd), and the tab's panel-history save, whose key and moment are
-still the tab's in Phase 1, is a third on the server's end:
+One shortcut the socket will not have: the tab's panel-history save,
+whose key and moment are the tab's in Phase 1, is
 `LoopbackServer.write_panel_history`, the core writing from its models.
+(The two the `Session` read through while it ran in the client's process,
+`screen_of` and `pty_of`, went with it in PR-1.12a: the session is the
+service's, and a panel shell's reads are the `pty.info` and
+`pty.capture` requests.)
 
 The app's own client (PR-1.10) carries the store and the state: it
 subscribes once, and the core hands it the snapshot and every change
@@ -193,14 +191,6 @@ class LoopbackClient:
         self._sinks.clear()
         self._server._clients.discard(self)
 
-    # -- the shortcuts (see the module docstring)
-
-    def screen_of(self, pty: int):
-        return self._server.core.screen_of(pty)
-
-    def pty_of(self, pty: int):
-        return self._server.core.pty_of(pty)
-
     # -- the server's way in
 
     def _deliver_event(self, event: dict) -> None:
@@ -211,7 +201,9 @@ class LoopbackClient:
         if checked.type == "pty-exited":
             self.forget(int(checked.get("pty")))
         try:
-            self._on_event(dict(event))
+            # What the protocol kept, not what was sent: the fields the type
+            # lists, bounded (as a socket's client will see them).
+            self._on_event({"t": checked.type, **checked.fields})
         except Exception:
             log.exception("loopback: a client's event callback failed")
 

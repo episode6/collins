@@ -47,6 +47,7 @@ E2E = tempfile.mkdtemp(prefix="collins-hide-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -133,7 +134,8 @@ def cleanup(win) -> None:
     would otherwise be reaped only by its pty closing."""
     for i in range(win.tab_view.get_n_pages()):
         tab = win.tab_view.get_nth_page(i).get_child()
-        pid = getattr(tab, "_child_pid", None)
+        probe = getattr(tab, "probe_call", None)
+        pid = probe("child_pid") if probe is not None else None
         if pid:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)
@@ -212,7 +214,7 @@ def hide() -> bool:
     """The close that must not close."""
     win, tab = state["win"], state["tab"]
     state["sid"] = tab.session_id
-    state["shell_pid"] = tab._child_pid
+    state["shell_pid"] = tab.probe_call("child_pid")
     state["tick_before"] = last_tick(tab)
     check("shim ticked before the hide", state["tick_before"] >= 0)
     win.close()

@@ -121,10 +121,18 @@ dict — holds the client's **mirrors** on one `apilink.LoopbackLink`
   `SessionItem`s and the store's lookups and mutators. The snapshot sends
   an `item` per row and one `rows`; each service refresh sends the items
   that moved (changed fields only) then `rows`, which is the client's
-  `refreshed`. **Busy, unread and status are the service's**: the
-  window's activity tracker (still in the client in Phase 1) calls
-  `set_busy` & co., which send `store.flags`, and the property moves when
-  the `item` comes back (immediately on the loopback). **Archived sessions
+  `refreshed`. **Busy, unread and status are the service's**: since
+  PR-1.12a the tracker runs there (`service/tracking.py`, D29) and sets
+  `busy` and a counted finish's `unread` on the items itself; the client
+  sends `store.flags` only for what the person did at its screen —
+  `status`, `unread: false` (and a notification's flag by focus, the
+  placeholder handoff), the /bg handoff's `backgrounding` and
+  `can_background` — and `busy` from a client is refused. The property
+  moves when the `item` comes back (immediately on the loopback). The
+  sandbox host and the live grants are the core's too
+  (`ServiceCore.start_sandbox_host`); the box a resumed or forked session
+  runs in is minted on the service at its spawn, and settled against the
+  id when the session resolves. **Archived sessions
   are paged**: not in the snapshot; `set_show_archived(True)`,
   `archived_sessions()`, `archived_breakdown()` and the `sessions`
   attribute (every session, as before) page them in once
@@ -270,34 +278,46 @@ animation's selector excludes every status that outranks it.
 **Which sessions are working** is `activity.py`, GTK-free: `ActivityTracker`
 is marked by (in order of trust) the CLI's own OSC 9;4 progress termprop
 (`ProgressWatch`, coaxed out of the CLI by the env spoof in
-`terminal._agent_tab_environment` — `ConEmuANSI=ON`, `TERM_PROGRAM=kitty`),
-first-column screen motion (`SpinnerWatch`), `contents-changed` redraws
-filtered by `EchoGate` (drops redraws the app itself caused), a `/proc` poll
-for live descendants below the agent (`proctree.has_live_descendant`, minus
-the persisted plumbing baseline so MCP servers don't read as work), and for
-tabs attached to a background agent the `claude agents --json` busy status
+`service.session.agent_environment` — `ConEmuANSI=ON`, `TERM_PROGRAM=kitty`
+— and read off the stream filter's `Progress` events on the service),
+first-column screen motion (`SpinnerWatch`), the pty's output after the
+filter, coalesced to the screen's 50 ms settle and filtered by `EchoGate`
+(drops what the app itself caused), a `/proc` poll for live descendants
+below the agent (`proctree.has_live_descendant`, minus the persisted
+plumbing baseline so MCP servers don't read as work), and for sessions
+attached to a background agent the `claude agents --json` busy status
 (`bgstatus.BackgroundBusyWatch`, since a `/bg` agent's env is scrubbed and
-speaks no progress). Ungated sources are held on fresh spawns until the gate
-arms (`MainWindow._startup_held`): on an Enter typed into the VTE (its
-`commit`, or the key itself) *or* on a "\r" the session writes itself
-(`Session.write_text` pokes its own gate and announces `input_sent`; the
-app's writes take the service's pty, never the VTE, so a new-chat send or a
-composer send would otherwise never arm it — the regression that left every
-such tab without a pole after PR-1.9). The busy→idle edge is
-`MainWindow._on_session_finished`: it flags unread, refreshes PRs, and is the
+speaks no progress). All of it runs on the service since PR-1.12a
+(`service/tracking.py` `ServiceActivity`, `tests/test_tracking.py`).
+Ungated sources are held on fresh spawns until the gate arms
+(`ServiceActivity.startup_held`): on a "\r" in a client's input frame (an
+Enter typed into the VTE, `ServiceActivity.on_input`; the pole starts
+pre-emptively on a bare Return alone — Alt+Enter and a pasted newline arm
+the gate but start no pole, as the window's Enter key was the one starter)
+*or* on a "\r" the
+session writes itself (`Session.write_text` pokes its own gate and tells its
+host `input_sent`, which the service's `SessionRecord` hands to
+`ServiceActivity.input_sent` for the baseline's last pristine snapshot; the
+app's writes take the service's pty, never the VTE, so a new-chat send, a
+composer send or `start_session` would otherwise never arm it — the
+regression that left every such tab without a pole after PR-1.9, fixed in
+PR 602 and carried into the service here). The busy→idle edge is
+`ServiceActivity._on_finished`: a counted one flags unread, tells the
+session's clients (who refresh PRs: `MainWindow.run_finished`), and is the
 edge any "do this when the session is done" feature should ride — but it is
-judged against the tab's transcript first (`activity.FinishLedger` over
-`TranscriptModel.stamp`; the CLI's idle repaints land redraw-inferred edges
-with the transcript unchanged, and those are held, then dropped — see
-`collins-notifications-and-tray`), so ride `_land_finish`'s callers' verdict,
-never the raw tracker edge. A progress
+judged against the session's transcript first (`service/finish.py`
+`FinishJudge`: `activity.FinishLedger` over `TranscriptModel.stamp`; the
+CLI's idle repaints land redraw-inferred edges with the transcript
+unchanged, and those are held, then dropped — see
+`collins-notifications-and-tray`), so ride `_land_finish`'s verdict, never
+the raw tracker edge. A progress
 termprop clear (and a background agent's idle reading) does not land that
 edge at once: the CLI (2.1.261) also clears the hint for a beat between tool
 calls, so `finish(grace_s=PROGRESS_FINISH_GRACE_S)` arms the finish for 3 s
 and the next busy hint `resume`s it; the pole stays up through the wait, and
 the sweep leaves an armed session to its grace (a redraw mark on `IDLE_S`
 inside it can't time it out early). The latest `mark` decides the deadline,
-so while the hint reads busy (`ProgressWatch.busy`) the window's redraw marks
+so while the hint reads busy (`ProgressWatch.busy`) the service's redraw marks
 carry `PROGRESS_IDLE_S` too — on the default `IDLE_S` they cut the agent's
 word down to 2 s of screen silence, and a main loop stalled that long landed
 graceless finishes (unread flag, notification) mid-turn. Probing the CLI

@@ -110,10 +110,10 @@ def test_a_panel_shell_has_vtes_variables_and_no_progress_declarations(tmp_path,
     srv, client, _ends = make(tmp_path, environment=lambda: bare)
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path)
-    env = child_environ(client.pty_of(pty).child_pid())
+    env = child_environ(srv.core.ptys.get(pty).child_pid())
     assert env[b"TERM"] == b"xterm-256color" and env[b"COLORTERM"] == b"truecolor"
     assert b"ConEmuANSI" not in env and b"TERM_PROGRAM" not in env
-    assert client.pty_of(pty).kind == "shell"
+    assert srv.core.ptys.get(pty).kind == "shell"
 
 
 def test_a_sandboxed_shell_with_no_plan_is_refused(tmp_path, restore_shell):
@@ -150,7 +150,7 @@ def test_a_sandboxed_shell_runs_the_launcher_on_its_boxs_plan(tmp_path, restore_
     restore_shell.append(srv)
     pty = spawn_shell(client, inside, sandbox=True, sandbox_box="box-1")
     assert seen == [(plan, "/bin/the-users-shell")]
-    found = client.pty_of(pty)
+    found = srv.core.ptys.get(pty)
     assert (found.box, found.plan) == ("box-1", plan)
     assert pump(2, lambda: b"cd '" + str(inside).encode() + b"'" in ends.live(pty))
 
@@ -174,10 +174,10 @@ def test_a_sandboxed_shells_shell_is_the_one_inside_the_box(tmp_path, restore_sh
     monkeypatch.setattr(core_mod.sandboxplan, "load_plan", lambda path: None)
     srv, client, _ends = make(tmp_path, plans={"box-1": "/plan"})
     restore_shell.append(srv)
-    boxed = client.pty_of(spawn_shell(client, tmp_path, sandbox=True, sandbox_box="box-1"))
+    boxed = srv.core.ptys.get(spawn_shell(client, tmp_path, sandbox=True, sandbox_box="box-1"))
     assert boxed.shell_pid() == 4242 and boxed.shell_pid() == 4242
     assert asked == [boxed.child_pid()]
-    plain = client.pty_of(spawn_shell(client, tmp_path))
+    plain = srv.core.ptys.get(spawn_shell(client, tmp_path))
     assert plain.shell_pid() == plain.child_pid()
 
 
@@ -191,7 +191,7 @@ def test_the_shells_cwd_and_foreground_are_read_on_the_service(tmp_path, restore
     srv, client, _ends = make(tmp_path, shell=SH, environment=lambda: bare)
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path)
-    found = client.pty_of(pty)
+    found = srv.core.ptys.get(pty)
     assert pump(3, lambda: found.process_cwd() == str(tmp_path))
     assert pump(3, lambda: not found.has_running_command())
     client.send_input(pty, f"cd '{sub}'\n".encode())
@@ -206,7 +206,7 @@ def test_the_reads_go_quiet_once_the_shell_is_gone(tmp_path, restore_shell):
     srv, client, _ends = make(tmp_path, shell="/bin/true")
     restore_shell.append(srv)
     reply = client.request({"t": "spawn", "kind": "shell", "cwd": str(tmp_path)})
-    found = client.pty_of(reply["pty"])
+    found = srv.core.ptys.get(reply["pty"])
     assert pump(3, lambda: found.child_pid() is None)
     assert found.shell_pid() is None
     assert found.process_cwd() is None
@@ -216,24 +216,27 @@ def test_the_reads_go_quiet_once_the_shell_is_gone(tmp_path, restore_shell):
 # -- clear
 
 
-def test_clear_wipes_a_shells_model_and_refuses_an_agent(tmp_path, restore_shell):
+def test_clear_wipes_a_shells_model_and_erases_an_agents_box(tmp_path, restore_shell):
     srv, client, ends = make(tmp_path)
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path)
     client.send_input(pty, b"hello\r")
     # The tty's echo, then cat's own line: both in before the wipe.
-    assert pump(2, lambda: "hello\nhello" in client.screen_of(pty).capture_contents())
+    assert pump(2, lambda: "hello\nhello" in srv.core.ptys.get(pty).screen.capture_contents())
     client.request({"t": "clear", "pty": pty})
-    assert client.screen_of(pty).capture_contents() == ""
+    assert srv.core.ptys.get(pty).screen.capture_contents() == ""
     # The model is live again: what the shell says next lands in it.
     client.send_input(pty, b"again\r")
-    assert pump(2, lambda: "again" in client.screen_of(pty).capture_contents())
-    assert "hello" not in client.screen_of(pty).capture_contents()
+    assert pump(2, lambda: "again" in srv.core.ptys.get(pty).screen.capture_contents())
+    assert "hello" not in srv.core.ptys.get(pty).screen.capture_contents()
 
+    # An agent's clear is the composer's erase of its box (PR-1.12a: the
+    # session is the service's): served, and nothing to erase at an empty
+    # box, so the model stands.
     agent = client.request({"t": "spawn", "kind": "agent", "cwd": str(tmp_path)})["pty"]
-    with pytest.raises(loopback.RequestRefused) as refused:
-        client.request({"t": "clear", "pty": agent})
-    assert refused.value.error == protocol.ERROR_REFUSED
+    before = srv.core.ptys.get(agent).screen.capture_contents()
+    client.request({"t": "clear", "pty": agent})
+    assert srv.core.ptys.get(agent).screen.capture_contents() == before
 
 
 # -- the panel history
@@ -246,10 +249,10 @@ def test_the_panel_history_is_written_from_the_models(tmp_path, restore_shell, h
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path)
     client.send_input(pty, b"echoed by cat\r")
-    assert pump(2, lambda: "echoed by cat\nechoed by cat" in client.screen_of(pty).capture_contents())
+    assert pump(2, lambda: "echoed by cat\nechoed by cat" in srv.core.ptys.get(pty).screen.capture_contents())
     panelhistory.save("sess", "a closed shell's", 5)
     srv.write_panel_history("sess", {0: pty, 2: "restored text\nkept"})
-    assert panelhistory.load("sess", 0) == client.screen_of(pty).capture_contents().rstrip()
+    assert panelhistory.load("sess", 0) == srv.core.ptys.get(pty).screen.capture_contents().rstrip()
     assert "echoed by cat" in panelhistory.load("sess", 0)
     assert panelhistory.load("sess", 2) == "restored text\nkept"
     assert panelhistory.ordinals("sess") == [0, 2]
@@ -263,7 +266,8 @@ def test_a_shell_already_gone_writes_nothing(tmp_path, restore_shell, history):
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path)
     client.send_input(pty, b"before the end\r")
-    assert pump(2, lambda: "before the end\nbefore the end" in client.screen_of(pty).capture_contents())
+    text = lambda: srv.core.ptys.get(pty).screen.capture_contents()  # noqa: E731
+    assert pump(2, lambda: "before the end\nbefore the end" in text())
     srv.write_panel_history("sess", {0: pty})
     assert "before the end" in (panelhistory.load("sess", 0) or "")
     client.request({"t": "close", "pty": pty, "mode": "kill"})
@@ -283,7 +287,7 @@ def test_a_shell_that_exits_writes_its_history_under_its_key(tmp_path, restore_s
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path, history="sess", ordinal=3)
     client.send_input(pty, b"kept at exit\r")
-    assert pump(2, lambda: "kept at exit\nkept at exit" in client.screen_of(pty).capture_contents())
+    assert pump(2, lambda: "kept at exit\nkept at exit" in srv.core.ptys.get(pty).screen.capture_contents())
     client.request({"t": "close", "pty": pty, "mode": "kill"})
     assert pump(3, lambda: any(e.get("t") == "pty-exited" for e in ends.events))
     assert "kept at exit" in (panelhistory.load("sess", 3) or "")
@@ -294,7 +298,7 @@ def test_a_shell_refiled_under_a_new_key_writes_there(tmp_path, restore_shell, h
     restore_shell.append(srv)
     pty = spawn_shell(client, tmp_path, history="draft-1", ordinal=0)
     client.send_input(pty, b"moved\r")
-    assert pump(2, lambda: "moved\nmoved" in client.screen_of(pty).capture_contents())
+    assert pump(2, lambda: "moved\nmoved" in srv.core.ptys.get(pty).screen.capture_contents())
     client.request({"t": "panel.key", "pty": pty, "history": "sess"})
     client.request({"t": "close", "pty": pty, "mode": "kill"})
     assert pump(3, lambda: any(e.get("t") == "pty-exited" for e in ends.events))
@@ -309,7 +313,7 @@ def test_a_shell_filed_under_no_key_writes_nothing(tmp_path, restore_shell, hist
     pty = spawn_shell(client, tmp_path, history="sess", ordinal=1)
     panelhistory.save("sess", "an older save", 1)
     client.send_input(pty, b"gone\r")
-    assert pump(2, lambda: "gone\ngone" in client.screen_of(pty).capture_contents())
+    assert pump(2, lambda: "gone\ngone" in srv.core.ptys.get(pty).screen.capture_contents())
     client.request({"t": "panel.key", "pty": pty, "history": None})
     client.request({"t": "close", "pty": pty, "mode": "kill"})
     assert pump(3, lambda: any(e.get("t") == "pty-exited" for e in ends.events))

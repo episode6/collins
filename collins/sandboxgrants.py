@@ -289,7 +289,7 @@ def _first_line(proc) -> str:
 
 class GrantMounts:
     """See the module docstring. Handed to the tabs as
-    `terminal.SANDBOX_GRANTS`, the way the SandboxHost is.
+    `ServiceCore.sandbox_grants`, the way the SandboxHost is (PR-1.12a).
 
     `register` / `unregister` follow a box's life, `allow` / `revoke` a
     grant's; each queues its work for the worker and returns at once.

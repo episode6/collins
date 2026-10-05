@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import threading
 from pathlib import Path
 
 import gi
@@ -39,8 +38,7 @@ from . import (
     providers,
     ptyclient,
     remotediffs,
-    sandboxgrants,
-    sandboxplan,
+    sandboxstatus,
     statusicon,
     tooltipmute,
     traymodel,
@@ -48,7 +46,7 @@ from . import (
     welcome,
 )
 from . import terminal as terminal_mod
-from .api.loopback import LoopbackServer
+from .api.loopback import LoopbackServer, RequestRefused
 from .apilink import LoopbackLink
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .copylabel import open_uri
@@ -59,7 +57,6 @@ from .remoteprs import RemotePrStore
 from .remotestate import RemoteState
 from .remotestore import RemoteStore
 from .service.core import ServiceCore
-from .terminal import TerminalTab
 from .toolclient import ToolClient
 from .window import HIDE_NOTICE_ID, MainWindow, session_window
 
@@ -1639,7 +1636,6 @@ class App(Adw.Application):
         apply_color_scheme(self.state.get_setting("color_scheme"))
 
         self._start_session_tools()
-        self._start_sandbox_support()
 
         focus = Gio.SimpleAction.new("focus-session", GLib.VariantType("s"))
         focus.connect("activate", self._on_focus_session)
@@ -2129,25 +2125,22 @@ class App(Adw.Application):
     # app is a client of the UI-bound ones: toolclient.ToolClient answers the
     # `tool` events with the tab their session lives in. Through Phase 1 the
     # service's records of its sessions are the tabs' own Sessions, which is
-    # the one thing it asks the app (ToolClient.sessions).
+    # the sessions are its own (ServiceCore.sessions, PR-1.12a).
 
     def _start_session_tools(self) -> None:
         """The tools' dispatcher on the service, its socket and the
-        `--mcp-config` file it's named in, and this client's half. Any
-        failure leaves providers.MCP_CONFIG_PATH unset, so launched commands
-        come out exactly as they did before the feature."""
+        `--mcp-config` file it's named in, and this client's half; the
+        sandbox host beside them (§3.9: the service's, `start_sandbox_host`,
+        whose probe's verdict comes back as a `sandbox` event). Any failure
+        leaves providers.MCP_CONFIG_PATH unset, so launched commands come
+        out exactly as they did before the feature."""
         core = self._service_core
         self.tool_client = ToolClient(self, self._service_link)
-        self.session_tools = core.start_tools(
-            sessions=self.tool_client.sessions,
-            sandbox_host=lambda: terminal_mod.SANDBOX_HOST,
-        )
+        core.start_sandbox_host(self.get_application_id())
+        self.session_tools = core.start_tools()
         # The Sandboxed chip's requests, on the same records.
-        core.start_sandbox(
-            host=lambda: terminal_mod.SANDBOX_HOST,
-            grants=lambda: terminal_mod.SANDBOX_GRANTS,
-            sessions=self.tool_client.sessions,
-        )
+        core.start_sandbox()
+        self._service_link.on("sandbox", self._on_sandbox_event)
         config = core.start_mcp(self.get_application_id())
         if config is not None:
             providers.MCP_CONFIG_PATH = config
@@ -2159,12 +2152,15 @@ class App(Adw.Application):
         on the ``server`` backend. Built on every backend (the pty half
         costs nothing idle) so a check can flip a tab's backend without
         the app knowing."""
-        core = ServiceCore.with_state(sandbox_plan=self._sandbox_plan_of_box)
+        core = ServiceCore.with_state()
         self._service_core = core
         # A remembered CLI location goes on PATH before anything looks for
         # the CLI — the store's first scan is the very next line.
         clisetup.apply_saved(core.state)
         core.start_store()
+        # Busy and the finish verdict are the service's (§3.6, D29): the
+        # tracker over its sessions, fed by the pty server from here on.
+        core.start_activity()
         self._service_loopback = LoopbackServer(core)
         terminal_mod.SERVICE_LOOPBACK = self._service_loopback
 
@@ -2190,9 +2186,26 @@ class App(Adw.Application):
         # The notification history's mirror listens on the same link, so
         # the one subscribe fills it too.
         self.notification_center = RemoteNotifications(link)
+        self.notification_center.on_finished.append(self._on_run_finished)
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
         self.store.subscribe()
+        # The sandbox probe's verdict so far (the service's; a client never
+        # probes): what the sidebar, the new-chat screen and Preferences
+        # read (sandboxstatus). The `sandbox what=probe` event keeps it.
+        try:
+            status = link.call({"t": "service.status"})
+        except RequestRefused:
+            status = {}
+        sandboxstatus.set_probe_reason(status.get("sandbox"))
+
+    def _on_run_finished(self, session_id: str) -> None:
+        """The service counted a finish for *session_id* (D29): the window
+        holding its tab re-reads the pull requests and owes the green its
+        announcement — the flag the service sets next raises it."""
+        for window in self.get_windows():
+            if isinstance(window, MainWindow) and window.run_finished(session_id):
+                return
 
     def _show_refused_write(self, text: str) -> None:
         """A write the service refused, already reverted in the mirror:
@@ -2203,89 +2216,16 @@ class App(Adw.Application):
         if window is not None:
             window.show_toast(text)
 
-    def _sandbox_plan_of_box(self, box: str) -> str | None:
-        """The plan file the session running in *box* launched from, or
-        None: the service's record a sandboxed panel shell is spawned on
-        (ServiceCore's *sandbox_plan*). In Phase 1 that record is the box's
-        `Session`, still held by its tab; when the sessions move into the
-        service this lookup goes with them."""
-        if not box:
-            return None
-        for window in self.get_windows():
-            if not isinstance(window, MainWindow):
-                continue
-            for i in range(window.tab_view.get_n_pages()):
-                tab = window.tab_view.get_nth_page(i).get_child()
-                if isinstance(tab, TerminalTab) and tab.sandbox_box == box and tab.sandbox_plan_path:
-                    # A plan file gone from disk is still returned: the
-                    # launcher fails at exec, SpawnError, refused with its errno.
-                    return tab.sandbox_plan_path
-        return None
-
-    def _start_sandbox_support(self) -> None:
-        """Find out, off the main loop, whether sandboxed sessions can be
-        launched here (bubblewrap on PATH and a namespace probe that
-        passes — sandboxplan.probe), and hand the tabs their plan maker.
-        The verdict is cached for the run; a launch that comes before it
-        lands probes synchronously once."""
-        app_id = self.get_application_id()
-        # The sandbox host is the service's (§3.9: everything but the chip
-        # moves as it is), so it keeps the service's own state: the boxes
-        # it makes and sweeps are the service machine's.
-        service_state = self._service_core.state
-        host = sandboxplan.SandboxHost(app_id, service_state, service_state.state_file())
-        terminal_mod.SANDBOX_HOST = host
-        # Plans a previous run never released (a tab destroyed before its
-        # shell's exit landed): all this app id's, and bwrap read each one
-        # at exec, so nothing running misses it.
-        swept = sandboxplan.sweep_plans(app_id)
-        if swept:
-            logging.getLogger(__name__).info("sandbox: swept %d stale plan file(s)", swept)
-        # Grants are a session's and go with its box: the ones left by a
-        # box no session names and that is no longer on disk. Here, on the
-        # main loop, before the sweep's thread: it writes the state.
-        pruned = host.prune_grants()
-        if pruned:
-            logging.getLogger(__name__).info(
-                "sandbox: dropped the grants of %d box(es) that are gone", pruned
-            )
-
-        # The live grants: one owner of every bindfs mount this instance
-        # makes, and the thread they are made on.
-        grants = sandboxgrants.GrantMounts(host)
-        self._sandbox_grants = grants
-        terminal_mod.SANDBOX_GRANTS = grants
-
-        # The mounts an instance that died left under the sandbox root,
-        # then the boxes no session names and no running instance holds (a
-        # launch that never produced a transcript, a session deleted while
-        # Collins was down) — in that order: a box with a mount under it
-        # is never removed. Off the main loop: a home can be large.
-        def sweep() -> None:
-            unmounted = grants.sweep_mounts()
-            if unmounted:
-                logging.getLogger(__name__).info(
-                    "sandbox: unmounted %d grant(s) a dead instance left", unmounted
-                )
-            gone = host.sweep_boxes()
-            if gone:
-                logging.getLogger(__name__).info("sandbox: removed %d unused box(es)", gone)
-
-        threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
-        # The UI reads the cached verdict and never blocks on the probe: a
-        # new-chat screen opened before it lands hides its Sandboxed box
-        # until this callback puts it back.
-        sandboxplan.probe_async(
-            lambda _reason: GLib.idle_add(
-                self._on_sandbox_probe_landed, priority=GLib.PRIORITY_DEFAULT
-            )
-        )
-
-    def _on_sandbox_probe_landed(self) -> bool:
+    def _on_sandbox_event(self, event: dict) -> None:
+        """The probe's verdict landed on the service (a `sandbox` event of
+        ``what: "probe"``): every new-chat screen shows or hides its
+        Sandboxed box accordingly."""
+        if event.get("what") != "probe":
+            return
+        sandboxstatus.set_probe_reason(event.get("reason"))
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.refresh_sandbox_availability()
-        return GLib.SOURCE_REMOVE
 
     def do_shutdown(self) -> None:
         # Stops accepting and unlinks the socket; mcp.json stays behind on
@@ -2313,17 +2253,11 @@ class App(Adw.Application):
             # its model file removed with it (a model file lives as long as
             # its row; in Phase 1 scrollback survives a crash only, and only
             # once PR-3.6's keeper exists to re-adopt a live pty).
+            # The live grants go with the core: every directory mounted
+            # into a running box is unmounted (ServiceCore.shutdown).
             terminal_mod.SERVICE_LOOPBACK = None
             loopback.shutdown()
             self._service_loopback = None
-        grants = getattr(self, "_sandbox_grants", None)
-        if grants is not None:
-            # Every directory mounted into a running box, unmounted; the
-            # bindfs servers would go with the process anyway
-            # (PR_SET_PDEATHSIG), this leaves nothing to chance.
-            terminal_mod.SANDBOX_GRANTS = None
-            grants.shutdown()
-            self._sandbox_grants = None
         if self._status_icon is not None:
             self._status_icon.stop()
             self._status_icon = None

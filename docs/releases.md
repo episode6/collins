@@ -38,6 +38,17 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The session runs on the service.** Everything a session tab did behind
+  its terminal — launching the agent (the sandbox plan, a reaped worktree
+  put back, a worktree launch watched), reading and typing into the CLI's
+  input box (the composer's cut and paste-back, model and effort switches,
+  "Add to chat"), finding a new session's transcript, the busy pole and the
+  finished-run verdict, and the graceful close — now runs in the service
+  half of the app; the window shows what the service tells it and asks for
+  what it wants. Nothing looks different, by design; a resume whose
+  worktree the CLI had removed starts its shell in the directory a moment
+  before the checkout lands. If a tab misbehaves, report the session and
+  the step.
 - **Session tabs on the service's pty server.** Every session tab
   runs on the in-app half of the headless service Collins is being split
   into: the shell runs on a pty the service holds, the service answers

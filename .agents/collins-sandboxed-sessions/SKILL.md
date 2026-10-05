@@ -235,7 +235,15 @@ read_plan` plus an `inputs` check (version 2, a box id, the box's paths);
 re-issues a plan with `--chdir` changed (`cwd` recorded beside
 `workspace`) and every path under the parent's box moved to the
 sibling's.
-The app sets `terminal.SANDBOX_HOST` to one at startup.
+The service owns one (`ServiceCore.start_sandbox_host`, `core.sandbox_host`,
+PR-1.12a; the live grants beside it as `core.sandbox_grants`); the window
+reaches it only through requests (`sandbox.forget` for a forgotten
+transcript's box, `sandbox.derive` / `sandbox.drop` for a sibling's plan).
+Rule 5 holds on both: `sandbox.drop` releases only a plan file this
+service derived for that box (`SandboxRequests._derived`, popped on the
+drop) and only one shaped `<uuid>.json` right under its own plan
+directory (`sandboxplan.plan_dir`), and `drop` / `forget` refuse a box a
+live session runs in (`ServiceCore.session_for_box`).
 
 **A worktree launch is narrowed to its worktree.** `claude -w` makes
 `<repo>/.claude/worktrees/<name>` *after* it has started, inside the box,
@@ -391,15 +399,16 @@ this instance claims the root and sweeps; anyone else's → it sweeps
 nothing. `discard_box` has no such check: it is only called for a box
 this instance's own state named or its own tab minted.
 
-**The tab.** The launch is the tab's `Session`'s
-(`collins/service/session.py`; the tab forwards `sandboxed`,
-`sandbox_plan_path`, `sandbox_box`, `restart_sandboxed` and the rest):
-every method named here and under the restart below lives there.
+**The tab.** The launch is the session's (`collins/service/session.py`,
+the service's since PR-1.12a; the tab's mirror forwards `sandboxed`,
+`sandbox_plan_path`, `sandbox_box`, `restart_sandboxed` and the rest, off
+the `session` event's sandbox fields): every method named here and under
+the restart below lives there.
 `SessionOptions.sandbox` is the decision, `sandbox_plan` the
 file, `sandbox_box` the box. `Session._launch_command` (from
 `_finish_spawn`, and again from a
 restart) writes the plan at the last moment through
-`terminal.SANDBOX_HOST.prepare_launch` because the workspace is the
+the service host's `prepare_launch` because the workspace is the
 *settled* cwd — a recreated worktree included — in the box the options
 name (a resumed session's), else the one the tab already launched in (a
 restart keeps the home), else a fresh one — unless the options already
@@ -421,7 +430,12 @@ launch record (as launched, not as the settings now say). A sandboxed
 *fork* tab keeps its origin's id but runs the resolver in `_fork_resolve`
 mode: the forked conversation's id lands on `fork-resolved` and the window
 records it with the fork tab's own box, so the fork's row resumes boxed
-too, in its own home.
+too, in its own home. A resume or fork opened with no box of its own is
+minted one on the service at its spawn (`ServiceCore._box_for_launch`: a
+fork's seeded with a copy of its origin's grants and tool switches), and
+a resolving session's box is recorded and settled there
+(`ServiceCore.session_resolved`, what `MainWindow._settle_sandbox_box`
+did).
 
 **Also.** A restart keeps the tab's box. A sandboxed panel shell runs in
 the session's, since it runs the session's plan file. A trashed or
@@ -533,8 +547,8 @@ reaches `MainWindow._on_tab_toast` (markup-escaped, over the sidebar's
 toast overlay).
 
 **Live grants (`sandboxgrants.py`, GTK-free).** One `GrantMounts(host)`
-per app instance, handed to the tabs as `terminal.SANDBOX_GRANTS`; it owns
-every mount this instance made.
+per service (`ServiceCore.sandbox_grants`, PR-1.12a; the sessions reach it
+through the core); it owns every mount this instance made.
 
 - **One worker thread**, `sandbox-grants`, fed by a queue and alive until
   `shutdown()`. Every spawn, mount and unmount runs on it: that serialises
@@ -714,7 +728,7 @@ flag"** — so nothing about it is the caller's to say:
   handler: `SessionTools.tool_offered(session, tool)` (service/tools.py;
   `App._mcp_tool_offered` until PR-1.11, moved word for word) is True for
   a session that isn't `sandboxed`, else
-  `SANDBOX_HOST.tool_enabled(session.sandbox_box, tool)`. The session is
+  the service host's `tool_enabled(session.sandbox_box, tool)`. The session is
   the one the peer's `SO_PEERCRED` pid walks up to; `session.sandboxed`
   and `session.sandbox_box` are the launch's own records. The
   refusal is `mcptools.sandbox_disabled_error`. A call's arguments can't
@@ -815,12 +829,19 @@ row's button stays greyed through the blocker like every other reason.
 
 **The probe.** `sandboxplan.probe()` runs `bwrap --unshare-user
 --unshare-pid … -- /bin/true` once per launch on a thread
-(`probe_async` from `App._start_sandbox_support`) and caches
-`probe_reason()`: `""`, `REASON_NO_BWRAP`, `REASON_NO_USERNS`.
-`available()` probes synchronously (5 s cap) if asked before the thread
-landed — only `prepare_launch` calls it; every UI path reads
-`probe_reason() == ""` and treats None as "not yet", and
-`App._on_sandbox_probe_landed` → `MainWindow.refresh_sandbox_availability`
+(`probe_async` from `ServiceCore.start_sandbox_host`, the service's) and
+caches `probe_reason()` *in the service's process*: `""`,
+`REASON_NO_BWRAP`, `REASON_NO_USERNS`. `available()` probes synchronously
+(5 s cap) if asked before the thread landed — only `prepare_launch` calls
+it, on the service. A client never probes: its copy is
+`collins/sandboxstatus.py` (GTK-free, `tests/test_sandboxstatus.py`),
+filled from the `service.status` reply's `sandbox` at connect
+(`App._start_service_client`) and from the `sandbox` event of `what:
+"probe"` (`App._on_sandbox_event`), and every UI path — the sidebar's
+project menu, the new-chat screen, `MainWindow._sandbox_for_new_session`,
+Preferences' status row (which listens for the verdict instead of probing)
+— reads `sandboxstatus.probe_reason() == ""` and treats None as "not
+yet"; `App._on_sandbox_event` → `MainWindow.refresh_sandbox_availability`
 → `NewChatView.set_sandbox_available` puts the checkbox on screens built
 before the verdict. The new-chat checkbox and the project-menu item are
 shown only when it passes; the Preferences group is always built, its
@@ -992,8 +1013,12 @@ launched sandboxed through a **fake** `COLLINS_BWRAP` (records the
 driving the chip, the sandboxed shell, both terminal tools from the box,
 a grant → stale → restart → relaunch with the grant, and a sibling
 derived / refused — all with `COLLINS_BINDFS=/nonexistent`, so a grant
-waits for the restart; then a last pass with the override gone and a
-fresh `GrantMounts` in the app's place, where a directory allowed through
+waits for the restart; then a last pass with the override gone and the
+service's `GrantMounts` built again (`restart_grants`, through the
+`debug.sandbox` probe, as every read of the host and the grants in the
+check is: `HOST.grants(box)`, `GRANTS.status(box, path)` cross as
+`debug.sandbox {target, name, args, kwargs}` and come back JSON, a
+`Delivery` as a record), where a directory allowed through
 `chip.allow_directory` is tagged *live*, asks for no restart, and leaves
 through its remove button (the fake bwrap builds no box, but the mount
 and the link are made on the host all the same). Staged under `~/.cache/collins-e2e` with `HOME` moved

@@ -39,6 +39,7 @@ E2E = tempfile.mkdtemp(prefix="collins-badge-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -118,6 +119,27 @@ def saved_notifications() -> list:
         return []
 
 
+def finish_edge(app: App, session_id: str) -> None:
+    """The tracker's finish edge for *session_id* — the window's
+    `_on_session_finished` for a resolved session moved into the service
+    (PR-1.12a, D29) — reached by the probe: a run marked busy under the
+    id, then finished (debug.sandbox on the core's `activity_call`)."""
+    for name in ("tracker.mark", "tracker.finish"):
+        app._service_link.call(
+            {"t": "debug.sandbox", "target": "core", "name": "activity_call", "args": [name, session_id]}
+        )
+
+
+def set_busy(app: App, session_id: str, busy: bool) -> None:
+    """The tracker's busy verdict for *session_id* — the service's own
+    (PR-1.12a, D29: a client's `store.flags busy` is refused) — reached by
+    the probe: a mark, or the teardown clear that reports no finish."""
+    name = "tracker.mark" if busy else "tracker.clear"
+    app._service_link.call(
+        {"t": "debug.sandbox", "target": "core", "name": "activity_call", "args": [name, session_id]}
+    )
+
+
 def run_checks(app: App) -> None:
     center = app.notification_center
     store = app.store
@@ -138,11 +160,11 @@ def run_checks(app: App) -> None:
           f"{row.title!r} / {row.project!r}" if row else "no row")
     check("the row's body is the finished-run text",
           row is not None and row.body == "Finished a run", row.body if row else "")
-    store.set_busy(SESSION, True)
+    set_busy(app, SESSION, True)
     check("a flagged session back at work leaves the badge",
           not center.is_green(SESSION) and badge() == 0)
     check("its flag is still up", store.get_item(SESSION).unread)
-    store.set_busy(SESSION, False)
+    set_busy(app, SESSION, False)
     check("the badge comes back when the turn ends", center.is_green(SESSION) and badge() == 1)
     store.set_unread(SESSION, False)
     check("the flag coming off removes the row", center.rows() == [] and badge() == 0)
@@ -150,7 +172,7 @@ def run_checks(app: App) -> None:
 
     # -- a placeholder's flag lives in the sidebar --------------------------
     win.sidebar.add_placeholder(PLACEHOLDER, PROJECT_DIR, "agent-claude-symbolic")
-    win._on_session_finished(PLACEHOLDER)
+    win._on_session_finished(PLACEHOLDER)  # a placeholder's edge is the window's own
     row = center.get(notifycenter.green_id(PLACEHOLDER))
     check("a placeholder's finish is a row under its own key",
           row is not None and row.session_id == PLACEHOLDER and badge() == 1)
@@ -207,7 +229,9 @@ def run_checks(app: App) -> None:
     win._pages[FORK] = page
     check("the original row stands in for the undiscovered fork",
           store.rows_representing(FORK) == [SESSION], str(store.rows_representing(FORK)))
-    win._on_session_finished(FORK)
+    # The finish edge is the service's tracker's (PR-1.12a), reached by
+    # the probe: a run marked busy under the fork's id, then finished.
+    finish_edge(app, FORK)
     check("the fork's finish pulses the row it forked from", store.get_item(SESSION).unread)
     win._sync_status(FORK)
     check("the row keeps its flag: its tab is the fork's, through the chain",

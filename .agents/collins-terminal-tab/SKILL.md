@@ -28,16 +28,18 @@ mode, attachments), `vtehtml.py` (reading dim text back out of VTE),
 
 Since PR-1.6 of the split (`~/specs/collins/split-service-and-client.md`
 §3.5) the tab is a widget around a **`Session`**
-(`collins/service/session.py`, GTK-free: GLib/Gio only), one per tab as
-`tab.session`. Read the rest of this skill with that in mind — the
-mechanisms are unchanged, but most of the methods it names are the
-session's now:
+(`collins/service/session.py`, GTK-free: GLib/Gio only) — and since
+PR-1.12a (§3.19) that session is **the service's**, one per live agent
+pty in `ServiceCore.sessions`, while `tab.session` is its mirror
+(`clientsession.ClientSession`; see "The session on the service" below).
+Read the rest of this skill with that in mind — the mechanisms are
+unchanged, but most of the methods it names are the session's now:
 
 | Lives in `Session` | Stays in `TerminalTab` / `MainWindow` |
 | --- | --- |
 | identity: `session_id`, `fork`, `provider`, `options`, `command_override`, `cwd` | widgets, overlays, dialogs, the footer, the dock, the editor |
-| launch: `spawn`, `_finish_spawn`, `_launch_command`, `agent_environment` (was `_agent_tab_environment`), the sandbox plan (`_sandbox_options`, `_reserve_worktree`, `_register/_unregister_sandbox_box`, `_release_sandbox_plan`, `shell_exited`), `_check_worktree_launch` / `relaunch_without_worktree`, `restart_sandboxed` and its poll, the new-chat prompt poll | `spawn_async` on the tab's own VTE (`_TabHost.spawn_shell`), `_on_spawned` handing the pid to the pty port |
-| reads: `takes_prompt`, `entered_prompt`, `prompt_block`, `unstarted_thread` (minus the new-chat screen), `visible_screen_text`, `worktree_exit_prompt_keystrokes`, `screen_first_column` | `_mention_leading_space` / `_row_text` (Add to chat) |
+| launch: `spawn`, `_finish_spawn`, `_launch_command`, `agent_environment` (was `_agent_tab_environment`), the sandbox plan (`_sandbox_options`, `_reserve_worktree`, `_register/_unregister_sandbox_box`, `_release_sandbox_plan`, `shell_exited`), `_check_worktree_launch` / `relaunch_without_worktree`, `restart_sandboxed` and its poll, the new-chat prompt poll, a reaped worktree put back (`_recreated`) | the `spawn` request that builds the session (`TerminalTab._service_spawn`) and the attach |
+| reads: `takes_prompt`, `entered_prompt`, `prompt_block`, `unstarted_thread` (minus the new-chat screen), `visible_screen_text`, `worktree_exit_prompt_keystrokes`, `screen_first_column`, `mention_leading_space` (Add to chat and a drop's tokens: `mention`, and `write` with `mention: true`) | — |
 | writes: `inject_prompt(_unfocused)`, `switch_model/effort`, the open-cut (`begin_cut` → settle → apply → verify), `send_composed`, `restore_draft` (paste-back), `foreign_paste_in_box` | the composer widget, its open/close/dock, the stash (`_stash_draft`) |
 | `/proc`: `candidate_pids`, `agent_is_running`, `agent_pid`, `has_running_command`, `current_agent_cwd`, `has_background_descendant`, `owns_pid_ancestors` | — |
 | transcript: the `TranscriptModel`, its monitor/poll/debounce, `request_update` and its landing, the PRs it tracks (`tracked_prs`, `restored_prs`, `attached_prs`), the resolver (`start_resolver`, `arm_resolver`), `current_model/effort/permission_mode`, `finish_witness` | chips, labels, attachments, the editor's agent files (`_on_transcript_landed`, `_on_transcript_reset`) |
@@ -64,26 +66,43 @@ exactly the reads the tab always made; later swaps put `PtyServer` and
 `termscreen` behind the same ports.
 
 **How the tab talks to it.** Down: every old name on the tab is a forwarder
-(`tab.takes_prompt()`, `tab.session_id` — settable —, `tab._options`,
-`tab._child_pid`, `tab._initial_command`, `tab.finish_ledger`, ...), so the
-window, the app and the e2e checks didn't change. Up: the session reports
-through a `SessionHost` listener (`alive`, `mapped`, `paint`,
-`focus_terminal`, `spawn_shell`, `session_resolved`, `transcript_landed`,
-`process_exited`, `input_sent`, ...) which `terminal._TabHost` implements,
-mostly by emitting the tab's existing signals. `input_sent` is every write
-the session makes (`Session.write_text`: an injected prompt, a switch, a
-close flow's keys), announced *before* the bytes go to the pty: on the
-service's pty they never pass the client's VTE, so they never arrive as its
-`commit`, and the window's echo gate would otherwise only ever arm on an
-Enter typed into the terminal — a turn sent from the new-chat screen, the
-composer or `start_session` left the tab in its startup hold for good (no
-pole, no unread flag, no finished notification). The session pokes and arms
-its own `echo_gate` in `write_text`; the tab relays the announcement as
-`input-sent`, which `MainWindow._on_input_sent` takes the process
-baseline's last snapshot on, as `_on_terminal_commit` does for a typed
-"\r". A composer's open-cut reaches the
-composer through a `CutSink` (`terminal._ComposerCut`: `alive`, `seed`,
-`refuse`).
+(`tab.takes_prompt()`, `tab.session_id`, `tab._options`, `tab.sandboxed`,
+`tab.current_agent_cwd()`, ...) to the mirror, so the window and the app
+didn't change; the privates the e2e checks read (`_initial_command`,
+`_visible_screen_text()`, `_pasted_back`, `_child_pid`, `finish_ledger`,
+`_transcript.set_path`) are probes now (`tab.probe("initial_command")`,
+`tab.probe_call("visible_screen_text")`, `tab.probe_call("child_pid")`,
+`tab.probe_set("session_id", x)`, `tab.probe_call("transcript.set_path",
+p)`). Up: the session reports through a `SessionHost` listener (`alive`,
+`mapped`, `paint`, `focus_terminal`, `spawn_shell`, `session_resolved`,
+`transcript_landed`, `process_exited`, ...) which the service's
+`hosting.SessionRecord` implements: as `session`, `cut`, `composer`,
+`focus.terminal`, `shells` and `close` events to the pty's attached
+clients, which the tab turns into its existing signals (`focus` stays the
+client's own event, `focused` required). A composer's open-cut reaches the
+composer through a `CutSink` (`hosting.CutSink`: `alive` is "the client
+is still attached and hasn't called the cut off"; `seed`, `refuse` and —
+for a cut that ends with nothing to seed, an empty box or one that never
+settles — `ended` are `cut` events by handle, `seeded` / `refused` /
+`cancelled`; a seeded cut's handle is let go of at once, and `cut.cancel`
+reaches only the asking client's cuts, calling the session's chain off
+when it is that client's). The tab's decisions on those events are
+`ClientSession.cut_action` (seed an open composer, `_restore_or_stash` for
+one that closed meanwhile, lower one whose box can't be read) and
+`ClientSession.close_action` (`budget` → the forced close), GTK-free and
+tested in `tests/test_clientsession.py`. `input_sent` is the one host call that never
+reaches a client: every write the session makes (`Session.write_text`: an
+injected prompt, a switch, a close flow's keys) is announced *before* the
+bytes go to the pty, and on the service's pty they never pass a client's
+VTE, so they never arrive as an input frame — the session pokes and arms
+its own `echo_gate` in `write_text` (PR 602), and `SessionRecord.input_sent`
+hands the text to `ServiceActivity.input_sent`, which takes the process
+baseline's last pristine snapshot on a "\\r", as `on_input` does for a
+typed Enter. A fresh spawn whose turns were only ever sent that way would
+otherwise sit in its startup hold for good (no pole, no unread flag, no
+finished notification); `scripts/check_injected_prompt_pole.py` drives the
+road end to end through the probe (`activity.startup_held_for`,
+`echo_gate.armed`).
 
 **Testing a state machine.** `tests/test_session.py` builds a `Session`
 over fakes: a `FakeTerminal` that is both ports and models just enough of
@@ -103,17 +122,17 @@ A **sandboxed** launch (`SessionOptions.sandbox`) types
 `python3 <…>/collins/sandboxrun.py <plan> -- claude …` instead:
 `_launch_command` (from `_finish_spawn`, and again from the chip's
 *Restart to apply*, `restart_sandboxed`) writes the plan through
-`terminal.SANDBOX_HOST.prepare_launch(cwd, box)` at the last moment (the
+the service host's `prepare_launch(cwd, box)` at the last moment (the
 workspace is the settled cwd, a recreated worktree included; the box is
 the one the options name — a resumed session's, a fork's — else the one
-this tab already launched in, else minted by `SANDBOX_HOST.mint_box(cwd)`,
+this tab already launched in, else minted by the host's `mint_box(cwd)`,
 seeded with the project's default grants unless this is a `--continue`
 launch, whose box is settled when it resolves) — or adopts the plan and box
 the options already carry (a sibling's derived ones) — `Provider.
 sandbox_prefix` prepends the wrapper (and the tab appends
 `provider.session_flags` — the permission mode — behind a `--continue`
 override), `_register_sandbox_box` tells the live grants
-(`terminal.SANDBOX_GRANTS`) the box is up once the plan is settled,
+(the service's, `core.sandbox_grants`) the box is up once the plan is settled,
 `_unregister_sandbox_box(then)` has what was mounted into it unmounted on
 the grants' worker and calls `then` when it is (the restart's relaunch,
 `_relaunch_sandboxed`, and the exit's clean-up both hang off it — the
@@ -432,22 +451,26 @@ swap 2 of §3.5:
   event on every allocation change, `notify::has-focus` as a `focus`
   event, `pty-exited` is what `child-exited` was (`tab._on_pty_exited` →
   `Session.shell_exited`; a status the service does not know is -1). The
-  ports are `ptyclient.ServicePtyPort` (a write is an input frame, a
-  resize `set_size` plus the event; the pid and foreground group read off
-  the loopback's pty object) and `ServiceScreenPort` over the service's
-  `termscreen.Screen` (`client.screen_of(pty)`): the model is the screen
-  as anchored to the cursor already, so row indices are the model's own;
+  ports are `hosting.RecordPtyPort` and `RecordScreenPort` on the service over its
+  pty and `termscreen.Screen` (PR-1.12a; the dim judgement with the
+  active client's `term`, palette included): the model is the screen as
+  anchored to the cursor already, so row indices are the model's own;
   `row_text` cuts a row's cells, `visible_text` joins on the wrap flags.
-- **The spawn.** `_TabHost.spawn_shell` → `TerminalTab._service_spawn`: a
-  `spawn` request (kind `agent`, the cwd, the VTE's grid), then
-  `ClientTerminal.attach(pty)`, and `Session.shell_spawned` an idle later
-  at `PRIORITY_DEFAULT` (VTE's spawn was asynchronous; the session's
-  recreated-worktree landing now runs at `PRIORITY_DEFAULT` too). The
+- **The spawn.** `TerminalTab._service_spawn`: one `spawn` request (kind
+  `agent`, the cwd, the VTE's grid, and what the `Session` is built from:
+  `session`, `fork`, `command_override`, `jsonl_path`, the options'
+  fields, `sandbox_plan`, `fork_resolve`, a new chat's `prompt`); the
+  service builds the session, runs `Session.spawn` (its `spawn_shell` is
+  `PtyServer.spawn`, then `shell_spawned` types the command), answers
+  with the pty and the session's `handle`, and the tab attaches. The
   **service** builds the shell's environment (its own, plus the two
-  progress declarations when `progress_termprop` is on: `ServiceCore`'s
-  `get_setting`); the session types the agent command exactly as before,
-  the `sandboxrun.py` wrapper included. A refusal (`SpawnError`'s errno)
-  is painted where VTE's spawn error was.
+  progress declarations when `progress_termprop` is on); the session
+  types the agent command exactly as before, the `sandboxrun.py` wrapper
+  included. A refusal (`SpawnError`'s errno) is painted where VTE's spawn
+  error was. A resume whose reaped worktree is being put back spawns the
+  shell in the directory at once, made empty, and types the command once
+  the checkout has landed (`Session._recreated`; a `cd` ahead of it when
+  the worktree couldn't be put back).
 - **The redraw guard** (`redrawguard.RedrawGuard`, GTK-free,
   `tests/test_redrawguard.py`). Raised by `attach` (the VTE reset first)
   and by the first `REDRAW` frame of a redraw the service sends on its
@@ -461,7 +484,8 @@ swap 2 of §3.5:
   answered (an attach that failed, a sink cut mid-redraw) and logs. The
   `attach` reply's `modes` lists what the preamble re-asserted; if
   `?1004h` is among them the real focus state is sent when the guard
-  comes down. `ClientTerminal.dropped_commits` counts what the guard
+  comes down. The attach is also where the session's facts arrive whole
+  (the `session` event, PR-1.12a). `ClientTerminal.dropped_commits` counts what the guard
   swallowed (`check_attach_redraw.py` asserts it and that no sentinel
   answer reached the pty). A commit carrying NUL (Ctrl+Space, Ctrl+@)
   reaches `commit` as an empty C string of size 1 and is sent as `\0`
@@ -495,9 +519,8 @@ swap 2 of §3.5:
   the same dicts and bytes the socket will, every message through
   `protocol.validate` both ways, with no framing and no queue (a request
   is answered before it returns; every live frame is reported drained
-  as the callback takes it). Two shortcuts the socket will not have
-  (`screen_of`, `pty_of`) exist because the `Session` still runs in the
-  client's process; they go with the loopback (D21, PR-1.12).
+  as the callback takes it). Its one shortcut the socket will not have is
+  `write_panel_history` (the tab's save; D21, PR-1.12b).
 - **What differs, by design.** A row written before a resize is kept by
   the model as it was (no reflow, D19) where VTE re-wraps it: a shell's
   echo from before the tab's first allocation reads differently in
@@ -535,6 +558,112 @@ swap 2 of §3.5:
 - **The panel shells** (PR-1.8) are the same, each a `ClientTerminal` over
   a `shell` pty with its own loopback client; see `collins-panel-dock`,
   "Panel shells on the pty server".
+
+## The session on the service (hosting, tracking, finish, clientsession)
+
+PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
+
+- **`service/hosting.py`.** `SessionRecord`, one per live agent pty
+  (`ServiceCore.sessions`, by pty id, built by `spawn` for kind `agent`
+  and dropped once the pty's exit has been reported): the `Session`, its
+  `SessionHost` (this object), its ports (`RecordPtyPort`,
+  `RecordScreenPort`), the `CutSink`s of the composers that asked for a
+  cut, and the **facts** a client reads synchronously off its tab, sent
+  as a `session` event: whole on `attach` (`snapshot`) and as the fields
+  that changed after (`refresh_facts`, on the output settle — 50 ms after
+  a burst, `output_arrived` — and the 2 s process poll; D28). The
+  identity (`session`, `fork`, `options`, `cwd`, `agent_cwd`, `pid`), the
+  box reads (`takes_prompt`, `entered`, `prompt_block` as a msgid,
+  `unstarted`, `foreign_paste`, `agent_running`, `running_command`), the
+  launch state (`initial_command`, `worktree_launch`, `new_chat_prompt`,
+  `pasted_back`, `paste_back_pending`, `shells_follow_armed`, `closing`),
+  the sandbox (`sandboxed`, `sandbox_box`, `sandbox_plan_path`,
+  `defaults_owed`, `can_restart`), the transcript tail (`model`, `effort`,
+  `permission_mode` — the transcript's own, None while unknown —
+  `transcript_path`, `prs`, `touched_files`, `attachments`,
+  `ledger_armed`, with `landed` and `reset` one-shots), and the activity
+  verdicts by handle (`busy`, `finished`). `composer_open` — the client
+  fact `_post_switch` reads — arrives on the `switch`, `send`, `cut` and
+  `draft.restore` requests and is remembered. `paint` formats the
+  "[session manager]" line and inserts it into the stream (a line painted
+  before the spawn waits for the pty). `focus_terminal`,
+  `refocus_composer`, `resend_composed`, `stash_draft` and
+  `mark_stale_shells` are `focus.terminal`, `composer` and `shells`
+  events; a close budget running out is a `close` event (`state: budget`)
+  the window answers by forcing the close.
+- **The requests** (`ServiceCore._req_*`, each routed to the session by
+  its pty): `prompt {text, focus, when_empty}` (with `when_empty` the
+  service re-reads `takes_prompt` off the live screen and refuses with
+  `PROMPT_BLOCK_MSGID`: the PR menu's send and `start_session`'s poll use
+  it), `write {text, mention}`, `switch {model|effort,
+  composer_open}`, `send {text, composer_open}` (reply `sent`: now, or
+  waiting on a cut, which comes back as `composer resend`), `cut` (reply
+  the cut's `handle`), `cut.cancel`, `draft.restore` (reply `restored`),
+  `mention` (the service builds the reference and the leading space),
+  `clear` (served for agents now: the provider's clear keys), `close
+  {mode, text, force}`, `close.nudge`, `close.end`, `resolver.arm` (the
+  tab's map), `transcript.update/set/relocate`, `prs.restore`,
+  `cwd.settle {cwd, root}` (reply the `FollowScope` name: the editor's
+  root is the client's), `shells.follow`, `finish.witness`,
+  `baseline.absorb`, `baseline.cmdlines`, `restart.worktreeless`,
+  `sandbox.restart` (by box). A panel shell's reads are `pty.info` and
+  `pty.capture`. The sandbox host and the live grants are the core's
+  (`start_sandbox_host`: `App._start_sandbox_support` moved whole; the
+  probe's verdict is a `sandbox` event `what: "probe"`, and
+  `service.status` carries it with the grants' `live` reason); a session
+  resolving settles its box there (`ServiceCore.session_resolved`) and
+  re-files its panel shells' history (`rekey_shells`, by the `handle` a
+  shell's `spawn` names); a resume or fork with no box is minted one
+  there (`_box_for_launch`).
+- **`service/tracking.py`.** `ServiceActivity` (`start_activity`): the
+  window's `ActivityTracker` moved whole, fed by `termstream.Progress`
+  events in place of the termprop (`on_progress`, through the
+  `progress_termprop` setting), the output settle in place of
+  `contents-changed` (`on_settled`: `Session.redraw_counts`), the input
+  frames in place of `commit` (`on_input`: the echo gate's poke, a
+  carriage return's arm, the baseline's last snapshot and the pre-emptive
+  mark), the `/proc` poll every 2 s for every live agent
+  (`has_background_descendant` behind the plumbing baseline, absorbed
+  through a fresh spawn's pre-submit life by handle and persisted under
+  the id on resolve), and the background-busy poll (`claude agents
+  --json`, 3 s, while a session is attached to a background agent:
+  `Session.attached_background`, off the provider's
+  `is_attach_command`). Verdicts: `store.set_busy` on the rows a session
+  stands for (chain-aware; re-synced on the store's refresh for a session
+  that got its row mid-turn), a counted finish's `set_unread(True)` with
+  the window's old exemptions (a chain still busy, a row `backgrounding`,
+  a row with status `background`), and a `session {finished}` to the
+  pty's clients, which refresh the pull requests and mark the greens as
+  owed an announcement; a session with no row hears `busy` / `finished`
+  by its handle (the placeholder row). `service/finish.py` is the judge
+  (`FinishJudge`: `_judge_finish` / `_hold_finish` word for word; `held`
+  is what `check_pr_refresh_on_finish` reads by probe).
+- **`clientsession.py`.** `ClientSession`, the tab's mirror: the fields
+  under the attribute names the forwarders read, the reads that answer
+  from them (`takes_prompt_now`, `prompt_block_text` — translated —,
+  `entered_prompt`, `has_running_command`, `agent_is_running`,
+  `current_agent_cwd`, `current_model` with the options as the fallback,
+  ...), `apply(event)` (the names that moved; the one-shots every time
+  they are sent), `exit()` on `pty-exited`, and each request as a method.
+  The tab's `_on_session_event` turns the moved fields into
+  `_on_transcript_landed` / `_on_transcript_reset`, `_on_cwd_polled`,
+  `_sync_sandbox_chip`, and the signals `session-resolved`,
+  `fork-resolved`, `activity-changed`, `run-finished`; `close-budget` is
+  the close event. The window keeps `_clear_unread` (a keystroke is
+  presence), the attention mark off `contents-changed`, the /bg
+  orchestration and the notification delivery; `store.flags` keeps
+  `status`, `unread` and the handoff's two flags and refuses `busy`.
+- **The cwd tick** stays on the client (2 s while mapped, over the mirror's
+  `agent_cwd`, which the service's own poll publishes on change): the
+  footer's branch and the git page's freshness ride it.
+- **Testing.** `tests/test_core.py` (a spawn builds a session, the attach's
+  snapshot, the facts moving with the screen, the requests, a client's
+  departure cancelling its cut, the probe gated on the flag, `busy`
+  refused), `tests/test_clientsession.py` (every field on its attribute,
+  the requests' shapes through a fake client), `tests/test_finish.py`
+  (the judge), `tests/test_tracking.py` (the tracker's two roads for a
+  verdict, a counted finish's flags and exemptions, the background-busy
+  poll, through fakes), and `tests/test_session.py` as before.
 
 ## The service's pty server (ptyserver)
 
