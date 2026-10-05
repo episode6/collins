@@ -1,0 +1,11 @@
+# rpmlint filters for the Collins package (packaging/fedora/build-copr-srpm.sh
+# passes this file to every rpmlint run).
+#
+# The app needs libsoup 3's typelib (collins.api, the socket between the
+# window and its service), which the libsoup3 package ships and nothing
+# else provides a virtual name for: an explicit dependency it is.
+addFilter(r"explicit-lib-dependency libsoup3")
+# The service's user unit ships twice on purpose: installed for systemd,
+# and inside the package for `collins --install-desktop` (a pip install
+# has only the package to copy it out of).
+addFilter(r"files-duplicate /usr/lib/systemd/user/collins-service.service")
