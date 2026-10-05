@@ -22,7 +22,7 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import (  # noqa: E402
-    apilink,  # noqa: E402,
+    apilink,
     apppicker,
     attachpanel,
     attachrecords,
@@ -41,7 +41,7 @@ from . import (  # noqa: E402
     panelhistory,
     panellayout,
     prmenu,
-    ptyclient,  # noqa: E402,
+    ptyclient,
     remotediffs,
     remoteprs,
     sandboxchip,

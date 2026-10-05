@@ -51,6 +51,10 @@ class FakeSession:
         self.updates = 0
         self.redraws = False  # what `redraw_counts` answers
         self.descendants = False  # what `has_background_descendant` answers
+        self.resolver_arms = 0
+
+    def arm_resolver(self):
+        self.resolver_arms += 1
 
     def redraw_counts(self, startup_held):
         return self.redraws and not startup_held
@@ -208,8 +212,10 @@ def test_the_sessions_own_submit_takes_the_baselines_last_snapshot():
     session.cmdlines = {"mcp-server --stdio"}
     activity.input_sent(record, "hello")
     assert "mcp-server --stdio" not in activity._captures.get("s-1", set())
+    assert session.resolver_arms == 0
     activity.input_sent(record, "\r")
     assert "mcp-server --stdio" in activity._captures["s-1"]
+    assert session.resolver_arms == 1  # a paused resolver resumes before the submit lands
     assert state.baselines[SID] == {"mcp-server --stdio"}
     assert not activity.tracker.busy()  # the pole waits for the agent's own hint
     # The gate armed by the session's own poke releases the hold; from then
@@ -351,6 +357,7 @@ def test_a_bare_return_arms_the_gate_marks_the_pole_and_snapshots_the_baseline()
     assert session.echo_gate.armed
     assert state.baselines[SID] == {"mcp --stdio"}
     assert activity.tracker.busy() == {SID, "s-1"}
+    assert session.resolver_arms == 1
 
 
 def test_a_return_inside_another_key_or_a_paste_arms_but_does_not_mark():

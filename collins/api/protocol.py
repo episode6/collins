@@ -672,8 +672,6 @@ _SESSION_FIELDS = {
 
 SESSION_FIELDS = _SESSION_FIELDS  # the `session` event's fields, for the service's fitter
 
-SESSION_FIELDS = _SESSION_FIELDS  # the `session` event's fields, for the service's fitter
-
 _STATE_FIELDS = {
     "key": Field(K_STR, required=True, low=1, high=KEY_MAX, pattern=_KEY_RE),
     "entry": _s(PATH_MAX, low=1),
@@ -1894,22 +1892,54 @@ def _check_text(name: str, value: str) -> None:
 def fit_field(name: str, value, spec: Field) -> tuple[bool, object]:
     """*value* as *spec* would keep it (what `validate` does per field),
     for a sender fitting its own facts before they go out: a string over
-    its bound is cut to it; anything else that doesn't fit is reported.
+    its bound is cut to it, an integer clamped to its range, a list's
+    items fitted one by one (the unfit dropped, never the list), an
+    object's fields each fitted; what still doesn't fit is reported.
     Returns (True, the kept value) or (False, why it doesn't fit)."""
     try:
         return True, _check(name, value, spec)
     except _Invalid as first:
-        if (
-            spec.kind == K_STR
-            and isinstance(value, str)
-            and spec.high is not None
-            and len(value) > spec.high
-        ):
-            try:
-                return True, _check(name, value[: int(spec.high)], spec)
-            except _Invalid as again:
-                return False, again.msgid.format_map(again.args_)
-        return False, first.msgid.format_map(first.args_)
+        closer = _fit_closer(name, value, spec)
+        if closer is _UNFIT:
+            return False, first.msgid.format_map(first.args_)
+        try:
+            return True, _check(name, closer, spec)
+        except _Invalid as again:
+            return False, again.msgid.format_map(again.args_)
+
+
+_UNFIT = object()
+
+
+def _fit_closer(name: str, value, spec: Field):
+    """*value* brought toward *spec* (see fit_field), or _UNFIT when there
+    is no bringing it closer."""
+    kind = spec.kind
+    if kind == K_STR and isinstance(value, str) and spec.high is not None and len(value) > spec.high:
+        return value[: int(spec.high)]
+    if kind == K_INT and _is_int(value):
+        if spec.high is not None and value > spec.high:
+            return int(spec.high)
+        if spec.low is not None and value < spec.low:
+            return int(spec.low)
+    if kind == K_LIST and isinstance(value, list) and spec.item is not None:
+        kept = []
+        for index, item in enumerate(value):
+            ok, fitted = fit_field(f"{name}[{index}]", item, spec.item)
+            if ok:
+                kept.append(fitted)
+        if spec.high is not None:
+            kept = kept[: int(spec.high)]
+        return kept
+    if kind == K_OBJ and isinstance(value, dict) and spec.fields:
+        out = {}
+        for field_name, field_spec in spec.fields.items():
+            if field_name in value:
+                ok, fitted = fit_field(f"{name}.{field_name}", value[field_name], field_spec)
+                if ok:
+                    out[field_name] = fitted
+        return out
+    return _UNFIT
 
 
 def _check_string(name: str, value, spec: Field) -> str:

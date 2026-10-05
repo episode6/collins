@@ -467,13 +467,13 @@ class SessionRecord:
         if self.pty() is None:
             return
         facts = {**self.box_facts(), **self.launch_facts()}
-        # The process questions walk the tree: re-asked when the foreground
-        # flips, and while a command runs with no agent found under it yet
-        # (a sandboxed launch: the launcher is up before the CLI execs, and
-        # the composer waits on `agent_running`).
-        if facts.get("running_command") != self._sent.get("running_command") or (
-            facts.get("running_command") and not self._sent.get("agent_running")
-        ):
+        # The process questions walk the tree: re-asked here only when the
+        # foreground flips; the tracker's 2 s poll re-reads them for every
+        # session (`refresh_process_facts`: a sandboxed launch's
+        # `agent_running` turns true under it), so a settle never walks
+        # /proc on its own account (a command streaming output would have
+        # it walk twenty times a second).
+        if facts.get("running_command") != self._sent.get("running_command"):
             facts.update(self.process_facts())
         self._send_changed(facts)
 
@@ -523,13 +523,18 @@ class SessionRecord:
         self._event(event, active_only=True)
 
     def mapped(self) -> bool:
-        """Never, to the session: the one thing it asks this for is the
-        resolver's budget (`Session._resolver_tick`: a mapped tab polls
-        without end, an unmapped one for RESOLVER_BACKGROUND_TICKS), and
-        the service has no screen to be mapped on. The budget holds, and
-        a tab mapping re-arms it (`resolver.arm`), as §3.19 says; the cwd
+        """"At least one client is attached to this agent's pty" — main's
+        "has a tab" (§3.19). The one thing the session asks this for is
+        the resolver's budget (`Session._resolve_transcript`): with a
+        client attached it polls without end, as an on-screen tab did;
+        with none, for RESOLVER_BACKGROUND_TICKS, and an attach re-arms it
+        (`client_attached`), as a tab's map does through `resolver.arm`.
+        The session's own submit re-arms it too, before the write lands
+        (`ServiceActivity.input_sent` / `on_input`), so a re-arm's
+        baseline can never swallow the session's own transcript. The cwd
         poll runs for as long as the session lives (`alive`)."""
-        return False
+        pty = self.pty()
+        return pty is not None and bool(pty.attachments)
 
     def composer_open(self) -> bool:
         """The client fact `_post_switch` reads: whether the composer is up
@@ -649,8 +654,11 @@ class SessionRecord:
         pty sink); its handle, which the `cut` events carry."""
         handle = f"cut-{next(_cuts)}"
         cut = CutSink(self, sink, handle)
+        superseded = self._chain
+        if superseded is not None and superseded.handle in self.cuts:
+            superseded.ended()  # the session runs one chain: the older cut is over
         self.cuts[handle] = cut
-        self._chain = cut  # the session runs one chain: the newest cut's
+        self._chain = cut
         self.session.begin_cut(cut)
         return handle
 
@@ -678,9 +686,11 @@ class SessionRecord:
     def client_attached(self, sink) -> None:
         """The facts whole to the one attaching — after what moved since
         the last send went to everyone already attached, so a second attach
-        inside a settle starves no one (the snapshot records nothing)."""
+        inside a settle starves no one (the snapshot records nothing). A
+        resolver paused for want of a client resumes (`mapped`)."""
         self.refresh_facts()
         self.send_to(sink, self.snapshot())
+        self.session.arm_resolver()
 
     def client_gone(self, sink) -> None:
         for cut in list(self.cuts.values()):

@@ -257,6 +257,10 @@ class ServiceActivity:
         session = record.session
         submit = "\r" in text
         if submit:
+            # Before the write lands: a resolver paused for want of a client
+            # (`hosting.SessionRecord.mapped`) resumes with a baseline that
+            # cannot hold the transcript this submit is about to create.
+            session.arm_resolver()
             self.absorb_baseline(session)
         session.echo_gate.poked(text)
         # The pole starts pre-emptively on a bare Return alone, as the
@@ -277,6 +281,7 @@ class ServiceActivity:
         mark: the pole comes up on the agent's own hint, as it did for the
         window's `_on_input_sent` (PR 602)."""
         if "\r" in (text or ""):
+            record.session.arm_resolver()  # before the write, as in on_input
             self.absorb_baseline(record.session)
 
     def startup_held_for(self, handle: str) -> bool:

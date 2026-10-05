@@ -62,8 +62,6 @@ _NOT_SET_UP = "Sandboxed sessions aren't set up here"
 _PLAN_NAME_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json")
 
 
-_PLAN_NAME_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json")
-
 
 def delivery_record(delivery) -> dict:
     """A `sandboxgrants.Delivery` (or a row's status alone) as the protocol
@@ -310,7 +308,6 @@ class SandboxRequests:
         fields: dict = {"reason": reason or ""}
         if derived:
             fields["plan"] = derived
-            self._derived.setdefault(sibling_box or box, set()).add(derived)
             self._derived.setdefault(sibling_box or box, set()).add(derived)
         if sibling_box:
             fields["box"] = sibling_box

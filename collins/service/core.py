@@ -1570,16 +1570,18 @@ class ServiceCore:
     def input(self, pty_id: int, data: bytes, client: Client) -> None:
         """A `0x02` frame: what the client's VTE committed — typed into the
         pty, and on its way to the tracker's echo gate for an agent's."""
-        try:
-            self.ptys.write(pty_id, data, sink=client.sink_for(pty_id))
-        except KeyError:
-            return
         record = self.sessions.get(pty_id)
         if record is not None and self.activity is not None:
+            # Told before the write: a "\r" re-arms the resolver and takes
+            # the baseline's snapshot while the pty is still pristine.
             try:
                 self.activity.on_input(record, data)
             except Exception:  # noqa: BLE001 - the tracker's failure is not the keystroke's
                 log.exception("pty %d: the tracker failed on an input frame", pty_id)
+        try:
+            self.ptys.write(pty_id, data, sink=client.sink_for(pty_id))
+        except KeyError:
+            return
 
     # -- the loopback's one shortcut (deleted with it, D21)
 

@@ -518,11 +518,17 @@ def test_a_fact_that_does_not_fit_costs_the_others_nothing(server, tmp_path):
     assert len(sent) == 1, sent
     event = sent[0]
     assert event["model"] == "claude-opus-5-5"
-    assert "touched_files" not in event and "entered" not in event
+    # A list is fitted item by item: the path with the NUL goes, the other
+    # stays; an object field by field: rows_below is clamped, not dropped.
+    assert event["touched_files"] == ["/ok.py"]
+    assert event["entered"] == {"text": "x", "rows_below": protocol.MAX_ROWS}
     assert event["permission_mode"] == "p" * 32
-    # Nothing of the bad facts was recorded as sent: they are tried again.
-    assert record._sent["touched_files"] == [] and record._sent["model"] == "claude-opus-5-5"
-    assert record._sent.get("entered") is None
+    assert record._sent["touched_files"] == ["/ok.py"]
+    # A fact with no bringing it closer is dropped and not recorded.
+    before = len(ends.of("session"))
+    record._send_changed({"pid": "not-a-pid", "effort": "high"})
+    event = ends.of("session")[before:][0]
+    assert "pid" not in event and event["effort"] == "high"
 
 
 def test_a_second_attach_does_not_starve_the_first(server, tmp_path):
@@ -741,3 +747,108 @@ def test_a_prompt_only_when_empty_is_refused_off_the_live_screen(server, tmp_pat
     assert "hello" not in screen.capture_contents()
     client.request({"t": "prompt", "pty": pty, "text": "hello"})  # unconditional: typed
     assert pump(3, lambda: "hello" in screen.capture_contents())
+
+
+# -- the resolver's budget on the service -----------------------------------------------------
+
+
+def _resolver_rig(server, client, tmp_path, monkeypatch, attach):
+    """A fresh spawn (no id) whose resolver polls fast and has a short
+    background budget, over a projects dir of the test's own."""
+    from collins.service import session as session_mod
+
+    monkeypatch.setattr(session_mod, "RESOLVER_POLL_MS", 20)
+    monkeypatch.setattr(session_mod, "RESOLVER_BACKGROUND_TICKS", 3)
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    server.core.start_activity()  # the tracker is what re-arms the resolver on a submit
+    pty = spawn_agent(client, cwd)["pty"]
+    if attach:
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    from collins import sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", projects)  # the provider reads it live
+    return pty, record, projects, cwd
+
+
+def _write_transcript(projects, cwd, session_id):
+    import re
+
+    directory = projects / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{session_id}.jsonl").write_text('{"type":"summary"}\n')
+
+
+def test_mapped_is_whether_a_client_is_attached(server, tmp_path):
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    record = server.core.sessions[pty]
+    assert record.mapped() is False
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert record.mapped() is True
+    client.request({"t": "detach", "pty": pty})
+    assert record.mapped() is False
+
+
+def test_an_attached_session_idling_past_the_budget_still_resolves_on_its_submit(
+    server, tmp_path, monkeypatch
+):
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, record, projects, cwd = _resolver_rig(server, client, tmp_path, monkeypatch, attach=True)
+    session = record.session
+    pump(0.4)  # many times the background budget
+    assert session._resolver_source is not None  # a client is attached: no pause
+    client.request({"t": "write", "pty": pty, "text": "hello\r"})
+    sid = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    _write_transcript(projects, cwd, sid)
+    assert pump(3, lambda: session.session_id == sid)
+    assert any(e.get("session") == sid for e in ends.of("session"))
+
+
+def test_a_detached_session_pauses_after_the_budget_and_resumes_on_attach(
+    server, tmp_path, monkeypatch
+):
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, record, projects, cwd = _resolver_rig(server, client, tmp_path, monkeypatch, attach=False)
+    session = record.session
+    assert pump(2, lambda: session._resolver_source is None)  # the budget ran out
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert session._resolver_source is not None  # resumed on the attach
+    sid = "1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    _write_transcript(projects, cwd, sid)
+    assert pump(3, lambda: session.session_id == sid)
+
+
+def test_a_submit_resumes_a_paused_resolver_before_the_write_lands(server, tmp_path, monkeypatch):
+    """A detached session with a prompt typed through the API (start_session's
+    road): the submit itself re-arms the resolver, with its baseline taken
+    before the transcript the submit creates can exist."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, record, projects, cwd = _resolver_rig(server, client, tmp_path, monkeypatch, attach=False)
+    session = record.session
+    assert pump(2, lambda: session._resolver_source is None)
+    client.request({"t": "write", "pty": pty, "text": "hello\r"})
+    assert session._resolver_source is not None
+    sid = "2f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    _write_transcript(projects, cwd, sid)
+    assert pump(3, lambda: session.session_id == sid)
+
+
+def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    first = client.request({"t": "cut", "pty": pty})["handle"]
+    second = client.request({"t": "cut", "pty": pty})["handle"]
+    assert first not in record.cuts and second in record.cuts
+    assert [e["state"] for e in ends.of("cut") if e.get("handle") == first] == ["cancelled"]
+    assert record._chain is not None and record._chain.handle == second
