@@ -287,6 +287,7 @@ class ServiceCore:
         # and the archive sweep's timer (start_housekeeping).
         self.gh_status: str | None = None
         self._gh_checking = False
+        self._gh_wanted = 0  # bumped by each drop of the answer (check_gh)
         self._sweep_source = 0
         self.app_id = ""
         # The e2e probe (D27): served only when the service runs with the
@@ -1788,17 +1789,24 @@ class ServiceCore:
         """Ask ghsetup, off the main loop, whether the service's gh is there
         to be used; `service.status` carries the answer once it has landed.
         *fresh* drops the last answer first (a client's launch: the user
-        may have installed gh or logged in since)."""
+        may have installed gh or logged in since): a check already running
+        then started before the drop, so its answer is not kept and one
+        more check follows it."""
         if fresh:
             self.gh_status = None
+            self._gh_wanted += 1
         if self._gh_checking:
             return
         self._gh_checking = True
+        asked = self._gh_wanted
         from gi.repository import GLib
 
         def landed(status: str | None) -> bool:
             self._gh_checking = False
-            self.gh_status = status
+            if asked == self._gh_wanted:
+                self.gh_status = status
+            else:
+                self.check_gh()  # dropped while it ran: ask again
             return False
 
         def work() -> None:

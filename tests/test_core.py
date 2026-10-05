@@ -1317,6 +1317,14 @@ def test_service_status_says_whether_gh_is_ready(server, monkeypatch):
     assert "gh" not in client.request({"t": "service.status"})  # asked again: no stale answer
     assert pump(2, lambda: server.core.gh_status == ghsetup.READY)
     assert client.request({"t": "service.status"})["gh"] == "ready"
+    # A drop while a check runs: that check's answer predates the drop and
+    # is not kept; the one after it is.
+    answers = iter([ghsetup.MISSING, ghsetup.LOGGED_OUT])
+    monkeypatch.setattr(ghsetup, "check", lambda: next(answers))
+    server.core.check_gh(fresh=True)
+    server.core.check_gh(fresh=True)
+    assert pump(3, lambda: server.core.gh_status is not None)
+    assert server.core.gh_status == ghsetup.LOGGED_OUT
 
 
 def test_the_archive_sweep_runs_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):
