@@ -114,7 +114,7 @@ for session, prompt, stamp in (
 with open(STATE_FILE, "w", encoding="utf-8") as fh:
     json.dump({
         "names": {SESSION_A: "Fix spinner animation", SESSION_B: "Router profiling"},
-        "settings": {"welcome_seen": True},
+        "settings": {"welcome_seen": True, "gh_welcome_dismissed": True},
         # An update row from a last run that announced a version this launch
         # has since caught up with: retired at startup (updatecheck.retire),
         # which runs the center's listener before any window exists.
