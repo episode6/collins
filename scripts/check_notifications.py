@@ -316,6 +316,7 @@ def steps(app: App):
         check("the message moved under Earlier",
               section_titles(win) == ["Unread 1", "Earlier"], str(section_titles(win)))
         rows = sheet.rows()
+        e2e_service.settle()
         check("the read row lost its guide line",
               "unread" not in rows[1].get_css_classes() and rows[1].notification is shared["msg"])
         focus = win.get_focus()
@@ -639,6 +640,7 @@ def steps(app: App):
         win.is_active = lambda: True
         # The app's tool dispatch, end to end: the reply is one of the three.
         ok, reply = app.tool_client.notify_user((win, shared["tab_b"]), {"message": "Through the tool"})
+        e2e_service.settle()
         check("the notify_user tool replies 'in Collins' for a card",
               ok and reply == "The user was notified in Collins.", reply)
     yield message_unfocused
@@ -1030,12 +1032,10 @@ def steps(app: App):
         check("no card stands before the update", cards.cards() == [], str(len(cards.cards())))
         app.announce_update(newer)
         rows = [r for r in center.rows() if r.kind == notifycenter.KIND_UPDATE]
-        e2e_service.settle()
         check("an update in Collins is one unread row, keyed by the version, with the page's url",
               len(rows) == 1 and not rows[0].read and rows[0].id == "update:9.9.9"
               and rows[0].url == newer.url and rows[0].session_id == "",
               str([(r.id, r.url, r.read) for r in rows]))
-        e2e_service.settle()
         check("titled with the version, its body naming the one running",
               rows[0].title == "Collins 9.9.9 is available"
               and updatecheck.running_version() in rows[0].body,

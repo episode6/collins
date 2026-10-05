@@ -98,6 +98,7 @@ RUN dnf install -y \
     python3-devel pyproject-rpm-macros python3-setuptools python3-wheel python3-pip \
     desktop-file-utils appstream \
     python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling libsoup3 \
+    systemd-rpm-macros \
     python3-markdown-it-py python3-linkify-it-py bubblewrap bindfs fuse3 \
   && dnf clean all
 # Root here, but the runner checks the workspace out as uid 1001, and git
