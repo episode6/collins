@@ -958,3 +958,108 @@ def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):
     assert second["pty"] != first["pty"]
     assert pump(5, lambda: first["pty"] not in server.core.ptys.ptys)
     assert second["pty"] in server.core.ptys.ptys
+
+
+# -- the lifecycle (PR-1.12c, §3.21) ----------------------------------------------------
+
+
+class _Busy:
+    """A tracker stand-in: `busy_count` is whatever the test says."""
+
+    def __init__(self, count):
+        self.count = count
+
+    def busy_count(self):
+        return self.count
+
+    def stop(self):
+        pass
+
+
+def test_a_restart_when_idle_waits_for_no_session_busy(server, monkeypatch):
+    core = server.core
+    monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+    core.activity = _Busy(2)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    assert core.restart_pending
+    pump(0.2)
+    assert restarted == []  # still busy: it waits
+    core.activity.count = 0
+    assert pump(1, lambda: restarted == [True])
+    assert not core.restart_pending
+    pump(0.1)
+    assert restarted == [True]  # once
+
+
+def test_a_restart_when_idle_is_called_off_by_cancel(server, monkeypatch):
+    core = server.core
+    monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+    core.activity = _Busy(1)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    assert core.cancel_restart() is True
+    core.activity.count = 0
+    pump(0.2)
+    assert restarted == [] and not core.restart_pending
+    assert core.cancel_restart() is False  # nothing waits
+
+
+def test_a_restart_when_idle_with_nothing_busy_restarts_at_once(server):
+    core = server.core
+    core.activity = _Busy(0)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    assert restarted == [True] and not core.restart_pending
+
+
+def test_the_pty_table_names_the_sessions_and_goes_to_subscribers(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        assert all(e.get("running") is False for e in ends.of("item"))
+        resumed = spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]
+        fresh = spawn_agent(client, tmp_path)["pty"]
+        rows = {e["pty"]: e for e in ends.of("pty") if e.get("table")}
+        assert rows[resumed]["session"] == ids["alpha1"] and rows[resumed]["kind"] == "agent"
+        assert "session" not in rows[fresh]  # not resolved yet: no id
+        assert core.running_sessions() == {ids["alpha1"]}
+        running = [e for e in ends.of("item") if e["session"] == ids["alpha1"] and "running" in e]
+        assert running and running[-1]["running"] is True
+        # A second subscriber's snapshot carries both rows, table-flagged.
+        later = Client()
+        other = srv.connect(later.on_output, later.on_event, device="desktop")
+        other.request({"t": "subscribe"})
+        snapshot = {e["pty"]: e for e in later.of("pty")}
+        assert set(snapshot) >= {resumed, fresh} and all(e.get("table") for e in snapshot.values())
+        item = [e for e in later.of("item") if e["session"] == ids["alpha1"]][0]
+        assert item["running"] is True
+        # The exit: the table's word to every subscriber, and running off.
+        client.request({"t": "close", "pty": resumed, "mode": "kill"})
+        assert pump(8, lambda: any(
+            e.get("table") and e["pty"] == resumed for e in ends.of("pty-exited")
+        ))
+        assert core.running_sessions() == set()
+
+        def last_running():
+            moved = [e for e in ends.of("item") if e["session"] == ids["alpha1"] and "running" in e]
+            return moved[-1]["running"]
+
+        assert pump(2, lambda: last_running() is False)
+        for event in ends.of("pty") + ends.of("pty-exited"):
+            assert isinstance(protocol.validate(dict(event), protocol.SERVICE), protocol.Message)
+    finally:
+        srv.shutdown()
+        pump(0.3)

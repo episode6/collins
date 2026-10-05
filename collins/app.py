@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 import gi
@@ -24,7 +25,9 @@ from . import (
     apilink,
     autodelete,
     buildinfo,
+    connection,
     desktopentry,
+    dialogs,
     ghwelcome,
     is_debug_app_id,
     jobclient,
@@ -44,7 +47,7 @@ from . import (
     welcome,
 )
 from .api import protocol
-from .api.client import SocketLink, default_locale
+from .api.client import ProtocolMismatch, SocketLink, default_locale
 from .api.protocol import RequestRefused
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .connection import ConnectionManager
@@ -727,6 +730,21 @@ row.session-child.running.busy {
   animation: barber-pole 900ms linear infinite;
   background-image: repeating-linear-gradient(135deg,
     #1c71d8 0px, #1c71d8 4.243px, #99c1f1 4.243px, #99c1f1 8.485px);
+}
+
+/* A session the Collins service runs with no tab on this device (a running
+   row, split-service spec section 3.21) has its busy verdict from the service
+   all the same: the pole climbs in the detached yellow, on the same tile and
+   timing as the blue one above. A /bg agent's row has no such source and
+   never carries .busy, so it keeps the still yellow line. */
+row.session-child.detached.busy {
+  border-left-color: transparent;
+  background-clip: border-box;
+  background-repeat: repeat-y;
+  background-size: 2px 12px;
+  animation: barber-pole 900ms linear infinite;
+  background-image: repeating-linear-gradient(135deg,
+    #e5a50a 0px, #e5a50a 4.243px, #f9f06b 4.243px, #f9f06b 8.485px);
 }
 
 /* The same pole, standing in the sidebar header beside the "Sessions" title:
@@ -2156,8 +2174,21 @@ class App(Adw.Application):
             on_state=self._on_connection_state,
             on_connected=self._on_connected,
             on_lost=self._on_connection_lost,
+            on_mismatch=self._on_protocol_mismatch,
+            cancel=GLib.source_remove,
         )
-        self._connection.start_local()
+        # The device's open tabs (§3.21): written on every tab change, held
+        # still while the link is down (a tab that loses its pty then is no
+        # tab the person closed) and after the last window's quit.
+        self._open_tabs_frozen = False
+        self._open_tabs_source: int | None = None
+        # A restart that waits for the sessions to be idle, by the pid of
+        # the service asked (restart_service).
+        self._restart_idle_pid: int | None = None
+        try:
+            self._connection.start_local()
+        except ProtocolMismatch as mismatch:
+            self._mismatch_at_startup(mismatch)
 
     def _find_service(self, app_id: str):
         from .api import server as api_server
@@ -2202,13 +2233,22 @@ class App(Adw.Application):
     # -- the connection's life (§3.20) ------------------------------------------
 
     def _on_connection_state(self, state: str) -> None:
-        reconnecting = state != "connected" and getattr(self, "store", None) is not None
+        reconnecting = state not in ("connected", "mismatch") and getattr(self, "store", None) is not None
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.set_reconnecting(reconnecting)
 
     def _on_connection_lost(self, reason: str) -> None:
         log.warning("the service connection was lost: %s", reason)
+        # The tabs whose ptys went with the service close as their reattach
+        # fails; the record of what was open must not shrink with them.
+        self._flush_open_tabs()
+        self._open_tabs_frozen = True
+        if self._restart_idle_pid is not None:
+            # The restart that waited for the sessions to be idle is under
+            # way: the reconnect waits for that service to be gone.
+            self._connection.expect_restart(self._restart_idle_pid)
+            self._set_restart_pending(None)
 
     def _on_connected(self, first: bool) -> None:
         """Connected: on the first time the mirrors are built next
@@ -2234,6 +2274,174 @@ class App(Adw.Application):
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.reattach_tabs()
+        # What was open comes back (§3.21): a tab whose pty the service
+        # still runs reattached above; one whose session ended with the
+        # service (a restart, a crash) is resumed, as a relaunch does.
+        self._open_tabs_frozen = False
+        window = self._main_window()
+        entries = self.state.get_open_tabs()
+        if window is not None and entries:
+            window.reopen_open_tabs(entries)
+        self.persist_open_tabs()
+
+    # -- the device's open tabs (§3.21) -------------------------------------------
+
+    def open_tab_entries(self) -> list[str]:
+        """Every open window's tabs, as `open_tabs` entries, window by
+        window (the most recently focused first)."""
+        entries: list[str] = []
+        for window in self.get_windows():
+            if isinstance(window, MainWindow) and not window.closed_for_good:
+                for entry in window.open_tab_entries():
+                    if entry not in entries:
+                        entries.append(entry)
+        return entries
+
+    def persist_open_tabs(self, now: bool = False) -> None:
+        """Write `open_tabs` for this service: debounced, or *now*."""
+        if self._open_tabs_frozen or getattr(self, "state", None) is None:
+            return
+        if now:
+            self._flush_open_tabs()
+            return
+        if self._open_tabs_source is None:
+            self._open_tabs_source = GLib.timeout_add(
+                250, self._flush_open_tabs, priority=GLib.PRIORITY_DEFAULT
+            )
+
+    def _flush_open_tabs(self) -> bool:
+        if self._open_tabs_source is not None:
+            GLib.source_remove(self._open_tabs_source)
+            self._open_tabs_source = None
+        if not self._open_tabs_frozen and getattr(self, "state", None) is not None:
+            self.state.set_open_tabs(self.open_tab_entries())
+        return GLib.SOURCE_REMOVE
+
+    def freeze_open_tabs(self) -> None:
+        """The last window quit: nothing after this rewrites `open_tabs`."""
+        self._flush_open_tabs()
+        self._open_tabs_frozen = True
+
+    # -- restarting the service (§3.21) ------------------------------------------------
+
+    def restart_service(self, when: str, pid: int | None = None) -> None:
+        """*Restart service*: ``now`` (every session ends with the service;
+        the connection's lost path reconnects to the new one and the open
+        tabs resume) or ``idle`` (the service waits for no session to be
+        busy; "Restarting when idle" stands in the banner's place until
+        then, with Cancel)."""
+        link = self._service_link
+        if when == "now":
+            self._flush_open_tabs()
+            self._open_tabs_frozen = True
+            self._connection.expect_restart(pid)
+        try:
+            link.call({"t": "service.restart", "when": when})
+        except RequestRefused as refusal:
+            self._open_tabs_frozen = False
+            self._show_refused_write(_(refusal.msgid).format_map(refusal.details or {}))
+            return
+        if when == "idle":
+            self._set_restart_pending(pid if isinstance(pid, int) else 0)
+
+    def cancel_service_restart(self) -> None:
+        """The banner's Cancel: the restart that waits for the sessions is
+        called off."""
+        try:
+            self._service_link.call({"t": "service.restart", "when": "cancel"})
+        except RequestRefused as refusal:
+            log.warning("cancelling the restart was refused: %s", refusal.msgid)
+        self._set_restart_pending(None)
+
+    def _set_restart_pending(self, pid: int | None) -> None:
+        self._restart_idle_pid = pid
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.set_restart_pending(pid is not None)
+
+    # -- the protocol mismatch (§3.21) ---------------------------------------------------
+
+    def _mismatch_text(self, mismatch) -> tuple[str, str]:
+        service = mismatch.service if mismatch.service is not None else "?"
+        heading = _("Collins and its service speak different protocols")
+        body = _(
+            "The Collins service speaks protocol {service} and this Collins speaks "
+            "protocol {client}. Restarting the service starts the one this Collins "
+            "came with; every session it runs ends, and resumes when it is reopened."
+        ).format(service=service, client=mismatch.client)
+        return heading, body
+
+    def _mismatch_at_startup(self, mismatch) -> None:
+        """The first connect found a service this Collins cannot talk to:
+        ask, before any window exists (a dialog over a bare window, its own
+        loop), then restart the service and connect again, or quit."""
+        log.warning("the service refused this client's protocol: %s", mismatch)
+        answer = {"value": "quit"}
+        loop = GLib.MainLoop()
+        host = Adw.Window(title=traymodel.APP_NAME, default_width=520, default_height=260)
+        host.set_content(Adw.StatusPage(icon_name=APP_ID, title=traymodel.APP_NAME))
+        host.connect("close-request", lambda *_a: (loop.quit(), False)[1])
+        heading, body = self._mismatch_text(mismatch)
+
+        def answered(response: str) -> None:
+            answer["value"] = response
+            loop.quit()
+
+        host.present()
+        dialogs.answer_dialog(
+            host,
+            heading,
+            body,
+            [("quit", _("Quit"), ""), ("restart", _("Restart Service"), "destructive")],
+            lambda response: answered("quit" if response == "cancel" else response),
+            default_response="restart",
+        )
+        loop.run()
+        host.destroy()
+        if answer["value"] != "restart":
+            log.info("quitting: the service speaks another protocol")
+            os._exit(0)
+        self._stop_service_and_wait()
+        self._connection.start_local()
+
+    def _stop_service_and_wait(self) -> None:
+        """SIGTERM the service on our socket (it refused our hello, so it
+        serves no service.restart) and wait for it to be gone."""
+        from .api import server as api_server
+
+        path = api_server.socket_path(self.get_application_id())
+        pid = connection.stop_service(path)
+        deadline = time.monotonic() + connection.RESTART_WAIT_S
+        while pid is not None and connection.pid_is_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+
+    def _on_protocol_mismatch(self, mismatch) -> None:
+        """A reconnect found a service this Collins cannot talk to (an
+        upgrade restarted it): the same question, over the window."""
+        window = self._main_window()
+        heading, body = self._mismatch_text(mismatch)
+
+        def answered(response: str) -> None:
+            if response == "restart":
+                from .api import server as api_server
+
+                pid = connection.stop_service(api_server.socket_path(self.get_application_id()))
+                self._connection.expect_restart(pid)
+                self._connection.reconnect_now()
+            else:
+                self.quit()
+
+        if window is None:
+            answered("quit")
+            return
+        dialogs.answer_dialog(
+            window,
+            heading,
+            body,
+            [("quit", _("Quit"), ""), ("restart", _("Restart Service"), "destructive")],
+            lambda response: answered("quit" if response == "cancel" else response),
+            default_response="restart",
+        )
 
     def _on_run_finished(self, session_id: str) -> None:
         """The service counted a finish for *session_id* (D29): the window
@@ -2271,9 +2479,10 @@ class App(Adw.Application):
             state.flush_drafts()
         connection = getattr(self, "_connection", None)
         if connection is not None:
-            # The panel shells this client spawned end with it (a shell has
-            # no row to reattach from until PR-1.12c; the service writes
-            # each one's history when it exits); the agents live on.
+            # The panel shells this client spawned end with it (a shell is
+            # not reattached across a quit, even since PR-1.12c: the
+            # service writes each one's history when it exits and the
+            # reopened tab paints it back); the agents live on.
             for window in self.get_windows():
                 if isinstance(window, MainWindow):
                     window.close_panel_ptys()
@@ -2546,9 +2755,12 @@ class App(Adw.Application):
         window = self._main_window()
         if window is None:
             window = self._new_window()
-            # Fresh launch: reopen the session that was active when the app
-            # was last closed. Extra windows (Ctrl+Shift+N) start empty.
-            window.restore_last_session()
+            # Fresh launch: the tabs this device had open on this service
+            # come back, attached where the service still runs them, else
+            # resumed (open_tabs, §3.21); with none recorded, the session
+            # that was active, when the setting asks for it. Extra windows
+            # (Ctrl+Shift+N) start empty.
+            window.reopen_tabs()
             if self.state.get_setting("caffeine_on_launch"):
                 self.set_caffeine_enabled(
                     True, duration=self.state.get_setting("caffeine_launch_timer") or ""

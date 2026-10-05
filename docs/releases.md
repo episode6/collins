@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-04. Full change history: git log for this file.
+fork. Last modified: 2026-10-05. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -37,6 +37,19 @@ downloads of each version, see the
 ## Changelog
 
 ### v0.1.5 — UNRELEASED
+
+- **Detach, Quit and reopening.** *Detach* (the tab menu and a session
+  row's menu) closes a tab and leaves its session running in the Collins
+  service; its row becomes a running row (yellow, poled while the agent
+  works), and opening it attaches to the running session instead of
+  resuming it twice. Quitting detaches every tab by default (the quit
+  preference's new *Leave Running*, which an install on *Ask* moves to
+  once) and the next launch reopens the tabs, attached where they still
+  run, resumed where not; the quit dialog offers *Quit*, *Stop Sessions
+  and Quit* and *Keep Running (Hide Window)*. *Restart service* in the
+  main menu restarts the service now or once no session is busy, and the
+  tabs resume on the new one; a service speaking another protocol is
+  offered the same restart.
 
 - **The service is its own process.** Collins is now two programs:
   `collins-service` runs the sessions (every agent's pty, the terminal

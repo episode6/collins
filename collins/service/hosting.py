@@ -242,6 +242,9 @@ class SessionRecord:
     def __init__(self, core, *, provider, **session_kwargs) -> None:
         self.core = core
         self.pty_id: int | None = None
+        # A fork's own conversation, once its resolver found it: the
+        # session its pty runs, as the pty table tells it (PR-1.12c).
+        self.forked: str | None = None
         # The grid the spawn request asked for (the client's VTE's).
         self.grid: tuple[int, int] = (80, 24)
         self.exited = False
@@ -570,6 +573,7 @@ class SessionRecord:
         self._send_changed({"session": session_id, **self.box_facts(), **self.sandbox_facts()})
 
     def fork_resolved(self, session_id: str) -> None:
+        self.core.session_forked(self, session_id)
         self.send({"forked": session_id})
 
     def cwd_polled(self, cwd: str | None) -> None:

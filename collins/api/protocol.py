@@ -368,6 +368,10 @@ ERRORS = frozenset(
     }
 )
 
+# A `spawn` refused because the service runs that session already (its
+# args name the running `pty`): the client attaches to it instead (D31).
+ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
+
 # Which peer may send each binary tag.
 FRAME_SENDERS: Mapping[int, frozenset[str]] = {
     TAG_OUTPUT: frozenset({SERVICE}),
@@ -908,6 +912,11 @@ _TABLE: tuple[MessageType, ...] = (
                 "running_command": _req(_BOOL),
                 "process_cwd": _null(_PATH),
                 "plan": _null(_PATH),
+                # Its grid now: what a tab that attaches to a running pty
+                # starts its terminal at, so the attach paints the screen
+                # as it stands and no row is cut short (PR-1.12c, D19).
+                "cols": _COLS,
+                "rows": _ROWS,
             },
         ),
     ),
@@ -1249,6 +1258,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "syncing": _BOOL,
                 "backgrounding": _BOOL,
                 "can_background": _BOOL,
+                # An agent pty on the service names this session (PR-1.12c,
+                # §3.21): the row of a session nobody here shows is a
+                # running row, and opening it attaches.
+                "running": _BOOL,
                 "mtime": _NUM,
                 "created": _NUM,
                 "size": _i(0, SIZE_MAX),
@@ -1413,6 +1426,11 @@ _TABLE: tuple[MessageType, ...] = (
                 "box": _ID,
                 "active": _BOOL,
                 "sized_for": _HOST,
+                # A row of the pty table as the subscription carries it
+                # (the snapshot, an agent's spawn, its resolve): for the
+                # sidebar's running rows, never for a view of the pty
+                # (PR-1.12c, §3.21).
+                "table": _BOOL,
             },
         ),
     ),
@@ -1421,7 +1439,13 @@ _TABLE: tuple[MessageType, ...] = (
         "A pty's child exited; status is null when it is unknown (a keeper crash).",
         event=_event(
             SERVICE,
-            {"pty": _req(_PTY), "status": _req(_null(_i(-(2**31), 2**31 - 1)))},
+            {
+                "pty": _req(_PTY),
+                "status": _req(_null(_i(-(2**31), 2**31 - 1))),
+                # The subscription's word that an agent's row left the pty
+                # table (PR-1.12c), beside the one its views are sent.
+                "table": _BOOL,
+            },
         ),
     ),
     MessageType(
@@ -1824,9 +1848,9 @@ _TABLE: tuple[MessageType, ...] = (
     # -- the service itself (§3.10)
     MessageType(
         "service.restart",
-        "Restart the service: now, or once no session is busy.",
+        "Restart the service: now, or once no session is busy; or call a waiting restart off.",
         request=_request(
-            {"when": _req(Field(K_STR, choices=frozenset({"now", "idle"}), high=8))},
+            {"when": _req(Field(K_STR, choices=frozenset({"now", "idle", "cancel"}), high=8))},
         ),
     ),
     MessageType(

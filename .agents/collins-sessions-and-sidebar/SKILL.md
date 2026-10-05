@@ -217,7 +217,9 @@ is the rest, and the two must cover `DEFAULT_SETTINGS` exactly —
 per-session `panel_layout` and `editor_states` (the `AppState.panel_layouts`
 / `editor_states` properties read that block), `last_active_session` (a
 setting in the catalogue, stored per service: `uistate.SERVICE_SCOPED_
-SETTINGS`) and the unused-yet `open_tabs`. **Nothing outside `state.py`
+SETTINGS`) and `open_tabs`, the tabs this device had open on that
+service (`AppState.get_open_tabs` / `set_open_tabs`; written and read by
+the window, see `collins-terminal-tab`). **Nothing outside `state.py`
 knows the side**: `get_setting`, `set_setting`, `update_settings` and the
 `get_*` / `set_*` pairs route, `AppState.settings` stays the merged dict
 the window hands to `SessionOptions`, and `save()` writes `state.json`
@@ -274,6 +276,26 @@ transcript event was the user stopping Claude — it stands until the session
 moves on); `.running.busy` is the moving blue barber pole; `.unread` pulses
 green. An animated property outranks later plain rules, so the unread
 animation's selector excludes every status that outranks it.
+
+**Running rows** (PR-1.12c, spec §3.21, D31). `SessionItem.running` is
+the service's word that an agent pty runs the session: an `item` field
+(`StoreFeed.item_fields` asks `ServiceCore.running_sessions`, and
+`refresh_running` sends it when a pty spawns, resolves or exits) and the
+rows of the pty table the subscription carries (`pty` events with
+`table: true` — the snapshot's, an agent's spawn and resolve — and
+`pty-exited` with `table: true`; `api.client` routes a table event to the
+mirrors only, never to a view). `RemoteStore` keeps the table
+(`agent_ptys`, `pty_for(session)` through the forward chain,
+`unresolved_ptys`, `pty_running`) and emits `running-changed`. A fork's
+pty names the forked id once a sandboxed fork's resolver found it, else
+nothing (`ServiceCore.agent_pty_sessions`). A `SessionRow` whose session
+runs with no tab here takes the `detached` class (yellow), and
+`row.session-child.detached.busy` poles in yellow (the service's busy
+verdict reaches such a row too); an unresolved pty with no tab on this
+device is a running `PlaceholderRow` "New session" keyed `pty:<id>`
+(`SessionSidebar._unshown_ptys`, `pty_shown` from the window), opened by
+attaching. The row menu's *Detach* is offered while the session has a
+tab.
 
 **Which sessions are working** is `activity.py`, GTK-free: `ActivityTracker`
 is marked by (in order of trust) the CLI's own OSC 9;4 progress termprop

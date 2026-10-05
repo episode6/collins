@@ -168,7 +168,7 @@ SPAWN_ENV_STRIPPED = (
     "INVOCATION_ID",
     "JOURNAL_STREAM",
 )
-ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
+ALREADY_RUNNING_MSGID = protocol.ALREADY_RUNNING_MSGID
 # How long stop_sessions waits for every close flow (the agent's exit
 # budget, the shell's, the SIGKILL grace) before shutting what is left.
 STOP_BOUND_S = 30.0
@@ -272,6 +272,10 @@ class ServiceCore:
         # The subscribed clients, in the order they subscribed: who a
         # UI-bound tool call can go to (_tool_client).
         self._subscribers: list[Client] = []
+        # A restart waiting for no session to be busy (restart_when_idle):
+        # what to call, and the poll's source.
+        self._restart_waiting: Callable[[], None] | None = None
+        self._restart_source = 0
         pruned = self.ptys.prune_models()
         if pruned:
             log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
@@ -298,7 +302,7 @@ class ServiceCore:
 
             store = SessionStore(self.state)
         self.store = store
-        self.feed = storefeed.StoreFeed(store, self.state)
+        self.feed = storefeed.StoreFeed(store, self.state, running=self.running_sessions)
         # The notification history (PR-1.11): the service's, over the same
         # state, published to the same subscribers.
         self.notifications = notifications_mod.ServiceNotifications(self.state)
@@ -470,8 +474,8 @@ class ServiceCore:
                     continue
                 if live.session.has_running_command():
                     # Two CLIs on one transcript would both write it; the
-                    # client paints this where a spawn error goes, and
-                    # PR-1.12c attaches to the running pty instead.
+                    # client (PR-1.12c) attaches to the running pty it names;
+                    # a client that cannot paints it where a spawn error goes.
                     return protocol.refuse(
                         message.id, protocol.ERROR_REFUSED, ALREADY_RUNNING_MSGID, {"pty": live.pty_id}
                     )
@@ -523,6 +527,8 @@ class ServiceCore:
         if self.activity is not None:
             self.activity.started(record, fresh=fresh)
         pty = self.ptys.get(record.pty_id)
+        # Every subscriber's sidebar hears of the new agent pty (PR-1.12c).
+        self.publish_pty(record.pty_id)
         return protocol.reply(
             message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
         )
@@ -649,6 +655,16 @@ class ServiceCore:
         self.rekey_shells(record, session_id)
         if self.activity is not None:
             self.activity.resolved(record)
+        if pty is not None:
+            # The row of the pty table names the session now (PR-1.12c).
+            self.publish_pty(pty.id)
+
+    def session_forked(self, record: hosting.SessionRecord, session_id: str) -> None:
+        """A sandboxed fork's resolver found the forked conversation: its
+        pty runs that session from now on, as the pty table tells it."""
+        record.forked = session_id
+        if record.pty_id is not None:
+            self.publish_pty(record.pty_id)
 
     def rekey_shells(self, record: hosting.SessionRecord, session_id: str) -> None:
         """File the history of every panel shell of *record*'s session (the
@@ -1004,6 +1020,8 @@ class ServiceCore:
             running_command=bool(pty.has_running_command()),
             process_cwd=pty.process_cwd(),
             plan=pty.plan,
+            cols=pty.cols,
+            rows=pty.rows,
         )
 
     def _req_pty_capture(self, message: protocol.Message, client: Client) -> dict:
@@ -1034,7 +1052,15 @@ class ServiceCore:
         its session with no client attached (SessionTools.agent_exited) and
         drops the session once the exit is reported."""
         if pty.kind != "shell":
+            ran = self.agent_pty_sessions(include_finished=True).get(pty.id)
             record = self.sessions.pop(pty.id, None)
+            # The subscribers' word that the agent's row left the table
+            # (PR-1.12c): its session runs no more.
+            self._broadcast(
+                {"t": "pty-exited", "pty": pty.id, "status": pty.exit_status, "table": True}
+            )
+            if self.feed is not None and ran:
+                self.feed.refresh_running({ran})
             if record is not None:
                 status = -1 if pty.exit_status is None else int(pty.exit_status)
                 try:
@@ -1129,21 +1155,10 @@ class ServiceCore:
     def _req_subscribe(self, message: protocol.Message, client: Client) -> dict:
         items = self.feed.subscribe(client, client.deliver)
         ptys = 0
-        for pty_id, pty in list(self.ptys.ptys.items()):
-            event = {
-                "t": "pty",
-                "pty": pty_id,
-                "kind": pty.kind or "agent",
-                "cols": pty.cols,
-                "rows": pty.rows,
-            }
-            if pty.cwd:
-                event["cwd"] = pty.cwd
-            if pty.session:
-                event["session"] = pty.session
-            pid = pty.child_pid()
-            if pid:
-                event["pid"] = pid
+        for pty_id in list(self.ptys.ptys):
+            event = self.table_row(pty_id)
+            if event is None:
+                continue
             client.deliver(event)
             ptys += 1
         for record in self._records():
@@ -1754,6 +1769,114 @@ class ServiceCore:
         """The hex of every write recorded for *pty_id* since the spy."""
         return list(getattr(self, "_write_spy", {}).get(pty_id, []))
 
+    # -- the pty table as the subscription carries it (PR-1.12c, §3.21)
+
+    def agent_pty_sessions(self, include_finished: bool = False) -> dict[int, str | None]:
+        """Every live agent pty and the session it runs: the id a resume
+        or a resolved fresh spawn runs under; for a fork, the forked
+        conversation's id once its resolver found it, else None (a fork's
+        pty is no view of the session it forked from); None for a fresh
+        spawn that has not resolved yet."""
+        table: dict[int, str | None] = {}
+        for pty_id, pty in self.ptys.ptys.items():
+            if pty.kind == "shell" or (getattr(pty, "_finished", False) and not include_finished):
+                continue
+            record = self.sessions.get(pty_id)
+            if record is None:
+                table[pty_id] = pty.session or None
+            elif record.session.fork:
+                table[pty_id] = getattr(record, "forked", None)
+            else:
+                table[pty_id] = record.session.session_id or None
+        return table
+
+    def running_sessions(self) -> set[str]:
+        """The session ids an agent pty on the service runs right now
+        (each item's `running` field)."""
+        return {sid for sid in self.agent_pty_sessions().values() if sid}
+
+    def table_row(self, pty_id: int) -> dict | None:
+        """The `pty` event a subscriber is sent for one row of the pty
+        table (``table: true``: the sidebar's, never a view's); None for a
+        pty that is gone."""
+        pty = self.ptys.ptys.get(pty_id)
+        if pty is None or getattr(pty, "_finished", False):
+            return None
+        event: dict = {
+            "t": "pty",
+            "pty": pty_id,
+            "kind": pty.kind or "agent",
+            "cols": pty.cols,
+            "rows": pty.rows,
+            "table": True,
+        }
+        if pty.cwd:
+            event["cwd"] = pty.cwd
+        session = pty.session if pty.kind == "shell" else self.agent_pty_sessions().get(pty_id)
+        if session:
+            event["session"] = session
+        pid = pty.child_pid()
+        if pid:
+            event["pid"] = pid
+        return event
+
+    def publish_pty(self, pty_id: int) -> None:
+        """An agent pty spawned or resolved: every subscriber is sent its
+        row, and the item of the session it runs its `running`."""
+        event = self.table_row(pty_id)
+        if event is None:
+            return
+        self._broadcast(event)
+        if self.feed is not None and event.get("session"):
+            self.feed.refresh_running({event["session"]})
+
+    # -- restart when idle (§3.10 item 1, PR-1.12c)
+
+    # How often a restart that waits for every session to be idle looks.
+    RESTART_POLL_MS = 2000
+
+    def restart_when_idle(self, restart: Callable[[], None]) -> None:
+        """Call *restart* once no session is busy (the tracker's
+        `busy_count`): looked at now, then every `RESTART_POLL_MS`. A
+        second ask replaces the first; `cancel_restart` calls it off."""
+        from gi.repository import GLib
+
+        self.cancel_restart()
+        self._restart_waiting = restart
+        if self._restart_tick():
+            self._restart_source = GLib.timeout_add(self.RESTART_POLL_MS, self._restart_tick)
+
+    def _restart_tick(self) -> bool:
+        busy = self.activity.busy_count() if self.activity is not None else 0
+        if busy:
+            return True
+        restart, self._restart_waiting = self._restart_waiting, None
+        self._restart_source = 0
+        if restart is not None:
+            log.info("restart when idle: no session is busy; restarting")
+            try:
+                restart()
+            except Exception:
+                log.exception("restart when idle: the restart failed")
+        return False
+
+    def cancel_restart(self) -> bool:
+        """Call off a restart waiting for the sessions to be idle; True
+        when one was waiting."""
+        from gi.repository import GLib
+
+        waiting = self._restart_waiting is not None
+        self._restart_waiting = None
+        if self._restart_source:
+            GLib.source_remove(self._restart_source)
+            self._restart_source = 0
+        return waiting
+
+    @property
+    def restart_pending(self) -> bool:
+        """Whether a restart waits for the sessions to be idle."""
+        return self._restart_waiting is not None
+
     # -- stopping (§3.10 item 1)
 
     def stop_sessions(self, done: Callable[[], None] | None = None) -> list[str]:
@@ -1827,6 +1950,7 @@ class ServiceCore:
         return force
 
     def shutdown(self) -> None:
+        self.cancel_restart()
         if self.activity is not None:
             self.activity.stop()
         self.ptys.shutdown()

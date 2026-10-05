@@ -84,6 +84,18 @@ class ConnectionLost(Exception):
     """The connection could not be made or was lost; `str` says why."""
 
 
+class ProtocolMismatch(ConnectionLost):
+    """The service and this client speak no protocol in common (the hello
+    refused ``protocol``, or the hello's window and ours do not meet):
+    *service* and *client* are the two protocol versions, which the
+    mismatch dialog names (§3.21)."""
+
+    def __init__(self, message: str, service: int | None, client: int) -> None:
+        super().__init__(message)
+        self.service = service
+        self.client = client
+
+
 def new_client_id() -> str:
     return str(uuid.uuid4())
 
@@ -259,8 +271,11 @@ class SocketLink(apilink.Link):
         )
         if agreed is None:
             self.close()
-            raise ConnectionLost(
-                f"the service speaks protocol {hello['protocol']} and this Collins speaks {protocol.PROTOCOL}"
+            raise ProtocolMismatch(
+                f"the service speaks protocol {hello['protocol']} "
+                f"and this Collins speaks {protocol.PROTOCOL}",
+                int(hello["protocol"]),
+                protocol.PROTOCOL,
             )
         self._open(self._sync, deadline)
         self._hello(self._sync, deadline)
@@ -339,7 +354,13 @@ class SocketLink(apilink.Link):
         except RequestRefused as refusal:
             self.close()
             if refusal.error == protocol.ERROR_PROTOCOL:
-                raise ConnectionLost(refusal.msgid.format_map(refusal.details)) from None
+                details = refusal.details or {}
+                service = details.get("service")
+                raise ProtocolMismatch(
+                    refusal.msgid.format_map(details),
+                    service if isinstance(service, int) and not isinstance(service, bool) else None,
+                    protocol.PROTOCOL,
+                ) from None
             raise ConnectionLost(f"hello refused: {refusal.msgid}") from None
 
     def prove_local(self) -> bool:
@@ -646,6 +667,11 @@ class SocketLink(apilink.Link):
 
     def _dispatch_event(self, event: dict) -> None:
         pty = event.get("pty")
+        if event.get("table"):
+            # A row of the pty table for the subscription (the sidebar's
+            # running rows, PR-1.12c): the mirrors hear it, never a view.
+            self.dispatch(event)
+            return
         if isinstance(pty, int):
             claimed = False
             for client in list(self._pty_clients):
