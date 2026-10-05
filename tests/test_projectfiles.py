@@ -763,6 +763,19 @@ def test_the_placeholder_path_never_removes_something_swapped_over_its_placehold
     assert (tmp_path / "a.txt").read_text() == "A"
 
 
+def test_the_placeholders_identity_survives_a_reused_inode_number():
+    """ext4 hands a just-freed inode number straight back to the next file
+    made in the directory (CI showed it), so the inode alone would call a
+    swapped file ours: its ctime, size and type tell them apart."""
+    placeholder = os.stat_result((0o100600, 7, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0), {"st_ctime_ns": 100})
+    swapped = os.stat_result((0o100644, 7, 1, 1, 0, 0, 14, 0.0, 0.0, 0.0), {"st_ctime_ns": 200})
+    assert projectfiles._identity(placeholder) != projectfiles._identity(swapped)
+    same = os.stat_result((0o100600, 7, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0), {"st_ctime_ns": 100})
+    assert projectfiles._identity(placeholder) == projectfiles._identity(same)
+    a_dir = os.stat_result((0o040700, 7, 1, 1, 0, 0, 0, 0.0, 0.0, 0.0), {"st_ctime_ns": 100})
+    assert projectfiles._identity(placeholder) != projectfiles._identity(a_dir)
+
+
 def _force_copy_path(monkeypatch):
     """The copy path without a second mount: the primitive and `os.rename`
     answer `EXDEV`, as another filesystem would."""
