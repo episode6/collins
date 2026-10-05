@@ -699,3 +699,18 @@ def test_the_mirror_moves_a_stored_ask_too(app_state, tmp_path):
     state = RemoteState(_Link(), ui=ui)
     assert state.get_setting("quit_with_running_sessions") == "detach"
     assert state.get_setting("quit_detach_migrated") is True
+    # Committed with the read: the client's instance writes its file.
+    saved = json.loads(ui_path.read_text(encoding="utf-8"))["device"]["settings"]
+    assert saved["quit_with_running_sessions"] == "detach" and saved["quit_detach_migrated"] is True
+
+
+def test_the_apps_own_instance_commits_the_move_with_the_read(app_state):
+    _write_ui_settings(app_state, {"quit_with_running_sessions": "ask"})
+    app_state.AppState(migrate=True)
+    saved = json.loads(app_state._ui_state_file().read_text(encoding="utf-8"))["device"]["settings"]
+    assert saved["quit_with_running_sessions"] == "detach" and saved["quit_detach_migrated"] is True
+    # A throwaway reader writes nothing.
+    _write_ui_settings(app_state, {"quit_with_running_sessions": "ask"})
+    app_state.AppState()
+    saved = json.loads(app_state._ui_state_file().read_text(encoding="utf-8"))["device"]["settings"]
+    assert saved == {"quit_with_running_sessions": "ask"}

@@ -2377,6 +2377,9 @@ class App(Adw.Application):
         loop), then restart the service and connect again, or quit."""
         log.warning("the service refused this client's protocol: %s", mismatch)
         answer = {"value": "quit"}
+        # While the dialog's loop runs, a second launch's activate finds no
+        # app yet (do_activate): the mirrors are built once this returns.
+        self._mismatch_asking = True
         loop = GLib.MainLoop()
         host = Adw.Window(title=traymodel.APP_NAME, default_width=520, default_height=260)
         host.set_content(Adw.StatusPage(icon_name=APP_ID, title=traymodel.APP_NAME))
@@ -2397,6 +2400,7 @@ class App(Adw.Application):
             default_response="restart",
         )
         loop.run()
+        self._mismatch_asking = False
         host.destroy()
         if answer["value"] != "restart":
             log.info("quitting: the service speaks another protocol")
@@ -2749,6 +2753,11 @@ class App(Adw.Application):
             window.focus_session(session_id)
 
     def do_activate(self) -> None:
+        if getattr(self, "_mismatch_asking", False) or getattr(self, "state", None) is None:
+            # A second launch landing while the startup's mismatch dialog
+            # runs its own loop (or a startup that never connected): there
+            # is no app to activate yet.
+            return
         # A relaunch is a way back for a hidden window, and the way the notice
         # names where there is no tray host to point at.
         self._dismiss_hide_notice()

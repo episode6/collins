@@ -1232,7 +1232,22 @@ class AppState:
                         self.ui.set_scoped(self.service_id, key, value)
                 elif value != DEFAULT_SETTINGS.get(key) or key not in self.ui.present_keys:
                     ui_settings[key] = value
+        before = dict(ui_settings)
         migrate_device_settings(ui_settings)
+        moved = {k: v for k, v in ui_settings.items() if before.get(k) != v}
+        if moved:
+            # The device's file holds the move from here on: written now
+            # by the instance that writes it (the app's), so the one-shot
+            # is committed with the read; a throwaway reader (migrate
+            # False, or the service's device=False) keeps it in memory and
+            # writes nothing, as it writes nothing else. Only a value that
+            # moved is written (a fresh device sets the marker alone).
+            self.ui.settings.update(moved)
+            if "quit_with_running_sessions" in moved and self._device and self._migrate and not migrating:
+                try:
+                    self.ui.save()
+                except OSError as exc:
+                    log.warning("ui-state.json not written (%s); the move is redone next start", exc)
         # The merged view every reader sees: the service's settings and
         # this device's, the latter read from ui-state.json.
         self.settings = {**DEFAULT_SETTINGS, **service_settings, **ui_settings}
