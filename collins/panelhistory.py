@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import shutil
 import string
+from collections.abc import Iterable
 from pathlib import Path
 
 _STATE_BASE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
@@ -101,14 +102,16 @@ def save(session_id: str, text: str, ordinal: int = 0) -> None:
         pass  # history is best-effort; never break a tab close over it
 
 
-def save_all(session_id: str, texts: dict[int, str]) -> None:
+def save_all(session_id: str, texts: dict[int, str], keep: Iterable[int] = ()) -> None:
     """Persist every live shell's scrollback, one file per ordinal. The
-    mapping's keys are the explicit keep-set: files under ordinals it
-    doesn't mention belong to shells that no longer exist — closing a
-    shell deletes its history."""
+    mapping's keys, with *keep*, are the explicit keep-set: files under
+    ordinals neither mentions belong to shells that no longer exist —
+    closing a shell deletes its history. An ordinal in *keep* alone is
+    left as it is (its text follows by itself, `history_requests`)."""
     if _path(session_id) is None:
         return
-    stale = [path for ordinal, path in _ordinal_paths(session_id) if ordinal not in texts]
+    kept = set(texts) | set(keep)
+    stale = [path for ordinal, path in _ordinal_paths(session_id) if ordinal not in kept]
     for ordinal, text in texts.items():
         save(session_id, text, ordinal)
     for path in stale:
@@ -162,3 +165,36 @@ def delete(session_id: str) -> None:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+# The frame a `panel.history` request must stay under (api.protocol
+# MAX_FRAME is 1 MiB; the header and the pty entries take the rest).
+HISTORY_REQUEST_BUDGET = 900_000
+
+
+def history_requests(key: str, shells: list[dict], budget: int = HISTORY_REQUEST_BUDGET) -> list[dict]:
+    """The `panel.history` requests that write *shells* (entries of
+    ``{"ordinal", "pty"}`` or ``{"ordinal", "text"}``) under *key*: one
+    request when the texts fit *budget* together, else a first request
+    naming every ordinal (the ptys as they are, every text entry marked
+    ``keep`` so its file survives the keep-set) followed by one
+    ``partial`` request per text, each alone, so no shell's history is
+    blanked by another's. A text over the budget by itself is cut to its
+    tail. GTK-free; `tests/test_panelhistory.py` pins it."""
+
+    def size(entry: dict) -> int:
+        return len(entry.get("text", "").encode("utf-8", "surrogateescape"))
+
+    if sum(size(e) for e in shells) <= budget:
+        return [{"t": "panel.history", "key": key, "shells": shells}]
+    first = [{"ordinal": e["ordinal"], "keep": True} if "text" in e else e for e in shells]
+    out = [{"t": "panel.history", "key": key, "shells": first}]
+    for entry in shells:
+        if "text" not in entry:
+            continue
+        text = entry["text"]
+        while len(text.encode("utf-8", "surrogateescape")) > budget:
+            text = text[-(len(text) * 9 // 10) :]
+        out.append({"t": "panel.history", "key": key, "partial": True,
+                    "shells": [{"ordinal": entry["ordinal"], "text": text}]})
+    return out
