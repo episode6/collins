@@ -32,11 +32,9 @@ def test_the_git_pages_sites_are_gone():
     for prefix in ("gitpage:", "gitinfo:", "remotegit:", "gitloads:", "gitpatch:"):
         left = sorted(s for s in found if s.startswith(prefix))
         assert not left, left
-    # The sidebar's one: the file row's "is there a file to open" check,
-    # which is `fs.stat`'s once PR-2.3 brings it (the allowlist says so).
-    assert sorted(s for s in found if s.startswith("gitsidebar:")) == [
-        "gitsidebar:GitSidebar._file_menu_items:Path.is_file"
-    ]
+    # The sidebar's last one, the file row's "is there a file to open"
+    # check, is `fs.stat`'s since PR-2.4.
+    assert sorted(s for s in found if s.startswith("gitsidebar:")) == []
     assert not any(site.startswith("window:MainWindow._run_git") for site in found)
     assert not any(site.startswith("window:MainWindow._on_git_") for site in found)
 
@@ -71,6 +69,21 @@ def test_the_walker_follows_a_name_bound_to_a_path_and_the_image_constructors():
         "m:f:Texture.new_from_filename",
         "m:f:Pixbuf.new_from_file_at_scale",
     }
+
+
+def test_the_trees_and_quick_opens_sites_are_gone():
+    """PR-2.4: the tree, quick open, the editor's roots and the follow
+    scope read no disk on the client (the service's `fs.list`, `fs.walk`,
+    `fs.stat`, `cwd.settle`)."""
+    found = pathless.walk()
+    for prefix in ("filetree:", "quickopen:"):
+        left = sorted(s for s in found if s.startswith(prefix))
+        assert not left, left
+    # The pane's one left is the rename's, PR-2.5's.
+    assert sorted(s for s in found if s.startswith("editor:")) == ["editor:EditorPane._rename:Path.rename"]
+    for name in ("list_dir", "walk_files", "repository_root", "follow_scope", "is_inside", "_is_file"):
+        left = sorted(s for s in found if s.startswith(f"editorfiles:{name}:"))
+        assert not left, left
 
 
 def test_the_walker_covers_the_gtk_modules_and_the_helpers():

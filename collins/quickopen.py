@@ -3,20 +3,22 @@
 """Quick open: a type-ahead dialog to jump to any file in the project.
 
 Modeled on switcher.py's QuickSwitcher (search entry + list + arrow keys),
-backed by `editorfiles.walk_files` run on a background thread and marshaled
-home with `GLib.idle_add`, the same shape as `store.discover_sessions`.
-Scoring lives in the GTK-free `fuzzy` module.
+backed by the service's `fs.walk` (split-service spec §3.23, PR-2.4: the
+walk runs on the service's machine, asked from a background thread and
+landed at `GLib.PRIORITY_DEFAULT`). Scoring lives in the GTK-free `fuzzy`
+module.
 
 The walked file list is cached per project root so reopening the dialog is
-instant; a `Gio.FileMonitor` on the root drops the cache the moment the top
-level changes, and every open re-walks in the background anyway — the agent
-is creating files all the time, and a fresh walk quietly replacing a cached
-list is cheaper than ever showing a stale one for long.
+instant; a watch on the root (`fs.watch kind: dir`, the service's
+`dir-changed`) drops the cache the moment the top level changes, and every
+open re-walks in the background anyway — the agent is creating files all
+the time, and a fresh walk quietly replacing a cached list is cheaper than
+ever showing a stale one for long.
 """
 
 from __future__ import annotations
 
-import threading
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -24,10 +26,13 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from . import editorfiles, fuzzy  # noqa: E402
+from . import fuzzy, remotefiles  # noqa: E402
+from .api import protocol  # noqa: E402
 from .i18n import _  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 _MAX_RESULTS = 50
 _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
@@ -35,25 +40,24 @@ _ELLIPSIZE_END = 3  # Pango.EllipsizeMode.END
 # (root, show_hidden) -> (paths, truncated). Shared across dialogs so a
 # reopened quick-open shows something instantly; see _invalidate.
 _index_cache: dict[tuple[str, bool], tuple[list[str], bool]] = {}
-# root -> its top-level monitor, alive for the app's lifetime once a root has
-# been quick-opened at all (one monitor per project — a modest, bounded cost).
-_root_monitors: dict[str, Gio.FileMonitor] = {}
+# root -> the handle of its watch on the service, alive for the app's
+# lifetime once a root has been quick-opened at all (one watch per project —
+# a modest, bounded cost; a reconnect sends it again, `remotefiles.reset`).
+_root_watches: dict[str, str] = {}
+
+
+def _on_root_changed(event: dict) -> None:
+    """The service's `dir-changed` for a watched root: its cached walk is
+    stale."""
+    root = str(event.get("path"))
+    for key in [k for k in _index_cache if k[0] == root]:
+        del _index_cache[key]
 
 
 def _watch_root(root: str) -> None:
-    if root in _root_monitors:
+    if root in _root_watches:
         return
-    try:
-        monitor = Gio.File.new_for_path(root).monitor_directory(Gio.FileMonitorFlags.NONE, None)
-    except GLib.Error:
-        return
-
-    def on_changed(*_args) -> None:
-        for key in [k for k in _index_cache if k[0] == root]:
-            del _index_cache[key]
-
-    monitor.connect("changed", on_changed)
-    _root_monitors[root] = monitor
+    _root_watches[root] = remotefiles.watcher().watch(root, _on_root_changed, kind=protocol.WATCH_DIR)
 
 
 class QuickOpenDialog(Adw.Dialog):
@@ -122,14 +126,22 @@ class QuickOpenDialog(Adw.Dialog):
     # -- indexing ------------------------------------------------------------
 
     def _start_walk(self) -> None:
-        """Re-walk the project off the main loop; a cached list (if any) keeps
-        the dialog usable meanwhile and is quietly replaced when this lands."""
+        """Re-walk the project (`fs.walk`, on the service) off the main
+        loop; a cached list (if any) keeps the dialog usable meanwhile and
+        is quietly replaced when this lands."""
+        root, hidden = str(self._root), self._show_hidden
+        remotefiles.off_main(lambda: remotefiles.walk_root(root, hidden), self._walked, name="quickopen-walk")
 
-        def work() -> None:
-            paths, truncated = editorfiles.walk_files(self._root, self._show_hidden)
-            GLib.idle_add(self._apply_walk, paths, truncated)
-
-        threading.Thread(target=work, daemon=True).start()
+    def _walked(self, kind: str, value) -> None:
+        if kind == "ok":
+            self._apply_walk(*value)
+            return
+        # Refused (a root the service doesn't know, no `files` capability,
+        # gone): whatever was cached stays searchable, and the status says
+        # what there is.
+        log.info("quickopen: the walk of %s was refused: %s", self._root, remotefiles.refusal_words(value))
+        self._indexing = False
+        self._sync_status()
 
     def _apply_walk(self, paths: list[str], truncated: bool) -> bool:
         _index_cache[self._cache_key] = (paths, truncated)

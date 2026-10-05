@@ -497,16 +497,28 @@ class ToolClient:
                 return os.path.normpath(trial)
         return None
 
-    def open_in_editor(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:
+    def open_in_editor(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
+        """Whether the file is inside the session's project is the service's
+        answer (`TerminalTab.ask_can_open_in_editor`, PR-2.4), so the reply
+        waits for it (mcptools.DeferredResult)."""
         window, tab = found
         path = self.resolve_file(tab, args["path"])
         if path is None:
             return False, f"No such file: {args['path']}"
-        if not tab.can_open_in_editor(path):
-            return False, "That file is outside this session's project"
         line = args.get("line")
-        window.open_in_tab_editor(tab, path, [line - 1, 0] if line else None)
-        return True, "Opened in the editor."
+        deferred = mcptools.DeferredResult()
+
+        def landed(inside: bool) -> None:
+            if tab.get_root() is None:
+                deferred.resolve(False, "That session's tab closed before the file could open")
+            elif not inside:
+                deferred.resolve(False, "That file is outside this session's project")
+            else:
+                window.open_in_tab_editor(tab, path, [line - 1, 0] if line else None)
+                deferred.resolve(True, "Opened in the editor.")
+
+        tab.ask_can_open_in_editor(path, landed)
+        return deferred
 
     def show_diff(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         """Open the session's git page on a diff, and point it at a file.
@@ -671,18 +683,35 @@ class ToolClient:
             return False, f"No such file: {raw}"
         if not editorfiles.is_image_path(path):
             return False, f"Not an image Collins can display: {raw}"
-        return self._present_image(window, tab, path, args.get("caption"), raw)
+        # Project membership (the "Open in Editor" button) is the service's
+        # answer (PR-2.4): the reply waits for it.
+        deferred = mcptools.DeferredResult()
+        caption = args.get("caption")
+
+        def landed(inside: bool) -> None:
+            if tab.get_root() is None:
+                deferred.resolve(False, "That session's tab closed before the image could show")
+                return
+            try:
+                deferred.resolve(*self._present_image(window, tab, path, caption, raw, can_edit=inside))
+            except Exception:  # noqa: BLE001 - the reply must land regardless
+                logging.getLogger(__name__).exception("show_image lightbox failed")
+                deferred.resolve(False, f"Collins couldn't show {raw}")
+
+        tab.ask_can_open_in_editor(path, landed)
+        return deferred
 
     def _present_image(
-        self, window, tab, path: str, caption: str | None, origin: str
+        self, window, tab, path: str, caption: str | None, origin: str, can_edit: bool = False
     ) -> tuple[bool, str]:
         """Float *path* over *tab*'s window, the way a clicked image
         reference does (terminal._present_image): the lightbox shows any
-        readable image, project membership only gates its "Open in Editor"
-        button. *origin* is what the agent asked for — the file it named, or
-        the URL the copy came from — which is what a failed decode names on
-        the status page rather than the cache file nobody chose."""
-        can_edit = tab.can_open_in_editor(path)
+        readable image, project membership (*can_edit*, the service's
+        answer; never for a remote image's copy, which is this device's
+        cache) only gates its "Open in Editor" button. *origin* is what the
+        agent asked for — the file it named, or the URL the copy came from —
+        which is what a failed decode names on the status page rather than
+        the cache file nobody chose."""
         on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
         # The one place every `show_image` passes through, local and remote
         # alike, and the only one that has the agent's own caption in hand.
