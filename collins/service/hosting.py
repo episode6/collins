@@ -206,6 +206,10 @@ class CutSink:
             self.record.cuts.pop(self.handle, None)
 
     def _tell(self, state: str, text: str | None = None) -> None:
+        # The record's pty id, not the live pty: a sink is told its cut's
+        # fate from the session's main-loop callbacks, and `process_exited`
+        # cancels every cut synchronously before the record lets go of its
+        # pty, so a cut can't outlive the id it was begun under.
         event: dict = {"t": "cut", "pty": self.record.pty_id, "handle": self.handle, "state": state}
         if text is not None:
             event["text"] = text[: protocol.TEXT_MAX]
@@ -271,7 +275,10 @@ class SessionRecord:
                 self.on_settled(self)
             except Exception:
                 log.exception("session %s: the settle's listener failed", self.handle)
-        self.refresh_facts()
+        try:
+            self.refresh_facts()
+        except Exception:  # noqa: BLE001 - a fact that can't be read goes stale, not down (rule 4)
+            log.exception("session %s: the facts' refresh failed", self.handle)
         return False
 
     # -- the session event ---------------------------------------------------------

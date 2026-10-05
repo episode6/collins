@@ -380,7 +380,7 @@ SAMPLES = {
     ("pty.capture", p.REQUEST): {"pty": 7},
     ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld", "focus": False},
     ("switch", p.REQUEST): {"pty": 7, "model": "opus", "effort": "max", "composer_open": True},
-    ("write", p.REQUEST): {"pty": 7, "text": " @a.py#L2-4 "},
+    ("write", p.REQUEST): {"pty": 7, "text": " @a.py#L2-4 ", "mention": True},
     ("send", p.REQUEST): {"pty": 7, "text": "Fix the build", "composer_open": True},
     ("mention", p.REQUEST): {"pty": 7, "path": "/home/u/project/a.py", "start_line": 2, "end_line": 4},
     ("cut", p.REQUEST): {"pty": 7},

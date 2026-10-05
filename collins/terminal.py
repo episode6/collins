@@ -1449,11 +1449,6 @@ class TerminalTab(Gtk.Box):
         # an image already on the list that changes nothing about it says
         # nothing.
         "attachments-changed": (GObject.SignalFlags.RUN_FIRST, None, (object,)),
-        # Emitted each time a transcript read lands on the main loop (see
-        # _on_transcript_landed), so a finish edge the window is holding for the
-        # transcript's word (MainWindow._hold_finish) can be judged the
-        # moment the word arrives rather than when its window runs out.
-        "transcript-updated": (GObject.SignalFlags.RUN_FIRST, None, ()),
         # The service's activity verdicts for this tab's session, keyed by
         # its handle (the placeholder row's, before the session has a row;
         # a row's own flags travel on its item): busy went on or off, and a
@@ -3842,7 +3837,8 @@ class TerminalTab(Gtk.Box):
         it. The trailing space both
         terminates the CLI's mention token and leaves the cursor ready for
         that sentence; the leading one keeps the token off the end of a
-        sentence already being written (see _mention_leading_space).
+        sentence already being written (Session.mention_leading_space, on
+        the service).
 
         The path resolves against the agent's cwd right now, not the
         directory the tab started in — an agent that has cd'd into a
@@ -4013,7 +4009,7 @@ class TerminalTab(Gtk.Box):
         if self.composer_open():
             self._composer.insert_mention(text)
             return True
-        self.feed_child_text(self._mention_leading_space() + text)
+        self.session.write_mention(text)
         self.grab_terminal_focus()
         return True
 
@@ -4639,7 +4635,6 @@ class TerminalTab(Gtk.Box):
         self._refresh_pr_chips(prs)
         if lookup_empty:  # even with PRs still showing: none of them is this branch's
             self._sync_pr_refresh_tooltip(not_found=True)
-        self.emit("transcript-updated")
 
     @property
     def transcript_path(self) -> str | None:

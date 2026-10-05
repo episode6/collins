@@ -126,6 +126,23 @@ def test_every_field_lands_on_the_attribute_the_forwarder_reads(mirror):
     assert "session_id" in changed and "options" in changed and "busy" in changed
 
 
+def test_a_partial_event_leaves_the_other_fields_as_they_were(mirror):
+    """The snapshot comes whole on attach and changed fields after (D28):
+    a field an event leaves out keeps its value."""
+    session, _client = mirror
+    session.apply(
+        event(
+            session=ID, agent_cwd="/a", takes_prompt=True, model="claude-opus-5-5",
+            prs=[{"url": "https://github.com/o/r/pull/1", "number": 1}], busy=True,
+        )
+    )
+    assert session.apply(event(takes_prompt=False)) == {"takes_prompt"}
+    assert session.session_id == ID and session.current_agent_cwd() == "/a"
+    assert session.current_model() == "claude-opus-5-5" and session.busy is True
+    assert session.prs == [{"url": "https://github.com/o/r/pull/1", "number": 1}]
+    assert session.takes_prompt_now() is False
+
+
 def test_only_what_moved_is_reported(mirror):
     session, _client = mirror
     session.apply(event(takes_prompt=True, agent_cwd="/a"))
@@ -185,6 +202,9 @@ def test_prompts_switches_and_writes_are_the_protocols_requests(mirror):
         {"t": "switch", "pty": 7, "effort": "max", "composer_open": False},
         {"t": "write", "pty": 7, "text": " @a.py "},
     ]
+    # A drop's tokens: the service puts the leading space in front.
+    session.write_mention("@b.py @c.py ")
+    assert client.sent[-1] == {"t": "write", "pty": 7, "text": "@b.py @c.py ", "mention": True}
 
 
 def test_a_send_clears_the_composer_only_when_it_went(mirror):

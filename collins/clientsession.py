@@ -21,8 +21,8 @@ these from its own VTE.**
 
 `apply(event)` takes a `session` event and answers the names of the fields
 that moved; the tab turns those into its GObject signals
-(``session-resolved``, ``fork-resolved``, ``transcript-updated``,
-``process-exited``), so `window.py`'s handlers stay. The one-shots
+(``session-resolved``, ``fork-resolved``, ``process-exited``), so
+`window.py`'s handlers stay. The one-shots
 (`landed`, `reset`, `finished`, `forked`) come back in the set each time
 they are sent.
 
@@ -240,6 +240,12 @@ class ClientSession:
     def write_text(self, text: str) -> None:
         if text:
             self._ask({"t": "write"}, text=text)
+
+    def write_mention(self, text: str) -> None:
+        """Mention tokens built on the client (a drop's), typed with the
+        leading space the box wants (the service reads the cursor's line)."""
+        if text:
+            self._ask({"t": "write"}, text=text, mention=True)
 
     def inject_prompt(self, text: str) -> None:
         if text:

@@ -882,7 +882,16 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "write",
         "Type raw keystrokes into the agent's pty.",
-        request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
+        request=_request(
+            {
+                "pty": _req(_PTY),
+                "text": _req(_s(TEXT_MAX, low=1)),
+                # The text is a mention token (a drop's): the service puts
+                # the space in front of it that a half-written sentence in
+                # the box wants, as `mention` does (dropimages.leading_space).
+                "mention": _BOOL,
+            }
+        ),
     ),
     MessageType(
         "send",

@@ -328,7 +328,7 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
 A tool that ends or hands off its own session (an `archive_session` was
 prototyped) can't land inside its own call — the reply would never reach the
 shim — so it should arm and ride the busy→idle finish edge
-(`MainWindow._on_session_finished`).
+(`service.tracking.ServiceActivity._on_finished`, judged by `service/finish.py`).
 
 ## Adding a tool
 

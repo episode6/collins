@@ -241,6 +241,44 @@ def test_the_composer_fact_rides_the_requests(server, tmp_path):
     assert record.composer_open() is False
 
 
+def test_a_write_flagged_as_a_mention_keeps_its_distance(server, tmp_path):
+    """A drop's mention tokens are built on the client and typed through
+    `write mention: true`: the service puts the space in front that a
+    half-written sentence wants (Session.mention_leading_space), and none
+    in front of one typed at the prompt's own whitespace."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    screen = server.core.ptys.get(pty).screen
+    assert pump(3, lambda: screen.capture_contents().count("true") >= 2)
+    client.send_input(pty, b"look at")  # the line discipline echoes it at once
+    assert pump(3, lambda: "look at" in screen.capture_contents())
+    client.request({"t": "write", "pty": pty, "text": "@a.py ", "mention": True})
+    assert pump(3, lambda: "look at @a.py" in screen.capture_contents())
+    client.request({"t": "write", "pty": pty, "text": "@b.py ", "mention": True})
+    assert pump(3, lambda: "look at @a.py @b.py" in screen.capture_contents())
+    assert "@a.py  @b.py" not in screen.capture_contents()  # a space already there wants no second
+
+
+def test_a_handler_that_fails_refuses_its_request_alone(server, tmp_path, monkeypatch):
+    """Rule 4 on the router: a request whose handler raises (a CLI internal
+    that moved under a read) is logged and refused, and the service goes
+    on serving the next one."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+
+    def broken(message, client):
+        raise RuntimeError("the box moved")
+
+    monkeypatch.setattr(server.core, "_req_write", broken)
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "write", "pty": pty, "text": "x"})
+    assert refused.value.error == protocol.ERROR_FAILED
+    assert client.request({"t": "pty.info", "pty": pty})["kind"] == "agent"
+
+
 def test_a_cut_called_off_by_handle(server, tmp_path):
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event, device="laptop")

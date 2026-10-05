@@ -340,6 +340,15 @@ class ServiceCore:
             return protocol.refuse(
                 message.id, protocol.ERROR_GONE, "no such pty: {pty}", {"pty": message.get("pty")}
             )
+        except Exception:
+            # One request's failure is that request's (rule 4): the service
+            # hosts every session, so a read of a CLI internal that moved
+            # (the box, the transcript, the process tree) is logged and
+            # refused, never raised through the router.
+            log.exception("%s: the handler failed", message.type)
+            return protocol.refuse(
+                message.id, protocol.ERROR_FAILED, "{type}: failed on the service", {"type": message.type}
+            )
 
     def deliver(self, event: protocol.Message, client: Client) -> None:
         """A validated client event (`resize`, `focus`, `theme`)."""
@@ -613,7 +622,13 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_write(self, message: protocol.Message, client: Client) -> dict:
-        self._record(message).session.write_text(message.get("text"))
+        """Raw keystrokes for the pty; a mention (a drop's tokens, built on
+        the client) gets the leading space the box wants in front of it."""
+        session = self._record(message).session
+        text = message.get("text")
+        if message.get("mention"):
+            text = session.mention_leading_space() + text
+        session.write_text(text)
         return protocol.reply(message.id)
 
     def _req_switch(self, message: protocol.Message, client: Client) -> dict:
@@ -652,9 +667,7 @@ class ServiceCore:
     def _req_mention(self, message: protocol.Message, client: Client) -> dict:
         """The editor's "Add to chat" typed into the box: the mention token
         for the path, a leading space when the box has a sentence in it
-        already (dropimages.leading_space over the cursor's line)."""
-        from .. import dropimages
-
+        already (Session.mention_leading_space)."""
         session = self._record(message).session
         if not session.agent_is_running():
             return protocol.refuse(
@@ -670,11 +683,7 @@ class ServiceCore:
             return protocol.refuse(
                 message.id, protocol.ERROR_REFUSED, "Add to chat isn't available for this file"
             )
-        column, row = session.screen.cursor()
-        leading = ""
-        if column > 0:
-            leading = dropimages.leading_space(session.screen.row_text(row, column), column)
-        session.write_text(leading + reference + " ")
+        session.write_text(session.mention_leading_space() + reference + " ")
         return protocol.reply(message.id)
 
     def _req_close_nudge(self, message: protocol.Message, client: Client) -> dict:
@@ -1544,7 +1553,10 @@ class ServiceCore:
             return
         record = self.sessions.get(pty_id)
         if record is not None and self.activity is not None:
-            self.activity.on_input(record, data)
+            try:
+                self.activity.on_input(record, data)
+            except Exception:  # noqa: BLE001 - the tracker's failure is not the keystroke's
+                log.exception("pty %d: the tracker failed on an input frame", pty_id)
 
     # -- the loopback's one shortcut (deleted with it, D21)
 

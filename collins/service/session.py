@@ -88,7 +88,7 @@ from typing import Any, Protocol
 
 from gi.repository import Gio, GLib
 
-from .. import activity, composerkeys, editorfiles, proctree, sandboxplan
+from .. import activity, composerkeys, dropimages, editorfiles, proctree, sandboxplan
 from ..formatting import display_path
 from ..gitinfo import current_branch
 from ..i18n import _
@@ -744,6 +744,23 @@ class Session:
         if self.provider.takes_prompt(text, column):
             return True
         return self.provider.takes_prompt(text, column, self.screen.tail_is_faint(row, column))
+
+    def mention_leading_space(self) -> str:
+        """A space to put in front of a mention about to be typed, when the
+        input box has a sentence in it already (dropimages.leading_space
+        decides; this finds what it reads).
+
+        That is the line the cursor is on, up to the cursor — the same
+        screen `takes_prompt` reads, but read differently: this question is
+        asked mid-sentence, where the prompt marker is no longer the last
+        thing on the line, so what counts is the character immediately
+        before the cursor rather than where the marker sits. A cursor at
+        column 0 has nothing before it to read.
+        """
+        column, row = self.screen.cursor()
+        if column <= 0:
+            return ""
+        return dropimages.leading_space(self.screen.row_text(row, column), column)
 
     def prompt_block(self) -> str:
         """Why a prompt sent to this session wouldn't land, or "" when it would.

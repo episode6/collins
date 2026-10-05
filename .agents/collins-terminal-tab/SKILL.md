@@ -39,7 +39,7 @@ unchanged, but most of the methods it names are the session's now:
 | --- | --- |
 | identity: `session_id`, `fork`, `provider`, `options`, `command_override`, `cwd` | widgets, overlays, dialogs, the footer, the dock, the editor |
 | launch: `spawn`, `_finish_spawn`, `_launch_command`, `agent_environment` (was `_agent_tab_environment`), the sandbox plan (`_sandbox_options`, `_reserve_worktree`, `_register/_unregister_sandbox_box`, `_release_sandbox_plan`, `shell_exited`), `_check_worktree_launch` / `relaunch_without_worktree`, `restart_sandboxed` and its poll, the new-chat prompt poll, a reaped worktree put back (`_recreated`) | the `spawn` request that builds the session (`TerminalTab._service_spawn`) and the attach |
-| reads: `takes_prompt`, `entered_prompt`, `prompt_block`, `unstarted_thread` (minus the new-chat screen), `visible_screen_text`, `worktree_exit_prompt_keystrokes`, `screen_first_column` | `_mention_leading_space` / `_row_text` (Add to chat) |
+| reads: `takes_prompt`, `entered_prompt`, `prompt_block`, `unstarted_thread` (minus the new-chat screen), `visible_screen_text`, `worktree_exit_prompt_keystrokes`, `screen_first_column`, `mention_leading_space` (Add to chat and a drop's tokens: `mention`, and `write` with `mention: true`) | — |
 | writes: `inject_prompt(_unfocused)`, `switch_model/effort`, the open-cut (`begin_cut` → settle → apply → verify), `send_composed`, `restore_draft` (paste-back), `foreign_paste_in_box` | the composer widget, its open/close/dock, the stash (`_stash_draft`) |
 | `/proc`: `candidate_pids`, `agent_is_running`, `agent_pid`, `has_running_command`, `current_agent_cwd`, `has_background_descendant`, `owns_pid_ancestors` | — |
 | transcript: the `TranscriptModel`, its monitor/poll/debounce, `request_update` and its landing, the PRs it tracks (`tracked_prs`, `restored_prs`, `attached_prs`), the resolver (`start_resolver`, `arm_resolver`), `current_model/effort/permission_mode`, `finish_witness` | chips, labels, attachments, the editor's agent files (`_on_transcript_landed`, `_on_transcript_reset`) |
@@ -637,7 +637,9 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   departure cancelling its cut, the probe gated on the flag, `busy`
   refused), `tests/test_clientsession.py` (every field on its attribute,
   the requests' shapes through a fake client), `tests/test_finish.py`
-  (the judge), and `tests/test_session.py` as before.
+  (the judge), `tests/test_tracking.py` (the tracker's two roads for a
+  verdict, a counted finish's flags and exemptions, the background-busy
+  poll, through fakes), and `tests/test_session.py` as before.
 
 ## The service's pty server (ptyserver)
 
