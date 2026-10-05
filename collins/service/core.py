@@ -39,14 +39,36 @@ float). A settings write is followed by the
 store's two reactions to its title switches (`apply_pr_titles`,
 `apply_cli_titles`): the service acting on its own settings.
 
-**The activity tracker's boundary** (§3.6). Busy, unread and status are
-service facts that arrive at the client as `item` fields. In Phase 1 the
-tracker that decides them still runs in the client's process, beside the
-tab whose `Session` it watches (`window.MainWindow`'s `ActivityTracker`);
-its verdicts come here as `store.flags` requests, the service's store sets
-them on its `SessionItem`s, and the client's `RemoteStore` shows them when
-the `item` events come back. When the session moves into the service the
-tracker comes with it and `store.flags` goes.
+**The sessions are the service's** (§3.19, PR-1.12a). `sessions` holds a
+`hosting.SessionRecord` per live agent pty, built by `spawn` for kind
+``agent`` from the request's fields (`SessionOptions`' and the rest of
+what `session.Session` takes) and dropped once the pty's exit has been
+reported. The record is the session's host and ports; the facts a client
+reads off its tab arrive as `session` events (whole on `attach`, changed
+fields after); the requests a tab makes of its session (`prompt`, `write`,
+`switch`, `send`, `cut`, `close`, ...) are routed to it by its pty. The
+MCP identity walk and the Sandboxed chip's requests read `sessions`, and a
+box's plan is the session's that runs in it (`hosting.sandbox_plan_of`).
+
+**Busy and the finish verdict are the service's** (§3.6, D29). The
+tracker (`tracking.ServiceActivity`, `start_activity`) is fed by the stream
+filter's `Progress` events, every pty's output after the filter, the input
+frames and the ``/proc`` poll, and sets `busy` and a counted finish's
+`unread` on the store's items itself. `store.flags` keeps what a person did
+at a client's screen — `status`, `unread: false`, the /bg orchestration's
+`backgrounding` and `can_background` — and refuses `busy` and
+`unread: true` from a client.
+
+**The sandbox host is the service's** (`start_sandbox_host`): the
+`sandboxplan.SandboxHost` over the service's state, the live grants, the
+sweeps and the probe, whose verdict reaches clients as a `sandbox` event
+(``what: "probe"``).
+
+**The probe** (D27). With ``COLLINS_DEBUG_API=1`` in the service's
+environment the ``debug.*`` requests are served — a session attribute read,
+written or called by name, a pty's screen and process facts, a call on the
+sandbox host or the live grants — so the e2e checks reach past the protocol
+through one door; a service started otherwise refuses them as `unknown`.
 
 A client is anything the transport represents as a `Client`: it has a
 `device` name, a sink per pty (`sink_for(pty)`: the object the pty server
@@ -61,18 +83,19 @@ directory at a grid, and the core runs the user's `$SHELL` there with the
 service's own environment (the app's, in Phase 1) plus the two declarations
 that coax the CLI's progress announcements out (`session.agent_environment`,
 decided by the `progress_termprop` setting at spawn, as the VTE path did).
-The agent's command line is typed in by its `Session` (still on the client
-through Phase 1), exactly as before the split; a sandboxed launch types the
-`sandboxrun.py` wrapper the same way. A `SpawnError` is refused with the
+For an agent the `Session` is built first and `Session.spawn` settles the
+directory, the sandbox plan and the command; its `spawn_shell` is the pty
+server's spawn (`spawn_agent_pty`) and `shell_spawned` types the command,
+the `sandboxrun.py` wrapper included. A `SpawnError` is refused with the
 child's errno in the message, so the tab shows it where it used to show
 VTE's spawn error.
 
-`close` has one meaning in Phase 1 whatever its mode: the pty's child is
-sent SIGHUP and the master closed (`PtyServer.close`), which is what the
-tab's widget did to its VTE child. The graceful keystrokes of mode ``exit``
-and the /bg handoff of ``background`` are the `Session`'s until PR-1.10
-moves it into the service; ``kill`` is the same close with no grace to
-give, because `PtyServer.close` already escalates on its own.
+`close` with mode ``exit`` or ``background`` and the provider's keystrokes
+is the session's graceful close (`Session.begin_close`: the keystrokes,
+the nudges, the worktree dialog, the shell's exit, the budgets; a budget
+running out is a `close` event the window answers); ``kill``, or `force`,
+is the pty's child sent SIGHUP and the master closed (`PtyServer.close`),
+with SIGKILL after the grace.
 
 Panel shells (PR-1.8, spec §3.15) are ptys of kind ``shell``: the user's
 `$SHELL` with the service's environment and none of the agent's progress
@@ -86,15 +109,14 @@ held by its tab), and is refused when there is none; the plan is the pty's
 inside the box's workspace other than where bwrap lands the shell is one
 queued ``cd`` away, typed before anything else. ``clear`` on a shell wipes
 its model (`PtyServer.clear`); on an agent it is the composer's erase of
-the box, which is the `Session`'s and so still the client's through Phase
-1 (the session moves into the service in PR-1.12): the core refuses it
-rather than erase a box it cannot read. The panel history is written here
+the box (the provider's clear keys for what the box holds). The panel history is written here
 from the models: by the tab's three saves (`write_panel_history`), and
 (PR-1.11, §3.15) by the core itself when a shell's child exits, from its
 model before the model is dropped, under the key and ordinal the shell was
 spawned with (`spawn`'s ``history`` and ``ordinal``) or re-filed under
-since (`panel.key`: the resolver bound the tab; none once the shell's page
-closed for good, so a closed shell's history goes with it). The cwd,
+since (`panel.key`, or `rekey_shells` when the session its ``handle``
+names resolves; none once the shell's page closed for good, so a closed
+shell's history goes with it). The cwd,
 foreground and inner-shell reads a panel shell asks of its pty are the pty
 server's (`Pty.process_cwd`, `Pty.has_running_command`, `Pty.shell_pid`).
 
@@ -104,19 +126,22 @@ whose `job` events go to the client that started each one.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shlex
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from .. import panelhistory, providers, sandboxplan, trust
+from .. import panelhistory, providers, sandboxgrants, sandboxplan, trust
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
 from . import diffs as diffs_mod
-from . import jobs, prfeed, ptyserver, storefeed, termstream, tokenuse
+from . import hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
@@ -195,19 +220,34 @@ class ServiceCore:
                 next_id = state.pty_next_id
             get_setting = state.get_setting
         self._get_setting = get_setting
-        self._sandbox_plan = sandbox_plan or (lambda box: None)
+        # The sessions (§3.19): one record per live agent pty, by pty id.
+        self.sessions: dict[int, hosting.SessionRecord] = {}
+        self._sandbox_plan = sandbox_plan or (lambda box: hosting.sandbox_plan_of(self._records, box))
         self._environment = environment or (lambda: dict(os.environ))
+        self._stream_listener = on_stream_event
         self.ptys = ptyserver.PtyServer(
             state_dir=state_dir,
             record=record,
             record_next_id=record_next_id,
             next_id=1 if next_id is None else next_id,
-            on_event=on_stream_event,
+            on_event=self._on_stream_event,
             on_exit=self._on_pty_exit,
+            on_output=self._on_pty_output,
         )
         self.jobs = jobs.JobRunner()
         self.tools: tools_mod.SessionTools | None = None
         self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
+        # The sandbox host and the live grants (start_sandbox_host), the
+        # tracker (start_activity): None until started (a core that only
+        # serves ptys, as a test's).
+        self.sandbox_host: sandboxplan.SandboxHost | None = None
+        self.sandbox_grants: sandboxgrants.GrantMounts | None = None
+        self.activity: tracking.ServiceActivity | None = None
+        self.app_id = ""
+        # The e2e probe (D27): served only when the service runs with the
+        # flag in its environment.
+        self.debug = os.environ.get("COLLINS_DEBUG_API") == "1"
+        self._started = time.time()
         self._clients: set[int] = set()  # id(client)
         # The subscribed clients, in the order they subscribed: who a
         # UI-bound tool call can go to (_tool_client).
@@ -270,7 +310,13 @@ class ServiceCore:
         if self.prs is not None:
             self.prs.unsubscribe(client)
         for pty_id in list(self.ptys.ptys):
-            self.ptys.detach(pty_id, client.sink_for(pty_id))
+            sink = client.sink_for(pty_id)
+            record = self.sessions.get(pty_id)
+            if record is not None:
+                # A cut whose composer went with the client is called off;
+                # nothing else about the session changes.
+                record.client_gone(sink)
+            self.ptys.detach(pty_id, sink)
 
     # -- requests
 
@@ -278,7 +324,7 @@ class ServiceCore:
         """Answer a validated request: the reply dict (`protocol.reply`) or a
         refusal (`protocol.refuse`)."""
         handler = getattr(self, "_req_" + message.type.replace(".", "_").replace("-", "_"), None)
-        if handler is None:
+        if handler is None or (message.type.startswith("debug.") and not self.debug):
             return protocol.refuse(
                 message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": message.type}
             )
@@ -306,39 +352,32 @@ class ServiceCore:
             pass
 
     def _req_spawn(self, message: protocol.Message, client: Client) -> dict:
+        if message.get("kind") != "shell":
+            return self._spawn_agent(message, client)
         shell = os.environ.get("SHELL") or "/bin/bash"
-        kind = message.get("kind")
         cwd = message.get("cwd")
         env = dict(self._environment())
         cols = message.get("cols") or ptyserver.termscreen.DEFAULT_COLS
         rows = message.get("rows") or ptyserver.termscreen.DEFAULT_ROWS
         argv = [shell]
         box = plan = None
-        if kind == "shell":
+        if message.get("sandbox"):
+            box = message.get("sandbox_box") or ""
+            plan = self._sandbox_plan(box) if box else None
+            if not plan:
+                # No box to run in: nothing is spawned rather than a
+                # shell that would run unconfined under that title.
+                return protocol.refuse(
+                    message.id,
+                    protocol.ERROR_REFUSED,
+                    "no sandbox plan for this session — the shell was not started",
+                )
+            argv = providers.sandboxed_shell_argv(plan, shell)
+        try:
             # A panel shell is the user's own: no progress declarations,
             # which the VTE path never gave one either.
-            progress = False
-            if message.get("sandbox"):
-                box = message.get("sandbox_box") or ""
-                plan = self._sandbox_plan(box) if box else None
-                if not plan:
-                    # No box to run in: nothing is spawned rather than a
-                    # shell that would run unconfined under that title.
-                    return protocol.refuse(
-                        message.id,
-                        protocol.ERROR_REFUSED,
-                        "no sandbox plan for this session — the shell was not started",
-                    )
-                argv = providers.sandboxed_shell_argv(plan, shell)
-        else:
-            # The two declarations that coax the CLI's progress announcements
-            # out (session.agent_environment says why), unless the
-            # experimental setting is off: decided at spawn, as the VTE path
-            # decided it.
-            progress = self._get_setting("progress_termprop") in (None, True)
-        try:
             pty_id = self.ptys.spawn(
-                kind,
+                "shell",
                 argv,
                 cwd,
                 env,
@@ -347,25 +386,470 @@ class ServiceCore:
                 session=message.get("session"),
                 box=box,
                 plan=plan,
-                progress=progress,
-                history=message.get("history") if kind == "shell" else None,
+                progress=False,
+                history=message.get("history"),
                 ordinal=int(message.get("ordinal") or 0),
             )
         except ptyserver.SpawnError as exc:
-            return protocol.refuse(
-                message.id,
-                protocol.ERROR_FAILED,
-                "failed to start shell: {msg}",
-                {"msg": f"{exc.strerror}: {exc.filename}"},
-            )
+            return _spawn_refusal(message, exc)
         except (OSError, ValueError) as exc:
             return protocol.refuse(
                 message.id, protocol.ERROR_FAILED, "failed to start shell: {msg}", {"msg": str(exc)}
             )
+        pty = self.ptys.get(pty_id)
+        pty.handle = message.get("handle")
         if plan:
             self._enter_cwd_in_box(pty_id, plan, cwd)
-        pty = self.ptys.get(pty_id)
         return protocol.reply(message.id, pty=pty_id, cols=pty.cols, rows=pty.rows)
+
+    # -- the sessions (§3.19)
+
+    def _records(self) -> list[hosting.SessionRecord]:
+        return list(self.sessions.values())
+
+    def _sessions_list(self) -> list:
+        """Every live session (`SessionTools`' and `SandboxRequests`' lookup)."""
+        return [record.session for record in self.sessions.values()]
+
+    def _record(self, message: protocol.Message) -> hosting.SessionRecord:
+        """The session record the request's pty names (KeyError: gone)."""
+        pty_id = message.get("pty")
+        record = self.sessions.get(pty_id)
+        if record is None:
+            raise KeyError(pty_id)
+        return record
+
+    def session_for_box(self, box: str) -> hosting.SessionRecord | None:
+        for record in self.sessions.values():
+            if record.session.sandbox_box == box:
+                return record
+        return None
+
+    def _spawn_agent(self, message: protocol.Message, client: Client) -> dict:
+        """An agent's pty: the `Session` built from the request's fields,
+        then `Session.spawn`, whose `spawn_shell` is `spawn_agent_pty`
+        below; the reply is the pty and the session's handle, or the
+        spawn's refusal."""
+        provider = providers.get_provider(message.get("provider") or "claude")
+        options = self._launch_options(message)
+        if options is not None and message.get("sandbox") and not options.sandbox_plan:
+            options = self._box_for_launch(message, options)
+        record = hosting.SessionRecord(
+            self,
+            provider=provider,
+            session_id=message.get("session"),
+            fork=bool(message.get("fork")),
+            options=options,
+            command_override=message.get("command_override"),
+            cwd=message.get("cwd"),
+            jsonl_path=message.get("jsonl_path"),
+            # The service's ProgressWatch reads the stream's Progress events,
+            # so no VTE version is asked (§3.19); the declarations that coax
+            # them out of the CLI follow the setting at spawn, as before.
+            progress=True,
+            progress_env=self._get_setting("progress_termprop") in (None, True),
+        )
+        record.grid = (
+            message.get("cols") or ptyserver.termscreen.DEFAULT_COLS,
+            message.get("rows") or ptyserver.termscreen.DEFAULT_ROWS,
+        )
+        session = record.session
+        session.fork_resolve = bool(message.get("fork_resolve"))
+        prompt = message.get("prompt")
+        if prompt:
+            session.hold_new_chat_prompt(prompt)
+        session.set_transcript_path(message.get("jsonl_path"))
+        session.spawn(message.get("cwd"), message.get("session"))
+        if record.spawn_error is not None:
+            return _spawn_refusal(message, record.spawn_error)
+        if record.pty_id is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_FAILED, "failed to start shell: {msg}", {"msg": "no pty"}
+            )
+        self.sessions[record.pty_id] = record
+        fresh = message.get("session") is None
+        if message.get("jsonl_path") is None and fresh:
+            session.start_resolver(session.cwd or message.get("cwd"))
+        elif session.fork_resolve:
+            session.start_resolver(session.cwd or message.get("cwd"))
+        if prompt:
+            session.start_new_chat_prompt_poll()
+        if self.activity is not None:
+            self.activity.started(record, fresh=fresh)
+        pty = self.ptys.get(record.pty_id)
+        return protocol.reply(
+            message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
+        )
+
+    @staticmethod
+    def _launch_options(message: protocol.Message):
+        """The `SessionOptions` a spawn request carries, None when it
+        carries none of them (a plain resume)."""
+        names = ("model", "effort", "permission_mode", "add_dirs", "worktree", "worktree_name",
+                 "sandbox", "sandbox_box", "sandbox_plan")
+        if all(message.get(name) is None for name in names):
+            return None
+        return providers.SessionOptions(
+            model=message.get("model") or "",
+            effort=message.get("effort") or "",
+            permission_mode=message.get("permission_mode") or "",
+            add_dirs=tuple(message.get("add_dirs") or ()),
+            worktree=bool(message.get("worktree")),
+            worktree_name=message.get("worktree_name") or "",
+            sandbox=bool(message.get("sandbox")),
+            sandbox_plan=message.get("sandbox_plan") or "",
+            sandbox_box=message.get("sandbox_box") or "",
+        )
+
+    def _box_for_launch(self, message: protocol.Message, options):
+        """The box a sandboxed resume or fork runs in (what MainWindow.
+        open_session minted before the sessions were the service's): a
+        fork gets a box of its own seeded with a copy of its origin's
+        grants and tool switches, taken once; a resumed session with no
+        box yet (recorded before the boxes, or its transcript back from the
+        trash) gets one here, recorded against its id, starting with its
+        project's defaults. A fresh session's box is the launch's own."""
+        session_id, host, state = message.get("session"), self.sandbox_host, self.state
+        if not session_id or host is None or state is None:
+            return options
+        cwd = message.get("cwd") or ""
+        box = options.sandbox_box or state.sandbox_box(session_id)
+        if message.get("fork"):
+            origin = box
+            box = host.mint_box(cwd, seed=False)
+            grants = state.get_sandbox_grants(origin) if origin else []
+            if grants:
+                state.set_sandbox_grants(box, grants)
+            host.copy_tools(origin, box)
+        elif not box:
+            box = host.mint_box(cwd)
+            state.set_sandboxed(session_id, True, box=box)
+        return providers.replace_options(options, sandbox_box=box)
+
+    def spawn_agent_pty(self, record: hosting.SessionRecord, cwd: str) -> None:
+        """The session's `spawn_shell`: the user's shell on a new pty in
+        *cwd*, the record bound to it. A refusal is kept on the record for
+        the `spawn` reply (`SpawnError`); nothing is spawned."""
+        shell = os.environ.get("SHELL") or "/bin/bash"
+        session = record.session
+        cols, rows = record.grid
+        try:
+            pty_id = self.ptys.spawn(
+                "agent",
+                [shell],
+                cwd,
+                dict(self._environment()),
+                cols,
+                rows,
+                session=session.session_id,
+                box=session.sandbox_box or None,
+                plan=session.sandbox_plan_path,
+                options=providers.options_record(session.options),
+                progress=session.progress_env,
+            )
+        except ptyserver.SpawnError as exc:
+            record.spawn_error = exc
+            return
+        except (OSError, ValueError) as exc:
+            record.spawn_error = ptyserver.SpawnError(0, str(exc), cwd)
+            return
+        record.pty_id = pty_id
+        pty = self.ptys.get(pty_id)
+        pty.handle = record.handle
+
+    def _on_pty_output(self, pty: ptyserver.Pty) -> None:
+        record = self.sessions.get(pty.id)
+        if record is not None:
+            record.output_arrived()
+
+    def _on_stream_event(self, pty_id: int, event: object) -> None:
+        if isinstance(event, termstream.Progress):
+            record = self.sessions.get(pty_id)
+            if record is not None and self.activity is not None:
+                self.activity.on_progress(record, event)
+        if self._stream_listener is not None:
+            self._stream_listener(pty_id, event)
+
+    def session_resolved(self, record: hosting.SessionRecord, session_id: str) -> None:
+        """The resolver bound a session: its pty's row names it, its box is
+        settled and recorded (what MainWindow._settle_sandbox_box did), its
+        shells' history re-filed, and the tracker told."""
+        pty = record.pty()
+        if pty is not None:
+            pty.session = session_id
+            self.ptys._record_row(pty)
+        session = record.session
+        if session.sandboxed and self.state is not None:
+            box = session.sandbox_box
+            owed = session.take_sandbox_defaults_owed()
+            host = self.sandbox_host
+            if host is None:
+                self.state.set_sandboxed(session_id, True, box=box)
+            elif host.settle_box(session_id, box, session.cwd, owed) and self.sandbox_grants is not None:
+                self.sandbox_grants.sync(box)
+        self.rekey_shells(record, session_id)
+        if self.activity is not None:
+            self.activity.resolved(record)
+
+    def rekey_shells(self, record: hosting.SessionRecord, session_id: str) -> None:
+        """File the history of every panel shell of *record*'s session (the
+        shells spawned with its handle) under the id it resolved to."""
+        for pty in self.ptys.ptys.values():
+            if pty.kind == "shell" and getattr(pty, "handle", None) == record.handle:
+                pty.history = session_id
+
+    def session_transcript_landed(self, record: hosting.SessionRecord) -> None:
+        if self.activity is not None:
+            self.activity.transcript_landed(record)
+
+    # -- the requests a tab makes of its session (§3.19)
+
+    def _req_prompt(self, message: protocol.Message, client: Client) -> dict:
+        session = self._record(message).session
+        if message.get("focus", True):
+            session.inject_prompt(message.get("text"))
+        else:
+            session.inject_prompt_unfocused(message.get("text"))
+        return protocol.reply(message.id)
+
+    def _req_write(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.write_text(message.get("text"))
+        return protocol.reply(message.id)
+
+    def _req_switch(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        record.set_composer_open(message.get("composer_open"))
+        if message.get("model"):
+            record.session.switch_model(message.get("model"))
+        if message.get("effort"):
+            record.session.switch_effort(message.get("effort"))
+        return protocol.reply(message.id)
+
+    def _req_send(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        record.set_composer_open(message.get("composer_open"))
+        sent = []
+        record.session.send_composed(message.get("text"), lambda: sent.append(True))
+        return protocol.reply(message.id, sent=bool(sent))
+
+    def _req_cut(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        record.set_composer_open(True)
+        handle = record.begin_cut(client.sink_for(record.pty_id))
+        return protocol.reply(message.id, handle=handle)
+
+    def _req_cut_cancel(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        record.cancel_cuts(handle=message.get("handle"))
+        record.set_composer_open(False)
+        return protocol.reply(message.id)
+
+    def _req_draft_restore(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        record.set_composer_open(False)
+        return protocol.reply(message.id, restored=bool(record.session.restore_draft(message.get("text"))))
+
+    def _req_mention(self, message: protocol.Message, client: Client) -> dict:
+        """The editor's "Add to chat" typed into the box: the mention token
+        for the path, a leading space when the box has a sentence in it
+        already (dropimages.leading_space over the cursor's line)."""
+        from .. import dropimages
+
+        session = self._record(message).session
+        if not session.agent_is_running():
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "Add to chat: the agent isn't running in this tab"
+            )
+        reference = session.provider.file_reference(
+            message.get("path"),
+            session.current_agent_cwd(),
+            int(message.get("start_line") or 0),
+            int(message.get("end_line") or 0),
+        )
+        if reference is None:
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "Add to chat isn't available for this file"
+            )
+        column, row = session.screen.cursor()
+        leading = ""
+        if column > 0:
+            leading = dropimages.leading_space(session.screen.row_text(row, column), column)
+        session.write_text(leading + reference + " ")
+        return protocol.reply(message.id)
+
+    def _req_close_nudge(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.nudge_exit()
+        return protocol.reply(message.id)
+
+    def _req_close_end(self, message: protocol.Message, client: Client) -> dict:
+        record = self.sessions.get(message.get("pty"))
+        if record is not None:
+            record.session.end_close()
+        return protocol.reply(message.id)
+
+    def _req_resolver_arm(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.arm_resolver()
+        return protocol.reply(message.id)
+
+    def _req_transcript_update(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.request_update(bool(message.get("discover")))
+        return protocol.reply(message.id)
+
+    def _req_transcript_set(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.set_transcript_path(message.get("path"))
+        return protocol.reply(message.id)
+
+    def _req_transcript_relocate(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.relocate_transcript(message.get("path"))
+        return protocol.reply(message.id)
+
+    def _req_prs_restore(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.restore_prs(message.get("records"))
+        return protocol.reply(message.id)
+
+    def _req_cwd_settle(self, message: protocol.Message, client: Client) -> dict:
+        scope = self._record(message).session.settle_cwd(message.get("cwd"), message.get("root"))
+        return protocol.reply(message.id, scope=scope.name.lower() if scope is not None else "")
+
+    def _req_shells_follow(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        record.session.shells_follow_armed = bool(message.get("armed"))
+        record.refresh_facts()
+        return protocol.reply(message.id)
+
+    def _req_finish_witness(self, message: protocol.Message, client: Client) -> dict:
+        stamp, size = self._record(message).session.finish_witness()
+        return protocol.reply(message.id, stamp=[int(stamp[0]), int(stamp[1])], size=size)
+
+    def _req_baseline_absorb(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        capturing = self.activity.absorb_baseline(record.session) if self.activity is not None else False
+        return protocol.reply(message.id, capturing=bool(capturing))
+
+    def _req_baseline_cmdlines(self, message: protocol.Message, client: Client) -> dict:
+        cmdlines = sorted(self._record(message).session.background_descendant_cmdlines())
+        return protocol.reply(message.id, cmdlines=[c[: protocol.ARG_TEXT_MAX] for c in cmdlines[:1000]])
+
+    def _req_restart_worktreeless(self, message: protocol.Message, client: Client) -> dict:
+        self._record(message).session.relaunch_without_worktree()
+        return protocol.reply(message.id)
+
+    # -- the e2e probe (D27)
+
+    def _req_debug_session_get(self, message: protocol.Message, client: Client) -> dict:
+        target, name = self._debug_target(self._record(message).session, message.get("name"))
+        value = getattr(target, name)
+        if callable(value):
+            return protocol.reply(message.id, callable=True)
+        return protocol.reply(message.id, value=_jsonable(value))
+
+    def _req_debug_session_set(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        target, name = self._debug_target(record.session, message.get("name"))
+        setattr(target, name, message.get("value"))
+        record.refresh_facts()
+        return protocol.reply(message.id)
+
+    def _req_debug_session_call(self, message: protocol.Message, client: Client) -> dict:
+        record = self._record(message)
+        target, name = self._debug_target(record.session, message.get("name"))
+        result = getattr(target, name)(*(message.get("args") or []), **(message.get("kwargs") or {}))
+        record.refresh_facts()
+        return protocol.reply(message.id, value=_jsonable(result))
+
+    def _debug_target(self, session, name: str):
+        """A dotted name walked from the session (`finish_ledger.armed`,
+        `transcript.set_path`, `activity.judge.held`): the owner and the
+        last part. `activity` and `core` reach the service's tracker and
+        the core itself."""
+        parts = name.split(".")
+        target: Any = session
+        for part in parts[:-1]:
+            if target is session and part == "activity":
+                target = self.activity
+            elif target is session and part == "core":
+                target = self
+            else:
+                target = getattr(target, part)
+        return target, parts[-1]
+
+    def _req_debug_screen(self, message: protocol.Message, client: Client) -> dict:
+        screen = self.ptys.get(message.get("pty")).screen
+        column, row = screen.cursor()
+        return protocol.reply(
+            message.id,
+            rows=screen.rows(),
+            cursor=[int(column), int(row)],
+            columns=screen.columns(),
+            row_count=screen.row_count(),
+            capture=screen.capture_contents()[: protocol.TEXT_MAX],
+        )
+
+    def _req_debug_pty(self, message: protocol.Message, client: Client) -> dict:
+        pty = self.ptys.get(message.get("pty"))
+        return protocol.reply(
+            message.id,
+            child_pid=pty.child_pid(),
+            foreground_pgrp=pty.foreground_pgrp(),
+            shell_pid=pty.shell_pid(),
+            process_cwd=pty.process_cwd(),
+        )
+
+    def _req_debug_sandbox(self, message: protocol.Message, client: Client) -> dict:
+        targets = {"host": self.sandbox_host, "grants": self.sandbox_grants, "core": self}
+        target = targets[message.get("target")]
+        if target is None:
+            return protocol.refuse(message.id, protocol.ERROR_GONE, "Sandboxed sessions aren't set up here")
+        method = getattr(target, message.get("name"))
+        result = method(*(message.get("args") or []), **(message.get("kwargs") or {}))
+        return protocol.reply(message.id, value=_jsonable(result))
+
+    def _req_service_status(self, message: protocol.Message, client: Client) -> dict:
+        """What the service is running (§3.10): its version and protocol,
+        the counts, when it started, the sandbox probe's verdict and the
+        live grants' word."""
+        from .. import __version__
+
+        busy = len(self.activity.tracker.busy()) if self.activity is not None else 0
+        fields: dict = {
+            "version": __version__,
+            "protocol": protocol.PROTOCOL,
+            "ptys": len(self.ptys.ptys),
+            "busy": busy,
+            "clients": len(self._clients),
+            "started": self._started,
+        }
+        reason = sandboxplan.probe_reason()
+        if reason is not None:
+            fields["sandbox"] = reason[: protocol.ARG_TEXT_MAX]
+        if self.sandbox_grants is not None:
+            fields["live"] = (self.sandbox_grants.capable() or "")[: protocol.ARG_TEXT_MAX]
+        return protocol.reply(message.id, **fields)
+
+    def activity_call(self, name: str, *args, **kwargs):
+        """A method of the service's tracker by dotted name (`tracker.mark`,
+        `judge.drop`): the probe's door for a check with no tab to reach
+        it through (`debug.sandbox` with target ``core``)."""
+        target: Any = self.activity
+        parts = name.split(".")
+        for part in parts[:-1]:
+            target = getattr(target, part)
+        return getattr(target, parts[-1])(*args, **kwargs)
+
+    def sandbox_hosted(self) -> bool:
+        """Whether this service runs sandboxed sessions (a host was started)."""
+        return self.sandbox_host is not None
+
+    def grants_live(self) -> bool:
+        """Whether the live grants exist (with the host)."""
+        return self.sandbox_grants is not None
+
+    def restart_grants(self) -> None:
+        """The e2e checks' last pass: the live grants built again (the
+        bindfs override gone from the environment), in the service's place."""
+        if self.sandbox_grants is not None:
+            self.sandbox_grants.shutdown()
+        self.sandbox_grants = sandboxgrants.GrantMounts(self.sandbox_host)
 
     def _enter_cwd_in_box(self, pty_id: int, plan: str, cwd: str) -> None:
         """A sandboxed shell starts where bwrap's ``--chdir`` lands it (the
@@ -382,7 +866,12 @@ class ServiceCore:
 
     def _req_attach(self, message: protocol.Message, client: Client) -> dict:
         pty_id = message.get("pty")
-        answer = self.ptys.attach(pty_id, client.sink_for(pty_id), message.get("cols"), message.get("rows"))
+        sink = client.sink_for(pty_id)
+        answer = self.ptys.attach(pty_id, sink, message.get("cols"), message.get("rows"))
+        record = self.sessions.get(pty_id)
+        if record is not None:
+            # The session's facts, whole, before any live word (§3.19).
+            record.client_attached(sink)
         return protocol.reply(message.id, **answer)
 
     def _req_detach(self, message: protocol.Message, client: Client) -> dict:
@@ -397,27 +886,58 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_close(self, message: protocol.Message, client: Client) -> dict:
-        self.ptys.close(message.get("pty"))
+        pty_id = message.get("pty")
+        mode = message.get("mode")
+        record = self.sessions.get(pty_id)
+        if mode in ("exit", "background") and not message.get("force") and record is not None:
+            text = message.get("text") or ""
+            if not text:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"
+                )
+            record.session.begin_close(text, mode == "background", record.close_budget)
+            return protocol.reply(message.id)
+        if record is not None:
+            record.session.end_close()
+        self.ptys.close(pty_id)
         return protocol.reply(message.id)
 
     def _req_clear(self, message: protocol.Message, client: Client) -> dict:
         """A shell's *Clear*: its screen and scrollback wiped from the model
         (the client attaches again to be redrawn from it). An agent's
-        ``clear`` is the composer's erase of the CLI's box: the `Session`'s,
-        which runs in the client through Phase 1 (see the module
-        docstring)."""
+        ``clear`` is the composer's erase of the CLI's box: the provider's
+        clear keys for what the box holds now (nothing for an empty one)."""
         pty_id = message.get("pty")
         if self.ptys.get(pty_id).kind != "shell":
-            # Refused, not unknown: the type is served, an agent's case is
-            # not here yet, and a client can tell the two apart.
-            return protocol.refuse(
-                message.id,
-                protocol.ERROR_REFUSED,
-                "An agent's box is erased by its session, which runs in the client"
-                " until the service holds it",
-            )
+            record = self._record(message)
+            entered = record.session.entered_prompt()
+            keys = record.session.provider.clear_prompt_keys(entered) if entered is not None else None
+            if keys:
+                record.session.write_text(keys)
+            return protocol.reply(message.id)
         self.ptys.clear(pty_id)
         return protocol.reply(message.id)
+
+    def _req_pty_info(self, message: protocol.Message, client: Client) -> dict:
+        """A pty's process facts (a panel shell's reads: its shell, whether
+        a command runs, where the shell is), from the master the service
+        holds and its /proc."""
+        pty = self.ptys.get(message.get("pty"))
+        return protocol.reply(
+            message.id,
+            kind=pty.kind,
+            child_pid=pty.child_pid(),
+            shell_pid=pty.shell_pid(),
+            foreground_pgrp=pty.foreground_pgrp(),
+            running_command=bool(pty.has_running_command()),
+            process_cwd=pty.process_cwd(),
+            plan=pty.plan,
+        )
+
+    def _req_pty_capture(self, message: protocol.Message, client: Client) -> dict:
+        """A pty's text from the model of record (what the panel history
+        is written from and the terminal tools read)."""
+        return protocol.reply(message.id, text=self.ptys.capture(message.get("pty"))[: protocol.TEXT_MAX])
 
     def _req_panel_key(self, message: protocol.Message, client: Client) -> dict:
         """File a shell's history under a new key (the resolver bound its
@@ -432,9 +952,20 @@ class ServiceCore:
         """A shell's child exited: its history, from its model while the
         model is still whole (§3.15). A shell filed under no key (a fork's,
         a page closed for good, a tab with no session yet) writes nothing.
-        An agent's exit closes the shell the tools opened for its session
-        with no client attached (SessionTools.agent_exited)."""
+        An agent's exit is its session's (`Session.shell_exited`: the box
+        released, the plan unlinked), closes the shell the tools opened for
+        its session with no client attached (SessionTools.agent_exited) and
+        drops the session once the exit is reported."""
         if pty.kind != "shell":
+            record = self.sessions.pop(pty.id, None)
+            if record is not None:
+                status = -1 if pty.exit_status is None else int(pty.exit_status)
+                try:
+                    record.session.shell_exited(status)
+                except Exception:
+                    log.exception("session %s: the exit's clean-up failed", record.handle)
+                if self.activity is not None:
+                    self.activity.ended(record)
             if self.tools is not None and pty.session:
                 self.tools.agent_exited(pty.session)
             return
@@ -538,6 +1069,11 @@ class ServiceCore:
                 event["pid"] = pid
             client.deliver(event)
             ptys += 1
+        for record in self._records():
+            if record.pty_id is not None:
+                client.deliver(
+                    {"t": "session", "pty": record.pty_id, "handle": record.handle, **record.snapshot()}
+                )
         if self.notifications is not None:
             self.notifications.subscribe(client, client.deliver)
         if self.prs is not None:
@@ -705,10 +1241,16 @@ class ServiceCore:
         ok and no event follows (the client sends none for a row it lacks)."""
         session_id = message.get("session")
         store = self.store
+        if message.get("busy") is not None:
+            # D29: busy is the service's own verdict (tracking.ServiceActivity);
+            # a client says what the person did at its screen: the status,
+            # unread off (the person looked) or on (a notification its
+            # delivery table flagged, a placeholder's flag handed to the row).
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "Busy is decided by the service, not a client"
+            )
         if (status := message.get("status")) is not None:
             store.set_status(session_id, status)
-        if (busy := message.get("busy")) is not None:
-            store.set_busy(session_id, busy)
         if (unread := message.get("unread")) is not None:
             store.set_unread(session_id, unread)
         if (backgrounding := message.get("backgrounding")) is not None:
@@ -734,15 +1276,15 @@ class ServiceCore:
 
     # -- the session tools (PR-1.11, service.tools)
 
-    def start_tools(self, sessions, sandbox_host=lambda: None, notifications=None, diffs=None):
-        """The session tools' dispatcher over the core's records: *sessions*
-        lists the `service.session.Session`s the service holds (through
-        Phase 1 the tabs' own; the app's lookup), *sandbox_host* the
-        SandboxHost. Returns it: what the MCP socket service dispatches to."""
+    def start_tools(self, sessions=None, sandbox_host=None, notifications=None, diffs=None):
+        """The session tools' dispatcher over the core's records: the
+        service's sessions (`sessions`, a test's own lookup given one) and
+        its sandbox host. Returns it: what the MCP socket service
+        dispatches to."""
         self.tools = tools_mod.SessionTools(
             get_setting=self._get_setting,
-            sessions=sessions,
-            sandbox_host=sandbox_host,
+            sessions=sessions or self._sessions_list,
+            sandbox_host=sandbox_host or (lambda: self.sandbox_host),
             send_tool=self._send_tool,
             store=self.store,
             state=self.state,
@@ -793,16 +1335,91 @@ class ServiceCore:
             service.stop()
             self.mcp_service = None
 
-    def start_sandbox(self, host, grants, sessions) -> None:
-        """The Sandboxed chip's requests (service.sandbox): *host* and
-        *grants* answer the SandboxHost and the GrantMounts, *sessions* the
-        service's sessions; the plan of a box is the core's own lookup."""
+    def start_sandbox(self, host=None, grants=None, sessions=None) -> None:
+        """The Sandboxed chip's requests (service.sandbox) over the core's
+        sandbox host, live grants and sessions (each a test's own lookup
+        when given); the plan of a box is the core's own lookup."""
         self.sandbox = sandbox_mod.SandboxRequests(
-            host=host,
-            grants=grants,
+            host=host or (lambda: self.sandbox_host),
+            grants=grants or (lambda: self.sandbox_grants),
             plan_of=self._sandbox_plan,
-            sessions=sessions,
+            sessions=sessions or self._sessions_list,
             broadcast=self._broadcast,
+        )
+
+    def start_sandbox_host(self, app_id: str) -> None:
+        """The sandbox host (§3.9, PR-1.12a: what App._start_sandbox_support
+        did): the `SandboxHost` over the service's own state, the plans a
+        previous run never released swept, the grants of boxes that are
+        gone pruned, the live grants and their worker, the mounts a dead
+        instance left and the boxes nobody names swept off the main loop,
+        and the probe, whose verdict goes to every subscriber as a `sandbox`
+        event (``what: "probe"``)."""
+        self.app_id = app_id
+        state = self.state
+        if state is None:
+            return
+        host = sandboxplan.SandboxHost(app_id, state, state.state_file())
+        self.sandbox_host = host
+        swept = sandboxplan.sweep_plans(app_id)
+        if swept:
+            log.info("sandbox: swept %d stale plan file(s)", swept)
+        # Here, on the main loop, before the sweep's thread: it writes the state.
+        pruned = host.prune_grants()
+        if pruned:
+            log.info("sandbox: dropped the grants of %d box(es) that are gone", pruned)
+        grants = sandboxgrants.GrantMounts(host)
+        self.sandbox_grants = grants
+
+        def sweep() -> None:
+            # A box with a mount under it is never removed: the mounts first.
+            unmounted = grants.sweep_mounts()
+            if unmounted:
+                log.info("sandbox: unmounted %d grant(s) a dead instance left", unmounted)
+            gone = host.sweep_boxes()
+            if gone:
+                log.info("sandbox: removed %d unused box(es)", gone)
+
+        threading.Thread(target=sweep, name="sandbox-sweep", daemon=True).start()
+        sandboxplan.probe_async(self._on_probe)
+
+    def _on_probe(self, reason: str) -> None:
+        """The probe's verdict, on its thread: told to every subscriber on
+        the main loop."""
+        from gi.repository import GLib
+
+        def landed() -> bool:
+            self._broadcast({"t": "sandbox", "what": "probe", "reason": reason[: protocol.ARG_TEXT_MAX]})
+            return False
+
+        GLib.idle_add(landed, priority=GLib.PRIORITY_DEFAULT)
+
+    def start_activity(self) -> tracking.ServiceActivity:
+        """The tracker (§3.6, D29): built over the core's sessions, store
+        and state, fed by the pty server's output and stream events and the
+        input frames from here on."""
+        self.activity = tracking.ServiceActivity(
+            records=self._records,
+            store=self.store,
+            state=self.state,
+            get_setting=lambda key: self._get_setting(key) in (None, True),
+            announce=self._announce_finished,
+        )
+        return self.activity
+
+    def _announce_finished(self, session_id: str) -> None:
+        """A counted finish, to every subscriber (§3.19): a `notify` event of
+        kind ``finished`` (never persisted, as today), which a client's
+        delivery runs on — the pull requests re-read, the green announced —
+        before the row's unread flag follows it."""
+        self._broadcast(
+            {
+                "t": "notify",
+                "notification": f"finished:{session_id}",
+                "kind": "finished",
+                "session": session_id,
+                "when": time.time(),
+            }
         )
 
     def _broadcast(self, event: dict) -> None:
@@ -826,6 +1443,9 @@ class ServiceCore:
     _req_sandbox_revoke = _req_sandbox
     _req_sandbox_tools = _req_sandbox
     _req_sandbox_restart = _req_sandbox
+    _req_sandbox_derive = _req_sandbox
+    _req_sandbox_drop = _req_sandbox
+    _req_sandbox_forget = _req_sandbox
 
     def _tool_client(self, session) -> Client | None:
         """The session's active client (D20): of the subscribed clients,
@@ -835,9 +1455,10 @@ class ServiceCore:
         if not self._subscribers:
             return None
         device = None
-        for pty in self.ptys.ptys.values():
-            if pty.kind != "shell" and session.session_id and pty.session == session.session_id:
-                device = pty.sized_for() or None
+        for record in self.sessions.values():
+            if record.session is session:
+                pty = record.pty()
+                device = (pty.sized_for or None) if pty is not None else None
                 break
         if device:
             for client in reversed(self._subscribers):
@@ -915,27 +1536,17 @@ class ServiceCore:
     # -- input
 
     def input(self, pty_id: int, data: bytes, client: Client) -> None:
-        """A `0x02` frame: what the client's VTE committed."""
+        """A `0x02` frame: what the client's VTE committed — typed into the
+        pty, and on its way to the tracker's echo gate for an agent's."""
         try:
             self.ptys.write(pty_id, data, sink=client.sink_for(pty_id))
         except KeyError:
-            pass
+            return
+        record = self.sessions.get(pty_id)
+        if record is not None and self.activity is not None:
+            self.activity.on_input(record, data)
 
-    # -- the loopback's shortcuts (deleted with it, D21)
-
-    def screen_of(self, pty_id: int) -> termstream.ScreenHook:
-        """The pty's screen model: what a client-side `Session` reads through
-        its `ScreenPort` while it still runs in the client's process
-        (PR-1.7 to PR-1.9). From PR-1.10 the session reads it on the
-        service, and this goes with the loopback."""
-        return self.ptys.get(pty_id).screen
-
-    def pty_of(self, pty_id: int) -> ptyserver.Pty:
-        """The pty object, for the client-side `Session`'s `PtyPort`
-        (`child_pid`, `foreground_pgrp`: service facts the socket will
-        carry as `pty` event fields and a request). Same lifetime as
-        `screen_of`."""
-        return self.ptys.get(pty_id)
+    # -- the loopback's one shortcut (deleted with it, D21)
 
     def write_panel_history(self, key: str, shells: dict[int, int | str]) -> None:
         """Write a session's panel history (spec §3.15): each shell under
@@ -959,7 +1570,49 @@ class ServiceCore:
         panelhistory.save_all(key, texts)
 
     def shutdown(self) -> None:
+        if self.activity is not None:
+            self.activity.stop()
         self.ptys.shutdown()
+        if self.sandbox_grants is not None:
+            # Every directory mounted into a running box, unmounted; the
+            # bindfs servers would go with the process anyway
+            # (PR_SET_PDEATHSIG), this leaves nothing to chance.
+            self.sandbox_grants.shutdown()
+            self.sandbox_grants = None
+
+
+def _spawn_refusal(message: protocol.Message, exc: ptyserver.SpawnError) -> dict:
+    return protocol.refuse(
+        message.id,
+        protocol.ERROR_FAILED,
+        "failed to start shell: {msg}",
+        {"msg": f"{exc.strerror}: {exc.filename}"},
+    )
+
+
+def _jsonable(value):
+    """*value* as the probe's reply carries it: JSON as it is, a set or a
+    tuple as a list, a path as text, a dataclass as its fields, anything
+    else None."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (set, frozenset)):
+        return [_jsonable(v) for v in sorted(value, key=str)]
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, Path):
+        return str(value)
+    if hasattr(value, "__dataclass_fields__"):
+        import dataclasses
+
+        return {k: _jsonable(v) for k, v in dataclasses.asdict(value).items()}
+    try:
+        json.dumps(value)
+    except (TypeError, ValueError):
+        return None
+    return value
 
 
 def _within(root: str, path: str) -> bool:

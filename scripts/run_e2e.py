@@ -178,6 +178,10 @@ def run_check(path, timeout, use_dbus, env=None):
     if use_dbus:
         cmd = ["dbus-run-session", "--"] + cmd
     start = time.monotonic()
+    # The checks reach past the protocol through the debug.* requests, which
+    # the service serves only with this in its environment (D27); every
+    # check sets it too, since the service is in-process.
+    env = {**(env if env is not None else os.environ), "COLLINS_DEBUG_API": "1"}
     # A check spawns real children (VTEs, shims); its own process group lets
     # a timeout take the whole tree down rather than orphaning them.
     proc = subprocess.Popen(cmd, start_new_session=True, env=env)

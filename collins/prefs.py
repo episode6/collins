@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-04. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -19,6 +19,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
+    apilink,
     apppicker,
     autodelete,
     clisetup,
@@ -36,6 +37,7 @@ from . import (  # noqa: E402
     updatecheck,
     welcome,
 )
+from .api.loopback import RequestRefused
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .formatting import display_path
 from .i18n import LANGUAGES, N_, _, ngettext
@@ -817,14 +819,16 @@ class PreferencesDialog(Adw.Dialog):
     @staticmethod
     def _live_grants_line() -> str:
         """The status row's second line: whether a directory allowed while
-        a session runs reaches it at once (sandboxgrants), or waits for the
-        restart and why. "" when the app runs no live grants at all."""
-        from . import terminal  # the app's instance lives beside the tabs
-
-        grants = terminal.SANDBOX_GRANTS
-        if grants is None:
+        a session runs reaches it at once (sandboxgrants, the service's:
+        `service.status`'s ``live``), or waits for the restart and why. ""
+        when the service runs no live grants at all, or can't be asked."""
+        try:
+            status = apilink.call({"t": "service.status"})
+        except RequestRefused:
             return ""
-        reason = grants.capable()
+        reason = status.get("live")
+        if reason is None:
+            return ""
         if not reason:
             return _("Allowed directories reach a running session")
         reasons = {

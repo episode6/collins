@@ -41,6 +41,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import types
 
 REAL_HOME = os.path.expanduser("~")
 STAGE = os.path.join(REAL_HOME, ".cache", "collins-e2e")
@@ -82,6 +83,7 @@ RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 HOME = f"{E2E}/home"
 
 os.environ["HOME"] = HOME
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -300,6 +302,44 @@ trust.trust_dir(CHECKOUT)
 trust.trust_dir(PLAIN)
 app = App()
 
+
+def _service_call(target: str, name: str, *args, **kwargs):
+    """A method of the service's sandbox host, its live grants or the core,
+    through the probe (debug.sandbox, D27): the one door a check has past
+    the protocol."""
+    message: dict = {"t": "debug.sandbox", "target": target, "name": name, "args": list(args)}
+    if kwargs:
+        message["kwargs"] = dict(kwargs)
+    return app._service_link.call(message).get("value")
+
+
+class _Probe:
+    """The service's sandbox host (or its live grants) as the check reads
+    them: every method call crosses as a debug.sandbox request, a
+    `Delivery` coming back as a record with the same attributes."""
+
+    def __init__(self, target: str) -> None:
+        self._target = target
+
+    def __getattr__(self, name: str):
+        def call(*args, **kwargs):
+            value = _service_call(self._target, name, *args, **kwargs)
+            if name == "delivery" and isinstance(value, dict):
+                return types.SimpleNamespace(**value)
+            return value
+
+        return call
+
+
+def probe_host():
+    """The service's sandbox host, None where it runs none (asked once the
+    app is up: the link exists from its startup on)."""
+    return _Probe("host") if _service_call("core", "sandbox_hosted") else None
+
+
+def probe_grants():
+    return _Probe("grants") if _service_call("core", "grants_live") else None
+
 tries = 0
 state: dict = {}
 
@@ -458,22 +498,22 @@ OFFERED = ["set_session_title", "open_in_editor", "show_diff", "show_image", "no
 def offered_to(tab) -> list[str]:
     """What the session in *tab* is told it may call: the list the socket
     serves the pid of a process under the tab's shell."""
-    return [tool["name"] for tool in app.session_tools.list_tools(tab._child_pid)]
+    return [tool["name"] for tool in app.session_tools.list_tools(tab.probe_call("child_pid"))]
 
 
 def call_from(tab, tool: str, args: dict):
     """One tool call as the dispatcher sees it arrive from *tab*: by pid,
     through every gate — not the handler alone."""
-    return app.session_tools.dispatch(tab._child_pid, tool, args)
+    return app.session_tools.dispatch(tab.probe_call("child_pid"), tool, args)
 
 
 def tools() -> bool:
     """What a sandboxed session may call is a list of its own, kept by
     Collins against the session's box and asked at the dispatcher."""
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     box = caller.sandbox_box
-    check("the pid of the session's shell resolves to its tab", app.tool_client.found_for_pid(caller._child_pid) == found())
+    check("the pid of the session's shell resolves to its tab", app.tool_client.found_for_pid(caller.probe_call("child_pid")) == found())
     check("a sandboxed session is offered six tools", offered_to(caller) == OFFERED, offered_to(caller))
     shells = len(caller.panel_shells())
     refused = {
@@ -580,7 +620,7 @@ def launch_unsandboxed() -> None:
         ticks["n"] += 1
         for i in range(win.tab_view.get_n_pages()):
             tab = win.tab_view.get_nth_page(i).get_child()
-            if tab not in before and getattr(tab, "_child_pid", None):
+            if tab not in before and getattr(tab, "probe_call", None) and tab.probe_call("child_pid"):
                 check("a session of a project pinned unsandboxed has no box", not tab.sandboxed)
                 every = [tool["name"] for tool in mcptools.TOOLS]
                 check("…and is offered every tool", offered_to(tab) == every, offered_to(tab))
@@ -599,9 +639,9 @@ def launch_unsandboxed() -> None:
 
 def grants() -> bool:
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     check("the app installed a sandbox host", host is not None)
-    mounts = terminal.SANDBOX_GRANTS
+    mounts = probe_grants()
     check("…and the live grants", mounts is not None)
     check(
         "which can't deliver one here, and say why",
@@ -661,10 +701,11 @@ def grants() -> bool:
         any("can't apply it from here" in t for t in texts),
         texts,
     )
-    # What the resolver does when the id lands: binds the tab, and tells
-    # the window, which records the session as sandboxed — in this box.
-    caller.session_id = RESUMED
-    caller.emit("session-resolved", RESUMED)
+    # What the resolver does when the id lands: binds the session, and
+    # tells the service's host, which records the session as sandboxed —
+    # in this box — and the tab, which hears "session-resolved".
+    caller.probe_set("session_id", RESUMED)
+    caller.probe_call("host.session_resolved", RESUMED)
     check("the resolved session is sticky-sandboxed", AppState().is_sandboxed(RESUMED))
     check(
         "…in the tab's box",
@@ -685,7 +726,7 @@ def grants() -> bool:
 
 def restarted() -> bool:
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     plan2 = caller.sandbox_plan_path
     check("the restart wrote a fresh plan", plan2 and plan2 != state["plan1"], (state["plan1"], plan2))
     check("…and released the old one", not os.path.exists(state["plan1"]))
@@ -703,8 +744,8 @@ def restarted() -> bool:
     check("the session is up again", caller.has_running_command())
     check(
         "…resumed, not started fresh",
-        f"--resume {RESUMED}" in (caller._initial_command or ""),
-        caller._initial_command,
+        f"--resume {RESUMED}" in (caller.probe("initial_command") or ""),
+        caller.probe("initial_command"),
     )
     # The shell opened before the restart still runs in the box it spawned
     # in, which may hold a directory the revoke has since taken away: it
@@ -740,7 +781,7 @@ def restarted() -> bool:
 def siblings() -> bool:
     caller = state["caller"]
     win = state["win"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     plan = caller.sandbox_plan_path
     # A default of the project that the parent never held: a sibling holds
     # nothing its parent wasn't launched with, defaults included.
@@ -810,7 +851,7 @@ def sibling_up(before: int) -> bool:
             (own, caller.sandbox_box),
         )
         check("…and its plan names it", doc and doc["inputs"]["box"] == own, doc and doc["inputs"])
-        host = terminal.SANDBOX_HOST
+        host = probe_host()
         # Its parent was launched with the first grant, and has lost it
         # since; the sibling holds what the parent was launched with.
         # What its parent was denied, the sibling is denied; the rest are
@@ -859,7 +900,7 @@ def forgotten() -> bool:
     flag stays, so a transcript restored from the trash resumes boxed."""
     win = state["win"]
     gone = "99999999-8888-7777-6666-555555555555"
-    box = terminal.SANDBOX_HOST.mint_box(TRUSTED, seed=False)
+    box = probe_host().mint_box(TRUSTED, seed=False)
     win.state.set_sandbox_grants(box, [OTHER])
     sandboxplan.make_box(box)
     sandboxplan.seed_home(sandboxplan.box_home(box))
@@ -948,7 +989,7 @@ def sessions() -> bool:
     """Grants are a session's: two sessions of one project, side by side,
     and what a project's defaults do and don't do to them."""
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     first = caller.sandbox_box
     state["toasts"] = []
     caller.connect("toast", lambda _tab, text: state["toasts"].append(text))
@@ -960,7 +1001,7 @@ def sessions() -> bool:
 
 def second_up(second) -> None:
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     first = caller.sandbox_box
     state["second"] = second
     box = second.sandbox_box
@@ -1000,7 +1041,7 @@ def second_up(second) -> None:
 
 
 def third_up(third) -> None:
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     state["third"] = third
     box = third.sandbox_box
     check("a session launched after the pin starts with the default", host.grants(box) == [EXTRA], host.grants(box))
@@ -1039,7 +1080,7 @@ def third_up(third) -> None:
 
 
 def fourth_up(fourth) -> None:
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     box = fourth.sandbox_box
     check("a session launched after the unpin starts without it", host.grants(box) == [], host.grants(box))
     doc = sandboxplan.load_plan(fourth.sandbox_plan_path)
@@ -1052,7 +1093,7 @@ def fourth_up(fourth) -> None:
 def forked() -> None:
     """A fork starts with a copy of its origin's grants, taken once."""
     win = state["win"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     origin = win.store.get_session(ORIGIN)
     check("the earlier session is in the store", origin is not None)
     if origin is None:
@@ -1126,7 +1167,7 @@ def narrowed_typed(tab) -> None:
 
 
 def narrowed_up(tab) -> None:
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     state["narrow"] = tab
     options = tab.launch_options
     name = options.worktree_name
@@ -1135,7 +1176,7 @@ def narrowed_up(tab) -> None:
     check("a worktree launch is sandboxed", tab.sandboxed and options.worktree, options)
     check("the tab named the worktree", sandboxplan.valid_worktree_name(name), name)
     check("…and made its directory, empty", os.path.isdir(own) and os.listdir(own) == [], own)
-    typed = tab._initial_command or ""
+    typed = tab.probe("initial_command") or ""
     check("the name is typed after the flag", f" -w {name} " in f"{typed} ", typed)
     doc = sandboxplan.load_plan(tab.sandbox_plan_path)
     check("the plan's workspace is the worktree", bool(doc) and doc["workspace"] == own, doc and doc["workspace"])
@@ -1169,8 +1210,8 @@ def narrowed_up(tab) -> None:
         isinstance(got, tuple) and got[0] is False and "outside the sandbox's workspace" in got[1],
         got,
     )
-    tab.session_id = NARROWED
-    tab.emit("session-resolved", NARROWED)
+    tab.probe_set("session_id", NARROWED)
+    tab.probe_call("host.session_resolved", NARROWED)
     check("the resolved session is sticky-sandboxed", AppState().is_sandboxed(NARROWED))
     check("the restart starts", tab.restart_sandboxed())
     GLib.timeout_add(5000, narrowed_restarted)
@@ -1184,7 +1225,7 @@ def narrowed_restarted() -> bool:
     args = seen[-1] if seen else []
     check("the restart binds the same worktree", (own, own) in after(args, "--bind"), args)
     check("…and the checkout read-only still", (CHECKOUT, CHECKOUT) in after(args, "--ro-bind"), args)
-    typed = tab._initial_command or ""
+    typed = tab.probe("initial_command") or ""
     check("the session is resumed", f"--resume {NARROWED}" in typed and " -w" not in typed, typed)
     check("…and up again", tab.has_running_command())
     # The CLI reaped the worktree on its way out, and it can't be put back:
@@ -1200,7 +1241,7 @@ def narrowed_restarted() -> bool:
     }
     with open(lost, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(record) + "\n")
-    tab._transcript.set_path(lost)
+    tab.probe_call("transcript.set_path", lost)
     check("the worktree is there, and empty", os.path.isdir(own) and os.listdir(own) == [], own)
     check("the second restart starts", tab.restart_sandboxed())
     GLib.timeout_add(5000, narrowed_lost)
@@ -1210,7 +1251,7 @@ def narrowed_restarted() -> bool:
 def narrowed_lost() -> bool:
     tab = state["narrow"]
     own = state["own"]
-    text = " ".join(tab._visible_screen_text().split())
+    text = " ".join(tab.probe_call("visible_screen_text").split())
     check("a worktree that couldn't be put back is said", "couldn't be recreated" in text, text[-400:])
     seen = in_checkout()
     check("the fake bwrap saw the relaunch all the same", len(seen) == 3, len(seen))
@@ -1222,10 +1263,10 @@ def narrowed_lost() -> bool:
         args,
     )
     check("…around the worktree's directory", (own, own) in after(args, "--bind"), args)
-    typed = tab._initial_command or ""
+    typed = tab.probe("initial_command") or ""
     check("the session is resumed", f"--resume {NARROWED}" in typed and " -w" not in typed, typed)
     check("…and up again", tab.has_running_command())
-    tab._transcript.set_path(None)
+    tab.probe_call("transcript.set_path", None)
     # The CLI leaves, as it does when it can't cut the worktree.
     tab.feed_child_text("\x03")
     GLib.timeout_add(1500, narrowed_fallback)
@@ -1236,7 +1277,7 @@ def narrowed_fallback() -> bool:
     tab = state["narrow"]
     check("the CLI is gone", not tab.has_running_command())
     state["narrow_plan"] = tab.sandbox_plan_path
-    tab._relaunch_without_worktree()
+    tab.probe_call("relaunch_without_worktree")
     GLib.timeout_add(3000, narrowed_fell_back)
     return GLib.SOURCE_REMOVE
 
@@ -1257,7 +1298,7 @@ def narrowed_fell_back() -> bool:
     args = seen[-1] if seen else []
     check("the checkout is bound read-write", (CHECKOUT, CHECKOUT) in after(args, "--bind"), args)
     check("…and the worktree not at all", not any(own == a for a in args), args)
-    typed = tab._initial_command or ""
+    typed = tab.probe("initial_command") or ""
     check("the command is typed without the flag", " -w" not in typed and "--resume" not in typed, typed)
     check("the session is up", tab.has_running_command())
     for _tick in range(100):
@@ -1274,20 +1315,17 @@ def live() -> bool:
     allowed through the chip while the session runs is tagged *live* and
     nothing asks for a restart."""
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
+    host = probe_host()
     del os.environ["COLLINS_BINDFS"]
-    mounts = sandboxgrants.GrantMounts(host)
+    # The service's own live grants, built again in place of the ones that
+    # had no bindfs: what a launch on this machine gets.
+    _service_call("core", "restart_grants")
+    mounts = probe_grants()
     reason = mounts.capable()
     if reason:
         print(f"SKIP  the live pass: {reason}", flush=True)
-        mounts.shutdown()
         finish()
         return GLib.SOURCE_REMOVE
-    # The app's own, in place of the one that had no bindfs: what a launch
-    # on this machine gets.
-    terminal.SANDBOX_GRANTS.shutdown()
-    terminal.SANDBOX_GRANTS = mounts
-    app._sandbox_grants = mounts
     # The grant taken back in the first pass, allowed again, and the one
     # that waited for a restart dropped: the box holds the first
     # statically, and the state agrees with the box from here.
@@ -1311,8 +1349,8 @@ def live() -> bool:
 
 def delivered() -> bool:
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
-    mounts = terminal.SANDBOX_GRANTS
+    host = probe_host()
+    mounts = probe_grants()
     state["polls"] += 1
     if not state["toasts"] and state["polls"] < 200:
         return GLib.SOURCE_CONTINUE
@@ -1366,7 +1404,7 @@ def delivered() -> bool:
 
 def revoked() -> bool:
     caller = state["caller"]
-    mounts = terminal.SANDBOX_GRANTS
+    mounts = probe_grants()
     state["polls"] += 1
     if mounts_under(E2E) and state["polls"] < 200:
         return GLib.SOURCE_CONTINUE
@@ -1400,8 +1438,8 @@ def live_again() -> bool:
 
 def restarted_live() -> bool:
     caller = state["caller"]
-    host = terminal.SANDBOX_HOST
-    mounts = terminal.SANDBOX_GRANTS
+    host = probe_host()
+    mounts = probe_grants()
     plan = caller.sandbox_plan_path
     check("the restart wrote a fresh plan", bool(plan) and plan != state["plan_live"], plan)
     check("nothing is mounted any more", mounts_under(E2E) == [], mounts_under(E2E))
@@ -1423,7 +1461,7 @@ def restarted_live() -> bool:
     check("and is not stale", not host.plan_stale(plan, TRUSTED, live=mounts.live_paths(caller.sandbox_box)))
     check("the session is up again", caller.has_running_command())
     # A static grant taken back stays in the running box until the restart.
-    terminal.SANDBOX_HOST.revoke(caller.sandbox_box, OTHER)
+    probe_host().revoke(caller.sandbox_box, OTHER)
     chip = caller._sandbox_chip
     chip._rebuild()
     texts = labels(chip._content)
@@ -1447,7 +1485,8 @@ def finish() -> None:
                     os.killpg(os.getpgid(pid), signal.SIGKILL)
                 except OSError:
                     pass
-        pid = getattr(tab, "_child_pid", None)
+        probe = getattr(tab, "probe_call", None)
+        pid = probe("child_pid") if probe is not None else None
         if pid:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)

@@ -33,6 +33,7 @@ E2E = tempfile.mkdtemp(prefix="collins-gitprefs-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"

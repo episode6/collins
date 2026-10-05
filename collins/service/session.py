@@ -78,6 +78,7 @@ from __future__ import annotations
 import itertools
 import logging
 import os
+import shlex
 import threading
 import time
 from collections.abc import Callable, Collection
@@ -202,6 +203,10 @@ CUT_SETTLE_MS = 50
 CUT_SETTLE_READS = 4
 CUT_SETTLE_TRIES = 12
 CUT_VERIFY_MS = (150, 400, 900)
+# Why a prompt sent to a session wouldn't land (see Session.prompt_block):
+# the one sentence, as a msgid, so the service can hand it to a client to
+# translate (§3.14).
+PROMPT_BLOCK_MSGID = "This session isn't at an empty prompt."
 
 
 def _within(root: str, path: str) -> bool:
@@ -597,6 +602,15 @@ class Session:
         self.worktree_launch_ticks = 0
         self.new_chat_prompt: str | None = None
         self.new_chat_ticks = 0
+        # Whether the launch attached to a running background agent (the
+        # provider's `claude attach`) rather than resuming a transcript: its
+        # turns are announced by nothing on screen, so the agent list's word
+        # is polled for it (service.tracking's background-busy poll).
+        self.attached_background = False
+        # A resume whose reaped worktree is being put back off the main loop
+        # (see spawn): the shell is already up in the directory, the command
+        # waits for the checkout.
+        self._recreating: tuple[str | None, str | None, str] | None = None
 
         # The sandbox: where the host and the live grants are read from; the
         # plan file a sandboxed launch typed (sandboxplan.prepare_launch),
@@ -740,7 +754,7 @@ class Session:
         already typed are all "not at an empty input", and the fix for all four
         is to look at the terminal.
         """
-        return "" if self.takes_prompt() else _("This session isn't at an empty prompt.")
+        return "" if self.takes_prompt() else _(PROMPT_BLOCK_MSGID)
 
     def entered_prompt(self) -> EnteredPrompt | None:
         """The prompt typed into the agent's input box and not yet sent, or
@@ -1900,43 +1914,77 @@ class Session:
         it re-enters one it can still find, wherever the shell starts."""
         if session_id is not None:
             state = recreatable_worktree(self.transcript.path, cwd or "")
-            if state is not None:
+            if state is not None and self._reserve_recreate(str(state["worktreePath"])):
                 # Recreate it first — same path, branch, base commit — so the
-                # resume lands back where the session left off. Off the main
-                # loop: `worktree add` checks out a whole working tree.
-                # Until it finishes, readers see the worktree cwd and no
-                # initial command, same as a tab whose shell hasn't spawned.
+                # resume lands back where the session left off. The shell
+                # starts in the directory now, made empty (git takes an empty
+                # directory for a new worktree, as the CLI's reserved one),
+                # so the spawn answers at once with its pty; the checkout
+                # lands under it off the main loop — `worktree add` checks
+                # out a whole working tree — and the command is typed once it
+                # has (_recreated). Until then readers see the worktree cwd
+                # and no initial command.
                 worktree = str(state["worktreePath"])
                 self.cwd = worktree
                 self.initial_command = None
+                self._recreating = (cwd, session_id, worktree)
                 self.host.paint(_("recreating removed worktree {path}").format(path=worktree))
+                self.host.spawn_shell(worktree, agent_environment() if self.progress_env else None)
 
                 def recreate() -> None:
-                    if not recreate_worktree(state):
+                    ok = recreate_worktree(state)
+                    if not ok:
                         # An emptied directory a box left behind reads as
                         # reaped too, and is still there: gone, so that the
-                        # fallback below sees a worktree that isn't.
+                        # fallback sees a worktree that isn't.
                         sandboxplan.release_worktree(worktree)
-                    # Back to the directory the tab was handed once it exists
-                    # again — an agent that had moved into a subdirectory of
-                    # the worktree resumes there — and to the worktree itself
-                    # for a tab handed somewhere outside it (the repository
-                    # root a session started in before entering the worktree).
-                    # _finish_spawn re-checks the directory; on failure it
-                    # falls back with its usual warning.
-                    inside = cwd is not None and _within(worktree, cwd) and Path(cwd).is_dir()
                     # It advances the spawn, so it lands at PRIORITY_DEFAULT:
                     # a default-idle callback starves under CI's Xvfb.
-                    self.scheduler.idle_add(
-                        self._finish_spawn,
-                        cwd if inside else worktree,
-                        session_id,
-                        priority=GLib.PRIORITY_DEFAULT,
-                    )
+                    self.scheduler.idle_add(self._recreated, ok, priority=GLib.PRIORITY_DEFAULT)
 
                 self.scheduler.background(recreate)
                 return
         self._finish_spawn(cwd, session_id)
+
+    @staticmethod
+    def _reserve_recreate(worktree: str) -> bool:
+        """Make the reaped worktree's directory, empty, for the shell to
+        start in while the checkout is put back. False when it can't be
+        made (the spawn then takes the plain road and its fallback)."""
+        try:
+            os.makedirs(worktree, exist_ok=True)
+        except OSError:
+            return False
+        return Path(worktree).is_dir()
+
+    def _recreated(self, ok: bool) -> bool:
+        """The recreate landed: type the command where the session should
+        run. Back to the directory the tab was handed once it exists again
+        — an agent that had moved into a subdirectory of the worktree
+        resumes there — else the worktree itself; and when it couldn't be
+        put back, where _finish_spawn's fallback would have started
+        (the repository, else HOME), with its warning. The shell is up
+        already, so a move is a `cd` typed ahead of the command."""
+        pending, self._recreating = self._recreating, None
+        if pending is None or not self.host.alive():
+            return GLib.SOURCE_REMOVE
+        cwd, session_id, worktree = pending
+        if ok and Path(worktree).is_dir():
+            inside = cwd is not None and _within(worktree, cwd) and Path(cwd).is_dir()
+            target = cwd if inside else worktree
+        else:
+            root = worktree_project_root(worktree)
+            target = root if root and Path(root).is_dir() else str(Path.home())
+            self.host.paint(
+                _("warning: project dir {cwd} no longer exists, starting in {fallback}").format(
+                    cwd=worktree, fallback=target
+                )
+            )
+        if target != worktree:
+            self.write_text(shell_command(f"cd {shlex.quote(target)}\n"))
+        self.cwd = target
+        self._type_launch(target, session_id)
+        return GLib.SOURCE_REMOVE
 
     def _finish_spawn(self, cwd: str | None, session_id: str | None) -> None:
         if cwd is None or not Path(cwd).is_dir():
@@ -1960,6 +2008,14 @@ class Session:
         # so aliases/env apply and the tab drops to a prompt when the agent exits.
         # The tab closes when the *shell* exits.
         self.initial_command = None
+        self._settle_launch(cwd, session_id)
+        # Inherit, plus the progress-OSC coaxing — unless the experimental
+        # setting is off, in which case a plain inherited environment.
+        self.host.spawn_shell(cwd, agent_environment() if self.progress_env else None)
+
+    def _settle_launch(self, cwd: str, session_id: str | None) -> str | None:
+        """The command the launch types (the sandbox settled first), kept
+        as `initial_command`, and whether a `-w` launch is to be watched."""
         command = self._launch_command(cwd, session_id)
         if command is None:
             self.host.paint(
@@ -1978,13 +2034,20 @@ class Session:
                 and self.command_override is None
                 and bool(self.options and self.options.worktree)
             )
-        # Inherit, plus the progress-OSC coaxing — unless the experimental
-        # setting is off, in which case a plain inherited environment.
-        self.host.spawn_shell(cwd, agent_environment() if self.progress_env else None)
+        return command
+
+    def _type_launch(self, cwd: str, session_id: str | None) -> None:
+        """A shell already up: settle the launch for *cwd* and type it."""
+        self._settle_launch(cwd, session_id)
+        self.shell_spawned()
 
     def shell_spawned(self) -> None:
         """The shell is up on the pty (its pid is the pty's now): type the
-        agent command, and start watching a worktree launch."""
+        agent command, and start watching a worktree launch. With a
+        worktree still being put back nothing is typed yet: `_recreated`
+        comes back here once it is."""
+        if self._recreating is not None:
+            return
         if self.initial_command:
             self.write_text(f"{self.initial_command}\n")
         if self.worktree_launch:
@@ -2104,7 +2167,9 @@ class Session:
                 + self.provider.session_flags(self.options)
             )
         if session_id is not None:
-            return self.provider.resume_command(session_id, fork=self.fork, options=self.options)
+            command = self.provider.resume_command(session_id, fork=self.fork, options=self.options)
+            self.attached_background = bool(command) and self.provider.is_attach_command(command)
+            return command
         return self.provider.new_command(self.options)
 
     # -- the sandbox ------------------------------------------------------------

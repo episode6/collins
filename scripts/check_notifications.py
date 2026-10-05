@@ -65,6 +65,7 @@ E2E = tempfile.mkdtemp(prefix="collins-notify-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -176,6 +177,17 @@ def section_titles(win) -> list[str]:
 
 def sheet_page(win) -> str:
     return win.notify_sheet._stack.get_visible_child_name()
+
+
+def finish_edge(app: App, session_id: str) -> None:
+    """The tracker's finish edge for *session_id* — the window's
+    `_on_session_finished` for a resolved session moved into the service
+    (PR-1.12a, D29) — reached by the probe: a run marked busy under the
+    id, then finished (debug.sandbox on the core's `activity_call`)."""
+    for name in ("tracker.mark", "tracker.finish"):
+        app._service_link.call(
+            {"t": "debug.sandbox", "target": "core", "name": "activity_call", "args": [name, session_id]}
+        )
 
 
 def steps(app: App):
@@ -628,7 +640,7 @@ def steps(app: App):
     def announce_off():
         cards.dismiss_all()
         check("announce finished runs is off by default", not win.state.get_setting("announce_finished_runs"))
-        win._on_session_finished(SESSION_B)
+        finish_edge(app, SESSION_B)
         check("a finish flags the row and puts the synthetic row up",
               store.get_item(SESSION_B).unread and center.is_green(SESSION_B))
     yield announce_off
@@ -638,7 +650,7 @@ def steps(app: App):
         store.set_unread(SESSION_B, False)
         win.state.set_setting("announce_finished_runs", True)
         played.clear()
-        win._on_session_finished(SESSION_B)
+        finish_edge(app, SESSION_B)
         check("with the setting on a finish plays the sound", played == ["default"], str(played))
     yield announce_off_no_card
 

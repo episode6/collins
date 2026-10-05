@@ -28,9 +28,12 @@ resolves). The halves are the bodies `App._mcp_*` had, taking the same
 - `start_session` (a background tab, its prompt and its id, serialized per
   project root; `_BackgroundSpawn`).
 
-A tab is found by its session's handle, so a session whose id has not
-resolved yet is still found. GTK (it drives widgets); never imported by the
-service.
+A tab is found by its session's handle (`ClientSession.handle`, the
+service's name for it), so a session whose id has not resolved yet is
+still found. The sibling's sandbox plan a `start_session` from a sandboxed
+session inherits is derived on the service (`sandbox.derive`), and let go
+of there when the sibling will not launch after all (`sandbox.drop`). GTK
+(it drives widgets); never imported by the service.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ from dataclasses import replace
 from gi.repository import GLib
 
 from . import (
+    apilink,
     attachrecords,
     diffmodel,
     diffnotes,
@@ -54,9 +58,8 @@ from . import (
     mcptools,
     notifycenter,
     remoteimages,
-    sandboxplan,
 )
-from . import terminal as terminal_mod
+from .api.loopback import RequestRefused
 from .lightbox import present_image_lightbox
 from .providers import SessionOptions
 from .sessions import worktree_project_root
@@ -247,15 +250,19 @@ class _ShowDiff:
 
 
 def _drop_sibling_box(plan: str, box: str) -> None:
-    """A start_session sibling that will not launch after all: release the
-    plan derived for it (it describes a box in full) and let go of the box
-    minted with it, which goes — with the grants recorded for it — when
-    nothing else needs it."""
-    sandboxplan.release_plan(plan)
-    host = terminal_mod.SANDBOX_HOST
-    if box and host is not None:
-        host.release(box)
-        host.forget_box(box)
+    """A start_session sibling that will not launch after all: the service
+    releases the plan derived for it (it describes a box in full) and lets
+    go of the box minted with it, which goes — with the grants recorded for
+    it — when nothing else needs it (`sandbox.drop`)."""
+    if not box:
+        return
+    message: dict = {"t": "sandbox.drop", "box": box}
+    if plan:
+        message["plan"] = plan
+    try:
+        apilink.call(message)
+    except RequestRefused as refusal:
+        log.info("sandbox.drop %s refused: %s", box, refusal.msgid)
 
 
 class _BackgroundSpawn:
@@ -422,16 +429,14 @@ class ToolClient:
         return [w for w in self._app.get_windows() if isinstance(w, MainWindow)]
 
     def found_for(self, session):
-        """The window and tab holding *session* (a `service.session.Session`),
-        or None: what every half below takes."""
-        for window in self._main_windows():
-            for i in range(window.tab_view.get_n_pages()):
-                tab = window.tab_view.get_nth_page(i).get_child()
-                if isinstance(tab, TerminalTab) and tab.session is session:
-                    return window, tab
-        return None
+        """The window and tab holding *session* (a `service.session.Session`
+        of the service's, by its handle), or None: what every half below
+        takes."""
+        return self.found_for_handle(getattr(session, "handle", "") or "")
 
     def found_for_handle(self, handle: str):
+        if not handle:
+            return None
         for window in self._main_windows():
             for i in range(window.tab_view.get_n_pages()):
                 tab = window.tab_view.get_nth_page(i).get_child()
@@ -446,17 +451,6 @@ class ToolClient:
         tools = getattr(self._app, "session_tools", None)
         session = tools.find(shim_pid) if tools is not None else None
         return self.found_for(session) if session is not None else None
-
-    def sessions(self) -> list:
-        """Every tab's Session: the service's records of its sessions through
-        Phase 1 (SessionTools' *sessions*), the tabs holding them."""
-        out = []
-        for window in self._main_windows():
-            for i in range(window.tab_view.get_n_pages()):
-                tab = window.tab_view.get_nth_page(i).get_child()
-                if isinstance(tab, TerminalTab):
-                    out.append(tab.session)
-        return out
 
     # -- the events ------------------------------------------------------------
 
@@ -904,26 +898,25 @@ class ToolClient:
         if parent_sandboxed:
             # The parent's box again, around a home of the sibling's own:
             # its plan re-issued for the sibling's directory and box
-            # (sandboxplan.derive_plan) — the same workspace, grants,
-            # shares and settings protection it was *launched*
-            # with, whatever the switches say now. The tool takes nothing
+            # (sandboxplan.derive_plan, on the service: `sandbox.derive`) —
+            # the same workspace, grants, shares and settings protection it
+            # was *launched* with, whatever the switches say now, and never
+            # a directory the parent holds only live. The tool takes nothing
             # that can loosen it, and a cwd the box doesn't reach — an
             # agent asking for a sibling in ~/.ssh — is refused here.
-            host = terminal_mod.SANDBOX_HOST
-            launch = tab.launch_options
-            plan_path = launch.sandbox_plan if launch is not None else ""
-            if host is None or not plan_path:
+            if not tab.sandbox_box:
                 return False, mcptools.sibling_cwd_refusal(
                     "the parent session's sandbox plan isn't available"
                 )
-            # What the parent holds mounted since its launch is not in the
-            # plan the sibling inherits: a sibling asked for inside such a
-            # directory is refused, and told why.
-            grants = terminal_mod.SANDBOX_GRANTS
-            live = grants.live_paths(tab.sandbox_box) if grants is not None else ()
-            sibling_plan, sibling_box, reason = host.derive(plan_path, cwd, live=live)
-            if sibling_plan is None:
-                return False, mcptools.sibling_cwd_refusal(reason)
+            try:
+                derived = apilink.call(
+                    {"t": "sandbox.derive", "box": tab.sandbox_box, "handle": tab.session.handle, "cwd": cwd}
+                )
+            except RequestRefused as refusal:
+                return False, mcptools.sibling_cwd_refusal(refusal.msgid or "the sandbox host refused")
+            sibling_plan, sibling_box = derived.get("plan"), derived.get("box") or ""
+            if not sibling_plan:
+                return False, mcptools.sibling_cwd_refusal(derived.get("reason") or "")
         else:
             sibling_plan = sibling_box = ""
 

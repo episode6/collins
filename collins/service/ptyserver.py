@@ -338,6 +338,9 @@ class Pty:
         # closed for good) and its ordinal (panelhistory's).
         self.history: str | None = None
         self.ordinal: int = 0
+        # The session the pty belongs to, by its handle: an agent's own, a
+        # panel shell's agent (PR-1.12a: how `rekey_shells` finds them).
+        self.handle: str | None = None
         self.state = termstream.TerminalState(cols=cols, rows=rows, vte_version=server.vte_version)
         server.apply_term(self.state)
         self.screen = termscreen.Screen(cols, rows)
@@ -478,11 +481,15 @@ class PtyServer:
         record_next_id: Callable[[int], None] | None = None,
         vte_version: int = DEFAULT_VTE_VERSION,
         on_exit: Callable[[Pty], None] | None = None,
+        on_output: Callable[[Pty], None] | None = None,
     ):
         """*on_exit* hears every pty whose child exited, before its model
-        is dropped and before `pty-exited` goes out."""
+        is dropped and before `pty-exited` goes out; *on_output* hears
+        every pty that forwarded output (after the filter, once per read:
+        the service's redraw signal, §3.6)."""
         self.state_dir = Path(state_dir) if state_dir is not None else default_state_dir()
         self._on_exit = on_exit
+        self._on_output = on_output
         self._record = record
         self._record_next_id = record_next_id
         self._on_event = on_event
@@ -671,6 +678,11 @@ class PtyServer:
             self._broadcast(pty, filtered.forward, 0)
             pty._dirty = True
             self._schedule_save(pty)
+            if self._on_output is not None:
+                try:
+                    self._on_output(pty)
+                except Exception:
+                    log.exception("pty %d: the output listener failed", pty.id)
         if self._on_event is not None:
             for event in filtered.events:
                 try:

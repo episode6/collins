@@ -121,10 +121,18 @@ dict — holds the client's **mirrors** on one `apilink.LoopbackLink`
   `SessionItem`s and the store's lookups and mutators. The snapshot sends
   an `item` per row and one `rows`; each service refresh sends the items
   that moved (changed fields only) then `rows`, which is the client's
-  `refreshed`. **Busy, unread and status are the service's**: the
-  window's activity tracker (still in the client in Phase 1) calls
-  `set_busy` & co., which send `store.flags`, and the property moves when
-  the `item` comes back (immediately on the loopback). **Archived sessions
+  `refreshed`. **Busy, unread and status are the service's**: since
+  PR-1.12a the tracker runs there (`service/tracking.py`, D29) and sets
+  `busy` and a counted finish's `unread` on the items itself; the client
+  sends `store.flags` only for what the person did at its screen —
+  `status`, `unread: false` (and a notification's flag by focus, the
+  placeholder handoff), the /bg handoff's `backgrounding` and
+  `can_background` — and `busy` from a client is refused. The property
+  moves when the `item` comes back (immediately on the loopback). The
+  sandbox host and the live grants are the core's too
+  (`ServiceCore.start_sandbox_host`); the box a resumed or forked session
+  runs in is minted on the service at its spawn, and settled against the
+  id when the session resolves. **Archived sessions
   are paged**: not in the snapshot; `set_show_archived(True)`,
   `archived_sessions()`, `archived_breakdown()` and the `sessions`
   attribute (every session, as before) page them in once

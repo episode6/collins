@@ -17,7 +17,7 @@ import shlex
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 from . import sessions
@@ -263,6 +263,45 @@ class SessionOptions:
     sandbox_box: str = ""
 
 
+def replace_options(options: SessionOptions, **changes) -> SessionOptions:
+    """*options* with *changes* (dataclasses.replace, by a name the service
+    reaches)."""
+    return replace(options, **changes)
+
+
+def options_record(options: SessionOptions | None) -> dict | None:
+    """A `SessionOptions` as the API's `session` event and the pty table
+    carry it (None for none): its fields, `add_dirs` a list."""
+    if options is None:
+        return None
+    record = asdict(options)
+    record["add_dirs"] = list(record.get("add_dirs") or ())
+    return record
+
+
+def options_from_record(record: object) -> SessionOptions | None:
+    """The `SessionOptions` a record describes (None for none, or for
+    anything that isn't one); unknown keys are dropped, so a newer peer's
+    field never breaks an older one (rule 5: the record is foreign)."""
+    if not isinstance(record, dict):
+        return None
+    names = {f.name for f in fields(SessionOptions)}
+    kwargs = {k: v for k, v in record.items() if k in names}
+    if "add_dirs" in kwargs:
+        dirs = kwargs["add_dirs"]
+        kwargs["add_dirs"] = tuple(str(d) for d in dirs) if isinstance(dirs, (list, tuple)) else ()
+    for name in ("model", "effort", "permission_mode", "worktree_name", "sandbox_plan", "sandbox_box"):
+        if name in kwargs and not isinstance(kwargs[name], str):
+            kwargs[name] = ""
+    for name in ("worktree", "sandbox"):
+        if name in kwargs:
+            kwargs[name] = bool(kwargs[name])
+    try:
+        return SessionOptions(**kwargs)
+    except TypeError:
+        return None
+
+
 @dataclass(frozen=True)
 class BackgroundAgent:
     """One detached agent, as reported by the agent CLI (e.g. `claude agents`).
@@ -468,6 +507,13 @@ class Provider:
         chat is a single process fed user turns over stdin. A non-empty
         `session_id` resumes that existing session."""
         return None
+
+    def is_attach_command(self, command: str) -> bool:
+        """Whether *command* (one `resume_command` built) attaches to a
+        running background agent rather than resuming a transcript: a
+        session whose turns the agent list reports, not its terminal (see
+        activity.BackgroundBusyWatch). Base: never."""
+        return False
 
     def graceful_exit(self) -> str | None:
         """Keystrokes to feed the agent to make it exit cleanly, or None to
@@ -809,6 +855,13 @@ class ClaudeProvider(Provider):
             cli = shutil.which(self.cli)
             return f"{shlex.quote(cli)} attach {shlex.quote(agent.job_id)}"
         return cmd
+
+    def is_attach_command(self, command: str) -> bool:
+        try:
+            words = shlex.split(command)
+        except ValueError:
+            return False
+        return words[1:2] == ["attach"]
 
     def background_agents(self, include_finished: bool = False) -> list[BackgroundAgent]:
         """Detached sessions, per `claude agents --json`.

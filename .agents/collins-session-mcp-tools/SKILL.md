@@ -133,8 +133,8 @@ Since PR-1.11 the dispatcher is the service's: `SessionTools` (built by
 starts the socket, `start_mcp`). There is no session id in an MCP server's
 environment. `SessionTools.find(pid)` walks the shim's `/proc` ancestry
 (`proctree.ancestor_pids`) and asks every `Session` the service holds
-`owns_pid_ancestors` (through Phase 1 the tabs' own Sessions, listed by the
-app's `ToolClient.sessions`) — so a tool acts on the session whose shell the
+`owns_pid_ancestors` (`ServiceCore.sessions`, the service's own since
+PR-1.12a) — so a tool acts on the session whose shell the
 CLI descends from. Anything not launched from a tab (a daemon-hosted `/bg`
 job, whose ancestry tops out at systemd; a closed tab) gets a clean "not
 from a Collins session" error. `list_tools`, `tool_enabled` and
@@ -169,8 +169,13 @@ service's `diffnotes` store over its own read of the diff (`service/
 diffs.py`); `read_terminal` / `run_in_terminal` reach the session's shell
 ptys on the pty server (`run_in_terminal` opens at most one shell of its
 own per session, reused and refused when busy, closed when the session's
-agent pty exits); `start_session` is refused (in Phase 1 a session's
-logic lives in its client's tab; it moves into the service in PR-1.12).
+agent pty exits); `start_session` is still refused with no client (its
+client half spawns a tab; a service-side spawn is PR-1.12d's). With a
+client, the tab is found by the event's `handle`
+(`ToolClient.found_for_handle`, `found_for_pid` through
+`SessionTools.find`); the sibling's derived plan and box come from the
+service (`sandbox.derive`, `sandbox.drop` when the sibling will not
+launch after all).
 
 **Deferred replies.** The whole dispatch runs on the main loop, so a handler
 that blocks freezes the window. Return `mcptools.DeferredResult` and resolve
@@ -280,17 +285,17 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   sibling from a sandboxed parent), else per the project's default
   (`window._sandbox_for_new_session`); a sandboxed parent's sibling runs
   on the parent's *launched* plan re-issued for its directory and for a
-  box of its own — `terminal.SANDBOX_HOST.derive` returns (plan file, box
-  id, reason), records the parent's launch-time grants as the sibling's
+  box of its own — the service host's `derive` (the `sandbox.derive`
+  request, PR-1.12a) returns (plan file, box id, reason), records the parent's launch-time grants as the sibling's
   own list (grants are a session's: nothing the parent holds live or is
   allowed later reaches the sibling, and it takes no project defaults),
   and both ride in the options (`sandbox_plan`,
   `sandbox_box`) — and a cwd
   outside that plan's workspace or grants is refused
   (`mcptools.sibling_cwd_refusal`) — one inside a directory the parent
-  holds only *live* included (`derive(..., live=SANDBOX_GRANTS.
-  live_paths(parent box))`: "restart the parent session to start a
-  sibling there"). Every refusal past the derive drops
+  holds only *live* included (`derive(..., live=grants.live_paths(parent
+  box))` on the service: "restart the parent session to start a sibling
+  there"). Every refusal past the derive drops
   both (`toolclient._drop_sibling_box`). `bypassPermissions` is granted —
   explicit or inherited — only to a sandboxed sibling
   (`inherited_permission_mode(..., sandboxed=True)`); otherwise it is

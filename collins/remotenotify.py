@@ -59,10 +59,21 @@ class RemoteNotifications(NotificationCenter):
         self._moved = False
         link.on("notify", self._on_notify)
         link.on("seen", self._on_seen)
+        # Who hears a counted finish (the service's verdict, D29): the app,
+        # which hands it to the window holding the session's tab.
+        self.on_finished: list = []
 
     # -- events ---------------------------------------------------------------------
 
     def _on_notify(self, event: dict) -> None:
+        if event.get("kind") == KIND_FINISHED and str(event.get("notification", "")).startswith("finished:"):
+            # A counted finish (PR-1.12a, §3.19; ids `finished:<session>`):
+            # never a row of the history (the synthetic row is set_green's,
+            # `green:<session>`, off the flag); the client's delivery runs
+            # on it.
+            for listener in list(self.on_finished):
+                listener(str(event.get("session") or ""))
+            return
         row_id = event.get("notification", "")
         existing = self.get(row_id)
         if event.get("removed"):

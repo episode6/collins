@@ -1439,14 +1439,49 @@ def test_gate_resetting_landings_are_never_starvable(launch, tmp_path, monkeypat
 
 
 def test_the_recreated_worktree_spawn_lands_at_default_priority(launch, tmp_path, monkeypatch):
-    """The recreated-worktree spawn advances the pipeline, so it lands at
+    """The recreated-worktree landing advances the pipeline, so it lands at
     PRIORITY_DEFAULT like every other gate-resetting landing (it was the
-    one default-idle landing until PR-1.7)."""
-    session, _term, _host, clock = launch(session_id="sid")
+    one default-idle landing until PR-1.7). The shell is spawned in the
+    reaped worktree's directory at once, made empty (PR-1.12a: the spawn
+    answers with its pty), and the command waits for the checkout."""
+    session, term, host, clock = launch(session_id="sid")
+    worktree = tmp_path / "wt"
     monkeypatch.setattr(
         session_mod, "recreatable_worktree",
-        lambda path, cwd: {"worktreePath": str(tmp_path / "wt")},
+        lambda path, cwd: {"worktreePath": str(worktree)},
     )
     monkeypatch.setattr(session_mod, "recreate_worktree", lambda state: True)
     session.spawn(str(tmp_path), "sid")
-    assert clock.idle_priority("_finish_spawn") == PRIORITY_DEFAULT
+    assert worktree.is_dir() and host.spawns and host.spawns[0][0] == str(worktree)
+    assert session.cwd == str(worktree) and session.initial_command is None
+    _spawned(session, term)
+    assert term.writes == []  # nothing typed before the checkout is back
+    assert clock.idle_priority("_recreated") == PRIORITY_DEFAULT
+    clock.advance(0)
+    assert term.writes == ["claude --resume sid\n"]
+    assert session.initial_command == "claude --resume sid"
+
+
+def test_a_worktree_that_cannot_be_put_back_falls_back_with_a_warning(
+    launch, tmp_path, monkeypatch
+):
+    """The checkout never came back: the shell, already up in the emptied
+    directory, is moved to where _finish_spawn's fallback would have
+    started it, and the command typed there."""
+    session, term, host, clock = launch(session_id="sid")
+    worktree = tmp_path / "wt"
+    monkeypatch.setattr(
+        session_mod, "recreatable_worktree",
+        lambda path, cwd: {"worktreePath": str(worktree)},
+    )
+    monkeypatch.setattr(session_mod, "recreate_worktree", lambda state: False)
+    released = []
+    monkeypatch.setattr(session_mod.sandboxplan, "release_worktree", lambda p: released.append(p))
+    monkeypatch.setattr(session_mod, "worktree_project_root", lambda p: str(tmp_path))
+    session.spawn(str(tmp_path), "sid")
+    _spawned(session, term)
+    clock.advance(0)
+    assert released == [str(worktree)]
+    assert session.cwd == str(tmp_path)
+    assert any("no longer exists" in line for line in host.painted())
+    assert term.writes[0].endswith(f"cd {tmp_path}\n") and term.writes[-1] == "claude --resume sid\n"

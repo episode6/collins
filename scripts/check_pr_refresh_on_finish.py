@@ -39,6 +39,7 @@ E2E = tempfile.mkdtemp(prefix="collins-prrefresh-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -206,9 +207,10 @@ def finish_edge(*, turn_ended: bool = True) -> None:
     without it the edge is what the CLI's idle repaints produce."""
     if turn_ended:
         end_a_turn()
-    activity = state["win"]._activity
-    activity.mark(SESSION)
-    activity.finish(SESSION)
+    # The tracker is the service's (service.tracking): reached by the probe.
+    tab = state["tab"]
+    tab.probe_call("activity.tracker.mark", SESSION)
+    tab.probe_call("activity.tracker.finish", SESSION)
 
 
 def row_unread() -> bool:
@@ -293,12 +295,12 @@ def step_throttled() -> bool:
     # last counted one is the CLI repainting its idle screen: it is held for
     # FINISH_CONFIRM_S while the tab re-reads the file, then dropped —
     # nothing refetched, no flag, no green row.
-    check("the ledger is armed off the staged transcript", state["tab"].finish_ledger.armed)
+    check("the ledger is armed off the staged transcript", state["tab"].probe("finish_ledger.armed"))
     app.store.set_unread(SESSION, False)
     age_the_throttles()
     state["before"] = status_fetches()
     finish_edge(turn_ended=False)
-    check("an unmoved transcript holds the edge", SESSION in state["win"]._held_finishes)
+    check("an unmoved transcript holds the edge", SESSION in state["tab"].probe("activity.judge.held"))
     return later(step_repaint_dropped, int(FINISH_CONFIRM_S * 1000) + 1500)
 
 
@@ -307,7 +309,7 @@ def step_repaint_dropped() -> bool:
           status_fetches() == state["before"], f"{state['before']} -> {status_fetches()}")
     check("and raises no flag and no green row",
           not row_unread() and not app.notification_center.is_green(SESSION))
-    check("the held edge was dropped", SESSION not in state["win"]._held_finishes)
+    check("the held edge was dropped", SESSION not in state["tab"].probe("activity.judge.held"))
     # And the same edge after the transcript records a turn ending counts:
     # one refetch, one green.
     age_the_throttles()
@@ -351,8 +353,11 @@ def step_page_reread() -> bool:
         return later(step_page_reread, 500)
     check("a finish edge re-reads the open PR page", page_loads() == [PR_URL], page_loads())
     # A detach's parting progress-clear lands here as a finish too, and must
-    # spend nothing: the run is being handed on, not completing.
+    # spend nothing: the run is being handed on, not completing. The window
+    # marks a detach on its rows (`backgrounding`, the client flag the
+    # service's tracker reads, PR-1.12a) as well as in its own set.
     state["win"]._detaching.add(SESSION)
+    app.store.set_backgrounding(SESSION, True)
     age_the_throttles()
     forget_page_loads()
     state["before"] = status_fetches()
@@ -367,6 +372,7 @@ def step_detaching() -> bool:
         f"{state['before']} -> {status_fetches()}, {page_loads()}",
     )
     state["win"]._detaching.discard(SESSION)
+    app.store.set_backgrounding(SESSION, False)
     return done()
 
 

@@ -119,29 +119,43 @@ realizing a GTK-free `docktree.DockTree` of `Gtk.Paned`s whose leaves are
 `PanelStrip`s of duck-typed `PanelPage`s — shells, PR pages, the composer, the
 attachments gallery, the git page), an `EditorPane` in its own end slot, and
 overlays (composer, attachments, lightbox). The logic behind the widget is
-the tab's `Session` (`service/session.py`, GTK-free, `tab.session`): the
-launch (command, sandbox plan, worktree checks, restart), reading and
-writing the CLI's input box (`takes_prompt`, prompts, switches, the
-composer's cut), the transcript tail and the resolver that binds a freshly
-spawned tab to the session id the CLI mints, the activity watches the
-window's tracker is fed through, the cwd poll, and the close flows'
-keystrokes and polls. It reaches the terminal through two ports
-(`service/ports.py`: `PtyPort`, `ScreenPort`) and reports back through a
-listener (`terminal._TabHost`); every old name on the tab forwards to it,
-and `tests/test_session.py` drives its state machines through fake ports.
-The tab has **one backend** (PR-1.9; the tab's own in-widget pty, its
-`COLLINS_PTY_BACKEND` switch and the VTE adapters are gone): the terminal
-has no child and shows a pty of the service's pty server through the
-loopback (`ptyclient.ClientTerminal`: output frames are `feed()`, the
-VTE's commits go back as input, the redraw guard, the mouse coalescing;
-`ServicePtyPort` / `ServiceScreenPort` over the service's pty and screen
-model). The panel shells beside it are the same: each `PanelTerminal` is a
-`ClientTerminal` over a service pty of kind `shell` (a sandboxed one
-spawned by the service on its box's plan), its text, foreground and cwd
-read on the service, its history written by the service from the screen
-model and painted back into the new pty's stream on reopen. The client's
-VTE still parses what it is fed, so the OSC 9;4 progress termprop the
-activity tracker listens to still arrives there.
+the session's `Session` (`service/session.py`, GTK-free), **the service's
+since PR-1.12a**: `ServiceCore.sessions` holds one per live agent pty,
+built by `spawn` for kind `agent` and hosted by `service/hosting.py`'s
+`SessionRecord` (its host, its two ports over the service's pty and screen
+model, the cut sinks, and the facts it pushes) — the launch (command,
+sandbox plan, worktree checks, restart), reading and writing the CLI's
+input box (`takes_prompt`, prompts, switches, the composer's cut), the
+transcript tail and the resolver that binds a freshly spawned session to
+the id the CLI mints, the cwd poll, and the close flows' keystrokes and
+polls; `tests/test_session.py` drives its state machines through fake
+ports. The tab holds the **mirror**, `clientsession.ClientSession`
+(`tab.session`, GTK-free): the last `session` event's facts (sent whole on
+`attach`, as changed fields after, debounced to the screen's 50 ms settle:
+D28), read with no round trip, and the requests the tab makes (`prompt`,
+`write`, `switch`, `send`, `cut`, `draft.restore`, `close`, ...); every
+old name on the tab forwards to it, and `apply(event)` turns the fields
+that moved into the tab's GObject signals so `window.py`'s handlers stay.
+A client never derives one of these facts from its own VTE. Busy and the
+finish verdict are the service's too (D29): `service/tracking.py`'s
+`ServiceActivity` is the window's `ActivityTracker` moved whole, fed by the
+stream filter's `Progress` events, every pty's output after the filter,
+the input frames and the `/proc` poll, its finish edges judged by
+`service/finish.py` against the transcript; it sets `busy` and a counted
+finish's `unread` on the store's items, and a session with no row yet
+hears them as `busy` / `finished` fields of its `session` event. The tab
+has **one backend** (PR-1.9): the terminal has no child and shows a pty of
+the service's pty server through the loopback (`ptyclient.ClientTerminal`:
+output frames are `feed()`, the VTE's commits go back as input, the redraw
+guard, the mouse coalescing). The panel shells beside it are the same: each
+`PanelTerminal` is a `ClientTerminal` over a service pty of kind `shell` (a
+sandboxed one spawned by the service on its box's plan), its text,
+foreground and cwd read on the service (`pty.info`, `pty.capture`), its
+history written by the service from the screen model and painted back
+into the new pty's stream on reopen. The e2e checks reach past the
+protocol only through `tab.probe` / `probe_set` / `probe_call` (the
+`debug.*` requests, served only with `COLLINS_DEBUG_API=1` in the service's
+environment: D27).
 
 **What the session can call.** `mcp_shim.py` (stdlib-only, spawned by the CLI
 via `--mcp-config`) relays MCP over a Unix socket to `mcpserver.py`

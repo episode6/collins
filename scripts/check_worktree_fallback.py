@@ -31,6 +31,7 @@ E2E = tempfile.mkdtemp(prefix="collins-wtfallback-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -185,10 +186,10 @@ def step_fallback() -> bool:
           len(typed) == 2 and "-w" not in typed[1].split(), typed)
     check("the tab's options dropped the flag", tab._options is not None
           and not tab._options.worktree, tab._options)
-    check("the tab stopped watching for a failure", tab._worktree_launch is False)
+    check("the tab stopped watching for a failure", tab.probe("worktree_launch") is False)
     check("the terminal says what happened",
-          "couldn't create a worktree" in tab._visible_screen_text(),
-          tab._visible_screen_text()[-400:])
+          "couldn't create a worktree" in tab.probe_call("visible_screen_text"),
+          tab.probe_call("visible_screen_text")[-400:])
     check("the launch directory's own trust was recorded", trusted(FAIL_CWD) is True,
           trusted(FAIL_CWD))
     state["working"] = start(OK_CWD)
@@ -203,8 +204,8 @@ def step_no_false_positive() -> bool:
     check("its options keep the worktree flag", tab._options is not None and tab._options.worktree,
           tab._options)
     check("the error text in its output changed nothing",
-          "Error creating worktree" in tab._visible_screen_text(),
-          tab._visible_screen_text()[-400:])
+          "Error creating worktree" in tab.probe_call("visible_screen_text"),
+          tab.probe_call("visible_screen_text")[-400:])
     return done()
 
 

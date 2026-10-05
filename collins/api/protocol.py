@@ -235,6 +235,33 @@ each taken from the code the message replaces:
 - `service.restart` takes a required `when`, ``now`` or ``idle`` (§3.10's
   *Restart when idle*); `service.status` answers with the version, the protocol and
   the counts of ptys, busy sessions and clients.
+- The session on the service (PR-1.12a, §3.19). `spawn` for an agent
+  carries what `service.session.Session` is built from (`fork`,
+  `command_override`, `jsonl_path`, `sandbox_plan`, `fork_resolve`, the
+  new chat's `prompt`) and answers with the session's `handle`; a shell's
+  `spawn` names its agent's `handle` so the service re-files its history
+  when the session resolves. The `session` event is the facts a client
+  reads off its tab, every field optional but `pty` and `handle`, sent
+  whole on `attach` and as changed fields after (`_SESSION_FIELDS`; the
+  transcript's `model`, `effort` and `permission_mode` are null while
+  unknown; `landed`, `reset`, `finished` and `forked` are one-shots).
+  `cut` is a request answered with the cut's `handle` and an event by that
+  handle (`seeded` with the text, `refused`, `cancelled`); `cut.cancel`,
+  `draft.restore`, `write`, `send` (reply `sent`), `close` with the exit
+  keystrokes (`text`) or `force`, `close.nudge`, `close.end`,
+  `resolver.arm`, `transcript.update` / `set` / `relocate`,
+  `prs.restore`, `cwd.settle` (reply the follow scope's name),
+  `shells.follow`, `finish.witness`, `baseline.absorb`,
+  `baseline.cmdlines` and `restart.worktreeless` are the requests a tab
+  makes of its session; `composer`, `shells`, `focus` (from the service:
+  `EITHER` is the one event form both peers send) and `close` (`budget`
+  or `exited`) are the events the session sends. `pty.info` and
+  `pty.capture` are a panel shell's reads. `sandbox.derive`,
+  `sandbox.drop` and `sandbox.forget` are the sandbox host's three calls
+  the client still makes; the `sandbox` event's `box` is optional for the
+  probe's verdict (`what: "probe"`, `reason`). The `term` carries the
+  sixteen-colour `palette`, for the dim judgement the service makes. The
+  `debug.*` family (D27) is served only with `COLLINS_DEBUG_API=1`.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -296,6 +323,9 @@ U64_MAX = 0xFFFF_FFFF_FFFF_FFFF
 CLIENT = "client"
 SERVICE = "service"
 PEERS = frozenset({CLIENT, SERVICE})
+# An event form either peer may send (`focus`: the client's focus report,
+# and the service asking the active client to focus a terminal, PR-1.12a).
+EITHER = "either"
 
 REQUEST = "request"
 EVENT = "event"
@@ -499,6 +529,9 @@ _TERM = Field(
         "fg": Field(K_STR, pattern=_COLOR_RE, high=7),
         "bg": Field(K_STR, pattern=_COLOR_RE, high=7),
         "scheme": Field(K_STR, choices=frozenset({"light", "dark"}), high=8),
+        # The sixteen-colour palette the client draws in (PR-1.12a): what
+        # the screen model's dim-tail read judges a faint run against.
+        "palette": Field(K_LIST, low=16, high=16, item=Field(K_STR, pattern=_COLOR_RE, high=7)),
     },
 )
 
@@ -571,6 +604,68 @@ _EMPTY_GROUP = Field(
         "cwd": _PATH,
     },
 )
+
+_DEBUG_NAME = Field(K_STR, low=1, high=256, pattern=re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,255}"))
+_DEBUG_ARGS = Field(K_LIST, high=16, item=_null(_JSON))
+_DEBUG_KWARGS = Field(K_JSON_OBJECT)
+
+# The `session` event (§3.19): the facts a client reads synchronously off
+# its tab's session, sent whole on attach and as single changed fields after.
+# Every field but `pty` and `handle` is optional; the one-shots (`landed`,
+# `reset`, `finished`, `forked`) are sent true once and never false.
+_ENTERED = Field(K_OBJ, fields={"text": _req(_TEXT), "rows_below": _req(_i(0, MAX_ROWS))})
+_SESSION_FIELDS = {
+    "pty": _req(_PTY),
+    "handle": _req(_ID),
+    # identity and the launch
+    "session": _null(_ID),
+    "fork": _BOOL,
+    "provider": _SHORT,
+    "options": _null(Field(K_JSON_OBJECT)),
+    "command_override": _null(_s(PATH_MAX)),
+    "cwd": _null(_PATH),
+    "agent_cwd": _null(_PATH),
+    "pid": _null(_i(1, PID_MAX)),
+    "resolver_cwd": _null(_PATH),
+    "initial_command": _null(_s(PATH_MAX)),
+    "worktree_launch": _BOOL,
+    "new_chat_prompt": _null(_TEXT),
+    "shells_follow_armed": _BOOL,
+    "closing": _BOOL,
+    # the sandbox
+    "sandboxed": _BOOL,
+    "sandbox_box": _s(ID_MAX),
+    "sandbox_plan_path": _null(_PATH),
+    "defaults_owed": _BOOL,
+    "can_restart": _BOOL,
+    # the box reads and the process questions
+    "takes_prompt": _BOOL,
+    "entered": _null(_ENTERED),
+    "prompt_block": _s(MSGID_MAX),
+    "unstarted": _BOOL,
+    "foreign_paste": _BOOL,
+    "agent_running": _BOOL,
+    "running_command": _BOOL,
+    "pasted_back": Field(K_MAP, high=256, item=_TEXT),
+    "paste_back_pending": _null(Field(K_LIST, high=256, item=_TEXT)),
+    # the transcript tail
+    "model": _null(_s(MODEL_MAX)),
+    "effort": _null(_SHORT),
+    "permission_mode": _null(_SHORT),
+    "transcript_path": _null(_PATH),
+    "prs": _PR_RECORDS,
+    "lookup_empty": _BOOL,
+    "touched_files": Field(K_LIST, high=64, item=_PATH),
+    "attachments": Field(K_LIST, high=1000, item=Field(K_JSON_OBJECT)),
+    "ledger_armed": _BOOL,
+    "landed": _BOOL,
+    "reset": _BOOL,
+    # activity, keyed by the session's handle (the placeholder row's)
+    "busy": _BOOL,
+    "finished": _BOOL,
+    # a sandboxed fork's resolver found the forked conversation's id
+    "forked": _ID,
+}
 
 _STATE_FIELDS = {
     "key": Field(K_STR, required=True, low=1, high=KEY_MAX, pattern=_KEY_RE),
@@ -683,8 +778,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "focus",
-        "The client's view of a pty gained or lost focus.",
-        event=_event(CLIENT, {"pty": _req(_PTY), "focused": _req(_BOOL)}),
+        "A client's view of a pty gained or lost focus; from the service, a request to focus it.",
+        event=_event(EITHER, {"pty": _req(_PTY), "focused": _BOOL}),
     ),
     MessageType(
         "theme",
@@ -708,6 +803,17 @@ _TABLE: tuple[MessageType, ...] = (
                 "worktree_name": _s(ID_MAX),
                 "sandbox": _BOOL,
                 "sandbox_box": _ID,
+                # The rest of what an agent's `Session` is built from
+                # (PR-1.12a, §3.19): the session forked, a command override
+                # (a --continue, a check's stand-in), the transcript to tail,
+                # a sibling's derived plan, a sandboxed fork's resolver mode.
+                "fork": _BOOL,
+                "command_override": _s(PATH_MAX),
+                "jsonl_path": _PATH,
+                "sandbox_plan": _PATH,
+                "fork_resolve": _BOOL,
+                # A shell's: the agent session (its handle) it is a panel of.
+                "handle": _ID,
                 "cols": _COLS,
                 "rows": _ROWS,
                 # A shell's panel history: the key its file is under and
@@ -715,7 +821,8 @@ _TABLE: tuple[MessageType, ...] = (
                 "history": _ID,
                 "ordinal": _i(0, 65535),
             },
-            reply={"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS)},
+            # `handle` is the service's name for an agent's session (`s-N`).
+            reply={"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS), "handle": _ID},
         ),
     ),
     MessageType(
@@ -724,16 +831,67 @@ _TABLE: tuple[MessageType, ...] = (
         request=_request({"pty": _req(_PTY), "history": _req(_null(_ID))}),
     ),
     MessageType(
+        "pty.info",
+        "A pty's process facts: its child, its shell, the foreground, the shell's cwd, its plan.",
+        request=_request(
+            {"pty": _req(_PTY)},
+            reply={
+                "kind": _req(_s(SHORT_MAX, low=1)),
+                "child_pid": _null(_i(1, PID_MAX)),
+                "shell_pid": _null(_i(1, PID_MAX)),
+                "foreground_pgrp": _null(_i(-1, PID_MAX)),
+                "running_command": _req(_BOOL),
+                "process_cwd": _null(_PATH),
+                "plan": _null(_PATH),
+            },
+        ),
+    ),
+    MessageType(
+        "pty.capture",
+        "A pty's text, scrollback and screen, from the service's model.",
+        request=_request({"pty": _req(_PTY)}, reply={"text": _req(_TEXT)}),
+    ),
+    MessageType(
         "prompt",
         "Type text into the agent's box and submit it.",
-        request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
+        request=_request(
+            {
+                "pty": _req(_PTY),
+                "text": _req(_s(TEXT_MAX, low=1)),
+                # Whether to put the keyboard in the terminal too (default
+                # True: `inject_prompt`; False is the unfocused, bracketed
+                # paste of a background spawn's prompt).
+                "focus": _BOOL,
+            }
+        ),
     ),
     MessageType(
         "switch",
         "Post a model and/or effort switch to the agent.",
         request=_request(
-            {"pty": _req(_PTY), "model": _s(MODEL_MAX, low=1), "effort": _s(SHORT_MAX, low=1)},
+            {
+                "pty": _req(_PTY),
+                "model": _s(MODEL_MAX, low=1),
+                "effort": _s(SHORT_MAX, low=1),
+                # The client fact the switch's road depends on (§3.19).
+                "composer_open": _BOOL,
+            },
             one_of=("model", "effort"),
+        ),
+    ),
+    MessageType(
+        "write",
+        "Type raw keystrokes into the agent's pty.",
+        request=_request({"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))}),
+    ),
+    MessageType(
+        "send",
+        "The composer's send: submit its draft, now or once a cut has settled.",
+        request=_request(
+            {"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1)), "composer_open": _BOOL},
+            # Whether it went now (the composer empties) or waits on a cut
+            # still settling (a `composer resend` event follows).
+            reply={"sent": _req(_BOOL)},
         ),
     ),
     MessageType(
@@ -750,8 +908,32 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "cut",
-        "Lift the text out of the agent's box (the composer's open-cut).",
-        request=_request({"pty": _req(_PTY)}, reply={"text": _req(_TEXT)}),
+        "Begin the composer's open-cut; `cut` events say what it found.",
+        request=_request({"pty": _req(_PTY)}, reply={"handle": _req(_ID)}),
+        event=_event(
+            SERVICE,
+            {
+                "pty": _req(_PTY),
+                "handle": _req(_ID),
+                "state": _req(
+                    Field(K_STR, choices=frozenset({"seeded", "refused", "cancelled"}), high=16)
+                ),
+                "text": _TEXT,
+            },
+        ),
+    ),
+    MessageType(
+        "cut.cancel",
+        "Call a cut off: the composer closed, or the box holds its text again.",
+        request=_request({"pty": _req(_PTY), "handle": _ID}),
+    ),
+    MessageType(
+        "draft.restore",
+        "A closing composer's draft goes back into the agent's box, in pieces.",
+        request=_request(
+            {"pty": _req(_PTY), "text": _req(_s(TEXT_MAX, low=1))},
+            reply={"restored": _req(_BOOL)},
+        ),
     ),
     MessageType(
         "clear",
@@ -770,7 +952,187 @@ _TABLE: tuple[MessageType, ...] = (
             {
                 "pty": _req(_PTY),
                 "mode": _req(Field(K_STR, choices=frozenset({"exit", "background", "kill"}), high=16)),
+                # The keystrokes of an exit or a handoff, as the provider
+                # spells them; `force` is the window's answer to a budget
+                # event (the same as mode ``kill``).
+                "text": _s(256),
+                "force": _BOOL,
             }
+        ),
+        # The close poll's word: a budget ran out (the window answers with
+        # a forced close or a dialog), or the shell exited.
+        event=_event(
+            SERVICE,
+            {
+                "pty": _req(_PTY),
+                "state": _req(Field(K_STR, choices=frozenset({"budget", "exited"}), high=16)),
+                "phase": _SHORT,
+            },
+        ),
+    ),
+    MessageType(
+        "close.nudge",
+        "Feed the exit keystroke again to a CLI parked on a screen.",
+        request=_request({"pty": _req(_PTY)}),
+    ),
+    MessageType(
+        "close.end",
+        "The page is gone: the close poll stops.",
+        request=_request({"pty": _req(_PTY)}),
+    ),
+    # -- the session on the service (§3.19, PR-1.12a)
+    MessageType(
+        "session",
+        "An agent session's facts, whole on attach and as changed fields after.",
+        event=_event(SERVICE, _SESSION_FIELDS),
+    ),
+    MessageType(
+        "composer",
+        "The session asks the active client's composer for something.",
+        event=_event(
+            SERVICE,
+            {
+                "pty": _req(_PTY),
+                "what": _req(Field(K_STR, choices=frozenset({"refocus", "resend", "stash"}), high=16)),
+                "text": _TEXT,
+            },
+        ),
+    ),
+    MessageType(
+        "shells",
+        "The session says something about the panel shells beside it.",
+        event=_event(
+            SERVICE,
+            {"pty": _req(_PTY), "what": _req(Field(K_STR, choices=frozenset({"stale"}), high=16))},
+        ),
+    ),
+    MessageType(
+        "resolver.arm",
+        "A client mapped the tab: the transcript resolver's background budget starts over.",
+        request=_request({"pty": _req(_PTY)}),
+    ),
+    MessageType(
+        "transcript.update",
+        "Re-read the transcript now; with `discover`, ask the branch which PR it has.",
+        request=_request({"pty": _req(_PTY), "discover": _BOOL}),
+    ),
+    MessageType(
+        "transcript.set",
+        "Tail another transcript (or none).",
+        request=_request({"pty": _req(_PTY), "path": _req(_null(_PATH))}),
+    ),
+    MessageType(
+        "transcript.relocate",
+        "Follow the session's transcript to where the CLI moved it.",
+        request=_request({"pty": _req(_PTY), "path": _req(_PATH)}),
+    ),
+    MessageType(
+        "prs.restore",
+        "Re-adopt the pull requests saved for the session.",
+        request=_request({"pty": _req(_PTY), "records": _req(_PR_RECORDS)}),
+    ),
+    MessageType(
+        "cwd.settle",
+        "Whether the agent has moved, as the editor rooted at `root` should see it.",
+        request=_request(
+            {"pty": _req(_PTY), "cwd": _null(_PATH), "root": _req(_PATH)},
+            reply={"scope": _SHORT},
+        ),
+    ),
+    MessageType(
+        "shells.follow",
+        "Whether the shells beside a new chat are owed the offer to follow its worktree.",
+        request=_request({"pty": _req(_PTY), "armed": _req(_BOOL)}),
+    ),
+    MessageType(
+        "finish.witness",
+        "What the transcript says right now, for the finish ledger.",
+        request=_request(
+            {"pty": _req(_PTY)},
+            reply={
+                "stamp": _req(Field(K_LIST, low=2, high=2, item=_i(0, COUNT_MAX))),
+                "size": _req(_null(_i(0, SIZE_MAX))),
+            },
+        ),
+    ),
+    MessageType(
+        "baseline.absorb",
+        "Fold what runs under a pristine fresh spawn into its plumbing baseline.",
+        request=_request({"pty": _req(_PTY)}, reply={"capturing": _req(_BOOL)}),
+    ),
+    MessageType(
+        "baseline.cmdlines",
+        "The cmdlines running directly below the session's agent right now.",
+        request=_request(
+            {"pty": _req(_PTY)},
+            reply={"cmdlines": _req(Field(K_LIST, high=1000, item=_s(ARG_TEXT_MAX)))},
+        ),
+    ),
+    MessageType(
+        "restart.worktreeless",
+        "Type the new-session command again with the worktree dropped.",
+        request=_request({"pty": _req(_PTY)}),
+    ),
+    # -- the e2e probe (D27): served only with COLLINS_DEBUG_API=1
+    MessageType(
+        "debug.session.get",
+        "An attribute of a session, JSON-encoded (a method answers `callable`).",
+        request=_request(
+            {"pty": _req(_PTY), "name": _req(_DEBUG_NAME)},
+            reply={"value": _null(_JSON), "callable": _BOOL},
+        ),
+    ),
+    MessageType(
+        "debug.session.set",
+        "Set an attribute of a session.",
+        request=_request({"pty": _req(_PTY), "name": _req(_DEBUG_NAME), "value": _req(_null(_JSON))}),
+    ),
+    MessageType(
+        "debug.session.call",
+        "Call a method of a session with JSON arguments; its result JSON-encoded.",
+        request=_request(
+            {"pty": _req(_PTY), "name": _req(_DEBUG_NAME), "args": _DEBUG_ARGS, "kwargs": _DEBUG_KWARGS},
+            reply={"value": _null(_JSON)},
+        ),
+    ),
+    MessageType(
+        "debug.screen",
+        "A pty's screen model, as the checks read it.",
+        request=_request(
+            {"pty": _req(_PTY)},
+            reply={
+                "rows": _req(Field(K_LIST, high=MAX_ROWS, item=_s(MAX_COLS * 4))),
+                "cursor": _req(Field(K_LIST, low=2, high=2, item=_i(0, MAX_COLS))),
+                "columns": _req(_COLS),
+                "row_count": _req(_ROWS),
+                "capture": _req(_TEXT),
+            },
+        ),
+    ),
+    MessageType(
+        "debug.pty",
+        "A pty's process facts, as the checks read them.",
+        request=_request(
+            {"pty": _req(_PTY)},
+            reply={
+                "child_pid": _req(_null(_i(1, PID_MAX))),
+                "foreground_pgrp": _req(_null(_i(-1, PID_MAX))),
+                "shell_pid": _req(_null(_i(1, PID_MAX))),
+                "process_cwd": _req(_null(_PATH)),
+            },
+        ),
+    ),
+    MessageType(
+        "debug.sandbox",
+        "Call a method of the service's sandbox host, its live grants, or the core.",
+        request=_request(
+            {
+                "target": _req(Field(K_STR, choices=frozenset({"host", "grants", "core"}), high=8)),
+                "name": _req(_DEBUG_NAME),
+                "args": _DEBUG_ARGS,
+                "kwargs": _DEBUG_KWARGS,
+            },
+            reply={"value": _null(_JSON)},
         ),
     ),
     # -- state (§3.8)
@@ -1343,12 +1705,34 @@ _TABLE: tuple[MessageType, ...] = (
         request=_request(_SANDBOX_TARGET),
     ),
     MessageType(
+        "sandbox.derive",
+        "A sibling's plan, derived from a box's launched one for its directory.",
+        request=_request(
+            {**_SANDBOX_TARGET, "cwd": _req(_PATH)},
+            reply={"plan": _PATH, "box": _s(ID_MAX), "reason": _s(ARG_TEXT_MAX)},
+        ),
+    ),
+    MessageType(
+        "sandbox.drop",
+        "A derived plan and its box, let go of: nothing will launch from them.",
+        request=_request({**_SANDBOX_TARGET, "plan": _PATH}),
+    ),
+    MessageType(
+        "sandbox.forget",
+        "A session's transcript went: its box, and what it was allowed, go too.",
+        request=_request(_SANDBOX_TARGET),
+    ),
+    MessageType(
         "sandbox",
-        "A sandboxed session's grants or plan changed; a delivery for the toast.",
+        "A sandboxed session's grants or plan changed; a delivery for the toast; the probe's verdict.",
         event=_event(
             SERVICE,
             {
-                "box": _req(_ID),
+                # Absent for the probe's verdict (`what`: "probe"), which is
+                # about this machine, not a box.
+                "box": _ID,
+                "what": _SHORT,
+                "reason": _s(ARG_TEXT_MAX),
                 "pty": _PTY,
                 "session": _ID,
                 # The grant the event is about, what became of it in the
@@ -1378,6 +1762,13 @@ _TABLE: tuple[MessageType, ...] = (
                 "busy": _COUNT,
                 "clients": _COUNT,
                 "started": _NUM,
+                # The sandbox probe's verdict: "" when a box can be built here
+                # (absent until the probe has run), and the live grants'
+                # (sandboxgrants.GrantMounts.capable: "" when a directory
+                # allowed while a session runs reaches it at once, else why
+                # not; absent where the service runs no live grants).
+                "sandbox": _s(ARG_TEXT_MAX),
+                "live": _s(ARG_TEXT_MAX),
             }
         ),
     ),
@@ -1681,7 +2072,7 @@ def validate(message: object, sender: str) -> Message | Refusal:
         return Refusal(
             request_id, ERROR_INVALID, "{type} is an event and takes no id", {"type": name}
         )
-    if shape.sender != sender:
+    if shape.sender not in (sender, EITHER):
         return Refusal(
             request_id,
             ERROR_DIRECTION,
