@@ -278,8 +278,14 @@ touches the disk.
   entry itself with the reply's mtime, and for an open file *inside* a
   moved or renamed folder with the mtime it expected before the `gone`,
   `_OpenFile.gone_mtime`, since the move kept it; the re-watch seeds the
-  service with it, so a file that really differs is told at once), spends
-  the cut
+  service with it, so a file that really differs is told at once. The
+  claim "clean when the `gone` came" (`gone_marked`) dies with the first
+  change to the buffer's text (`_on_buffer_changed`), with a fill
+  (`_fill`) and with a save landing (`_on_saved`), so an edit typed while
+  a move ran, or after a deleted file was saved again, is never shown as
+  saved; the mtime is restored for a dirty buffer too, so its next save
+  keeps its stale check, and the "was deleted" banner is withdrawn either
+  way), spends the cut
   (`_spend_cut`: what failed stays on the clipboard, still cut) and names
   a failure in the banner. `paste_files` sends the clipboard in slices of
   `protocol.FS_PASTE_MAX` (1000), one request each, and joins the
@@ -295,26 +301,45 @@ touches the disk.
   same folders, and a planted symlink at the chosen name must not be
   written through. `projectfiles` lands a file copy by opening the target
   `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (`_copy_file_exclusive`: the
-  bytes, then `copystat`; the source is read only when it is a regular
-  file, so a FIFO or a device is `failed`), a tree by `shutil.copytree`
-  with that copy function and `dirs_exist_ok` False (`_copy_tree_
-  exclusive`: `makedirs` at the top and every subdirectory is the
-  exclusive step, links stay links), a same-filesystem move by `os.link`
-  + `unlink` for a file and `os.mkdir` + `os.rename` for a directory
-  (`_move_exclusive`; across filesystems, `EXDEV` / `EPERM` / `EMLINK`,
-  the exclusive copy then the source removed, as `shutil.move` does).
-  `EEXIST` at a paste's target is the next name of `unique_target`'s
-  sequence (`paste_entries`' loop; `no_room` after the hundredth), at a
-  rename's it is `exists`. **No lock** serializes the operations: two
-  requests cannot land one name, and a lock would hold every client's
-  rename behind a long copy. The tests in `test_projectfiles.py` make
-  each race deterministic by patching `unique_target` / `rename_target`
-  to plant something at the name they answer. Still as before: a
-  cross-filesystem cut that fails mid-tree leaves the partial copy at the
-  destination (a retry lands as "tree (copy)") and its `message` is
-  `shutil.Error`'s list.
+  source opened `O_NOFOLLOW` too and read only when it is a regular
+  file, so a FIFO, a device or a link swapped in after the check is
+  `failed`; the bytes by an `os.sendfile` loop with `copyfileobj`'s
+  read-write loop as shutil's fallback, `_copy_bytes`; then `copystat`
+  with `follow_symlinks=False`), a tree by `shutil.copytree` with that
+  copy function and `dirs_exist_ok` False (`_copy_tree_exclusive`:
+  `makedirs` at the top and every subdirectory is the exclusive step,
+  links stay links). **A move** (a cut's paste, and a rename;
+  `_move_exclusive`) is `renameat2(RENAME_NOREPLACE)` through `ctypes`
+  (`_rename_noreplace`, the symbol looked up once at import): `rename`'s
+  own semantics for a file, a directory, a link, a FIFO alike, no
+  ownership or read permission needed, the inode kept; `EEXIST` is the
+  name taken, `EINVAL` / `ENOSYS` / `ENOTSUP` or no such symbol take the
+  placeholder path (`_move_by_placeholder`: a file's target created
+  `O_CREAT|O_EXCL|O_NOFOLLOW` then replaced by `os.rename`, removed on a
+  failed rename only while `lstat` still shows the inode made; a
+  directory's `os.mkdir` then `os.rename`, `ENOTEMPTY` meaning someone
+  put something in it, so it stays and the name counts as taken), `EXDEV`
+  from either takes the copy path (`_move_by_copy`: the exclusive copy
+  then `unlink` / `rmtree` of the source, as `shutil.move` does). What a
+  failed move leaves (D46): only what the operation made and that holds
+  nothing of anyone else's is removed — a file copied across whose source
+  cannot then be unlinked is removed again (`failed` with the `unlink`'s
+  words, nothing at the destination, a retry the same), a tree whose
+  `rmtree` fails is kept with both halves. `EEXIST` at a paste's target
+  is the next name of `unique_target`'s sequence (`paste_entries`' loop;
+  `no_room` after the hundredth), at a rename's it is `exists`. **No
+  lock** serializes the operations: two requests cannot land one name,
+  and a lock would hold every client's rename behind a long copy. The
+  tests in `test_projectfiles.py` make each race deterministic by
+  patching `unique_target` / `rename_target` to plant something at the
+  name they answer, and run the move matrix on the real primitive and on
+  the placeholder path (`_rename_noreplace` patched to False) and the
+  copy path (the primitive and `os.rename` patched to `EXDEV`). Still as
+  before: a cross-filesystem cut that fails mid-tree leaves the partial
+  copy at the destination (a retry lands as "tree (copy)") and its
+  `message` is `shutil.Error`'s list.
 - `fs.rename` is `_move_exclusive` too (the inode kept; `exists` when
-  the name was taken between the check and the link), the request's
+  the name was taken between the check and the rename), the request's
   `root` is confined on the worker like `fs.list`'s (never `allowed` on
   the main loop), a target name with surrounding whitespace is refused
   `not_a_name` (the dialog's trimming is the client's, before the

@@ -113,11 +113,15 @@ class _OpenFile:
         self.pending_change: dict | None = None
         # A `gone` marked a clean buffer modified ("was deleted."): a rename
         # or a cut's paste that lands afterwards with the file's new place
-        # takes the mark back (`_retarget_open`); a buffer that was dirty
-        # before the `gone` keeps its own mark. `gone_mtime` is what the
-        # buffer expected before the `gone`: a file under a moved folder has
-        # no mtime of its own in the reply, and a move keeps the inode (or
-        # `copystat`s its times), so that one is restored.
+        # takes the mark back (`_retarget_open`). The claim "clean when the
+        # gone came" dies with the first change to the buffer's text
+        # (`_on_buffer_changed`: an edit the user typed while the move ran
+        # must never be shown as saved) and with any fill or save, which
+        # know the file again (`_fill`, `_on_saved`). `gone_mtime` is what
+        # the buffer expected before the `gone`: a file under a moved folder
+        # has no mtime of its own in the reply, and a move keeps the inode
+        # (or `copystat`s its times), so that one is restored — for a dirty
+        # buffer too, so its next save still has its stale check.
         self.gone_marked = False
         self.gone_mtime: int | None = None
         self.saving = False
@@ -692,22 +696,27 @@ class EditorPane(Gtk.Box):
             # answered another, which is then the truth.
             if mtime is not None and Path(moved) == new and opened.mtime != mtime:
                 opened.mtime = mtime
-            if opened.gone_marked:
-                # The file is right here under its new name: the mark a
-                # `gone` set is taken back. A file inside a moved folder has
-                # no mtime in the reply; the one it expected before the
-                # `gone` is restored (the move kept it), and the re-watch
-                # below seeds the service with it, so a file that really
-                # differs is one `file-changed` at once, never a silent
-                # save over it.
+            if opened.gone_mtime is not None:
+                # A `gone` beat the reply and the file is right here under
+                # its new name: the banner goes. A file inside a moved folder
+                # has no mtime in the reply; the one it expected before the
+                # `gone` is restored (the move kept it), dirty or not, so the
+                # next save keeps its stale check, and the re-watch below
+                # seeds the service with it, so a file that really differs
+                # is one `file-changed` at once, never a silent save over it.
                 if opened.mtime is None:
                     opened.mtime = opened.gone_mtime
-                opened.gone_marked = False
                 opened.gone_mtime = None
-                opened.buffer.set_modified(False)
                 deleted = _("{name} was deleted.").format(name=Path(key).name)
                 if self._banner.get_title() == deleted and self._banner.get_revealed():
                     self._banner.set_revealed(False)
+            if opened.gone_marked:
+                # The buffer was clean when the `gone` came and nothing has
+                # changed its text since (`_on_buffer_changed` drops the
+                # claim): the mark is taken back. A buffer edited meanwhile
+                # keeps its own mark: what it holds is unsaved.
+                opened.gone_marked = False
+                opened.buffer.set_modified(False)
             if opened.loading:
                 # The load in flight is reading the old path, so it is
                 # already doomed: start it again from the new one, which
@@ -942,6 +951,7 @@ class EditorPane(Gtk.Box):
         # re-keys the page (see _retarget_open), and a handler holding the
         # old path would stop finding the tab it titles.
         buffer.connect("modified-changed", self._on_modified_changed, opened)
+        buffer.connect("changed", self._on_buffer_changed, opened)
         buffer.connect("notify::cursor-position", lambda *_a: self._sync_status())
 
         self._start_load(opened, restore_cursor)
@@ -1162,6 +1172,8 @@ class EditorPane(Gtk.Box):
         opened.buffer.set_text(text)
         opened.buffer.end_irreversible_action()
         opened.buffer.set_modified(False)
+        opened.gone_marked = False  # the file is known again: no `gone` to take back
+        opened.gone_mtime = None
         opened.newline = newline
         opened.mtime = read.mtime
         opened.size = read.size
@@ -1276,6 +1288,8 @@ class EditorPane(Gtk.Box):
         opened.mtime = written.mtime
         opened.size = written.size
         opened.encoding = written.encoding
+        opened.gone_marked = False  # written again: the file is known, no `gone` to take back
+        opened.gone_mtime = None
         remotefiles.watcher().update(opened.watch_handle, written.mtime)
         if waiters is not None:
             # Typed into while the save was in flight: saved again now, over
@@ -1823,6 +1837,15 @@ class EditorPane(Gtk.Box):
         it = opened.buffer.get_iter_at_mark(opened.buffer.get_insert())
         self._status_cursor.set_text(f"{it.get_line() + 1}:{it.get_line_offset() + 1}")
         self._save_btn.set_sensitive(opened.buffer.get_modified())
+
+    def _on_buffer_changed(self, buffer: GtkSource.Buffer, opened: _OpenFile) -> None:
+        """Any change to the buffer's text: the claim that it was clean when
+        a `gone` came is gone with it (`_retarget_open` must never show
+        text the user typed while a move ran as saved). A fill or a reload
+        changes the text too, and resets the mark itself along with the
+        file's facts (`_fill`); the `gone` branch sets only the modified
+        flag, which is not a change."""
+        opened.gone_marked = False
 
     def _on_modified_changed(self, buffer: GtkSource.Buffer, opened: _OpenFile) -> None:
         page = self._pages.get(str(opened.path))
