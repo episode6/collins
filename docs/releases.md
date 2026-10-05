@@ -50,7 +50,10 @@ downloads of each version, see the
   pastes landing one name at once (the second gets the next "(copy N)").
   An open file still follows its rename or move with its unsaved edits,
   even when the move took long enough for the editor to be told the old
-  path was gone first. A paste of a big folder takes as long as it takes
+  path was gone first (and anything typed meanwhile stays unsaved until
+  you save it). A move keeps the file as it is — its owner, its
+  permissions, a file you cannot read — where it could be moved before.
+  A paste of a big folder takes as long as it takes
   with the window live, and a clipboard of any size goes through in
   slices. Copying a file puts a `collins://` reference to it on the
   clipboard for a paste within Collins, with the ordinary file URIs

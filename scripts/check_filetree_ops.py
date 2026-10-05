@@ -294,6 +294,73 @@ def run(root: str) -> int:
     remotefiles.off_main(lambda: remotefiles.make_dir(new_dir, root), lambda kind, value: made.append((kind, value)))
     check("and refuses it twice", wait_for(lambda: len(made) == 2) and made[1][0] == "refused" and made[1][1].details.get("reason") == "exists", made)
 
+    # -- a gone that beats a move's reply never hides an edit (the verification's N1, N2, N3) ------
+    def open_fresh(name: str):
+        path = os.path.join(root, name)
+        with open(path, "w") as fh:
+            fh.write("x = 1\n")
+        pane.open_file(path)
+        check(f"{name} opens", wait_for(lambda: path in pane._open and pane._open[path].filled and pane._open[path].watch_handle is not None), list(pane._open))
+        return path, pane._open[path]
+
+    def gone(path: str, opened) -> None:
+        pane._on_file_changed({"t": "file-changed", "handle": opened.watch_handle, "path": path, "gone": True})
+
+    def text(opened) -> str:
+        return opened.buffer.get_text(opened.buffer.get_start_iter(), opened.buffer.get_end_iter(), True)
+
+    # N1: a clean file is told it is gone while its cut runs; the user types meanwhile.
+    n1, o1 = open_fresh("n1.py")
+    expected = o1.mtime
+    gone(n1, o1)
+    check("N1: the gone marks the clean buffer", o1.gone_marked and o1.mtime is None and o1.buffer.get_modified(), (o1.gone_marked, o1.mtime))
+    o1.buffer.insert(o1.buffer.get_end_iter(), "typed while the paste ran\n")
+    check("N1: the user's edit drops the claim", not o1.gone_marked and o1.buffer.get_modified())
+    pane._paste(docs, [n1], True)
+    n1_moved = os.path.join(docs, "n1.py")
+    check("N1: the cut lands", wait_for(lambda: n1_moved in pane._open and os.path.exists(n1_moved)), list(pane._open))
+    m1 = pane._open[n1_moved]
+    check("N1: the edit is still unsaved, never shown as saved", m1.buffer.get_modified() and "typed while" in text(m1) and "typed while" not in open(n1_moved).read())
+    check("N1: and the mtime it expects is the moved file's", m1.mtime == expected == os.stat(n1_moved).st_mtime_ns // 1000, (m1.mtime, expected))
+    check("N1: the deleted banner is withdrawn", "was deleted" not in banner(pane), banner(pane))
+    clear_banner(pane)
+
+    # N2: a file really deleted, saved again, edited, then renamed.
+    n2, o2 = open_fresh("n2.py")
+    os.unlink(n2)
+    check("N2: a real deletion is told", wait_for(lambda: "was deleted" in banner(pane)) and o2.gone_marked, banner(pane))
+    clear_banner(pane)
+    pane._save(o2)
+    check("N2: saved again", wait_for(lambda: os.path.exists(n2) and not o2.buffer.get_modified() and not o2.saving))
+    check("N2: the save drops the mark", not o2.gone_marked and o2.gone_mtime is None and o2.mtime == os.stat(n2).st_mtime_ns // 1000, (o2.gone_marked, o2.mtime))
+    o2.buffer.insert(o2.buffer.get_end_iter(), "later edit, never saved\n")
+    pane._rename(n2, "n2b.py")
+    n2b = os.path.join(root, "n2b.py")
+    check("N2: the rename lands", wait_for(lambda: n2b in pane._open and os.path.exists(n2b)), list(pane._open))
+    m2 = pane._open[n2b]
+    check("N2: the later edit is still unsaved", m2.buffer.get_modified() and "later edit" in text(m2) and "later edit" not in open(n2b).read())
+
+    # N3 control: a file really deleted by someone else is told and stays marked.
+    n3, o3 = open_fresh("n3.py")
+    os.unlink(n3)
+    check("N3: a real deletion is told", wait_for(lambda: "was deleted" in banner(pane)), banner(pane))
+    settle(0.3)
+    check("N3: and stays marked, with no mtime to save over", o3.buffer.get_modified() and o3.mtime is None and o3.gone_marked, (o3.mtime, o3.gone_marked))
+    clear_banner(pane)
+
+    # A dirty buffer inside a moved folder that got a gone keeps its edits and its stale check.
+    os.makedirs(os.path.join(root, "box"))
+    n4, o4 = open_fresh(os.path.join("box", "n4.py"))
+    expected = o4.mtime
+    o4.buffer.insert(o4.buffer.get_end_iter(), "dirty before the gone\n")
+    gone(n4, o4)
+    check("a dirty buffer's gone sets no clean claim", not o4.gone_marked and o4.mtime is None and o4.gone_mtime == expected, (o4.gone_marked, o4.gone_mtime))
+    pane._rename(os.path.join(root, "box"), "crate")
+    n4_moved = os.path.join(root, "crate", "n4.py")
+    check("the folder rename re-keys it", wait_for(lambda: n4_moved in pane._open), list(pane._open))
+    m4 = pane._open[n4_moved]
+    check("still dirty, with the mtime it expected restored for the next save's stale check", m4.buffer.get_modified() and m4.mtime == expected == os.stat(n4_moved).st_mtime_ns // 1000 and m4.gone_mtime is None, (m4.mtime, expected))
+
     pane.shutdown()
     window.destroy()
     print(f"\n{PASSED} passed, {FAILED} failed")
