@@ -221,3 +221,26 @@ def test_a_dir_watch_sends_its_kind_and_hears_dir_changed(link):
     assert link.sent[-1] == {"t": "fs.watch", "path": "/srv/p/src", "kind": "dir", "handle": handle}
     remotefiles.watcher().unwatch(handle)
     assert link.sent[-1] == {"t": "fs.unwatch", "handle": handle}
+
+
+def test_reset_tells_its_listeners_after_resending(link):
+    heard: list[str] = []
+
+    class Tree:
+        def on_reconnect(self) -> None:
+            heard.append("tree")
+
+    tree = Tree()
+    watcher = remotefiles.watcher()
+    watcher.on_reset(tree.on_reconnect)
+    handle = watcher.watch("/srv/p", lambda _e: None, kind=protocol.WATCH_DIR)
+    link.sent.clear()
+    remotefiles.reset()
+    assert link.sent[-1]["handle"] == handle and heard == ["tree"]
+    watcher.off_reset(tree.on_reconnect)
+    remotefiles.reset()
+    assert heard == ["tree"]
+    watcher.on_reset(tree.on_reconnect)
+    del tree  # held weakly: a tree that is gone is not called
+    remotefiles.reset()
+    assert heard == ["tree"]
