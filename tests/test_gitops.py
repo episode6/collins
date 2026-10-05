@@ -378,6 +378,30 @@ def test_mutation_builders():
 # -- runners against a fake run ----------------------------------------------------------
 
 
+def test_a_long_branch_name_is_still_a_revision_and_a_bad_range_fails_soft():
+    """The builders' ref bound is ARGV_REF_MAX (1024), not safe_ref's 128
+    (a tool call's): a 148-char branch git accepts lists in the sidebar.
+    read_page runs on the commits worker, so a range the builder refuses
+    is ([], False), never a ValueError up the thread."""
+    long_branch = "feature/" + "x" * 140
+    assert len(long_branch) == 148
+    assert gitops.log_argv([f"{long_branch}..HEAD"], 5)[5] == f"{long_branch}..HEAD"
+    assert gitops.stack_walk_argv(long_branch, "HEAD", 3)[4] == f"{long_branch}..HEAD"
+    assert gitops.rev_parse_argv(long_branch)[-1] == long_branch
+    with pytest.raises(ValueError):
+        gitops.log_argv(["x" * 1025], 5)
+    with pytest.raises(ValueError):
+        gitops.log_argv(["--output=/x"], 5)
+    calls: list = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    assert gitops.read_page("/repo", ["--output=/x"], 3, run=run) == ([], False)
+    assert gitops.read_page("/repo", [f"{long_branch}..HEAD"], 3, run=run) == ([], False) and calls
+
+
 def test_read_page_uses_the_limit_plus_one_trick():
     records = [f"{i:040x}\x00{i:07x}\x00c{i}\x1e\n" for i in range(1, 8)]
 
