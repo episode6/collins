@@ -49,6 +49,7 @@ class World:
             find=self.find,
             start=self.start,
             schedule=self.schedule,
+            run_async=lambda fn: fn(),  # the fake transport is synchronous: no thread to race
             sleep=self.sleep,
             now=lambda: self.clock,
             on_state=self.states.append,
