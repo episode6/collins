@@ -4,6 +4,7 @@ login-shell capture and its merge, `sd_notify`, `--check`, `--print-socket`
 against a live socket, a stale socket unlinked and a live one respected
 by `ApiServer.listen`."""
 
+import errno
 import io
 import os
 import socket
@@ -34,13 +35,21 @@ def test_the_capture_fails_soft(tmp_path):
     assert service_main.login_shell_environment(str(slow), timeout=0.2) == {}
 
 
-def test_the_merge_fills_in_and_appends_path_only():
-    service = {"PATH": "/scratch/bin:/usr/bin", "COLLINS_APP_ID": "x", "HOME": "/h"}
-    captured = {"PATH": "/home/u/.local/bin:/usr/bin:/opt/bin", "COLLINS_APP_ID": "real", "EDITOR": "vi"}
+def test_the_login_shell_overlays_the_service_but_not_what_is_protected():
+    service = {
+        "PATH": "/scratch/bin:/usr/bin", "COLLINS_APP_ID": "x", "XDG_CONFIG_HOME": "/s", "HOME": "/h",
+        "EDITOR": "nano", "PYTHONPATH": "/wt",
+    }
+    captured = {
+        "PATH": "/home/u/.local/bin:/usr/bin:/opt/bin", "COLLINS_APP_ID": "real", "XDG_CONFIG_HOME": "/u",
+        "EDITOR": "vi", "PYTHONPATH": "/theirs", "GOPATH": "/go",
+    }
     merged = service_main.merge_environment(service, captured)
-    assert merged["COLLINS_APP_ID"] == "x"  # the service's own wins
-    assert merged["EDITOR"] == "vi"  # filled in
-    assert merged["PATH"] == "/scratch/bin:/usr/bin:/home/u/.local/bin:/opt/bin"
+    assert merged["COLLINS_APP_ID"] == "x" and merged["XDG_CONFIG_HOME"] == "/s"  # protected
+    assert merged["PYTHONPATH"] == "/wt" and merged["HOME"] == "/h"
+    assert merged["EDITOR"] == "vi" and merged["GOPATH"] == "/go"  # the shell's win
+    # The shell's PATH order, with what the service had in front put back first.
+    assert merged["PATH"] == "/scratch/bin:/home/u/.local/bin:/usr/bin:/opt/bin"
 
 
 # -- sd_notify --------------------------------------------------------------------
@@ -246,3 +255,93 @@ def test_the_socket_path_stays_under_the_kernels_bound(tmp_path, monkeypatch):
     assert long.endswith("/api.sock")
     # The same id resolves to the same place every time.
     assert api_server.socket_path("com.episode6.Collins.E2E.rcollinssandboxpolicyab12cd34ef") == long
+
+
+# -- the lock, the probe before any side effect, start to SIGTERM ---------------
+
+
+def test_the_lock_is_held_once(runtime):
+    fd = service_main.take_lock("com.example.Lock")
+    try:
+        with pytest.raises(OSError) as second:
+            service_main.take_lock("com.example.Lock")
+        assert second.value.errno == errno.EADDRINUSE
+    finally:
+        os.close(fd)
+    os.close(service_main.take_lock("com.example.Lock"))  # free again once released
+
+
+def test_a_live_socket_stops_the_service_before_any_side_effect(runtime, tmp_path, monkeypatch):
+    app_id = "com.example.Probe2"
+    path = api_server.socket_path(app_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    listener = _live_socket(path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    try:
+        with pytest.raises(OSError) as raised:
+            service_main.Service(app_id)
+        assert raised.value.errno == errno.EADDRINUSE
+    finally:
+        listener.close()
+    assert not (tmp_path / "config").exists()  # no state file was written
+
+
+def test_main_exits_zero_only_for_already_running(runtime, monkeypatch, capsys):
+    app_id = "com.example.Exit"
+    path = api_server.socket_path(app_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    listener = _live_socket(path)
+    try:
+        assert service_main.main(["--app-id", app_id]) == 0
+    finally:
+        listener.close()
+    assert path in capsys.readouterr().out
+
+    class Broken(service_main.Service):
+        def __init__(self, app_id):
+            raise OSError(errno.ENAMETOOLONG, "too long")
+
+    monkeypatch.setattr(service_main, "Service", Broken)
+    assert service_main.main(["--app-id", "com.example.Broken"]) == 1
+
+
+def test_start_sigterm_records_resume_and_removes_the_socket(tmp_path):
+    import shutil
+    import signal
+
+    from liveservice import LiveService
+
+    live = LiveService(tmp_path, app_id="com.example.Stop")
+    try:
+        live.start()
+        socket_path = live.socket
+        proof = api_server.proof_path(live.app_id)
+        assert os.path.exists(proof)
+        assert live.stop(signal.SIGTERM) == 0
+        assert not os.path.exists(socket_path) and not os.path.exists(proof)
+        state = live.state()
+        assert state.get("resume_on_start", []) == [] and "service_id" in state
+    finally:
+        live.stop()
+        shutil.rmtree(live.runtime, ignore_errors=True)
+
+
+def test_a_second_service_exits_zero_on_the_lock(tmp_path):
+    import shutil
+    import subprocess
+    import sys
+
+    from liveservice import LiveService
+
+    live = LiveService(tmp_path, app_id="com.example.Second")
+    try:
+        live.start()
+        second = subprocess.run(
+            [sys.executable, "-m", "collins.service.main", "--app-id", live.app_id],
+            env=live.env, cwd=live.env["PYTHONPATH"], capture_output=True, text=True, timeout=30,
+        )
+        assert second.returncode == 0 and second.stdout.strip() == live.socket
+        assert live.proc.poll() is None  # the first is untouched
+    finally:
+        live.stop()
+        shutil.rmtree(live.runtime, ignore_errors=True)

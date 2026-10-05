@@ -56,6 +56,23 @@ START_WAIT_S = 10.0
 # ---- helpers ------------------------------------------------------------------------
 
 
+def take_lock(app_id: str) -> int:
+    """`flock` the service's lock file for this app id; the descriptor is
+    held for the process's life. Raises OSError(EADDRINUSE) when another
+    service holds it."""
+    import fcntl
+
+    path = api_server.lock_path(app_id)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        os.close(fd)
+        raise OSError(errno.EADDRINUSE, f"another service holds {path}") from exc
+    return fd
+
+
 def login_shell_environment(shell: str | None = None, timeout: float = CAPTURE_TIMEOUT_S) -> dict[str, str]:
     """The environment a login, interactive shell ends up with, or {} when
     the capture fails (no shell, a timeout, output that isn't NUL-separated
@@ -101,22 +118,31 @@ def login_shell_environment(shell: str | None = None, timeout: float = CAPTURE_T
     return captured
 
 
+# What the login-shell capture never overrides: the service's own
+# configuration and what started it (a check's overrides, systemd's).
+PROTECTED_PREFIXES = ("COLLINS_", "XDG_")
+PROTECTED_NAMES = frozenset(
+    {"PYTHONPATH", "NOTIFY_SOCKET", "INVOCATION_ID", "JOURNAL_STREAM", "HOME", "USER"}
+)
+
+
 def merge_environment(service_env: dict[str, str], captured: dict[str, str]) -> dict[str, str]:
-    """*service_env* with what *captured* adds: missing variables, and the
-    ``PATH`` entries the service's ``PATH`` lacks, appended."""
+    """The service's environment overlaid by the login shell's (§3.10: the
+    user's variables and ``PATH`` order win), except what is protected:
+    ``COLLINS_*``, ``XDG_*`` and what started the service. ``PATH`` is the
+    captured one with the entries the service's had and the shell's lacks
+    put back in front, in their order: what an e2e harness (or a user's
+    launcher) prepended stays first."""
     merged = dict(service_env)
     for key, value in captured.items():
-        if key == "PATH":
+        if key == "PATH" or key.startswith(PROTECTED_PREFIXES) or key in PROTECTED_NAMES:
             continue
-        merged.setdefault(key, value)
+        merged[key] = value
     if "PATH" in captured:
-        have = [p for p in merged.get("PATH", "").split(":") if p]
-        seen = set(have)
-        for entry in captured["PATH"].split(":"):
-            if entry and entry not in seen:
-                have.append(entry)
-                seen.add(entry)
-        merged["PATH"] = ":".join(have)
+        shell_entries = [p for p in captured["PATH"].split(":") if p]
+        known = set(shell_entries)
+        front = [p for p in service_env.get("PATH", "").split(":") if p and p not in known]
+        merged["PATH"] = ":".join(front + shell_entries)
     return merged
 
 
@@ -233,8 +259,12 @@ class Service:
         from .core import ServiceCore
 
         self.app_id = app_id
-        # Before anything stateful (the state file's writer, the store, the
-        # MCP socket): a live socket means a service runs for this id.
+        # The very first step, before anything stateful (the state file's
+        # writer, the store, the sweeps, prune_models, the MCP socket): the
+        # single-instance lock, held for the service's life, then the
+        # socket probe (a service that crashed holds no lock but may have
+        # left a socket, which listen() unlinks when nobody answers).
+        self._lock_fd = take_lock(app_id)
         path = api_server.socket_path(app_id)
         if api_server.probe_socket(path) == "live":
             raise OSError(errno.EADDRINUSE, f"a service is already listening on {path}")
@@ -289,6 +319,10 @@ class Service:
         for number in (signal.SIGTERM, signal.SIGINT):
             GLib.unix_signal_add(GLib.PRIORITY_HIGH, number, self._on_signal, number)
         sd_notify("READY=1")
+        # As systemd's NotifyAccess/unset_environment would: a spawned shell
+        # must not inherit the manager's socket (the core strips it too).
+        os.environ.pop("NOTIFY_SOCKET", None)
+        self.environment.pop("NOTIFY_SOCKET", None)
         log.info("collins-service %s listening on %s", __version__, path)
         return path
 
@@ -316,18 +350,22 @@ class Service:
         try:
             self.server.stop_accepting()
             self.core.stop_mcp()
-            ended = self.core.stop_sessions()
+            ended = self.core.stop_sessions(done=self._stopped)
             if ended:
-                log.info("ended %d session(s), recorded to resume", len(ended))
+                log.info("ending %d session(s), recorded to resume", len(ended))
         except Exception:
             log.exception("the stop sequence failed")
             self.exit_code = 1
-        finally:
-            try:
-                self.server.stop()
-            except Exception:
-                log.exception("closing the server failed")
-            GLib.idle_add(self._quit, priority=GLib.PRIORITY_DEFAULT)
+            self._stopped()
+
+    def _stopped(self) -> None:
+        """Every close flow has settled (or the bound passed) and the core
+        is shut: the server goes, then the loop."""
+        try:
+            self.server.stop()
+        except Exception:
+            log.exception("closing the server failed")
+        GLib.idle_add(self._quit, priority=GLib.PRIORITY_DEFAULT)
 
     def _quit(self) -> bool:
         self.loop.quit()
@@ -361,12 +399,18 @@ def main(argv: list[str] | None = None) -> int:
         service = Service(args.app_id)
         service.start()
     except OSError as exc:
-        # A live socket: a service is already running for this id (found
-        # before anything was built, or by listen() in the race between
-        # two starting at once).
-        print(api_server.socket_path(args.app_id))
-        log.info("not starting: %s", exc)
-        return 0
+        if exc.errno == errno.EADDRINUSE:
+            # A service already runs for this id (the lock, the probe, or
+            # listen() in the race between two starting at once): exit 0,
+            # so a unit does not restart over it.
+            print(api_server.socket_path(args.app_id))
+            log.info("not starting: %s", exc)
+            return 0
+        log.error("could not start: %s", exc)
+        return 1
+    except GLib.Error as exc:
+        log.error("could not listen: %s", exc.message)
+        return 1
     return service.run()
 
 

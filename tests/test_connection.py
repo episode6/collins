@@ -215,3 +215,36 @@ def test_service_argv_prefers_the_installed_command(monkeypatch):
     monkeypatch.setattr(connection.shutil, "which", lambda name: None)
     argv = connection.service_argv("x")
     assert argv[1:] == ["-m", "collins.service.main", "--app-id", "x"]
+
+
+def test_a_loss_between_the_handshake_and_its_landing_wins():
+    """The threaded handshake lands after the link reported a loss: the
+    landing is from a dead attempt and changes nothing."""
+    world = World(live=True)
+    handshakes = []
+    world.manager._run_async = handshakes.append  # held back, run by hand
+    world.manager.start_local()
+    world.link.on_lost("gone")
+    world.fire()  # find: live -> the handshake is taken, not run
+    assert handshakes and world.manager.state == "connecting"
+    world.link.on_lost("gone again")  # the loss lands first
+    assert world.manager.state == "lost"
+    handshakes[-1]()  # now the handshake's own landing: ignored
+    assert world.manager.state == "lost" and world.connected == [True]
+
+
+def test_a_landing_on_a_link_already_dead_goes_back_to_lost():
+    world = World(live=True)
+    world.manager.start_local()
+    world.link.connected = False  # dead under the handshake, no on_lost yet
+    world.manager._try_connect()
+    assert world.manager.state == "lost"
+    assert [ms for ms, _ in world.timers][-1] >= 1000  # a retry is scheduled
+    assert world.connected == [True]
+
+
+def test_the_owner_can_declare_the_link_lost():
+    world = World(live=True)
+    world.manager.start_local()
+    world.manager.lost("resubscribe refused gone")
+    assert world.manager.state == "lost" and world.lost == ["resubscribe refused gone"]

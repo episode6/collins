@@ -302,7 +302,8 @@ def steps():
     )
     # A second client of the service: its own link (its own client id),
     # as another Collins on this machine would be.
-    second_link = SocketLink(api_server.socket_path(os.environ["COLLINS_APP_ID"]), device="second")
+    app_id = os.environ["COLLINS_APP_ID"]
+    second_link = SocketLink(api_server.socket_path(app_id), app_id=app_id, device="second")
     second_link.connect()
     client = second_link.pty_client(
         lambda p, d, f: state["view"].on_output(p, d, f),

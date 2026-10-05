@@ -513,6 +513,15 @@ def _core_call(name: str, *args):
     )["value"]
 
 
+def found_for_pid(shim_pid: int):
+    """The window and tab of the session the service binds a call from
+    *shim_pid* to (`SessionTools.find`, through the probe: the walk is the
+    service's /proc and sessions), as `ToolClient.found_for_handle` finds
+    them. A check's helper: no product code asks a debug request."""
+    handle = _core_call("debug_find_handle", int(shim_pid))
+    return app.tool_client.found_for_handle(handle or "")
+
+
 def offered_to(tab) -> list[str]:
     """What the session in *tab* is told it may call: the list the socket
     serves the pid of a process under the tab's shell."""
@@ -547,7 +556,10 @@ def tools() -> bool:
     caller = state["caller"]
     host = probe_host()
     box = caller.sandbox_box
-    check("the pid of the session's shell resolves to its tab", app.tool_client.found_for_pid(caller.probe_call("child_pid")) == found())
+    check(
+        "the pid of the session's shell resolves to its tab",
+        found_for_pid(caller.probe_call("child_pid")) == found(),
+    )
     check("a sandboxed session is offered six tools", offered_to(caller) == OFFERED, offered_to(caller))
     shells = len(caller.panel_shells())
     refused = {

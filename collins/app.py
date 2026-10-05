@@ -43,6 +43,7 @@ from . import (
     updatecheck,
     welcome,
 )
+from .api import protocol
 from .api.client import SocketLink, default_locale
 from .api.protocol import RequestRefused
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
@@ -2139,6 +2140,7 @@ class App(Adw.Application):
         cannot be read would be."""
         link = SocketLink(
             "",  # the path is the manager's to find
+            app_id=self.get_application_id(),
             device=ptyclient.device_name(),
             locale=default_locale(),
         )
@@ -2146,6 +2148,7 @@ class App(Adw.Application):
         self._connection = ConnectionManager(
             self.get_application_id(),
             link,
+            find=self._find_service,
             schedule=lambda ms, fn: GLib.timeout_add(ms, fn),
             land=lambda fn: GLib.idle_add(
                 lambda: (fn(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT
@@ -2154,9 +2157,6 @@ class App(Adw.Application):
             on_connected=self._on_connected,
             on_lost=self._on_connection_lost,
         )
-        # The manager finds the socket path before connecting.
-        link.path = self._connection._find(self.get_application_id())[0]
-        self._connection._find = self._find_service
         self._connection.start_local()
 
     def _find_service(self, app_id: str):
@@ -2227,6 +2227,8 @@ class App(Adw.Application):
             self.store.subscribe()
         except RequestRefused as refusal:
             log.warning("resubscribe refused: %s", refusal.msgid)
+            if refusal.error == protocol.ERROR_GONE and self._connection is not None:
+                self._connection.lost("the resubscribe found the link gone")
             return
         self._refresh_service_status()
         for window in self.get_windows():
@@ -2269,8 +2271,15 @@ class App(Adw.Application):
             state.flush_drafts()
         connection = getattr(self, "_connection", None)
         if connection is not None:
-            # Quitting the client ends nothing on the service (§3.10): the
-            # link closes, the ptys live on, and the next client attaches.
+            # The panel shells this client spawned end with it (a shell has
+            # no row to reattach from until PR-1.12c; the service writes
+            # each one's history when it exits); the agents live on.
+            for window in self.get_windows():
+                if isinstance(window, MainWindow):
+                    window.close_panel_ptys()
+            # Quitting the client ends nothing else on the service (§3.10):
+            # the link closes, the agent ptys live on, and the next client
+            # attaches.
             apilink.set_current(None)
             connection.stop()
             self._connection = None
