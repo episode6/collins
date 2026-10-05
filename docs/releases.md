@@ -61,6 +61,12 @@ downloads of each version, see the
   PR's picture no second `gh` call), and pruned after a day. The service
   no longer writes a PR's pictures to its own disk, and the old
   `git-blobs` and `pr-blobs` cache directories are no longer written.
+- **The git page hears about commits from the service.** A commit, a
+  checkout, a stage or a fetch made in a shell or by the agent reaches an
+  open git page as the service's `git-changed` (its watch now reads the
+  index, HEAD and the branches every 2 s, for every load, a commit's
+  included), instead of the window asking the service on every footer
+  tick. A page in a hidden strip catches up when it is shown.
 - **Collins is two programs: a service and a window.** `collins-service`
   runs your sessions (every agent's terminal, the terminal panel's shells,
   the sandboxes, the shared state, the session tools' MCP socket, every

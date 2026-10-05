@@ -401,3 +401,44 @@ def test_git_info_round_trips_through_fields():
     again = GitInfo.from_fields(info.to_fields(known_refs="r1"), previous=info)
     assert again.heads == info.heads and again.remotes == info.remotes
     assert GitInfo.from_fields({"root": None}).root is None
+
+
+def test_the_listener_hears_git_changed_after_the_entry_is_stored(link):
+    """PR-2.2: the page compares its signatures on the event, so it must
+    read a mirror that has seen the move — the listener is called from
+    the refresh's landing, not before it; a refused refresh still tells."""
+    gitinfo.current_branch("/srv/project")
+    seen_on_call: list[str | None] = []
+    remotegit.mirror().on_changed(
+        "/srv/project", lambda _e: seen_on_call.append(gitinfo.current_branch("/srv/project"))
+    )
+    held: list = []
+
+    def send(message, on_reply=None, on_refused=None):
+        link.sent.append(dict(message))
+        held.append((on_reply, on_refused))
+
+    link.send = send
+    link.dispatch({"t": "git-changed", "cwd": "/srv/project", "tree": "t2", "refs": "r1", "state": None})
+    assert seen_on_call == [] and len(held) == 1  # not told before the answer
+    held[0][0]({**INFO, "branch": "moved"})
+    assert seen_on_call == ["moved"]
+    link.dispatch({"t": "git-changed", "cwd": "/srv/project", "tree": "t3", "refs": "r1", "state": None})
+    held[1][1](RequestRefused(protocol.ERROR_GONE, "gone", {}))
+    assert seen_on_call == ["moved", "moved"]  # kept as unreachable, and told
+    assert remotegit.mirror().entry("/srv/project").unreachable
+
+
+def test_a_watch_without_the_working_tree_says_so(link):
+    remotegit.mirror().watch("/srv/project", [], handle="page-a", working_tree=False)
+    assert link.sent[-1] == {
+        "t": "git.watch", "cwd": "/srv/project", "handle": "page-a", "files": [], "working_tree": False,
+    }
+    remotegit.mirror().unwatch("page-a")
+
+
+def test_refresh_then_calls_back_with_no_link_at_once(monkeypatch):
+    mirror = remotegit.Mirror(link_of=lambda: None)
+    called: list[bool] = []
+    mirror.refresh_then("/srv/project", lambda: called.append(True))
+    assert called == [True]

@@ -669,6 +669,7 @@ SAMPLES = {
     ("git.sizes", p.REQUEST): {"cwd": "/home/u/project", "paths": ["a.txt"]},
     ("git.watch", p.REQUEST): {
         "cwd": "/home/u/project", "handle": "gitpage-7f", "files": ["a.txt", "src/b.py"], "state": "deadbeef",
+        "working_tree": True,
     },
     ("git.unwatch", p.REQUEST): {"handle": "gitpage-7f"},
     ("git-changed", p.EVENT): {"cwd": "/home/u/project", "tree": "t1", "refs": "r1", "state": None},

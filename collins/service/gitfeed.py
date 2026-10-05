@@ -22,9 +22,17 @@ blob GET the API server hands it:
   change_summary and the watch's tree-state digest.
 - `git.sizes`, `git.watch` / `git.unwatch` with the `git-changed` event
   (`_Watch`: the page's directory monitors, debounce and slow tick, here,
-  per watching client; `git-changed` carries the three signature digests
-  and a `.git` basename event is ignored as the page's monitors ignored
-  it), and `git.plan` (`gitops.run_plan` with the stale check: the stable
+  per watching client and handle; `git-changed` carries the three
+  signature digests and a `.git` basename event is ignored as the page's
+  monitors ignored it). Since PR-2.2 the watch is also the page's 2 s
+  freshness tick: every `WATCH_REFS_TICK_S` it reads the tree and refs
+  digests (stats of `.git`, no process) and runs the full compare when
+  one moved, so a commit, a checkout or a fetch made anywhere is a
+  `git-changed` within the 2 s the page's own tick took; a watch with
+  ``working_tree: false`` (a commit, range or branch load) has no
+  monitors and no state digest, only that tick. A watch replaced under
+  the same handle keeps the digests the one before had seen, so a move
+  between the two is still one event), and `git.plan` (`gitops.run_plan` with the stale check: the stable
   keys the plan names must all be in the fresh `file_patch`, else
   ``stale`` and nothing is applied; the trash is `files.trash_paths`).
 - The blob GET (`blob`): `gitops.file_at` of the working tree, the index
@@ -62,6 +70,9 @@ log = logging.getLogger(__name__)
 MAX_DIR_MONITORS = 64
 WATCH_DEBOUNCE_MS = 300
 WATCH_SLOW_TICK_S = 10
+# The tree and refs digests' tick (PR-2.2): the cadence of the page's old
+# 2 s compare of gitinfo.tree_signature / refs_signature, which it was.
+WATCH_REFS_TICK_S = 2
 # A blob's tag for a working-tree file: mtime and size, as §3.11 has it.
 _OCTET_STREAM = "application/octet-stream"
 
@@ -251,7 +262,7 @@ class GitFeed:
     # -- the watch -------------------------------------------------------------------------
 
     def watch(self, message: protocol.Message, client) -> dict:
-        """`git.watch {cwd, handle, files, state}`: a watch of *cwd* under
+        """`git.watch {cwd, handle, files, state, working_tree}`: a watch of *cwd* under
         the client's *handle* (the page's own name for it: two pages on
         one tree keep two watches, and one page's unwatch never takes the
         other's down). The same handle again replaces that watch."""
@@ -264,7 +275,15 @@ class GitFeed:
             old.stop()
         files_ = [p for p in (message.get("files") or ()) if gitops.safe_path(p)]
         seed = message.get("state")
-        watch = _Watch(self, cwd, client, files_, seed if isinstance(seed, str) else None)
+        working_tree = message.get("working_tree") is not False
+        # A replacement (the page's next load) carries the tree and refs
+        # digests its predecessor saw: a commit between the two watches is
+        # a move the new one reports, not a digest it adopts.
+        carried = old.last[:2] if old is not None and old.cwd == cwd and old.last[0] is not None else None
+        watch = _Watch(
+            self, cwd, client, files_, seed if isinstance(seed, str) else None,
+            working_tree=working_tree, carried=carried,
+        )
         self._watches[key] = watch
         watch.start()
         return protocol.reply(message.id)
@@ -475,28 +494,49 @@ def _tag_matches(header: str, tag: str) -> bool:
 
 class _Watch:
     """One client's watch of one working tree: the page's monitors,
-    debounce, compare and slow tick, here. The first compare seeds the
-    signatures without a push; every later move is one `git-changed`."""
+    debounce, compare and slow tick, here, and its 2 s tick of the tree
+    and refs digests (PR-2.2). The first compare seeds the signatures
+    without a push (unless a replaced watch's digests were carried over);
+    every later move is one `git-changed`. *working_tree* False is a
+    watch of the index, HEAD and the refs alone: no monitors, no state."""
 
     def __init__(
-        self, feed: GitFeed, cwd: str, client, paths: Sequence[str], state: str | None = None
+        self,
+        feed: GitFeed,
+        cwd: str,
+        client,
+        paths: Sequence[str],
+        state: str | None = None,
+        working_tree: bool = True,
+        carried: tuple[str | None, str | None] | None = None,
     ) -> None:
         self.feed = feed
         self.cwd = cwd
         self.client = client
         self.paths = list(paths)
+        self.working_tree = bool(working_tree)
         self._monitors: list[Gio.FileMonitor] = []
         self._debounce = 0
         self._tick = 0
+        self._refs_tick = 0
+        self._peeking = False
         self._checking = False
         self._stale = False
         self._stopped = False
+        if not self.working_tree:
+            state = None
         # The client's seed (the tree state its read sampled): the first
-        # compare is against it, and only the state is known until then.
-        self._seeded = state is not None
-        self.last: tuple[str | None, str | None, str | None] = (None, None, state)
+        # compare is against it, and only the state is known until then —
+        # unless the watch this one replaced passed on its tree and refs.
+        self._seeded = state is not None or carried is not None
+        tree, refs = carried if carried is not None else (None, None)
+        self.last: tuple[str | None, str | None, str | None] = (tree, refs, state)
 
     def start(self) -> None:
+        self._refs_tick = GLib.timeout_add_seconds(WATCH_REFS_TICK_S, self._on_refs_tick)
+        if not self.working_tree:
+            self.check()  # the seed; the refs tick is the whole watch
+            return
         root = gitfiles.repo_root(self.cwd)
         base = str(root) if root is not None else self.cwd
         dirs: set[str] = set()
@@ -526,6 +566,9 @@ class _Watch:
         if self._tick:
             GLib.source_remove(self._tick)
             self._tick = 0
+        if self._refs_tick:
+            GLib.source_remove(self._refs_tick)
+            self._refs_tick = 0
 
     def _on_event(self, _monitor, file: Gio.File, _other, _event) -> None:
         if self._stopped:
@@ -547,6 +590,33 @@ class _Watch:
         self.check()
         return GLib.SOURCE_CONTINUE
 
+    def _on_refs_tick(self) -> bool:
+        """The page's old 2 s tick: the tree and refs digests (stats of
+        `.git`, no process) read on a thread; a move from what the last
+        compare saw runs the full compare (`check`), which pushes."""
+        if self._stopped:
+            return GLib.SOURCE_REMOVE
+        if self._peeking or self._checking or self.last[0] is None:
+            return GLib.SOURCE_CONTINUE  # nothing seen yet, or a look already out
+        self._peeking = True
+        cwd = self.cwd
+
+        def work() -> None:
+            try:
+                found = cheap_signatures(cwd)
+            except Exception:
+                log.exception("gitfeed: the watch's refs tick of %s failed", cwd)
+                found = (None, None)
+            self.feed._dispatch(lambda: self._peeked(found))
+
+        self.feed._spawn(work, "git-watch-refs")
+        return GLib.SOURCE_CONTINUE
+
+    def _peeked(self, found: tuple[str | None, str | None]) -> None:
+        self._peeking = False
+        if not self._stopped and found != self.last[:2]:
+            self.check()
+
     def check(self) -> None:
         if self._stopped:
             return
@@ -555,12 +625,13 @@ class _Watch:
             return
         self._checking = True
         cwd = self.cwd
+        working_tree = self.working_tree
 
         def work() -> None:
             # A compare that raises still lands (the None triple, as
             # outside a repository), so the watch is never stuck checking.
             try:
-                found = signatures(cwd)
+                found = signatures(cwd, working_tree)
             except Exception:
                 log.exception("gitfeed: the watch's compare of %s failed", cwd)
                 found = (None, None, None)
@@ -599,16 +670,24 @@ class _Watch:
             log.exception("gitfeed: a git-changed delivery failed")
 
 
-def signatures(cwd: str) -> tuple[str | None, str | None, str | None]:
+def signatures(cwd: str, working_tree: bool = True) -> tuple[str | None, str | None, str | None]:
     """(tree, refs, state) digests of the repository enclosing *cwd*:
     the index's mtime, HEAD and the markers; the refs' mtimes; the
-    working tree's state (gitops.tree_state_signature). None each
-    outside a repository."""
-    git = gitfiles.git_dir(cwd)
-    if git is None:
+    working tree's state (gitops.tree_state_signature; None without
+    *working_tree*). None each outside a repository."""
+    tree, refs = cheap_signatures(cwd)
+    if tree is None:
         return None, None, None
+    return tree, refs, gitops.tree_state_signature(cwd) if working_tree else None
+
+
+def cheap_signatures(cwd: str) -> tuple[str | None, str | None]:
+    """(tree, refs) of `signatures`: `.git` reads and stats alone, no
+    process (the refs tick's look)."""
+    found = gitfiles.git_dir(cwd)
+    if found is None:
+        return None, None
     tree = gitfiles.digest(
-        (gitfiles.index_mtime(git), gitfiles.head_sha(git), gitfiles.operation_markers(git))
+        (gitfiles.index_mtime(found), gitfiles.head_sha(found), gitfiles.operation_markers(found))
     )
-    refs = gitfiles.digest(gitfiles.refs_signature(git))
-    return tree, refs, gitops.tree_state_signature(cwd)
+    return tree, gitfiles.digest(gitfiles.refs_signature(found))
