@@ -2634,11 +2634,16 @@ class MainWindow(Adw.ApplicationWindow):
         tab.set_pr_store(self.store.pr_store)
         tab.set_panel_size_lookup(self._panel_size_seed)
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
-        # "commit" is everything the app sends this terminal's child — the
-        # keystrokes the user types, and the focus reports VTE emits on a tab
-        # switch — so the redraw that answers one is not the agent working.
-        # The text goes along so the gate can arm itself on the first submit.
+        # "commit" is what the VTE itself sends this terminal's child — the
+        # keystrokes the user types, and the focus and mouse reports it emits
+        # on a tab switch — so the redraw that answers one is not the agent
+        # working. The text goes along so a typed Enter arms the gate.
         watch(tab.terminal, "commit", self._on_terminal_commit, page)
+        # The app's own writes (an injected prompt, a switch, a close flow's
+        # keys) take the service's road, not the VTE's, so they never arrive
+        # as a commit: the session pokes its own gate and announces them
+        # (see _on_input_sent).
+        watch(tab, "input-sent", self._on_input_sent, page)
         watch(tab.terminal, "contents-changed", self._on_terminal_output, page)
         # The agent's own busy signal, where the CLI and VTE both speak it —
         # see ProgressWatch (and _agent_tab_environment for how it's coaxed
@@ -4585,8 +4590,9 @@ class MainWindow(Adw.ApplicationWindow):
         return ignores
 
     def _on_terminal_commit(self, _terminal, text: str, _size: int, page: Adw.TabPage) -> None:
-        """Everything the app sends this terminal's child, on its way to the
-        gate (see EchoGate.poked).
+        """What the VTE sends this terminal's child — the keystrokes typed
+        into it, its focus and mouse reports — on its way to the gate (see
+        EchoGate.poked).
 
         A carriage return in it is the arming edge — the last pristine
         instant of a fresh spawn — so the baseline takes one final snapshot
@@ -4595,6 +4601,12 @@ class MainWindow(Adw.ApplicationWindow):
         already running would read as work for the session's whole life. The
         agent can't have spawned anything for this turn yet; the text reaches
         it after this handler returns.
+
+        The app's own writes (an injected prompt, a switch, a close flow's
+        keys) go to the service's pty without passing the VTE, so they do
+        not arrive here: the session announces them itself and pokes its
+        own gate (Session.write_text); the tab relays the announcement as
+        "input-sent", which _on_input_sent takes the baseline snapshot on.
         """
         text = text or ""
         if "\r" in text:
@@ -4602,6 +4614,13 @@ class MainWindow(Adw.ApplicationWindow):
         session = self._session_of(page)
         if session is not None:
             session.echo_gate.poked(text)
+
+    def _on_input_sent(self, _tab, text: str, page: Adw.TabPage) -> None:
+        """The session is about to type *text* into its pty (see
+        _on_terminal_commit): the baseline's last pristine snapshot rides a
+        "\\r" in it. The gate itself the session pokes, before the write."""
+        if "\r" in (text or ""):
+            self._absorb_baseline(page)
 
     # -- pre-emptive /bg status ----------------------------------------------
 

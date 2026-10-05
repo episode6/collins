@@ -69,8 +69,19 @@ exactly the reads the tab always made; later swaps put `PtyServer` and
 window, the app and the e2e checks didn't change. Up: the session reports
 through a `SessionHost` listener (`alive`, `mapped`, `paint`,
 `focus_terminal`, `spawn_shell`, `session_resolved`, `transcript_landed`,
-`process_exited`, ...) which `terminal._TabHost` implements, mostly by
-emitting the tab's existing signals. A composer's open-cut reaches the
+`process_exited`, `input_sent`, ...) which `terminal._TabHost` implements,
+mostly by emitting the tab's existing signals. `input_sent` is every write
+the session makes (`Session.write_text`: an injected prompt, a switch, a
+close flow's keys), announced *before* the bytes go to the pty: on the
+service's pty they never pass the client's VTE, so they never arrive as its
+`commit`, and the window's echo gate would otherwise only ever arm on an
+Enter typed into the terminal — a turn sent from the new-chat screen, the
+composer or `start_session` left the tab in its startup hold for good (no
+pole, no unread flag, no finished notification). The session pokes and arms
+its own `echo_gate` in `write_text`; the tab relays the announcement as
+`input-sent`, which `MainWindow._on_input_sent` takes the process
+baseline's last snapshot on, as `_on_terminal_commit` does for a typed
+"\r". A composer's open-cut reaches the
 composer through a `CutSink` (`terminal._ComposerCut`: `alive`, `seed`,
 `refuse`).
 

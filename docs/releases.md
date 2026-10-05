@@ -95,6 +95,13 @@ downloads of each version, see the
   which the graceful close no longer recognised, so closing a worktree tab
   waited on a dialog it would have answered before. Both the numbered and
   the older layout are recognised now.
+- **A prompt Collins typed starts the pole again.** Since the session tabs
+  moved onto the service's pty, a turn started from the new-chat screen,
+  the composer or the `start_session` tool never counted as the tab's
+  first submit: the sidebar's working pole, the unread flag and the
+  finished-run notification all waited for an Enter typed into the
+  terminal itself. Every prompt Collins sends now counts, whichever way it
+  was sent.
 
 ### v0.1.4 — 2026-09-27
 

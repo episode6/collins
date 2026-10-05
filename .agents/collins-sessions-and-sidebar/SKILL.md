@@ -278,7 +278,12 @@ the persisted plumbing baseline so MCP servers don't read as work), and for
 tabs attached to a background agent the `claude agents --json` busy status
 (`bgstatus.BackgroundBusyWatch`, since a `/bg` agent's env is scrubbed and
 speaks no progress). Ungated sources are held on fresh spawns until the gate
-arms (`MainWindow._startup_held`). The busy→idle edge is
+arms (`MainWindow._startup_held`): on an Enter typed into the VTE (its
+`commit`, or the key itself) *or* on a "\r" the session writes itself
+(`Session.write_text` pokes its own gate and announces `input_sent`; the
+app's writes take the service's pty, never the VTE, so a new-chat send or a
+composer send would otherwise never arm it — the regression that left every
+such tab without a pole after PR-1.9). The busy→idle edge is
 `MainWindow._on_session_finished`: it flags unread, refreshes PRs, and is the
 edge any "do this when the session is done" feature should ride — but it is
 judged against the tab's transcript first (`activity.FinishLedger` over
