@@ -485,9 +485,12 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   highlighting via GtkSourceView — the engine behind GNOME Text Editor. The
   tree's right-click menu covers rename, copy, cut and paste, carried out
   by the service (a rename stays in its folder and never lands on a taken
-  name; a paste never overwrites, landing as "name (copy)" instead; a cut
-  moves, and an open file follows its rename or move with its unsaved
-  edits). Copies travel through the system clipboard as Collins' own
+  name; a paste never overwrites, landing as "name (copy)" instead — and
+  that holds against the agent writing in the same folder at the same
+  moment, not only against your own clicks; a cut moves, and an open file
+  follows its rename or move with its unsaved edits; a big folder copy
+  takes as long as it takes, with the rest of the window live). Copies
+  travel through the system clipboard as Collins' own
   `collins://` references to the service's files — and, when the service is
   this machine, as ordinary file URIs too, so files round-trip with your
   file manager — and, on a

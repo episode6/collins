@@ -271,31 +271,106 @@ def test_rename_path_is_an_fs_rename_call_and_its_reason_is_told(link):
 
 
 def test_paste_files_is_an_fs_paste_call_with_an_outcome_per_entry(link):
+    def result(source, target=None, mtime=None, error=None, message=""):
+        return {"source": source, "target": target, "mtime": mtime, "error": error, "message": message}
+
     link.answers["fs.paste"] = {
-        "placed": ["/srv/p/pkg/a (copy).txt"],
         "results": [
-            {"source": "/srv/p/a.txt", "target": "/srv/p/pkg/a (copy).txt", "error": None, "message": ""},
-            {"source": "/tmp/x.txt", "target": None, "error": "source_outside", "message": ""},
-            {"source": "/srv/p/b.txt", "target": None, "error": "failed", "message": "Permission denied"},
-            {"source": "/srv/p/c.txt", "target": None, "error": "newer_rule", "message": ""},
+            result("/srv/p/a.txt", "/srv/p/pkg/a (copy).txt", 42),
+            result("/tmp/x.txt", error="source_outside"),
+            result("/srv/p/b.txt", error="failed", message="Permission denied"),
+            result("/srv/p/c.txt", error="newer_rule"),
+            result("/srv/p/d", "/srv/p/pkg/d"),
         ],
     }
-    entries = ["/srv/p/a.txt", "/tmp/x.txt", "/srv/p/b.txt", "/srv/p/c.txt"]
+    entries = ["/srv/p/a.txt", "/tmp/x.txt", "/srv/p/b.txt", "/srv/p/c.txt", "/srv/p/d"]
     outcomes = remotefiles.paste_files(entries, "/srv/p/pkg", True, "/srv/p")
     assert link.calls[-1][0] == {
         "t": "fs.paste",
-        "entries": ["/srv/p/a.txt", "/tmp/x.txt", "/srv/p/b.txt", "/srv/p/c.txt"],
+        "entries": ["/srv/p/a.txt", "/tmp/x.txt", "/srv/p/b.txt", "/srv/p/c.txt", "/srv/p/d"],
         "target": "/srv/p/pkg",
         "cut": True,
         "root": "/srv/p",
     }
+    # The wait is as long as the move takes (D41), never CALL_TIMEOUT_S.
+    assert link.calls[-1][1] == remotefiles.PASTE_TIMEOUT_S > remotefiles.CALL_TIMEOUT_S
     assert outcomes == [
-        remotefiles.PasteOutcome("/srv/p/a.txt", "/srv/p/pkg/a (copy).txt", None, ""),
+        remotefiles.PasteOutcome("/srv/p/a.txt", "/srv/p/pkg/a (copy).txt", None, "", 42),
         remotefiles.PasteOutcome("/tmp/x.txt", None, PasteError.SOURCE_OUTSIDE, ""),
         remotefiles.PasteOutcome("/srv/p/b.txt", None, PasteError.FAILED, "Permission denied"),
         # A rule this client does not know reads as a failure, never as a landing.
         remotefiles.PasteOutcome("/srv/p/c.txt", None, PasteError.FAILED, ""),
+        remotefiles.PasteOutcome("/srv/p/d", "/srv/p/pkg/d", None, "", None),  # a folder: no mtime
     ]
+
+
+def _result(entry: str, landed: bool = True) -> dict:
+    return {
+        "source": entry,
+        "target": entry.replace("/src/", "/dst/") if landed else None,
+        "mtime": 7 if landed else None,
+        "error": None if landed else "missing",
+        "message": "",
+    }
+
+
+def test_paste_files_sends_a_long_clipboard_in_slices_and_joins_the_outcomes(link):
+    """D42: at most FS_PASTE_MAX entries per request, one request per
+    slice, the outcomes one per entry in order."""
+    entries = [f"/srv/p/src/f{index:04d}" for index in range(2 * protocol.FS_PASTE_MAX + 5)]
+    link.answers["fs.paste"] = lambda message: {"results": [_result(e) for e in message["entries"]]}
+    outcomes = remotefiles.paste_files(entries, "/srv/p/dst", False, "/srv/p")
+    sent = [call[0] for call in link.calls if call[0]["t"] == "fs.paste"]
+    assert [len(call["entries"]) for call in sent] == [protocol.FS_PASTE_MAX, protocol.FS_PASTE_MAX, 5]
+    assert [e for call in sent for e in call["entries"]] == entries
+    assert all(call["target"] == "/srv/p/dst" and call["root"] == "/srv/p" for call in sent)
+    assert all(call["cut"] is False for call in sent)
+    assert [o.source for o in outcomes] == entries
+    assert [o.target for o in outcomes] == [e.replace("/src/", "/dst/") for e in entries]
+    assert all(o.mtime == 7 for o in outcomes)
+
+
+def test_a_slice_refused_before_anything_landed_raises_and_after_ends_the_batching_as_failures(link):
+    entries = [f"/srv/p/src/f{index:04d}" for index in range(3 * protocol.FS_PASTE_MAX)]
+    refusal = RequestRefused(protocol.ERROR_REFUSED, "The path is outside every root the service knows", {})
+    # The first slice refused: the whole paste raises, as one request's would.
+    link.answers["fs.paste"] = refusal
+    with pytest.raises(RequestRefused):
+        remotefiles.paste_files(entries, "/srv/p/dst", True, "/srv/p")
+    # A first slice that landed nothing (every entry missing), then a
+    # refusal: still nothing landed, it raises.
+    calls = [0]
+
+    def missing_then_refused(message):
+        calls[0] += 1
+        if calls[0] == 1:
+            return {"results": [_result(e, landed=False) for e in message["entries"]]}
+        raise refusal
+
+    link.answers["fs.paste"] = missing_then_refused
+    with pytest.raises(RequestRefused):
+        remotefiles.paste_files(entries, "/srv/p/dst", True, "/srv/p")
+    # A first slice that landed, then a refusal: the batching ends, its
+    # entries and the unsent ones are failures carrying the refusal's
+    # words, so the caller sees one outcome per entry and spends the cut
+    # for what landed.
+    calls[0] = 0
+
+    def landed_then_refused(message):
+        calls[0] += 1
+        if calls[0] == 1:
+            return {"results": [_result(e) for e in message["entries"]]}
+        raise refusal
+
+    link.answers["fs.paste"] = landed_then_refused
+    outcomes = remotefiles.paste_files(entries, "/srv/p/dst", True, "/srv/p")
+    assert calls[0] == 2  # the third slice was never sent
+    assert [o.source for o in outcomes] == entries
+    landed = outcomes[: protocol.FS_PASTE_MAX]
+    assert all(o.target is not None and o.error is None for o in landed)
+    rest = outcomes[protocol.FS_PASTE_MAX :]
+    assert all(o.target is None and o.error is PasteError.FAILED for o in rest)
+    assert all(o.message == "The path is outside every root the service knows" for o in rest)
 
 
 def test_make_dir_is_an_fs_mkdir_call(link):

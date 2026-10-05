@@ -381,9 +381,13 @@ def gallery_step(
 
 def path_from_file_uri(uri: str) -> str | None:
     """The local filesystem path a `file:` URI points at, or None when it
-    isn't one (other scheme, or a remote host). Sheds any query/fragment —
-    agent CLIs tack `#L10`-style line fragments onto file references."""
-    parsed = urllib.parse.urlsplit(uri)
+    isn't one (other scheme, or a remote host, or no URI at all: a hostile
+    clipboard line `urlsplit` refuses). Sheds any query/fragment — agent
+    CLIs tack `#L10`-style line fragments onto file references."""
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+    except ValueError:
+        return None
     if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
         return None
     path = urllib.parse.unquote(parsed.path)
@@ -545,19 +549,26 @@ COLLINS_SCHEME = "collins"
 
 def collins_uri(service_id: str, path: str) -> str:
     """`collins://<service id>/<path>` for *path* on the service *service_id*
-    (the path percent-encoded as a `file:` URI's would be)."""
-    return f"{COLLINS_SCHEME}://{urllib.parse.quote(service_id, safe='')}{urllib.parse.quote(path)}"
+    (the path percent-encoded as a `file:` URI's would be; a name that is
+    not UTF-8, `os.fsdecode`'s surrogates, is encoded byte for byte and
+    read back the same way, never a raise)."""
+    quoted_path = urllib.parse.quote(path.encode("utf-8", "surrogateescape"))
+    return f"{COLLINS_SCHEME}://{urllib.parse.quote(service_id, safe='')}{quoted_path}"
 
 
 def path_from_collins_uri(uri: str, service_id: str | None) -> str | None:
     """The path a `collins://` URI names on the service *service_id*, or
-    None when it is no such URI, names another service, or *service_id*
-    is unknown (no service, no paths)."""
-    parsed = urllib.parse.urlsplit(uri)
+    None when it is no such URI, names another service, *service_id*
+    is unknown (no service, no paths), or it is no URI at all (a hostile
+    line `urlsplit` refuses)."""
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+    except ValueError:
+        return None
     if parsed.scheme != COLLINS_SCHEME or not service_id:
         return None
     if urllib.parse.unquote(parsed.netloc) != service_id:
         return None
-    path = urllib.parse.unquote(parsed.path)
+    path = urllib.parse.unquote(parsed.path, errors="surrogateescape")
     return path if path.startswith("/") else None
 
