@@ -197,9 +197,10 @@ service decides which keys a client writes: a device setting, an unknown
 setting or one of the wrong type is `refused`), every `store.*` mutation
 and `trust.*`, with `collins/service/storefeed.py` turning each save and
 refresh into events per subscriber (archived sessions only once paged
-in). The activity tracker still runs in the client (the window's), and
-its verdicts go to the service as `store.flags` and come back as `item`
-fields. PR-1.11 put the rest behind requests and events: the PR hub and
+in). The activity tracker runs on the service (`service/tracking.py`,
+since PR-1.12a): its verdicts set `busy` and a counted finish's `unread`
+on the store's items, which reach the client as `item` fields; the client
+sends `store.flags` only for what the person did at its screen. PR-1.11 put the rest behind requests and events: the PR hub and
 every `gh` call (`service/prfeed.py`), the notification history
 (`service/notifications.py`; rows carry their text as msgid and args,
 each client translating with `i18n.translate`), the session tools
@@ -284,7 +285,7 @@ service, against its machine's login: the UI asks (`usage.get`,
 | --- | --- |
 | The service's half: names, favorites, archived, project order, PR records, attachments, drafts, notifications (each row's text as `msgid` and `args`, plus its English `body` for an older build; a row written before PR-1.11 reads its body as its msgid), the service id, and the settings in `state.SERVICE_SETTINGS` | `~/.config/collins/state.json` (`AppState`, synchronous atomic writes) |
 | The marks on each session's diff (`diff_notes`: session id → notes and highlights, `diffnotes.mark_record` each; kept for the git page's life, so only a crash leaves any) and the show_diffs asked for with no client attached (`pending_diffs`: session id → the tool's arguments) | `state.json` (the service's alone: `service/diffs.py`, `service/tools.py`) |
-| This device's half: the settings in `state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, tray, Caffeine, composer, editor and git-page looks), and per service: panel layouts, editor states, the last active session | `~/.config/collins/ui-state.json` (`uistate.UiState`, written through `AppState`; `state.json.pre-split` is the one-time backup the first start after the split leaves) |
+| This device's half: the settings in `state.DEVICE_SETTINGS` (appearance, geometry, keybindings, sounds, tray, Caffeine, composer, editor and git-page looks), and per service: panel layouts, editor states, the last active session, the open tabs (`open_tabs`: session ids and `pty:<id>`, reopened at launch and after a reconnect) | `~/.config/collins/ui-state.json` (`uistate.UiState`, written through `AppState`; `state.json.pre-split` is the one-time backup the first start after the split leaves) |
 | Headless-run scratch cwd | `~/.config/collins/title-scratch/<uuid>` |
 | Panel shell scrollback (the tab's saves, and the service's own write when a shell exits) | `~/.local/state/collins/panel_history/<session>[.<ordinal>].txt` |
 | Chats virtual project | `~/.local/share/collins/chats/` |

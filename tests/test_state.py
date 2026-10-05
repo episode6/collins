@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 import json
 import time
@@ -207,9 +207,10 @@ def test_caffeine_idle_grace_setting(app_state):
 
 def test_running_session_behavior_settings(app_state):
     state = app_state.AppState()
-    # Both default to today's behaviour: the confirmation dialog asks.
+    # Archiving asks; quitting leaves the sessions running in the service
+    # (detach, D30: the default since PR-1.12c).
     assert state.get_setting("archive_running_session") == "ask"
-    assert state.get_setting("quit_with_running_sessions") == "ask"
+    assert state.get_setting("quit_with_running_sessions") == "detach"
     state.set_setting("archive_running_session", "background")
     state.set_setting("quit_with_running_sessions", "exit")
     fresh = app_state.AppState()

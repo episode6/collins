@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -500,6 +500,7 @@ class PlaceholderRow(Gtk.ListBoxRow):
         live: bool = True,
         draft: bool = False,
         written: bool = False,
+        running: bool = False,
     ) -> None:
         super().__init__()
         self.placeholder_id = placeholder_id
@@ -507,6 +508,10 @@ class PlaceholderRow(Gtk.ListBoxRow):
         self.add_css_class("session-child")
         if live:
             self.add_css_class(_STATUS_CSS["open"])  # it stands for a live tab
+        elif running:
+            # A fresh session the Collins service runs with no tab here and
+            # no id yet (§3.21): a running row, opened by attaching.
+            self.add_css_class(_STATUS_CSS["background"])
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         box.set_valign(Gtk.Align.CENTER)  # match SessionRow in a taller row
@@ -544,7 +549,11 @@ class PlaceholderRow(Gtk.ListBoxRow):
         # something is written, the trash can once the row stands for the
         # user's writing (the pencil above), since the click then throws
         # that writing away.
-        if live and not written:
+        if running:
+            # Nothing to close or discard here: the session runs on the
+            # service, and opening the row shows it.
+            trailing = None
+        elif live and not written:
             trailing = Gtk.Button(icon_name="tab-close-symbolic", valign=Gtk.Align.CENTER)
             trailing.set_tooltip_text(_("Close tab"))
         else:
@@ -552,11 +561,12 @@ class PlaceholderRow(Gtk.ListBoxRow):
             trailing.set_tooltip_text(
                 _("Discard draft and close tab") if live else _("Discard draft")
             )
-        trailing.add_css_class("flat")
-        trailing.connect(
-            "clicked", lambda *_: sidebar.emit("close-placeholder", placeholder_id)
-        )
-        box.append(trailing)
+        if trailing is not None:
+            trailing.add_css_class("flat")
+            trailing.connect(
+                "clicked", lambda *_: sidebar.emit("close-placeholder", placeholder_id)
+            )
+            box.append(trailing)
 
         if arriving:
             _arrive_by_slide(self, box)
@@ -890,6 +900,7 @@ class SessionRow(Gtk.ListBoxRow):
         self._status_handler = item.connect("notify::status", self._on_status_changed)
         self._state_handler = item.connect("notify::state", self._on_state_changed)
         self._busy_handler = item.connect("notify::busy", self._on_busy_changed)
+        self._running_handler = item.connect("notify::running", self._on_status_changed)
         self._unread_handler = item.connect("notify::unread", self._on_unread_changed)
         self._on_status_changed(item, None)
         self._on_state_changed(item, None)
@@ -1135,6 +1146,9 @@ class SessionRow(Gtk.ListBoxRow):
         if self._busy_handler is not None:
             self.item.disconnect(self._busy_handler)
             self._busy_handler = None
+        if self._running_handler is not None:
+            self.item.disconnect(self._running_handler)
+            self._running_handler = None
         if self._unread_handler is not None:
             self.item.disconnect(self._unread_handler)
             self._unread_handler = None
@@ -1220,10 +1234,14 @@ class SessionRow(Gtk.ListBoxRow):
     def _on_status_changed(self, item: SessionItem, _pspec) -> None:
         # The row itself carries the status: a session running in a tab keeps
         # its title at full strength (the class the dimming rule tests for),
-        # and one running detached colors its left guide line instead.
+        # and one running detached colors its left guide line instead. So
+        # does one the Collins service runs with no tab here (`running`,
+        # §3.21): the yellow line, and the pole while it works.
         for css in _STATUS_CSS.values():
             self.remove_css_class(css)
         status_css = _STATUS_CSS.get(item.status)
+        if status_css is None and item.running:
+            status_css = _STATUS_CSS["background"]
         if status_css is not None:
             self.add_css_class(status_css)
 
@@ -1424,6 +1442,12 @@ class SessionSidebar(Gtk.Box):
         # by the window on the same terms as the callables above; until then no
         # session is open in anything, so the mark's click stays a menu.
         self.has_tab: Callable[[str], bool] = lambda _session_id: False
+        # "Is this agent pty shown in a tab on this device?" — what decides
+        # whether a fresh session the service runs with no id yet gets a
+        # running "New session" row (§3.21). Replaced by the window.
+        self.pty_shown: Callable[[int], bool] = lambda _pty: False
+        # The running rows of the last rebuild: "pty:<id>" -> cwd.
+        self._running_ptys: dict[str, str] = {}
         # Whether a PR sweep is running (see refresh_pull_requests): one click
         # of the refresh button at a time, however long gh takes.
         self._pr_sweep = False
@@ -1732,6 +1756,11 @@ class SessionSidebar(Gtk.Box):
         # open on it is a live placeholder too, and is listed once.
         drafts = self.store.state.get_new_chat_drafts()
         placeholder_cwds = {pid: record["cwd"] for pid, record in drafts.items()}
+        # Fresh sessions the Collins service runs with no tab on this device
+        # and no id yet: a running "New session" row each, under the project
+        # of the directory they run in (§3.21).
+        self._running_ptys = self._unshown_ptys()
+        placeholder_cwds.update(self._running_ptys)
         placeholder_cwds.update(self._placeholders)
         placeholders_by_group: dict[tuple, list[str]] = {}
         for pid, cwd in placeholder_cwds.items():
@@ -1823,11 +1852,14 @@ class SessionSidebar(Gtk.Box):
                     label=(
                         newchat.draft_label(record["text"], _("Draft"))
                         if record is not None
+                        else _("New session")
+                        if pid in self._running_ptys and pid not in self._placeholders
                         else None
                     ),
                     live=pid in self._placeholders,
                     draft=record is not None,
                     written=record is not None and bool(record["text"].strip()),
+                    running=pid in self._running_ptys and pid not in self._placeholders,
                 )
                 prow.set_margin_start(child_indent)
                 if pid == self._active_session_id:
@@ -2350,6 +2382,30 @@ class SessionSidebar(Gtk.Box):
         self._rebuild_rows()
         self._invalidate()
 
+    def _unshown_ptys(self) -> dict[str, str]:
+        """The service's agent ptys with no session id yet and no tab on
+        this device: ``"pty:<id>"`` -> the directory each runs in."""
+        unresolved = getattr(self.store, "unresolved_ptys", None)
+        if unresolved is None:
+            return {}
+        rows: dict[str, str] = {}
+        for pty, cwd in sorted(unresolved().items()):
+            try:
+                if self.pty_shown(pty):
+                    continue
+            except Exception:
+                log.exception("sidebar: pty_shown failed")
+                continue
+            rows[f"pty:{pty}"] = cwd or str(Path.home())
+        return rows
+
+    def refresh_running_rows(self) -> None:
+        """The service's agent ptys or this device's tabs moved: rebuild
+        only when the running "New session" rows would change."""
+        if self._unshown_ptys() != self._running_ptys:
+            self._rebuild_rows()
+            self._invalidate()
+
     def refresh_drafts(self) -> None:
         """The kept new-chat drafts changed (one written, relabelled, sent
         or discarded): rebuild, so the rows say what the state says."""
@@ -2589,6 +2645,12 @@ class SessionSidebar(Gtk.Box):
             # over to a fresh one instead — the agent keeps running, its
             # terminal is only reparented.
             open_section.append_item(item(_("Move to new window"), "move-session-new-window"))
+        can_detach = getattr(self.get_root(), "can_detach_session", None)
+        if row.item.status in _IN_TAB_STATUSES and (can_detach is None or can_detach(session_id)):
+            # Stop looking without ending it (§3.21): the tab closes, the
+            # session runs on in the Collins service, and the row says so.
+            # Not while a close is under way, nor for a shell whose CLI left.
+            open_section.append_item(item(_("Detach"), "detach-session"))
         if _GHOSTTY:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))
         if provider.supports_fork:

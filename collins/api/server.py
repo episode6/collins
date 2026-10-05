@@ -32,8 +32,10 @@ versions and closed after the reply; `client_id`, `device`, `locale` and
 `term` recorded; the reply carries `PROTOCOL`, `MIN_PROTOCOL`, the package
 version, the state's `service_id`, the hostname, the caps and the proof
 file), `local` (the hex against the 32 random bytes written to
-``local-proof`` at start, D11) and `service.restart` (handed to the
-`on_restart` callback `service.main` gives it). Any request before hello
+``local-proof`` at start, D11) and `service.restart` (``now``: handed to
+the `on_restart` callback `service.main` gives it; ``idle``: handed to it
+once the core's `restart_when_idle` finds no session busy; ``cancel``:
+that wait called off, PR-1.12c). Any request before hello
 is refused ``sequence``.
 
 **Flow control** (§3.2, §3.20). libsoup has no backpressure signal (F15),
@@ -654,10 +656,17 @@ class ApiServer:
         when = str(message.get("when"))
         if self.on_restart is None:
             return protocol.refuse(message.id, protocol.ERROR_REFUSED, "This service cannot restart itself")
-        if when != "now":
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "Restart when idle is not served yet"
-            )
+        if when == "cancel":
+            # A restart waiting for the sessions to be idle, called off
+            # (a no-op when none waits).
+            self.core.cancel_restart()
+            return protocol.reply(message.id)
+        if when == "idle":
+            # The service does the waiting (§3.21): the core polls the
+            # tracker's busy count and restarts once it reads 0.
+            self.core.restart_when_idle(lambda: self._restart_later("idle"))
+            return protocol.reply(message.id)
+        self.core.cancel_restart()
         GLib.idle_add(self._restart_later, when, priority=GLib.PRIORITY_DEFAULT)
         return protocol.reply(message.id)
 

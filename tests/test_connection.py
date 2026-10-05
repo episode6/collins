@@ -248,3 +248,87 @@ def test_the_owner_can_declare_the_link_lost():
     world.manager.start_local()
     world.manager.lost("resubscribe refused gone")
     assert world.manager.state == "lost" and world.lost == ["resubscribe refused gone"]
+
+
+# -- PR-1.12c: the mismatch and a restart this client asked for -----------------------
+
+
+def test_a_reconnect_into_a_protocol_mismatch_asks_and_stops_retrying():
+    from collins.api.client import ProtocolMismatch
+
+    world = World(live=True)
+    world.manager.start_local()
+    mismatches = []
+    world.manager.on_mismatch = mismatches.append
+
+    def refuse():
+        raise ProtocolMismatch("the service speaks protocol 3", 3, 1)
+
+    world.link.connect = refuse
+    world.link.on_lost("closed")
+    world.fire()  # the retry: found live, the hello refused
+    assert world.manager.state == connection.MISMATCH
+    assert len(mismatches) == 1 and mismatches[0].service == 3 and mismatches[0].client == 1
+    assert world.timers == []  # no retry of its own
+
+
+def test_a_restart_waits_for_the_old_service_before_starting_another():
+    world = World(live=True)
+    world.manager.start_local()
+    alive = {"pid": True}
+    world.manager._pid_alive = lambda pid: alive["pid"]
+    world.manager.expect_restart(4242)
+    world.live = False
+    world.link.on_lost("closed")
+    world.fire()  # the first retry: the old service is still ending its sessions
+    assert world.started == [] and world.timers  # it waits, it starts nothing
+    alive["pid"] = False
+    for _ in range(5):
+        world.fire()
+        if world.manager.state == "connected":
+            break
+    assert world.started == ["com.example.Test"]
+    assert world.manager.state == "connected"
+
+
+def test_reconnect_now_skips_the_backoff():
+    world = World(live=True)
+    world.manager.start_local()
+    world.link.on_lost("closed")
+    assert world.timers and world.timers[0][0] == 1000
+    world.manager.reconnect_now()
+    assert world.manager.state == "connected"
+
+
+def test_service_pid_reads_the_listeners_credentials(tmp_path):
+    import os
+    import socket
+
+    path = str(tmp_path / "api.sock")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(path)
+    listener.listen(1)
+    try:
+        assert connection.service_pid(path) == os.getpid()
+    finally:
+        listener.close()
+    assert connection.service_pid(str(tmp_path / "none.sock")) is None
+    assert connection.pid_is_alive(os.getpid())
+
+
+def test_a_restart_wait_that_outlives_its_bound_proceeds():
+    """An old service that will not go (a stuck close flow) holds the
+    reconnect up for RESTART_WAIT_S only, then the find and start go on:
+    the service's own single-instance lock (service.lock) is the real
+    guard against two services, this wait only spares the race."""
+    world = World(live=True)
+    world.manager.start_local()
+    world.manager._pid_alive = lambda pid: True  # never goes
+    world.manager.expect_restart(4242)
+    world.live = False
+    world.link.on_lost("closed")
+    for _ in range(int(connection.RESTART_WAIT_S * 1000 / (connection.POLL_MS * 5)) + 10):
+        world.fire()
+        if world.started:
+            break
+    assert world.started == ["com.example.Test"]

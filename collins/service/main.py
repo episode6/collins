@@ -350,6 +350,11 @@ class Service:
         try:
             self.server.stop_accepting()
             self.core.stop_mcp()
+            # The clients go first (PR-1.12c): a client sees its link lost,
+            # not one pty-exited per session, so it keeps its open tabs and
+            # resumes each on the service that starts next (§3.21) instead
+            # of closing them one by one as their sessions end.
+            self.server.stop()
             ended = self.core.stop_sessions(done=self._stopped)
             if ended:
                 log.info("ending %d session(s), recorded to resume", len(ended))

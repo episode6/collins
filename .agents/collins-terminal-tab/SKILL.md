@@ -265,12 +265,81 @@ ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close
 marks the row `backgrounding` (yellow, disabled) until the daemon lists the
 job or a timeout, and `_watch_background_fork` handles older CLIs that fork.
 
-Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit` (close
-all / background all in a queue / **hide** — the window hides, sessions keep
-running, the status icon brings it back; `request_quit` bypasses hide).
-`_close_ok` also covers the no-dialog paths. Finalizing a `Vte.Terminal`
-SIGHUPs its child; a hidden window keeps every page alive with no
-`Gio.Application.hold()`.
+**Detach** (PR-1.12c, spec §3.21, D12): `win.detach-session` (the tab
+menu's item targets "" = the menu's page; the row menu's names the
+session, routed to its owner window) → `MainWindow.detach_page` → the
+editor's Save Changes? only → the page goes into `_detached_pages` and
+`close_page` → `_on_close_page` skips every ask and the graceful close and
+calls `TerminalTab.detach_pty()` (a `detach`, the client closed) instead of
+`release_pty()` (`detach_page` refuses a page mid-close, `_page_settling`,
+and closes a tab whose CLI has exited instead; the row menu asks
+`can_detach_session`); the panel shells still end (their history written by the
+service). The tab's `destroy` also detaches (no longer `release_pty`): a
+window that closes for real leaves its sessions running. **Opening a
+running session attaches** (D31): `open_session` asks `store.pty_for(id)`
+and, while that pty's CLI still runs (`pty.info`'s `running_command`; a shell-only pty is resumed over, which the service takes by closing it), builds `TerminalTab(attach_pty=…)`, which reads the pty's grid
+(`pty.info` `cols`/`rows`, so the attach paints at the pty's own size and
+the model, which never reflows, cuts nothing), claims the pty and attaches;
+the `session` snapshot fills the mirror. `attach_refused` (the pty ended
+meanwhile) falls back to a resume. `open_running_pty(pty)` does the same
+for a session with no id yet (a running "New session" row, a `pty:<id>`
+entry of `open_tabs`), with a placeholder row like a fresh tab's.
+
+Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit`, by
+`quit_with_running_sessions`: **detach** (the default since PR-1.12c, D30:
+`do_detach` records `open_tabs` with `_close_for_good`, marks every
+running tab `_detached_pages` and closes all pages with `_close_ok`, so a
+page mid-close drains and a shell-only tab ends, and the last page's close
+reissues the window's; a non-last window's tabs are kept by
+`App.keep_open_tabs`),
+**exit** (*Stop Sessions and Quit*: close all with `_close_ok`, as quitting
+always did; with nothing busy the fast path releases each pty), background
+(the /bg queue), **hide** (the window hides, sessions keep running, the
+status icon brings it back; `request_quit` bypasses hide) or **ask**: the
+dialog (`dialogs.answer_dialog`) "N sessions keep running in the Collins
+service" with *Quit*, *Stop Sessions and Quit*, *Keep Running (Hide
+Window)*; its first showing adds the status-icon sentence
+(`quit_notice_shown`). An install whose stored value was `ask` moves to
+`detach` once (`state.migrate_device_settings`, marked by
+`quit_detach_migrated`). `_close_for_good` writes `open_tabs` one last time
+(with this window's tabs when it is the last window) and freezes it.
+`_close_ok` also covers the no-dialog paths. A hidden window keeps every
+page alive with no `Gio.Application.hold()`.
+
+**open_tabs** (§3.21): `App.persist_open_tabs` (debounced 250 ms) writes
+every open window's `open_tab_entries()` — a tab with a live pty, as its
+session id or `pty:<id>` for an unresolved one or a fork — through
+`AppState.set_open_tabs` into the per-service block of `ui-state.json`, on
+every page attached, detached, reordered and resolved. It is frozen while
+the link is down (tabs whose ptys went with the service close as their
+reattach fails; that must not shrink the record) and after the last
+window's quit. `MainWindow.reopen_tabs()` (the launch, from
+`do_activate`) and `App._on_connected` after a reconnect (after
+`reattach_tabs`) reopen each entry not shown: attached when the service
+runs it, resumed when not (a `pty:` entry that no longer runs is dropped);
+a session the store has not scanned yet waits for its first refresh. With
+`open_tabs` empty the launch falls back to `restore_last_session`.
+
+**Restart service** (`win.restart-service`, the main menu):
+`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`)
+and the mirror's agent ptys for the blast radius, then
+`App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
+`open_tabs` and tells the connection manager to wait for that pid to be
+gone (`ConnectionManager.expect_restart`) before it starts another
+service. *Idle* is `ServiceCore.restart_when_idle` (polls
+`activity.busy_count()` every `RESTART_POLL_MS`, 2 s; `service.restart
+{when: cancel}` → `cancel_restart`), shown as "Restarting when idle" with
+Cancel in the reconnect banner (`MainWindow.set_restart_pending`). The
+service's stop now ends its clients **before** its sessions
+(`Service.stop`), so a client sees the link go, not one `pty-exited` per
+session. *Restart Service* is offered only for an older service
+(`mismatch.service < mismatch.client`). A `hello` refused `protocol`
+raises `api.client.ProtocolMismatch`:
+at startup `App._mismatch_at_startup` asks over a bare window on a nested
+loop (*Restart Service*: `connection.stop_service` SIGTERMs the socket's
+peer, found by `SO_PEERCRED`, then `start_local` again; *Quit*); on a
+reconnect the manager goes to `mismatch` and `App._on_protocol_mismatch`
+asks over the window.
 
 ## Footer and chrome
 
@@ -518,7 +587,8 @@ swap 2 of §3.5:
   `MainWindow._on_close_page`, the final close) sends `close` (mode
   `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
   SIGKILL after the grace), detaches and closes its `PtyClient`:
-  closing a tab ends the session (D12) until *Detach* in PR-1.12c.
+  closing a tab ends the session (D12). `TerminalTab.detach_pty()` is
+  *Detach*'s and a destroyed tab's (PR-1.12c): the pty runs on.
   `App.do_shutdown` closes the panel shells' ptys and the link; the
   agents' ptys live on (§3.10) and the next client attaches.
 - **The wiring.** `App._start_service` builds the `SocketLink` and the

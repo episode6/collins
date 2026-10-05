@@ -59,6 +59,69 @@ WAITING = "waiting"
 CONNECTING = "connecting"
 CONNECTED = "connected"
 LOST = "lost"
+# The service answered and speaks no protocol this client does (§3.21):
+# no retry, the owner asks the person.
+MISMATCH = "mismatch"
+
+# How long a reconnect after a restart this client asked for waits for the
+# old service to finish ending its sessions before it starts another.
+RESTART_WAIT_S = 20.0
+
+
+def _is_mismatch(exc: BaseException) -> bool:
+    from .api.client import ProtocolMismatch
+
+    return isinstance(exc, ProtocolMismatch)
+
+
+def pid_is_alive(pid: int) -> bool:
+    """Whether *pid* names a process that has not exited (a zombie counts
+    as gone)."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="ascii") as fh:
+            state = fh.read().rsplit(")", 1)[1].split()[0]
+    except (OSError, IndexError):
+        return False
+    return state not in ("Z", "X")
+
+
+def service_pid(path: str) -> int | None:
+    """The pid of the process listening on the service socket at *path*
+    (the peer's credentials, SO_PEERCRED: the listener's at its listen),
+    or None when nothing answers or it is another user's. What the
+    mismatch dialog's *Restart service* stops, since a service that
+    refused our hello serves no `service.restart`."""
+    import socket
+    import struct
+
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2.0)
+            sock.connect(path)
+            raw = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    except OSError:
+        return None
+    pid, uid, _gid = struct.unpack("3i", raw)
+    if pid <= 0 or uid != os.getuid():
+        return None
+    return pid
+
+
+def stop_service(path: str) -> int | None:
+    """SIGTERM the service listening at *path* (its stop sequence ends the
+    sessions, recorded to resume, and exits); returns its pid, None when
+    there was nothing to stop."""
+    import signal
+
+    pid = service_pid(path)
+    if pid is None:
+        return None
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as exc:
+        log.warning("connection: could not stop the service (pid %d): %s", pid, exc)
+        return None
+    return pid
 
 
 def service_argv(app_id: str) -> list[str]:
@@ -150,6 +213,9 @@ class ConnectionManager:
         on_state: Callable[[str], None] | None = None,
         on_connected: Callable[[bool], None] | None = None,
         on_lost: Callable[[str], None] | None = None,
+        on_mismatch: Callable[[Exception], None] | None = None,
+        cancel: Callable[[object], None] | None = None,
+        pid_alive: Callable[[int], bool] | None = None,
     ) -> None:
         self.app_id = app_id
         self.link = link
@@ -167,6 +233,13 @@ class ConnectionManager:
         self.on_state = on_state
         self.on_connected = on_connected
         self.on_lost = on_lost
+        self.on_mismatch = on_mismatch
+        self._cancel = cancel
+        self._pid_alive = pid_alive or pid_is_alive
+        # The service a restart this client asked for is waiting on (its
+        # pid), and how long the reconnect has waited for it to go.
+        self._restart_pid: int | None = None
+        self._restart_waited = 0
         self.state = IDLE
         self.path = ""
         self.started_how = ""  # "", "systemd" or "spawned": how this client started it
@@ -271,6 +344,16 @@ class ConnectionManager:
         self._pending = None
         if self.stopped or self.state == CONNECTED:
             return False
+        if self._old_service_alive():
+            # The service this client restarted is still on its way out
+            # (ending its sessions): look again in a beat, without
+            # counting an attempt, for a bounded while.
+            if self._restart_waited < RESTART_WAIT_S * 1000:
+                self._restart_waited += POLL_MS * 5
+                self._pending = self._schedule(POLL_MS * 5, self._retry)
+                return False
+            self._restart_pid = None
+        self._restart_waited = 0
         try:
             self.path, found = self._find(self.app_id)
             if found != "live":
@@ -340,9 +423,52 @@ class ConnectionManager:
     def _connect_failed(self, exc: Exception, generation: int | None = None) -> None:
         if self.stopped or (generation is not None and generation != self._generation):
             return
+        if _is_mismatch(exc):
+            # No retry speaks a protocol the service does not: the owner
+            # asks the person (the mismatch dialog, §3.21).
+            log.warning("connection: %s", exc)
+            self._set_state(MISMATCH)
+            if self.on_mismatch is not None:
+                try:
+                    self.on_mismatch(exc)
+                except Exception:
+                    log.exception("connection: on_mismatch failed")
+            return
         log.warning("connection: connect failed: %s", exc)
         self._set_state(LOST)
         self._retry_later()
+
+    # -- a restart this client asked for (PR-1.12c) ------------------------------------
+
+    def expect_restart(self, pid: int | None) -> None:
+        """The service (*pid*, from `service.status`) was asked to restart:
+        the next reconnect waits for that process to be gone before it
+        starts another, so the two never share the state files."""
+        self._restart_pid = pid if isinstance(pid, int) and pid > 0 else None
+
+    def _old_service_alive(self) -> bool:
+        pid = self._restart_pid
+        if pid is None:
+            return False
+        if not self._pid_alive(pid):
+            self._restart_pid = None
+            return False
+        return True
+
+    def reconnect_now(self) -> None:
+        """Try again at once (the mismatch dialog's *Restart service*, once
+        the old service is gone): the lost path, with no backoff."""
+        if self.stopped:
+            return
+        if self._pending is not None and self._cancel is not None:
+            try:
+                self._cancel(self._pending)
+            except Exception:
+                pass
+        self._pending = None
+        self.attempts = 0
+        self._set_state(LOST)
+        self._retry()
 
     def stop(self) -> None:
         """The client is quitting: no more retries."""

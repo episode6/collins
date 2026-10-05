@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -204,11 +204,26 @@ DEFAULT_SETTINGS = {
     "welcome_seen": False,
     # What to do instead of the confirmation dialog when a running session's
     # tab has to close: ask (the dialog, as before) | exit | background.
-    # quit_with_running_sessions takes a fourth value, hide: the window (not
-    # its sessions) goes away, recoverable from the status icon — see
-    # MainWindow._hide_window.
     "archive_running_session": "ask",  # archiving a session whose tab is busy
-    "quit_with_running_sessions": "ask",  # closing a window while sessions run
+    # Closing a window (quitting) while sessions run (MainWindow._confirm_quit,
+    # split-service spec §3.21, D30): detach (the default: plain Quit, every
+    # tab detached and its session left running in the Collins service) |
+    # ask (the quit dialog: Quit, Stop sessions and quit, Keep running) |
+    # exit (Stop sessions and quit: each agent asked to exit, as quitting
+    # always did before the service) | background (each handed to /bg, the
+    # rest exited) | hide (the window, not its sessions, goes away,
+    # recoverable from the status icon — MainWindow._hide_window). An
+    # install that stored "ask" before detach existed is moved to detach
+    # once, by migrate_device_settings (quit_detach_migrated records it, so
+    # an "ask" chosen afterwards stays).
+    "quit_with_running_sessions": "detach",
+    # Whether the one-shot ask -> detach move of quit_with_running_sessions
+    # has run on this device (migrate_device_settings).
+    "quit_detach_migrated": False,
+    # Whether the quit dialog has said, once, that the status icon leaves
+    # with the window while the sessions keep running (MainWindow.
+    # _confirm_quit; set when the dialog first shows, like hide_notice_shown).
+    "quit_notice_shown": False,
     # What becomes of a session's git worktree when the session is archived:
     # ask (a dialog before the archive — Keep, Trash, or Cancel the archive)
     # | always (move it to the trash, no dialog) | never (leave it). The move
@@ -479,6 +494,8 @@ DEVICE_SETTINGS: frozenset[str] = frozenset({
     "easy_copy_paste",
     "language",
     "quit_with_running_sessions",
+    "quit_detach_migrated",
+    "quit_notice_shown",
     "hide_notice_shown",
     "show_tab_bar",
     "status_icon",
@@ -544,6 +561,19 @@ def _ui_state_file() -> Path:
 
 def _pre_split_backup() -> Path:
     return _STATE_FILE.with_name("state.json.pre-split")
+
+
+def migrate_device_settings(settings: dict) -> dict:
+    """The one-shot moves of this device's settings, applied to the device
+    settings as read (in place, and returned). Today one: the quit setting's
+    old default, "ask", becomes "detach" (D30: quitting leaves the sessions
+    running in the service), once per device; quit_detach_migrated marks it
+    done, so an "ask" chosen in Preferences afterwards stays."""
+    if not settings.get("quit_detach_migrated"):
+        if settings.get("quit_with_running_sessions", "ask") == "ask":
+            settings["quit_with_running_sessions"] = "detach"
+        settings["quit_detach_migrated"] = True
+    return settings
 
 
 def device_defaults() -> dict:
@@ -1202,6 +1232,26 @@ class AppState:
                         self.ui.set_scoped(self.service_id, key, value)
                 elif value != DEFAULT_SETTINGS.get(key) or key not in self.ui.present_keys:
                     ui_settings[key] = value
+        before = dict(ui_settings)
+        migrate_device_settings(ui_settings)
+        moved = {k: v for k, v in ui_settings.items() if before.get(k) != v}
+        if moved:
+            # The device's file holds the move from here on: written now
+            # by the instance that writes it (the app's), so the one-shot
+            # is committed with the read; a throwaway reader (migrate
+            # False, or the service's device=False) keeps it in memory and
+            # writes nothing, as it writes nothing else. Only a value that
+            # moved is written (a fresh device sets the marker alone). The
+            # pre-split (v0.1.4) path, `migrating`, carries the moved
+            # `detach` in ui_settings into the device's half that
+            # _commit_migration writes (ui-state.json first), so it is not
+            # saved twice here.
+            self.ui.settings.update(moved)
+            if "quit_with_running_sessions" in moved and self._device and self._migrate and not migrating:
+                try:
+                    self.ui.save()
+                except OSError as exc:
+                    log.warning("ui-state.json not written (%s); the move is redone next start", exc)
         # The merged view every reader sees: the service's settings and
         # this device's, the latter read from ui-state.json.
         self.settings = {**DEFAULT_SETTINGS, **service_settings, **ui_settings}
@@ -1925,6 +1975,29 @@ class AppState:
         """Follow the forward chain (a session may be backgrounded repeatedly)
         to the latest id. Cycle-safe; returns the input when unforwarded."""
         return self.forward_chain(session_id)[-1]
+
+    # -- the tabs this device had open on this service (§3.21) ---------------
+
+    def get_open_tabs(self) -> list[str]:
+        """The tabs this device had open on this service, in tab order:
+        session ids, and ``pty:<id>`` for a tab whose session had not
+        resolved (uistate's per-service block). Empty until the service
+        has named itself."""
+        if not self.service_id:
+            return []
+        return list(self.ui.service(self.service_id).get("open_tabs") or [])
+
+    def set_open_tabs(self, entries: list[str]) -> None:
+        """Record the open tabs (see get_open_tabs); an unchanged list is
+        not rewritten."""
+        if not self.service_id:
+            return
+        clean = uistate.clean_open_tabs(entries)
+        block = self.ui.service(self.service_id)
+        if block.get("open_tabs") == clean:
+            return
+        block["open_tabs"] = clean
+        self._save_ui()
 
     # -- per-session panel layout ------------------------------------------
 

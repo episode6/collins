@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -1528,8 +1528,15 @@ class TerminalTab(Gtk.Box):
         new_chat: bool = False,
         worktree_default: bool = False,
         sandbox_default: bool = False,
+        attach_pty: int | None = None,
     ) -> None:
-        """*new_chat* opens the tab on the new-chat screen instead of the
+        """*attach_pty* is an agent pty the service already runs (a session
+        nobody here was showing, D31): the tab attaches to it instead of
+        spawning one, and the session's facts arrive with the attach; a pty
+        gone in the meantime leaves `attach_refused` set for the window to
+        resume the session instead (§3.21).
+
+        *new_chat* opens the tab on the new-chat screen instead of the
         agent's console: nothing is spawned until `begin_session`, which
         the screen's Send (the "new-chat-send" signal, via the window)
         reaches. *worktree_default* is what its worktree checkbox starts
@@ -1571,6 +1578,10 @@ class TerminalTab(Gtk.Box):
         # sandboxed fork's resolver mode (begin_session and the constructor
         # tail decide).
         self._fork_resolve = False
+        # A tab opened over a running pty whose attach the service refused
+        # (the pty ended between the sidebar's word and the click): the
+        # window resumes the session instead (MainWindow.open_session).
+        self.attach_refused = False
         # The open-cuts in flight, by the handle the service gave each: the
         # composer that asked, for as long as it is still this tab's and
         # still up (`_on_cut_event`).
@@ -1957,7 +1968,10 @@ class TerminalTab(Gtk.Box):
         # "fork-resolved" instead of binding the tab to it.
         self._fork_resolve = bool(fork and self.sandboxed)
         self.connect("map", lambda *_: self.session.arm_resolver())
-        self._service_spawn(cwd)
+        if attach_pty is not None:
+            self._service_attach(int(attach_pty))
+        else:
+            self._service_spawn(cwd)
 
     # -- the session, forwarded ------------------------------------------------
     #
@@ -2215,12 +2229,46 @@ class TerminalTab(Gtk.Box):
             # their history when it resolves (`rekey_shells`).
             self._rekey_panel_shells()
         except RequestRefused as exc:
+            running = (exc.details or {}).get("pty")
+            if (
+                exc.msgid == protocol.ALREADY_RUNNING_MSGID
+                and isinstance(running, int)
+                and not self.fork  # a fork never stands in for its origin
+            ):
+                # The service runs this session already (a sidebar that had
+                # not heard yet): show that pty instead (D31).
+                self._service_attach(running)
+                if not self.attach_refused:
+                    return
             reason = _(exc.msgid).format_map(exc.details) if exc.msgid else _("failed to start shell")
             self.feed_message(reason)
             return
         except (ValueError, KeyError) as exc:
             self.feed_message(_("failed to start shell: {msg}").format(msg=str(exc)))
             return
+
+    def _service_attach(self, pty: int) -> None:
+        """Show an agent pty the service already runs (D31: a tab is a view
+        over a pty): `attach` and its redraw, the session's facts whole in
+        the `session` event that comes with it — its handle, its id, its
+        options. Nothing is spawned and nothing typed."""
+        self.session.pty = pty
+        self._client.claim(pty)
+        try:
+            # At the pty's own grid: an attach at another one is applied
+            # before the redraw (the newcomer is the active client), and
+            # the model does not reflow (D19), so a terminal not yet
+            # allocated (VTE's 80x24) would cut the rows the screen holds.
+            # The tab's allocation resizes it as any tab's does, after.
+            info = self._client.request({"t": "pty.info", "pty": pty})
+            if info.get("cols") and info.get("rows"):
+                self.terminal.set_size(int(info["cols"]), int(info["rows"]))
+            self._view.attach(pty)
+        except (RequestRefused, ValueError) as exc:
+            _log.info("pty %s could not be attached: %s", pty, exc)
+            self.session.pty = None
+            self._view.pty = None
+            self.attach_refused = True
 
     def _theme_colours(self) -> tuple:
         """(foreground, background, palette) of the theme the terminal is
@@ -2353,10 +2401,10 @@ class TerminalTab(Gtk.Box):
         self.emit("process-exited", -1 if status is None else int(status))
 
     def release_pty(self) -> None:
-        """The tab is closing for good: end its pty on the service (Phase
-        1: closing a tab ends the session, D12; *Detach* is PR-1.12's) and
-        let the loopback client go. What the widget's finalize did to its
-        VTE child, done where the window closes the page."""
+        """The tab is closing for good: end its pty on the service (closing
+        a tab ends the session, D12) and let the client go. What the
+        widget's finalize did to its VTE child, done where the window
+        closes the page. *Detach* is `detach_pty`."""
         if self._client.closed:
             return
         pty = self._view.pty
@@ -2367,6 +2415,24 @@ class TerminalTab(Gtk.Box):
                 pass
         self._view.detach()
         self._client.close()
+
+    def detach_pty(self) -> None:
+        """Stop showing the pty and leave it running on the service: the
+        session goes on with no tab here (*Detach*, a plain *Quit*, a window
+        destroyed; §3.21, D12). Idempotent; a tab already released or
+        detached sends nothing."""
+        if self._client.closed:
+            return
+        self._view.detach()
+        self._client.close()
+
+    @property
+    def pty_id(self) -> int | None:
+        """The agent pty this tab shows, None before the spawn, after the
+        exit or once released."""
+        if self._client.closed or self._view.exited:
+            return None
+        return self._view.pty
 
     def reattach(self) -> None:
         """The link came back (spec §3.20): show the pty again (a redraw
@@ -2391,7 +2457,7 @@ class TerminalTab(Gtk.Box):
 
     def close_panel_ptys(self) -> None:
         """The app is quitting: end every panel shell's pty on the service
-        (a shell has no row to reattach from until PR-1.12c, and the
+        (a shell is not reattached across a quit, even since PR-1.12c; the
         service writes its history from the model when it exits, under the
         key the tab's saves filed it by). The agent's pty is left running
         (§3.10: quitting ends nothing)."""
@@ -3160,9 +3226,11 @@ class TerminalTab(Gtk.Box):
             pr_store.connect("pr-attached", self._on_hub_pr_attached),
         ]
         self.connect("destroy", self._leave_pr_store)
-        # A window closed with idle tabs destroys them with no close-page:
-        # the tab's pty must not outlive it (idempotent).
-        self.connect("destroy", lambda *_a: self.release_pty())
+        # A window closed (a plain Quit) destroys its tabs with no
+        # close-page: each detaches, its session left running in the
+        # service (§3.21; idempotent, and a no-op for a tab released or
+        # detached already).
+        self.connect("destroy", lambda *_a: self.detach_pty())
         # Nor its panel shells' (a stowed or maximized one included).
         self.connect("destroy", lambda *_a: self.release_panel_ptys())
 

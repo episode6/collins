@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ from . import (
     panelhistory,
     pkgrepos,
     sandboxstatus,
+    uistate,
     updatecheck,
     welcome,
 )
@@ -350,6 +351,20 @@ class MainWindow(Adw.ApplicationWindow):
         # app.quit reached this window: the close it issues must never take
         # the hide branch — quit means quit, from any state (see request_quit).
         self._quit_requested = False
+        # Pages closing as a *Detach* (§3.21): no ask, no graceful exit, the
+        # pty left running on the service (see detach_page).
+        self._detached_pages: set[Adw.TabPage] = set()
+        # This window closed for real (a quit, its own close): its tabs are
+        # no longer among the device's open tabs (App.persist_open_tabs).
+        self.closed_for_good = False
+        # The open_tabs entries a reopen could not place yet (a session the
+        # service's store had not scanned): tried again on the next refresh.
+        self._reopen_waiting: list[str] = []
+        self._reopen_active: str | None = None
+        # The service banner's two states (set_reconnecting,
+        # set_restart_pending).
+        self._banner_reconnecting = False
+        self._banner_restart_pending = False
         # Active tab's session at the first close request, before the tab
         # drain disturbs the selection ("" = none); persisted when the last
         # window really closes so the next launch can reopen it.
@@ -464,6 +479,12 @@ class MainWindow(Adw.ApplicationWindow):
         tab_menu.append(_("Rename…"), "win.rename-tab")
         tab_menu.append(_("Set emoji…"), "win.set-tab-emoji")
         tab_menu.append(_("Copy session ID"), "win.copy-tab-session-id")
+        # Stop looking without ending it (§3.21, D12): the page closes with
+        # no question and the session runs on in the Collins service. ""
+        # names the page the menu was opened on (see _on_detach_action).
+        detach_item = Gio.MenuItem.new(_("Detach"), None)
+        detach_item.set_action_and_target_value("win.detach-session", GLib.Variant("s", ""))
+        tab_menu.append_item(detach_item)
         tab_menu.append(_("Close"), "win.close-menu-tab")
         self.tab_view.set_menu_model(tab_menu)
 
@@ -620,6 +641,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.has_changes = self._session_has_changes
         self.sidebar.live_cwd = self._session_live_cwd
         self.sidebar.has_tab = self._session_has_tab
+        self.sidebar.pty_shown = self._pty_shown_on_device
         # The sidebar can't see which instance it is in; the window can, and
         # only a debug one gets the developer items in the hamburger menu.
         if _debug_build(self):
@@ -635,6 +657,12 @@ class MainWindow(Adw.ApplicationWindow):
         # The service's busy verdicts land on the items; the header's pole
         # and the tray follow them (PR-1.12a).
         self.store.connect("busy-changed", self._on_row_busy_changed)
+        # The service's agent ptys: running rows come and go (§3.21).
+        self._running_handler = self.store.connect(
+            # (and the open tabs follow: a kept entry gone, a CLI that left)
+            "running-changed", lambda *_a: self._open_tabs_changed()
+        )
+        self.connect("destroy", lambda *_a: self.store.disconnect(self._running_handler))
         if hasattr(self.state, "connect_changed"):
             # A name the service wrote (the set_session_title tool runs there
             # since PR-1.11): the session's open tab wears it, as a rename
@@ -670,6 +698,9 @@ class MainWindow(Adw.ApplicationWindow):
         # over content that stays readable.
         self.reconnect_banner = Adw.Banner(title=_("Reconnecting to the Collins service"))
         self.reconnect_banner.set_revealed(False)
+        # The same place says "Restarting when idle" while a restart waits
+        # for the sessions, with the button that calls it off (§3.21).
+        self.reconnect_banner.connect("button-clicked", self._on_banner_button)
         content_with_banner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content_with_banner.append(self.reconnect_banner)
         self.lightbox_overlay.set_vexpand(True)
@@ -750,15 +781,17 @@ class MainWindow(Adw.ApplicationWindow):
             # The user insisted mid-drain: any tabs still alive skip the
             # per-tab drain, so capture their panel histories and state now
             # (a no-op for tabs that already drained through _on_close_page).
+            # A plain Quit lands here too: every tab still open detaches as
+            # the window goes (TerminalTab.detach_pty on destroy).
             self._release_all_editor_windows()
             self._save_panel_data()
             self._persist_last_session()
+            self._close_for_good()
             return False  # tabs drained (or the user insisted) — really close
         self._last_active_session = self._active_restore_id() or ""
         busy = self._busy_tab_count()
-        if busy and not self._quit_requested and not self._quit_asking and (
-            self.state.get_setting("quit_with_running_sessions") == "hide"
-        ):
+        behavior = self.state.get_setting("quit_with_running_sessions")
+        if busy and not self._quit_requested and not self._quit_asking and behavior == "hide":
             # Keep everything exactly as it is; only the surface goes. The
             # window object lives on with every tab, handler and timer, so
             # nothing about a session changes. An idle window (busy == 0)
@@ -774,10 +807,125 @@ class MainWindow(Adw.ApplicationWindow):
             self._release_all_editor_windows()
             self._save_panel_data()
             self._persist_last_session()
+            # Stop sessions and quit, with nothing busy to drain: what is
+            # left (an unstarted thread) ends with the window, as it always
+            # did. A tab whose CLI has exited ends with it whatever the
+            # setting: a shell alone is no session to leave running. The
+            # rest detach as the window goes, their sessions running on.
+            for tab in self._terminal_tabs():
+                if behavior == "exit" or not tab.has_running_command():
+                    tab.release_pty()
+            self._close_for_good()
             return False  # nothing running or unsaved; continue with the normal close
         if not self._quit_asking:  # one flow for however many sessions/buffers
             self._begin_quit_flow()
         return True
+
+    def _terminal_tabs(self) -> list[TerminalTab]:
+        tabs = []
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab):
+                tabs.append(tab)
+        return tabs
+
+    def _close_for_good(self) -> None:
+        """This window is going for real: the device's open tabs are written
+        one last time with this window's own (they come back at the next
+        launch) — kept by the app when other windows stay (`App.keep_open_tabs`:
+        its tabs are left running, rows in the sidebar, and still reopen) —
+        and, for the last window, no write follows (§3.21)."""
+        if self.closed_for_good:
+            return
+        app = self.get_application()
+        others = [
+            w for w in (app.get_windows() if app is not None else [])
+            if isinstance(w, MainWindow) and w is not self and not w.closed_for_good
+        ]
+        if others:
+            if hasattr(app, "keep_open_tabs"):
+                app.keep_open_tabs(self.open_tab_entries())
+            self.closed_for_good = True
+            if hasattr(app, "persist_open_tabs"):
+                app.persist_open_tabs(now=True)
+            return
+        if hasattr(app, "persist_open_tabs"):
+            app.persist_open_tabs(now=True)
+            app.freeze_open_tabs()
+        self.closed_for_good = True
+
+    def open_tab_entries(self) -> list[str]:
+        """This window's tabs as `open_tabs` entries, in tab order: the
+        session id of a tab showing a live pty, ``pty:<id>`` for one whose
+        session has not resolved (or a fork, whose id is its origin's).
+        A new-chat screen, an ended session, a chat view and a page mid-close
+        (the person is ending it) have none."""
+        entries: list[str] = []
+        for i in range(self.tab_view.get_n_pages()):
+            page = self.tab_view.get_nth_page(i)
+            tab = page.get_child()
+            if not isinstance(tab, TerminalTab) or self._page_settling(page):
+                continue
+            pty = tab.pty_id
+            if pty is None or not tab.has_running_command():
+                continue  # no pty, or a shell alone: no session to reopen
+            if tab.session_id and not tab.fork:
+                entries.append(tab.session_id)
+            else:
+                entries.append(f"pty:{pty}")
+        return entries
+
+    def _open_tabs_changed(self) -> None:
+        """A tab opened, closed, detached, resolved or moved: the device's
+        `open_tabs` follow (debounced, App.persist_open_tabs), and the
+        sidebar's running rows."""
+        if self.closed_for_good:
+            return
+        app = self.get_application()
+        if hasattr(app, "persist_open_tabs"):
+            app.persist_open_tabs()
+        self.sidebar.refresh_running_rows()
+
+    def _page_for_pty(self, pty: int) -> Adw.TabPage | None:
+        for i in range(self.tab_view.get_n_pages()):
+            page = self.tab_view.get_nth_page(i)
+            tab = page.get_child()
+            if isinstance(tab, TerminalTab) and tab.pty_id == pty:
+                return page
+        return None
+
+    @staticmethod
+    def _pty_runs_cli(pty: int) -> bool:
+        """Whether agent pty *pty* still runs its CLI (`pty.info`'s
+        running command): only then is opening its session an attach.
+        Unknown (no link, a refusal) reads as running: the attach finds
+        out, and falls back to a resume when it is refused."""
+        link = apilink.current()
+        if link is None:
+            return True
+        try:
+            return bool(link.call({"t": "pty.info", "pty": pty}).get("running_command", True))
+        except RequestRefused:
+            return True
+
+    def can_detach_session(self, session_id: str) -> bool:
+        """Whether the row menu's *Detach* has anything to do: the session's
+        tab is open in some window, its CLI runs, and no close is under way
+        (see detach_page)."""
+        owner = self._owner_window(session_id)
+        page = owner._page_for(session_id) if owner is not None else None
+        if page is None or owner._page_settling(page):
+            return False
+        tab = page.get_child()
+        return isinstance(tab, TerminalTab) and tab.pty_id is not None and tab.has_running_command()
+
+    def _pty_shown_on_device(self, pty: int) -> bool:
+        """Whether some window of this app shows agent pty *pty*."""
+        app = self.get_application()
+        windows = app.get_windows() if app is not None else [self]
+        return any(
+            isinstance(w, MainWindow) and w._page_for_pty(pty) is not None for w in windows
+        )
 
     def _active_session_id(self) -> str | None:
         page = self.tab_view.get_selected_page()
@@ -911,9 +1059,34 @@ class MainWindow(Adw.ApplicationWindow):
 
     def set_reconnecting(self, reconnecting: bool) -> None:
         """Raise or lower the reconnect banner (`App._on_connection_state`)."""
+        self._banner_reconnecting = bool(reconnecting)
+        self._sync_service_banner()
+
+    def set_restart_pending(self, pending: bool) -> None:
+        """Say "Restarting when idle", with Cancel, in the reconnect
+        banner's place (`App.restart_service`)."""
+        self._banner_restart_pending = bool(pending)
+        self._sync_service_banner()
+
+    def _sync_service_banner(self) -> None:
         banner = getattr(self, "reconnect_banner", None)
-        if banner is not None:
-            banner.set_revealed(bool(reconnecting))
+        if banner is None:
+            return
+        if self._banner_reconnecting:
+            banner.set_title(_("Reconnecting to the Collins service"))
+            banner.set_button_label(None)
+            banner.set_revealed(True)
+        elif self._banner_restart_pending:
+            banner.set_title(_("Restarting when idle"))
+            banner.set_button_label(_("Cancel"))
+            banner.set_revealed(True)
+        else:
+            banner.set_revealed(False)
+
+    def _on_banner_button(self, _banner) -> None:
+        app = self.get_application()
+        if self._banner_restart_pending and hasattr(app, "cancel_service_restart"):
+            app.cancel_service_restart()
 
     def close_panel_ptys(self) -> None:
         """The app is quitting: every tab's panel shells end on the service
@@ -1115,6 +1288,34 @@ class MainWindow(Adw.ApplicationWindow):
             self._quit_asking = False
             self._hide_window()
 
+        def do_detach() -> None:
+            # Plain Quit (§3.21, D30): nothing is asked of any agent. The
+            # open tabs are recorded (open_tabs brings each back at the next
+            # launch), then every tab detaches and its session keeps running
+            # in the Collins service — except a page already mid-close (a
+            # graceful exit, a /bg handoff), which drains as do_quit's do,
+            # and a shell whose CLI has exited, which ends. _on_close_page
+            # reissues the window close once the last page is gone.
+            self._quit_asking = False
+            self._quitting = True
+            self._close_for_good()
+            pages = [self.tab_view.get_nth_page(i) for i in range(self.tab_view.get_n_pages())]
+            for page in pages:
+                self._close_ok.add(page)
+                tab = page.get_child()
+                if (
+                    isinstance(tab, TerminalTab)
+                    and not self._page_settling(page)
+                    and tab.pty_id is not None
+                    and tab.has_running_command()
+                ):
+                    self._detached_pages.add(page)
+            if not pages:
+                GLib.idle_add(self.close, priority=GLib.PRIORITY_DEFAULT)
+                return
+            for page in pages:
+                self.tab_view.close_page(page)
+
         can_background = any(self._quit_backgroundable(self.tab_view.get_nth_page(i))
                              for i in range(self.tab_view.get_n_pages()))
         behavior = self.state.get_setting("quit_with_running_sessions")
@@ -1124,44 +1325,66 @@ class MainWindow(Adw.ApplicationWindow):
         if behavior == "background":
             # Background what can be handed off; anything that can't gets the
             # normal graceful exit — exactly what the dialog's Background
-            # Sessions button does, so no backgroundable tabs means the same
-            # exit-all the button would have produced.
+            # Sessions button did, so no backgroundable tabs means the same
+            # exit-all.
             do_quit(background=can_background)
+            return
+        if behavior == "detach":
+            do_detach()
             return
         # "ask" — or "hide" during an explicit app.quit, which never hides
         # silently: the dialog offers all the answers instead.
-        heading = _("Close window with {n} active session(s)?").format(n=busy)
-        body = _("Agents are asked to exit cleanly first; "
-                 "other running commands will be terminated.")
-        if can_background:
-            body = _("Agents are asked to exit cleanly first; other running "
-                     "commands will be terminated. Backgrounding instead keeps "
-                     "the agents running detached — reopen a session later to "
-                     "re-attach.")
+        heading = (
+            _("1 session keeps running in the Collins service")
+            if busy == 1
+            else _("{n} sessions keep running in the Collins service").format(n=busy)
+        )
+        app = self.get_application()
+        other_windows = any(
+            isinstance(w, MainWindow) and w is not self and not w.closed_for_good
+            for w in (app.get_windows() if app is not None else [])
+        )
+        if other_windows:
+            body = _("This window closes and its agents keep working; their tabs come "
+                     "back the next time Collins opens. Stop Sessions and Quit asks "
+                     "each agent to exit first.")
+        else:
+            body = _("Quit closes Collins and leaves every agent working; the tabs "
+                     "come back the next time Collins opens. Stop Sessions and Quit "
+                     "asks each agent to exit first.")
         body += " " + _("Keep Running hides the window and leaves every "
                         "session exactly as it is.")
-        # The least destructive answer is the default — but only when a
-        # status icon can appear to bring the window back, and never for an
-        # explicit Quit, which would swallow its own meaning. The app's
-        # cached watch answers, not statusicon.available() — a synchronous
-        # bus round trip has no place on the close path.
-        app = self.get_application()
-        hide_default = not explicit_quit and bool(
-            getattr(app, "tray_host_present", False)
-        )
-        dialogs.confirm_dialog(
+        if not getattr(app, "tray_host_present", False):
+            body += " " + _("Without a status icon, a hidden window comes back by "
+                            "launching Collins again.")
+        if not self.state.get_setting("quit_notice_shown"):
+            # Once per device: the icon going is no sign the agents did.
+            body += " " + _("Collins's status icon leaves with the window; "
+                            "the sessions keep running.")
+            self.state.set_setting("quit_notice_shown", True)
+
+        def answered(response: str) -> None:
+            if response == "quit":
+                do_detach()
+            elif response == "stop":
+                do_quit()
+            elif response == "hide":
+                do_hide()
+            else:
+                self._quit_asking = False
+
+        dialogs.answer_dialog(
             self,
             heading,
             body,
-            _("Exit Sessions"),
-            do_quit,
-            on_dismiss=lambda: setattr(self, "_quit_asking", False),
-            default_response="extra2" if hide_default else "confirm",
-            extra_label=_("Background Sessions") if can_background else None,
-            on_extra=(lambda: do_quit(background=True)) if can_background else None,
-            extra2_label=_("Keep Running (Hide Window)"),
-            on_extra2=do_hide,
-            keys={"e": "confirm", "b": "extra", "k": "extra2", "c": "cancel"},
+            [
+                ("hide", _("Keep Running (Hide Window)"), ""),
+                ("stop", _("Stop Sessions and Quit"), "destructive"),
+                ("quit", _("Quit"), "suggested"),
+            ],
+            answered,
+            default_response="quit",
+            keys={"q": "quit", "s": "stop", "k": "hide", "c": "cancel"},
         )
 
     # -- quit-time backgrounding ---------------------------------------------
@@ -1392,6 +1615,8 @@ class MainWindow(Adw.ApplicationWindow):
             # disabled falls through, and Ctrl+Shift+Z falling through to a
             # terminal would type into the agent (see _install_shortcuts).
             "undo-archive": lambda *_: self._undo_archive_now(),
+            # The app menu's *Restart service* (§3.21).
+            "restart-service": lambda *_: self._ask_restart_service(),
         }
         for name, callback in plain.items():
             action = Gio.SimpleAction(name=name)
@@ -1435,6 +1660,9 @@ class MainWindow(Adw.ApplicationWindow):
             "export-session": self._on_export_session,
             "session-details": self._on_session_details,
             "stop-session": lambda _a, p: self._close_session_tab(p.get_string()),
+            # The tab menu's and the row menu's *Detach* (§3.21); "" is the
+            # page the tab menu was opened on.
+            "detach-session": self._on_detach_action,
             "background-session": lambda _a, p: self._close_session_tab(
                 p.get_string(), background=True
             ),
@@ -1658,6 +1886,106 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- tabs --------------------------------------------------------------
 
+    def reopen_tabs(self) -> None:
+        """A launch's first window: the tabs this device had open on this
+        service come back (`open_tabs`, §3.21) — each attached when the
+        service still runs it, else resumed — with the one that was active
+        selected. With none recorded, the "reopen the last session"
+        setting still reopens the active one alone (restore_last_session)."""
+        entries = self.state.get_open_tabs()
+        if not entries:
+            self.restore_last_session()
+            return
+        self.reopen_open_tabs(entries, active=self.state.get_setting("last_active_session") or None)
+
+    def reopen_open_tabs(self, entries: list[str], active: str | None = None) -> None:
+        """Open each `open_tabs` entry not shown already: a session id is
+        opened as the sidebar's row would be (attached when running,
+        resumed when not); ``pty:<id>`` is attached when the service still
+        runs it and dropped when it does not (an unresolved session with no
+        id has nothing to resume). A session the store has not scanned yet
+        waits for its first refresh."""
+        app = self.get_application()
+        waiting: list[str] = []
+        for entry in entries:
+            pty = uistate.open_tab_pty(entry)
+            if pty is not None:
+                if self.store.pty_running(pty) and not self._pty_shown_on_device(pty):
+                    self.open_running_pty(pty)
+                continue
+            if session_window(app, entry) is not None:
+                continue
+            session = self.store.get_session(entry)
+            if session is None:
+                waiting.append(entry)
+                continue
+            self.open_session(session)
+        self._reopen_waiting = waiting
+        self._reopen_active = active
+        self._select_reopened(active)
+
+    def _select_reopened(self, active: str | None) -> None:
+        page = self._page_for(active) if active else None
+        if page is not None:
+            self.tab_view.set_selected_page(page)
+
+    def _apply_reopen_waiting(self) -> None:
+        """One more go for the entries the store had not scanned (once)."""
+        entries, self._reopen_waiting = self._reopen_waiting, []
+        app = self.get_application()
+        for entry in entries:
+            if session_window(app, entry) is not None:
+                continue
+            session = self.store.get_session(entry)
+            if session is not None:
+                self.open_session(session)
+        self._select_reopened(self._reopen_active)
+
+    def open_running_pty(self, pty: int, background: bool = False) -> TerminalTab | None:
+        """A tab over agent pty *pty*, which the service runs with no tab
+        on this device (a running "New session" row, an ``open_tabs``
+        entry of an unresolved session): attached, never spawned. Jumps to
+        the tab that shows it already; None when the service no longer
+        runs it."""
+        app = self.get_application()
+        for window in app.get_windows() if app is not None else [self]:
+            if isinstance(window, MainWindow):
+                page = window._page_for_pty(pty)
+                if page is not None:
+                    window.tab_view.set_selected_page(page)
+                    if window is not self:
+                        window.present()
+                    return page.get_child()
+        row = self.store.agent_ptys().get(pty)
+        if row is None:
+            return None
+        if row.get("session"):
+            session = self.store.get_session(row["session"])
+            if session is not None:
+                self.open_session(session)
+                return self._session_tab(row["session"])
+        cwd = row.get("cwd") or str(Path.home())
+        provider = self._default_provider()
+        tab = TerminalTab(
+            cwd=cwd,
+            session_id=None,
+            settings=self.state.settings,
+            provider=provider,
+            attach_pty=pty,
+            initial_size=self._background_terminal_size() if background else None,
+        )
+        if tab.attach_refused:
+            tab.detach_pty()
+            return None
+        page = self._add_tab(
+            tab,
+            _("New chat") if chats.is_chat_cwd(cwd) else GLib.path_get_basename(cwd),
+            f"{provider.name} session — {cwd}",
+            background=background,
+        )
+        self._add_placeholder(page, tab, cwd)
+        return tab
+
     def restore_last_session(self) -> None:
         """Reopen the session that was in the active tab when the app was last
         closed — only when the opt-in setting says so; by default a launch
@@ -1755,6 +2083,21 @@ class MainWindow(Adw.ApplicationWindow):
                 return
 
         cwd = resume_cwd(session)
+        # A session the Collins service already runs is shown, not resumed
+        # a second time (D31): a tab over its pty, its facts arriving with
+        # the attach. A fork always starts its own.
+        attach_pty = None if fork else self.store.pty_for(session.session_id)
+        if attach_pty is not None and (
+            self._pty_shown_on_device(attach_pty) or not self._pty_runs_cli(attach_pty)
+        ):
+            # Shown here already, or a shell whose CLI has exited: the
+            # resume below is what the service takes for that one (it
+            # closes the shell-only pty and spawns the session afresh).
+            attach_pty = None
+        if attach_pty is not None:
+            attach_id = self.store.agent_ptys().get(attach_pty, {}).get("session") or attach_id
+            if attach_id == session.session_id:
+                attach_id = None
         # A chat's throwaway directory may have been swept or trashed since;
         # recreate it rather than letting the terminal fall back to $HOME.
         chats.ensure_chat_dir(cwd)
@@ -1772,19 +2115,35 @@ class MainWindow(Adw.ApplicationWindow):
             if attach_id
             else session.jsonl_path
         )
-        tab = TerminalTab(
-            cwd=cwd,
-            session_id=bound_id,
-            fork=fork,
-            settings=self.state.settings,
-            provider=provider,
-            jsonl_path=jsonl_path,
-            # The box, and the prompts-off mode the setting gives it: the
-            # CLI restores no permission mode on --resume by itself.
-            options=replace(self._sandboxed_options(SessionOptions()), sandbox_box=box)
-            if sandboxed
-            else None,
-        )
+        tab = None
+        if attach_pty is not None:
+            tab = TerminalTab(
+                cwd=cwd,
+                session_id=bound_id,
+                settings=self.state.settings,
+                provider=provider,
+                jsonl_path=jsonl_path,
+                attach_pty=attach_pty,
+            )
+            if tab.attach_refused:
+                # It ended between the sidebar's word and the click: resumed
+                # instead, as any session with no pty is.
+                tab.detach_pty()
+                tab = None
+        if tab is None:
+            tab = TerminalTab(
+                cwd=cwd,
+                session_id=bound_id,
+                fork=fork,
+                settings=self.state.settings,
+                provider=provider,
+                jsonl_path=jsonl_path,
+                # The box, and the prompts-off mode the setting gives it: the
+                # CLI restores no permission mode on --resume by itself.
+                options=replace(self._sandboxed_options(SessionOptions()), sandbox_box=box)
+                if sandboxed
+                else None,
+            )
         title = f"{self.store.display_name(session)} (fork)" if fork else self._tab_title(session)
         project = "Chats" if chats.is_chat_cwd(session.cwd) else session.project_name
         page = self._add_tab(tab, title, f"{project} — {bound_id}")
@@ -2252,6 +2611,11 @@ class MainWindow(Adw.ApplicationWindow):
             self.tab_view.set_selected_page(page)
             self._clear_unread(page)  # already-selected tabs emit no switch; see open_session
             return True
+        pty = uistate.open_tab_pty(placeholder_id)
+        if pty is not None:
+            # A running "New session" row: the fresh session the service
+            # runs with no tab here, shown by attaching (§3.21).
+            return self.open_running_pty(pty) is not None
         if newchat.is_draft_id(placeholder_id):
             return self._open_new_chat_draft(placeholder_id)  # a kept draft with no tab: reopen it
         return False
@@ -2674,6 +3038,7 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar's, and the sidebar is where it can be changed (drag a project
         header there instead). Deferred to an idle so the snap lands after the
         tab bar has finished settling the drag."""
+        self._open_tabs_changed()
         if self._sorting_tabs or self._sort_tabs_source is not None:
             return
         self._sort_tabs_source = GLib.idle_add(self._snap_tabs_back)
@@ -2815,6 +3180,7 @@ class MainWindow(Adw.ApplicationWindow):
         # one before it knew its id gets it written down now.
         tab.restore_composer_draft(self.state.get_session_draft(session_id))
         self._pending_resolved[page] = (session_id, page.get_title())
+        self._open_tabs_changed()  # its entry is the id now, not pty:<id>
         self._sync_status(session_id)
         self._update_active_row()  # the resolved tab may be the selected one
         self._apply_resolved_sessions()
@@ -2887,6 +3253,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_store_refreshed(self, _store, _order_changed: bool) -> None:
         self._sync_trash_archived_action()
+        if self._reopen_waiting:
+            self._apply_reopen_waiting()
         if self._restore_session_id is not None:
             self._apply_restore_session()
         if self._pending_resolved:
@@ -3208,6 +3576,7 @@ class MainWindow(Adw.ApplicationWindow):
         # An unresolved tab has no session to sync a status for, and it is
         # still a tab: the item is Active for it and counts it in the tooltip.
         self._notify_tray()
+        self._open_tabs_changed()
 
     def _on_page_detached(self, _view: Adw.TabView, page: Adw.TabPage, _pos: int) -> None:
         handler = self._title_handlers.pop(page, None)
@@ -3221,6 +3590,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._cancel_new_chat_save(page)
         self._discarding_drafts.discard(page)
         self._notify_tray()
+        self._open_tabs_changed()
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -5421,6 +5791,91 @@ class MainWindow(Adw.ApplicationWindow):
         if isinstance(tab, TerminalTab) and tab.session_id:
             self.get_clipboard().set(tab.session_id)
 
+    def _on_detach_action(self, _action, param: GLib.Variant) -> None:
+        """*Detach*: the row menu names the session (its tab may be in
+        another window), the tab menu names nothing (the page it was
+        opened on)."""
+        session_id = param.get_string()
+        if session_id:
+            owner = self._owner_window(session_id)
+            page = owner._page_for(session_id) if owner is not None else None
+            if owner is not None and page is not None:
+                owner.detach_page(page)
+            return
+        page = self._menu_page or self.tab_view.get_selected_page()
+        if page is not None:
+            self.detach_page(page)
+
+    def detach_page(self, page: Adw.TabPage) -> bool:
+        """Close *page* and leave its session running in the Collins service
+        (§3.21, D12): no question about the session — nothing of it ends —
+        and its row stays, a running row. Unsaved editor buffers still get
+        their Save Changes? first; the panel shells end with the tab, their
+        history written as on a close. False when there is nothing running
+        to leave (a new-chat screen, a session that has ended)."""
+        tab = page.get_child()
+        if not isinstance(tab, TerminalTab) or tab.is_new_chat or tab.pty_id is None:
+            return False
+        if self._page_settling(page):
+            # Mid-close (a graceful exit, a /bg handoff): the close runs to
+            # its end; a Detach now would leave its keystrokes going into a
+            # pty the person was told keeps running (PR-1.12c review).
+            return False
+        if not tab.has_running_command():
+            # The CLI has exited and the shell sits there alone: nothing to
+            # leave running. The page closes as it would (nothing to ask).
+            self.tab_view.close_page(page)
+            return False
+
+        def go() -> None:
+            if self.tab_view.get_page(tab) is None or self._page_settling(page):
+                return  # closed, or a close began, meanwhile
+            self._detached_pages.add(page)
+            self.tab_view.close_page(page)
+
+        self._ask_save_editors([tab], go)
+        return True
+
+    def _ask_restart_service(self) -> None:
+        """*Restart service* (§3.21): the blast radius first — the sessions
+        the service runs, how many of them are working — then a restart
+        now, or once none is busy. Every session ends with the service and
+        each open tab resumes its own once it is back, as a quit and a
+        relaunch did before the service."""
+        app = self.get_application()
+        link = getattr(app, "_service_link", None)
+        try:
+            status = link.call({"t": "service.status"}) if link is not None else {}
+        except RequestRefused as refusal:
+            dialogs.error_dialog(self, _("The Collins service did not answer"), _(refusal.msgid))
+            return
+        sessions = len(self.store.agent_ptys())
+        busy = int(status.get("busy") or 0)
+        pid = status.get("pid")
+        if sessions:
+            body = _("{n} sessions end with it, {busy} of them working. Each open tab "
+                     "resumes its session once the service is back.").format(n=sessions, busy=busy)
+        else:
+            body = _("No session is running.")
+        body += " " + _("Collins and its status icon stay while the service restarts.")
+        choices = []
+        if busy:
+            choices.append(("idle", _("Restart When Idle"), ""))
+        choices.append(("now", _("Restart Now"), "destructive" if sessions else "suggested"))
+
+        def answered(response: str) -> None:
+            if response in ("now", "idle") and hasattr(app, "restart_service"):
+                app.restart_service(response, pid)
+
+        dialogs.answer_dialog(
+            self,
+            _("Restart the Collins service?"),
+            body,
+            choices,
+            answered,
+            default_response="idle" if busy else "now",
+        )
+
     def _close_menu_tab(self) -> None:
         page = self._menu_page or self.tab_view.get_selected_page()
         if page is not None:
@@ -5431,7 +5886,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_close_page(self, view: Adw.TabView, page: Adw.TabPage) -> bool:
         tab = page.get_child()
-        if isinstance(tab, TerminalTab) and page not in self._confirmed_closes:
+        detaching = page in self._detached_pages
+        if isinstance(tab, TerminalTab) and page not in self._confirmed_closes and not detaching:
             agent_busy = tab.has_running_command()
             panel_busy = tab.panel_has_running_command()
             editor_dirty = tab.editor_dirty_count()
@@ -5463,9 +5919,17 @@ class MainWindow(Adw.ApplicationWindow):
         self._confirmed_closes.discard(page)
         self._closing_pages.discard(page)
         self._bg_closing.discard(page)
+        self._detached_pages.discard(page)
+        if isinstance(tab, TerminalTab) and not detaching:
+            app = self.get_application()
+            if hasattr(app, "forget_kept_tab"):
+                app.forget_kept_tab(tab.session_id, tab.pty_id)
         if isinstance(tab, TerminalTab):
-            tab.session.end_close()  # its close poll, if one was running, ends here
-            tab.release_pty()  # the tab's pty goes with it
+            if detaching:
+                tab.detach_pty()  # the pty runs on in the service (§3.21)
+            else:
+                tab.session.end_close()  # its close poll, if one was running, ends here
+                tab.release_pty()  # the tab's pty goes with it
         self._close_asking.discard(page)
         self._close_ok.discard(page)
         self._bg_ok.discard(page)

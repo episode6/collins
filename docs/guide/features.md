@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-04. Full change history: git log for this file.
+fork. Last modified: 2026-10-05. Full change history: git log for this file.
 -->
 
 # Features
@@ -139,7 +139,8 @@ Enter opens, Esc closes.
   on the service too: their saved scrollback is written from the service's
   screen model and painted back ahead of the new shell's prompt, and
   `read_terminal` / `run_in_terminal` read and type through the service.
-  Quitting Collins ends the sessions.
+  Quitting Collins ends nothing: see *Detach*, *Quit* and *Restart service*
+  below.
 - Clicking a session opens it in an embedded **VTE terminal** running your
   `$SHELL` with the agent's resume command (`claude --resume <id>`) — in
   the directory the session **last worked in** (worktree-aware), not just
@@ -286,14 +287,53 @@ Enter opens, Esc closes.
   dialog's third answer, **Keep Running (Hide Window)**, hides the window
   and leaves every session exactly as it is — panels, scrollback and all.
   The status icon's *Show Collins*, a session's notification, or simply
-  launching Collins again brings it back. Where a status icon is present
-  it's the dialog's default answer; the **When quitting with running
-  sessions** preference can skip the dialog entirely (always ask, exit,
-  background, or hide), and the menu's explicit Quit always really quits.
+  launching Collins again brings it back. The **When quitting with running
+  sessions** preference set to *Hide Window* hides without asking, and the
+  menu's explicit Quit always really quits (the sessions keep running in
+  the service).
+- **Detach** (the tab menu, and the row menu of a session with a tab open)
+  stops looking without ending anything: the tab closes with no question,
+  the session keeps running in the Collins service, and its row becomes a
+  **running row** — the yellow line, climbing in yellow stripes while the
+  agent works. Opening a running row **attaches** a tab to the session's
+  terminal as it stands (scrollback, a turn mid-stream and all) instead of
+  resuming it a second time. A brand-new session that has not named itself
+  yet shows as a running **New session** row under its project. Unsaved
+  editor buffers still get their *Save Changes?* first; the terminal
+  panel's shells end with the tab, their scrollback kept as on a close.
+  Detach is not offered while the tab is already closing (an exit or a
+  `/bg` handoff runs to its end), and a tab whose agent has exited simply
+  closes: a shell alone is no running session, and its row is not a
+  running row. **Close** keeps its meaning: the agent is asked to exit.
+- **Quitting leaves the sessions running.** *Quit* closes the window and
+  every tab detaches: the agents keep working in the service, and the next
+  launch brings the tabs back — each attached where the service still runs
+  it, resumed where it does not. With **When quitting with running
+  sessions** on *Ask*, the dialog says how many sessions keep running and
+  offers **Quit**, **Stop Sessions and Quit** (each agent asked to exit
+  first, as quitting did before the service) and **Keep Running (Hide
+  Window)**; the first time, it also says the status icon goes with the
+  window while the sessions keep running, and without a status icon it
+  says how a hidden window comes back. Closing one of several windows
+  says that window closes; its tabs are reopened at the next launch all
+  the same. A tab already closing finishes its close, and a tab whose
+  agent has exited ends with the window. The preference's choices are
+  *Leave Running* (the default; an install that had *Ask* moves to it
+  once), *Ask*, *Stop Sessions*, *Background Session* and *Hide Window*.
+- **Restart service** (the main menu) restarts the Collins service after
+  saying what it costs: how many sessions end, how many of them are
+  working. **Restart Now** ends them, the window reconnects to the new
+  service and every open tab resumes its session — what quitting and
+  relaunching did before the service. **Restart When Idle** waits on the
+  service until no session is busy; meanwhile "Restarting when idle"
+  stands where the reconnect banner goes, with **Cancel**. A window that
+  finds an older service speaking a protocol it does not offers the same
+  restart, or Quit; a newer service asks for Collins to be upgraded.
 - The window title names the focused session, and the sidebar is
-  **resizable**, its width remembered. On the next launch the app opens
-  with no session — or, with **Reopen the last session** on (Preferences →
-  Session behavior), with the one you had focused — and the window comes back at
+  **resizable**, its width remembered. The next launch reopens the tabs
+  that were open when Collins quit; with none, it opens with no session —
+  or, with **Reopen the last session** on (Preferences → Session
+  behavior), with the one you had focused — and the window comes back at
   its last size.
 
 ## Prompt composer
@@ -1410,8 +1450,8 @@ last session**, a **Sandbox** group — **Sandbox new sessions**, **Skip
 permission prompts inside**, **Share GitHub CLI login**, **Share SSH
 agent**, **Let sandboxed sessions write settings and hooks**, and a
 status row saying whether bubblewrap was found and whether allowed
-directories reach a running session — what to do **when quitting with running sessions** (ask /
-exit / background / hide) and **when archiving a running session** (ask /
+directories reach a running session — what to do **when quitting with running sessions** (leave
+running / ask / stop sessions / background / hide) and **when archiving a running session** (ask /
 exit / background), **Archive on claude.ai too**, **Delete
 archived sessions after** (a number and a unit; 0 never), **Exact busy
 tracking from the agent** (on: the sidebar's working indicator reads the

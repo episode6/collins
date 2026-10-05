@@ -421,11 +421,24 @@ def test_the_cut_off_redraws_and_acks_after_a_drop_still_count(served, monkeypat
     client.close()
 
 
-def test_service_restart_now_is_served_and_idle_refused(tmp_path, monkeypatch):
+def test_service_restart_now_idle_and_cancel_are_served(tmp_path, monkeypatch):
+    """PR-1.12c serves `idle` (the core waits for no session busy) and
+    `cancel` (that wait called off) beside `now`."""
     monkeypatch.setenv("SHELL", CAT)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
     (tmp_path / "run").mkdir()
     core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+
+    class Busy:
+        count = 1
+
+        def busy_count(self):
+            return self.count
+
+        def stop(self):
+            pass
+
+    core.activity = Busy()
     restarts = []
     server = api_server.ApiServer(core, "com.example.Restart", on_restart=restarts.append)
     path = server.listen()
@@ -433,10 +446,19 @@ def test_service_restart_now_is_served_and_idle_refused(tmp_path, monkeypatch):
         client = Raw(path)
         client.hello()
         idle = client.request({"t": "service.restart", "when": "idle"})
-        assert idle["ok"] is False and idle["error"] == "refused"
+        assert idle["ok"] is True and core.restart_pending
+        cancel = client.request({"t": "service.restart", "when": "cancel"})
+        assert cancel["ok"] is True and not core.restart_pending
+        assert restarts == []
+        # Idle, then now: the waiting one is called off and fires never.
+        monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+        assert client.request({"t": "service.restart", "when": "idle"})["ok"] is True
         now = client.request({"t": "service.restart", "when": "now"})
         assert now["ok"] is True
         assert pump(2, lambda: restarts == ["now"])
+        core.activity.count = 0
+        pump(0.3)
+        assert restarts == ["now"] and not core.restart_pending
         client.close()
     finally:
         server.stop()
