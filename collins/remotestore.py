@@ -158,6 +158,10 @@ class RemoteStore(GObject.Object):
         # "cwd": str}. What a running row attaches to, and the unresolved
         # spawns' "New session" rows.
         self._agent_ptys: dict[int, dict] = {}
+        # The open_tabs entries of a window that closed while others stay
+        # (App.keep_open_tabs): kept while their sessions run here, dropped
+        # when a table exit names one, cleared with the rest on a reset.
+        self.kept_open_tabs: list[str] = []
         link.on("item", self._on_item)
         link.on("pty", self._on_pty)
         link.on("pty-exited", self._on_pty_exited)
@@ -184,6 +188,7 @@ class RemoteStore(GObject.Object):
         self._fields.clear()
         self._paged = False
         self._missing.clear()
+        self.kept_open_tabs = []
         # The new service's table comes whole with the snapshot.
         gone = [row.get("session") or "" for row in self._agent_ptys.values()]
         self._agent_ptys.clear()
@@ -283,6 +288,10 @@ class RemoteStore(GObject.Object):
         """An agent pty's child exited: its row leaves the table (the
         subscription's word and a view's alike; the second is a no-op)."""
         row = self._agent_ptys.pop(event.get("pty"), None)
+        if event.get("table"):
+            # A session that ended (or whose CLI left) with no tab here: a
+            # closed window's kept entry no longer stands for anything.
+            self.forget_kept_tab((row or {}).get("session"), event.get("pty"))
         if row is not None:
             session_id = row.get("session") or ""
             if session_id and not self._table_runs(session_id):
@@ -382,6 +391,20 @@ class RemoteStore(GObject.Object):
                 item.favorite = favorite
 
     # -- the service's agent ptys (PR-1.12c, §3.21) ----------------------------------
+
+    def keep_open_tabs(self, entries: list[str]) -> None:
+        """Keep a closed window's `open_tabs` entries (App.keep_open_tabs)."""
+        self.kept_open_tabs += [e for e in entries if e not in self.kept_open_tabs]
+
+    def forget_kept_tab(self, session_id: str | None, pty: int | None) -> bool:
+        """Drop the kept entries naming *session_id* or ``pty:<pty>``; True
+        when one went."""
+        gone = {session_id, f"pty:{pty}" if isinstance(pty, int) else None} - {None, ""}
+        kept = [e for e in self.kept_open_tabs if e not in gone]
+        if len(kept) == len(self.kept_open_tabs):
+            return False
+        self.kept_open_tabs = kept
+        return True
 
     def _table_runs(self, session_id: str) -> bool:
         return any(row.get("session") == session_id for row in self._agent_ptys.values())

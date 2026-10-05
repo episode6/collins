@@ -2298,16 +2298,12 @@ class App(Adw.Application):
         """A window that closed while others stay: its tabs are still open
         tabs of this device (their sessions run on, and come back at the
         next launch) until one of them is closed for good elsewhere."""
-        kept = getattr(self, "_kept_open_tabs", [])
-        self._kept_open_tabs = kept + [e for e in entries if e not in kept]
+        self.store.keep_open_tabs(entries)
 
     def forget_kept_tab(self, session_id: str | None, pty: int | None) -> None:
         """A tab closed for good (not detached): no kept entry of a closed
         window stands for its session any more."""
-        gone = {session_id, f"pty:{pty}" if pty is not None else None} - {None}
-        kept = getattr(self, "_kept_open_tabs", [])
-        if any(entry in gone for entry in kept):
-            self._kept_open_tabs = [e for e in kept if e not in gone]
+        if self.store.forget_kept_tab(session_id, pty):
             self.persist_open_tabs()
 
     def open_tab_entries(self) -> list[str]:
@@ -2320,7 +2316,7 @@ class App(Adw.Application):
                 for entry in window.open_tab_entries():
                     if entry not in entries:
                         entries.append(entry)
-        for entry in getattr(self, "_kept_open_tabs", []):
+        for entry in self.store.kept_open_tabs:
             if entry not in entries:
                 entries.append(entry)
         return entries
