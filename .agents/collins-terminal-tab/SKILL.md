@@ -740,7 +740,9 @@ The `Session` is the service's (spec §3.19). The pieces:
   `can_background` (the service's, `service/bgagents.py`).
 - **The cwd tick** is a client 2 s tick while mapped, over the mirror's
   `agent_cwd`, which the service's own poll publishes on change: the
-  footer's branch and the git page's freshness ride it.
+  footer's branch and the git page's root check ride it (`poll_tick`;
+  the page's signatures' compare is the service's `git-changed` since
+  PR-2.2, and the finish edge calls `check_now`).
 - **Running means the CLI runs.** A session counts as running (the row's
   `running`, `open_tabs`, attach-on-activate) only while its CLI does:
   `ServiceCore.cli_changed` follows the `running_command` fact, publishing

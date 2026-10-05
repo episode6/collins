@@ -245,8 +245,9 @@ Enter opens, Esc closes.
   deletes, and a click opens either full size. An SVG keeps its patch under
   the preview (a small one is drawn scaled up, since vector artwork loses
   nothing by it); a binary image, whose diff only ever said the two files
-  differ, shows the picture alone. The blobs come through `gh`, so private
-  repositories and Enterprise hosts work — and *Show embedded images*
+  differ, shows the picture alone. The blobs come through `gh` on the
+  service, so private repositories and Enterprise hosts work, and are kept
+  in `~/.cache/collins/blobs/` for a day — and *Show embedded images*
   (Preferences) turns the whole thing off.
 - **Right-click a chip** for what to *do* with it: mark a draft **ready for
   review**, **merge** it — or arm **auto-merge** while its checks are still

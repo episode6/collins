@@ -605,14 +605,15 @@ class ApiServer:
     # -- connections
 
     def _on_blob(self, _server, msg: Soup.ServerMessage, _path, query, *_rest) -> None:
-        """`GET /api/blob?kind=git&…` (§3.11, §3.23): the blob's bytes with
-        its ETag, answered off the main loop — the message is paused while
-        the service's thread reads it, and unpaused with the answer. The
-        request names its client with the ``Collins-Client`` header (the
-        hello's client_id, for the `local` capability's confinement); a
-        request with none, or one of a client the server does not know,
-        is confined like a remote client's. ``kind`` other than ``git``
-        is 404 until the later chunks serve it."""
+        """`GET /api/blob?kind=git|pr&…` (§3.11, §3.23): the blob's bytes
+        with its ETag, answered off the main loop — the message is paused
+        while the service's thread reads it, and unpaused with the answer.
+        The request names its client with the ``Collins-Client`` header
+        (the hello's client_id, for the `local` capability's confinement
+        of a git blob; a PR file is a gh read and needs none); a request
+        with none, or one of a client the server does not know, is
+        confined like a remote client's. Any other ``kind`` is 404 until
+        the later chunks serve it (``file`` and ``icon``, PR-2.7)."""
         if not self.accepting or msg.get_method() != "GET":
             msg.set_status(405, None)
             return
@@ -626,10 +627,13 @@ class ApiServer:
         # listener is not a Unix socket, is what makes this a credential.
         client_id = msg.get_request_headers().get_one(CLIENT_HEADER) or ""
         client = self.clients.get(client_id)
-        if params.get("kind") != "git":
+        # kind=git is a git blob (gitfeed.GitFeed.blob, PR-2.1), kind=pr a
+        # PR file through gh (prfeed.PrBlobs.blob, PR-2.2); the same shape.
+        feed_name = {"git": "git", "pr": "pr_blobs"}.get(params.get("kind") or "")
+        if feed_name is None:
             msg.set_status(404, None)
             return
-        feed = getattr(self.core, "git", None)
+        feed = getattr(self.core, feed_name, None)
         if feed is None:
             msg.set_status(404, None)
             return

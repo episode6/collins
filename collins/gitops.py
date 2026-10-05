@@ -855,6 +855,37 @@ def side_ref(
     return (merge_base or halves[0]) if old else halves[1]
 
 
+def side_blob(
+    load: object,
+    side: str,
+    path: str,
+    previous_path: str | None = None,
+    parent_target: str | None = None,
+    merge_base: str | None = None,
+) -> tuple[str, str | None, str] | None:
+    """Where the blob GET reads one *side* of *load* from (split-service
+    spec §3.23, PR-2.2): ``(at, ref, path)`` for `remotegit.blob_url` —
+    AT_WORKTREE, AT_INDEX or AT_REF with the revision side_ref names, and
+    the path that side has (the old one of a rename). None where
+    side_bytes would read nothing: side_ref names no side and it isn't
+    the unstaged load's working tree, or the path or the ref isn't safe.
+    What the diff view's image previews fetch, by URL, through the
+    blobcache."""
+    ref = side_ref(load, side, parent_target, merge_base)
+    where = previous_path if side == diffmodel.OLD and previous_path else path
+    if not safe_path(where):
+        return None
+    if ref is None:
+        if load == "unstaged" and side == diffmodel.NEW:
+            return AT_WORKTREE, None, where
+        return None
+    if ref == INDEX_REF:
+        return AT_INDEX, None, where
+    if not gitloads.safe_ref(ref):
+        return None
+    return AT_REF, ref, where
+
+
 def side_bytes(
     cwd: str | Path | None,
     load: object,

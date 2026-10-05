@@ -25,8 +25,10 @@ machine's `.git` and git:
   entry before, marked `unreachable`, so a hiccup reads as "nothing
   moved" rather than "not a repository" and the page leaves its view
   alone; with no entry before it is None. The service's `git-changed`
-  events refresh the entry the same way and are handed to the pages
-  watching that cwd (`on_changed`). `watch` / `unwatch` are the page's
+  events refresh the entry by `send` and are handed to the pages
+  watching that cwd once the answer is stored (`on_changed`,
+  `refresh_then`: the page compares its signatures on the event,
+  PR-2.2). `watch` / `unwatch` are the page's
   directory monitors, installed on the service under the page's own
   handle (two pages on one tree are two watches); the mirror remembers
   every live watch and sends them again on `reset` (a reconnect: the
@@ -115,6 +117,8 @@ class Mirror:
         # Every live watch by handle: the message that installed it, sent
         # again after a reconnect (reset).
         self._watches: dict[str, dict] = {}
+        # refresh_then's callbacks per cwd while its re-read is in flight.
+        self._then_waiting: dict[str, list[Callable[[], None]]] = {}
 
     # -- the link
 
@@ -133,6 +137,8 @@ class Mirror:
         with self._lock:
             self._entries.clear()
             self._pending.clear()
+            # _then_waiting is left alone: its re-reads in flight are
+            # answered or refused (gone) and tell their callbacks either way.
             watches = list(self._watches.values())
         for message in watches:
             self._send_watch(message)
@@ -257,20 +263,33 @@ class Mirror:
 
     # -- the watch
 
-    def watch(self, cwd: str, files: Sequence[str], state: str | None = None, *, handle: str) -> None:
+    def watch(
+        self,
+        cwd: str,
+        files: Sequence[str],
+        state: str | None = None,
+        *,
+        handle: str,
+        working_tree: bool = True,
+    ) -> None:
         """Install the page's monitors on the service for *cwd* (the
         loaded files' directories, `git.watch`) under the page's
         *handle*; the reply is not waited for. The same handle again
         replaces that watch and no other (two pages on one tree keep
         two). *state* is the tree state the page's read sampled: the
         service's first compare is against it, so an edit between the
-        read and the watch's first look is a move. The watch is
-        remembered until `unwatch`, and sent again on `reset`."""
+        read and the watch's first look is a move. *working_tree* False
+        (a commit, range or branch load) watches the index, HEAD and the
+        refs alone, on the service's 2 s tick: no monitors, no state.
+        The watch is remembered until `unwatch`, and sent again on
+        `reset`."""
         message: dict = {
             "t": "git.watch", "cwd": cwd, "handle": handle, "files": list(files)[: protocol.REPO_PATHS_MAX]
         }
         if state is not None:
             message["state"] = state
+        if not working_tree:
+            message["working_tree"] = False
         with self._lock:
             self._watches[handle] = message
         self._send_watch(message)
@@ -308,19 +327,93 @@ class Mirror:
             if not listeners:
                 del self._listeners[cwd]
 
+    def refresh_then(self, cwd: str, then: Callable[[], None]) -> None:
+        """Re-read *cwd*'s entry by `send` (the main thread never waits)
+        and call *then* once the answer is stored — or refused, the entry
+        kept as `_unreachable` leaves it — on the main loop, where replies
+        land. With no link, or with git local (a service without the git
+        capability: gitinfo reads this machine), *then* at once. The
+        page's compare after a `git-changed` or a fresh watch reads the
+        mirror it leaves."""
+        link = self._link_of()
+        if link is None or gitinfo.reader() is None:
+            then()
+            return
+        with self._lock:
+            waiting = self._then_waiting.get(cwd)
+            if waiting is not None:
+                # One re-read in flight per cwd: a burst of events (a
+                # rebase) rides it rather than sending one each.
+                waiting.append(then)
+                return
+            self._then_waiting[cwd] = [then]
+            previous = self._entries.get(cwd)
+
+        def tell() -> None:
+            with self._lock:
+                callbacks = self._then_waiting.pop(cwd, [])
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception:
+                    log.exception("remotegit: a refresh_then callback failed")
+
+        def landed(fields: dict) -> None:
+            self._store(cwd, fields, self.entry(cwd))
+            tell()
+
+        def refused(refusal: RequestRefused) -> None:
+            self._unreachable(cwd, self.entry(cwd), refusal)
+            tell()
+
+        link.send(self._message(cwd, previous, False, False), on_reply=landed, on_refused=refused)
+
+    def state_then(self, cwd: str, then: Callable[[str | None], None]) -> None:
+        """The tree-state digest of *cwd* as the service reads it now
+        (`git.info` with ``state``, by `send`: the main thread never
+        waits), handed to *then* on the main loop; None when it can't be
+        had (no link, git local, a refusal). The page's check of a state
+        pushed beside a read in flight, before it reloads."""
+        link = self._link_of()
+        if link is None or gitinfo.reader() is None:
+            then(None)
+            return
+        with self._lock:
+            previous = self._entries.get(cwd)
+
+        def landed(fields: dict) -> None:
+            entry = self._store(cwd, fields, self.entry(cwd))
+            then(entry.state)
+
+        def refused(refusal: RequestRefused) -> None:
+            self._unreachable(cwd, self.entry(cwd), refusal)
+            then(None)
+
+        link.send(self._message(cwd, previous, False, True), on_reply=landed, on_refused=refused)
+
     def _on_changed(self, event: dict) -> None:
+        """A `git-changed`: the entry is re-read first and the pages
+        watching the cwd are told once it is stored (PR-2.2: the page's
+        compare of the tree and refs signatures runs on the event, against
+        a mirror that has seen the move). A cwd the mirror never read is
+        told at once."""
         cwd = event.get("cwd")
         if not isinstance(cwd, str):
             return
         with self._lock:
             known = cwd in self._entries
+
+        def tell() -> None:
+            for listener in list(self._listeners.get(cwd, ())):
+                try:
+                    listener(event)
+                except Exception:
+                    log.exception("remotegit: a git-changed listener failed")
+
         if known:
-            self._refresh_async(cwd, False, False)
-        for listener in list(self._listeners.get(cwd, ())):
-            try:
-                listener(event)
-            except Exception:
-                log.exception("remotegit: a git-changed listener failed")
+            self.refresh_then(cwd, tell)
+        else:
+            tell()
 
 
 class Transport:

@@ -575,3 +575,41 @@ def test_the_blob_route_answers_bytes_with_a_tag_and_304_on_it(served, tmp_path)
     status, _h, _b = _http_get(path, f"kind=file&path={repo}/a.txt", {"Collins-Client": "git-client"})
     assert status == 404
     client.close()
+
+
+def test_the_pr_blob_is_named_by_url_and_served_by_kind_pr(served, monkeypatch):
+    """`pr.blob` answers the GET's URL (never a path); `kind=pr` answers
+    gh's bytes with the commit's tag, a 304 on it with no gh call, 404 for
+    what gh won't hand over and 400 for what the gates refuse (PR-2.2)."""
+    from collins import prstatus
+
+    calls: list[list[str]] = []
+    replies: list[bytes | None] = [b"\x89PNG-one", None]
+
+    def gh_bytes(args, max_bytes=None):
+        calls.append(list(args))
+        return replies.pop(0)
+
+    monkeypatch.setattr(prstatus, "gh_bytes", gh_bytes)
+    server, path = served
+    client = Raw(path)
+    client.hello(client_id="pr-client")
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    reply = client.request({"t": "pr.blob", "repository": "o/r", "ref": sha, "path": "docs/a b.png"})
+    assert reply["ok"] and "file" not in reply and calls == []
+    url = reply["url"]
+    assert url.startswith("/api/blob?kind=pr&")
+    query = url.split("?", 1)[1]
+    mine = {"Collins-Client": "pr-client"}
+    status, headers, body = _http_get(path, query, mine)
+    assert status == 200 and body == b"\x89PNG-one" and headers["ETag"].startswith('"pr-')
+    assert calls[0][1] == f"repos/o/r/contents/docs/a%20b.png?ref={sha}"
+    status, _h, body = _http_get(path, query, {**mine, "If-None-Match": headers["ETag"]})
+    assert status == 304 and body == b"" and len(calls) == 1  # free: gh not asked
+    status, _h, _b = _http_get(path, query, mine)
+    assert status == 404 and len(calls) == 2  # gh handed nothing over
+    refused = client.request({"t": "pr.blob", "repository": "o/r", "ref": "main", "path": "a.png"})
+    assert refused["ok"] and refused["error"].startswith("Not a commit") and "url" not in refused
+    status, _h, _b = _http_get(path, f"kind=pr&repository=o/r&ref={sha}&path=../x.png", mine)
+    assert status == 400 and len(calls) == 2
+    client.close()

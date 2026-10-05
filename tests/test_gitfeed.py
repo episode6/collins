@@ -425,12 +425,89 @@ def test_a_compare_that_raises_leaves_the_watch_checking_again(served, monkeypat
     client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": []})
     watch = core.git.watch_of(client, "p1")
 
-    def boom(cwd):
+    def boom(cwd, *_args):
         raise OSError("gone")
 
     monkeypatch.setattr(gitfeed, "signatures", boom)
     watch.check()
     assert not watch._checking  # landed through the failure: the next event still compares
+
+
+# -- the 2 s tick of the tree and refs digests (PR-2.2) -----------------------------------
+
+
+def _changed(events: list[dict]) -> list[dict]:
+    return [e for e in events if e.get("t") == "git-changed"]
+
+
+def test_the_refs_tick_reports_an_index_move_no_monitor_saw(served):
+    """The page's old 2 s compare, on the service: a `git add` from a shell
+    moves the index, which no monitor of the working tree reports; the
+    tick reads the digests, sees the move and the full compare pushes."""
+    core, client, repo, events = served
+    state = gitops.tree_state_signature(repo)
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state})
+    watch = core.git.watch_of(client, "p1")
+    assert watch._refs_tick != 0
+    before = len(_changed(events))
+    watch._on_refs_tick()  # nothing moved: no compare, no event
+    assert len(_changed(events)) == before
+    git(repo, "add", "a.txt")
+    watch._on_refs_tick()
+    changed = _changed(events)[before:]
+    assert len(changed) == 1
+    tree, refs = gitfeed.cheap_signatures(str(repo))
+    assert changed[0]["tree"] == tree and changed[0]["refs"] == refs
+    watch._on_refs_tick()
+    assert len(_changed(events)) == before + 1  # seen: the same digests again are no event
+    client.request({"t": "git.unwatch", "handle": "p1"})
+    assert watch._refs_tick == 0
+
+
+def test_a_watch_without_the_working_tree_has_no_monitors_and_no_state(served):
+    """A commit, range or branch load's watch: no monitors, no state
+    digest, and a commit made elsewhere is a `git-changed` on the tick."""
+    core, client, repo, events = served
+    client.request(
+        {"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": [], "working_tree": False}
+    )
+    watch = core.git.watch_of(client, "p1")
+    assert not watch.working_tree and watch._monitors == [] and watch._tick == 0
+    assert watch.last[0] is not None and watch.last[2] is None  # seeded by the first look
+    before = len(_changed(events))
+    git(repo, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+    watch._on_refs_tick()
+    changed = _changed(events)[before:]
+    assert len(changed) == 1 and changed[0]["state"] is None
+    # An edit to the working tree is no business of this watch.
+    (repo / "a.txt").write_text("edited\n")
+    watch.check()
+    assert len(_changed(events)) == before + 1
+
+
+def test_a_replaced_watch_keeps_the_digests_so_a_commit_between_is_reported(served):
+    """The page re-sends its watch under its handle at every load; a commit
+    landing between the two is a move the new watch reports, not a digest
+    it adopts as its seed."""
+    core, client, repo, events = served
+    state = gitops.tree_state_signature(repo)
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state})
+    first = core.git.watch_of(client, "p1")
+    seen = first.last[:2]
+    git(repo, "commit", "-q", "--allow-empty", "-m", "between")
+    before = len(_changed(events))
+    fresh_state = gitops.tree_state_signature(repo)
+    client.request(
+        {"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": fresh_state}
+    )
+    second = core.git.watch_of(client, "p1")
+    assert first._stopped and second is not first
+    changed = _changed(events)[before:]
+    assert len(changed) == 1 and changed[0]["tree"] != seen[0]
+    # A fresh handle adopts what it finds, as before: no event.
+    before = len(_changed(events))
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p2", "files": [], "state": fresh_state})
+    assert len(_changed(events)) == before
 
 
 # -- the builders hold the wire's text to their grammar (D33) -------------------------

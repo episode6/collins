@@ -63,12 +63,18 @@ builders) and its arguments, never a command line, and the service runs what
 its own builder makes of them. A repository's branch, trunk, GitHub page and
 freshness come from one `git.info` answer per directory that the window keeps
 and the service's `git-changed` events refresh; the page's file watch lives
-on the service; a stage, discard or revert is a plan the service re-checks
+on the service, which also looks at the index, HEAD and the branches every
+2 s and tells the window when one moved (a commit made in a shell shows up
+without the window polling); a stage, discard or revert is a plan the service re-checks
 against the file as it is now before applying it; and the bytes of a file at
 a commit, in the index or in the working tree (the diff's images) are a plain
-HTTP `GET` on the same socket. The window opens no project file for any of
-this, which is what a window on another machine needs; the editor's files
-and the rest follow in the later chunks of the split.
+HTTP `GET` on the same socket, cached under `~/.cache/collins/blobs/` and
+asked again with the tag they came with, so an unchanged picture is not sent
+twice; a PR's changed pictures come the same way, the service fetching them
+through `gh`. The cache is pruned of anything not fetched for a day. The
+window opens no project file for any of this, which is what a window on
+another machine needs; the editor's files and the rest follow in the later
+chunks of the split.
 
 ## Worktrees
 

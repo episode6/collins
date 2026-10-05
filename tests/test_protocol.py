@@ -669,6 +669,7 @@ SAMPLES = {
     ("git.sizes", p.REQUEST): {"cwd": "/home/u/project", "paths": ["a.txt"]},
     ("git.watch", p.REQUEST): {
         "cwd": "/home/u/project", "handle": "gitpage-7f", "files": ["a.txt", "src/b.py"], "state": "deadbeef",
+        "working_tree": True,
     },
     ("git.unwatch", p.REQUEST): {"handle": "gitpage-7f"},
     ("git-changed", p.EVENT): {"cwd": "/home/u/project", "tree": "t1", "refs": "r1", "state": None},
@@ -775,7 +776,7 @@ REPLIES = {
     "pr.sweep": {"results": {ID: [PR_RECORD]}},
     "pr.detail": {"detail": {"url": "https://github.com/o/r/pull/1", "files": [{"path": "a.py"}]}},
     "pr.threads": {"threads": [{"id": "PRRT_1", "path": "a.py", "comments": []}]},
-    "pr.blob": {"file": "/home/u/.cache/collins/pr-blobs/ab.png", "error": ""},
+    "pr.blob": {"url": "/api/blob?kind=pr&repository=o%2Fr&ref=" + "a" * 40 + "&path=a.png", "error": ""},
     "pr.action": {"error": "gh: Pull request is not mergeable"},
     "pr.comment": {"error": ""},
     "pr.review": {"error": ""},

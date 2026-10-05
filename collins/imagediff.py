@@ -6,10 +6,13 @@ The diff is the wrong renderer for a picture — git says ``Binary files a/
 icon.png and b/icon.png differ`` and stops; an SVG spills a screen of path
 data that says a shape changed without ever showing it. So both places
 Collins shows a diff of images draw them instead: the PR page's Files view
-(prfileimages, whose blobs come from `gh`) and the git page's native diff
-view (diffview, whose blobs come from `gitops.file_at`). This module is the
-drawing they share; each caller says which sides a file has and how the
-bytes of each are fetched (an `ImageSide`), and gets back a row of pictures.
+(prfileimages, whose blobs come from `gh` on the service) and the git
+page's native diff view (diffview, whose blobs are the service's git). This
+module is the drawing they share; each caller says which sides a file has
+and how the bytes of each are fetched (an `ImageSide`), and gets back a row
+of pictures. Both fetchers are the blob GET (`GET /api/blob?kind=pr|git`,
+split-service spec §3.23) into this device's `blobcache`, with
+``If-None-Match``: the file decoded here is the cache's.
 
 A side's bytes are fetched through `pictures.fetch` — once per key per run,
 on a worker thread, three at a time — so a PR that regenerates thirty

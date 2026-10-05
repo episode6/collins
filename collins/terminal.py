@@ -2871,8 +2871,10 @@ class TerminalTab(Gtk.Box):
             # any of them; it only makes the button worth pressing again.
             self._sync_pr_refresh_tooltip()
         self._sync_footer_seps()
-        # The git page's freshness check rides this same 2 s tick — but only
-        # for a page somebody can see; one in a hidden strip catches up on
+        # The git page's root check (the agent's cwd moving to another tree,
+        # the tree going or coming) rides this same 2 s tick — but only for
+        # a page somebody can see. Its signatures' compare is the service's
+        # `git-changed` (PR-2.2); a page hidden when one came compares on
         # its next map.
         page = self._git_page
         if page is not None and page.get_mapped():
@@ -3956,12 +3958,12 @@ class TerminalTab(Gtk.Box):
             # there to avoid.
             if getattr(page, "page_kind", None) == "pr" and page.get_mapped():
                 page.refresh_if_stale()
-        # The git page compares the tree's signature on the footer's 2 s tick
-        # anyway; asking now makes the commit the agent just made show up on
-        # the finish edge instead of up to two seconds later.
+        # The service's watch pushes a commit within its 2 s tick anyway;
+        # asking now makes the commit the agent just made show up on the
+        # finish edge instead of up to two seconds later.
         page = self._git_page
         if page is not None and page.get_mapped():
-            page.poll_tick()
+            page.check_now()
 
     # -- graceful close ----------------------------------------------------
 
@@ -5620,7 +5622,8 @@ class TerminalTab(Gtk.Box):
         # takes effect on chips and pages that were built before it.
         self._confirm_merges = bool(settings.get("confirm_merges", True))
         # Likewise read at each resolution: the page re-resolves its parent
-        # on every 2 s tick (and reloads a branch diff whose base moved), so
+        # on every 2 s footer tick (poll_tick, and reloads a branch diff
+        # whose base moved), so
         # a changed name reaches an open page without a push.
         self._git_parent_setting = str(settings.get("git_parent_branch") or "").strip()
         self._apply_terminal_max_width(settings)
