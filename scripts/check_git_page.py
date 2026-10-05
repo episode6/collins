@@ -79,7 +79,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import diffnotes, gitloads, gitops, gitpage, remotegit  # noqa: E402
+from collins import blobcache, diffnotes, gitloads, gitops, gitpage, remotegit  # noqa: E402
 from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
 from collins.editor import GtkSource  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
@@ -864,6 +864,31 @@ def check_native(repo: str) -> None:
         and badges.get("untracked.txt") == ("new", False)
         and badges.get("new.png") == ("new · binary", True),
         badges,
+    )
+    # The pictures are the blob GET's (PR-2.2): each side fetched by URL
+    # into this device's blob cache, never bytes over a request nor a path.
+    check(
+        "the image's two sides and the new image land as pictures over the blob GET",
+        wait_for(lambda: view.preview_pictures("pic.png") == 2 and view.preview_pictures("new.png") == 1),
+        (view.preview_pictures("pic.png"), view.preview_pictures("new.png")),
+    )
+    folder = blobcache.directory()
+    wanted = [
+        remotegit.blob_url(repo, gitops.AT_INDEX, None, "pic.png"),
+        remotegit.blob_url(repo, gitops.AT_WORKTREE, None, "pic.png"),
+        remotegit.blob_url(repo, gitops.AT_WORKTREE, None, "new.png"),
+    ]
+    held = [folder / (blobcache.key_for(url) + ".png") for url in wanted]
+    tags = [folder / (blobcache.key_for(url) + ".etag") for url in wanted]
+    check(
+        "and the blob cache holds each side, beside its tag, under the service's id",
+        folder.parent == blobcache.cache_root()
+        and folder.name not in ("", "service")
+        and all(p.is_file() for p in held)
+        and all(t.is_file() for t in tags)
+        and held[1].read_bytes() == open(os.path.join(repo, "pic.png"), "rb").read()
+        and not os.path.isdir(os.path.join(os.environ["XDG_CACHE_HOME"], "collins", "git-blobs")),
+        (folder, sorted(os.listdir(folder)) if folder.is_dir() else None),
     )
     check("text.txt draws its two hunks", len(view.hunk_rows("text.txt")) == 2, view.hunk_rows("text.txt"))
     check(

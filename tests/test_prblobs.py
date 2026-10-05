@@ -3,6 +3,8 @@ which paths count as images, the key one is cached under, the gates a
 repository's own strings pass before they can name a request, and the
 degradations that leave a preview as a stand-in rather than an exception."""
 
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
 from collins import prblobs, prdetail, prstatus
@@ -131,12 +133,10 @@ def test_no_commit_means_no_picture():
 # -- the fetch ----------------------------------------------------------------
 
 
-def test_a_blob_lands_as_a_file(gh, tmp_path):
+def test_a_blob_comes_back_as_its_bytes(gh):
     push, calls = gh
     push(PNG)
-    path = prblobs.fetch_to_file(REPO, SHA, "data/icon.png", tmp_path)
-    assert path.read_bytes() == PNG
-    assert path.suffix == ".png"  # the decoder downstream sniffs by name
+    assert prblobs.fetch_bytes(REPO, SHA, "data/icon.png") == PNG
     (args, max_bytes) = calls[0]
     assert args[0] == "api"
     assert args[1] == f"repos/{REPO}/contents/data/icon.png?ref={SHA}"
@@ -144,27 +144,27 @@ def test_a_blob_lands_as_a_file(gh, tmp_path):
     assert max_bytes == prblobs.MAX_BLOB_BYTES
 
 
-def test_a_path_with_spaces_and_marks_travels_encoded(gh, tmp_path):
+def test_a_path_with_spaces_and_marks_travels_encoded(gh):
     push, calls = gh
     push(PNG)
-    prblobs.fetch_to_file(REPO, SHA, "docs/a b#c.png", tmp_path)
+    prblobs.fetch_bytes(REPO, SHA, "docs/a b#c.png")
     assert calls[0][0][1] == (
         f"repos/{REPO}/contents/docs/a%20b%23c.png?ref={SHA}"
     )
 
 
-def test_a_failed_call_is_a_blob_error_not_a_crash(gh, tmp_path):
+def test_a_failed_call_is_a_blob_error_not_a_crash(gh):
     push, _calls = gh
     push(None)  # no gh, offline, or a 404: the before-side of an added file
     with pytest.raises(prblobs.BlobError):
-        prblobs.fetch_to_file(REPO, SHA, "data/icon.png", tmp_path)
+        prblobs.fetch_bytes(REPO, SHA, "data/icon.png")
 
 
-def test_an_empty_reply_is_a_failure(gh, tmp_path):
+def test_an_empty_reply_is_a_failure(gh):
     push, _calls = gh
     push(b"")
     with pytest.raises(prblobs.BlobError):
-        prblobs.fetch_to_file(REPO, SHA, "data/icon.png", tmp_path)
+        prblobs.fetch_bytes(REPO, SHA, "data/icon.png")
 
 
 # -- the gates ----------------------------------------------------------------
@@ -183,8 +183,30 @@ def test_an_empty_reply_is_a_failure(gh, tmp_path):
         ("episode6/collins", SHA, "x" * 600 + ".png"),
     ],
 )
-def test_nothing_ungated_reaches_gh(gh, tmp_path, repository, ref, path):
+def test_nothing_ungated_reaches_gh(gh, repository, ref, path):
     _push, calls = gh
     with pytest.raises(prblobs.BlobError):
-        prblobs.fetch_to_file(repository, ref, path, tmp_path)
+        prblobs.fetch_bytes(repository, ref, path)
+    with pytest.raises(prblobs.BlobError):
+        prblobs.check(repository, ref, path)  # what pr.blob refuses before naming a URL
     assert calls == []
+
+
+# -- the blob GET's URL and tag (PR-2.2) ----------------------------------------
+
+
+def test_the_url_is_the_blob_get_with_every_field_encoded():
+    url = prblobs.blob_url(REPO, SHA, "docs/a b#c.png")
+    assert url.startswith("/api/blob?kind=pr&")
+    query = parse_qs(urlsplit(url).query)
+    assert query == {"kind": ["pr"], "repository": [REPO], "ref": [SHA], "path": ["docs/a b#c.png"]}
+    assert "#" not in url and " " not in url
+
+
+def test_the_tag_names_the_repository_the_commit_and_the_path():
+    tag = prblobs.blob_tag(REPO, SHA, "data/icon.png")
+    assert tag.startswith('"pr-') and tag.endswith('"') and tag.count('"') == 2
+    assert tag == prblobs.blob_tag(REPO, SHA, "data/icon.png")
+    assert tag != prblobs.blob_tag(REPO, "f" * 40, "data/icon.png")
+    assert tag != prblobs.blob_tag("o/fork", SHA, "data/icon.png")
+    assert tag != prblobs.blob_tag(REPO, SHA, "data/other.png")

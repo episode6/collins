@@ -12,8 +12,9 @@ once per run and hands every later caller the same one. The download goes
 through `remoteimages` — the same capped, timeout-bounded, redirect-gated
 fetch `show_image` uses, into the same pruned cache directory — on a worker
 thread, landing back on the main loop. A caller whose images aren't at a
-public URL passes its own fetcher instead (the PR view's file previews ask
-`gh` for the blob: see prblobs) and keeps everything around it. Failures are remembered too: a URL
+public URL passes its own fetcher instead (the PR view's file previews and
+the git page's diff ask the service for the blob: `blobcache.fetch` over the
+blob GET) and keeps everything around it. Failures are remembered too: a URL
 that 404s must not be re-fetched by every rebuild. A cached file that has
 since been pruned (downloads live a day) counts as a miss rather than a hit,
 so what a caller is handed is a file that is really there — which is what
@@ -82,9 +83,10 @@ def fetch(
     same frame rather than flashing.
 
     *fetcher* replaces the download for a caller whose images don't come off
-    a public URL: the PR view's file previews ask `gh` for a blob instead
-    (see prblobs), and want the caching, the thread, the in-flight coalescing
-    and the remembered failure all the same. *url* is then only a cache key —
+    a public URL: the PR view's file previews and the git page's ask the
+    service's blob GET instead (`blobcache.fetch`), and want the caching,
+    the thread, the in-flight coalescing and the remembered failure all the
+    same. *url* is then only a cache key —
     it is never parsed — so it has to name the bytes exactly (a commit, not a
     branch). The call is made on the worker thread and may raise; whatever it
     raises becomes the failure the caller is handed."""

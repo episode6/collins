@@ -66,9 +66,13 @@ and the service's `git-changed` events refresh; the page's file watch lives
 on the service; a stage, discard or revert is a plan the service re-checks
 against the file as it is now before applying it; and the bytes of a file at
 a commit, in the index or in the working tree (the diff's images) are a plain
-HTTP `GET` on the same socket. The window opens no project file for any of
-this, which is what a window on another machine needs; the editor's files
-and the rest follow in the later chunks of the split.
+HTTP `GET` on the same socket, cached under `~/.cache/collins/blobs/` and
+asked again with the tag they came with, so an unchanged picture is not sent
+twice; a PR's changed pictures come the same way, the service fetching them
+through `gh`. The cache is pruned of anything not fetched for a day. The
+window opens no project file for any of this, which is what a window on
+another machine needs; the editor's files and the rest follow in the later
+chunks of the split.
 
 ## Worktrees
 

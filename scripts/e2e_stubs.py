@@ -23,6 +23,9 @@ The data (every key optional)::
                 answers (a missing key answers null)
     trash_aside a directory: the git page's trash (service.files.trash_paths)
                 moves files there instead, recording each ask as "trash"
+    gh_bytes    a map of a gh api endpoint ("repos/o/r/contents/a.png?ref=<sha>")
+                -> a file whose bytes prstatus.gh_bytes answers for it (a
+                missing key answers None): a PR file's blob, `kind=pr`
 
 Every stubbed call is appended as a JSON line to ``<data>.calls.jsonl``
 (``{"stub": name, "args": [...]}``), which `e2e_service.stub_calls()`
@@ -107,6 +110,24 @@ def apply() -> None:
             return (_data().get("gh_json") or {}).get(" ".join(args[:2]))
 
         prstatus.gh_json = gh_json
+    if "gh_bytes" in data:
+        # A PR file's blob (`GET /api/blob?kind=pr`, PR-2.2): the endpoint
+        # gh would be asked for, answered from a file the check wrote.
+        from collins import prstatus
+
+        def gh_bytes(args, max_bytes=None, **kwargs):
+            args = [str(a) for a in args]
+            _record("gh_bytes", args)
+            source = (_data().get("gh_bytes") or {}).get(args[1] if len(args) > 1 else "")
+            if not source:
+                return None
+            try:
+                with open(source, "rb") as fh:
+                    return fh.read()
+            except OSError:
+                return None
+
+        prstatus.gh_bytes = gh_bytes
     if "trash_aside" in data:
         # The git page's trash is the service's (service.files.trash_paths,
         # through git.plan, PR-2.1). Gio refuses to trash on "system

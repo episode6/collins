@@ -211,3 +211,34 @@ def test_the_sweep_runs_on_the_service(wired, monkeypatch):
     swept = remoteprs.sweep([("s0", [prstatus.PullRequest(number=1, url=URL1)], "/home/u/p")])
     assert [pr.url for pr in swept["s0"]] == [URL1, URL2]
     assert [pr.url for pr in remoteprs.resync([prstatus.PullRequest(number=1, url=URL1)])] == [URL1, URL2]
+
+
+def test_a_pr_blob_is_a_url_the_blobcache_fetches(wired, monkeypatch, tmp_path):
+    """`fetch_blob` (PR-2.2): `pr.blob` names the URL, the GET (here the
+    service's `PrBlobs`, inline) answers the bytes, and what comes back is
+    the blobcache's file — a second fetch is answered 304 from it."""
+    from collins import blobcache
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    gh_calls = []
+    monkeypatch.setattr(prstatus, "gh_bytes", lambda args, max_bytes=None: gh_calls.append(args) or b"PNG")
+    blobs = prfeed.PrBlobs(dispatch=lambda fn: fn(), spawn=lambda fn, _name: fn())
+    gets = []
+
+    def http_get(path_query, headers=None, timeout=60.0):
+        gets.append(dict(headers or {}))
+        answer = []
+        blobs.blob(None, path_query.split("?", 1)[1], (headers or {}).get("If-None-Match"),
+                   lambda status, hdrs, body: answer.append((status, hdrs, body)))
+        return answer[0]
+
+    wired.http_get = http_get
+    sha = "a" * 40
+    file = remoteprs.fetch_blob("o/r", sha, "docs/shot.png")
+    assert file.read_bytes() == b"PNG" and file.suffix == ".png"
+    assert file.parent.parent == blobcache.cache_root()
+    again = remoteprs.fetch_blob("o/r", sha, "docs/shot.png")
+    assert again == file and len(gh_calls) == 1 and gets[1]["If-None-Match"].startswith('"pr-')
+    with pytest.raises(Exception, match="Not a commit"):
+        remoteprs.fetch_blob("o/r", "main", "docs/shot.png")
+    assert wired.calls.count("pr.blob") == 3

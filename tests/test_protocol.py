@@ -775,7 +775,7 @@ REPLIES = {
     "pr.sweep": {"results": {ID: [PR_RECORD]}},
     "pr.detail": {"detail": {"url": "https://github.com/o/r/pull/1", "files": [{"path": "a.py"}]}},
     "pr.threads": {"threads": [{"id": "PRRT_1", "path": "a.py", "comments": []}]},
-    "pr.blob": {"file": "/home/u/.cache/collins/pr-blobs/ab.png", "error": ""},
+    "pr.blob": {"url": "/api/blob?kind=pr&repository=o%2Fr&ref=" + "a" * 40 + "&path=a.png", "error": ""},
     "pr.action": {"error": "gh: Pull request is not mergeable"},
     "pr.comment": {"error": ""},
     "pr.review": {"error": ""},

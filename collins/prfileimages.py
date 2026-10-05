@@ -15,11 +15,14 @@ lightbox at full size. Which sides a file has is `prblobs.sides`' answer
 drawing is `imagediff`'s, shared with the git page's native diff view —
 this module only says where the bytes come from.
 
-The bytes come from `prblobs` (a `gh api` blob fetch, so private repositories
-and Enterprise hosts work), routed through `pictures.fetch` so a preview is
-downloaded once per commit per run, is decoded no bigger than it is drawn,
-measures height-for-width in the column, and animates when it is a GIF. What
-lands is a *file*, which is what lets a click hand it to the lightbox.
+The bytes come from `prblobs` on the service (a `gh api` blob fetch, so
+private repositories and Enterprise hosts work) by the blob GET: `pr.blob`
+names the URL, this device's `blobcache` fetches it with ``If-None-Match``
+(`remoteprs.fetch_blob`, split-service spec §3.23) — routed through
+`pictures.fetch` so a preview is downloaded once per commit per run, is
+decoded no bigger than it is drawn, measures height-for-width in the column,
+and animates when it is a GIF. What lands is the cache's *file*, which is
+what lets a click hand it to the lightbox.
 
 It honors the ``pr_inline_images`` setting: off, the Files view renders
 exactly the patch it always did.

@@ -180,15 +180,27 @@ def fetch_threads(url: str) -> tuple:
 
 
 def fetch_blob(repository: str, ref: str, path: str) -> Path:
-    """`prblobs.fetch_to_file`, on the service: the path of the file it wrote
-    (on the service's machine; a blob transfer is Phase 2's).
-    Raises `prblobs.BlobError`."""
-    from .prblobs import BlobError
+    """One PR file's blob in this device's blobcache (§3.23, PR-2.2):
+    `pr.blob` checks the gates on the service and answers the blob GET's
+    URL (`GET /api/blob?kind=pr&…`), which `blobcache.fetch` GETs with
+    ``If-None-Match`` (the service runs gh for it; a commit's file is
+    answered ``304`` once held). Raises `prblobs.BlobError` with the
+    reason — the stand-in's tooltip. Worker thread."""
+    from . import blobcache, prblobs
 
     reply = _call({"t": "pr.blob", "repository": repository, "ref": ref, "path": path}) or {}
-    if reply.get("file"):
-        return Path(reply["file"])
-    raise BlobError(reply.get("error") or f"GitHub wouldn't hand over {path}")
+    url = reply.get("url")
+    if not isinstance(url, str) or not url.startswith(BLOB_URL_PREFIX):
+        raise prblobs.BlobError(reply.get("error") or f"GitHub wouldn't hand over {path}")
+    try:
+        return blobcache.fetch(url, prblobs.image_suffix(path) or "")
+    except ValueError as error:
+        raise prblobs.BlobError(str(error)) from None
+
+
+# What a `pr.blob` reply's URL must start with (rule 5: the service's
+# words are checked before they are fetched).
+BLOB_URL_PREFIX = "/api/blob?kind=pr&"
 
 
 def invalidate(url: str) -> None:

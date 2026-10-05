@@ -6,8 +6,14 @@ A diff says what changed in a text file. For an image it says
 ``Binary files a/icon.png and b/icon.png differ`` — or, for an SVG, a screen
 of path data nobody can read as a shape. The Files view renders those as
 images instead (`prfileimages` builds the widgets), and this is the half
-that goes and gets them: the blob at one commit, saved to a file on disk the
-decoder and the lightbox can both work from.
+that goes and gets them: the blob at one commit, on the service's machine
+(split-service spec §3.23, PR-2.2). `pr.blob` checks the gates and answers
+the blob's URL (`blob_url`: `GET /api/blob?kind=pr&…`); the GET runs
+`fetch_bytes` on the service's worker thread and answers the bytes with
+`blob_tag` (a commit's file never changes: a client holding the tag is
+answered ``304`` with no gh call); the client keeps them in its blobcache,
+which the decoder and the lightbox work from. A blob is never a path on
+the wire.
 
 The fetch goes through `gh api` rather than a plain download, for the same
 reason every other PR call does: it is already authenticated (a private
@@ -21,9 +27,7 @@ Everything naming the blob is repository content and is gated before it can
 become part of a request: the repository must be ``owner/name``, the ref a
 full commit sha (never a branch name — see prdetail._oid), the path a
 relative one with no traversal in it, and the suffix one of the image kinds
-the viewer can decode. What comes back is capped at `MAX_BLOB_BYTES` and
-lands in the cache directory beside the other fetched images, pruned on the
-same 24-hour clock.
+the viewer can decode. What comes back is capped at `MAX_BLOB_BYTES`.
 
 GTK-free, like prdetail and prstatus beside it: CI runs with no GTK, and the
 gates are the half worth testing.
@@ -31,13 +35,13 @@ gates are the half worth testing.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import urllib.parse
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
-from . import editorfiles, prdetail, prstatus, remoteimages
-from .dropimages import cache_directory, save_copy
+from . import editorfiles, prdetail, prstatus
 
 # What a blob may weigh before it is dropped unfetched. Smaller than
 # remoteimages' 25 MB download cap: this one is an image a *review* is
@@ -149,27 +153,11 @@ def cache_key(repository: str, ref: str, path: str) -> str:
     return f"gh://{repository}/{ref}/{path}"
 
 
-def default_directory() -> Path:
-    """Where fetched blobs are kept: a sibling of the remote-image downloads,
-    under the cache directory, on the same 24-hour prune."""
-    return cache_directory() / "pr-blobs"
-
-
-def fetch_to_file(
-    repository: str, ref: str, path: str, directory: Path | None = None
-) -> Path:
-    """Fetch *path* at commit *ref* of *repository*, and return its file.
-
-    The whole blocking half, so a worker thread has one call to make: gate,
-    prune, fetch, save. Raises `BlobError` — a file that isn't there at that
-    commit (the before-side of a file the PR adds, a rename's old name) is a
-    404 like any other failure, and the caller shows its stand-in. Never call
-    on the main thread.
-    """
-    if directory is None:
-        directory = default_directory()
-    suffix = image_suffix(path)
-    if suffix is None:
+def check(repository: str, ref: str, path: str) -> None:
+    """Raise `BlobError` unless *repository*, *ref* and *path* pass the
+    gates (see the module docstring): what `pr.blob` checks before it
+    names a URL and what the blob GET checks again before it calls gh."""
+    if image_suffix(path) is None:
         raise BlobError(f"Not an image Collins can show: {path}")
     if not _REPOSITORY.fullmatch(repository or ""):
         raise BlobError(f"Not a repository: {repository}")
@@ -177,7 +165,34 @@ def fetch_to_file(
         raise BlobError(f"Not a commit: {ref}")
     if not _safe_path(path):
         raise BlobError(f"Not a path in the repository: {path}")
-    remoteimages.prune_stale(directory)
+
+
+def blob_url(repository: str, ref: str, path: str) -> str:
+    """The `GET /api/blob?kind=pr` path and query for one blob (split-service
+    spec §3.23, PR-2.2): what `pr.blob` answers and the client's blobcache
+    fetches."""
+    query = {"kind": "pr", "repository": repository, "ref": ref, "path": path}
+    return "/api/blob?" + urllib.parse.urlencode(query)
+
+
+def blob_tag(repository: str, ref: str, path: str) -> str:
+    """The blob GET's ETag: a digest of the repository, the commit and the
+    path. A commit's file never changes, so a client that holds the tag
+    is answered ``304`` without a gh call."""
+    digest = hashlib.sha1(f"{repository}\0{ref}\0{path}".encode("utf-8", "replace")).hexdigest()
+    return f'"pr-{digest}"'
+
+
+def fetch_bytes(repository: str, ref: str, path: str) -> bytes:
+    """Fetch *path* at commit *ref* of *repository* through gh: the bytes.
+
+    The whole blocking half, so the service's worker thread has one call
+    to make: gate, fetch. Raises `BlobError` — a file that isn't there at
+    that commit (the before-side of a file the PR adds, a rename's old
+    name) is a 404 like any other failure, and the client shows its
+    stand-in. Never call on the main thread.
+    """
+    check(repository, ref, path)
     data = prstatus.gh_bytes(
         ["api", _endpoint(repository, ref, path),
          "-H", "Accept: application/vnd.github.raw"],
@@ -187,10 +202,7 @@ def fetch_to_file(
         raise BlobError(f"GitHub wouldn't hand over {path} at {ref[:7]}")
     if not data:
         raise BlobError(f"GitHub sent an empty file for {path}")
-    try:
-        return save_copy(data, directory, "pr-blob", suffix)
-    except OSError as error:
-        raise BlobError(f"Couldn't save what GitHub sent: {error}") from None
+    return data
 
 
 def _endpoint(repository: str, ref: str, path: str) -> str:

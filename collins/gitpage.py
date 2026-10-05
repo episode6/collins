@@ -1253,7 +1253,14 @@ class GitPage(Adw.Bin):
         def reader(file: diffmodel.File, side: str) -> bytes | None:
             return gitops.side_bytes(cwd, loaded, side, file.path, file.previous_path, parent_target, base)
 
-        self._diffview.load(read.files, loaded, reader, repo=str(self._repo_root or ""))
+        def locator(file: diffmodel.File, side: str) -> str | None:
+            # An image's side is the blob GET's (§3.23, PR-2.2): fetched by
+            # URL into the blobcache, never bytes over a request.
+            found = gitops.side_blob(loaded, side, file.path, file.previous_path, parent_target, base)
+            return remotegit.blob_url(cwd, *found) if found is not None and cwd else None
+
+        repo = str(self._repo_root or "")
+        self._diffview.load(read.files, loaded, reader, repo=repo, image_locator=locator)
         self.sidebar.refresh_files(_file_summaries(read.files), loaded, self._options.untracked, read.status)
         working = loaded in ("unstaged", "staged")
         self._tree_state = state

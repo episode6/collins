@@ -485,10 +485,26 @@ untracked and unmerged readers is `git.sizes` (`gitops.file_sizes`), the
 watch's tree state `git.info` with `state`, and a plan is one `git.plan`
 (below). The service answers every one of these off its main loop: the
 handler returns a `protocol.Deferred` and the thread's reply settles it
-(`gitfeed._later`); `tests/inproc.py` pumps the loop for one. A
-`blobcache.fetch(url)` is the `pictures.fetch` fetcher over the same GET
-into `~/.cache/collins/blobs/<service id>/` with the ETag kept beside the
-file (PR-2.2 moves the diff's images onto it).
+(`gitfeed._later`); `tests/inproc.py` pumps the loop for one.
+
+**The diff's images are the blob GET's, by URL (PR-2.2).** A gap's
+context still reads the bytes (`side_bytes` → `file_at`, the GET without
+a cache), but an image preview never does: `DiffView.load` takes an
+`image_locator(file, side)` beside the context reader (the page's:
+`gitops.side_blob(load, side, path, previous_path, parent_target, base)`
+→ `(at, ref, path)`, the same sides `side_bytes` reads, then
+`remotegit.blob_url(cwd, at, ref, path)`), and each side's fetcher is
+`blobcache.fetch(url, suffix)` — the `pictures.fetch` fetcher over the
+same GET into `~/.cache/collins/blobs/<service id>/<sha1 of the url>`
+with the ETag in a `.etag` sidecar and `If-None-Match` on the next fetch
+(a `304` keeps the file as it is), the directory swept of files older
+than 24 h (`remoteimages.prune_stale`, at most once per ten minutes per
+directory). The run's key in `pictures` still names the load, the side
+and the patch hash, so an edit to the working tree is a new fetch of the
+same URL, answered `304` when the file's mtime and size did not move.
+No locator, no previews (a bare `DiffView` in a probe). The old
+`git-blobs` directory is gone; `DiffView.preview_pictures(path)` is the
+e2e's probe of how many sides landed as pictures.
 
 **`gitloads.py` is the `Loaded` vocabulary**: `MODES` / `DEFAULT_MODE`,
 `SHOW_KEY` / `RANGE_KEY`, `safe_ref` (the one rule for a ref that goes on

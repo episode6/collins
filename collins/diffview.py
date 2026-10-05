@@ -59,7 +59,6 @@ not the unit suite.
 
 from __future__ import annotations
 
-import hashlib
 import itertools
 import logging
 import re
@@ -67,7 +66,7 @@ import threading
 import weakref
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 import gi
 
@@ -79,6 +78,7 @@ gi.require_version("Graphene", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
+    blobcache,
     contextmenu,
     diffmodel,
     diffnotes,
@@ -91,9 +91,7 @@ from . import (  # noqa: E402
     keyedslots,
     keymap,
     prblobs,
-    remoteimages,
 )
-from .dropimages import cache_directory  # noqa: E402
 from .editor import GtkSource  # noqa: E402 — require_version + friendly exit live there
 from .i18n import _  # noqa: E402
 
@@ -156,6 +154,9 @@ _NOTE_EDITOR_MAX_HEIGHT = 220
 _CARD_REAP_MS = 500
 
 ContextReader = Callable[[diffmodel.File, str], "bytes | None"]
+# Where the blob GET reads one side of an image from: the `/api/blob` URL
+# (remotegit.blob_url over gitops.side_blob), None for no such side.
+ImageLocator = Callable[[diffmodel.File, str], "str | None"]
 
 
 @dataclass(frozen=True)
@@ -2605,6 +2606,7 @@ class DiffView(Gtk.Box):
         self.loaded: object = None
         self.repo_key = ""
         self._reader: ContextReader | None = None
+        self._image_locator: ImageLocator | None = None
         self._gen = 0
         self._context_cache: dict[tuple[str, str], list[str] | None] = {}
         self._pending: dict[tuple[str, str], list[Callable[[list[str] | None], None]]] = {}
@@ -2792,18 +2794,21 @@ class DiffView(Gtk.Box):
         load: object,
         context_reader: ContextReader | None,
         repo: str = "",
+        image_locator: ImageLocator | None = None,
     ) -> None:
         """Show *files* (gitops.read_diff's, in order) for the Loaded *load*.
         *context_reader(file, side)* is the blocking read of a whole file on
         one side (gitops.file_at through gitops.side_ref), called on a
-        thread when a gap expands or an image preview is drawn; *repo*
-        names the repository for the preview cache's keys. Sections are
-        patched by key: a file keeps its section, an untouched hunk its
-        widget, the scroll its place."""
+        thread when a gap expands; *image_locator(file, side)* is the blob
+        URL an image preview's side is fetched from (blobcache.fetch, on a
+        thread; no previews without one); *repo* names the repository for
+        the preview cache's keys. Sections are patched by key: a file keeps
+        its section, an untouched hunk its widget, the scroll its place."""
         self._gen += 1
         self.loaded = load
         self.repo_key = repo
         self._reader = context_reader
+        self._image_locator = image_locator
         self._context_cache = {}
         self._pending = {}
         self._files = list(files)
@@ -3739,6 +3744,25 @@ class DiffView(Gtk.Box):
         it."""
         return [(*s.header_text(), s._preview is not None) for s in self._sections()]
 
+    def preview_pictures(self, path: str) -> int:
+        """How many of *path*'s preview sides have landed as a picture (not
+        the placeholder, not a stand-in): the e2e's probe of the blob GET."""
+        section = self._section_for(path, diffmodel.NEW)
+        if section is None or section._preview is None:
+            return 0
+        count = 0
+        stack = [section._preview]
+        while stack:
+            widget = stack.pop()
+            if isinstance(widget, imagediff.pictures.BoundedPicture):
+                count += 1
+                continue
+            child = widget.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        return count
+
     def set_scroll(self, fraction: float) -> None:
         """Scroll the stream to *fraction* of its range (0.0 top, 1.0
         bottom), as a wheel would — the current file follows after the
@@ -4150,10 +4174,12 @@ class DiffView(Gtk.Box):
                 return
 
     def image_preview(self, file: diffmodel.File) -> Gtk.Widget | None:
-        """The before / after pictures for an image *file*, their bytes read
-        through the context reader on a thread; None for a text file or
-        with no reader."""
-        if self._reader is None or not prblobs.is_image(file.path):
+        """The before / after pictures for an image *file*, each side's blob
+        fetched by the URL the image locator names, into the blobcache, on
+        a thread (§3.23: never a path, never bytes over a request); None
+        for a text file or with no locator. A side the locator names no
+        URL for is the stand-in."""
+        if self._image_locator is None or not prblobs.is_image(file.path):
             return None
         sides: list[imagediff.ImageSide] = []
         if file.kind == diffmodel.KIND_NEW or file.untracked:
@@ -4163,19 +4189,22 @@ class DiffView(Gtk.Box):
         else:
             wanted = [diffmodel.OLD, diffmodel.NEW]
         both = len(wanted) > 1
-        reader = self._reader
+        locator = self._image_locator
         for side in wanted:
             path = file.previous_path if side == diffmodel.OLD and file.previous_path else file.path
+            # The run's key names the load, the side and the patch: an edit
+            # to the working tree is another key (a fresh fetch, answered
+            # 304 when the file's tag did not move), not the old picture.
             key = f"git-blob://{self.repo_key}/{self.loaded!r}/{side}/{path}#{file.patch_hash}"
             caption = "" if not both else (_("Before") if side == diffmodel.OLD else _("After"))
+            url = locator(file, side)
+            suffix = PurePosixPath(path).suffix.lower()[:8]
             sides.append(
                 imagediff.ImageSide(
                     key=key,
                     path=path,
                     caption=caption,
-                    fetcher=lambda key=key, file=file, side=side, path=path: _blob_to_file(
-                        key, path, reader(file, side)
-                    ),
+                    fetcher=lambda url=url, suffix=suffix: _fetch_blob(url, suffix),
                 )
             )
         return imagediff.preview_row(sides)
@@ -4363,20 +4392,10 @@ class DiffView(Gtk.Box):
         self._gen += 1
 
 
-def _blob_to_file(key: str, path: str, data: bytes | None) -> Path:
-    """`imagediff`'s fetcher half for a git blob: *data* saved under the
-    cache as a file named by the key, so the picture can go to the
-    lightbox (and to another app) from disk. Raises for no data — the
-    stand-in's reason. Worker thread."""
-    if data is None:
+def _fetch_blob(url: str | None, suffix: str):
+    """`imagediff`'s fetcher half for a side's blob: the blobcache's file
+    for *url* (the service's GET, ``If-None-Match`` against the last
+    tag). Raises for no URL — the stand-in's reason. Worker thread."""
+    if url is None:
         raise ValueError(_("No such file on this side."))
-    directory = cache_directory() / "git-blobs"
-    directory.mkdir(parents=True, exist_ok=True)
-    remoteimages.prune_stale(directory)
-    suffix = PurePosixPath(path).suffix.lower()[:8]
-    target = directory / (hashlib.sha1(key.encode("utf-8", "replace")).hexdigest() + suffix)
-    if not target.exists():
-        tmp = target.with_suffix(target.suffix + ".part")
-        tmp.write_bytes(data)
-        tmp.replace(target)
-    return target
+    return blobcache.fetch(url, suffix)

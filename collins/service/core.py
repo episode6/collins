@@ -277,6 +277,8 @@ class ServiceCore:
         # Git over the API (PR-2.1): every git.* request, the blob GET and
         # the watches, answered off the main loop.
         self.git = gitfeed.GitFeed(self)
+        # A PR file's blob GET (PR-2.2, `kind=pr`): gh on a thread, no store.
+        self.pr_blobs = prfeed.PrBlobs()
         self.tools: tools_mod.SessionTools | None = None
         self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
         # The sandbox host and the live grants (start_sandbox_host), the

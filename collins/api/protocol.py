@@ -159,8 +159,9 @@ each taken from the code the message replaces:
   service's machine: `pr.set` (a session's list, wholesale), `pr.fetch`
   (re-read the statuses of some URLs), `pr.sweep` (the sidebar's sweep),
   `pr.detail` and `pr.threads` (the PR page's data, `prdetail`'s, as JSON
-  objects), `pr.blob` (an image in the Files view: the path of the file
-  the service wrote; a blob transfer is Phase 2's) and the actions:
+  objects), `pr.blob` (an image in the Files view: the gates checked and
+  the URL of its blob GET answered, ``GET /api/blob?kind=pr``, PR-2.2) and
+  the actions:
   `pr.action` (`practions.perform`'s keys), `pr.comment`, `pr.review` and
   `pr.thread` (reply in a review thread, or resolve it). Each names the PR
   by its record, from which the service rebuilds it with
@@ -294,7 +295,8 @@ each taken from the code the message replaces:
   later: exactly one response per request, on the connection that asked,
   which may take longer; `tests/inproc.py` pumps the loop until it does.
   ``GET /api/blob?kind=git`` on the same socket is a blob's bytes
-  (`api.server`), never a path on the wire.
+  (`api.server`), never a path on the wire; ``kind=pr`` is a PR file's
+  (PR-2.2), at the URL `pr.blob` answers.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -430,6 +432,8 @@ REQUEST_ID_MAX = 2**53 - 1
 TYPE_MAX = 64
 ID_MAX = 128
 PATH_MAX = 4096
+# A blob URL (`/api/blob?kind=…`): a path and a ref percent-encoded (PR-2.2).
+BLOB_URL_MAX = 4 * PATH_MAX
 TEXT_MAX = 1024 * 1024  # characters: prompt, paint, cut, tool reply
 NAME_MAX = 1024  # a title, a project's name, a display name
 HOST_MAX = 255  # a hostname, a device's name
@@ -1595,14 +1599,16 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "pr.blob",
-        "Fetch one file of a repository at a commit (an image the Files view shows).",
+        "Name the blob URL of one file of a repository at a commit (an image the Files view shows).",
         request=_request(
             {
                 "repository": _req(_s(NAME_MAX, low=1)),
                 "ref": _req(_s(256, low=1)),
                 "path": _req(_s(PATH_MAX, low=1)),
             },
-            reply={"file": _PATH, **_PR_ERROR},
+            # The blob GET's URL (`GET /api/blob?kind=pr&…`, PR-2.2), never
+            # a path: the client's blobcache fetches it.
+            reply={"url": _s(BLOB_URL_MAX), **_PR_ERROR},
         ),
     ),
     MessageType(
