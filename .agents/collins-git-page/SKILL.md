@@ -443,9 +443,12 @@ own** (below): they are the seam the transport sits on.
 
 **Git goes over the API (split-service spec §3.23, PR-2.1, D33).** In
 the app every runner is routed through `remotegit.Transport`
-(`gitops.set_transport`, installed by `remotegit.install(link)` once the
-app connects; a caller that brings its own `run=` — a test, the service's
-own code — never sees it): the argv a caller built is mapped back to the
+(`gitops.set_transport`, installed by `remotegit.install(link)` on every
+hello whose caps list `git`, `App._install_git_transport`; a caller that
+brings its own `run=` — a test's fake — never sees it, and the service's
+process never has one: `GitFeed.__init__` refuses to start with a
+transport installed, so its own `file_patch` / `run_plan` / `file_at`
+calls always run git here): the argv a caller built is mapped back to the
 **builder** that makes it and its keyword args (`gitops.match_argv`: every
 `*_argv` of gitops plus the nine ad-hoc argv promoted to builders —
 `gitloads.commit_subject_argv` / `commit_message_argv` /
@@ -1025,9 +1028,15 @@ waits only when asked for freshness, `remotegit.MAIN_THREAD_TIMEOUT_S`
 (0.5 s) at most: `gitinfo.refresh` (the page's tick, its open and
 `_on_mutated`, which re-seeds `_signature` from the answer so a move
 the page made is never reloaded twice — the reason refresh waits),
-`has_changes` / `change_summary` (a status is never served stale: the
-menus' state and the footer's entry mode read it), and a cwd the mirror
-has never seen. A `git.run`'s wait is its timeout plus a margin of at
+a cwd the mirror has never seen, and — with the status's own budget,
+`MAIN_THREAD_STATUS_TIMEOUT_S` (`gitinfo._STATUS_TIMEOUT_S` + 0.5 s), a
+large repository's status being slower than 0.5 s — `has_changes` /
+`change_summary` (a status is never served stale: the PR menu, the
+window's action and the footer's entry mode read it). The builders'
+revision bound is `gitops.ARGV_REF_MAX` (1024, `safe_argv_ref`), not
+`gitloads.safe_ref`'s 128 (a tool call's), and `read_page` answers
+`([], False)` for a range the builder refuses (the commits worker never
+dies on a ValueError). A `git.run`'s wait is its timeout plus a margin of at
 most the timeout (`ignored_names`' 0.5 s budget waits 1 s). A service that could
 not be asked (``gone``: the link down, a timeout) keeps the entry before,
 marked `GitInfo.unreachable` and re-stamped, so a hiccup or a restart

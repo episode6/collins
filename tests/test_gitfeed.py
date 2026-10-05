@@ -491,6 +491,18 @@ def test_an_option_shaped_argument_is_refused_invalid_by_every_builder(served, t
     assert not Path("/x").exists() and not (tmp_path / "x").exists()
 
 
+def test_a_long_branch_lists_its_commits_through_the_service(served):
+    """A 148-char branch (git accepts it) is a revision to the builders:
+    `log_argv` over it runs and answers git's exit 0."""
+    core, client, repo, _events = served
+    long_branch = "feature/" + "x" * 140
+    git(repo, "branch", long_branch)
+    reply = run(client, "log_argv", {"range_args": [f"{long_branch}..HEAD"], "limit": 5}, cwd=repo)
+    assert reply["status"] == 0 and not reply["unreachable"]
+    reply = run(client, "rev_parse_argv", {"rev": long_branch}, cwd=repo)
+    assert reply["status"] == 0
+
+
 def test_the_untracked_read_cannot_name_a_file_outside_the_tree(served, tmp_path):
     core, client, repo, _events = served
     secret = tmp_path / "outside-secret.txt"

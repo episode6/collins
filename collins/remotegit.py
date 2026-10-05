@@ -86,6 +86,12 @@ MAX_ENTRIES = 256
 # the next tick's answer fills the entry. Every other main-thread read is
 # served from the mirror and refreshed without waiting.
 MAIN_THREAD_TIMEOUT_S = 0.5
+# How long a `changes` read (has_changes / change_summary: one `git status`
+# on the service, its own budget gitinfo._STATUS_TIMEOUT_S) may wait on the
+# main thread: the status's budget and a little, as before the split — a
+# large repository's status takes longer than MAIN_THREAD_TIMEOUT_S, and a
+# cut-off answer would read "clean" and mark a healthy entry unreachable.
+MAIN_THREAD_STATUS_TIMEOUT_S = gitinfo._STATUS_TIMEOUT_S + 0.5
 
 Listener = Callable[[dict], None]
 
@@ -145,13 +151,15 @@ class Mirror:
         neither *changes* nor *state* is wanted, which are never served
         stale). Otherwise, off the main thread, one blocking fetch with
         the run's full wait. On the main thread a plain read is served the
-        entry as it is and refreshed by `send`; the main thread waits —
-        MAIN_THREAD_TIMEOUT_S at most — only when asked for freshness:
-        *wait* (`gitinfo.refresh`: the page's tick, its open, a mutation
-        it made, which re-seeds its signatures from the answer), *changes*
-        / *state* (a status is never served stale: the menus' state and
-        the footer's entry mode read it), or a cwd never seen. None when
-        there is no entry and the service could not be asked."""
+        entry as it is and refreshed by `send`; the main thread waits only
+        when asked for freshness: MAIN_THREAD_TIMEOUT_S at most for *wait*
+        (`gitinfo.refresh`: the page's tick, its open, a mutation it made,
+        which re-seeds its signatures from the answer), *state* or a cwd
+        never seen, and MAIN_THREAD_STATUS_TIMEOUT_S for *changes* (a
+        status is never served stale: the menus' state and the footer's
+        entry mode read it, and it has the service's status budget to
+        answer in). None when there is no entry and the service could not
+        be asked."""
         with self._lock:
             entry = self._entries.get(cwd)
             fresh = entry is not None and time.monotonic() - entry.fetched_at <= max_age
@@ -160,7 +168,9 @@ class Mirror:
                 return entry
         if not _on_main_thread():
             return self._fetch(cwd, entry, changes, state)
-        if entry is None or changes or state or wait:
+        if changes:
+            return self._fetch(cwd, entry, changes, state, timeout=MAIN_THREAD_STATUS_TIMEOUT_S)
+        if entry is None or state or wait:
             return self._fetch(cwd, entry, changes, state, timeout=MAIN_THREAD_TIMEOUT_S)
         self._refresh_async(cwd, changes, state)
         return entry
@@ -247,7 +257,7 @@ class Mirror:
 
     # -- the watch
 
-    def watch(self, cwd: str, files: Sequence[str], state: str | None = None, handle: str = "") -> None:
+    def watch(self, cwd: str, files: Sequence[str], state: str | None = None, *, handle: str) -> None:
         """Install the page's monitors on the service for *cwd* (the
         loaded files' directories, `git.watch`) under the page's
         *handle*; the reply is not waited for. The same handle again
@@ -267,8 +277,8 @@ class Mirror:
 
     def _send_watch(self, message: dict) -> None:
         link = self._link_of()
-        if link is None:
-            return
+        if link is None or gitinfo.reader() is None:
+            return  # no link, or git is local (a service without the git capability)
         link.send(
             message, on_refused=lambda r: log.debug("git.watch %s refused: %s", message.get("cwd"), r.msgid)
         )
@@ -277,7 +287,7 @@ class Mirror:
         with self._lock:
             self._watches.pop(handle, None)
         link = self._link_of()
-        if link is None:
+        if link is None or gitinfo.reader() is None:
             return
         link.send({"t": "git.unwatch", "handle": handle}, on_refused=lambda r: None)
 

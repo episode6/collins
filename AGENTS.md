@@ -299,8 +299,9 @@ builders validate their own arguments (a ref, a path, a count:
 `ValueError`, `invalid` on the wire), since the service runs what they
 make of a client's args. On the GTK main thread a plain read of the
 mirror never waits for the service (a stale entry is served and
-refreshed by `send`); an explicit `gitinfo.refresh` or a status waits
-`remotegit.MAIN_THREAD_TIMEOUT_S` (0.5 s) at most. The
+refreshed by `send`); an explicit `gitinfo.refresh` waits
+`remotegit.MAIN_THREAD_TIMEOUT_S` (0.5 s) at most, a status its own
+budget (`MAIN_THREAD_STATUS_TIMEOUT_S`). The
 client opens no project file for git and runs no git:
 `tests/test_client_is_pathless.py` walks the GTK modules and the client
 helpers for filesystem and subprocess sites and holds them to

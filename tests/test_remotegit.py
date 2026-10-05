@@ -176,10 +176,14 @@ def test_a_worker_thread_blocks_for_a_fresh_answer_and_the_main_thread_never_doe
     assert len(held) == 1 and len(link.calls) == 2
     held[0][1]({**INFO, "branch": "later"})
     assert gitinfo.current_branch("/srv/project") == "later"
-    # has_changes on the main thread waits, but only MAIN_THREAD_TIMEOUT_S.
+    # has_changes on the main thread waits for the status, with the
+    # status's own budget (a large repository's takes longer than the
+    # plain bound; cut off it would read "clean").
     link.answers["git.info"] = lambda m: {**INFO, "changes": {"staged": True, "unstaged": False}}
     assert gitinfo.has_changes("/srv/project") is True
-    assert link.calls[-1][0]["changes"] is True and link.calls[-1][1] == remotegit.MAIN_THREAD_TIMEOUT_S
+    assert link.calls[-1][0]["changes"] is True
+    assert link.calls[-1][1] == remotegit.MAIN_THREAD_STATUS_TIMEOUT_S == gitinfo._STATUS_TIMEOUT_S + 0.5
+    assert remotegit.MAIN_THREAD_STATUS_TIMEOUT_S > remotegit.MAIN_THREAD_TIMEOUT_S
 
 
 def test_a_service_that_did_not_answer_keeps_the_entry_before(link, monkeypatch):

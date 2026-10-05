@@ -430,8 +430,25 @@ class PlanContext:
 # grammar — on both sides, since the client builds the same argv first.
 
 
+# The longest revision a builder puts on an argv: gitfiles' bound on a ref
+# name it lists (`_REF_NAME_MAX`), not gitloads.safe_ref's 128, which is
+# the bound on what a tool call or a saved layout may name — a branch git
+# itself accepts can be far longer, and the sidebar lists it.
+ARGV_REF_MAX = 1024
+
+
+def safe_argv_ref(name: object) -> bool:
+    """gitloads.safe_ref's rule at ARGV_REF_MAX: a non-empty str, no
+    whitespace, no leading "-" (an option), no ".." (a range)."""
+    if not isinstance(name, str) or not name or len(name) > ARGV_REF_MAX:
+        return False
+    if any(ch.isspace() for ch in name):
+        return False
+    return not name.startswith("-") and ".." not in name
+
+
 def _check_ref(name: object, what: str = "ref") -> str:
-    if not gitloads.safe_ref(name):
+    if not safe_argv_ref(name):
         raise ValueError(f"not a safe {what}: {name!r}")
     return name  # type: ignore[return-value]
 
@@ -454,13 +471,13 @@ def _check_range_arg(token: object) -> str:
     pass). Anything else is a ValueError."""
     if isinstance(token, str) and token in NOT_ON_ANY_REMOTE:
         return token
-    if gitloads.safe_ref(token):
+    if safe_argv_ref(token):
         return token  # type: ignore[return-value]
     if isinstance(token, str):
         for dots in ("...", ".."):
             if dots in token:
                 left, _sep, right = token.partition(dots)
-                if gitloads.safe_ref(left) and gitloads.safe_ref(right):
+                if safe_argv_ref(left) and safe_argv_ref(right):
                     return token
                 break
     raise ValueError(f"not a revision or range: {token!r}")
@@ -1010,9 +1027,16 @@ def read_page(
     """(commits, more) for the first *pages* pages of *page_size* commits
     in *range_args*: one `git log` asking for one commit past the window
     (the limit+1 trick), so *more* says whether a `load more…` row is
-    due without a second call. ([], False) when git couldn't answer."""
+    due without a second call. ([], False) when git couldn't answer, or
+    when *range_args* is nothing the builder puts on an argv (a worker
+    thread calls this: it never raises, rule 4)."""
     wanted = max(1, int(page_size)) * max(1, int(pages))
-    result = run_git(cwd, log_argv(range_args, wanted + 1), run=run, timeout=timeout)
+    try:
+        argv = log_argv(range_args, wanted + 1)
+    except ValueError:
+        log.debug("gitops: read_page refused its range %r", list(range_args)[:4])
+        return [], False
+    result = run_git(cwd, argv, run=run, timeout=timeout)
     if not result.ok:
         return [], False
     commits = parse_log(result.stdout)
