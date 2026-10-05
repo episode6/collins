@@ -1113,7 +1113,8 @@ mirror keeps `MAX_ENTRIES` (256) cwds and evicts the least recently read
 (a hit moves the entry to the back). `has_changes` / `change_summary`
 are `git.info` with `changes` (one `git status` on the service, asked
 fresh and on demand, never on a tick), `ignored_names` is `git.run` with
-`check_ignore_argv`, and `gitops.in_progress_at(cwd)` /
+`check_ignore_argv` where a client still calls it (the file tree no
+longer does: since PR-2.4 the service runs it inside `fs.list`), and `gitops.in_progress_at(cwd)` /
 `in_progress_operation_at` (the page's bar and the sidebar's gates) read
 the mirror's `operation` kind. A service that cannot be asked reads as
 "not a repository" — never this machine's `.git`, which is not the

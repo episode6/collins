@@ -53,6 +53,10 @@ log = logging.getLogger(__name__)
 
 _MAX_RECENT_FILES = 20  # cap on files a session's editor_state remembers
 _MAX_AGENT_FILES = 8  # rows in the "agent files" list pinned above the tree
+# A fresh open refused on the load's worker: the file resolves outside the
+# pane's root (`fs.stat`'s `inside`, PR-2.4). A marker, never shown: the
+# banner says `_outside_message`.
+_OUTSIDE_MSGID = "outside-the-editor-root"
 # The debounce between a file-monitor event and the check of the file lives
 # on the service now (service.files.WATCH_DEBOUNCE_MS, PR-2.3): one
 # `file-changed` per burst of an agent's quick writes.
@@ -157,6 +161,20 @@ class EditorPane(Gtk.Box):
         self._banner_click_id: int | None = None
         self._reroot_asking = False  # the follow-the-working-directory dialog is up
         self._reroot_queued: Path | None = None  # a move that arrived while it was
+        # A re-root's stats are the service's (PR-2.4): the one in flight,
+        # by number, so a newer request_root supersedes it.
+        self._reroot_seq = 0
+        # How a queued move is judged again (`_follow_queued`): the tab's
+        # session's `cwd.settle` with `judge` (`set_follow_judge`); None for
+        # a pane with no session behind it, which only offers.
+        self._follow_judge = None
+        # The Agent files list's check (`set_agent_files`): one `fs.stat`
+        # pass in flight at a time, the latest paths kept for the next.
+        self._agent_wanted: list[str] = []
+        self._agent_checking = False
+        self._agent_again = False
+        # Image pages being opened: their `fs.stat` is in flight.
+        self._image_opening: set[str] = set()
         self._active_search_context: GtkSource.SearchContext | None = None
         self._last_match: tuple[int, int] | None = None  # (start, end) char offsets
         # One column at a time (see _sync_layout): whether the pane is
@@ -680,15 +698,43 @@ class EditorPane(Gtk.Box):
 
     def set_agent_files(self, paths: list[str]) -> None:
         """Show *paths* (most recent first) in the agent-files list. Called on
-        every transcript update, so it must be cheap when nothing changed.
+        every transcript update, so it must be cheap: the check is one
+        `fs.stat` per path on a worker thread (`_check_agent_files`), one
+        pass at a time, a call meanwhile only remembered for the next.
         Drops anything outside the project or no longer a file on disk."""
-        shown = []
-        for path in paths:
-            if len(shown) >= _MAX_AGENT_FILES:
-                break
-            p = Path(path)
-            if editorfiles.is_inside(self._root, p) and p.is_file():
-                shown.append(str(p))
+        self._agent_wanted = list(paths)
+        if self._agent_checking:
+            self._agent_again = True
+            return
+        self._check_agent_files()
+
+    def _check_agent_files(self) -> None:
+        paths, root = list(self._agent_wanted), str(self._root)
+        self._agent_checking = True
+
+        def work() -> list[str]:
+            shown: list[str] = []
+            for path in paths:
+                if len(shown) >= _MAX_AGENT_FILES:
+                    break
+                found = remotefiles.stat_path(path, root)
+                if found.is_file and found.inside:
+                    shown.append(str(Path(path)))
+            return shown
+
+        self._off_main(work, self._agent_files_checked)
+
+    def _agent_files_checked(self, kind: str, value) -> None:
+        self._agent_checking = False
+        if self._shut:
+            return
+        if kind == "ok":
+            self._show_agent_files(value)
+        if self._agent_again:
+            self._agent_again = False
+            self._check_agent_files()
+
+    def _show_agent_files(self, shown: list[str]) -> None:
         if shown == self._agent_paths:
             return
         self._agent_paths = shown
@@ -777,16 +823,12 @@ class EditorPane(Gtk.Box):
         # Defense in depth behind the tree's own symlink filtering: every
         # caller (tree activation, session restore, future pop-out) funnels
         # through here, and a save would write through a symlink — so nothing
-        # resolving outside the project may ever get a buffer.
-        if not editorfiles.is_inside(self._root, path):
-            self._notify(
-                _("{name} is outside this project and can't be opened here.").format(
-                    name=path.name
-                )
-            )
-            return
+        # resolving outside the project may ever get a buffer. Whether it
+        # does is the service's `fs.stat` (`inside` of this root, PR-2.4),
+        # asked on the load's worker before the read: a fresh open of a
+        # file outside closes its tab again with `_outside_message`.
         if editorfiles.is_image_path(path):
-            self._open_image_page(key, path)
+            self._open_image(key, path)
             return
         # The guards on what may be loaded (a regular file, under the size
         # cap, not binary) are the service's now: `fs.read` refuses or
@@ -842,10 +884,17 @@ class EditorPane(Gtk.Box):
         opened.pending_cursor = restore_cursor
         load_id = opened.load_id
         path = str(opened.path)
-        self._off_main(
-            lambda: remotefiles.read(path),
-            lambda kind, value: self._on_loaded(opened, load_id, kind, value),
-        )
+        root = str(self._root)
+
+        def work() -> remotefiles.FileText:
+            # A fresh open is confined to this pane's root (`open_file`'s
+            # guard); a reload is not: a file left open outside the root
+            # by a re-root goes on reloading from where it is.
+            if not reload and not remotefiles.stat_path(path, root).inside:
+                raise RequestRefused(protocol.ERROR_REFUSED, _OUTSIDE_MSGID, {})
+            return remotefiles.read(path)
+
+        self._off_main(work, lambda kind, value: self._on_loaded(opened, load_id, kind, value))
 
     @staticmethod
     def _off_main(work, land) -> None:
@@ -865,15 +914,52 @@ class EditorPane(Gtk.Box):
 
         threading.Thread(target=run, name="editor-files", daemon=True).start()
 
+    def _outside_message(self, path: Path) -> str:
+        return _("{name} is outside this project and can't be opened here.").format(name=path.name)
+
+    def _open_image(self, key: str, path: Path) -> None:
+        """An image's page, once the service's `fs.stat` says the file is
+        inside this root, a file, and not absurdly large
+        (`editorfiles.image_stat_guard`); asked off the main loop."""
+        if key in self._image_opening:
+            return
+        self._image_opening.add(key)
+        root = str(self._root)
+        self._off_main(
+            lambda: remotefiles.stat_path(key, root),
+            lambda kind, value: self._image_stat_landed(key, path, kind, value),
+        )
+
+    def _image_stat_landed(self, key: str, path: Path, kind: str, value) -> None:
+        self._image_opening.discard(key)
+        if self._shut:
+            return
+        existing = self._pages.get(key)
+        if existing is not None:
+            self._select_page(existing)
+            return
+        if kind != "ok":
+            self._notify(
+                _("Couldn't open {name}: {message}").format(
+                    name=path.name, message=remotefiles.refusal_words(value)
+                )
+            )
+            return
+        if not value.inside:
+            self._notify(self._outside_message(path))
+            return
+        guard = editorfiles.image_stat_guard(value.kind, value.size)
+        if guard != editorfiles.LoadGuard.OK:
+            self._notify(self._guard_message(path, guard))
+            return
+        self._open_image_page(key, path)
+
     def _open_image_page(self, key: str, path: Path) -> None:
         """A read-only `Gtk.Picture` page — images never get a buffer
         (`fs.read` would refuse them as binary), so none of the
         save/dirty/search machinery applies: `_open` stays text-only and
-        every `_open` consumer skips these pages."""
-        guard = editorfiles.image_guard(path)
-        if guard != editorfiles.LoadGuard.OK:
-            self._notify(self._guard_message(path, guard))
-            return
+        every `_open` consumer skips these pages. The guard ran first
+        (`_image_stat_landed`)."""
         # Through animatedimage like every other image surface, so a GIF
         # opened here plays rather than showing its first frame.
         paintable = animatedimage.load(key)
@@ -910,7 +996,10 @@ class EditorPane(Gtk.Box):
         if not still_open:
             return
         failure: str | None = None
-        if kind != "ok":
+        outside = kind != "ok" and value.msgid == _OUTSIDE_MSGID
+        if outside:
+            failure = self._outside_message(opened.path)
+        elif kind != "ok":
             failure = remotefiles.refusal_words(value)
         elif value.binary:
             failure = self._guard_message(opened.path, editorfiles.LoadGuard.BINARY)
@@ -925,7 +1014,9 @@ class EditorPane(Gtk.Box):
                 self._settle_pending_change(opened)
             else:
                 self._notify(
-                    _("Couldn't open {name}: {message}").format(name=opened.path.name, message=failure)
+                    failure
+                    if outside
+                    else _("Couldn't open {name}: {message}").format(name=opened.path.name, message=failure)
                 )
                 page = self._pages.get(key)
                 if page is not None:
@@ -1171,6 +1262,7 @@ class EditorPane(Gtk.Box):
         for opened in list(self._open.values()):
             self._unwatch(opened)
         self._watched.clear()
+        self._tree.shutdown()  # the tree's directory watches (PR-2.4)
 
     def _check_external(self, opened: _OpenFile, event: dict) -> None:
         """A `file-changed` for *opened*: judged against the mtime and size
@@ -1261,16 +1353,29 @@ class EditorPane(Gtk.Box):
             # keeping; a move back to where the pane already is cancels it.
             self._reroot_queued = None if new_root == self._root else new_root
             return
+        self._reroot_seq += 1  # a re-root still asking the service is superseded
         if new_root == self._root:
             return
-        try:
-            if not new_root.is_dir():
-                return
-        except OSError:
-            return
-        old_root = self._root
+        # Whether *root* is a directory, and which open files have a
+        # counterpart there, are the service's `fs.stat` answers, asked off
+        # the main loop (PR-2.4); the move goes on in `_reroot_checked`.
+        seq, old_root = self._reroot_seq, self._root
+        counterparts = editorfiles.reroot_counterparts(old_root, new_root, list(self._pages))
+
+        def work() -> set[str] | None:
+            if not remotefiles.stat_path(str(new_root)).is_dir:
+                return None
+            return {path for path in counterparts if remotefiles.stat_path(path).is_file}
+
+        self._off_main(work, lambda kind, value: self._reroot_checked(seq, old_root, new_root, kind, value))
+
+    def _reroot_checked(self, seq: int, old_root: Path, new_root: Path, kind: str, files) -> None:
+        if self._shut or seq != self._reroot_seq or self._root != old_root or self._reroot_asking:
+            return  # superseded, or the pane moved (or asked) meanwhile
+        if kind != "ok" or files is None:
+            return  # not a directory over there (or the service couldn't say): no move
         entries = editorfiles.plan_reroot(
-            old_root, new_root, list(self._pages), self._dirty_paths()
+            old_root, new_root, list(self._pages), self._dirty_paths(), files=files
         )
         defaults = {entry.path: entry.default for entry in entries}
         asking = [entry for entry in entries if entry.needs_asking]
@@ -1315,20 +1420,41 @@ class EditorPane(Gtk.Box):
             self.get_root(), str(old_root), str(new_root), asking, move, done
         )
 
+    def set_follow_judge(self, judge) -> None:
+        """How a queued move is judged again: `judge(cwd, root)` answering a
+        `FollowScope` or None, blocking (the tab's session's `judge_cwd`,
+        the service's `cwd.settle` with `judge`; asked from a worker)."""
+        self._follow_judge = judge
+
     def _follow_queued(self, root: Path) -> bool:
         """A move that arrived while the follow dialog was up, taken as far as
-        it goes from wherever the pane ended up (see `request_root`)."""
-        scope = editorfiles.follow_scope(self._root, str(root))
+        it goes from wherever the pane ended up (see `request_root`). The
+        scope is the service's (`cwd.settle` with `judge`, PR-2.4), asked
+        off the main loop; with no judge (a pane with no session) it is
+        only offered — never a silent swap."""
+        judge = self._follow_judge
+        if judge is None:
+            self.offer_root(str(root))
+            return GLib.SOURCE_REMOVE
+        pane_root = self._root
+        self._off_main(
+            lambda: judge(str(root), str(pane_root)),
+            lambda kind, scope: self._queued_judged(root, pane_root, kind, scope),
+        )
+        return GLib.SOURCE_REMOVE
+
+    def _queued_judged(self, root: Path, pane_root: Path, kind: str, scope) -> None:
+        if self._shut or kind != "ok" or self._root != pane_root:
+            return  # closed, unanswered, or the pane moved again meanwhile
         if scope is editorfiles.FollowScope.AUTO:
             self.request_root(root)
         elif scope is editorfiles.FollowScope.OFFER:
             self.offer_root(str(root))
-        return GLib.SOURCE_REMOVE
 
     def offer_root(self, root: str) -> None:
         """Offer a move the pane won't make on its own — the session working
         somewhere outside the project this editor belongs to, where re-rooting
-        would swap out every open file (see `editorfiles.follow_scope`).
+        would swap out every open file (see `projectfiles.follow_scope`).
         Ignoring the banner is a real answer, so nothing expires it."""
         self._show_banner(
             _("Session moved to {name}").format(name=Path(root).name),
@@ -1373,8 +1499,8 @@ class EditorPane(Gtk.Box):
                 if moved is not None:
                     self._reload_from_disk(moved)
         active = self._selected_key()
-        if active and editorfiles.is_inside(self._root, active):
-            self._tree.reveal(active)
+        if active:
+            self._tree.reveal(active)  # a no-op for a file the tree can't show
         self._sync_status()
         self.emit("root-changed", str(self._root))
 

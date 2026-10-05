@@ -106,6 +106,9 @@ CHECK_SECONDS = {
     # Not yet timed on CI: about 5 s on a dev box under the headless shell
     # (a service of its own, a dozen round trips and four debounces).
     "check_editor_save.py": 5.0,
+    # Not yet timed on CI: about 6 s on a dev box under the headless shell
+    # (a service of its own, the listings, the walk and a few debounces).
+    "check_filetree.py": 6.0,
     # Skips in CI's container (no user namespace for bubblewrap), so its
     # weight is what a skip costs; a machine that can build a box spends
     # about as long on the boxes and the live grant. (The refresh script

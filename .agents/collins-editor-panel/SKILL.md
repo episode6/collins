@@ -32,8 +32,9 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   dirty state), a search bar, and an image page for pictures
   (`editorfiles.image_guard`, shown through `animatedimage.load`).
 - `filetree.FileTree`: a `Gtk.ListView` over a `Gtk.TreeListModel`, lazily
-  populated by `editorfiles.list_dir` on first expansion (honours
-  `editor_show_hidden_files`; `ignored_names` from git on demand). Icons and
+  populated by the service's `fs.list` on first expansion (honours
+  `editor_show_hidden_files`; the ignored names come in the same answer;
+  see "The tree, quick open and roots" below). Icons and
   colors per extension from `filetypes.py` (bundled `ft-*-symbolic` Octicons;
   color classes defined in `app.py`'s scheme provider, Seti-inspired). Context
   menus (new file/folder, rename, copy/cut/paste, trash, reveal) act through
@@ -47,10 +48,10 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   `EditorPane._open_file_with` launches through `openwith.open_file_with`,
   a failure landing in the banner. Probes: `FileTree.open_with_labels`,
   `activate_open_with`, `EditorPane.agent_file_open_with_labels`.
-- `quickopen.QuickOpen`: type-ahead over `editorfiles.walk_files` (background
-  thread, cached per root, cache dropped by a `Gio.FileMonitor` on the root,
-  re-walked on every open anyway), scored by `fuzzy.py` (subsequence; basename
-  and segment-start hits win).
+- `quickopen.QuickOpenDialog`: type-ahead over the service's `fs.walk`
+  (asked from a background thread, cached per root, the cache dropped by
+  the root's `fs.watch kind: dir`, re-walked on every open anyway), scored
+  by `fuzzy.py` (subsequence; basename and segment-start hits win).
 
 ## Behaviours
 
@@ -147,12 +148,74 @@ files.py` the service's:
   check that opens files needs the same two lines, or every open lands in
   the banner with "Not connected to the service".
 
+**The tree, quick open and roots are the service's** (split-service spec
+§3.23, PR-2.4). The directory reads moved out of `editorfiles` into
+`collins/projectfiles.py` (`list_entries`, `list_dir`, `walk_files`,
+`repository_root`, `is_inside`, `follow_scope`, `FollowScope`), which the
+service runs; the client reaches them only through requests
+(`remotefiles.stat_path` / `list_dir` / `walk_root`, blocking, called from a
+worker through `remotefiles.off_main`, which lands at
+`GLib.PRIORITY_DEFAULT`; the names avoid `stat` / `walk`, which the
+pathless walker reads as `Path` methods):
+
+- `fs.list {path, hidden, root}` answers the entries in the tree's order
+  (`kind` `file`, `dir`, or `symlink` — a link to a folder inside the root,
+  shown as a folder and never expanded; a link out of the root is not
+  listed), each marked `ignored` by one check-ignore the service runs in
+  the folder (`gitinfo.ignored_names`, which used to run on the main loop
+  per listing), at most 5000 and `truncated`. Confined to a root the
+  service knows (`files.allowed`) and to the root it names.
+- **`Gtk.TreeListModel` calls the children function for every directory row
+  it binds**, to draw the expander, and drops the model it gets (measured:
+  one call per bound row, two more per expansion). So `_create_children`
+  returns the node's own store (`_Node.children`, made once) and costs
+  nothing; the listing and the watch start in `_open_dir`, from the row's
+  `notify::expanded` (hooked in `_on_bind`) or from `reveal`. The old code
+  listed every visible folder on bind and paired its monitor with a store
+  the model then dropped, so a subfolder's live refresh never landed.
+- An expanded folder holds `fs.watch kind: dir` (handle → path in
+  `_watched`; the bound method `_on_dir_changed` is the listener, held
+  weakly by the watcher): the service's `monitor_directory`, debounced
+  300 ms into one `dir-changed {handle, path}` per burst, and the tree lists
+  again (`_list`: one listing per folder in flight, a change meanwhile
+  re-lists once it lands; `_epoch` turns over with the root). The root has
+  no watch (PR-2.6's root watch is the links'). `_splice` keeps the node of
+  every entry still there, so a folder expanded inside a refreshed one
+  stays expanded; a folder that left the listing is forgotten (its store
+  and watch). `forget_dir`, `set_root` and `shutdown` (from
+  `EditorPane.shutdown`) unwatch.
+- `reveal(path)` is a walk that waits: it goes as far as the rows already
+  listed, expands and opens the next folder, and resumes from each
+  listing's landing (`_continue_reveal`); a newer reveal or a re-root
+  replaces it.
+- `fs.walk {root, hidden}` answers at most 20 000 relative paths; the walk's
+  `paths` and the listing's `entries` are `protocol.CHUNKED_JSON_FIELDS`
+  (past a frame they travel as their JSON in `TAG_BLOB` frames).
+- `fs.stat {path, root}` answers the kind a symlink names (`symlink` only
+  for a dangling one, `missing`), a file's size, the mtime and `inside`
+  (of *root*, or of every root the service knows); it is unconfined.
+  `TerminalTab.ask_can_open_in_editor(path, then)` is `can_open_in_editor`
+  over it (the window's `_open_in_editor` asks each tab's root in turn on
+  one worker; `open_in_editor` and `show_image` defer their tool reply;
+  a clicked path or image and an attachment wait for the answer). The
+  Agent files list (`set_agent_files`: one pass of stats in flight, the
+  latest paths kept), a fresh open (the load's worker refuses one outside
+  the root; a reload is not confined, so a file a re-root left open
+  outside goes on reloading), an image page (`editorfiles.
+  image_stat_guard`; the lightbox keeps `image_guard` until PR-2.7) and
+  the git page's file-row menu (`GitSidebar._file_on_disk`; the
+  right-click asks off the main loop, the e2e probes block) all ask it.
+
 **Following the session** (`request_root` / `offer_root`): the tab's cwd tick
-calls `_maybe_follow_editor`; `editorfiles.follow_scope(root, cwd)` and
-`plan_reroot` decide whether a cwd move (into a `.claude/worktrees/<x>`
-worktree, back out, into an unrelated dir) re-roots the tree and which open
-files map to the new root (`renamed_path`). Panel shells get the same offer to
-`cd` (`_maybe_offer_shells_follow`).
+calls `_maybe_follow_editor`, whose scope is the service's (`cwd.settle`:
+`projectfiles.follow_scope` after the settling); `plan_reroot` decides which
+open files map to the new root (`renamed_path`), given the counterparts the
+service says are files (`reroot_counterparts`, stat'ed with the new root's
+`is_dir` on a worker: `request_root` → `_reroot_checked`, superseded by a
+newer request). A move queued while the follow dialog was up is judged
+again by `cwd.settle` with `judge: true` (`set_follow_judge`, the tab's
+`session.judge_cwd`; a pane with no session only offers). Panel shells get
+the same offer to `cd` (`_maybe_offer_shells_follow`).
 
 **Narrow mode** (`editor_narrow_width`, default 500, 0 = never): an
 `Adw.BreakpointBin` around the paned with one `Adw.Breakpoint`
@@ -214,5 +277,5 @@ close state joins all three.
 
 Related: `collins-terminal-tab`, `collins-panel-dock`,
 `collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`,
-`check_editor_save.py`), `collins-session-mcp-tools` (the API's message
+`check_editor_save.py`, `check_filetree.py`), `collins-session-mcp-tools` (the API's message
 table in `api/protocol.py`: the `fs.*` types).

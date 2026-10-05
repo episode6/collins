@@ -10,7 +10,12 @@ back and falls back to UTF-8 when latin-1 can't carry the text, is refused
 regardless with `expect_mtime` null; `fs.watch` reports a change once per
 debounce with the file's stat, a deletion as `gone`, replaces a handle's
 earlier watch, is dropped by `fs.unwatch` and by the client going away,
-and refuses a directory kind; every read and write is a `Deferred`
+and (PR-2.4) watches a directory too, one `dir-changed` per debounce;
+`fs.stat` answers the kind a symlink names, a file's size, the mtime and
+whether the path is inside a root; `fs.list` answers a directory's entries
+in the tree's order with the ignored names marked, cut at 5000 and saying
+so, confined to a known root and to the root it names; `fs.walk` answers a
+root's files, capped at 20 000; every read and write is a `Deferred`
 settled off the main loop, and a worker that raises settles `failed`.
 
 The core over the in-process harness (tests/inproc.py) with the worker
@@ -321,11 +326,204 @@ def test_watch_handles_unwatch_and_a_client_going_away(served):
     assert not core.files.watching(client, "w2")
 
 
-def test_a_directory_watch_is_not_served_yet(served):
+def dir_changes(events: list[dict]) -> list[dict]:
+    return [e for e in events if e.get("t") == "dir-changed"]
+
+
+def test_a_dir_watch_reports_once_per_debounce(served):
+    """PR-2.4: a burst of changes in a watched directory is one
+    `dir-changed {handle, path}`; the next burst is another; the watch
+    goes with `fs.unwatch`."""
+    core, client, project, events = served
+    client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
+    watch = core.files._watches[(id(client), "d1")]
+    assert isinstance(watch, files._DirWatch)
+    for name in ("b.txt", "c.txt", "d.txt"):
+        (project / name).write_text("x")
+        watch._on_event()
+    assert pump(2.0, lambda: dir_changes(events))
+    pump(0.6)
+    assert dir_changes(events) == [{"t": "dir-changed", "handle": "d1", "path": str(project)}]
+    (project / "e.txt").write_text("x")
+    watch._on_event()
+    assert pump(2.0, lambda: len(dir_changes(events)) == 2)
+    client.request({"t": "fs.unwatch", "handle": "d1"})
+    assert watch._stopped and not core.files.watching(client, "d1")
+
+
+def test_a_dir_watchs_monitor_is_real(served):
+    """A file a shell makes in the directory lands with no hand-fired
+    event (what the tree's live refresh rides)."""
+    core, client, project, events = served
+    client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
+    pump(0.2)
+    (project / "from-a-shell.txt").write_text("hello\n")
+    assert pump(3.0, lambda: dir_changes(events)), "the directory monitor never fired"
+
+
+def test_a_dir_watch_is_confined_and_bounded_like_a_files(served):
     core, client, project, _events = served
+    client.local = False
     with pytest.raises(inproc.RequestRefused) as refused:
         client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
     assert refused.value.error == protocol.ERROR_REFUSED
+
+
+# -- fs.stat, fs.list, fs.walk (PR-2.4) ------------------------------------------------
+
+
+def test_stat_answers_kind_size_mtime_and_inside(served, tmp_path):
+    core, client, project, _events = served
+    path = project / "a.txt"
+    reply = client.request({"t": "fs.stat", "path": str(path), "root": str(project)})
+    assert reply["kind"] == "file" and reply["size"] == 8 and reply["mtime"] == mtime_of(path)
+    assert reply["inside"] is True
+    reply = client.request({"t": "fs.stat", "path": str(project), "root": str(project)})
+    assert reply["kind"] == "dir" and reply["size"] is None and reply["inside"] is True
+    reply = client.request({"t": "fs.stat", "path": str(project / "nope"), "root": str(project)})
+    assert reply == {"kind": "missing", "size": None, "mtime": None, "inside": False}
+    (project / "dangling").symlink_to(project / "nowhere")
+    assert client.request({"t": "fs.stat", "path": str(project / "dangling")})["kind"] == "symlink"
+    # A link to a file is the file; one out of the root is not inside it.
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    (project / "out.txt").symlink_to(outside)
+    reply = client.request({"t": "fs.stat", "path": str(project / "out.txt"), "root": str(project)})
+    assert reply["kind"] == "file" and reply["inside"] is False
+
+
+def test_stat_is_unconfined_and_inside_of_every_root_without_one(served, tmp_path):
+    """A stat leaks nothing a shell could not: a client that is not local
+    may stat anything; with no root named, `inside` is of every root the
+    service knows."""
+    core, client, project, _events = served
+    client.local = False
+    elsewhere = tmp_path / "elsewhere.txt"
+    elsewhere.write_text("x")
+    reply = client.request({"t": "fs.stat", "path": str(elsewhere)})
+    assert reply["kind"] == "file" and reply["inside"] is False
+    assert client.request({"t": "fs.stat", "path": str(project / "a.txt")})["inside"] is False
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    assert client.request({"t": "fs.stat", "path": str(project / "a.txt")})["inside"] is True
+
+
+def test_list_answers_the_trees_order_and_kinds(served):
+    core, client, project, _events = served
+    (project / "src").mkdir()
+    (project / "Zeta.md").write_text("z")
+    (project / ".hidden").write_text("h")
+    (project / "node_modules").mkdir()
+    (project / "link").symlink_to(project / "src")
+    message = {"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)}
+    reply = client.request(message)
+    assert [(e["name"], e["kind"]) for e in reply["entries"]] == [
+        ("link", "symlink"), ("src", "dir"), ("a.txt", "file"), ("Zeta.md", "file"),
+    ]
+    assert reply["truncated"] is False
+    names = [e["name"] for e in client.request({**message, "hidden": True})["entries"]]
+    assert ".hidden" in names and "node_modules" not in names
+
+
+def test_list_marks_the_ignored_names(served):
+    """The check-ignore the tree ran on the main loop runs on the service,
+    in the listing's directory, and marks the entries."""
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        pytest.skip("no git")
+    core, client, project, _events = served
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    (project / ".gitignore").write_text("build.log\nout/\n")
+    (project / "build.log").write_text("x")
+    (project / "out").mkdir()
+    reply = client.request({"t": "fs.list", "path": str(project), "hidden": True, "root": str(project)})
+    ignored = {e["name"]: e["ignored"] for e in reply["entries"]}
+    assert ignored == {"out": True, ".gitignore": False, "a.txt": False, "build.log": True}
+
+
+def test_list_of_more_than_5000_entries_is_truncated(served):
+    core, client, project, _events = served
+    big = project / "big"
+    big.mkdir()
+    for index in range(5003):
+        (big / f"f{index:05d}").touch()
+    reply = client.request({"t": "fs.list", "path": str(big), "hidden": False, "root": str(project)})
+    assert len(reply["entries"]) == protocol.FS_LIST_MAX == 5000
+    assert reply["truncated"] is True and reply["entries"][-1]["name"] == "f04999"
+
+
+def test_list_is_confined_to_a_known_root_and_to_its_own(served, tmp_path):
+    core, client, project, _events = served
+    other = tmp_path / "other"
+    other.mkdir()
+    # The root it names: the directory must resolve inside it.
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.list", "path": str(other), "hidden": False, "root": str(project)})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    (project / "escape").symlink_to(other)
+    with pytest.raises(inproc.RequestRefused):
+        client.request(
+            {"t": "fs.list", "path": str(project / "escape"), "hidden": False, "root": str(project)}
+        )
+    # A client that is not local: only under a root the service knows,
+    # whatever root it names.
+    client.local = False
+    with pytest.raises(inproc.RequestRefused):
+        client.request({"t": "fs.list", "path": str(other), "hidden": False, "root": str(other)})
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    reply = client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)})
+    assert [e["name"] for e in reply["entries"]] == ["a.txt"]  # the link out of the root is not listed
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.list", "path": str(project / "gone"), "hidden": False, "root": str(project)})
+    assert refused.value.error == protocol.ERROR_GONE
+
+
+def test_walk_answers_relative_paths_breadth_first(served):
+    core, client, project, _events = served
+    (project / "src" / "deep").mkdir(parents=True)
+    (project / "src" / "b.py").write_text("b")
+    (project / "src" / "deep" / "c.py").write_text("c")
+    (project / ".env").write_text("e")
+    reply = client.request({"t": "fs.walk", "root": str(project), "hidden": False})
+    assert reply == {"paths": ["a.txt", "src/b.py", "src/deep/c.py"], "truncated": False}
+    hidden = client.request({"t": "fs.walk", "root": str(project), "hidden": True})["paths"]
+    assert ".env" in hidden
+
+
+def test_a_walk_is_capped_at_20000(served):
+    core, client, project, _events = served
+    for part in range(5):  # under the listing's 5000 each, 22 501 in all
+        directory = project / f"d{part}"
+        directory.mkdir()
+        for index in range(4500):
+            (directory / f"f{index}").touch()
+    reply = client.request({"t": "fs.walk", "root": str(project), "hidden": False})
+    assert len(reply["paths"]) == protocol.FS_WALK_MAX == 20_000 and reply["truncated"] is True
+    assert reply["paths"][0] == "a.txt"
+
+
+def test_walk_is_confined_to_a_known_root(served, tmp_path):
+    core, client, project, _events = served
+    client.local = False
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.walk", "root": str(project), "hidden": False})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
+
+
+def test_stat_list_and_walk_are_deferreds_settled_later(served):
+    core, client, project, _events = served
+    landed: list = []
+    core.files = files.Files(core, dispatch=landed.append)
+    for frame in (
+        {"t": "fs.stat", "id": 1, "path": str(project / "a.txt")},
+        {"t": "fs.list", "id": 2, "path": str(project), "hidden": False, "root": str(project)},
+        {"t": "fs.walk", "id": 3, "root": str(project), "hidden": False},
+    ):
+        raw = core.handle(protocol.validate(frame, protocol.CLIENT), client)
+        assert isinstance(raw, protocol.Deferred) and not raw.settled
 
 
 # -- the helpers -----------------------------------------------------------------------

@@ -38,6 +38,18 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The editor's tree, quick open and roots go over the service's socket.**
+  The file tree lists a folder by asking the service (the folder's entries
+  and the names git ignores in one answer, off the window's main loop,
+  where the ignore check used to run), quick open's index is a walk on the
+  service, and both stay fresh through folder watches the service runs.
+  Whether a file is inside the project (an open, the Agent files list, a
+  clicked path, `open_in_editor`, the git page's *Open in editor*) and
+  whether a new working directory is one to follow are the service's
+  answers too. A folder that changes on disk now refreshes in the tree
+  while it is open (an expanded subfolder used to stay as first listed),
+  and the folders expanded inside it stay expanded. Otherwise nothing
+  looks different (the fourth chunk of the split's Phase 2).
 - **The editor's files go over the service's socket.** Opening a file in
   the editor panel asks the service for its text, saving hands the text
   back, and the file monitor that reloads a buffer the agent rewrote runs

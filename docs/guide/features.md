@@ -504,7 +504,12 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   every file through `collins-service` (the same socket the agent's
   terminal comes over), never from the window itself — which is what an
   editor on another machine needs. Files up to 5 MiB open; one that is
-  not UTF-8 is read as latin-1 and written back the same way.
+  not UTF-8 is read as latin-1 and written back the same way. The tree's
+  folders and quick open's index are the service's listings too, kept
+  fresh by folder watches it runs: a folder open in the tree shows files
+  appearing and going while you look, and the folders expanded inside it
+  stay expanded. A folder lists up to 5,000 entries, quick open indexes up
+  to 20,000 files.
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — and the whole editor can **pop out** into a window of its
   own on a second monitor, then dock back with one click.

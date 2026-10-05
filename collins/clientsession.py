@@ -378,6 +378,17 @@ class ClientSession:
                 return member
         return None
 
+    def judge_cwd(self, cwd: str | None, root: str) -> editorfiles.FollowScope | None:
+        """`cwd.settle` with `judge`: the scope of *cwd* from *root* now,
+        none of the settling (the editor's queued move, PR-2.4). Blocking:
+        the editor asks from a worker thread."""
+        reply = self._ask({"t": "cwd.settle"}, cwd=cwd, root=root, judge=True)
+        scope = (reply or {}).get("scope") or ""
+        for member in editorfiles.FollowScope:
+            if member.value == scope and member is not editorfiles.FollowScope.NONE:
+                return member
+        return None
+
     def set_shells_follow_armed(self, armed: bool) -> None:
         self.shells_follow_armed = bool(armed)
         self._ask({"t": "shells.follow"}, armed=bool(armed))
