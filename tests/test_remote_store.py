@@ -374,3 +374,24 @@ def test_a_table_row_names_the_session_and_its_exit_clears_it(world):
     link.dispatch({"t": "pty", "pty": 43, "kind": "agent", "session": ids["alpha2"], "table": True})
     remote.reset()
     assert item.running is False and remote.agent_ptys() == {}
+
+
+def test_a_kept_entry_goes_with_a_table_exit_and_a_reset(world):
+    _store, remote, _state, ids, link = world
+    link.dispatch({"t": "pty", "pty": 51, "kind": "agent", "session": ids["alpha2"], "table": True})
+    link.dispatch({"t": "pty", "pty": 52, "kind": "agent", "cwd": "/w", "table": True})
+    remote.keep_open_tabs([ids["alpha2"], "pty:52", ids["alpha1"]])
+    assert remote.kept_open_tabs == [ids["alpha2"], "pty:52", ids["alpha1"]]
+    # A view's exit (no table flag) moves nothing kept.
+    link.dispatch({"t": "pty-exited", "pty": 51, "status": 0})
+    assert ids["alpha2"] in remote.kept_open_tabs
+    link.dispatch({"t": "pty", "pty": 51, "kind": "agent", "session": ids["alpha2"], "table": True})
+    # The table's exits: by the session the row named, and by the pty.
+    link.dispatch({"t": "pty-exited", "pty": 51, "status": None, "table": True})
+    link.dispatch({"t": "pty-exited", "pty": 52, "status": 0, "table": True})
+    assert remote.kept_open_tabs == [ids["alpha1"]]
+    assert remote.forget_kept_tab(ids["alpha1"], None) is True
+    assert remote.forget_kept_tab(ids["alpha1"], None) is False
+    remote.keep_open_tabs(["pty:9"])
+    remote.reset()
+    assert remote.kept_open_tabs == []

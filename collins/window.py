@@ -659,7 +659,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.store.connect("busy-changed", self._on_row_busy_changed)
         # The service's agent ptys: running rows come and go (§3.21).
         self._running_handler = self.store.connect(
-            "running-changed", lambda *_a: self.sidebar.refresh_running_rows()
+            # (and the open tabs follow: a kept entry gone, a CLI that left)
+            "running-changed", lambda *_a: self._open_tabs_changed()
         )
         self.connect("destroy", lambda *_a: self.store.disconnect(self._running_handler))
         if hasattr(self.state, "connect_changed"):
@@ -866,8 +867,8 @@ class MainWindow(Adw.ApplicationWindow):
             if not isinstance(tab, TerminalTab) or self._page_settling(page):
                 continue
             pty = tab.pty_id
-            if pty is None:
-                continue
+            if pty is None or not tab.has_running_command():
+                continue  # no pty, or a shell alone: no session to reopen
             if tab.session_id and not tab.fork:
                 entries.append(tab.session_id)
             else:
