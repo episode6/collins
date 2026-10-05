@@ -161,9 +161,18 @@ class RemoteState(AppState):
         self._ui_only_keys = frozenset(k for k in ui_settings if k not in DEFAULT_SETTINGS)
         before = dict(ui_settings)
         migrate_device_settings(ui_settings)
-        # The device's own reads (get_setting answers off UiState) see a
-        # moved value too; the next device write saves it.
-        self.ui.settings.update({k: v for k, v in ui_settings.items() if before.get(k) != v})
+        moved = {k: v for k, v in ui_settings.items() if before.get(k) != v}
+        if moved:
+            # The device's own reads (get_setting answers off UiState) see
+            # the move, and the device's file holds it from now on: this
+            # is the client's own instance, the writer of ui-state.json,
+            # so the one-shot is committed with the read.
+            self.ui.settings.update(moved)
+            try:
+                if "quit_with_running_sessions" in moved:  # a value moved, not just the marker
+                    self.ui.save()
+            except OSError as exc:
+                log.warning("ui-state.json not written (%s); the move is redone next start", exc)
         self.settings = {**DEFAULT_SETTINGS, **ui_settings}
 
     def _write_ui(self) -> None:
