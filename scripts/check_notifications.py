@@ -283,9 +283,10 @@ def steps(app: App):
     # -- the action and the binding ----------------------------------------------
     def open_by_action():
         win.activate_action("win.toggle-notifications")
-        e2e_service.settle()
+        # No pump here: the sheet's focus hand-off is an idle that must run
+        # once the sheet is mapped (the next frame), and these two read
+        # widget state of this process, no round trip.
         check("Ctrl+Shift+B's action opens the sheet", split.get_show_sidebar())
-        e2e_service.settle()
         check("and lights the bell", bell.button.get_active())
     yield open_by_action
 
