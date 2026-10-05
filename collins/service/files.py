@@ -65,6 +65,13 @@ PR-2.4 adds the tree's, quick open's and the roots' requests:
   Every watch is confined on a thread and installed when that lands
   (`_pending`), and one Gio cannot make a monitor for is refused.
 
+PR-2.6 adds the bare root-name links' read:
+
+- `fs.names {root}`: `names_reply`, the names in an allowed root that are
+  not directories (a symlink to a directory is one), at most
+  FS_NAMES_MAX and `truncated`, on a thread. The client holds a
+  `fs.watch {kind: dir}` on the root and asks again on its `dir-changed`.
+
 **Nothing blocks the main loop**: every read, write and stat runs on a
 daemon thread and answers through a `protocol.Deferred` settled on the
 main loop at `PRIORITY_DEFAULT` (`_later`; a worker that raises settles a
@@ -479,6 +486,36 @@ def walk_reply(root: str, hidden: bool) -> dict:
     return {"paths": paths, "truncated": truncated}
 
 
+def names_reply(root: str) -> dict:
+    """`fs.names`'s fields (a worker thread): the names in *root* that are
+    not directories, a symlink to a directory counting as one (what the
+    client's `os.scandir` test did). A name over FS_NAME_MAX or one that
+    is not text is left out; past FS_NAMES_MAX the rest is dropped and the
+    reply says `truncated`."""
+    names: list[str] = []
+    truncated = False
+    try:
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    continue
+                name = entry.name
+                if len(name) > protocol.FS_NAME_MAX:
+                    continue
+                try:
+                    name.encode("utf-8")
+                except UnicodeEncodeError:
+                    continue
+                if len(names) >= protocol.FS_NAMES_MAX:
+                    truncated = True
+                    break
+                names.append(name)
+    except OSError:
+        raise ReadRefused(protocol.ERROR_GONE, "The folder is not there") from None
+    names.sort()
+    return {"names": names, "truncated": truncated}
+
+
 def _dispatch_default(fn: Callable[[], object]) -> None:
     GLib.idle_add(lambda: fn() and False, priority=GLib.PRIORITY_DEFAULT)
 
@@ -535,6 +572,8 @@ class Files:
             return self.listing(message, client)
         if kind == "fs.walk":
             return self.walk(message, client)
+        if kind == "fs.names":
+            return self.names(message, client)
         return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
 
     def client_gone(self, client) -> None:
@@ -710,6 +749,27 @@ class Files:
             return protocol.reply(message.id, **fields)
 
         return self._later(message, "fs-walk", work)
+
+    def names(self, message: protocol.Message, client) -> dict | protocol.Deferred:
+        """`fs.names {root}`: `names_reply` on a thread, for a root the
+        client may name (`allowed`: a session's, or anything for a
+        `local` client)."""
+        root = self._path(message, "root")
+        if isinstance(root, dict):
+            return root
+        if not allowed(self.core, client, root):
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": root[: protocol.ARG_TEXT_MAX]}
+            )
+
+        def work() -> dict:
+            try:
+                fields = names_reply(root)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
+            return protocol.reply(message.id, **fields)
+
+        return self._later(message, "fs-names", work)
 
     # -- the watch -------------------------------------------------------------------------
 

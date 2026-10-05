@@ -57,7 +57,6 @@ ALLOWLIST = frozenset(
         "footerapps:launch_app_file:Path.is_file",
         "prefs:PreferencesDialog._browse_clone_directory:os.path.isdir",
         "sidebar:<module>:shutil.which",
-        "terminal:_open_file_reference:os.path.isfile",
         "window:<module>:shutil.which",
         "window:MainWindow._on_open_ghostty:Path.is_dir",
         "window:MainWindow._on_open_ghostty:shutil.which",
@@ -90,20 +89,6 @@ ALLOWLIST = frozenset(
         "editorfiles:rename_target:Path.is_symlink",
         "editorfiles:paste_entries:Path.is_dir",
         "editorfiles:paste_entries:Path.is_symlink",
-        # -- links and root names (PR-2.6) ----------------------------------------------
-        "linkpatterns:resolve_path:os.path.exists",
-        "terminal:_RootNameLinks._file_names:os.scandir",
-        "terminal:_RootNameLinks._rebuild:Gio.File.new_for_path.monitor_directory",
-        "transcriptlinks:transcript_links:open",
-        "transcriptlinks:transcript_links:os.stat",
-        # The new-chat screen's "is this a git checkout / does the worktree
-        # exist" checks: `fs.stat` reads, which PR-2.6 brings for the links.
-        "newchatview:is_git_checkout:Path.exists",
-        "sidebar:SessionSidebar.show_group_menu:Path.exists",
-        "window:MainWindow._launch_new_session:Path.exists",
-        "window:MainWindow._on_new_chat_send:Path.exists",
-        "window:MainWindow._refresh_alt_new_session_item:Path.exists",
-        "window:MainWindow._worktree_for_new_session:Path.exists",
         # -- uploads, attachments, lightbox, icons (PR-2.7) ------------------------------
         # The lightbox's guard: it shows the service's files and this device's
         # cached blobs alike, so it stays until the lightbox is on the blob GET

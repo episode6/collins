@@ -38,6 +38,21 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **Terminal links and the worktree checks go over the service's socket.**
+  Ctrl+click on a path asks the service whether it is there (and whether it
+  is inside the project, which picks the editor over the default app) and
+  opens the file when the answer lands; the names that make a bare
+  `README.md` underline come from the service, which watches the project
+  root and tells the window when they change; and finishing a link the CLI
+  wrapped across rows reads the transcript's tail on the service, so the
+  window opens neither. The new-chat screen's *New git worktree* box, the
+  project menu's worktree entries and a sibling session's worktree launch
+  ask the service whether the folder is a git checkout instead of looking at
+  `.git` themselves, so those appear a moment after the screen or menu.
+  One visible difference: a Ctrl+click on text that looks like a path but is
+  nothing is now swallowed instead of reaching the terminal (the answer
+  arrives after the click is over). Otherwise nothing looks different (the
+  sixth chunk of the split's Phase 2).
 - **The editor's tree, quick open and roots go over the service's socket.**
   The file tree lists a folder by asking the service (the folder's entries
   and the names git ignores in one answer, off the window's main loop,

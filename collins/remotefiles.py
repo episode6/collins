@@ -36,6 +36,15 @@ pattern: the work on a daemon thread, its answer landed at
 - `Watcher.watch(path, listener, kind=WATCH_DIR)` watches a directory's
   entries; its listener hears `dir-changed {handle, path}`.
 
+PR-2.6 adds the links' reads (`terminal`'s click gate and bare root-name
+links), blocking the same way:
+
+- `present(path)` is `fs.stat` as the click's gate wants it: whether
+  anything is at the path (a dangling link is not).
+- `root_names(root)` is `fs.names`: the non-directory names of a root, and
+  `truncated`; the root's watch is `Watcher.watch(root, listener,
+  kind=WATCH_DIR)` and its `dir-changed` is the cue to ask again.
+
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
 `apilink.current()` as every other ask of the service. GTK-free; the
@@ -212,6 +221,24 @@ def walk_root(root: str, hidden: bool = False) -> tuple[list[str], bool]:
     `RequestRefused`."""
     fields = apilink.call({"t": "fs.walk", "root": str(root), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
     return [str(p) for p in fields.get("paths") or ()], bool(fields.get("truncated", False))
+
+
+def present(path: str) -> bool:
+    """Whether anything is at *path* on the service's machine: `fs.stat`'s
+    kind is a file, a directory or something else (a dangling symlink and
+    a missing path are not). Blocking; a refusal or no link is "no" (the
+    click's gate fails soft: nothing opens)."""
+    try:
+        return stat_path(path).kind not in ("missing", "symlink")
+    except RequestRefused:
+        return False
+
+
+def root_names(root: str) -> tuple[list[str], bool]:
+    """`fs.names` of *root*: (the names that are not directories,
+    truncated). Blocking; raises `RequestRefused`."""
+    fields = apilink.call({"t": "fs.names", "root": str(root)}, timeout=CALL_TIMEOUT_S)
+    return [str(n) for n in fields.get("names") or ()], bool(fields.get("truncated", False))
 
 
 def off_main(

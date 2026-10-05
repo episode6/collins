@@ -551,7 +551,7 @@ def scan(
             checked += 1
             if checked == MAX_SCAN_CANDIDATES:
                 log.debug("stat budget spent after %d image paths in one message", checked)
-            resolved = linkpatterns.resolve_file_reference(path, trials)
+            resolved = linkpatterns.resolve_file_reference(path, trials, os.path.exists)
             key = resolved[0] if resolved is not None else None
         if key is None:
             # Reached only by something that *looked* like an image, so it
@@ -611,7 +611,7 @@ def delivered(
     written = path.strip()
     if is_remote(written):
         return None
-    key = linkpatterns.resolve_path(written, roots)
+    key = linkpatterns.resolve_path(written, roots, os.path.exists)
     if key is None:
         log.debug("delivered file resolved nowhere: %r", written)
         return None

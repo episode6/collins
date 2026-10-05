@@ -31,6 +31,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import (
+    checkouts,
     contextmenu,
     desktopentry,
     footerapps,
@@ -2754,10 +2755,17 @@ class SessionSidebar(Gtk.Box):
             self._popup_menu(menu, row, x, y)
             return
 
+        # Whether the project is a checkout is the service's answer
+        # (`fs.stat` of its `.git`, off the main loop): the menu is built
+        # when it lands, a few milliseconds after the click.
+        checkouts.ask(row.cwd or "", lambda is_git: self._show_group_menu(row, x, y, is_git))
+
+    def _show_group_menu(self, row: GroupHeaderRow, x: float, y: float, is_git: bool) -> None:
+        if row.get_root() is None:
+            return  # the row went (a rebuild) while the service answered
         project_name = row.group_key[1]
 
         open_section = Gio.Menu()
-        is_git = bool(row.cwd) and (Path(row.cwd) / ".git").exists()
         if row.cwd:
             new_item = Gio.MenuItem.new(_("New session here"), None)
             new_item.set_action_and_target_value(
