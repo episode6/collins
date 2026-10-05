@@ -48,6 +48,7 @@ import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
 import collins.terminal as terminal_mod  # noqa: E402
+from collins import apilink, remotefiles  # noqa: E402
 
 
 def _pump(ctx: GLib.MainContext, seconds: float, until=lambda: False) -> None:
@@ -64,7 +65,11 @@ def main() -> int:
     os.mkdir(os.path.join(root, "docs"))
 
     # The tab spawns its shell on a service of this check's own (PR-1.12b).
-    e2e_service.harness_link()
+    # The root's names are the service's (`fs.names`) and its watch the
+    # service's too (`fs.watch {kind: dir}`): the link carries the files
+    # transport, as the app installs it on every connect (PR-2.6).
+    remotefiles.install(e2e_service.harness_link())
+    assert apilink.current() is not None
     tab = terminal_mod.TerminalTab(cwd=root, command_override="true")
     assert tab.link_root == root, tab.link_root
 
@@ -79,6 +84,8 @@ def main() -> int:
     # The tab is the terminal's ancestor already (no realization needed):
     # drive the map handler the way GTK would.
     matcher._on_map(tab.terminal)
+    ctx = GLib.MainContext.default()
+    _pump(ctx, 5, until=lambda: matcher._names is not None)  # the names are asked of the service
     assert matcher._root == root, matcher._root
     # Directories excluded; the space name is listed here and filtered later
     # by bare_names_pattern (a name-set change to it still means a rebuild).
@@ -90,7 +97,6 @@ def main() -> int:
     print(f"map wiring OK: tag {first_tag}, names {sorted(matcher._names)}")
 
     # A new root file must swap the tag for a rebuilt one...
-    ctx = GLib.MainContext.default()
     open(os.path.join(root, "CHANGELOG.md"), "w").close()
     _pump(ctx, 5, until=lambda: "CHANGELOG.md" in (matcher._names or ()))
     assert "CHANGELOG.md" in matcher._names, matcher._names
