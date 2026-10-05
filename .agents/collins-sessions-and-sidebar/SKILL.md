@@ -61,7 +61,11 @@ the CLI re-enters the worktree whenever the directory exists, so
 `sessions.recreate_worktree` puts it back from the last live `worktree-state`
 before resuming (`git worktree add -f -f`: the CLI's lock outlives the
 session, and a single `-f` fails silently). The CLI also *moves* a transcript
-to the worktree's project directory the moment a session enters one.
+to the worktree's project directory the moment a session enters one; the
+service follows it (`ServiceCore.sync_transcript_paths` on every refresh of
+its store: a live session whose transcript path is gone is re-aimed at the
+path the scan found, PR-1.12d), and the client hears the session's
+`transcript_path` and the row's `path`, never stat-ing a transcript.
 
 ## The store (`store.py`) and the view-model (`models.py`)
 
@@ -73,7 +77,9 @@ across refreshes so property bindings survive; `refreshed(order_changed)` says
 whether rows must be rebuilt. `SessionItem` properties the sidebar binds to:
 `display_name`, `subtitle`, `preview`, `favorite`, `status` (`""` | `open` |
 `attention` | `background`), `state` (`""` | `interrupted`), `busy`, `unread`,
-`syncing`, `backgrounding`, `can_background`. `unread-changed`,
+`syncing`, `backgrounding`, `can_background`, `background` (`""` |
+`running` | `pending`: the service's word that the row's conversation runs
+as a /bg agent, PR-1.12d), `running`. `unread-changed`,
 `busy-changed` and `archived` signals fire from the setters so the badge and
 notification center follow without callers remembering to announce.
 
@@ -126,8 +132,9 @@ dict — holds the client's **mirrors** on one `api.client.SocketLink`
   `busy` and a counted finish's `unread` on the items itself; the client
   sends `store.flags` only for what the person did at its screen —
   `status`, `unread: false` (and a notification's flag by focus, the
-  placeholder handoff), the /bg handoff's `backgrounding` and
-  `can_background` — and `busy` from a client is refused. The property
+  placeholder handoff) — and `busy`, `backgrounding` and `can_background`
+  from a client are refused (the last two are the service's background
+  agents' since PR-1.12d, below). The property
   moves when the `item` comes back (a moment later, over the socket). The
   sandbox host and the live grants are the core's too
   (`ServiceCore.start_sandbox_host`); the box a resumed or forked session
@@ -354,9 +361,33 @@ loops, hooks, the auto-mode classifier, thinking and 40 s tool runs, with
 0/3 flapping only in the first seconds of a turn's stream; `COLLINS_LOG=DEBUG`
 logs each hint reading and each finish the tracker lands or disarms.
 
-**Background agents.** `bgstatus.py` polls `background_agents()` on a file
-monitor over `~/.claude/jobs/` (used only as a wake-up, never parsed) plus
-app events; the `background_status_poll` setting is a 20 s timed fallback.
+**Background agents** run on the service since PR-1.12d (split-service
+spec §3.22): `service/bgagents.py`'s `BackgroundAgents`, built by
+`ServiceCore.start_background()`, owns `bgstatus.BackgroundStatusPoller`
+(which polls `background_agents()` on a file monitor over `~/.claude/jobs/`
+— used only as a wake-up, never parsed — plus explicit events; the
+`background_status_poll` setting, read on the service and re-read after
+every settings write, is a 20 s timed fallback), the /bg handoff (a
+session's `close {mode: background}` runs `handoff`: the pending detach
+written, the agents listed so far noted, the fork watch's 30 × 1 s thread,
+every row standing for the session `backgrounding` until the match, the
+watch's give-up or the 45 s safety timer; `record_forward` on a fork; the
+CLI nudged 700 ms after a confirmation), the replay of pending detaches
+at service start, *Repair session link* (the `session.repair` job: the
+inputs read on the main loop in `_req_job_start`, the match on the job's
+thread, the forward recorded back on the main loop before the outcome),
+each row's `can_background` (`bgblock.background_blocker` over the
+service's live sessions; one handoff app-wide), and the busy feed into the
+tracker (`ServiceActivity.background_busy`) while a session is attached
+to a background agent. Its outputs are item fields: `background`,
+`backgrounding`, `can_background`. The window is a reader: the mirror's
+`background-changed` runs `MainWindow._on_backgrounded`, which re-syncs
+the row's status (`_row_status`: a row with no tab is `background` when its
+item says so) and, when no row is `backgrounding` any more, advances the
+quit-time /bg queue (`_on_detach_settled`); `_background_blocker` reads
+the same gate over the tab and the mirror for its reasons (the header
+button's tooltip, the close dialog's sentence). `window.py` imports
+nothing of `bgstatus` (`tests/test_client_boundary.py`).
 Current CLIs detach in place (same id keeps running); older ones forked to a
 new id, which `AppState.forward_session` tracks so the old row is replaced and
 names/favorites/panels carry over. Anything mapping session→row must go
@@ -389,7 +420,12 @@ moves it to the system trash (`worktree
 unlock`, then `Gio.File.trash`; git's registration and the branch stay,
 so the entry lists as prunable until gc forgets it), never while the
 session is detached or another tab / background agent works in it, and
-never for bulk archives. The archive's Undo (`_undo_archive_now`) restores
+never for bulk archives. The transcript read is the service's
+(`store.worktree-check {session}` → `removable`, the worktree state or
+null, and `shares`, whether the session runs on as a background agent or
+one works in there), asked from a worker thread; the open tabs that may
+work in it are the window's to count (`_worktree_in_use`). The archive's
+Undo (`_undo_archive_now`) restores
 the worktree with the session: `_trashed_worktrees` holds the records while
 the undo is armed, `sessions.restore_worktree` reads the freedesktop trash
 (home trash and the mount's `.Trash-<uid>`) back by `Path=` and re-registers
@@ -403,11 +439,18 @@ stamps `archived_at` (first archive wins; a restore drops it; archives from
 before the stamp are stamped at first read, never earlier). The
 `auto_delete_archived_after` / `auto_delete_archived_unit` pair (0 = never,
 the default; month = 30 d, year = 365 d) is read by `autodelete.maybe_sweep`,
-which `App._sweep_archived` calls at launch and on the update check's hourly
-timer; a cache file (`archive-sweep.json`) holds it to one sweep a day. The
-trash goes through `MainWindow.trash_expired_archives` — the manual bulk
-delete's path minus the dialog: running sessions are skipped, an emptied
-project is kept as a header. Sessions out of sight only because their
+which the service runs on its own timer since PR-1.12d
+(`ServiceCore.start_housekeeping`: after the store's first scan, then
+hourly; the e2e probe's door is `debug.sandbox` → `sweep_archived`); a
+cache file (`archive-sweep.json`, the service machine's) holds it to one
+sweep a day. The trash goes through `ServiceCore.trash_expired_archives` —
+the manual bulk delete's path minus the dialog: running sessions (an agent
+pty on the service, or a background agent) are skipped, an emptied project
+is kept as a header, and each trashed session is forgotten on the service
+(`forget_session`) with a `forgotten` event so every window drops its tab,
+layout and Undo for it. A forgotten transcript's files and records
+(panel history, PRs, images, draft, box) go through `store.forget` from
+the window's `_forget_transcript` too. Sessions out of sight only because their
 *project* is archived carry no stamp and are never swept.
 `scripts/check_auto_delete.py` drives the row and the sweep.
 
@@ -420,7 +463,10 @@ root) before a worktree launch.
 **Chats** (`chats.py`) are ordinary sessions whose cwd is a throwaway dir under
 `~/.local/share/collins/chats/`, shown as a pinned virtual project. On its
 first scan the app **reaps chat dirs no discovered session points at** — which
-is why every throwaway instance must set `COLLINS_CHATS_DIR`.
+is why every throwaway instance must set `COLLINS_CHATS_DIR`. A swept or
+trashed chat folder is made again by the service before a spawn in it (an
+agent's or a panel shell's, PR-1.12d) and by the `chats.trust` job given a
+`cwd`; the client never creates one.
 
 **Project icons** (`projecticons.py`): a `project-icon.svg` at a project's
 root replaces the folder icon, gated by `usable_icon_bytes` (SVG only;

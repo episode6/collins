@@ -310,6 +310,10 @@ class Service:
         core.start_store()
         core.start_activity()
         core.start_sandbox_host(self.app_id)
+        # PR-1.12d: the background agents (the poller, the handoffs, the
+        # replay) and the service's own timers (the archive sweep, gh).
+        core.start_background()
+        core.start_housekeeping()
         core.start_tools()
         core.start_sandbox()
         config = core.start_mcp(self.app_id)

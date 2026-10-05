@@ -1015,7 +1015,7 @@ class AppState:
         self.session_forwards: dict[str, str] = {}
         # /bg detaches whose fork hasn't been identified yet: session id -> the
         # evidence needed to finish the pairing after a restart (see
-        # MainWindow._replay_pending_detaches).
+        # service.bgagents.BackgroundAgents.replay).
         self.pending_detaches: dict[str, dict] = {}
         # The session ids the service ended on its last stop (resumable by
         # a client reopening them; split-service spec §3.10, PR-1.12b).

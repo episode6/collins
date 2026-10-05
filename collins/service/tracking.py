@@ -15,8 +15,9 @@ filter's `Progress` events in place of the termprop, by the pty's output
 bytes after the filter in place of the redraws (`on_output`, coalesced to
 the screen's 50 ms settle), by the input frames in place of the commits
 (`on_input`: the echo gate's poke, Enter's arm and pre-emptive mark), by
-the same ``/proc`` poll over every live agent pty, and by the
-background-busy poll over the sessions attached to a background agent. Its
+the same ``/proc`` poll over every live agent pty, and by the agent list's
+word on the sessions attached to a background agent (`background_busy`,
+fed by `bgagents.BackgroundAgents`' poll, PR-1.12d). Its
 verdicts call the store directly: `set_busy` on the rows a session stands
 for, and on a counted finish (`finish.FinishJudge`) `set_unread(True)` and
 a `finished` word to the session's clients, which refresh the pull requests
@@ -24,11 +25,11 @@ and announce the run the way they always did. A session with no row yet
 (a tab's placeholder) hears the verdicts as `busy` and `finished` fields
 of its `session` event, keyed by its handle.
 
-What stays a client's (D29): "the person typed here" (`unread: false`),
-"attention", and the /bg orchestration's two flags, which arrive as
-`store.flags` and are read here off the items (`backgrounding` is "a /bg
-was fed and not yet confirmed"; a row's status ``background`` is "detached
-and no tab").
+What stays a client's (D29): "the person typed here" (`unread: false`)
+and "attention" (the row's status), which arrive as `store.flags`. The /bg
+handoff's `backgrounding` ("a /bg was fed and not yet confirmed") is the
+service's own since PR-1.12d (`bgagents`); both are read here off the
+items (a row's status ``background`` is "detached and no tab").
 
 GLib only through the injected timers and the one idle landing; nothing
 here imports GTK.
@@ -37,14 +38,12 @@ here imports GTK.
 from __future__ import annotations
 
 import logging
-import threading
 from collections.abc import Callable
 from typing import Any
 
 from .. import mcptools
 from ..activity import (
     BACKGROUND_IDLE_S,
-    BACKGROUND_POLL_MS,
     PROCESS_IDLE_S,
     PROCESS_POLL_MS,
     PROGRESS_FINISH_GRACE_S,
@@ -52,7 +51,6 @@ from ..activity import (
     ActivityTracker,
     BackgroundBusyWatch,
 )
-from ..bgstatus import fetch_background_busy_ids
 from . import finish as finish_mod
 from . import termstream
 
@@ -100,7 +98,6 @@ class ServiceActivity:
         timeout_add: Callable[..., int] | None = None,
         source_remove: Callable[[int], Any] | None = None,
         land: Callable[..., None] | None = None,
-        fetch_busy: Callable[[], set[str]] = fetch_background_busy_ids,
         clock: Callable[[], float] | None = None,
         announce: Callable[[str], None] | None = None,
     ) -> None:
@@ -111,7 +108,6 @@ class ServiceActivity:
         self._timeout_add = timeout_add or _glib_timeout_add
         self._source_remove = source_remove or _glib_source_remove
         self._land = land or _glib_land
-        self._fetch_busy = fetch_busy
         self._announce = announce
         kwargs = {"clock": clock} if clock is not None else {}
         self.tracker = ActivityTracker(
@@ -126,8 +122,9 @@ class ServiceActivity:
         )
         self.bg_busy = BackgroundBusyWatch()
         self._process_poll: int | None = None
-        self._bg_poll: int | None = None
-        self._bg_fetching = False
+        # Told whenever the live sessions move (a spawn, a resolve, an
+        # exit): the background agents' busy poll follows them (bgagents).
+        self.on_sessions_changed: Callable[[], None] | None = None
         # Sessions that spawned their CLI fresh (no id at the spawn): no
         # agent can be mid-turn in one before its first submit, so even the
         # ungated pole starters hold through the startup paint (by handle).
@@ -433,13 +430,8 @@ class ServiceActivity:
         elif not records and self._process_poll is not None:
             self._source_remove(self._process_poll)
             self._process_poll = None
-        attached = any(getattr(r.session, "attached_background", False) for r in records)
-        if attached and self._bg_poll is None:
-            self._bg_poll = self._timeout_add(BACKGROUND_POLL_MS, self._poll_background_busy)
-            self._poll_background_busy()  # the first answer shouldn't wait a beat
-        elif not attached and self._bg_poll is not None:
-            self._source_remove(self._bg_poll)
-            self._bg_poll = None
+        if self.on_sessions_changed is not None:
+            self.on_sessions_changed()
 
     def _poll_processes(self) -> bool:
         records = list(self._records())
@@ -458,25 +450,11 @@ class ServiceActivity:
                     self.tracker.mark(key, idle_s=PROCESS_IDLE_S)
         return True
 
-    def _poll_background_busy(self) -> bool:
-        if self._bg_fetching:
-            return True
-        self._bg_fetching = True
-
-        def work() -> None:
-            try:
-                busy = self._fetch_busy()
-            except Exception:  # noqa: BLE001 - a failed read is "no answer", not a crash
-                busy = None
-            self._land(self._apply_background_busy, busy)
-
-        threading.Thread(target=work, daemon=True).start()
-        return True
-
-    def _apply_background_busy(self, busy_ids: set[str] | None) -> None:
-        """One tick's answer: only agents a live session is attached to
-        count, and dropping out of that set reads as the run ending."""
-        self._bg_fetching = False
+    def background_busy(self, busy_ids: set[str] | None) -> None:
+        """One tick of the agent list's word on which background agents are
+        working (bgagents' poll; None: the read failed, no answer): only
+        agents a live session is attached to count, and dropping out of
+        that set reads as the run ending."""
         if busy_ids is None:
             return
         watched = {sid for sid in busy_ids if self._attached_session(sid) is not None}
@@ -503,7 +481,6 @@ class ServiceActivity:
     def stop(self) -> None:
         self.tracker.stop()
         self.judge.stop()
-        for source in (self._process_poll, self._bg_poll):
-            if source is not None:
-                self._source_remove(source)
-        self._process_poll = self._bg_poll = None
+        if self._process_poll is not None:
+            self._source_remove(self._process_poll)
+        self._process_poll = None

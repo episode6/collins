@@ -272,15 +272,21 @@ def step_row() -> bool:
     return later(step_sweep, 300)
 
 
+def sweep_archived() -> None:
+    """The archive sweep's tick: the service's own since PR-1.12d
+    (ServiceCore.sweep_archived), reached through the probe."""
+    app._service_link.call({"t": "debug.sandbox", "target": "core", "name": "sweep_archived"})
+
+
 def step_sweep() -> bool:
     win = state["win"]
     # Within the day: nothing, whatever has expired.
-    app._sweep_archived()
+    sweep_archived()
     settle()
     check("a sweep within the day trashes nothing", all(os.path.exists(p) for p in PATHS.values()))
     # A day on: the two old ones go, the fresh one and the live one stay.
     autodelete.write_record({"swept_at": NOW - 25 * 3600})
-    app._sweep_archived()
+    sweep_archived()
     settle()
     check("the session archived forty days ago is trashed", not os.path.exists(PATHS[OLD]))
     check("and so is the lone one in the other project", not os.path.exists(PATHS[LONE]))

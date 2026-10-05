@@ -409,6 +409,10 @@ def chats_trust(job: Job, args: dict) -> dict:
             raise failure(error) from None
     else:
         cwd = _path(args, "cwd")
+        # One that was swept or trashed since is made again (what the
+        # window's chats.ensure_chat_dir did before PR-1.12d): a no-op for a
+        # folder outside the chats root.
+        chats.ensure_chat_dir(cwd)
     chats.trust_chat_dir(cwd)
     return {"cwd": cwd}
 

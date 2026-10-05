@@ -131,7 +131,7 @@ class FakeState:
         self.baselines[session_id] = set(cmdlines)
 
 
-def make(*records, store=None, state=None, fetch=None, settings=None):
+def make(*records, store=None, state=None, settings=None):
     timers = Timers()
     announced = []
     activity = ServiceActivity(
@@ -142,7 +142,6 @@ def make(*records, store=None, state=None, fetch=None, settings=None):
         timeout_add=timers.add,
         source_remove=timers.remove,
         land=lambda fn, *args: fn(*args),
-        fetch_busy=fetch or (lambda: set()),
         announce=announced.append,
     )
     return activity, timers, announced
@@ -294,18 +293,21 @@ def test_a_new_turn_drops_a_held_finish():
     assert activity.judge.held == {}
 
 
-# -- the background-busy poll ------------------------------------------------------
+# -- the agent list's word on background agents (bgagents' poll, PR-1.12d) -----------
 
 
 def test_the_agent_lists_word_marks_and_finishes_the_attached_session():
     store, state = FakeStore(SID), FakeState()
     session = FakeSession("s-1", SID, attached_background=True)
     record = FakeRecord(session)
-    answers = [set(), {SID}]
-    activity, timers, _announced = make(record, store=store, state=state, fetch=lambda: answers.pop())
-    activity.started(record, fresh=False)  # starts the poll: the first answer is fetched at once
+    activity, timers, _announced = make(record, store=store, state=state)
+    told = []
+    activity.on_sessions_changed = lambda: told.append(True)
+    activity.started(record, fresh=False)
+    assert told  # the background agents' poll follows the live sessions
+    activity.background_busy({SID})  # the first answer
     assert store.items[SID].busy is True
-    activity._poll_background_busy()  # the next tick: the agent went idle
+    activity.background_busy(set())  # the next tick: the agent went idle
     assert session.progress.ended == 1
     assert activity.tracker.finish_pending(SID)  # finished with the progress grace, not outright
     assert activity.tracker.is_busy(SID)
@@ -316,11 +318,11 @@ def test_only_an_attached_sessions_agent_counts_and_no_answer_changes_nothing():
     store, state = FakeStore(SID, FORK), FakeState()
     record = FakeRecord(FakeSession("s-1", SID, attached_background=True))
     activity, _timers, _announced = make(record, store=store, state=state)
-    activity._apply_background_busy({FORK})  # busy, but no live session is attached to it
+    activity.background_busy({FORK})  # busy, but no live session is attached to it
     assert store.items[FORK].busy is False and not activity.tracker.busy()
-    activity._apply_background_busy({SID})
+    activity.background_busy({SID})
     assert store.items[SID].busy is True
-    activity._apply_background_busy(None)  # a failed read: no answer, nothing finished
+    activity.background_busy(None)  # a failed read: no answer, nothing finished
     assert store.items[SID].busy is True and not activity.tracker.finish_pending(SID)
 
 
@@ -331,9 +333,9 @@ def test_the_attached_session_is_found_through_the_forward_chain():
     state.chains[FORK] = [SID, FORK]
     record = FakeRecord(FakeSession("s-1", SID, attached_background=True))
     activity, _timers, _announced = make(record, store=store, state=state)
-    activity._apply_background_busy({FORK})
+    activity.background_busy({FORK})
     assert activity.tracker.is_busy(FORK)
-    activity._apply_background_busy(set())
+    activity.background_busy(set())
     assert activity.tracker.finish_pending(FORK) and record.session.progress.ended == 1
     assert PROGRESS_FINISH_GRACE_S > 0
 

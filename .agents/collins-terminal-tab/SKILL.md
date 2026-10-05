@@ -262,8 +262,9 @@ in). Once the CLI is gone `_poll_shell_exit` feeds `shellinput.shell_command("ex
 because a shell inherits input the CLI never read (VTE mouse reports), and a
 bare kill-line at column 0 rings the bell — and force-closes if the shell
 ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close
-marks the row `backgrounding` (yellow, disabled) until the daemon lists the
-job or a timeout, and `_watch_background_fork` handles older CLIs that fork.
+(`close {mode: background}`) has the service mark the row `backgrounding`
+(yellow, disabled) until the daemon lists the job or a timeout, and its fork
+watch (`service/bgagents.py`, PR-1.12d) handles older CLIs that fork.
 
 **Detach** (PR-1.12c, spec §3.21, D12): `win.detach-session` (the tab
 menu's item targets "" = the menu's page; the row menu's names the

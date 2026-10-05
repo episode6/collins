@@ -56,13 +56,11 @@ from . import (
     welcome,
 )
 from .api.protocol import RequestRefused
-from .bgstatus import (
+from .bgblock import (
     BLOCK_IN_FLIGHT,
     BLOCK_SANDBOXED,
     BLOCK_UNREGISTERED,
-    BackgroundStatusPoller,
     background_blocker,
-    match_background_fork,
 )
 from .caffeine import (
     DURATION_KEYS,
@@ -96,10 +94,8 @@ from .replayview import ReplayTab
 from .sessions import (
     Session,
     export_markdown,
-    first_message_uuid,
     path_within,
     project_name_for_cwd,
-    removable_worktree,
     resume_cwd,
     session_from_file,
     worktree_project_root,
@@ -156,8 +152,9 @@ _GIT_TIMEOUT_S = 120
 # Quit-time backgrounding, which runs one session at a time. How long to wait
 # for a tab's session id to land before giving up and exiting it cleanly, how
 # often to re-check while waiting, and how long to let one handoff hold the
-# queue before moving on (the pending detach is on disk either way, so the next
-# launch finishes any pairing this gives up on — see _replay_pending_detaches).
+# queue before moving on (the pending detach is on disk either way, so the
+# service's watch, or its replay at the next start, finishes any pairing this
+# gives up on — see service.bgagents).
 _BG_QUEUE_WAIT_MS = 5000
 _BG_QUEUE_POLL_MS = 500
 _BG_QUEUE_ITEM_TIMEOUT_S = 20
@@ -409,14 +406,11 @@ class MainWindow(Adw.ApplicationWindow):
         # One entry per tab; the pane itself still belongs to the tab, so
         # dirty counts and state capture keep working through it.
         self._editor_windows: dict[TerminalTab, EditorWindow] = {}
-        # Sessions assumed to be running detached because a /bg was fed, until
-        # the agent list reports them: session id -> safety-timeout source
-        # (see _mark_backgrounding).
-        self._pending_bg: dict[str, int] = {}
-        # The subset of those whose detach isn't confirmed yet — the window in
-        # which the row must stay disabled, because neither resuming nor
-        # attaching would do the right thing.
-        self._detaching: set[str] = set()
+        # Whether a /bg handoff was in flight (some row `backgrounding`) at
+        # the last background-changed: its end is what the quit-time queue
+        # waits on (see _on_backgrounded). The handoff itself is the
+        # service's (service.bgagents, PR-1.12d).
+        self._detach_in_flight = False
         # Quit-time backgrounding runs one session at a time (see
         # _start_quit_backgrounding): tabs still waiting their turn, the timer
         # bounding the current one, and the progress notice over them.
@@ -670,16 +664,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.state.connect_changed(self._on_state_name_changed)
             self.connect("destroy", lambda *_a: self.state.disconnect_changed(self._on_state_name_changed))
 
-        # Yellow "running detached" guide lines: keep the set of backgrounded session
-        # ids fresh (see bgstatus.py for the trigger strategy).
-        self._bg_status = BackgroundStatusPoller(on_change=self._on_background_ids_changed)
-        self._bg_status.start(
-            [d for p in available_providers() if (d := p.background_watch_dir()) is not None]
+        # Yellow "running detached" guide lines and the /bg handoff are the
+        # service's (service.bgagents, spec §3.22): its word arrives as each
+        # row's `background`, `backgrounding` and `can_background`.
+        self._background_handler = self.store.connect("background-changed", self._on_backgrounded)
+        # A session the service forgot by itself (the archive sweep): what
+        # this device kept for it goes too.
+        self._forgotten_handler = self.store.connect(
+            "forgotten", lambda _store, session_id: self._forget_on_device(session_id)
         )
-        self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
+        self.connect("destroy", lambda *_a: self.store.disconnect(self._background_handler))
+        self.connect("destroy", lambda *_a: self.store.disconnect(self._forgotten_handler))
         self.connect("destroy", lambda *_: self._stop_watchers())
-        # Any /bg the last run couldn't see through to the end gets one more go.
-        self._replay_pending_detaches()
 
         self.sidebar.set_size_request(180, -1)  # minimum drag width
         self.split = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
@@ -1490,8 +1486,8 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _bg_queue_item_timed_out(self) -> bool:
         """This handoff is taking too long to hold the quit up. Move on: the
-        pending detach is already on disk, so the next launch finishes the
-        pairing (see _replay_pending_detaches)."""
+        pending detach is already on disk, so the service's watch (or its
+        replay at the next start) finishes the pairing (service.bgagents)."""
         self._bg_queue_timeout = None
         log.info("bg-queue: handoff still unconfirmed after %ss; leaving it to "
                  "the next launch", _BG_QUEUE_ITEM_TIMEOUT_S)
@@ -2051,7 +2047,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return
             elif (
                 target != session.session_id
-                and target in self._bg_status.background_ids
+                and self._background_of(session.session_id) == "running"
                 and not sandboxed
             ):
                 # The fork is running but has only a metadata stub for a
@@ -2098,9 +2094,8 @@ class MainWindow(Adw.ApplicationWindow):
             attach_id = self.store.agent_ptys().get(attach_pty, {}).get("session") or attach_id
             if attach_id == session.session_id:
                 attach_id = None
-        # A chat's throwaway directory may have been swept or trashed since;
-        # recreate it rather than letting the terminal fall back to $HOME.
-        chats.ensure_chat_dir(cwd)
+        # A chat's throwaway directory that was swept or trashed since is
+        # made again on the service, by the spawn (PR-1.12d).
         # The session's own box is its $HOME, as it left it; the service
         # mints one where there is none yet (a session recorded before the
         # boxes, a transcript back from the trash) and a fork's own, seeded
@@ -2766,7 +2761,8 @@ class MainWindow(Adw.ApplicationWindow):
         provider = get_provider(record["provider"])
 
         def proceed() -> None:
-            chats.ensure_chat_dir(cwd)  # a chat's throwaway dir may have been swept
+            # A chat's throwaway dir that was swept is made again by the
+            # service, at the spawn of the screen's shells or its session.
             tab = TerminalTab(
                 cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
                 new_chat=True, worktree_default=self._worktree_for_new_session(cwd),
@@ -3259,20 +3255,16 @@ class MainWindow(Adw.ApplicationWindow):
             self._apply_restore_session()
         if self._pending_resolved:
             self._apply_resolved_sessions()
-        self._sync_transcript_paths()
+        # A transcript that moved under a session on worktree entry is the
+        # service's to follow (ServiceCore.sync_transcript_paths, PR-1.12d).
         self._refresh_tab_titles()
         # Freshly discovered rows start with no status; re-assert yellow lines
-        # for sessions known to be running detached (no-op when unchanged).
-        for session_id in self._bg_status.background_ids:
-            self._sync_status(session_id)
-        # A pending /bg that forked is assumed detached on the old row until
-        # something more solid takes over; once the store discovers the fork,
-        # the old row is hidden ("moved") and the fork's own row carries the
-        # line, so the assumption can go.
-        for session_id in list(self._pending_bg):
-            target = self.state.resolve_forward(session_id)
-            if target != session_id and self.store.get_session(target) is not None:
-                self._clear_backgrounding(session_id, "fork discovered; row handed off")
+        # for the rows the service says run detached (no-op when unchanged):
+        # a row made by this refresh took its `background` without a signal.
+        for row_id in self.store.row_ids():
+            item = self.store.get_item(row_id)
+            if item is not None and item.background and item.status != "background":
+                self._sync_status(row_id)
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
         self._schedule_launch_sweep()
@@ -3307,36 +3299,6 @@ class MainWindow(Adw.ApplicationWindow):
         self._launch_sweep_done = True
         self.sidebar.refresh_pull_requests()
         return GLib.SOURCE_REMOVE
-
-    def _sync_transcript_paths(self) -> None:
-        """Re-aim tabs whose transcript moved out from under them.
-
-        The CLI keys a session's transcript by its working directory, so a
-        session that enters a git worktree has its file re-homed under a new
-        project directory. The tab resolved its path once, when the session
-        started, and would otherwise tail a path that no longer exists for the
-        rest of the run — no PR chips, no agent files, no status.
-
-        Only a tab whose own path has gone missing is touched, and only when
-        the store has found that same session somewhere that exists, so a tab
-        deliberately pointed at another file (an attached fork tails the
-        fork's transcript) is never dragged off it.
-        """
-        for session_id, page in list(self._pages.items()):
-            tab = page.get_child()
-            if not isinstance(tab, TerminalTab):
-                continue
-            current = tab.transcript_path
-            if not current or Path(current).exists():
-                continue
-            session = self.store.get_session(session_id)
-            if session is None:
-                continue
-            moved = str(session.jsonl_path)
-            if moved == current or not Path(moved).exists():
-                continue
-            log.info("transcript moved: %s -> %s", current, moved)
-            tab.relocate_transcript(moved)
 
     def _apply_resolved_sessions(self) -> None:
         """Finish attaching resolved tabs once the store discovers their sessions
@@ -4033,11 +3995,10 @@ class MainWindow(Adw.ApplicationWindow):
                 exit_text = tab.provider.background_exit()
         if exit_text:
             self._bg_closing.add(page)  # a handoff: the close poll allows it more time
-            self._watch_background_fork(tab)
-            # Show the yellow guide line as soon as the tab closes, and keep the
-            # row unopenable until the detach is confirmed (or times out). The
-            # gate guarantees a session id here.
-            self._mark_backgrounding(tab.session_id)
+            # The handoff's watch, the pending detach and the rows' disabled,
+            # pre-emptively yellow state are the service's: they start when
+            # the session's close {mode: background} arrives there
+            # (service.bgagents, PR-1.12d), and come back as item fields.
         else:
             self._bg_closing.discard(page)
             exit_text = tab.provider.graceful_exit()
@@ -4086,148 +4047,37 @@ class MainWindow(Adw.ApplicationWindow):
         if position is not None:
             self.tab_view.set_selected_page(pages[position])
 
-    def _watch_background_fork(self, tab: TerminalTab) -> None:
-        """Confirm the session is running detached, and record its successor
-        id if the CLI forked one. Despite the docs suggesting in-place
-        detaches, current Claude CLIs have been observed (2026-07) forking on
-        /bg: the background agent runs under a *new* session id whose
-        transcript is a copy of the conversation, leaving the original behind
-        as a stale duplicate. Watch the agent list (off the main thread) for
-        either outcome. The tab's own session id appearing means an in-place
-        detach: nothing to record. A fresh id with a matching conversation
-        means a fork: record old -> new, so the stale row is hidden, the
-        user's name/emoji/favorite carry over, and opening the old session
-        redirects to the live one.
-
-        Either way the CLI may keep the terminal after /bg (parked on its
-        agent-list screen), which would hang the pending close until the
-        force-close safety net — so once the session is confirmed running
-        detached, the CLI gets an exit nudge if it still holds the terminal."""
-        old_id = tab.session_id
-        provider = tab.provider
-        if not old_id or tab.fork:
-            return
-        cwd = tab.current_agent_cwd()
-        old_session = self.store.get_session(old_id)
-        old_uuid = (
-            first_message_uuid(old_session.jsonl_path) if old_session is not None else None
-        )
-        # Remembered on disk so a restart mid-handoff can finish the pairing
-        # instead of stranding the agent (see _replay_pending_detaches).
-        self.state.set_pending_detach(
-            old_id, provider=provider.id, cwd=cwd or "", uuid=old_uuid or ""
-        )
-        # Finished jobs included, to mirror the matcher's candidate pool —
-        # see match_background_fork.
-        known = {a.session_id for a in provider.background_agents(include_finished=True)}
-
-        def work() -> None:
-            for attempt in range(30):  # the agent entry appears within seconds of /bg
-                found = match_background_fork(provider, old_id, cwd, old_uuid, known)
-                log.debug("bg-watch: attempt %s for %s: %r", attempt, old_id, found)
-                if found is not None:
-                    GLib.idle_add(self._on_backgrounded, tab, old_id, found)
-                    return
-                time.sleep(1)
-            log.info("bg-watch: %s never appeared in the agent list; giving up", old_id)
-            # Never confirmed: the detach presumably failed — drop the
-            # pre-emptive yellow line and re-enable the row.
-            GLib.idle_add(self._clear_backgrounding, old_id, "confirmation watch gave up")
-
-        threading.Thread(target=work, daemon=True).start()
-
-    # -- pending /bg detaches across restarts --------------------------------
-
-    def _replay_pending_detaches(self) -> None:
-        """Finish the /bg handoffs that were still in flight when the app last
-        closed. The fork watcher lives only as long as the process, so a quit
-        (or crash) during the seconds between feeding /bg and the CLI listing
-        the agent used to lose the old -> new pairing for good: the row went on
-        pointing at the frozen pre-/bg transcript, and the live agent had no row
-        to reach it from at all. Worse, resuming that row and backgrounding it
-        again spawned a second agent, so they piled up unreachable.
-
-        The evidence needed for the pairing is persisted with the pending
-        detach, so replay it once at startup against the current agent list. A
-        record that matches nothing is dropped — its agent is gone."""
-        pending = self.state.get_pending_detaches()
-        if not pending:
-            return
-        log.info("bg-replay: %s pending detach(es) to re-check", len(pending))
-        # An agent some other row already forwards to is spoken for; it can't
-        # be the one this record is looking for. That is all the standing in
-        # for `known` there is this long after the /bg, so pairing also has to
-        # be strict: see match_background_fork's unique_cwd.
-        claimed = set(self.state.session_forwards.values())
-
-        def work() -> None:
-            for old_id, info in pending.items():
-                provider = get_provider(info.get("provider") or "claude")
-                found = match_background_fork(
-                    provider,
-                    old_id,
-                    info.get("cwd") or "",
-                    info.get("uuid") or "",
-                    claimed,
-                    unique_cwd=True,
-                )
-                GLib.idle_add(self._on_detach_replayed, old_id, found)
-
-        threading.Thread(target=work, daemon=True).start()
-
-    def _on_detach_replayed(self, old_id: str, found: str | None) -> bool:
-        """A pending detach re-checked at startup: `found` is the fork's id, ""
-        for an in-place detach, or None when nothing in the agent list matches."""
-        if found is None:
-            log.info("bg-replay: %s matches no running agent; dropping the record", old_id)
-        else:
-            log.info("bg-replay: %s paired with %s", old_id, found or "itself (in place)")
-            if found:
-                self.store.record_forward(old_id, found)
-            self._sync_status(old_id)  # yellow line, through the forward
-        self.state.clear_pending_detach(old_id)
-        return GLib.SOURCE_REMOVE
-
     def _on_repair_action(self, _action, param: GLib.Variant) -> None:
         """The row's "Repair session link" item: look for the background agent
         this row should reach, and link the row to it. Recovers the pairings
-        the automatic paths can miss — a fork watcher that died with the app
-        before the CLI listed the agent, a startup replay that declined an
+        the automatic paths can miss — a fork watch that died with the
+        service before the CLI listed the agent, a replay that declined an
         ambiguous match, a restart-respawned job — where the row goes on
         pointing at a frozen transcript while its agent runs (or sits
-        finished) with no row leading to it."""
+        finished) with no row leading to it. The service's ``session.repair``
+        job matches (the agent CLI and the transcripts are its machine's)
+        and records the link; the answer is said here."""
         session_id = param.get_string()
-        session = self.store.get_session(session_id)
-        if session is None:
+        if self.store.get_session(session_id) is None:
             return
-        provider = get_provider(session.provider)
-        # Repair the end of the forward chain: a row forwarded once may have
-        # been backgrounded again from the fork. The fork copies the
-        # conversation verbatim, so when the tail has no transcript of its
-        # own (a stub), the clicked row's transcript still carries the
-        # first-message uuid the matcher pairs on.
-        old_id = self.state.resolve_forward(session_id)
-        old_session = self.store.get_session(old_id) or session
-        cwd = old_session.cwd or session.cwd
-        old_uuid = first_message_uuid(old_session.jsonl_path)
-        # Agents other rows already forward to are spoken for. That is the
-        # same stand-in for `known` as the startup replay's, and the pairing
-        # is just as much a guess here, so it is strict the same way: see
-        # match_background_fork's unique_cwd.
-        claimed = set(self.state.session_forwards.values())
 
-        def work() -> None:
-            found = match_background_fork(
-                provider, old_id, cwd, old_uuid, claimed, unique_cwd=True
-            )
-            GLib.idle_add(self._on_repair_matched, session_id, old_id, found)
+        def landed(event: jobclient.JobEvent) -> None:
+            if not event.finished:
+                return
+            if not event.ok:
+                log.info("repair %s: %s", session_id, event.text)
+                self._on_repair_matched(session_id, None)
+                return
+            found = event.result.get("found")
+            self._on_repair_matched(session_id, found if isinstance(found, str) else None)
 
-        threading.Thread(target=work, daemon=True).start()
+        jobclient.start("session.repair", {"session": session_id}, landed)
 
-    def _on_repair_matched(self, session_id: str, old_id: str, found: str | None) -> bool:
-        """A repair's match, back on the main thread: `found` is the agent's
-        session id, "" when this session is itself the listed agent, or None
-        when nothing in the agent list matches."""
+    def _on_repair_matched(self, session_id: str, found: str | None) -> bool:
+        """A repair's match: `found` is the agent's session id, "" when this
+        session is itself the listed agent, or None when nothing in the agent
+        list matches. The service has recorded the link and refreshed its
+        agent list already; the row's line follows as its item does."""
         if found is None:
             dialogs.error_dialog(
                 self,
@@ -4240,15 +4090,6 @@ class MainWindow(Adw.ApplicationWindow):
                 ),
             )
             return GLib.SOURCE_REMOVE
-        if found:
-            log.info("repair: %s linked to background agent %s", old_id, found)
-            self.store.record_forward(old_id, found)
-        else:
-            log.info("repair: %s is itself the listed background agent", old_id)
-        # Either way the agent list is the fresher truth now: re-sync the
-        # yellow line (through the forward) and the poller's id set.
-        self._sync_status(session_id)
-        self._bg_status.refresh()
         if found:
             dialogs.info_dialog(
                 self,
@@ -4266,32 +4107,27 @@ class MainWindow(Adw.ApplicationWindow):
             )
         return GLib.SOURCE_REMOVE
 
-    def _on_backgrounded(self, tab: TerminalTab, old_id: str, new_id: str) -> bool:
-        """The tab's session is confirmed running detached (new_id is its
-        fork's session id, or "" when it detached in place)."""
-        log.info("bg-watch: %s confirmed detached (fork id: %s)", old_id, new_id or "none")
-        if new_id:
-            self.store.record_forward(old_id, new_id)
-        self.state.clear_pending_detach(old_id)  # paired; nothing left to replay
-        # Confirmed detached: the row is clickable again — it opens the live
-        # agent, not the stale original — while _is_detached keeps it yellow
-        # through the forward for as long as the agent runs.
-        self._confirm_backgrounding(old_id)
-        # The agent list already shows the detached session: refresh now so
-        # the yellow line lands promptly even if the jobs-dir monitor misses it.
-        self._bg_status.refresh()
-        # Give the CLI a moment to exit on its own before nudging it off any
-        # screen it parked on (see _watch_background_fork).
-        GLib.timeout_add(700, self._nudge_cli_exit, tab)
-        return GLib.SOURCE_REMOVE
+    def _on_backgrounded(self, _store, session_id: str) -> None:
+        """A row's background-agent facts moved on the service (its
+        `background`, `backgrounding` or `can_background`; service.bgagents,
+        PR-1.12d): the yellow line of a row with no tab follows, and so do
+        the header's button and, when a /bg handoff stopped being in flight
+        (confirmed, abandoned or timed out), the quit-time queue."""
+        self._sync_status(session_id)
+        in_flight = self._handoff_in_flight()
+        settled = self._detach_in_flight and not in_flight
+        self._detach_in_flight = in_flight
+        if settled:
+            self._on_detach_settled()
 
-    def _nudge_cli_exit(self, tab: TerminalTab) -> bool:
-        """The CLI was asked to leave (by its exit keystroke or /bg) yet still
-        owns the tab's terminal — typically parked on its session-list screen.
-        Feed the exit keystroke to dismiss it so the pending close can finish
-        (Session.nudge_exit; a no-op once the CLI has exited)."""
-        tab.session.nudge_exit()
-        return GLib.SOURCE_REMOVE
+    def _handoff_in_flight(self) -> bool:
+        """Whether a /bg handoff waits for its agent anywhere (some row is
+        `backgrounding`): the gate is app-wide, one at a time."""
+        return any(
+            item.backgrounding
+            for row_id in self.store.row_ids()
+            if (item := self.store.get_item(row_id)) is not None
+        )
 
     def _chain(self, session_id: str) -> set[str]:
         """Every id a row's conversation has run under — its own and each /bg
@@ -4317,18 +4153,38 @@ class MainWindow(Adw.ApplicationWindow):
             None,
         )
 
+    def _items_for(self, session_id: str) -> list[SessionItem]:
+        """The row items that speak for *session_id*: its own row's, or (an
+        id with no row, such as a live /bg fork's stub) the rows standing
+        in for it."""
+        item = self.store.get_item(session_id)
+        if item is not None:
+            return [item]
+        return [
+            row_item
+            for row_id in self.store.rows_representing(session_id)
+            if (row_item := self.store.get_item(row_id)) is not None
+        ]
+
+    def _background_of(self, session_id: str) -> str:
+        """The service's word on whether a row's conversation runs as a
+        background agent (its item's `background`): "running" when the
+        agent list lists it under any id of its chain, "pending" while a /bg
+        fed for it waits for the list, "" otherwise."""
+        return next((item.background for item in self._items_for(session_id) if item.background), "")
+
     def _is_detached(self, session_id: str) -> bool:
         """Whether a row's conversation is running as a background agent — under
         its own id, or under the id its /bg fork runs as. A pending detach
         counts: assume the /bg worked until the confirmation watch says
-        otherwise."""
-        chain = self._chain(session_id)
-        return bool(chain & self._bg_status.background_ids or chain & set(self._pending_bg))
+        otherwise (the service's watch: service.bgagents)."""
+        return bool(self._background_of(session_id))
 
     def _detaching_now(self, session_id: str) -> bool:
         """Whether a /bg was fed for this row's conversation and hasn't been
-        confirmed yet — the window in which the row stays disabled."""
-        return bool(self._chain(session_id) & self._detaching)
+        confirmed yet — the window in which the row stays disabled (its
+        item's `backgrounding`, the service's)."""
+        return any(item.backgrounding for item in self._items_for(session_id))
 
     def _row_status(self, row_id: str) -> str:
         page = self._page_for(row_id)
@@ -4361,24 +4217,12 @@ class MainWindow(Adw.ApplicationWindow):
         # whether it is Active at all, its tooltip, and its menu.
         self._notify_tray()
 
-    def _on_background_ids_changed(self, changed: set[str]) -> None:
-        # Confirmed detaches: membership owns the yellow line from here on, so
-        # the assumed-detached state can go. A /bg that forked is confirmed by
-        # its fork's id turning up, not by the row's own.
-        live = changed & self._bg_status.background_ids
-        for session_id in list(self._pending_bg):
-            if self._chain(session_id) & live:
-                self._clear_backgrounding(session_id, "detach confirmed by the agent list")
-        for session_id in changed:
-            self._sync_status(session_id)
-
     # -- "the agent is working right now" ------------------------------------
 
     def _stop_watchers(self) -> None:
-        """Drop every timer that would outlive the window: the detach poller,
-        the activity sweep, the process poll and the background-busy poll all
-        hold callbacks into a window that is going away."""
-        self._bg_status.stop()
+        """Drop every timer that would outlive the window: the launch's PR
+        sweep holds a callback into a window that is going away (the detach
+        poller and the activity polls are the service's)."""
         if self._launch_sweep_source is not None:
             GLib.source_remove(self._launch_sweep_source)
             self._launch_sweep_source = None
@@ -4414,7 +4258,8 @@ class MainWindow(Adw.ApplicationWindow):
         on with nobody watching by definition. A detached session with no tab
         never reaches the tracker at all (see activity.py), so the filter is
         really about the one that does — a tab *attached* to a background
-        agent, whose turns the agent list reports (see _apply_background_busy).
+        agent, whose turns the agent list reports (the service's tracker,
+        service.tracking.ServiceActivity.background_busy).
         Its row still gets its pole; the header stays out of it.
         """
         working = any(not self._is_detached(sid) for sid in self._busy_sessions())
@@ -4642,74 +4487,6 @@ class MainWindow(Adw.ApplicationWindow):
             for window in self._main_windows():
                 window.notify_cards.dismiss_session(key)
 
-    # -- pre-emptive /bg status ----------------------------------------------
-
-    def _set_row_backgrounding(self, session_id: str, flag: bool) -> None:
-        """Disable (or re-enable) every row standing for this session — the
-        row may be the one its /bg fork forked from, not its own."""
-        for row_id in self.store.rows_representing(session_id):
-            self.store.set_backgrounding(row_id, flag)
-
-    def _mark_backgrounding(self, session_id: str) -> None:
-        """A /bg was just fed: treat the session as backgrounded right away —
-        yellow guide line once its tab closes, sidebar row disabled — instead of
-        waiting for the agent CLI to list it. The row re-enables as soon as the
-        detach is confirmed; the assumed-detached state lasts until the agent
-        list reports it, the confirmation watch gives up, or the safety timeout
-        fires."""
-        if session_id in self._pending_bg:
-            return
-        log.info("bg-pending: %s marked (detach fed, awaiting confirmation)", session_id)
-        self._detaching.add(session_id)
-        self._pending_bg[session_id] = GLib.timeout_add_seconds(
-            45, self._backgrounding_expired, session_id
-        )
-        self._set_row_backgrounding(session_id, True)
-        self._refresh_background_affordances()  # the gate closes app-wide
-        # Assumed-detached counts as detached everywhere else; the header's
-        # pole shouldn't be the one place still claiming otherwise.
-        self._sync_working_pole()
-
-    def _confirm_backgrounding(self, session_id: str) -> None:
-        """The detach is confirmed. Re-enable the row immediately: clicking it
-        now attaches to the live agent instead of resuming a stale transcript.
-        Waiting for the fork's row instead would mean waiting out the safety
-        timeout whenever the fork's agent detaches without doing any work — it
-        leaves only a metadata stub, so that row may never arrive. The
-        assumed-detached state (and with it the yellow line) stays until the
-        agent list catches up, so the line never blinks."""
-        if session_id not in self._detaching:
-            return
-        log.info("bg-pending: %s row re-enabled (detach confirmed)", session_id)
-        self._detaching.discard(session_id)
-        self._set_row_backgrounding(session_id, False)
-        self._on_detach_settled()
-
-    def _clear_backgrounding(self, session_id: str, reason: str = "") -> None:
-        source = self._pending_bg.pop(session_id, None)
-        if source is None:
-            return
-        log.info("bg-pending: %s cleared (%s)", session_id, reason or "unspecified")
-        GLib.source_remove(source)
-        self.state.clear_pending_detach(session_id)
-        self._detaching.discard(session_id)
-        self._set_row_backgrounding(session_id, False)
-        self._sync_status(session_id)  # the line follows the agent list again
-        self._on_detach_settled()
-
-    def _backgrounding_expired(self, session_id: str) -> bool:
-        # Confirmation never arrived (e.g. the agent exited right after
-        # detaching): stop pretending, re-enable the row.
-        log.info("bg-pending: %s expired (safety timeout, never confirmed)", session_id)
-        self._pending_bg.pop(session_id, None)
-        # Keep the persisted record: the agent may still be starting up, and
-        # the next launch gets one more chance to pair them.
-        self._detaching.discard(session_id)
-        self._set_row_backgrounding(session_id, False)
-        self._sync_status(session_id)
-        self._on_detach_settled()
-        return GLib.SOURCE_REMOVE
-
     def _update_active_row(self) -> None:
         """Tell the sidebar which session (or new-session placeholder) the
         selected tab is showing. A tab keeps its placeholder highlighted even
@@ -4809,27 +4586,16 @@ class MainWindow(Adw.ApplicationWindow):
             # tab attached to a live fork that row is the one it forked from,
             # not one of the fork's own — it may never get one.
             has_row=bool(session_id and self.store.rows_representing(session_id)),
-            detach_in_flight=bool(self._detaching),
+            # The handoffs are the service's (service.bgagents): one is in
+            # flight while any row is `backgrounding`.
+            detach_in_flight=self._handoff_in_flight(),
         )
 
     def _refresh_background_affordances(self) -> None:
-        """Re-evaluate every background affordance at once. The gate is
-        app-wide — only one handoff runs at a time — so a detach starting or
-        settling changes every row, not just the session being handed over.
-
-        Only a session with an open tab has anything to hand over, so the gate
-        is evaluated per open tab and every other row is simply switched off.
-        Walking the rows instead would be quadratic: rows_representing scans
-        them all."""
+        """Re-evaluate the header's background button. The rows' buttons
+        read their item's `can_background`, which the service decides over
+        its own sessions (service.bgagents.refresh_affordances, PR-1.12d)."""
         self._update_close_buttons(self.tab_view.get_selected_page())
-        allowed: set[str] = set()
-        for session_id, page in self._pages.items():
-            if not self._background_blocker(page):
-                # The button lives on whichever row stands for this session —
-                # for a tab attached to a live fork, the one it forked from.
-                allowed.update(self.store.rows_representing(session_id))
-        for row_id in self.store.row_ids():
-            self.store.set_can_background(row_id, row_id in allowed)
 
     def _on_detach_settled(self) -> None:
         """A /bg handoff stopped being in flight — confirmed, abandoned or
@@ -5978,15 +5744,10 @@ class MainWindow(Adw.ApplicationWindow):
             # closed, leaving a live tab its row could no longer reach.
             if self._pages.get(session_id) is page:
                 self._pages.pop(session_id)
+            # The row's line, from the service's word on the agent list; the
+            # service re-reads that list itself when the session's pty exits
+            # while the list still names it (bgagents.session_ended).
             self._sync_status(session_id)
-            # That painted the row from the cached agent list, which may
-            # predate this conversation's background job finishing — nothing
-            # else in the close path re-polls, so without this a just-finished
-            # job's yellow line would outlive the tab until some unrelated
-            # refresh. Only when the cache says detached: an ordinary close
-            # has no reason to shell out to the CLI.
-            if self._chain(session_id) & self._bg_status.background_ids:
-                self._bg_status.refresh()
         view.close_page_finish(page, True)
         self._refresh_background_affordances()  # a row without a tab can't be backgrounded
         if view.get_n_pages() == 0:
@@ -6545,15 +6306,18 @@ class MainWindow(Adw.ApplicationWindow):
         if session is None or self._is_detached(session_id):
             self._archive_now(session_id, True)
             return
-        jsonl_path, cwd = session.jsonl_path, session.cwd or ""
         own_page = self._page_for(session_id)
         self._worktree_asking.add(session_id)
 
-        def land(state: dict | None) -> bool:
+        def land(state: dict | None, shares: bool) -> bool:
             if self.state.is_archived(session_id):
                 self._worktree_asking.discard(session_id)
                 return GLib.SOURCE_REMOVE  # archived some other way meanwhile
-            if state is None or self._worktree_in_use(str(state["worktreePath"]), except_page=own_page):
+            if (
+                state is None
+                or shares
+                or self._worktree_in_use(str(state["worktreePath"]), except_page=own_page)
+            ):
                 self._worktree_asking.discard(session_id)
                 self._archive_now(session_id, True)
                 return GLib.SOURCE_REMOVE
@@ -6591,10 +6355,26 @@ class MainWindow(Adw.ApplicationWindow):
             return GLib.SOURCE_REMOVE
 
         def probe() -> None:
-            state = removable_worktree(jsonl_path, cwd)
-            GLib.idle_add(land, state, priority=GLib.PRIORITY_DEFAULT)
+            state, shares = self._worktree_check(session_id)
+            GLib.idle_add(land, state, shares, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=probe, daemon=True).start()
+
+    @staticmethod
+    def _worktree_check(session_id: str) -> tuple[dict | None, bool]:
+        """The service's read of the worktree a session's transcript still
+        records (`store.worktree-check`, PR-1.12d: the transcript is its
+        machine's), and whether a background agent shares it there. Off the
+        main loop: the call blocks its thread on the reply."""
+        try:
+            reply = apilink.call({"t": "store.worktree-check", "session": session_id})
+        except RequestRefused as refusal:
+            log.info("worktree check of %s refused: %s", session_id, refusal.msgid)
+            return None, False
+        state = reply.get("removable")
+        if not isinstance(state, dict) or not isinstance(state.get("worktreePath"), str):
+            state = None
+        return state, bool(reply.get("shares"))
 
     def _archive_now(self, session_id: str, archived: bool) -> None:
         page = self._page_for(session_id) if archived else None
@@ -6692,20 +6472,20 @@ class MainWindow(Adw.ApplicationWindow):
             if decided is not None:
                 land(decided)
             return
-        jsonl_path, cwd = session.jsonl_path, session.cwd or ""
 
         def probe() -> None:
-            state = removable_worktree(jsonl_path, cwd)
-            if state is not None:
+            state, shares = self._worktree_check(session_id)
+            if state is not None and not shares:
                 GLib.idle_add(land, state, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=probe, daemon=True).start()
 
     def _worktree_in_use(self, path: str, except_page: Adw.TabPage | None = None) -> bool:
-        """Whether an open tab in any window, or a background agent, is
-        working in *path* or somewhere under it. *except_page* is a tab not
-        to count: the session being archived, asked about while its own tab
-        is still open."""
+        """Whether an open tab in any window is working in *path* or
+        somewhere under it (a background agent working there is the
+        service's to say: `store.worktree-check`'s ``shares``).
+        *except_page* is a tab not to count: the session being archived,
+        asked about while its own tab is still open."""
         app = self.get_application()
         windows = [w for w in (app.get_windows() if app is not None else [self]) if isinstance(w, MainWindow)]
         for window in windows:
@@ -6715,10 +6495,6 @@ class MainWindow(Adw.ApplicationWindow):
                 tab = page.get_child()
                 if isinstance(tab, TerminalTab) and tab.start_cwd and path_within(path, tab.start_cwd):
                     return True
-        for sid in self._bg_status.background_ids:
-            session = self.store.get_session(sid)
-            if session is not None and session.cwd and path_within(path, session.cwd):
-                return True
         return False
 
     def _trash_worktree(self, session_id: str, state: dict) -> None:
@@ -6892,50 +6668,6 @@ class MainWindow(Adw.ApplicationWindow):
         # archived sessions themselves are only paged in for the delete.
         self._trash_archived_action.set_enabled(self.store.has_archived())
 
-    def session_is_running(self, session_id: str) -> bool:
-        """Whether the session has a tab in this window or runs as a
-        background agent — what the automatic archive sweep asks before it
-        trashes anything (see autodelete)."""
-        return self._page_for(session_id) is not None or self._is_detached(session_id)
-
-    def trash_expired_archives(self, session_ids: list[str]) -> list[str]:
-        """The automatic delete (autodelete.maybe_sweep's *trash*): the same
-        path as *Delete archived sessions…* without the dialog. Sessions
-        still running are skipped — they come round again tomorrow — and a
-        project this empties out is kept in the sidebar as an empty header,
-        the way the dialog's default keeps it: an automatic delete has nobody
-        to ask, and losing a project you never removed is the surprise.
-        Returns the ids that were not trashed."""
-        # Every session, read once: the archived ones are paged into the
-        # store's mirror here (the first read), and the projects this
-        # empties are judged against the whole set, survivors included.
-        sessions = self.store.sessions
-        wanted = [
-            sid
-            for sid in session_ids
-            if sid in sessions
-            and self.store.state.is_archived(sid)
-            and not self.session_is_running(sid)
-        ]
-        skipped = [sid for sid in session_ids if sid not in wanted]
-        if not wanted:
-            return skipped
-        emptied = emptied_projects(list(sessions.values()), set(wanted))
-        if emptied:
-            self.store.keep_projects(emptied)
-        errors = self.store.trash_many(wanted)
-        gone = [sid for sid in wanted if sid not in errors]
-        self._drop_undo(gone)
-        for session_id in gone:
-            self._forget_transcript(session_id)
-            # The row is gone for good — don't leave its id (and its archive
-            # stamp) in state forever.
-            self.state.set_archived(session_id, False)
-        for session_id, error in errors.items():
-            log.warning("archive sweep: could not trash %s: %s", session_id, error)
-        self._sync_trash_archived_action()
-        return skipped + list(errors)
-
     def _trash_archived(self) -> None:
         """Sidebar menu → trash every session the sidebar keeps out of sight:
         the ones archived individually plus everything inside an archived
@@ -7005,38 +6737,34 @@ class MainWindow(Adw.ApplicationWindow):
             self.store.keep_projects(keep.projects)
 
     def _forget_transcript(self, session_id: str) -> None:
-        """Drop everything the app kept for a session whose transcript just
-        went away: its tab, its panel scrollback, its panel and editor
-        layout, its PRs, the images it was shown, the prompt it was in the
-        middle of writing."""
+        """Drop everything kept for a session whose transcript just went
+        away: its tab, its panel and editor layout and the prompt it was in
+        the middle of writing here, and on the service (`store.forget`,
+        PR-1.12d) its panel scrollback, its PRs, the images it was shown and
+        its sandbox box with what the box was allowed. Waits for the reply:
+        a caller reads the state right after."""
+        self._forget_on_device(session_id)
+        # The mirror's debounced draft goes now, so a pending one is never
+        # sent after the service dropped it.
+        self.state.set_session_draft(session_id, "")
+        self.state.flush_drafts(session_id)
+        try:
+            apilink.call({"t": "store.forget", "session": session_id})
+        except RequestRefused as refusal:
+            log.info("store.forget %s refused: %s", session_id, refusal.msgid)
+
+    def _forget_on_device(self, session_id: str) -> None:
+        """This device's half of a forgotten session: its tab closed, its
+        panel and editor layout dropped, Undo no longer offering it. Also
+        what the service's own forget (the archive sweep's `forgotten`)
+        asks of every client."""
         page = self._pages.get(session_id)
         if page is not None:
             self.tab_view.close_page(page)
-        panelhistory.delete(session_id)
         self.state.set_panel_layout(session_id, None)
         self.state.set_editor_state(session_id, None)
-        self.state.set_session_draft(session_id, "")
-        self.state.flush_drafts(session_id)
-        self.store.pr_store.set_records(session_id, [])
-        self.state.set_session_attachments(session_id, [])
-        if session_id in self.state.sandboxed_sessions:
-            # Its box goes with it, and what the box was allowed — unlinked,
-            # not trashed: Collins' own derived data, possibly large. The
-            # sticky flag stays, so a transcript restored from the trash
-            # resumes boxed, in a fresh home, as a new session would. A
-            # box another id of the conversation still names (a forward)
-            # keeps its grants and stays; one a tab still holds goes when
-            # that lets go.
-            box = self.state.sandboxed_sessions[session_id]
-            self.state.set_sandboxed(session_id, True, box="")
-            if box:
-                # The service's host forgets it (sandbox.forget): a no-op
-                # for a box another session names, and otherwise the end of
-                # the box and of the grants recorded for it.
-                try:
-                    apilink.call({"t": "sandbox.forget", "box": box})
-                except RequestRefused as refusal:
-                    log.info("sandbox.forget %s refused: %s", box, refusal.msgid)
+        self._drop_undo([session_id])
+        self._sync_trash_archived_action()
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
@@ -7195,7 +6923,6 @@ class MainWindow(Adw.ApplicationWindow):
         self.notify_sheet.schedule_refresh()
         # The cards' own light/dark; any card standing changes with it.
         self.notify_cards.apply_settings(self.state.settings)
-        self._bg_status.set_polling(bool(self.state.get_setting("background_status_poll")))
         self.store.apply_pr_titles()
         self.store.apply_cli_titles()
 
