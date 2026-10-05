@@ -1381,3 +1381,70 @@ def test_a_background_close_starts_the_handoff_on_the_service(app_state, project
     finally:
         srv.shutdown()
         pump(0.3)
+
+
+def test_the_repair_job_matches_off_the_loop_and_records_the_link(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    """`session.repair` (PR-1.12d): the inputs read on the main loop, the
+    match on the job's thread, the forward recorded back on the main loop
+    before the job's outcome; nothing matching is ``found: None``."""
+    from collins.service import bgagents as bgagents_mod
+
+    _root, ids = projects_dir
+    core, store, _poller, srv, client, ends = _store_core(app_state, tmp_path)
+    try:
+        asked = []
+
+        def match(provider, old_id, cwd, uuid, claimed, unique_cwd=False):
+            asked.append((old_id, cwd, set(claimed), unique_cwd))
+            return "fork-0003" if old_id == ids["alpha1"] else None
+
+        monkeypatch.setattr(bgagents_mod.bgstatus, "match_background_fork", match)
+
+        def repair(session_id):
+            message = {"t": "job.start", "kind": "session.repair", "args": {"session": session_id}}
+            return client.request(message)["job"]
+
+        def outcome(job_id):
+            done = [e for e in ends.of("job") if e["job"] == job_id and e["state"] != "running"]
+            return done[-1] if done else None
+
+        job = repair(ids["alpha1"])
+        assert pump(5, lambda: outcome(job) is not None)
+        assert outcome(job)["state"] == "done" and outcome(job)["result"] == {"found": "fork-0003"}
+        assert core.state.resolve_forward(ids["alpha1"]) == "fork-0003"
+        assert asked[0][0] == ids["alpha1"] and asked[0][1] == "/home/user/alpha" and asked[0][3] is True
+        missing = repair(ids["beta1"])
+        assert pump(5, lambda: outcome(missing) is not None)
+        assert outcome(missing)["result"] == {"found": None}
+        assert core.state.resolve_forward(ids["beta1"]) == ids["beta1"]
+        unknown = repair("nope")
+        assert pump(5, lambda: outcome(unknown) is not None)
+        assert outcome(unknown)["state"] == "refused"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_first_sweep_waits_for_the_stores_first_scan(app_state, projects_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    swept = []
+    monkeypatch.setattr(core, "sweep_archived", lambda: swept.append(store.applied))
+    monkeypatch.setattr(core, "check_gh", lambda fresh=False: None)
+    try:
+        core.start_housekeeping()
+        assert swept == []  # no scan yet: a sweep would stamp the day for nothing
+        store._last_sessions = discover_sessions()
+        store._apply()
+        assert swept == [True]
+        store._apply()
+        assert swept == [True]  # once: the timer takes it from there
+        assert core._sweep_source
+    finally:
+        core.shutdown()
+        assert not core._sweep_source

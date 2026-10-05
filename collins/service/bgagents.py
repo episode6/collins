@@ -556,7 +556,7 @@ class BackgroundAgents:
     def repair_landed(self, inputs: dict, found: str | None) -> None:
         """The match, back on the main loop: a fork is recorded; either way
         the agent list is the fresher truth now."""
-        if found is None:
+        if found is None or self._stopped:
             return
         old_id = inputs["old"]
         if found:

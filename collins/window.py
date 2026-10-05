@@ -3267,6 +3267,11 @@ class MainWindow(Adw.ApplicationWindow):
                 self._sync_status(row_id)
         # Rows just appeared or went away, and a row is what a handoff needs.
         self._refresh_background_affordances()
+        # A handoff's in-flight state as the rows now have it: a row made
+        # (or a snapshot taken) by this refresh brought its `backgrounding`
+        # without a background-changed, so a handoff that settled unheard
+        # still advances the quit-time queue.
+        self._sync_detach_in_flight()
         self._schedule_launch_sweep()
 
     def _schedule_launch_sweep(self) -> None:
@@ -4114,6 +4119,12 @@ class MainWindow(Adw.ApplicationWindow):
         the header's button and, when a /bg handoff stopped being in flight
         (confirmed, abandoned or timed out), the quit-time queue."""
         self._sync_status(session_id)
+        self._sync_detach_in_flight()
+
+    def _sync_detach_in_flight(self) -> None:
+        """Note whether a /bg handoff is in flight now; one that stopped
+        being (confirmed, abandoned or timed out) reopens the gate and
+        lets the quit-time queue send the next."""
         in_flight = self._handoff_in_flight()
         settled = self._detach_in_flight and not in_flight
         self._detach_in_flight = in_flight
@@ -4572,7 +4583,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _background_blocker(self, page: Adw.TabPage | None) -> str:
         """Why this tab can't be handed to the background right now, or "" when
-        it can. See bgstatus.background_blocker for what the reasons mean."""
+        it can. See bgblock.background_blocker for what the reasons mean."""
         tab = page.get_child() if page is not None else None
         is_session = isinstance(tab, TerminalTab)
         session_id = tab.session_id if is_session else None

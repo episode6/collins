@@ -327,3 +327,25 @@ def test_a_worktree_a_background_agent_works_in_is_shared(world):
     assert bg.worktree_shared(ids["alpha2"], "/home/user/alpha")
     assert bg.worktree_shared(ids["alpha1"], "/elsewhere")  # runs on as an agent itself
     assert bg.session_is_running(ids["alpha1"]) and not bg.session_is_running(ids["beta1"])
+
+
+def test_stop_leaves_no_timer_and_no_listener_and_lands_nothing(world):
+    store, state, ids = world
+    old = ids["alpha1"]
+    provider = FakeProvider([])
+    attached = FakeRecord(FakeSession(ids["alpha2"], provider, attached_background=True))
+    deferred = []
+    bg, _poller, timers, _sleeps = make(world, provider, attached, deferred=deferred, activity=Activity())
+    bg.start()
+    bg.sync_busy_poll()
+    bg.mark_backgrounding(old)
+    assert timers.pending  # the safety timer and the busy poll
+    handler = bg._refreshed_handler
+    assert store.handler_is_connected(handler)
+    bg.stop()
+    assert not timers.pending and not bg.pending
+    assert not store.handler_is_connected(handler)  # the store's refreshes reach it no more
+    # A repair or a watch landing after the stop changes nothing.
+    bg.repair_landed({"session": old, "old": old}, "fork-0009")
+    bg._on_backgrounded(attached, old, "fork-0009")
+    assert state.resolve_forward(old) == old
