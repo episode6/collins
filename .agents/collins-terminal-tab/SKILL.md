@@ -275,7 +275,7 @@ calls `TerminalTab.detach_pty()` (a `detach`, the client closed) instead of
 service). The tab's `destroy` also detaches (no longer `release_pty`): a
 window that closes for real leaves its sessions running. **Opening a
 running session attaches** (D31): `open_session` asks `store.pty_for(id)`
-and builds `TerminalTab(attach_pty=…)`, which reads the pty's grid
+and, while that pty's CLI still runs (`pty.info`'s `running_command`; a shell-only pty is resumed over, which the service takes by closing it), builds `TerminalTab(attach_pty=…)`, which reads the pty's grid
 (`pty.info` `cols`/`rows`, so the attach paints at the pty's own size and
 the model, which never reflows, cuts nothing), claims the pty and attaches;
 the `session` snapshot fills the mirror. `attach_refused` (the pty ended
