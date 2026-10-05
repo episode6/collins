@@ -98,8 +98,8 @@ INSTALLED_SIZE="$(du -sk "$BUILD" --exclude=DEBIAN | cut -f1)"
 # an install hint when it is missing, which apt should have made unnecessary).
 # gir1.2-soup-3.0 is the socket between the window and collins-service
 # (collins/api/client.py, collins/service/main.py): a missing typelib is a
-# window that cannot start its service. libspelling is only recommended: composer.py degrades to an unchecked text
-# box without it. The two version floors are the measured ones: GTK 4.10 for
+# window that cannot start its service. libspelling is only recommended:
+# composer.py degrades to an unchecked text box without it. The two version floors are the measured ones: GTK 4.10 for
 # Gtk.FileDialog/FontDialog, libadwaita 1.5 for Adw.AlertDialog and friends.
 cat > "$BUILD/DEBIAN/control" <<EOF
 Package: $PKG
