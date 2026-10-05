@@ -5332,6 +5332,12 @@ class TerminalTab(Gtk.Box):
         except (RequestRefused, ValueError) as exc:
             _log.warning("panel history of %s not written: %s", history_id, exc)
 
+    def release_editor(self) -> None:
+        """The tab is closing for good: the editor's file watches on the
+        service go with it (`EditorPane.shutdown`, PR-2.3); after the
+        window captured the editor's state."""
+        self._editor.shutdown()
+
     def release_panel_ptys(self) -> None:
         """The tab is closing for good: end every panel shell's pty on the
         service. After `save_panel_history`, which reads their models."""

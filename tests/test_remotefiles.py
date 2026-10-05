@@ -84,10 +84,13 @@ def test_the_watcher_sends_watches_under_handles_and_routes_events(link):
     heard: list[dict] = []
     other: list[dict] = []
     watcher = remotefiles.watcher()
-    first = watcher.watch("/srv/p/a.txt", heard.append)
+    first = watcher.watch("/srv/p/a.txt", heard.append, mtime=7)
     second = watcher.watch("/srv/p/a.txt", other.append)
     assert first != second and watcher.watching(first) and watcher.watching(second)
-    assert link.sent[-2] == {"t": "fs.watch", "path": "/srv/p/a.txt", "kind": "file", "handle": first}
+    assert link.sent[-2] == {
+        "t": "fs.watch", "path": "/srv/p/a.txt", "kind": "file", "handle": first, "mtime": 7,
+    }
+    assert link.sent[-1] == {"t": "fs.watch", "path": "/srv/p/a.txt", "kind": "file", "handle": second}
     event = {"t": "file-changed", "handle": first, "path": "/srv/p/a.txt", "mtime": 1, "size": 2}
     event["gone"] = False
     link.dispatch(event)
@@ -106,11 +109,13 @@ def test_the_watcher_sends_watches_under_handles_and_routes_events(link):
 def test_reset_sends_every_live_watch_again(link):
     watcher = remotefiles.watcher()
     a = watcher.watch("/srv/p/a.txt", lambda e: None)
-    b = watcher.watch("/srv/p/b.txt", lambda e: None)
+    b = watcher.watch("/srv/p/b.txt", lambda e: None, mtime=1)
     watcher.unwatch(a)
+    watcher.update(b, 9)  # a later read or write: the seed a reconnect sends
+    watcher.update(None, 3)
     del link.sent[:]
     remotefiles.reset()
-    assert link.sent == [{"t": "fs.watch", "path": "/srv/p/b.txt", "kind": "file", "handle": b}]
+    assert link.sent == [{"t": "fs.watch", "path": "/srv/p/b.txt", "kind": "file", "handle": b, "mtime": 9}]
 
 
 def test_a_refused_watch_is_logged_and_kept_for_the_next_reset(link, caplog):
@@ -146,3 +151,30 @@ def test_no_installed_link_means_no_watch_is_sent(link):
     remotefiles.install(link)
     remotefiles.reset()
     assert link.sent == [{"t": "fs.watch", "path": "/srv/p/b.txt", "kind": "file", "handle": handle}]
+
+
+def test_a_bound_method_listener_is_held_weakly_and_its_watch_dropped_when_it_dies(link):
+    """A pane dropped without `shutdown` must not live on through its
+    watches: the listener is a weak method, and the next event for a dead
+    one drops the watch (and sends the unwatch)."""
+    import gc
+
+    class Pane:
+        def __init__(self) -> None:
+            self.heard: list[dict] = []
+
+        def on_event(self, event: dict) -> None:
+            self.heard.append(event)
+
+    pane = Pane()
+    watcher = remotefiles.watcher()
+    handle = watcher.watch("/srv/p/a.txt", pane.on_event, mtime=1)
+    event = {"t": "file-changed", "handle": handle, "path": "/srv/p/a.txt", "mtime": 2, "size": 1}
+    event["gone"] = False
+    link.dispatch(event)
+    assert pane.heard == [event]
+    del pane
+    gc.collect()
+    link.dispatch(event)
+    assert not watcher.watching(handle)
+    assert link.sent[-1] == {"t": "fs.unwatch", "handle": handle}

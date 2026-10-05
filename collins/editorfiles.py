@@ -27,8 +27,9 @@ from .sessions import worktree_project_root
 # what the agent just wrote" file tree.
 SKIP_DIR_NAMES = {".git", "node_modules", "__pycache__", ".venv", "target", "dist", "build"}
 
-_MAX_HIGHLIGHT_BYTES = 512 * 1024  # opened normally below this...
-_MAX_OPEN_BYTES = 5 * 1024 * 1024  # ...refused outright above this
+# Highlighted below this; still opened above it (the open cap itself is
+# the service's, protocol.FILE_TEXT_MAX).
+_MAX_HIGHLIGHT_BYTES = 512 * 1024
 # Images get their own, far larger cap (screenshots of 4K monitors are
 # routinely multi-MB): this only guards the image viewer against decoding
 # something absurd, not against ordinary photos.
@@ -281,9 +282,9 @@ def is_image_path(path: str | Path) -> bool:
 
 
 def image_guard(path: str | Path) -> LoadGuard:
-    """`load_guard`'s sibling for the image viewers: images are binary by
-    nature, so only existence, readability and (a much larger) size cap are
-    checked — never BINARY."""
+    """The guard for the image viewers (the text files' is the service's
+    `fs.read`): images are binary by nature, so only existence,
+    readability and (a much larger) size cap are checked — never BINARY."""
     p = Path(path)
     try:
         if not p.is_file():
@@ -422,7 +423,7 @@ def path_from_file_uri(uri: str) -> str | None:
 
 
 def should_highlight(size: int | None) -> bool:
-    """Above ~512 KB, a file is still opened (see `load_guard`) but with
+    """Above ~512 KB, a file is still opened (`fs.read` allows 5 MiB) but with
     syntax highlighting switched off — GtkSource re-highlights on every
     keystroke, and that cost is only worth paying for files this size or
     smaller. *size* is the one `fs.read` answered (PR-2.3); None (not

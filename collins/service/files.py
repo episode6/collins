@@ -20,18 +20,28 @@ PR-2.3 adds the editor's requests, served by `Files`:
   empty text; the `mtime` (microseconds) the save that follows expects
   and the `size`. Refused `refused` over `max` (FILE_TEXT_MAX at most),
   for a path that is not a regular file, and outside every root.
-- `fs.write {path, text, expect_mtime, encoding}`: the text written by a
-  temporary file in the same directory and one `os.replace` (the mode of
-  the file it replaces kept), **after** the file's mtime is compared with
-  `expect_mtime`: a file that moved underneath the client is refused
-  `stale` and left exactly as it is (the client raises its "changed on
-  disk" dialog and asks again with `expect_mtime: null` to overwrite). A
+- `fs.write {path, text, expect_mtime, encoding}`: the text written the
+  way `GtkSource.FileSaver` wrote it (`write_file`: in place for a hard
+  link, a read-only directory or another owner's file, else by a
+  temporary file and one `os.replace` with the old mode, a new file
+  created under the umask), **after** the file's mtime is compared with
+  `expect_mtime` — right before the write, off the descriptor or the
+  stat the replace follows: a file that moved underneath the client is
+  refused `stale` and left exactly as it is (the client raises its
+  "changed on disk" dialog and asks again with `expect_mtime: null` to
+  overwrite). The reply's mtime and size are the written descriptor's. A
   text latin-1 cannot carry is written as UTF-8 and the reply says so.
-- `fs.watch {path, kind: file, handle}` / `fs.unwatch {handle}`: one
-  `Gio.FileMonitor` per client and handle (`_FileWatch`, the editor's
-  monitor moved here), debounced 300 ms, then a stat on a thread and one
+- `fs.watch {path, kind: file, handle, mtime}` / `fs.unwatch {handle}`:
+  one `Gio.FileMonitor` per client and handle (`_FileWatch`, the editor's
+  monitor moved here; at most MAX_WATCHES_PER_CLIENT), seeded by a stat
+  on a thread compared against the client's `mtime` (a file that already
+  differs is one `file-changed` at once), then debounced 300 ms and one
   `file-changed {handle, path, mtime, size, gone}` per burst whose stat
   moved. A directory's watch (`kind: dir`) is PR-2.4's and is refused.
+- Confinement for the read and the write runs on the worker, against the
+  roots computed on the main loop (`confined`): the path is resolved
+  through its symlinks right before the open, so a link swapped in
+  between points nowhere outside a root.
 
 **Nothing blocks the main loop**: every read, write and stat runs on a
 daemon thread and answers through a `protocol.Deferred` settled on the
@@ -194,7 +204,8 @@ def file_stat(path: str) -> tuple[int | None, int | None, bool]:
 
 
 class ReadRefused(Exception):
-    """`read_file` could not answer: the refusal's code, words and args."""
+    """`read_file` could not answer: the refusal's code, words and args.
+    The words name no file: the client puts the name in front."""
 
     def __init__(self, error: str, msgid: str, details: dict | None = None) -> None:
         super().__init__(msgid)
@@ -203,38 +214,61 @@ class ReadRefused(Exception):
         self.details = details or {}  # not `args`: that is BaseException's
 
 
-def read_file(path: str, max_bytes: int) -> dict:
+OUTSIDE_MSGID = "The path is outside every root the service knows"
+TOO_LARGE_MSGID = "The file is too large to open in the editor ({size} bytes, over {max})"
+
+
+def confined(path: str, roots: Sequence[str] | None) -> str:
+    """*path* resolved through its symlinks (the file itself), or a
+    `ReadRefused` ``refused`` when *roots* (the service's, computed on the
+    main loop) is given and the resolved file is inside none of them. The
+    check runs here, on the worker, right before the open: a link swapped
+    between the request and the read points nowhere outside."""
+    real = os.path.realpath(path)
+    if roots is not None and not any(is_inside(root, real) for root in roots):
+        raise ReadRefused(protocol.ERROR_REFUSED, OUTSIDE_MSGID)
+    return real
+
+
+def _os_error(exc: OSError) -> str:
+    return (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]
+
+
+def read_file(path: str, max_bytes: int, roots: Sequence[str] | None = None) -> dict:
     """`fs.read`'s work (a worker thread): the reply's fields, or a
-    `ReadRefused`."""
-    name = os.path.basename(path)[: protocol.ARG_TEXT_MAX]
+    `ReadRefused`. The open is non-blocking and the file's kind is read
+    off the open descriptor, so a FIFO or a device swapped in for the file
+    is refused rather than waited on."""
+    real = confined(path, roots)
     try:
-        st = os.stat(path)
+        fd = os.open(real, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY)
     except FileNotFoundError:
-        raise ReadRefused(protocol.ERROR_GONE, "{name} is not there", {"name": name}) from None
+        raise ReadRefused(protocol.ERROR_GONE, "The file is not there") from None
     except OSError as exc:
         raise ReadRefused(
-            protocol.ERROR_FAILED, "Couldn't read {name}: {error}",
-            {"name": name, "error": (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]},
+            protocol.ERROR_FAILED, "Couldn't read the file: {error}", {"error": _os_error(exc)}
         ) from None
-    if not stat_mod.S_ISREG(st.st_mode):
-        raise ReadRefused(protocol.ERROR_REFUSED, "{name} is not a file", {"name": name})
-    if st.st_size > max_bytes:
-        raise ReadRefused(
-            protocol.ERROR_REFUSED, "{name} is too large to open in the editor",
-            {"name": name, "size": st.st_size, "max": max_bytes},
-        )
     try:
-        with open(path, "rb") as fh:
+        st = os.fstat(fd)
+        if not stat_mod.S_ISREG(st.st_mode):
+            raise ReadRefused(protocol.ERROR_REFUSED, "The path is not a file")
+        if st.st_size > max_bytes:
+            raise ReadRefused(
+                protocol.ERROR_REFUSED, TOO_LARGE_MSGID, {"size": st.st_size, "max": max_bytes},
+            )
+        with os.fdopen(fd, "rb") as fh:
+            fd = -1
             data = fh.read(max_bytes + 1)
     except OSError as exc:
         raise ReadRefused(
-            protocol.ERROR_FAILED, "Couldn't read {name}: {error}",
-            {"name": name, "error": (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]},
+            protocol.ERROR_FAILED, "Couldn't read the file: {error}", {"error": _os_error(exc)}
         ) from None
+    finally:
+        if fd >= 0:
+            os.close(fd)
     if len(data) > max_bytes:  # grew between the stat and the read
         raise ReadRefused(
-            protocol.ERROR_REFUSED, "{name} is too large to open in the editor",
-            {"name": name, "size": len(data), "max": max_bytes},
+            protocol.ERROR_REFUSED, TOO_LARGE_MSGID, {"size": len(data), "max": max_bytes},
         )
     fields = {"mtime": mtime_us(st), "size": len(data), "binary": False}
     if b"\x00" in data[:BINARY_SNIFF_BYTES]:
@@ -256,47 +290,104 @@ class WriteStale(Exception):
         self.mtime = mtime
 
 
-def write_file(path: str, text: str, expect_mtime: int | None, encoding: str) -> dict:
-    """`fs.write`'s work (a worker thread): the text to *path* by a
-    temporary file in its directory and one replace, after the mtime
-    check (`WriteStale` when it moved; an OSError is the caller's
-    `failed`). The reply's fields: the new mtime and size, and the
-    encoding written (UTF-8 when latin-1 could not carry the text)."""
-    # The file itself, through any symlink: the editor opens a link inside
-    # the project to a file inside it, and a save must land in the file,
-    # not turn the link into a copy (what `g_file_replace` did).
-    path = os.path.realpath(path)
-    mtime, _size, gone = file_stat(path)
-    if expect_mtime is not None and (gone or mtime != expect_mtime):
-        raise WriteStale(mtime)
+def _encode(text: str, encoding: str) -> tuple[bytes, str]:
     try:
-        data = text.encode(encoding)
+        return text.encode(encoding), encoding
     except (UnicodeEncodeError, LookupError):
-        data = text.encode("utf-8")
-        encoding = protocol.FILE_ENCODING_UTF8
-    directory = os.path.dirname(path) or "."
-    mode = None
+        return text.encode("utf-8"), protocol.FILE_ENCODING_UTF8
+
+
+def _write_in_place(fd: int, data: bytes, expect_mtime: int | None) -> os.stat_result:
+    """*data* over the open file *fd*, which is not truncated until the
+    compare passed: the mtime is read off the descriptor right before the
+    write."""
+    st = os.fstat(fd)
+    if expect_mtime is not None and mtime_us(st) != expect_mtime:
+        raise WriteStale(mtime_us(st))
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view) :]
+    os.ftruncate(fd, len(data))
+    os.fsync(fd)
+    return os.fstat(fd)
+
+
+def write_file(
+    path: str, text: str, expect_mtime: int | None, encoding: str, roots: Sequence[str] | None = None
+) -> dict:
+    """`fs.write`'s work (a worker thread): the text to the file *path*
+    names, through any symlink (`confined`: a link inside the project to a
+    file inside it is written as the file, never turned into a copy —
+    what `g_file_replace` did), after the mtime check (`WriteStale` when it
+    moved, nothing written; an OSError is the caller's `failed`).
+
+    How it is written follows the saver this replaces: a file that is one
+    of several hard links, one in a directory the service cannot write
+    (a writable file in a read-only directory), or one another user or
+    group owns is written **in place** (open, compare off the descriptor,
+    write, truncate, fsync), so every link sees the text and the owner and
+    mode stay; any other existing file by a temporary file beside it,
+    given the old mode, compared again right before the one `os.replace`
+    (the window between the compare and the write is the replace alone);
+    a file that is not there is created ``0o666`` under the umask, as
+    GLib creates one. The reply's fields: the mtime and size read off the
+    written descriptor (the temporary's, before the replace: the inode
+    keeps them through the rename, so the next `file-changed` and the
+    next save compare against exactly what was written), and the encoding
+    written (UTF-8 when latin-1 could not carry the text)."""
+    real = confined(path, roots)
+    data, encoding = _encode(text, encoding)
     try:
-        mode = stat_mod.S_IMODE(os.stat(path).st_mode)
-    except OSError:
-        pass
+        st: os.stat_result | None = os.stat(real)
+    except FileNotFoundError:
+        st = None
+    if st is not None and not stat_mod.S_ISREG(st.st_mode):
+        raise ReadRefused(protocol.ERROR_REFUSED, "The path is not a file")
+    if expect_mtime is not None and (st is None or mtime_us(st) != expect_mtime):
+        raise WriteStale(mtime_us(st) if st is not None else None)
+    directory = os.path.dirname(real) or "."
+    if st is None:
+        fd = os.open(real, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NOCTTY, 0o666)
+        try:
+            written = _write_in_place(fd, data, None)
+        finally:
+            os.close(fd)
+        return {"mtime": mtime_us(written), "size": written.st_size, "encoding": encoding}
+    in_place = (
+        st.st_nlink > 1
+        or not os.access(directory, os.W_OK)
+        or (st.st_uid, st.st_gid) != (os.getuid(), os.getgid())
+    )
+    if in_place:
+        fd = os.open(real, os.O_WRONLY | os.O_NOFOLLOW | os.O_NOCTTY)
+        try:
+            written = _write_in_place(fd, data, expect_mtime)
+        finally:
+            os.close(fd)
+        return {"mtime": mtime_us(written), "size": written.st_size, "encoding": encoding}
     fd, temp = tempfile.mkstemp(prefix=".collins-", suffix=".tmp", dir=directory)
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        if mode is not None:
-            os.chmod(temp, mode)
-        os.replace(temp, path)
-    except OSError:
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view) :]
+            os.fsync(fd)
+            os.fchmod(fd, stat_mod.S_IMODE(st.st_mode))
+            written = os.fstat(fd)
+        finally:
+            os.close(fd)
+        # The compare again, as close to the replace as a stat can be.
+        now = file_stat(real)
+        if expect_mtime is not None and (now[2] or now[0] != expect_mtime):
+            raise WriteStale(now[0])
+        os.replace(temp, real)
+    except BaseException:
         try:
             os.unlink(temp)
         except OSError:
             pass
         raise
-    st = os.stat(path)
-    return {"mtime": mtime_us(st), "size": st.st_size, "encoding": encoding}
+    return {"mtime": mtime_us(written), "size": written.st_size, "encoding": encoding}
 
 
 def _dispatch_default(fn: Callable[[], object]) -> None:
@@ -305,6 +396,11 @@ def _dispatch_default(fn: Callable[[], object]) -> None:
 
 def _spawn_default(fn: Callable[[], None], name: str) -> None:
     threading.Thread(target=fn, name=name, daemon=True).start()
+
+
+# The most watches one client may hold (a file per open editor tab; a
+# client past this has leaked them).
+MAX_WATCHES_PER_CLIENT = 512
 
 
 class Files:
@@ -349,15 +445,21 @@ class Files:
             watch.stop()
         self._watches.clear()
 
-    def _path(self, message: protocol.Message, client) -> str | dict:
-        """The request's path, confined; else the refusal."""
+    def _path(self, message: protocol.Message) -> str | dict:
+        """The request's path, an absolute one; else the refusal."""
         path = message.get("path")
-        if not isinstance(path, str) or not os.path.isabs(path) or not allowed(self.core, client, path):
+        if not isinstance(path, str) or not os.path.isabs(path):
             return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "{path} is outside every root the service knows",
+                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID,
                 {"path": str(path)[: protocol.ARG_TEXT_MAX]},
             )
         return path
+
+    def _roots(self, client) -> list[str] | None:
+        """The roots the worker confines a path to (`confined`), computed
+        here on the main loop where the store lives; None for a `local`
+        client, which may name anything."""
+        return None if getattr(client, "local", False) else roots(self.core)
 
     def _later(self, message: protocol.Message, name: str, work: Callable[[], dict]) -> protocol.Deferred:
         """*work* on a thread, its reply dict settled on the main loop; a
@@ -381,17 +483,18 @@ class Files:
     # -- fs.read ---------------------------------------------------------------------------
 
     def read(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        path = self._path(message, client)
+        path = self._path(message)
         if isinstance(path, dict):
             return path
         max_bytes = message.get("max")
         if not isinstance(max_bytes, int) or max_bytes < 1:
             max_bytes = protocol.FILE_TEXT_MAX
         max_bytes = min(max_bytes, protocol.FILE_TEXT_MAX)
+        allowed_roots = self._roots(client)
 
         def work() -> dict:
             try:
-                fields = read_file(path, max_bytes)
+                fields = read_file(path, max_bytes, allowed_roots)
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
             return protocol.reply(message.id, **fields)
@@ -401,7 +504,7 @@ class Files:
     # -- fs.write --------------------------------------------------------------------------
 
     def write(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        path = self._path(message, client)
+        path = self._path(message)
         if isinstance(path, dict):
             return path
         text = message.get("text")
@@ -414,19 +517,19 @@ class Files:
         encoding = message.get("encoding")
         if encoding not in protocol.FILE_ENCODINGS:
             encoding = protocol.FILE_ENCODING_UTF8
-        name = os.path.basename(path)[: protocol.ARG_TEXT_MAX]
+        allowed_roots = self._roots(client)
 
         def work() -> dict:
             try:
-                fields = write_file(path, text, expect_mtime, encoding)
+                fields = write_file(path, text, expect_mtime, encoding, allowed_roots)
+            except ReadRefused as refused:
+                return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
             except WriteStale:
-                return protocol.refuse(
-                    message.id, protocol.ERROR_STALE, "{name} changed on disk", {"name": name}
-                )
+                return protocol.refuse(message.id, protocol.ERROR_STALE, "The file changed on disk")
             except OSError as exc:
                 return protocol.refuse(
-                    message.id, protocol.ERROR_FAILED, "Couldn't save {name}: {error}",
-                    {"name": name, "error": (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]},
+                    message.id, protocol.ERROR_FAILED, "Couldn't save the file: {error}",
+                    {"error": _os_error(exc)},
                 )
             return protocol.reply(message.id, **fields)
 
@@ -435,9 +538,16 @@ class Files:
     # -- the watch -------------------------------------------------------------------------
 
     def watch(self, message: protocol.Message, client) -> dict:
-        path = self._path(message, client)
+        """`fs.watch {path, kind: file, handle, mtime}`: a `_FileWatch` under
+        the client's handle (the same handle again replaces), seeded with
+        the client's `mtime` when it sends one."""
+        path = self._path(message)
         if isinstance(path, dict):
             return path
+        if not allowed(self.core, client, path):
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": path[: protocol.ARG_TEXT_MAX]}
+            )
         if message.get("kind") != protocol.WATCH_FILE:
             return protocol.refuse(
                 message.id, protocol.ERROR_REFUSED, "A {kind} watch is not served yet",
@@ -448,7 +558,13 @@ class Files:
         old = self._watches.pop(key, None)
         if old is not None:
             old.stop()
-        watch = _FileWatch(self, path, handle, client)
+        elif sum(1 for k in self._watches if k[0] == id(client)) >= MAX_WATCHES_PER_CLIENT:
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "Too many watches for one client ({max})",
+                {"max": MAX_WATCHES_PER_CLIENT},
+            )
+        seed = message.get("mtime")
+        watch = _FileWatch(self, path, handle, client, seed if isinstance(seed, int) else None)
         self._watches[key] = watch
         watch.start()
         return protocol.reply(message.id)
@@ -465,30 +581,35 @@ class Files:
 
 class _FileWatch:
     """One client's watch of one file, by its handle: the editor's
-    `Gio.FileMonitor`, debounce and stat, here. The stat at the start
-    seeds `last`; every later burst whose stat differs is one
-    `file-changed`."""
+    `Gio.FileMonitor`, debounce and stat, here. The first stat (on a
+    thread, right after the monitor is installed) seeds `last`; given the
+    client's *seed* mtime it is compared against that, so a file that
+    already differs from what the client read is one `file-changed` at
+    once (a change between the read and the watch, or while the client was
+    away). Every later burst whose stat differs is one more."""
 
-    def __init__(self, files: Files, path: str, handle: str, client) -> None:
+    def __init__(self, files: Files, path: str, handle: str, client, seed: int | None = None) -> None:
         self.files = files
         self.path = path
         self.handle = handle
         self.client = client
+        self.seed = seed
         self._monitor: Gio.FileMonitor | None = None
         self._debounce = 0
         self._checking = False
         self._stale = False
         self._stopped = False
-        self.last: tuple[int | None, int | None, bool] = file_stat(path)
+        self.last: tuple[int | None, int | None, bool] | None = None
 
     def start(self) -> None:
         try:
             monitor = Gio.File.new_for_path(self.path).monitor_file(Gio.FileMonitorFlags.NONE, None)
         except GLib.Error as exc:
             log.debug("files: no monitor on %s: %s", self.path, exc.message)
-            return
-        monitor.connect("changed", self._on_event)
-        self._monitor = monitor
+        else:
+            monitor.connect("changed", self._on_event)
+            self._monitor = monitor
+        self.check()  # the seed, against the client's
 
     def stop(self) -> None:
         self._stopped = True
@@ -531,7 +652,12 @@ class _FileWatch:
         if self._stopped:
             return
         stale, self._stale = self._stale, False
-        if found != self.last:
+        if self.last is None:
+            # The seed: a move since the client's own mtime is reported.
+            self.last = found
+            if self.seed is not None and (found[2] or found[0] != self.seed):
+                self._deliver(found)
+        elif found != self.last:
             self.last = found
             self._deliver(found)
         if stale:

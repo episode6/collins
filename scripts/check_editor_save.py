@@ -17,8 +17,11 @@ file carries the edit; a clean buffer reloads silently, cursor kept; a
 save over a file that moved underneath is refused `stale` and asks before
 overwriting (the "changed on disk" dialog, stubbed), the file untouched
 until Overwrite; a deleted file is told and marked dirty; a change that
-waited for a reload is judged even when the reload fails; a closed tab's
-watch is gone. The pane never opens a file itself.
+waited for a reload is judged even when the reload fails; a save before
+the first read lands writes nothing; a change between the read and the
+watch reaches the buffer (the watch's seed); the pane's shutdown drops
+every watch; a closed tab's watch is gone. The pane never opens a file
+itself.
 
 This is a script, not a pytest test, on purpose: tests/conftest.py blocks
 the GTK-stack namespaces for the whole suite so local runs reproduce CI.
@@ -154,7 +157,11 @@ def run(root: str) -> int:
     if not wait_for(lambda: not opened.loading):
         print("FAIL  the read never landed")
         return 1
-    check("the read filled the buffer", buffer_text(opened) == "print('hello')\n", buffer_text(opened))
+    # The file's final newline is implicit (what the loader stripped and
+    # the saver put back): the buffer shows one line, not an empty second.
+    check("the read filled the buffer", buffer_text(opened) == "print('hello')", buffer_text(opened))
+    check("without an empty last line", opened.buffer.get_line_count() == 1, opened.buffer.get_line_count())
+    check("the view is editable once filled", opened.view.get_editable())
     check("the buffer is clean after the load", not opened.buffer.get_modified())
     check("the file's mtime is kept for the save", opened.mtime == os.stat(first).st_mtime_ns // 1000, opened.mtime)
     check("the encoding is flagged", opened.encoding == "utf-8", opened.encoding)
@@ -165,7 +172,7 @@ def run(root: str) -> int:
     check("the tab is titled after the file", page.get_title() == "first.py", page.get_title())
 
     # -- edit: the tab is dirty -----------------------------------------------
-    opened.buffer.insert(opened.buffer.get_end_iter(), "x = 1\n")
+    opened.buffer.insert(opened.buffer.get_end_iter(), "\nx = 1")
     check("an edit dirties the buffer", opened.buffer.get_modified())
     check("the tab shows the dot", page.get_title() == "• first.py", page.get_title())
 
@@ -180,12 +187,12 @@ def run(root: str) -> int:
         pane._banner.get_title(),
     )
     check("the banner offers Reload", pane._banner.get_button_label() == "Reload", pane._banner.get_button_label())
-    check("the dirty buffer kept the edit", buffer_text(opened) == "print('hello')\nx = 1\n", buffer_text(opened))
+    check("the dirty buffer kept the edit", buffer_text(opened) == "print('hello')\nx = 1", buffer_text(opened))
     check("the buffer is still dirty", opened.buffer.get_modified())
 
     # -- Reload: the disk's text, the new mtime, a clean buffer ------------------
     pane._banner.emit("button-clicked")
-    if not wait_for(lambda: buffer_text(opened) == "print('changed')\n"):
+    if not wait_for(lambda: buffer_text(opened) == "print('changed')"):
         print("FAIL  the reload never brought the disk's text:", repr(buffer_text(opened)))
         return 1
     check("the banner came down", not pane._banner.get_revealed())
@@ -194,7 +201,7 @@ def run(root: str) -> int:
     check("the tab's dot is gone", page.get_title() == "first.py", page.get_title())
 
     # -- save after reload: fs.write lands the edit on disk --------------------
-    opened.buffer.insert(opened.buffer.get_end_iter(), "y = 2\n")
+    opened.buffer.insert(opened.buffer.get_end_iter(), "\ny = 2")
     pane._select_page(page)
     pane.save_current()
     check("a save is in flight", opened.saving)
@@ -208,14 +215,14 @@ def run(root: str) -> int:
     check("the save took the new mtime", opened.mtime == os.stat(first).st_mtime_ns // 1000)
     settle()
     check("the save's own change raised no banner", not pane._banner.get_revealed(), pane._banner.get_title())
-    check("and reloaded nothing", buffer_text(opened) == "print('changed')\ny = 2\n" and not opened.loading)
+    check("and reloaded nothing", buffer_text(opened) == "print('changed')\ny = 2" and not opened.loading)
 
     # -- a clean buffer follows the disk silently, cursor kept --------------------
     _found, it = opened.buffer.get_iter_at_line(1)
     it.set_line_offset(2)
     opened.buffer.place_cursor(it)
     write_outside(first, "print('again')\ny = 2\nz = 3\n")
-    if not wait_for(lambda: buffer_text(opened) == "print('again')\ny = 2\nz = 3\n"):
+    if not wait_for(lambda: buffer_text(opened) == "print('again')\ny = 2\nz = 3"):
         print("FAIL  the clean buffer never followed the disk:", repr(buffer_text(opened)))
         return 1
     check("a clean buffer reloads without a banner", not pane._banner.get_revealed(), pane._banner.get_title())
@@ -231,7 +238,7 @@ def run(root: str) -> int:
     real_confirm = dialogs.confirm_dialog
     dialogs.confirm_dialog = fake_confirm
     try:
-        opened.buffer.insert(opened.buffer.get_end_iter(), "mine = 1\n")
+        opened.buffer.insert(opened.buffer.get_end_iter(), "\nmine = 1")
         write_outside(first, "theirs = 1\n")
         if not wait_for(lambda: pane._banner.get_revealed()):
             print("FAIL  the second external write raised no banner")
@@ -245,14 +252,14 @@ def run(root: str) -> int:
         with open(first) as fh:
             on_disk = fh.read()
         check("nothing was written before the answer", on_disk == "theirs = 1\n", on_disk)
-        check("the buffer kept its edit", buffer_text(opened).endswith("mine = 1\n"))
+        check("the buffer kept its edit", buffer_text(opened).endswith("mine = 1"))
         asked[0]["confirm"]()
         if not wait_for(lambda: not opened.buffer.get_modified()):
             print("FAIL  the overwrite never landed")
             return 1
         with open(first) as fh:
             on_disk = fh.read()
-        check("Overwrite writes the buffer over the file", on_disk == buffer_text(opened), on_disk)
+        check("Overwrite writes the buffer over the file", on_disk == buffer_text(opened) + "\n", on_disk)
         check("and takes the new mtime", opened.mtime == os.stat(first).st_mtime_ns // 1000)
     finally:
         dialogs.confirm_dialog = real_confirm
@@ -302,8 +309,84 @@ def run(root: str) -> int:
         (racing.pending_change, racing.mtime, racing.buffer.get_modified()),
     )
 
-    # -- closing a tab drops its watch -----------------------------------------------
+    # -- a save before the first fill writes nothing (the review of PR 609) -----------
+    # Ctrl+S the instant a file opens: the read has not landed, the buffer
+    # is empty and not editable, and the save is refused rather than
+    # writing an empty buffer over the file.
+    fourth = os.path.join(root, "fourth.txt")
+    with open(fourth, "w") as fh:
+        fh.write("keep me\n" * 1000)
+    pane._banner.set_revealed(False)
+    pane.open_file(fourth)
+    early = pane._open[fourth]
+    check("an unfilled buffer is not editable", not early.view.get_editable())
+    saved: list[bool] = []
+    pane._do_save(early, saved.append)
+    pane.save_current()
+    check("a save before the fill is refused at once", saved == [False] and not early.saving, saved)
+    check("and says the file is still loading", "still loading" in pane._banner.get_title(), pane._banner.get_title())
+    if not wait_for(lambda: not early.loading):
+        print("FAIL  the fourth read never landed")
+        return 1
+    with open(fourth) as fh:
+        on_disk = fh.read()
+    check("the file is untouched", on_disk == "keep me\n" * 1000, len(on_disk))
+    check("the filled buffer is clean and editable", not early.buffer.get_modified() and early.view.get_editable())
+
+    # -- a change between the read and the watch is not lost ------------------------
+    # The watch is installed once the read lands, seeded with the read's
+    # mtime: a write that slipped in between is a `file-changed` at once,
+    # and the clean buffer follows the disk.
+    fifth = os.path.join(root, "fifth.txt")
+    with open(fifth, "w") as fh:
+        fh.write("before\n")
+    real_read = remotefiles.read
+    slipped: list[bool] = []
+
+    def read_then_write(path, *args, **kwargs):
+        result = real_read(path, *args, **kwargs)
+        if path == fifth and not slipped:  # once: the reload's own read must not move it again
+            slipped.append(True)
+            write_outside(fifth, "after\n")
+        return result
+
+    remotefiles.read = read_then_write
+    try:
+        pane.open_file(fifth)
+        raced = pane._open[fifth]
+        if not wait_for(lambda: not raced.loading):
+            print("FAIL  the fifth read never landed")
+            return 1
+        check("the read brought the text as it was", buffer_text(raced) in ("before", "after"), buffer_text(raced))
+        if not wait_for(lambda: buffer_text(raced) == "after" and not raced.loading):
+            print("FAIL  the change between the read and the watch was lost:", repr(buffer_text(raced)))
+            return 1
+        check("a change between the read and the watch reaches the buffer", buffer_text(raced) == "after")
+        check(
+            "and the mtime followed it",
+            raced.mtime == os.stat(fifth).st_mtime_ns // 1000,
+            (raced.mtime, os.stat(fifth).st_mtime_ns // 1000, raced.loading, raced.pending_change),
+        )
+    finally:
+        remotefiles.read = real_read
+
+    # -- the pane's shutdown drops every watch (a session tab closing) ---------------
+    handles = [o.watch_handle for o in pane._open.values() if o.watch_handle]
+    check("every open file holds a watch before the shutdown", len(handles) == len(pane._open) and handles)
+    pane.shutdown()
+    check(
+        "shutdown drops every watch on the service",
+        not any(watcher.watching(h) for h in handles) and not pane._watched,
+        [h for h in handles if watcher.watching(h)],
+    )
+    check("and the files remember none", all(o.watch_handle is None for o in pane._open.values()))
+    # The rest of the check needs the watches back.
+    for o in list(pane._open.values()):
+        pane._watch_external_changes(o)
+    other = pane._open[second]
     handle = other.watch_handle
+
+    # -- closing a tab drops its watch -----------------------------------------------
     pane._close_confirmed.add(pane._pages[second])
     pane._tab_view.close_page(pane._pages[second])
     if not wait_for(lambda: second not in pane._open):

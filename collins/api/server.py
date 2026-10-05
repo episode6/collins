@@ -83,7 +83,11 @@ CLIENT_HEADER = "Collins-Client"
 SOCKET_NAME = "api.sock"
 PROOF_NAME = "local-proof"
 HELLO_TIMEOUT_S = 5  # a connection with no hello by then is closed
-MAX_CHUNKED_REQUESTS = 8  # transfers held per connection ahead of their request (PR-2.3)
+# The bytes of chunked requests held per connection ahead of their request
+# (PR-2.3): the one chunked request field is fs.write's text, at most
+# FILE_TEXT_MAX characters (four bytes each in UTF-8 at the worst); past
+# the budget the oldest transfer goes.
+CHUNKED_REQUEST_BUDGET = 4 * protocol.FILE_TEXT_MAX
 
 
 # ---- paths -----------------------------------------------------------------------
@@ -522,13 +526,13 @@ class Connection:
             self.server.core.input(header.stream, data, self.client)
         elif header.tag == protocol.TAG_BLOB:
             buffer = self._chunks.setdefault(header.stream, bytearray())
-            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.CHUNKED_MAX:
-                # Out of order or over the bound: the request is refused
+            if header.offset != len(buffer) or len(buffer) + len(data) > CHUNKED_REQUEST_BUDGET:
+                # Out of order or over the budget: the request is refused
                 # when it arrives short of its bytes.
                 self._chunks.pop(header.stream, None)
                 return
             buffer += data
-            if len(self._chunks) > MAX_CHUNKED_REQUESTS:
+            while sum(len(b) for b in self._chunks.values()) > CHUNKED_REQUEST_BUDGET:
                 # A client that sends chunks and never the request they
                 # belong to: the oldest transfer goes.
                 self._chunks.pop(next(iter(self._chunks)))

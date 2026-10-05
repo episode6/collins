@@ -113,9 +113,11 @@ import it. It holds:
   `mtime` (microseconds), `size` and `binary`; `fs.write {path, text,
   expect_mtime, encoding}` is refused `stale` with nothing written when
   the file's mtime moved from `expect_mtime` (null writes regardless);
-  `fs.watch {path, kind, handle}` / `fs.unwatch {handle}` are per-client
-  `Gio.FileMonitor`s on the service pushing `file-changed {handle, path,
-  mtime, size, gone}`, debounced 300 ms. The handlers are
+  `fs.watch {path, kind, handle, mtime}` / `fs.unwatch {handle}` are
+  per-client `Gio.FileMonitor`s on the service (at most 512 a client)
+  pushing `file-changed {handle, path, mtime, size, gone}`, debounced
+  300 ms; the first stat is compared against the client's `mtime` seed,
+  so a change between the client's read and its watch is an event at once. The handlers are
   `service/files.py`'s `Files`, the client's `remotefiles.py`. A message
   over the frame cap is chunked **either way**: `split_message` /
   `join_message` on the first of `CHUNKED_FIELDS` (`stdout`, `text`) a

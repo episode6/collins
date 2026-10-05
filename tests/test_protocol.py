@@ -701,7 +701,9 @@ SAMPLES = {
         "text_chunked": False,
         "text_bytes": 4,
     },
-    ("fs.watch", p.REQUEST): {"path": "/home/u/project/a.txt", "kind": "file", "handle": "w1"},
+    ("fs.watch", p.REQUEST): {
+        "path": "/home/u/project/a.txt", "kind": "file", "handle": "w1", "mtime": 1700000000000000,
+    },
     ("fs.unwatch", p.REQUEST): {"handle": "w1"},
     ("file-changed", p.EVENT): {
         "handle": "w1",

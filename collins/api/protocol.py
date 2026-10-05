@@ -2193,6 +2193,13 @@ _TABLE: tuple[MessageType, ...] = (
                 # carries back and what `fs.unwatch` names. A handle
                 # watched again replaces its earlier watch.
                 "handle": _req(_HANDLE),
+                # The mtime the client's last read or write of the file
+                # answered: the watch's first stat (on a thread) is
+                # compared against it, and a file that differs already is
+                # one `file-changed` at once (a change between the read
+                # and the watch, or while the client was disconnected).
+                # Null seeds the watch from the file as it is.
+                "mtime": _null(_MTIME),
             }
         ),
     ),

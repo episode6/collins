@@ -88,21 +88,46 @@ files.py` the service's:
   `remotefiles.refusal_words` into the banner; a fresh open closes its tab,
   a reload keeps it. `load_id` still makes a superseded read (a rename's)
   a no-op.
+- `_fill` strips the file's final newline when the buffer's implicit
+  trailing newline is on (what `FileLoader` did; `opened.newline` keeps
+  `\n` or `\r\n`) and `_do_save` puts it back, so a file shows no empty
+  last line and a save adds a missing final newline. `_fill` also marks
+  the buffer `filled` and makes the view editable: until then a save is
+  refused ("still loading") and nothing can be typed, so a Ctrl+S or a
+  close-flow Save during the first read never writes an empty buffer over
+  the file.
 - `_do_save` sends `fs.write` with the buffer's text and `expect_mtime`:
   Ctrl+S (`_save`) expects the mtime of the last read or write, and a file
   that moved underneath is refused `stale` by the service with **nothing
   written** — `_on_saved` raises the "changed on disk" dialog, whose
   Overwrite saves again with `expect_mtime` null. `save_all` and the close
   flows' Save pass null from the start (the user's explicit consent, as
-  before). The service writes by a temp file in the directory and one
-  `os.replace`, keeps the mode and follows a symlink to the file.
+  before). Saves are serialized: one asked for while one is in flight
+  waits (`save_again`) and goes from `_on_saved` expecting the mtime that
+  save answered, so two quick Ctrl+S never raise the dialog. The service
+  writes as `FileSaver` did (`service/files.write_file`): in place for a
+  hard link, a read-only directory or another owner's file, else by a temp
+  file beside it with the old mode and one `os.replace`, a new file under
+  the umask; the compare runs right before the write, and the reply's
+  mtime is the written descriptor's. A save whose encoding differs from
+  the read's (latin-1 that could not carry the text) is told in the banner.
 - `_watch_external_changes` installs `fs.watch kind: file` under a handle
-  the client mints (`remotefiles.Watcher`; `_teardown_page` unwatches);
-  the service's `Gio.FileMonitor` debounces 300 ms, stats on a thread and
-  pushes `file-changed {handle, path, mtime, size, gone}` once per burst
-  whose stat moved. `_check_external` judges it against `opened.mtime`: a
-  clean buffer reloads silently (cursor kept), a dirty one is told
-  (Reload), `gone` marks the buffer dirty and says so. An event that
+  the client mints (`remotefiles.Watcher`), seeded with `opened.mtime`:
+  the service's first stat (on a thread) is compared against the seed, so
+  a write between the read and the watch is a `file-changed` at once;
+  `watcher.update(handle, mtime)` after each fill and save keeps the seed
+  a reconnect's `reset` re-sends. The listener is the bound method
+  `_on_file_changed` (held weakly by the watcher; `_watched` maps handle →
+  `_OpenFile`), so a pane dropped without `shutdown` is not kept alive by
+  its watches. `_teardown_page` unwatches one file; `EditorPane.shutdown`
+  every one (`TerminalTab.release_editor`, called where the window closes
+  a tab for good and when the window itself is destroyed) — without it
+  every watch, and through it the pane, outlived its tab. The service's
+  `Gio.FileMonitor` debounces 300 ms, stats on a thread and pushes
+  `file-changed {handle, path, mtime, size, gone}` once per burst whose
+  stat moved. `_check_external` judges it against `opened.mtime` and
+  `size`: a clean buffer reloads silently (cursor kept), a dirty one is
+  told (Reload), `gone` marks the buffer dirty and says so. An event that
   arrives while a save or load is in flight waits (`pending_change`) for
   the reply's mtime, so the editor's own write never reads as a change.
   The link is installed behind the `files` capability of the service's
