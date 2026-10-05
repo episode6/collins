@@ -117,6 +117,8 @@ class Mirror:
         # Every live watch by handle: the message that installed it, sent
         # again after a reconnect (reset).
         self._watches: dict[str, dict] = {}
+        # refresh_then's callbacks per cwd while its re-read is in flight.
+        self._then_waiting: dict[str, list[Callable[[], None]]] = {}
 
     # -- the link
 
@@ -135,6 +137,8 @@ class Mirror:
         with self._lock:
             self._entries.clear()
             self._pending.clear()
+            # _then_waiting is left alone: its re-reads in flight are
+            # answered or refused (gone) and tell their callbacks either way.
             watches = list(self._watches.values())
         for message in watches:
             self._send_watch(message)
@@ -336,17 +340,56 @@ class Mirror:
             then()
             return
         with self._lock:
+            waiting = self._then_waiting.get(cwd)
+            if waiting is not None:
+                # One re-read in flight per cwd: a burst of events (a
+                # rebase) rides it rather than sending one each.
+                waiting.append(then)
+                return
+            self._then_waiting[cwd] = [then]
             previous = self._entries.get(cwd)
+
+        def tell() -> None:
+            with self._lock:
+                callbacks = self._then_waiting.pop(cwd, [])
+            for callback in callbacks:
+                try:
+                    callback()
+                except Exception:
+                    log.exception("remotegit: a refresh_then callback failed")
 
         def landed(fields: dict) -> None:
             self._store(cwd, fields, self.entry(cwd))
-            then()
+            tell()
 
         def refused(refusal: RequestRefused) -> None:
             self._unreachable(cwd, self.entry(cwd), refusal)
-            then()
+            tell()
 
         link.send(self._message(cwd, previous, False, False), on_reply=landed, on_refused=refused)
+
+    def state_then(self, cwd: str, then: Callable[[str | None], None]) -> None:
+        """The tree-state digest of *cwd* as the service reads it now
+        (`git.info` with ``state``, by `send`: the main thread never
+        waits), handed to *then* on the main loop; None when it can't be
+        had (no link, git local, a refusal). The page's check of a state
+        pushed beside a read in flight, before it reloads."""
+        link = self._link_of()
+        if link is None or gitinfo.reader() is None:
+            then(None)
+            return
+        with self._lock:
+            previous = self._entries.get(cwd)
+
+        def landed(fields: dict) -> None:
+            entry = self._store(cwd, fields, self.entry(cwd))
+            then(entry.state)
+
+        def refused(refusal: RequestRefused) -> None:
+            self._unreachable(cwd, self.entry(cwd), refusal)
+            then(None)
+
+        link.send(self._message(cwd, previous, False, True), on_reply=landed, on_refused=refused)
 
     def _on_changed(self, event: dict) -> None:
         """A `git-changed`: the entry is re-read first and the pages

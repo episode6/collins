@@ -2825,6 +2825,13 @@ class DiffView(Gtk.Box):
             file = by_key.get((section.file.previous_path, section.file.path))
             if file is not None and section not in plan.built:
                 section.update(file)
+        # A read in flight was the last load's (its landing is dropped by
+        # the generation): a kept trailing gap waiting on one is free to be
+        # measured again by the settle below, or it would read "measuring"
+        # for good — a reload landing between a scroll and its measure.
+        for section in self._sections():
+            for gap in section.gaps:
+                gap.measuring = False
         if self._solo is not None and self._section_for(self._solo, diffmodel.NEW) is None:
             self._solo = None  # the soloed file left the load: the whole stream again
         for section in self._sections():

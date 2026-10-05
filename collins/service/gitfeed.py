@@ -77,11 +77,15 @@ WATCH_REFS_TICK_S = 2
 _OCTET_STREAM = "application/octet-stream"
 
 
-def _dispatch_default(fn: Callable[[], object]) -> None:
+def dispatch_default(fn: Callable[[], object]) -> None:
+    """Land *fn* on the main loop at PRIORITY_DEFAULT (a pipeline's
+    landing: default-idle starves under CI's Xvfb). The feeds' default
+    *dispatch* (this one's and `prfeed.PrBlobs`')."""
     GLib.idle_add(lambda: fn() and False, priority=GLib.PRIORITY_DEFAULT)
 
 
-def _spawn_default(fn: Callable[[], None], name: str) -> None:
+def spawn_default(fn: Callable[[], None], name: str) -> None:
+    """Run *fn* on a daemon thread named *name*: the feeds' default *spawn*."""
     threading.Thread(target=fn, name=name, daemon=True).start()
 
 
@@ -103,8 +107,8 @@ class GitFeed:
             # back over the API (git.plan recursing into itself).
             raise RuntimeError("gitfeed: a git transport is installed in the service's process")
         self.core = core
-        self._dispatch = dispatch or _dispatch_default
-        self._spawn = spawn or _spawn_default
+        self._dispatch = dispatch or dispatch_default
+        self._spawn = spawn or spawn_default
         # A watch per client and handle (a page's), not per cwd: two pages
         # on one tree each have their own.
         self._watches: dict[tuple[int, str], _Watch] = {}

@@ -795,16 +795,33 @@ class GitPage(Adw.Bin):
         second at most on the main loop): the host's finish edge, so the
         commit the agent just made shows on it rather than on the
         watch's next tick, and a page mapped again after a move it was
-        told of while hidden. poll_tick's root checks, then the
-        signatures' compare (_compare_signatures). Only for a mapped
-        page."""
+        told of while hidden. On the watched tree the compare goes
+        through _compare_on_event, so a sidebar mutation in flight keeps
+        it for after it lands (comparing a half-moved index would reload
+        twice); elsewhere (another cwd, the card) poll_tick's root checks,
+        then the signatures' compare. A tree state kept while the page
+        was hidden is compared after. Only for a mapped page."""
         if not self.get_mapped() or self._closing:
             return
-        self._compare_due = False
         cwd = self._cwd_provider()
         gitinfo.refresh(cwd)
-        if self._check_root(cwd):
-            self._compare_signatures(cwd)
+        if self._opened and cwd and cwd == self._watched_cwd:
+            self._compare_on_event(cwd, counted=False)
+        else:
+            self._compare_due = False
+            if self._check_root(cwd):
+                self._compare_signatures(cwd)
+        self._take_deferred_state()
+
+    def _take_deferred_state(self) -> None:
+        """A tree state a `git-changed` brought while the page was hidden
+        or a mutation was in flight, compared now — unless a mutation is
+        still out (its retry takes it) or the page is hidden still."""
+        if self._deferred_state is _NO_STATE or self.sidebar.busy or not self.get_mapped():
+            return
+        state, self._deferred_state = self._deferred_state, _NO_STATE
+        if self._opened and self._loaded in ("unstaged", "staged"):
+            self._state_moved(state)
 
     def _check_root(self, cwd: str | None) -> bool:
         """The tree under the agent's cwd, off the mirror: True when the
@@ -1123,10 +1140,10 @@ class GitPage(Adw.Bin):
     # -- opening and closing the view --------------------------------------------------
 
     def _on_map(self) -> None:
-        """Shown: open on the first map; a compare the page was told of
-        while hidden runs now (check_now)."""
+        """Shown: open on the first map; a compare or a tree state the
+        page was told of while hidden runs now (check_now)."""
         self._ensure_open()
-        if self._compare_due and self._opened:
+        if self._opened and (self._compare_due or self._deferred_state is not _NO_STATE):
             self.check_now()
 
     def _ensure_open(self) -> None:
@@ -1245,9 +1262,12 @@ class GitPage(Adw.Bin):
         if loaded == "branch" and self._resolve_parent() is None:
             return
         self._loading = True
+        # Below the early-outs on purpose: only a read that really starts
+        # samples the tree state. One that starts with no mutation in
+        # flight samples it after any mutation, so a state kept from
+        # while one was (or while the page was hidden) is old news; one
+        # parked behind a read in flight (above) clears nothing.
         if not self.sidebar.busy:
-            # This read samples the tree state after any mutation: a state
-            # kept from while one was in flight is old news.
             self._deferred_state = _NO_STATE
         gen = self._gen
         cwd = self._cwd_provider()
@@ -1362,10 +1382,33 @@ class GitPage(Adw.Bin):
             return GLib.SOURCE_REMOVE
         self._run_pending_navigate()
         if working and stale is not None and stale != self._tree_state:
-            self._tree_state = stale
-            log.debug("gitpage: the working tree moved during the read; reloading")
-            self._read_diff(loaded)
+            self._confirm_state(loaded)
         return GLib.SOURCE_REMOVE
+
+    def _confirm_state(self, loaded: gitloads.Loaded) -> None:
+        """A tree state the watch pushed while a read was out differs from
+        the one the read sampled before reading: an edit during the read,
+        or a state the watch sampled before the read did (a mutation half
+        done, its own reload already out). The two look the same here, so
+        the service is asked for the state as it is now (by `send`: the
+        main loop never waits) and the load re-read only when that one
+        differs from what the read drew too — or when it can't be had."""
+        cwd = self._watched_cwd
+        gen = self._gen
+        if not cwd:
+            return
+
+        def answered(fresh: str | None) -> None:
+            if gen != self._gen or self._closing or not self._opened or self._loaded != loaded:
+                return
+            if self._loading:
+                return  # another read is out: its worker samples the state anew
+            if fresh is None or fresh != self._tree_state:
+                self._tree_state = fresh
+                log.debug("gitpage: the working tree moved during the read; reloading")
+                self._read_diff(loaded)
+
+        remotegit.mirror().state_then(cwd, answered)
 
     def _tick(self, moved: bool, parent_moved: bool) -> None:
         """The compare's second half (after the branch, parent and
@@ -1473,11 +1516,13 @@ class GitPage(Adw.Bin):
         then, on a working-tree load, a moved tree state reloads by key —
         one that lands beside a read in flight is kept for the read's
         landing (_diff_read), so an edit during a read is drawn rather
-        than dropped. A state that arrives while the sidebar's mutation
-        is in flight (the watch's 2 s tick can see it half done) is kept
-        for after it: the mutation's own reload, which samples the state
-        after it, drops it (_read_diff); one with no reload is compared
-        on the retry."""
+        than dropped, and confirmed against a fresh state before it
+        reloads (_confirm_state). A state that arrives while the
+        sidebar's mutation is in flight (the watch's 2 s tick can see it
+        half done) is kept for after it: the mutation's own reload, which
+        samples the state after it, drops it (_read_diff); one with no
+        reload is compared on the retry. A hidden page keeps it for its
+        next map (§3.15: only a visible page reloads)."""
         if self._closing or not self._opened:
             return
         cwd = event.get("cwd")
@@ -1489,6 +1534,10 @@ class GitPage(Adw.Bin):
         if self.sidebar.busy:
             self._deferred_state = state
             self._schedule_retry()
+            return
+        if not self.get_mapped():
+            # §3.15: only a visible page reloads; this one does on its map.
+            self._deferred_state = state
             return
         self._state_moved(state)
 
@@ -1539,9 +1588,7 @@ class GitPage(Adw.Bin):
             return GLib.SOURCE_REMOVE
         if self._compare_due:
             self._compare_on_event(self._watched_cwd)
-        state, self._deferred_state = self._deferred_state, _NO_STATE
-        if state is not _NO_STATE and self._opened and self._loaded in ("unstaged", "staged"):
-            self._state_moved(state)
+        self._take_deferred_state()  # a hidden page keeps it for its map
         return GLib.SOURCE_REMOVE
 
     # -- the sidebar --------------------------------------------------------------------

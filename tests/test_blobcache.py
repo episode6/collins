@@ -53,12 +53,29 @@ def test_the_next_fetch_sends_the_tag_and_a_304_keeps_the_file(cache):
     link = BlobLink()
     link.answers.append((200, {"ETag": '"abc:pic.png"'}, b"PNG1"))
     first = blobcache.fetch(URL, ".png", link=link)
-    stamp = first.stat().st_mtime_ns
     link.answers.append((304, {"ETag": '"abc:pic.png"'}, b""))
     again = blobcache.fetch(URL, ".png", link=link)
     assert link.gets[1] == (URL, {"If-None-Match": '"abc:pic.png"'})
-    assert again == first and again.read_bytes() == b"PNG1"
-    assert again.stat().st_mtime_ns == stamp  # not rewritten
+    assert again == first and again.read_bytes() == b"PNG1"  # the same bytes, the same file
+
+
+def test_a_304_restarts_the_prune_clock_of_the_blob_and_its_tag(cache):
+    """The prune goes by mtime: a 304 marks the blob used, so one looked at
+    daily is never pruned a day after its last full GET."""
+    link = BlobLink()
+    link.answers.append((200, {"ETag": '"t"'}, b"KEEP"))
+    held = blobcache.fetch(URL, ".png", link=link)
+    tag = held.with_suffix(".etag")
+    day_ago = held.stat().st_mtime - blobcache.PRUNE_AFTER_SECONDS - 60
+    for path in (held, tag):
+        os.utime(path, (day_ago, day_ago))
+    link.answers.append((304, {"ETag": '"t"'}, b""))
+    assert blobcache.fetch(URL, ".png", link=link) == held
+    blobcache.prune(held.parent, force=True)
+    assert held.read_bytes() == b"KEEP" and tag.read_text() == '"t"'
+    link.answers.append((304, {"ETag": '"t"'}, b""))
+    assert blobcache.fetch(URL, ".png", link=link).read_bytes() == b"KEEP"
+    assert link.gets[-1][1] == {"If-None-Match": '"t"'}  # still held: asked with its tag
 
 
 def test_a_new_tag_replaces_the_bytes_and_no_tag_forgets_the_old_one(cache):

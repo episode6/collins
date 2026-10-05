@@ -469,6 +469,13 @@ def check_sidebar(repo: str) -> None:
     reads_before = len(reads)
     heard = page.changes_heard
     sidebar.stage_all()
+    # A git-changed whose state the watch sampled with the mutation half
+    # done lands while the mutation's own reload is out: it differs from
+    # what that read sampled, but is confirmed against the service's state
+    # as it is now (the same as the read's) before any reload.
+    caught = wait_for(lambda: not sidebar.busy and page._loading)
+    check("the mutation's own read is out when a mid-mutation state lands", caught, (sidebar.busy, page._loading))
+    page._on_git_changed({"t": "git-changed", "cwd": page._watched_cwd, "tree": "t", "refs": "r", "state": "mid-mutation"})
     landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
     check("stage_all reloads the view once", landed, len(reads) - reads_before)
     check("and staged the tree", git_out(repo, "diff", "--name-only") == "" and git_out(repo, "diff", "--cached", "--name-only").split() == ["a.txt"])
@@ -1979,6 +1986,60 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         gitpage.dialogs.confirm_dialog = real_confirm
 
 
+def check_reload_during_a_measure(scratch: str) -> None:
+    """A reload by key that lands while a trailing gap's measure read is out
+    (a `git-changed` reload arriving between a scroll and its measure) still
+    lets the kept gap measure: the orphaned read is dropped by the view's
+    generation, and the gap must not read "measuring" for good."""
+    print("-- a reload while a trailing gap measures")
+    root = os.path.join(scratch, "measure")
+    os.mkdir(root)
+    repo = make_repo(root)
+    body = "".join(f"line {n}\n" for n in range(60))
+    write_file(repo, "u.txt", body)
+    git(repo, "add", "u.txt")
+    git(repo, "commit", "-qm", "u")
+    write_file(repo, "u.txt", body.replace("line 2\n", "line two\n"))
+    page = GitPage(cwd_provider=lambda: repo, parent_provider=lambda _cwd: "main", on_closed=lambda p: None)
+    page.apply_settings(SETTINGS)
+    view = page.diff_view
+    real_bytes = gitops.side_bytes
+    slowed: list[bool] = []
+
+    def slow_once(*args, **kwargs):
+        if not slowed:
+            slowed.append(True)
+            time.sleep(1.0)  # the measure read is still out when the reload lands
+        return real_bytes(*args, **kwargs)
+
+    real_read_context = view._read_context
+    raced: list[bool] = []
+
+    def racing(file, side, callback):
+        real_read_context(file, side, callback)
+        if not raced:
+            raced.append(True)
+            page._read_diff(page.loaded)  # a reload by key while the read is out
+
+    gitops.side_bytes = slow_once
+    view._read_context = racing
+    window = Gtk.Window(title="measure", default_width=900, default_height=600)
+    window.set_child(page)
+    window.present()
+    try:
+        check("the page opens on the edit", wait_for(page.settled))
+        check(
+            "a reload landing while the trailing gap's read is out leaves it measurable: it measures",
+            wait_for(lambda: bool(raced) and page.settled() and view.gap_measured("u.txt", "trailing:0") is True),
+            (bool(raced), view.gap_measured("u.txt", "trailing:0"), view.gap_rows("u.txt")),
+        )
+    finally:
+        gitops.side_bytes = real_bytes
+        view._read_context = real_read_context
+        page.page_closed()
+        window.destroy()
+
+
 def check_outside_a_repo(scratch: str) -> None:
     print("-- outside a repository")
     nowhere = os.path.join(scratch, "nowhere")
@@ -2052,6 +2113,7 @@ def main() -> int:
             check_sidebar(repo)
             check_native(repo)
             check_outside_a_repo(scratch)
+            check_reload_during_a_measure(scratch)
         finally:
             os.environ["PATH"] = real_path
     finally:

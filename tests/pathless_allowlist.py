@@ -28,6 +28,7 @@ ALLOWLIST = frozenset(
         "blobcache:fetch:Path.write_text",
         "blobcache:fetch:os.replace",  # the fetch's own temporary into place
         "blobcache:fetch:os.unlink",
+        "blobcache:fetch:os.utime",  # a 304 marks the blob used: the prune clock (PR-2.2)
         "imagediff:_paintable:Path.read_bytes",  # a fetched blob decoded: the blobcache file (PR-2.2)
         "remoteimages:prune_stale:Path.is_file",
         "remoteimages:prune_stale:Path.iterdir",
