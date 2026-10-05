@@ -28,9 +28,7 @@ ALLOWLIST = frozenset(
         "blobcache:fetch:Path.write_text",
         "blobcache:fetch:os.replace",  # the fetch's own temporary into place
         "blobcache:fetch:os.unlink",
-        "diffview:_blob_to_file:Path.exists",  # the git-blobs cache; the blobcache in PR-2.2
-        "diffview:_blob_to_file:Path.mkdir",
-        "imagediff:_paintable:Path.read_bytes",  # a fetched blob, decoded (PR-2.2: the blobcache's file)
+        "imagediff:_paintable:Path.read_bytes",  # a fetched blob decoded: the blobcache file (PR-2.2)
         "remoteimages:prune_stale:Path.is_file",
         "remoteimages:prune_stale:Path.iterdir",
         "remoteimages:prune_stale:Path.stat",

@@ -46,8 +46,14 @@ re-emitted. The gh calls keep their names as `remoteprs` functions —
 (`pr.action` / `pr.comment` / `pr.review` / `pr.thread`, the PR named by
 its record), `fetch_detail` / `fetch_threads` (`pr.detail` /
 `pr.threads`: `prdetail.detail_record` / `detail_from_record`, a patch
-over `WIRE_PATCH_MAX` crossing as None), `fetch_blob` (`pr.blob`; a path
-on the service's machine, a blob transfer in Phase 2),
+over `WIRE_PATCH_MAX` crossing as None), `fetch_blob` (`pr.blob`, PR-2.2:
+the service checks `prblobs.check`'s gates and answers the blob GET's URL,
+`prblobs.blob_url` → `GET /api/blob?kind=pr&repository=&ref=&path=`,
+which `blobcache.fetch` GETs into `~/.cache/collins/blobs/<service id>/`
+with `If-None-Match`; the route is `service.prfeed.PrBlobs.blob`, gh's
+bytes on a thread with `prblobs.blob_tag`, a matching tag answered `304`
+with no gh call — a commit's file never changes; nothing is written on
+the service and no path crosses),
 `invalidate` and `sweep` / `resync` (`pr.fetch`, `pr.sweep`) — called from
 worker threads as before; a refusal reads as the function's own failure.
 The Session's own transcript-driven fetches (`enrich`, `discover_pr`) are
@@ -327,8 +333,10 @@ tip/warning/caution/important the passed green, pending yellow, failed red
 and merged purple of `_SCHEME_CSS`. Images render via `bodyimages` /
 `pictures` (`BoundedPicture` measures height-for-width in a `Gtk.Box`
 slot); changed images render before/after from `prblobs` (`gh api
-…/contents/{path}?ref=<sha>` with the raw media type; a binary file *does*
-get a "Binary files differ" patch, so `patch is None` means over-cap).
+…/contents/{path}?ref=<sha>` with the raw media type, `prblobs.fetch_bytes`
+on the service, reached through `pr.blob`'s URL and the blobcache; a
+binary file *does* get a "Binary files differ" patch, so `patch is None`
+means over-cap).
 Avatars are `github.com/<login>.png`, logins gated to GitHub's username
 alphabet.
 
