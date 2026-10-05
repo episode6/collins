@@ -38,8 +38,10 @@ if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
 # Every check's runtime directory is a scratch one of its own, made at
-# import and removed at exit, so nothing of a check lands under the user's
-# own `collins/` runtime tree. It is a short subdirectory of the real
+# import and removed at exit (a check that dies on its deadline through
+# os._exit skips that exit and leaves its `cr-*` directory behind: a
+# known, small litter), so nothing of a check lands under the user's own
+# `collins/` runtime tree. It is a short subdirectory of the real
 # runtime directory, not of the check's scratch tree nor of /tmp: a Unix
 # socket path is bounded at 107 bytes (the scratch tree under a long app
 # id passes it), and /tmp is inside every sandbox box, where a plan file

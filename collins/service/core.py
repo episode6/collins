@@ -466,13 +466,21 @@ class ServiceCore:
         wanted = message.get("session")
         if wanted:
             for live in self._records():
-                if live.pty_id in self.ptys.ptys and live.session.session_id == wanted:
+                if live.pty_id not in self.ptys.ptys or live.session.session_id != wanted:
+                    continue
+                if live.session.has_running_command():
                     # Two CLIs on one transcript would both write it; the
                     # client paints this where a spawn error goes, and
                     # PR-1.12c attaches to the running pty instead.
                     return protocol.refuse(
                         message.id, protocol.ERROR_REFUSED, ALREADY_RUNNING_MSGID, {"pty": live.pty_id}
                     )
+                # The CLI left and only the shell sits on the pty (a quit
+                # before 1.12c's attach): that pty is ended, its row and
+                # history kept, and the resume takes a fresh one.
+                log.info("spawn: session %s has a shell-only pty %d; closing it", wanted, live.pty_id)
+                live.session.end_close()
+                self.ptys.close(live.pty_id)
         record = hosting.SessionRecord(
             self,
             provider=provider,
@@ -1629,15 +1637,22 @@ class ServiceCore:
         `write_panel_history` as a request (PR-1.12b; through Phase 1 it
         was the loopback's one shortcut, D21)."""
         shells: dict[int, int | str] = {}
+        keep: set[int] = set()
         for entry in message.get("shells") or []:
-            if "pty" in entry:
+            if entry.get("keep"):
+                keep.add(int(entry["ordinal"]))
+            elif "pty" in entry:
                 shells[int(entry["ordinal"])] = int(entry["pty"])
             else:
                 shells[int(entry["ordinal"])] = str(entry.get("text") or "")
-        self.write_panel_history(str(message.get("key")), shells)
+        self.write_panel_history(
+            str(message.get("key")), shells, keep=keep, partial=bool(message.get("partial"))
+        )
         return protocol.reply(message.id)
 
-    def write_panel_history(self, key: str, shells: dict[int, int | str]) -> None:
+    def write_panel_history(
+        self, key: str, shells: dict[int, int | str], keep: set[int] = frozenset(), partial: bool = False
+    ) -> None:
         """Write a session's panel history (spec §3.15): each shell under
         its ordinal, from its pty's live model (`PtyServer.capture`; a pty
         already gone writes nothing, its file cleared) when *shells* names
@@ -1655,7 +1670,12 @@ class ServiceCore:
                 texts[ordinal] = source
             else:
                 texts[ordinal] = self.ptys.capture(int(source))
-        panelhistory.save_all(key, texts)
+        if partial:
+            # Only what is named is written; the keep-set went before.
+            for ordinal, text in texts.items():
+                panelhistory.save(key, text, ordinal)
+            return
+        panelhistory.save_all(key, texts, keep=keep)
 
     # -- the e2e probe's write spy (D27; served through debug.sandbox target core)
 

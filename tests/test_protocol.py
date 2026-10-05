@@ -385,7 +385,8 @@ SAMPLES = {
     ("panel.key", p.REQUEST): {"pty": 7, "history": ID, "handle": "s-4"},
     ("panel.history", p.REQUEST): {
         "key": ID,
-        "shells": [{"ordinal": 0, "pty": 7, "text": "what the widget shows"}],
+        "shells": [{"ordinal": 0, "pty": 7, "text": "what the widget shows", "keep": False}],
+        "partial": False,
     },
     ("pty.info", p.REQUEST): {"pty": 7},
     ("pty.capture", p.REQUEST): {"pty": 7},

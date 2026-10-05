@@ -101,11 +101,30 @@ def runtime_dir(app_id: str) -> str:
         directory = os.path.join(sandboxplan.state_base(), "collins", app_id)
     if len(os.path.join(directory, SOCKET_NAME).encode()) <= SOCKET_PATH_MAX:
         return directory
+    return _short_runtime_dir(directory)
+
+
+def _short_runtime_dir(intended: str) -> str:
+    """A stand-in for *intended* when its socket path would pass the
+    kernel's bound: ``<tmp>/collins-<uid>/<sha1(intended)[:16]>``. The
+    hash is of the whole intended directory, so two runtime trees with
+    one app id never share a stand-in. The parent lives in the shared
+    temp directory, so it is made 0700 and then checked: a directory
+    somebody else pre-created there is refused (OSError), never used."""
     import hashlib
+    import stat
     import tempfile
 
-    digest = hashlib.sha1(app_id.encode()).hexdigest()[:16]
-    return os.path.join(tempfile.gettempdir(), f"collins-{os.getuid()}", digest)
+    parent = os.path.join(tempfile.gettempdir(), f"collins-{os.getuid()}")
+    try:
+        os.mkdir(parent, 0o700)
+    except FileExistsError:
+        pass
+    info = os.lstat(parent)
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        raise OSError(errno.EACCES, f"{parent} is not a private directory of this user")
+    digest = hashlib.sha1(intended.encode()).hexdigest()[:16]
+    return os.path.join(parent, digest)
 
 
 def lock_path(app_id: str) -> str:

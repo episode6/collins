@@ -877,10 +877,21 @@ _TABLE: tuple[MessageType, ...] = (
                         high=64,
                         item=Field(
                             K_OBJ,
-                            fields={"ordinal": _req(_i(0, 10_000)), "pty": _PTY, "text": _TEXT},
+                            # `keep`: the ordinal is named (kept) and nothing is
+                            # written for it, so a text too large for this frame
+                            # can follow in a `partial` request of its own.
+                            fields={
+                                "ordinal": _req(_i(0, 10_000)),
+                                "pty": _PTY,
+                                "text": _TEXT,
+                                "keep": _BOOL,
+                            },
                         ),
                     )
                 ),
+                # `partial`: write only the shells named; an ordinal absent is
+                # left alone (the keep-set was sent whole in an earlier request).
+                "partial": _BOOL,
             }
         ),
     ),

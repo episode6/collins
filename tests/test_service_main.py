@@ -345,3 +345,28 @@ def test_a_second_service_exits_zero_on_the_lock(tmp_path):
     finally:
         live.stop()
         shutil.rmtree(live.runtime, ignore_errors=True)
+
+
+def test_the_short_runtime_dir_hashes_the_whole_directory_and_checks_its_parent(tmp_path, monkeypatch):
+    import stat
+    import tempfile
+
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "t"))
+    (tmp_path / "t").mkdir()
+    tempfile.tempdir = None  # re-read TMPDIR
+    try:
+        app_id = "com.episode6.Collins.E2E.rcollinssandboxpolicyab12cd34ef"
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / ("a" * 90)))
+        one = api_server.socket_path(app_id)
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / ("b" * 90)))
+        two = api_server.socket_path(app_id)
+        assert one != two  # one app id, two runtime trees: two stand-ins
+        parent = os.path.dirname(os.path.dirname(one))
+        assert stat.S_IMODE(os.lstat(parent).st_mode) == 0o700
+        # A parent somebody else could have made: refused, never used.
+        os.chmod(parent, 0o775)
+        with pytest.raises(OSError):
+            api_server.socket_path(app_id)
+    finally:
+        tempfile.tempdir = None

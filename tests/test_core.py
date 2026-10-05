@@ -858,11 +858,15 @@ def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
 # -- a session that already runs, and the stop sequence (PR-1.12b) ---------------
 
 
-def test_a_second_spawn_of_a_running_session_is_refused_with_its_pty(server, tmp_path):
+def test_a_second_spawn_of_a_running_session_is_refused_with_its_pty(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")  # a real shell: the typed command runs
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    server = loopback.LoopbackServer(core)
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event, device="laptop")
     session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-    first = spawn_agent(client, tmp_path, session=session_id)
+    first = spawn_agent(client, tmp_path, session=session_id, command_override="sleep 300")
+    assert pump(5, lambda: server.core.ptys.get(first["pty"]).has_running_command())
     with pytest.raises(loopback.RequestRefused) as refused:
         spawn_agent(client, tmp_path, session=session_id)
     assert refused.value.error == "refused"
@@ -871,6 +875,8 @@ def test_a_second_spawn_of_a_running_session_is_refused_with_its_pty(server, tmp
     # Another session is fine.
     other = spawn_agent(client, tmp_path, session="1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0")
     assert other["pty"] != first["pty"]
+    server.shutdown()
+    pump(0.3)
 
 
 def test_spawned_shells_never_see_the_probe_or_systemd_variables(server, tmp_path, monkeypatch):
@@ -894,22 +900,44 @@ def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup
     srv = loopback.LoopbackServer(core)
     ends = Client()
     client = srv.connect(ends.on_output, ends.on_event, device="laptop")
-    # The agent's typed command ignores SIGHUP and sits there.
+    # The agent's typed command ignores HUP, INT and TERM in a process
+    # group of its own (the shell's job control) and sits there.
     reply = client.request({
         "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
-        "command_override": "trap '' HUP; sleep 300",
+        "command_override": "sh -c 'trap \"\" HUP INT TERM; while :; do sleep 1; done'",
     })
     pty = reply["pty"]
     assert pump(5, lambda: core.ptys.get(pty).has_running_command())
     child = core.ptys.get(pty).child_pid()
     assert child
+    job = core.ptys.get(pty).foreground_pgrp()
+    assert job and job != child
     done = []
     started = time.monotonic()
     core.stop_sessions(done=lambda: done.append(time.monotonic()))
     assert pump(15, lambda: bool(done))
     assert pty not in core.ptys.ptys
     assert not os.path.exists(f"/proc/{child}") or open(f"/proc/{child}/stat").read().split()[2] == "Z"
+    # The job's own group went too: nothing is left in it.
+    pump(1.0)
+    with pytest.raises(ProcessLookupError):
+        os.killpg(job, 0)
     # The flow ran: the exit budget (2 ticks), then SIGHUP ignored, then the
     # grace and SIGKILL; well under the stop bound.
     assert done[0] - started < 10
     pump(0.3)
+
+
+def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):
+    """The CLI exited and the shell sits on the pty (a quit before
+    1.12c's attach): the resume is not refused; the old pty is closed and
+    a fresh one takes the session."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    first = spawn_agent(client, tmp_path, session=session_id)  # `true`: the CLI is gone at once
+    assert pump(5, lambda: not server.core.ptys.get(first["pty"]).has_running_command())
+    second = spawn_agent(client, tmp_path, session=session_id)
+    assert second["pty"] != first["pty"]
+    assert pump(5, lambda: first["pty"] not in server.core.ptys.ptys)
+    assert second["pty"] in server.core.ptys.ptys

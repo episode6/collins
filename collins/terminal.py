@@ -157,27 +157,6 @@ def _pty_unknown(refusal: RequestRefused) -> bool:
     return refusal.error == protocol.ERROR_GONE and refusal.msgid.startswith("no such pty")
 
 
-# A `panel.history` request stays under the frame cap: the texts of the
-# shells with no pty are the only part that grows.
-_HISTORY_REQUEST_BUDGET = 900_000
-
-
-def _history_requests(key: str, shells: list[dict]) -> list[dict]:
-    """The `panel.history` requests for *shells*: one when the texts fit
-    `_HISTORY_REQUEST_BUDGET`, else a first request naming every ordinal
-    (ptys as they are, texts emptied) followed by one request per text
-    that would not fit together with the others."""
-    total = sum(len(e.get("text", "").encode("utf-8", "surrogateescape")) for e in shells)
-    if total <= _HISTORY_REQUEST_BUDGET:
-        return [{"t": "panel.history", "key": key, "shells": shells}]
-    first = [dict(e, text="") if "text" in e else e for e in shells]
-    out = [{"t": "panel.history", "key": key, "shells": first}]
-    for entry in shells:
-        if "text" in entry:
-            others = [dict(e, text="") if "text" in e and e is not entry else e for e in shells]
-            shells_now = [entry if e is entry else e for e in others]
-            out.append({"t": "panel.history", "key": key, "shells": shells_now})
-    return out
 
 
 def _pty_client(on_output, on_event):
@@ -5275,11 +5254,10 @@ class TerminalTab(Gtk.Box):
         if self._client.closed:
             return
         # The mapping is the keep-set, so it goes in one request when it
-        # fits the frame; larger, the texts are split across several,
-        # the first naming every ordinal (a pty, or an empty text the next
-        # requests fill in).
+        # fits the frame; larger, the texts follow one per request
+        # (panelhistory.history_requests).
         try:
-            for message in _history_requests(history_id, shells):
+            for message in panelhistory.history_requests(history_id, shells):
                 self._client.request(message)
         except (RequestRefused, ValueError) as exc:
             _log.warning("panel history of %s not written: %s", history_id, exc)
