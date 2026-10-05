@@ -440,7 +440,7 @@ class SocketLink(apilink.Link):
             raise RequestRefused(protocol.ERROR_INVALID, text, {})
         return checked
 
-    def _send_text(self, channel: _Channel, message: dict, text: str | None = None) -> None:
+    def _send_text(self, channel: _Channel, message: dict | None, text: str | None = None) -> None:
         """Post *message* to the I/O thread, encoded here (or *text*, already
         encoded: a request encodes before its pending entry is registered,
         so an oversized one is refused rather than leaked)."""
@@ -461,10 +461,16 @@ class SocketLink(apilink.Link):
     def _send_encoded(self, channel: _Channel, frames: list[bytes], text: str) -> None:
         """A request on *channel*, already encoded by `_encode_request`: its
         TAG_BLOB *frames* (if any) ahead of the request's *text* on the same
-        connection, in one I/O job so nothing can come between them."""
+        connection."""
+        if not frames:
+            self._send_text(channel, None, text)
+            return
         encoded = [GLib.Bytes.new(frame) for frame in frames]
 
         def do_send():
+            # One job for the frames and the request behind them: two
+            # threads' chunked requests on one connection must not
+            # interleave, or the server joins the wrong bytes.
             ws = channel.ws
             if ws is None or ws.get_state() != Soup.WebsocketState.OPEN:
                 return

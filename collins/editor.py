@@ -147,6 +147,7 @@ class EditorPane(Gtk.Box):
         self._root = Path(root)
         self._open: dict[str, _OpenFile] = {}  # path str -> _OpenFile
         self._watched: dict[str, _OpenFile] = {}  # a watch's handle -> the file it watches
+        self._shut = False  # `shutdown` ran: a read or write landing later installs nothing
         self._pages: dict[str, Adw.TabPage] = {}
         self._page_key: dict[Adw.TabPage, str] = {}
         self._close_confirmed: set[Adw.TabPage] = set()  # discard-changes already agreed to
@@ -893,6 +894,8 @@ class EditorPane(Gtk.Box):
         self._select_page(page)
 
     def _on_loaded(self, opened: _OpenFile, load_id: int, kind: str, value) -> None:
+        if self._shut:
+            return  # the tab closed while the read was in flight: nothing to fill or watch
         if load_id != opened.load_id:
             return  # a newer load (a rename's) owns this buffer now
         opened.loading = False
@@ -1022,6 +1025,12 @@ class EditorPane(Gtk.Box):
             if on_done is not None:
                 opened.save_again.append(on_done)
             return
+        if opened.reloading and not opened.buffer.get_modified():
+            # Ctrl+S in the middle of a silent reload: nothing of the user's
+            # to write, and the read in flight is about to move the mtime.
+            if on_done is not None:
+                on_done(True)
+            return
         start, end = opened.buffer.get_bounds()
         text = opened.buffer.get_text(start, end, True)
         if text and opened.buffer.get_implicit_trailing_newline():
@@ -1036,6 +1045,10 @@ class EditorPane(Gtk.Box):
 
     def _on_saved(self, opened: _OpenFile, on_done, expect: int | None, kind: str, value) -> None:
         opened.saving = False
+        if self._shut:
+            if on_done is not None:
+                on_done(kind == "ok")
+            return
         waiters, opened.save_again = opened.save_again, None
         if kind != "ok":
             refusal: RequestRefused = value
@@ -1128,6 +1141,8 @@ class EditorPane(Gtk.Box):
         Idempotent: a file that gets re-watched (a rename, a restarted load)
         must not leave the watch on its old path running."""
         self._unwatch(opened)
+        if self._shut:
+            return
         handle = remotefiles.watcher().watch(str(opened.path), self._on_file_changed, mtime=opened.mtime)
         opened.watch_handle = handle
         self._watched[handle] = opened
@@ -1150,7 +1165,9 @@ class EditorPane(Gtk.Box):
         """The pane's tab is closing for good: every file's watch on the
         service is dropped (`TerminalTab.release_editor`). Without this
         the watches, and through their listener the pane and its buffers,
-        would live as long as the module's watcher."""
+        would live as long as the module's watcher. A read or write still
+        in flight lands on `_shut` and installs nothing."""
+        self._shut = True
         for opened in list(self._open.values()):
             self._unwatch(opened)
         self._watched.clear()

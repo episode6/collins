@@ -462,3 +462,24 @@ def test_read_of_a_fifo_is_refused_not_waited_on(served):
     with pytest.raises(inproc.RequestRefused) as refused:
         client.request({"t": "fs.read", "path": str(fifo)})
     assert refused.value.error == protocol.ERROR_REFUSED and "not a file" in refused.value.msgid
+
+
+def test_a_read_only_file_of_ones_own_is_refused_not_swapped_out(served):
+    """0444 in a writable directory: the replace branch could swap the file
+    out, but the saver this replaces refused with Permission denied, and
+    so does the service — the content and the mode are untouched."""
+    core, client, project, _events = served
+    if os.geteuid() == 0:
+        pytest.skip("root writes anywhere")
+    path = project / "ro.txt"
+    path.write_text("keep\n")
+    path.chmod(0o444)
+    try:
+        with pytest.raises(inproc.RequestRefused) as refused:
+            client.request({"t": "fs.write", "path": str(path), "text": "new\n", "expect_mtime": None})
+        assert refused.value.error == protocol.ERROR_FAILED
+        assert "Couldn't save" in refused.value.msgid and "denied" in refused.value.details["error"]
+        assert path.read_text() == "keep\n" and stat.S_IMODE(path.stat().st_mode) == 0o444
+        assert not [name for name in os.listdir(project) if name.startswith(".collins-")]
+    finally:
+        path.chmod(0o644)

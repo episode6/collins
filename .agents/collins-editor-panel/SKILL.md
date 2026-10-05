@@ -108,8 +108,9 @@ files.py` the service's:
   writes as `FileSaver` did (`service/files.write_file`): in place for a
   hard link, a read-only directory or another owner's file, else by a temp
   file beside it with the old mode and one `os.replace`, a new file under
-  the umask; the compare runs right before the write, and the reply's
-  mtime is the written descriptor's. A save whose encoding differs from
+  the umask; a read-only file of the user's own is refused Permission
+  denied, never swapped out; the compare runs right before the write, and
+  the reply's mtime is the written descriptor's. A save whose encoding differs from
   the read's (latin-1 that could not carry the text) is told in the banner.
 - `_watch_external_changes` installs `fs.watch kind: file` under a handle
   the client mints (`remotefiles.Watcher`), seeded with `opened.mtime`:
@@ -122,7 +123,9 @@ files.py` the service's:
   its watches. `_teardown_page` unwatches one file; `EditorPane.shutdown`
   every one (`TerminalTab.release_editor`, called where the window closes
   a tab for good and when the window itself is destroyed) — without it
-  every watch, and through it the pane, outlived its tab. The service's
+  every watch, and through it the pane, outlived its tab; `shutdown` sets
+  `_shut`, so a read or write that lands after it fills nothing and
+  installs no watch (a restored tab closed soon after its files reopened). The service's
   `Gio.FileMonitor` debounces 300 ms, stats on a thread and pushes
   `file-changed {handle, path, mtime, size, gone}` once per burst whose
   stat moved. `_check_external` judges it against `opened.mtime` and

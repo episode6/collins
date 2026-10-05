@@ -19,9 +19,9 @@ overwriting (the "changed on disk" dialog, stubbed), the file untouched
 until Overwrite; a deleted file is told and marked dirty; a change that
 waited for a reload is judged even when the reload fails; a save before
 the first read lands writes nothing; a change between the read and the
-watch reaches the buffer (the watch's seed); the pane's shutdown drops
-every watch; a closed tab's watch is gone. The pane never opens a file
-itself.
+watch reaches the buffer (the watch's seed); a closed tab's watch is
+gone; the pane's shutdown drops every watch, and a read landing after it
+installs none. The pane never opens a file itself.
 
 This is a script, not a pytest test, on purpose: tests/conftest.py blocks
 the GTK-stack namespaces for the whole suite so local runs reproduce CI.
@@ -370,23 +370,8 @@ def run(root: str) -> int:
     finally:
         remotefiles.read = real_read
 
-    # -- the pane's shutdown drops every watch (a session tab closing) ---------------
-    handles = [o.watch_handle for o in pane._open.values() if o.watch_handle]
-    check("every open file holds a watch before the shutdown", len(handles) == len(pane._open) and handles)
-    pane.shutdown()
-    check(
-        "shutdown drops every watch on the service",
-        not any(watcher.watching(h) for h in handles) and not pane._watched,
-        [h for h in handles if watcher.watching(h)],
-    )
-    check("and the files remember none", all(o.watch_handle is None for o in pane._open.values()))
-    # The rest of the check needs the watches back.
-    for o in list(pane._open.values()):
-        pane._watch_external_changes(o)
-    other = pane._open[second]
-    handle = other.watch_handle
-
     # -- closing a tab drops its watch -----------------------------------------------
+    handle = other.watch_handle
     pane._close_confirmed.add(pane._pages[second])
     pane._tab_view.close_page(pane._pages[second])
     if not wait_for(lambda: second not in pane._open):
@@ -409,6 +394,39 @@ def run(root: str) -> int:
         "binary" in pane._banner.get_title() and binary not in pane._pages,
         pane._banner.get_title(),
     )
+
+    # -- the pane's shutdown drops every watch (a session tab closing) ---------------
+    # And a read still in flight when the tab closes installs nothing when
+    # it lands: a restored tab closed soon after its files reopened.
+    sixth = os.path.join(root, "sixth.txt")
+    with open(sixth, "w") as fh:
+        fh.write("late\n")
+    real_read = remotefiles.read
+
+    def slow_read(path, *args, **kwargs):
+        if path == sixth:
+            time.sleep(0.5)
+        return real_read(path, *args, **kwargs)
+
+    remotefiles.read = slow_read
+    try:
+        pane.open_file(sixth)
+        late = pane._open[sixth]
+        handles = [o.watch_handle for o in pane._open.values() if o.watch_handle]
+        check("every filled file holds a watch before the shutdown", len(handles) == len(pane._open) - 1)
+        pane.shutdown()
+        check(
+            "shutdown drops every watch on the service",
+            not any(watcher.watching(h) for h in handles) and not pane._watched,
+            [h for h in handles if watcher.watching(h)],
+        )
+        check("and the files remember none", all(o.watch_handle is None for o in pane._open.values()))
+        settle(1.5)  # the slow read lands after the shutdown
+        check("a read landing after the shutdown fills nothing", late.loading and not late.filled)
+        check("and installs no watch", late.watch_handle is None and not pane._watched, pane._watched)
+        check("and nothing of the pane's is watched", not any(watcher.watching(h) for h in handles))
+    finally:
+        remotefiles.read = real_read
 
     print(f"\n{PASSED} passed, {FAILED} failed")
     return 1 if FAILED else 0
