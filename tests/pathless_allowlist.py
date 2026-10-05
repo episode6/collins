@@ -107,13 +107,10 @@ ALLOWLIST = frozenset(
         "window:MainWindow._on_new_chat_send:Path.exists",
         "window:MainWindow._refresh_alt_new_session_item:Path.exists",
         "window:MainWindow._worktree_for_new_session:Path.exists",
-        # -- uploads, attachments, lightbox, icons (PR-2.7): the project icon is
-        # the service's `kind=icon` blob, every picture a blob decoded from its
-        # bytes through `blobcache.read`. Left: `image_guard`, which nothing
-        # calls now that the editor's image pages guard over `fs.stat` (PR-2.4)
-        # and the lightbox is on the blob GET ------------------------------------
-        "editorfiles:image_guard:Path.is_file",
-        "editorfiles:image_guard:Path.open",
-        "editorfiles:image_guard:Path.stat",
+        # -- uploads, attachments, lightbox, icons (PR-2.7): none left. The
+        # project icon is the service's `kind=icon` blob, every picture a blob
+        # decoded from its bytes through `blobcache.read`; `image_guard` went
+        # with its last caller (the editor's image pages guard over `fs.stat`
+        # since PR-2.4, the lightbox is on the blob GET) ------------------------
     }
 )

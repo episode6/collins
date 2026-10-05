@@ -286,7 +286,10 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   gated, 25 MiB, into the service's `remote-images` cache; localhost is
   deliberately allowed) behind a `DeferredResult`, its failure the agent's
   words, the download's time off the forwarded call's bound. The client
-  half (`ToolClient.show_image`) resolves nothing: it records the
+  half (`ToolClient.show_image`) resolves nothing: for a path it asks the
+  service whether the file is inside the tab's project
+  (`ask_can_open_in_editor`, PR-2.4: only the lightbox's "Open in Editor"
+  button hangs on it; a URL is never asked), then records the
   attachment and calls `lightbox.show_image(tab, key, session=…)`, which
   fetches the blob (`kind=file` / `kind=remote`) and answers "Image shown."
   once the lightbox decoded it, a failure when it didn't. With no client the

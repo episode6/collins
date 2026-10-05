@@ -56,8 +56,8 @@ _MAX_COPY_SUFFIXES = 100
 
 
 class LoadGuard(enum.Enum):
-    """Why a file may not open: `image_guard`'s answers, and the words the
-    editor gives the service's `fs.read` refusals (the text guards — a
+    """Why a file may not open: `image_stat_guard`'s answers, and the words
+    the editor gives the service's `fs.read` refusals (the text guards — a
     regular file, the size cap, the NUL sniff — are the service's since
     PR-2.3, `service.files.read_file`)."""
 
@@ -265,30 +265,6 @@ def is_image_path(path: str | Path) -> bool:
     is left to the actual decode (Gdk.Texture), whose failure the viewers
     already handle — this only routes the open."""
     return Path(path).suffix.lower() in IMAGE_SUFFIXES
-
-
-def image_guard(path: str | Path) -> LoadGuard:
-    """The lightbox's guard (the text files' is the service's `fs.read`,
-    the editor's image pages' `image_stat_guard` over `fs.stat`): images
-    are binary by nature, so only existence, readability and (a much
-    larger) size cap are checked — never BINARY. The lightbox shows the
-    service's files and this device's cached blobs alike, so it stays
-    until PR-2.7 moves the lightbox onto the blob GET."""
-    p = Path(path)
-    try:
-        if not p.is_file():
-            return LoadGuard.NOT_A_FILE
-        size = p.stat().st_size
-    except OSError:
-        return LoadGuard.UNREADABLE
-    if size > _MAX_IMAGE_BYTES:
-        return LoadGuard.TOO_LARGE
-    try:
-        with p.open("rb") as f:
-            f.read(1)
-    except OSError:
-        return LoadGuard.UNREADABLE
-    return LoadGuard.OK
 
 
 LIGHTBOX_WINDOW_FRACTION = 0.85  # the lightbox never grows past this much of the window
@@ -556,9 +532,12 @@ def reroot_counterparts(old_root: str | Path, new_root: str | Path, open_paths: 
 
 
 def image_stat_guard(kind: str, size: int | None) -> LoadGuard:
-    """`image_guard`'s answer from a stat the service made (`fs.stat`'s
-    kind and size, PR-2.4): the editor's image pages. Whether the bytes
-    can be read is the decode's to find out."""
+    """The image pages' guard, from a stat the service made (`fs.stat`'s
+    kind and size, PR-2.4): images are binary by nature, so only existence
+    and (a much larger) size cap are checked, never BINARY. Whether the
+    bytes can be read is the fetch's and the decode's to find out (the
+    picture is the service's blob since PR-2.7, and so is the lightbox's,
+    which took the old on-disk `image_guard` with it)."""
     if kind != "file":
         return LoadGuard.NOT_A_FILE
     if size is not None and size > _MAX_IMAGE_BYTES:
