@@ -393,9 +393,10 @@ def repo_root(cwd: str | Path | None) -> Path | None:
 
 
 def index_mtime(cwd: str | Path | None) -> int | None:
-    """st_mtime_ns of the repository's index file (in the worktree's own git
-    dir, not the common dir). None when there is no index yet or it can't be
-    stat'd."""
+    """The mtime of the repository's index file (in the worktree's own git
+    dir, not the common dir), microseconds since the epoch on both paths
+    (gitfiles.index_mtime's unit). None when there is no index yet or it
+    can't be stat'd."""
     if not _local(cwd):
         entry = info(cwd)
         return entry.index_mtime if entry is not None else None

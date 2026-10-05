@@ -182,6 +182,24 @@ def test_reset_forgets_every_entry(link):
     assert remotegit.mirror().entry("/srv/project") is None
 
 
+def test_the_mirror_evicts_the_least_recently_read(link, monkeypatch):
+    """A hit moves an entry to the back: past MAX_ENTRIES the cwd nobody
+    has read for longest goes, never a long-lived tab's that was just
+    read because it was stored first."""
+    monkeypatch.setattr(remotegit, "MAX_ENTRIES", 3)
+    link.answers["git.info"] = lambda m: dict(INFO, root=m["cwd"])
+    mirror = remotegit.mirror()
+    for cwd in ("/a", "/b", "/c"):
+        gitinfo.current_branch(cwd)
+    gitinfo.current_branch("/a")  # a hit: /a is now the most recently read
+    gitinfo.current_branch("/d")  # the fourth entry evicts the least recently read
+    assert mirror.entry("/b") is None
+    assert all(mirror.entry(cwd) is not None for cwd in ("/a", "/c", "/d"))
+    gitinfo.refresh("/c")  # a re-store of a kept entry moves it to the back too
+    gitinfo.current_branch("/e")
+    assert mirror.entry("/a") is None and mirror.entry("/c") is not None
+
+
 # -- the transport ----------------------------------------------------------------------
 
 
