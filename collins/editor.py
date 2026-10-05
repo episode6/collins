@@ -903,6 +903,10 @@ class EditorPane(Gtk.Box):
                 self._notify(
                     _("Couldn't reload {name}: {message}").format(name=opened.path.name, message=failure)
                 )
+                # A `file-changed` that waited for this reload is judged all
+                # the same: the file may be gone or binary now, and that
+                # event is what tells the buffer so (review of PR 609).
+                self._settle_pending_change(opened)
             else:
                 self._notify(
                     _("Couldn't open {name}: {message}").format(name=opened.path.name, message=failure)
