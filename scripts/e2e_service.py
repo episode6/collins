@@ -62,6 +62,12 @@ def _stop(proc: subprocess.Popen) -> None:
 def _stop_all() -> None:
     for proc in list(_services):
         _stop(proc)
+    if _stubs_data:
+        for path in (_stubs_data, _stubs_data + ".calls.jsonl"):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 atexit.register(_stop_all)

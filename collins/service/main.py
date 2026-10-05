@@ -32,6 +32,7 @@ exits 0 after printing its path. ``sd_notify`` is a datagram to
 from __future__ import annotations
 
 import argparse
+import errno
 import logging
 import os
 import shutil
@@ -58,25 +59,35 @@ START_WAIT_S = 10.0
 def login_shell_environment(shell: str | None = None, timeout: float = CAPTURE_TIMEOUT_S) -> dict[str, str]:
     """The environment a login, interactive shell ends up with, or {} when
     the capture fails (no shell, a timeout, output that isn't NUL-separated
-    pairs). Never raises."""
+    pairs). Never raises. The shell runs in a session of its own, so a
+    timeout reaps whatever it forked along with it."""
     shell = shell or os.environ.get("SHELL") or "/bin/sh"
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [shell, "-lic", "env -0"],
             stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,  # no controlling tty: a shell that asks gets EOF
         )
-    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         log.info("login-shell capture failed: %s", exc)
         return {}
-    if result.returncode not in (0, None) and not result.stdout:
-        log.info("login-shell capture exited %s", result.returncode)
+    try:
+        stdout, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.communicate()
+        log.info("login-shell capture timed out after %.0f s", timeout)
+        return {}
+    if proc.returncode not in (0, None) and not stdout:
+        log.info("login-shell capture exited %s", proc.returncode)
         return {}
     captured: dict[str, str] = {}
-    for entry in result.stdout.split(b"\0"):
+    for entry in stdout.split(b"\0"):
         if b"=" not in entry:
             continue
         key, _, value = entry.partition(b"=")
@@ -222,6 +233,11 @@ class Service:
         from .core import ServiceCore
 
         self.app_id = app_id
+        # Before anything stateful (the state file's writer, the store, the
+        # MCP socket): a live socket means a service runs for this id.
+        path = api_server.socket_path(app_id)
+        if api_server.probe_socket(path) == "live":
+            raise OSError(errno.EADDRINUSE, f"a service is already listening on {path}")
         self.environment = merge_environment(dict(os.environ), login_shell_environment())
         self.core = ServiceCore.with_state(environment=lambda: dict(self.environment))
         self.core.app_id = app_id
@@ -341,11 +357,13 @@ def main(argv: list[str] | None = None) -> int:
         return print_socket(args.app_id)
     # The service formats only `paint` text, per client locale (§3.14).
     i18n.init("en")
-    service = Service(args.app_id)
     try:
+        service = Service(args.app_id)
         service.start()
     except OSError as exc:
-        # A live socket: a service is already running for this id.
+        # A live socket: a service is already running for this id (found
+        # before anything was built, or by listen() in the race between
+        # two starting at once).
         print(api_server.socket_path(args.app_id))
         log.info("not starting: %s", exc)
         return 0

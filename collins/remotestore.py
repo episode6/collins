@@ -24,13 +24,13 @@ spliced when the order changed, and `refreshed` is emitted: the client's
 refresh is the service's, one for one. `put-away` is `archived`. No
 transcript is read here: the per-refresh I/O stays on the service.
 
-**Busy, unread and status are the service's** (rule 3 of §3.1). The
-activity tracker still runs in this process in Phase 1 (the window's), and
-its verdicts reach the service as `store.flags` requests through
-`set_busy` / `set_unread` / `set_status` / `set_backgrounding` /
-`set_can_background`; the property changes only when the service's `item`
-event comes back. On the loopback that is before the call returns, so the
-window and the e2e checks see what they always saw.
+**Busy is the service's** (rule 3 of §3.1, D29): `set_busy` only sends
+`store.flags`, and the row changes when the service's `item` event comes
+back. The flags this client decides — `unread`, `status`, the /bg
+orchestration's `backgrounding` and `can_background` — are applied to the
+row at once (D16) and sent; a refusal puts the old value back. The window's
+handlers on the store's signals (the green row's rise, `_reraise_green`)
+count on that edge being synchronous, as it was on the loopback.
 
 **Archived sessions are paged.** The snapshot carries the sessions with
 rows. The ones kept out of sight are fetched when they are first needed:
@@ -594,9 +594,19 @@ class RemoteStore(GObject.Object):
         item = self._items.get(session_id)
         if item is None or item.get_property(prop) == value:
             return
-        self._link.send({"t": "store.flags", "session": session_id, prop: value})
-        if prop != "busy":
-            self._set_props(item, {prop: value}, announce=True)
+        if prop == "busy":
+            self._link.send({"t": "store.flags", "session": session_id, prop: value})
+            return
+        before = item.get_property(prop)
+
+        def refused(refusal) -> None:
+            log.warning("store: %s of %s refused: %s", prop, session_id, refusal.msgid)
+            current = self._items.get(session_id)
+            if current is not None and current.get_property(prop) == value:
+                self._set_props(current, {prop: before}, announce=True)
+
+        self._set_props(item, {prop: value}, announce=True)
+        self._link.send({"t": "store.flags", "session": session_id, prop: value}, None, refused)
 
     # -- the CLI's folder trust (trust.*) -------------------------------------------
 

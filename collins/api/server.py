@@ -130,8 +130,10 @@ def probe_socket(path: str, timeout: float = 1.0) -> str:
     except OSError as exc:
         if exc.errno in (errno.ECONNREFUSED, errno.ENOENT):
             return "stale"
-        log.debug("probing %s: %s", path, exc)
-        return "stale"
+        # Anything else (a timeout, a reset, EACCES) is a listener in some
+        # state, not an absence: never unlink over it.
+        log.debug("probing %s: %s; taken as live", path, exc)
+        return "live"
     else:
         return "live"
     finally:
