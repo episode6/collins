@@ -285,7 +285,8 @@ each taken from the code the message replaces:
   ``known_refs`` digest differs; with ``changes`` the `git status` of
   has_changes / change_summary; with ``state`` the watch's tree-state
   digest), `git.sizes` the on-disk size of repository paths, `git.watch` /
-  `git.unwatch` install the page's directory monitors on the service and
+  `git.unwatch` install the page's directory monitors on the service (one
+  watch per client and ``handle``, the page's own name for it) and
   `git-changed` is their event, `git.plan` carries a gitpatch plan out on
   the service, refused ``stale`` when a stable key it names is no longer in
   the fresh patch, and `fs.trash` is §3.23's trash. A handler that must
@@ -2014,6 +2015,10 @@ _TABLE: tuple[MessageType, ...] = (
         request=_request(
             {
                 "cwd": _req(_PATH),
+                # The client's name for this watch (a page's): two pages
+                # on one tree are two watches, and an unwatch names one.
+                # The same handle again replaces that watch.
+                "handle": _req(_s(64, low=1)),
                 "files": Field(K_LIST, high=REPO_PATHS_MAX, item=_s(MAX_PATH)),
                 # The tree-state digest the page's read sampled: the
                 # watch's first compare is against it.
@@ -2023,8 +2028,8 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "git.unwatch",
-        "Stop watching a working tree for this client.",
-        request=_request({"cwd": _req(_PATH)}),
+        "Stop one watch of this client's, by its handle.",
+        request=_request({"handle": _req(_s(64, low=1))}),
     ),
     MessageType(
         "git-changed",

@@ -474,8 +474,10 @@ client that proved it is `local` (`service/files.py`'s `allowed`).
 index|ref&ref=…&path=…` on the same socket (`SocketLink.http_get`, the
 `Collins-Client` header naming the client for the confinement; an ETag
 of the commit and path, the index entry's blob or the file's mtime and
-size, `304` on `If-None-Match`, `404`, `413` over `MAX_BLOB_BYTES`):
-**the client opens no project file.** The on-disk size gate of the
+size, `304` on `If-None-Match`, `404`, `413` over `MAX_BLOB_BYTES` on
+every side; a working-tree path that resolves outside the tree — a
+symlink out of it — is `404`, and `git.sizes` sizes it as gone):
+**the client opens no project file for git.** The on-disk size gate of the
 untracked and unmerged readers is `git.sizes` (`gitops.file_sizes`), the
 watch's tree state `git.info` with `state`, and a plan is one `git.plan`
 (below). The service answers every one of these off its main loop: the
@@ -850,12 +852,16 @@ can't give "3 of 12". Matches are re-counted (position kept) on every
 (`_sync_search_label`). Closing the bar focuses the current match's view.
 
 **Watch mode (the service's since PR-2.1).** After a working-tree load
-lands, `_install_watch` sends `git.watch {cwd, files, state}`
-(`remotegit.Mirror.watch`) and listens for the cwd's `git-changed`
-events (`Mirror.on_changed`); a commit / range load watches nothing, and
-`_drop_watch` (`_close_view`, a reload) sends `git.unwatch`. On the
-service (`gitfeed._Watch`, one per client and cwd) the same rules as the
-page had: a `Gio.FileMonitor` on each distinct directory of the loaded
+lands, `_install_watch` sends `git.watch {cwd, handle, files, state}`
+(`remotegit.Mirror.watch`; the `handle` is the page's own,
+`GitPage.watch_handle`, so two pages on one tree are two watches and
+one page's unwatch never takes the other's down) and listens for the
+cwd's `git-changed` events (`Mirror.on_changed`); a commit / range load
+watches nothing, and `_drop_watch` (`_close_view`, a reload) sends
+`git.unwatch {handle}`. The mirror remembers every live watch and sends
+them again on `reset` (a reconnect: the service dropped them with the
+client). On the service (`gitfeed._Watch`, one per client and handle)
+the same rules as the page had: a `Gio.FileMonitor` on each distinct directory of the loaded
 files (old paths of renames too) — over `MAX_DIR_MONITORS` (64), or with
 no file at all, the repository root alone; events (not for the `.git`
 entry itself) debounce `WATCH_DEBOUNCE_MS` (300) into a compare on a
@@ -1008,11 +1014,26 @@ fallback's: `read_info` answers every one at once as a `GitInfo`, with
 dir by the refs digest — `operation_kind`, `refs_signature`,
 `status_porcelain`). In the app `gitinfo` reads a **per-cwd mirror** of
 the service's `git.info` reply (`remotegit.Mirror`, installed with
-`gitinfo.set_reader`): an entry younger than `MAX_AGE_S` (1 s) is served,
-an older one re-fetched with one blocking `call` on the caller's thread
-(the footer's tick, a right-click, a page's worker — never the link's
-I/O thread), `gitinfo.refresh(cwd)` forces one (the page's tick, its
-open, every mutation), `git-changed` refreshes by `send`, and
+`gitinfo.set_reader`): an entry younger than `MAX_AGE_S` (1 s) is served;
+an older one is re-fetched with one blocking `call` **only off the main
+thread** (a page's worker, `read_diff`'s tree state). **On the GTK main
+thread a plain read never waits** (§3.23: nothing new runs on the main
+loop): the footer's 2 s tick's `current_branch`, a right-click's menu
+get the entry as it is and a refresh by `send`, one in flight per cwd
+(a stopped service used to hold the main loop 13 s). The main thread
+waits only when asked for freshness, `remotegit.MAIN_THREAD_TIMEOUT_S`
+(0.5 s) at most: `gitinfo.refresh` (the page's tick, its open and
+`_on_mutated`, which re-seeds `_signature` from the answer so a move
+the page made is never reloaded twice — the reason refresh waits),
+`has_changes` / `change_summary` (a status is never served stale: the
+menus' state and the footer's entry mode read it), and a cwd the mirror
+has never seen. A `git.run`'s wait is its timeout plus a margin of at
+most the timeout (`ignored_names`' 0.5 s budget waits 1 s). A service that could
+not be asked (``gone``: the link down, a timeout) keeps the entry before,
+marked `GitInfo.unreachable` and re-stamped, so a hiccup or a restart
+reads as "nothing moved" and the page leaves its view alone, never as
+"not a repository"; a real refusal (the cwd not allowed) drops it.
+`git-changed` refreshes by `send` the same way, and
 `resolve_branch` / `parent_branch` resolve any name off the mirror's
 heads, remote-tracking refs and ranked remotes (`GitInfo.resolve_branch`),
 so the main loop makes no round trip per name. `index_mtime` is

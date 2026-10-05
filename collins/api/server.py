@@ -715,7 +715,10 @@ class ApiServer:
             self.core.client_connected(client)
         connection.client = client
         connection.channel = channel
-        caps = [protocol.CAP_LOCAL]
+        # `git`: this service serves git.*, fs.trash, git-changed and the
+        # blob GET (PR-2.1); a client installs its git transport only on
+        # seeing it, and runs git locally against an older service.
+        caps = [protocol.CAP_LOCAL, protocol.CAP_GIT]
         if self.debug:
             caps.append(protocol.CAP_DEBUG)
         state = getattr(self.core, "state", None)

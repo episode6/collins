@@ -667,8 +667,10 @@ SAMPLES = {
         "known_refs": "ab12",
     },
     ("git.sizes", p.REQUEST): {"cwd": "/home/u/project", "paths": ["a.txt"]},
-    ("git.watch", p.REQUEST): {"cwd": "/home/u/project", "files": ["a.txt", "src/b.py"], "state": "deadbeef"},
-    ("git.unwatch", p.REQUEST): {"cwd": "/home/u/project"},
+    ("git.watch", p.REQUEST): {
+        "cwd": "/home/u/project", "handle": "gitpage-7f", "files": ["a.txt", "src/b.py"], "state": "deadbeef",
+    },
+    ("git.unwatch", p.REQUEST): {"handle": "gitpage-7f"},
     ("git-changed", p.EVENT): {"cwd": "/home/u/project", "tree": "t1", "refs": "r1", "state": None},
     ("git.plan", p.REQUEST): {
         "cwd": "/home/u/project",

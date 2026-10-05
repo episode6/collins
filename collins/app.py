@@ -2216,8 +2216,13 @@ class App(Adw.Application):
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
         # Git goes over the link too (PR-2.1, §3.23): gitinfo reads the
-        # per-cwd mirror and gitops' runners send builders by name.
-        remotegit.install(link)
+        # per-cwd mirror and gitops' runners send builders by name — when
+        # the service says it serves them (the `git` capability); against
+        # an older service git stays this machine's, as before.
+        if protocol.CAP_GIT in (link.hello.get("caps") or ()):
+            remotegit.install(link)
+        else:
+            log.warning("the service has no git capability: git runs locally")
         self.store.subscribe()
         self._refresh_service_status()
 

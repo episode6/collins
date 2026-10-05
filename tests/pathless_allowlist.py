@@ -26,6 +26,8 @@ ALLOWLIST = frozenset(
         "blobcache:fetch:Path.read_text",
         "blobcache:fetch:Path.unlink",
         "blobcache:fetch:Path.write_text",
+        "blobcache:fetch:os.replace",  # the fetch's own temporary into place
+        "blobcache:fetch:os.unlink",
         "diffview:_blob_to_file:Path.exists",  # the git-blobs cache; the blobcache in PR-2.2
         "diffview:_blob_to_file:Path.mkdir",
         "imagediff:_paintable:Path.read_bytes",  # a fetched blob, decoded (PR-2.2: the blobcache's file)
@@ -68,6 +70,17 @@ ALLOWLIST = frozenset(
         "editor:EditorPane.request_root:Path.is_dir",
         "editorfiles:read_first_line:open",
         "editorfiles:should_highlight:Path.stat",
+        "editor:EditorPane.set_agent_files:Path.is_file",
+        "editorfiles:image_guard:Path.is_file",
+        "editorfiles:image_guard:Path.open",
+        "editorfiles:image_guard:Path.stat",
+        "editorfiles:load_guard:Path.is_file",
+        "editorfiles:load_guard:Path.open",
+        "editorfiles:load_guard:Path.stat",
+        # The file row's "is there a file to open" check (the editor and the
+        # Open In… apps): `fs.stat` once PR-2.3 brings it; the one git-page
+        # site still on this machine's disk.
+        "gitsidebar:GitSidebar._file_menu_items:Path.is_file",
         # -- the tree, quick open and roots (PR-2.4) -----------------------------------
         "editorfiles:_exists:Path.exists",
         "editorfiles:_exists:Path.is_symlink",
@@ -82,6 +95,8 @@ ALLOWLIST = frozenset(
         "terminal:PanelTerminal._sync_cwd:Path.is_dir",
         "terminal:PanelTerminal.follow_cwd:Path.is_dir",
         "terminal:TerminalTab.__init__:Path.is_dir",
+        "editorfiles:repository_root:Path.exists",
+        "editorfiles:walk_files:Path.is_symlink",
         # -- file operations and the clipboard (PR-2.5) --------------------------------
         "editor:EditorPane._rename:Path.rename",
         "editorfiles:paste_entries:shutil.copy2",
@@ -90,13 +105,29 @@ ALLOWLIST = frozenset(
         "editorfiles:paste_target:Path.is_dir",
         "editorfiles:rename_target:Path.exists",
         "editorfiles:rename_target:Path.is_symlink",
+        "editorfiles:paste_entries:Path.is_dir",
+        "editorfiles:paste_entries:Path.is_symlink",
         # -- links and root names (PR-2.6) ----------------------------------------------
         "linkpatterns:resolve_path:os.path.exists",
         "terminal:_RootNameLinks._file_names:os.scandir",
         "terminal:_RootNameLinks._rebuild:Gio.File.new_for_path.monitor_directory",
         "transcriptlinks:transcript_links:open",
         "transcriptlinks:transcript_links:os.stat",
+        # The new-chat screen's "is this a git checkout / does the worktree
+        # exist" checks: `fs.stat` reads, which PR-2.6 brings for the links.
+        "newchatview:is_git_checkout:Path.exists",
+        "sidebar:SessionSidebar.show_group_menu:Path.exists",
+        "window:MainWindow._launch_new_session:Path.exists",
+        "window:MainWindow._on_new_chat_send:Path.exists",
+        "window:MainWindow._refresh_alt_new_session_item:Path.exists",
+        "window:MainWindow._worktree_for_new_session:Path.exists",
         # -- uploads, attachments, lightbox, icons (PR-2.7) ------------------------------
         "projecticons:project_icon_data:Path.read_bytes",
+        "projecticons:project_icon_path:Path.is_file",
+        "projecticons:project_icon_path:Path.stat",
+        "animatedimage:_animation:PixbufAnimation.new_from_file",
+        "animatedimage:load:Texture.new_from_filename",
+        "composer:ComposerView._add_preview:Texture.new_from_filename",
+        "pictures:thumbnail:Pixbuf.new_from_file_at_scale",
     }
 )

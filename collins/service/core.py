@@ -1223,8 +1223,8 @@ class ServiceCore:
     _req_git_unwatch = _git
     _req_git_plan = _git
 
-    def _req_fs_trash(self, message: protocol.Message, client: Client) -> dict:
-        return files_mod.handle_trash(self, client, message)
+    def _req_fs_trash(self, message: protocol.Message, client: Client) -> dict | protocol.Deferred:
+        return files_mod.handle_trash(self, client, message, later=self.git._later)
 
     # -- the diffs' marks (PR-1.11; service.diffs)
 

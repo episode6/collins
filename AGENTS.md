@@ -289,15 +289,23 @@ builders) and sends `git.run {cwd, builder, args}` — the wire never
 carries an argv, and the service runs only what its own builder makes —
 `gitinfo`'s `.git` reads are a per-cwd mirror of `git.info`
 (`remotegit.py`; the readers themselves are `gitfiles.py`, the service's),
-a blob is `GET /api/blob?kind=git` (`blobcache.py` caches it), the page's
-watch is `git.watch` / `git-changed` on the service (`service/gitfeed.py`)
-and a plan is `git.plan`, refused `stale` when a stable key moved;
-`service/files.py` is the trash and the rule confining every path to a
-root the service knows (or anything for a `local` client). The client
-opens no project file and runs no git: `tests/test_client_is_pathless.py`
-walks the GTK modules and the client helpers for filesystem and
-subprocess sites and holds them to `tests/pathless_allowlist.py`, which
-shrinks per Phase 2 chunk and never grows.
+a blob is `GET /api/blob?kind=git` (`blobcache.py` is the client's cache
+for it, which PR-2.2 puts the diff's images on), the page's watch is
+`git.watch` / `git-changed` on the service (`service/gitfeed.py`; a watch
+per page handle) and a plan is `git.plan`, refused `stale` when a stable
+key moved; `service/files.py` is the trash and the rule confining every
+path to a root the service knows (or anything for a `local` client). The
+builders validate their own arguments (a ref, a path, a count:
+`ValueError`, `invalid` on the wire), since the service runs what they
+make of a client's args. On the GTK main thread a plain read of the
+mirror never waits for the service (a stale entry is served and
+refreshed by `send`); an explicit `gitinfo.refresh` or a status waits
+`remotegit.MAIN_THREAD_TIMEOUT_S` (0.5 s) at most. The
+client opens no project file for git and runs no git:
+`tests/test_client_is_pathless.py` walks the GTK modules and the client
+helpers for filesystem and subprocess sites and holds them to
+`tests/pathless_allowlist.py`, which shrinks per Phase 2 chunk and never
+grows.
 
 ## Where state lives
 
@@ -321,7 +329,7 @@ shrinks per Phase 2 chunk and never grows.
 | The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer`: an agent's pty and a panel shell's) |
 | A live pty's saved screen model (`termscreen.Screen.dump()` as JSON, for a restarted service's re-adoption, a later phase's keeper); removed with the pty's row, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
-| Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
+| Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`; built in PR-2.1, the diff's images move onto it in PR-2.2) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
 | Everything of the CLI's | `~/.claude/` — read only |
 
 Every one of these has an environment override used by tests, captures and

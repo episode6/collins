@@ -9,16 +9,28 @@ machine's `.git` and git:
 
 - **The mirror** (`Mirror`): a per-cwd copy of the service's `git.info`
   reply (`gitfiles.GitInfo`), installed as `gitinfo`'s reader. A read
-  serves the entry when it is younger than `gitinfo.MAX_AGE_S`, else asks
-  the service (one blocking `call` on the caller's thread: the footer's
-  tick, a right-click, a page's worker — never the link's I/O thread);
-  `gitinfo.refresh` forces one (the page's tick, before it compares the
-  signatures); `has_changes` / `change_summary` always ask fresh, with
-  ``changes`` (one `git status` on the service, on demand as before). The
-  service's `git-changed` events refresh the entry without blocking
-  (`send`) and are handed to the page watching that cwd (`on_changed`).
-  `watch` / `unwatch` are the page's directory monitors, installed on the
-  service.
+  serves the entry when it is younger than `gitinfo.MAX_AGE_S`. An older
+  one is re-fetched with the run's full wait **only off the main thread**
+  (a page's worker, `read_diff`'s tree state). On the GTK main thread a
+  plain read (the footer's 2 s tick's `current_branch`, a right-click's
+  menu) is served the entry as it is and refreshed by an asynchronous
+  `send`, one in flight per cwd, so a slow or stopped service costs the
+  main loop nothing (§3.23: nothing new runs on it); the main thread
+  waits, `MAIN_THREAD_TIMEOUT_S` at most, only when asked for freshness:
+  `gitinfo.refresh` (the page's tick, its open, a mutation it made — the
+  page re-seeds its signatures from the answer, so a move it made is
+  never reloaded twice), `has_changes` / `change_summary` (a status is
+  never served stale) and a cwd the mirror has never seen. A service
+  that cannot be asked (the link down, a timeout: ``gone``) keeps the
+  entry before, marked `unreachable`, so a hiccup reads as "nothing
+  moved" rather than "not a repository" and the page leaves its view
+  alone; with no entry before it is None. The service's `git-changed`
+  events refresh the entry the same way and are handed to the pages
+  watching that cwd (`on_changed`). `watch` / `unwatch` are the page's
+  directory monitors, installed on the service under the page's own
+  handle (two pages on one tree are two watches); the mirror remembers
+  every live watch and sends them again on `reset` (a reconnect: the
+  service dropped them with the client).
 - **The transport** (`Transport`, `gitops.GitTransport`): every argv a
   runner is handed is mapped back to its builder and keyword args
   (`gitops.match_argv`, D33) and sent as `git.run`; an argv no builder
@@ -38,6 +50,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from urllib.parse import urlencode
 
 from . import apilink, gitinfo, gitops, gitpatch
@@ -67,8 +80,18 @@ BLOB_TIMEOUT_S = 60.0
 # it the least recently read goes (a hit moves an entry to the back, so a
 # long-lived tab's cwd is never the one evicted).
 MAX_ENTRIES = 256
+# How long a read on the GTK main thread may wait for a cwd the mirror has
+# never seen (a page opened before the footer's first tick): a healthy
+# service answers in about a millisecond; past this the read says None and
+# the next tick's answer fills the entry. Every other main-thread read is
+# served from the mirror and refreshed without waiting.
+MAIN_THREAD_TIMEOUT_S = 0.5
 
 Listener = Callable[[dict], None]
+
+
+def _on_main_thread() -> bool:
+    return threading.current_thread() is threading.main_thread()
 
 
 class Mirror:
@@ -81,6 +104,11 @@ class Mirror:
         self._entries: dict[str, GitInfo] = {}
         self._listeners: dict[str, list[Listener]] = {}
         self._installed_on: apilink.Link | None = None
+        # The cwds with an asynchronous refresh in flight (one each).
+        self._pending: set[str] = set()
+        # Every live watch by handle: the message that installed it, sent
+        # again after a reconnect (reset).
+        self._watches: dict[str, dict] = {}
 
     # -- the link
 
@@ -93,27 +121,51 @@ class Mirror:
         self._installed_on = link
 
     def reset(self) -> None:
-        """Forget every entry (a reconnect: the service may be another)."""
+        """Forget every entry (a reconnect: the service may be another)
+        and install the live watches again: the service dropped them with
+        the client that went away, and the pages still hold them."""
         with self._lock:
             self._entries.clear()
+            self._pending.clear()
+            watches = list(self._watches.values())
+        for message in watches:
+            self._send_watch(message)
 
     # -- gitinfo's reader
 
     def read(
-        self, cwd: str, max_age: float = gitinfo.MAX_AGE_S, changes: bool = False, state: bool = False
+        self,
+        cwd: str,
+        max_age: float = gitinfo.MAX_AGE_S,
+        changes: bool = False,
+        state: bool = False,
+        wait: bool = False,
     ) -> GitInfo | None:
-        """The entry for *cwd*, fetched when missing, older than *max_age*,
-        or when *changes* / *state* are wanted (never served stale). None
-        when the service could not be asked at all."""
+        """The entry for *cwd*: served when younger than *max_age* (and
+        neither *changes* nor *state* is wanted, which are never served
+        stale). Otherwise, off the main thread, one blocking fetch with
+        the run's full wait. On the main thread a plain read is served the
+        entry as it is and refreshed by `send`; the main thread waits —
+        MAIN_THREAD_TIMEOUT_S at most — only when asked for freshness:
+        *wait* (`gitinfo.refresh`: the page's tick, its open, a mutation
+        it made, which re-seeds its signatures from the answer), *changes*
+        / *state* (a status is never served stale: the menus' state and
+        the footer's entry mode read it), or a cwd never seen. None when
+        there is no entry and the service could not be asked."""
         with self._lock:
             entry = self._entries.get(cwd)
             fresh = entry is not None and time.monotonic() - entry.fetched_at <= max_age
             if fresh and not changes and not state:
                 self._entries[cwd] = self._entries.pop(cwd)  # most recently read: last out
                 return entry
-        return self._fetch(cwd, entry, changes, state)
+        if not _on_main_thread():
+            return self._fetch(cwd, entry, changes, state)
+        if entry is None or changes or state or wait:
+            return self._fetch(cwd, entry, changes, state, timeout=MAIN_THREAD_TIMEOUT_S)
+        self._refresh_async(cwd, changes, state)
+        return entry
 
-    def _fetch(self, cwd: str, previous: GitInfo | None, changes: bool, state: bool) -> GitInfo | None:
+    def _message(self, cwd: str, previous: GitInfo | None, changes: bool, state: bool) -> dict:
         message: dict = {"t": "git.info", "cwd": cwd}
         if changes:
             message["changes"] = True
@@ -121,12 +173,63 @@ class Mirror:
             message["state"] = True
         if previous is not None and previous.refs:
             message["known_refs"] = previous.refs
+        return message
+
+    def _fetch(
+        self, cwd: str, previous: GitInfo | None, changes: bool, state: bool, timeout: float | None = None
+    ) -> GitInfo | None:
+        """One blocking `call`; a service that did not answer (``gone``)
+        keeps *previous*, marked unreachable and re-stamped so the next
+        read within MAX_AGE_S serves it instead of asking again."""
+        message = self._message(cwd, previous, changes, state)
+        wait = CALL_MARGIN_S + gitops.GIT_TIMEOUT_S if timeout is None else timeout
         try:
-            fields = apilink.call(message, timeout=CALL_MARGIN_S + gitops.GIT_TIMEOUT_S)
+            fields = apilink.call(message, timeout=wait)
         except RequestRefused as refusal:
             log.debug("git.info %s refused: %s", cwd, refusal.msgid)
-            return None
+            return self._unreachable(cwd, previous, refusal)
         return self._store(cwd, fields, previous)
+
+    def _refresh_async(self, cwd: str, changes: bool, state: bool) -> None:
+        """A refresh by `send` (the main thread never waits): one in
+        flight per cwd; the reply is stored where a fetch's would be."""
+        link = self._link_of()
+        if link is None:
+            return
+        with self._lock:
+            if cwd in self._pending:
+                return
+            self._pending.add(cwd)
+            previous = self._entries.get(cwd)
+
+        def landed(fields: dict) -> None:
+            with self._lock:
+                self._pending.discard(cwd)
+            self._store(cwd, fields, self.entry(cwd))
+
+        def refused(refusal: RequestRefused) -> None:
+            with self._lock:
+                self._pending.discard(cwd)
+            self._unreachable(cwd, self.entry(cwd), refusal)
+
+        link.send(self._message(cwd, previous, changes, state), on_reply=landed, on_refused=refused)
+
+    def _unreachable(self, cwd: str, previous: GitInfo | None, refusal: RequestRefused) -> GitInfo | None:
+        """What a refused ask leaves: for ``gone`` (the service could not
+        be asked at all) the entry before, kept and marked; for any other
+        refusal (the cwd not allowed, not a directory) nothing — that is a
+        real answer, and reads as "not a repository"."""
+        if refusal.error != protocol.ERROR_GONE:
+            with self._lock:
+                self._entries.pop(cwd, None)
+            return None
+        if previous is None:
+            return None
+        kept = replace(previous, fetched_at=time.monotonic(), unreachable=True)
+        with self._lock:
+            self._entries.pop(cwd, None)
+            self._entries[cwd] = kept
+        return kept
 
     def _store(self, cwd: str, fields: dict, previous: GitInfo | None) -> GitInfo:
         entry = GitInfo.from_fields(fields, previous)
@@ -144,26 +247,44 @@ class Mirror:
 
     # -- the watch
 
-    def watch(self, cwd: str, files: Sequence[str], state: str | None = None) -> None:
+    def watch(self, cwd: str, files: Sequence[str], state: str | None = None, handle: str = "") -> None:
         """Install the page's monitors on the service for *cwd* (the
-        loaded files' directories, `git.watch`); the reply is not waited
-        for. Replaces any earlier watch of the cwd by this client. *state*
-        is the tree state the page's read sampled: the service's first
-        compare is against it, so an edit between the read and the
-        watch's first look is a move."""
-        link = self._link_of()
-        if link is None:
-            return
-        message: dict = {"t": "git.watch", "cwd": cwd, "files": list(files)[: protocol.REPO_PATHS_MAX]}
+        loaded files' directories, `git.watch`) under the page's
+        *handle*; the reply is not waited for. The same handle again
+        replaces that watch and no other (two pages on one tree keep
+        two). *state* is the tree state the page's read sampled: the
+        service's first compare is against it, so an edit between the
+        read and the watch's first look is a move. The watch is
+        remembered until `unwatch`, and sent again on `reset`."""
+        message: dict = {
+            "t": "git.watch", "cwd": cwd, "handle": handle, "files": list(files)[: protocol.REPO_PATHS_MAX]
+        }
         if state is not None:
             message["state"] = state
-        link.send(message, on_refused=lambda r: log.debug("git.watch %s refused: %s", cwd, r.msgid))
+        with self._lock:
+            self._watches[handle] = message
+        self._send_watch(message)
 
-    def unwatch(self, cwd: str) -> None:
+    def _send_watch(self, message: dict) -> None:
         link = self._link_of()
         if link is None:
             return
-        link.send({"t": "git.unwatch", "cwd": cwd}, on_refused=lambda r: None)
+        link.send(
+            message, on_refused=lambda r: log.debug("git.watch %s refused: %s", message.get("cwd"), r.msgid)
+        )
+
+    def unwatch(self, handle: str) -> None:
+        with self._lock:
+            self._watches.pop(handle, None)
+        link = self._link_of()
+        if link is None:
+            return
+        link.send({"t": "git.unwatch", "handle": handle}, on_refused=lambda r: None)
+
+    def watch_handles(self) -> tuple[str, ...]:
+        """The live watches' handles (a probe)."""
+        with self._lock:
+            return tuple(self._watches)
 
     def on_changed(self, cwd: str, listener: Listener) -> None:
         """Call *listener* with every `git-changed` event for *cwd* (the
@@ -181,18 +302,10 @@ class Mirror:
         cwd = event.get("cwd")
         if not isinstance(cwd, str):
             return
-        link = self._link_of()
         with self._lock:
-            previous = self._entries.get(cwd)
-        if link is not None and previous is not None:
-            message: dict = {"t": "git.info", "cwd": cwd}
-            if previous.refs:
-                message["known_refs"] = previous.refs
-            link.send(
-                message,
-                on_reply=lambda fields: self._store(cwd, fields, self.entry(cwd)),
-                on_refused=lambda r: None,
-            )
+            known = cwd in self._entries
+        if known:
+            self._refresh_async(cwd, False, False)
         for listener in list(self._listeners.get(cwd, ())):
             try:
                 listener(event)
@@ -248,8 +361,12 @@ class Transport:
         }
         if stdin:
             message["stdin"] = stdin.decode("utf-8", "replace")
+        # The margin over git's own timeout is at most the timeout itself:
+        # a 0.5 s budget (ignored_names, on the main loop) waits 1 s, not
+        # 10.5, for a service that does not answer.
+        margin = min(CALL_MARGIN_S, message["timeout"])
         try:
-            fields = apilink.call(message, timeout=message["timeout"] + CALL_MARGIN_S)
+            fields = apilink.call(message, timeout=message["timeout"] + margin)
         except RequestRefused as refusal:
             return gitops.GitResult(False, "", _words(refusal), unreachable=True)
         status = fields.get("status")
