@@ -2634,13 +2634,15 @@ class MainWindow(Adw.ApplicationWindow):
         tab.set_pr_store(self.store.pr_store)
         tab.set_panel_size_lookup(self._panel_size_seed)
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
-        # "commit" is everything the app sends this terminal's child — the
-        # keystrokes the user types, and the focus reports VTE emits on a tab
-        # switch — so the redraw that answers one is not the agent working.
-        # The text goes along so the gate can arm itself on the first submit.
+        # "commit" is what the VTE itself sends this terminal's child — the
+        # keystrokes the user types, and the focus and mouse reports it emits
+        # on a tab switch — so the redraw that answers one is not the agent
+        # working. The text goes along so a typed Enter arms the gate.
         watch(tab.terminal, "commit", self._on_terminal_commit, page)
-        # The app's own writes take the service's road, not the VTE's: the
-        # session announces them (see _on_input_sent).
+        # The app's own writes (an injected prompt, a switch, a close flow's
+        # keys) take the service's road, not the VTE's, so they never arrive
+        # as a commit: the session pokes its own gate and announces them
+        # (see _on_input_sent).
         watch(tab, "input-sent", self._on_input_sent, page)
         watch(tab.terminal, "contents-changed", self._on_terminal_output, page)
         # The agent's own busy signal, where the CLI and VTE both speak it —
