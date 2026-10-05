@@ -234,7 +234,13 @@ class FileTree(Gtk.Box):
         again = key in self._relist
         self._relist.discard(key)
         if self._shut or epoch != self._epoch or self._stores.get(key) is not store:
-            return  # re-rooted, forgotten or shut meanwhile: the rows are no one's
+            # Re-rooted, forgotten or shut meanwhile: the rows are no one's.
+            # A listing asked for the path's current store while this one
+            # was in flight waited on it (`_relist`): it runs now.
+            current = self._stores.get(key)
+            if again and not self._shut and current is not None:
+                self._list(Path(key), current)
+            return
         if kind == "ok":
             entries, _truncated = value
             self._splice(store, Path(key), entries)

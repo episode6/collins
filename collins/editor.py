@@ -717,7 +717,12 @@ class EditorPane(Gtk.Box):
             for path in paths:
                 if len(shown) >= _MAX_AGENT_FILES:
                     break
-                found = remotefiles.stat_path(path, root)
+                try:
+                    found = remotefiles.stat_path(path, root)
+                except RequestRefused as refusal:
+                    if refusal.error == protocol.ERROR_GONE:
+                        raise  # no service to ask: the list stays as it was
+                    continue  # a path the service won't stat (not absolute): not a row
                 if found.is_file and found.inside:
                     shown.append(str(Path(path)))
             return shown
