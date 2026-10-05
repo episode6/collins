@@ -328,8 +328,9 @@ each taken from the code the message replaces:
 - Links and root names (§3.23, PR-2.6; the same ``files`` cap). `fs.names`
   answers a root's non-directory names (at most FS_NAMES_MAX, and
   ``truncated``; a root the client may not name is refused unless it is
-  `local`), re-asked on the `dir-changed` of the watch the client holds
-  on the root. `store.transcript-tail` answers the links of a session's
+  `local`; ``names`` is a CHUNKED_JSON_FIELD, so 5000 long names travel
+  as TAG_BLOB frames past a frame), re-asked on the `dir-changed` of the
+  watch the client holds on the root. `store.transcript-tail` answers the links of a session's
   transcript's last 2 MiB, bounded as TRANSCRIPT_LINKS_MAX says: the
   client never opens the transcript.
 - Enumerations a client sends are closed (`choices`) and, where a request
@@ -459,10 +460,11 @@ ERRORS = frozenset(
 # ever chunked: the first of CHUNKED_FIELDS the message holds as text (or,
 # for CHUNKED_JSON_FIELDS, as a list).
 CHUNKED_FIELD = "stdout"
-CHUNKED_FIELDS = ("stdout", "text", "paths", "entries")
+CHUNKED_FIELDS = ("stdout", "text", "paths", "entries", "names")
 # Of CHUNKED_FIELDS, the lists (PR-2.4: `fs.walk`'s paths, `fs.list`'s
-# entries): chunked as their compact JSON, decoded back on joining.
-CHUNKED_JSON_FIELDS = frozenset({"paths", "entries"})
+# entries; PR-2.6: `fs.names`' names): chunked as their compact JSON,
+# decoded back on joining.
+CHUNKED_JSON_FIELDS = frozenset({"paths", "entries", "names"})
 CHUNKED_MAX = 64 * 1024 * 1024  # the most bytes a chunked field runs to, either way
 STREAM_MASK = 0xFFFF_FFFF
 
@@ -2376,6 +2378,10 @@ _TABLE: tuple[MessageType, ...] = (
             reply={
                 "names": _req(Field(K_LIST, high=FS_NAMES_MAX, item=_s(FS_NAME_MAX, low=1))),
                 "truncated": _req(_BOOL),
+                # Set by the transport when the names went ahead as
+                # TAG_BLOB frames (CHUNKED_JSON_FIELDS).
+                "names_chunked": _BOOL,
+                "names_bytes": _i(0, SIZE_MAX),
             },
         ),
     ),

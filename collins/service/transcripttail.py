@@ -26,7 +26,9 @@ from ..api import protocol
 from ..transcriptlinks import TAIL_BYTES, harvest_links, message_strings
 
 # How many transcripts' links the cache holds (one per session a person
-# is clicking in; a service hosts a handful of live ones).
+# is clicking in; a service hosts a handful of live ones). Least
+# recently used out first (a dict keeps its insertion order; a hit and a
+# store both move the path to the end).
 CACHE_ENTRIES = 8
 
 _lock = threading.Lock()
@@ -46,6 +48,8 @@ def read_links(path: str) -> list[str]:
     stamp = (st.st_size, st.st_mtime_ns)
     with _lock:
         cached = _cache.get(path)
+        if cached is not None:
+            _cache[path] = _cache.pop(path)  # most recently used goes last
     if cached is not None and cached[0] == stamp:
         return cached[1]
     try:
@@ -57,8 +61,9 @@ def read_links(path: str) -> list[str]:
         return []
     links = bound(harvest_links(message_strings(data)))
     with _lock:
-        if path not in _cache and len(_cache) >= CACHE_ENTRIES:
-            _cache.pop(next(iter(_cache)))
+        _cache.pop(path, None)
+        if len(_cache) >= CACHE_ENTRIES:
+            _cache.pop(next(iter(_cache)))  # the least recently used
         _cache[path] = (stamp, links)
     return links
 

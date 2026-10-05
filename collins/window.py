@@ -2486,7 +2486,10 @@ class MainWindow(Adw.ApplicationWindow):
             # the agent (_on_new_chat_send) — with the worktree decision as
             # the screen's checkbox then says, seeded from what was resolved
             # above. Nothing runs until then, so nothing is trusted or
-            # flagged here either.
+            # flagged here either. *is_git* is for the background branch
+            # below alone: here the checkout question is the screen's own
+            # (`TerminalTab.when_checkout_known` holds a Send until the
+            # service has answered).
             tab = TerminalTab(
                 cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
                 options=options, new_chat=True, worktree_default=worktree,

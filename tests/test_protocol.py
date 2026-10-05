@@ -918,7 +918,12 @@ REPLIES = {
         "entries_bytes": 2,
     },
     "fs.walk": {"paths": ["a.txt", "src/b.py"], "truncated": False, "paths_chunked": False, "paths_bytes": 2},
-    "fs.names": {"names": ["README.md", "pyproject.toml"], "truncated": False},
+    "fs.names": {
+        "names": ["README.md", "pyproject.toml"],
+        "truncated": False,
+        "names_chunked": False,
+        "names_bytes": 2,
+    },
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
@@ -1700,3 +1705,15 @@ def test_a_walks_paths_and_a_listings_entries_chunk_as_json():
     # A chunked list field whose JSON is not a list is refused at the join.
     odd = b'{"a": 1}'
     assert p.join_reply({**slim, "paths_bytes": len(odd)}, odd) is None
+
+
+def test_fs_names_chunks_as_json_like_a_walks_paths():
+    """PR-2.6 review: 5000 names of 255 characters are past a frame."""
+    names = [f"{index:05d}-{'n' * 249}" for index in range(p.FS_NAMES_MAX)]
+    reply = {"re": 4, "ok": True, "names": names, "truncated": False}
+    assert not isinstance(p.validate_response(reply, "fs.names"), p.Refusal)
+    frames, slim = p.split_reply(reply)
+    assert frames and "names" not in slim and slim["names_chunked"] is True
+    data = b"".join(p.unpack_frame(frame)[1] for frame in frames)
+    assert p.join_reply(slim, data)["names"] == names
+    assert "names" in p.CHUNKED_JSON_FIELDS and "names" in p.CHUNKED_FIELDS
