@@ -682,10 +682,62 @@ def test_the_upload_route_writes_a_pending_upload_and_refuses_past_the_cap(serve
         assert fh.read() == b"png-bytes"
     status, _b = _http_put(path, "session=sid-unknown&name=a.png", b"x", {})
     assert status == 403
-    # The cap is read off the headers: libsoup never buffers the body.
     monkeypatch.setattr(uploads, "MAX_BYTES", 4)
     status, _b = _http_put(path, "name=big.png", b"12345", {})
     assert status == 413
+    assert not (tmp_path / "uploads" / uploads.PENDING / "big.png").exists()
+
+
+def _rss_mib() -> int:
+    with open("/proc/self/status", encoding="ascii") as fh:
+        for line in fh:
+            if line.startswith("VmRSS"):
+                return int(line.split()[1]) // 1024
+    return 0
+
+
+def test_a_put_past_the_cap_is_refused_without_holding_its_body(served, tmp_path, monkeypatch):
+    """The real cap, a real body past it streamed over the socket (PR 612's
+    review): the 413 arrives and the service's memory never grows by the
+    body (the early handler turns accumulation off; libsoup drains it)."""
+    import socket
+    import threading
+
+    from collins import uploads
+
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    _server, path = served
+    length = uploads.MAX_BYTES + 1
+    answer = {}
+
+    def send() -> None:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(30)
+        conn.connect(path)
+        head = f"PUT /api/upload?name=big.png HTTP/1.1\r\nHost: x\r\nContent-Length: {length}\r\n\r\n"
+        conn.sendall(head.encode())
+        piece = b"\0" * (1024 * 1024)
+        sent = 0
+        try:
+            while sent < length:
+                sent += conn.send(piece[: length - sent])
+            answer["head"] = conn.recv(64)
+        except OSError as err:
+            answer["error"] = str(err)
+        conn.close()
+
+    before = _rss_mib()
+    peak = [before]
+    thread = threading.Thread(target=send, daemon=True)
+    thread.start()
+
+    def done() -> bool:
+        peak[0] = max(peak[0], _rss_mib())
+        return not thread.is_alive()
+
+    assert pump(30, done), "the PUT never finished"
+    assert answer.get("head", b"").startswith(b"HTTP/1.1 413"), answer
+    assert peak[0] - before < 32, f"RSS grew {peak[0] - before} MiB under a refused {length >> 20} MiB body"
     assert not (tmp_path / "uploads" / uploads.PENDING / "big.png").exists()
 
 

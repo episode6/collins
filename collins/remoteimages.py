@@ -236,14 +236,18 @@ def _read_capped(response, url: str, deadline: float, now) -> bytes:
 
     Read in chunks rather than in one `read()`: a socket timeout bounds each
     read but not their sum, and a slow drip is exactly how an unbounded
-    download looks from here.
+    download looks from here. `read1`, not `read(n)`: the latter waits for
+    all *n* bytes, so a server dripping a few bytes inside every socket
+    timeout would keep one read going past the deadline; `read1` answers
+    with whatever one receive brought, and the deadline is checked again.
     """
     chunks: list[bytes] = []
     total = 0
     while True:
         if now() > deadline:
             raise FetchError(f"Timed out after {TIMEOUT_SECONDS:g}s fetching {url}")
-        chunk = response.read(_CHUNK_BYTES)
+        reader = getattr(response, "read1", None) or response.read
+        chunk = reader(_CHUNK_BYTES)
         if not chunk:
             break
         total += len(chunk)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import gi
@@ -149,6 +150,9 @@ class EditorPane(Gtk.Box):
 
     def __init__(self, root: str | Path) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        # The session its tab names in a blob GET (the image tab's `kind=file`,
+        # D38); the tab sets it (TerminalTab.image_session).
+        self.image_session: Callable[[], str] = lambda: ""
         self._root = Path(root)
         self._open: dict[str, _OpenFile] = {}  # path str -> _OpenFile
         self._watched: dict[str, _OpenFile] = {}  # a watch's handle -> the file it watches
@@ -986,7 +990,7 @@ class EditorPane(Gtk.Box):
                 return
             self._show_image_page(key, path, paintable)
 
-        pictures.fetch(key, landed)
+        pictures.fetch(key, landed, session=self.image_session())
 
     def _show_image_page(self, key: str, path: Path, paintable) -> None:
         picture = Gtk.Picture.new_for_paintable(paintable)

@@ -459,7 +459,15 @@ at most 50 MiB (413), tagged `"<mtime µs>-<size>"` (304 free).
 (`~/.cache/collins/remote-images/<sha1 of url><suffix>`, a day) answers a
 PR body's image or a gallery row, downloading on a miss (502 when the fetch
 fails); show_image's `download` replaces the copy first. The client's copy
-is named by the answer's content type (`blobcache.fetch(url, None)`).
+is named by the answer's content type (`blobcache.fetch(url, None)`). Any attached client can therefore have the service GET any http(s) URL,
+localhost included (a body image is enough): deliberate for show_image and
+acceptable for one user's service whose clients already have a shell
+(§3.16); only image content types are answered. A show_image download is
+bounded from the call's start (`TOOL_BOUND_S` armed before the fetch: a
+dripping server answers "Timed out…", its late landing dropped), and
+`remoteimages` reads with `read1` so its 10 s deadline is checked between
+drips. The registry holds resolved paths only, and the GET compares the
+resolved path: a link swapped in at an admitted path is refused.
 
 `attachrecords.py` (GTK-free) is the per-session log of every image the
 session put on screen — lightbox showings (with captions, which always win),

@@ -623,3 +623,26 @@ def test_show_image_of_a_url_with_no_client_is_recorded_after_the_download(world
     assert got == (True, tools_mod.SHOW_IMAGE_RECORDED)
     (record,) = world["state"].attachments["sid-1"]
     assert record["key"] == "https://example.com/x.png"
+
+
+def test_show_image_of_a_dripping_url_answers_at_the_bound(world):
+    """The deferred is bounded from the start (PR 612's review): a download
+    that never lands answers the agent at TOOL_BOUND_S, and a late landing
+    forwards nothing."""
+    world["tools"]._fetch_remote = lambda url, done: world["holder"].update(done=done)
+    client = attach(world)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/drip.png"})
+    assert isinstance(got, mcptools.DeferredResult) and not got.resolved
+    (bound,) = [ms for ms, _fn, _args in world["timers"].due.values()]
+    assert bound == int(tools_mod.TOOL_BOUND_S * 1000)
+    world["timers"].fire_all()
+    assert got.result() == (False, "Timed out after 14s fetching https://example.com/drip.png")
+    world["holder"]["done"](None)
+    assert client.events == []
+
+
+def test_show_image_of_a_url_that_lands_cancels_its_bound(world):
+    world["tools"]._fetch_remote = lambda url, done: done(None)
+    attach(world)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/x.png"})
+    assert got == (True, "done") and world["timers"].due == {}

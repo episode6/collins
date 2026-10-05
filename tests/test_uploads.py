@@ -85,6 +85,11 @@ def test_the_cap_is_64_mib():
         uploads.write("sid-1", "big.bin", b"\0" * (uploads.MAX_BYTES + 1))
 
 
+def test_an_empty_upload_is_refused():
+    with pytest.raises(ValueError):
+        uploads.write("sid-1", "a.png", b"")
+
+
 def test_a_symlink_planted_as_the_sessions_directory_is_not_followed(uploads_root, tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -219,9 +224,11 @@ def test_the_put_refuses_an_unknown_session_a_bad_name_and_a_body_past_the_cap(u
     assert _put(feed, "session=sid-9&name=a.png", b"x")[0] == 403
     assert _put(feed, "session=..&name=a.png", b"x")[0] == 400
     assert _put(feed, "session=sid-1&name=..", b"x")[0] == 400
+    assert _put(feed, "session=sid-1&name=a.png", b"")[0] == 400  # an empty body names nothing
     monkeypatch.setattr(uploads, "MAX_BYTES", 4)
     assert _put(feed, "session=sid-1&name=a.png", b"12345")[0] == 413
     assert not (uploads_root / "sid-9").exists()
+    assert not (uploads_root / "sid-1").exists()
 
 
 # -- the client's end ---------------------------------------------------------------

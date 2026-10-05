@@ -1917,6 +1917,7 @@ class TerminalTab(Gtk.Box):
         # A move the editor queued while its follow dialog was up is judged
         # again by the service (`cwd.settle` with `judge`, PR-2.4).
         self._editor.set_follow_judge(self.session.judge_cwd)
+        self._editor.image_session = self.image_session
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._outer.set_wide_handle(True)

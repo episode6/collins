@@ -58,9 +58,9 @@ work on a thread and answers through *respond* on the main loop (`git`,
 `PUT /api/upload?session=&name=` (PR-2.7) is a drop's or a paste's bytes,
 handed to `core.upload_blobs.put` and answered with the written path as
 JSON; its cap (`uploads.MAX_BYTES`) is checked on the headers by an early
-handler (411 with no Content-Length, 413 past the cap), so libsoup never
-buffers a body the cap refuses. Both name their client by the
-``Collins-Client`` header.
+handler (411 with no Content-Length, 413 past the cap), which also turns
+the body's accumulation off, so a refused body is drained and dropped,
+never held. Both name their client by the ``Collins-Client`` header.
 
 Gio and libsoup only; nothing here imports GTK.
 """
@@ -731,8 +731,14 @@ class ApiServer:
 
     def _on_upload_headers(self, _server, msg: Soup.ServerMessage, _path, _query, *_rest) -> None:
         """A PUT's headers, before its body: no Content-Length (a chunked
-        body) is 411 and one past `uploads.MAX_BYTES` 413, so libsoup
-        never buffers a body the cap refuses."""
+        body) is 411 and one past `uploads.MAX_BYTES` 413. A status set
+        here does not stop libsoup reading the body (it reads the whole
+        declared length before it answers), so the body is also told not
+        to accumulate: the refused bytes are drained off the socket and
+        dropped, never held — the service's memory stays flat under a
+        64 MiB+ PUT, and the 413 arrives once the body is through. (A
+        well-behaved client checks the size before it sends:
+        `remoteuploads.upload`.)"""
         if msg.get_method() != "PUT":
             return
         headers = msg.get_request_headers()
@@ -740,11 +746,17 @@ class ApiServer:
             msg.set_status(411, None)
         elif headers.get_content_length() > uploads.MAX_BYTES:
             msg.set_status(413, None)
+        else:
+            return
+        msg.get_request_body().set_accumulate(False)
 
     def _on_upload(self, _server, msg: Soup.ServerMessage, _path, _query, *_rest) -> None:
         """`PUT /api/upload?session=&name=` (§3.11, PR-2.7): the body to
         `service.blobs.UploadBlobs.put` (the write on its thread), the
-        path back as JSON. The client is named as a blob GET names it."""
+        path back as JSON. The client is named as a blob GET names it,
+        and an unknown or absent ``Collins-Client`` is not refused: `put`
+        confines by the session id, and whoever reaches this 0600 socket
+        is the service's own uid (§3.16 — the socket is the credential)."""
         if msg.get_status() in (411, 413):
             return  # refused on the headers
         if not self.accepting or msg.get_method() != "PUT":

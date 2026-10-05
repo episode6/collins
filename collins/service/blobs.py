@@ -32,7 +32,13 @@ the main loop — and the `PUT /api/upload` the server hands its body to:
 - **`PUT /api/upload?session=<id>&name=<basename>`** (`UploadBlobs.put`):
   the body written by `uploads.write` under the session's directory, or
   the pending one with no `session` (D37); the reply is JSON
-  ``{"path": …}``. A session id the service doesn't know is `403`.
+  ``{"path": …}``. A session id the service doesn't know is `403`, an
+  empty body `400`.
+
+`kind=remote` lets any attached client have the service GET any http(s)
+URL, localhost included — deliberate for show_image (a dev server's plot)
+and acceptable for one user's service, whose every client is already
+trusted with a shell (§3.16); it answers only image content types.
 
 GLib only; nothing here imports GTK.
 """
@@ -97,15 +103,17 @@ class ImageRegistry:
         self._paths: OrderedDict[str, OrderedDict[str, None]] = OrderedDict()
 
     def admit(self, keys, path: str) -> None:
+        """Hold *path*'s resolved path for each key (D38: the exact
+        resolved path; a link swapped in later points at a file nobody
+        admitted)."""
         real = os.path.realpath(path)
         for key in keys:
             if not key:
                 continue
             held = self._paths.setdefault(key, OrderedDict())
             self._paths.move_to_end(key)
-            for one in {path, real}:
-                held[one] = None
-                held.move_to_end(one)
+            held[real] = None
+            held.move_to_end(real)
             while len(held) > REGISTRY_PER_SESSION:
                 held.popitem(last=False)
             while len(self._paths) > REGISTRY_SESSIONS:
@@ -124,13 +132,15 @@ def _session_records(core, key: str):
             yield session
 
 
-def agent_named(core, key: str) -> frozenset[str]:
-    """Every path the session *key*'s agent exposed (D38): its show_image
-    paths and the images the service's transcript scan of it found.
-    Main loop (the records and the scan are the main loop's)."""
+def agent_named(core, key: str) -> tuple[frozenset[str], frozenset[str]]:
+    """What the session *key*'s agent exposed (D38): (the resolved paths
+    its show_image calls named, the image paths the service's transcript
+    scan of it found — resolved by the caller, on its worker). Main loop
+    (the records and the scan are the main loop's)."""
     if not key:
-        return frozenset()
-    found = set(getattr(core, "image_registry", ImageRegistry()).paths(key))
+        return frozenset(), frozenset()
+    admitted = getattr(core, "image_registry", ImageRegistry()).paths(key)
+    found: set[str] = set()
     for session in _session_records(core, key):
         try:
             seen = session.transcript.attachments()
@@ -139,7 +149,7 @@ def agent_named(core, key: str) -> frozenset[str]:
         for one in seen:
             if not getattr(one, "remote", False) and isinstance(one.key, str) and one.key.startswith("/"):
                 found.add(one.key)
-    return frozenset(found)
+    return admitted, frozenset(found)
 
 
 def known_session(core, session_id: str) -> bool:
@@ -248,15 +258,15 @@ class FileBlobs(_Feed):
         # What the worker confines to, gathered here on the main loop where
         # the store, the records and the registry live.
         roots = None if local else files.roots(self.core)
-        named = frozenset() if local else agent_named(self.core, session)
+        admitted, seen = (frozenset(), frozenset()) if local else agent_named(self.core, session)
 
         def work() -> tuple[int, dict, bytes]:
             real = os.path.realpath(path)
             if roots is not None and not (
                 any(editorfiles.is_inside(root, real) for root in roots)
                 or uploads.inside(real, session or None)
-                or path in named
-                or real in named
+                or real in admitted
+                or real in {os.path.realpath(key) for key in seen}
             ):
                 return 403, {}, b""
             if not editorfiles.is_image_path(real):
@@ -394,6 +404,9 @@ class UploadBlobs(_Feed):
             return
         if len(body) > uploads.MAX_BYTES:
             self._answer(respond, 413)
+            return
+        if not body:
+            self._answer(respond, 400)  # an empty upload is nothing to mention
             return
         if session is not None and not known_session(self.core, session):
             self._answer(respond, 403)

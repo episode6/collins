@@ -1832,16 +1832,19 @@ class ServiceCore:
         self.sweep_pending_uploads()
         return True
 
-    def sweep_pending_uploads(self) -> list[str]:
+    def sweep_pending_uploads(self) -> None:
         """The uploads made with no session id (D37) that are older than a
-        week go (`uploads.sweep_pending`). Never raises."""
+        week go (`uploads.sweep_pending`: a scandir and an unlink per
+        entry, so on a thread, never the main loop). Never raises."""
         from .. import uploads
 
-        try:
-            return uploads.sweep_pending()
-        except Exception:
-            log.warning("pending uploads sweep failed", exc_info=True)
-            return []
+        def sweep() -> None:
+            try:
+                uploads.sweep_pending()
+            except Exception:
+                log.warning("pending uploads sweep failed", exc_info=True)
+
+        gitfeed.spawn_default(sweep, "pending-sweep")
 
     def sweep_archived(self) -> list[str] | None:
         """Ask autodelete whether a sweep is due (the setting and the

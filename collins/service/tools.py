@@ -303,8 +303,24 @@ class SessionTools:
                 return self._show_image_on(session, dict(args), sandboxed)
             deferred = mcptools.DeferredResult()
             started = self._clock()
+            # Bounded from the start: a download that outruns the bound (a
+            # server dripping bytes) answers the agent at TOOL_BOUND_S,
+            # under the shim's own timeout, and its landing is dropped.
+            timer = [0]
+
+            def timed_out() -> bool:
+                timer[0] = 0
+                deferred.resolve(False, f"Timed out after {TOOL_BOUND_S:g}s fetching {raw}")
+                return False
+
+            timer[0] = self._timeout_add(int(TOOL_BOUND_S * 1000), timed_out)
 
             def fetched(failure: str | None) -> None:
+                if timer[0]:
+                    self._source_remove(timer[0])
+                    timer[0] = 0
+                if deferred.resolved:
+                    return  # the bound answered first
                 if failure is not None:
                     deferred.resolve(False, failure)
                     return
@@ -322,7 +338,8 @@ class SessionTools:
         return self._show_image_on(session, {**args, "path": key}, sandboxed)
 
     def admit_image(self, session, path: str) -> None:
-        """Record *path* as one the session's agent named (D38)."""
+        """Record *path* as one the session's agent named (D38): its
+        resolved path, which is what a `kind=file` GET is compared by."""
         if self.registry is not None:
             self.registry.admit((session.session_id, getattr(session, "handle", None)), path)
 

@@ -528,7 +528,10 @@ trashes `~/.local/share/collins/uploads/<id>/` with the transcript
 (`_trash_uploads`, unlinked when the trash refuses the mount) and `delete`
 unlinks it — the archive sweep runs through `trash_many` too; the pending
 uploads (`_pending/`, made with no id) are no session's and go after a week
-on the service's housekeeping tick (`ServiceCore.sweep_pending_uploads`).
+on the service's housekeeping tick (`ServiceCore.sweep_pending_uploads`, on
+a thread). An empty upload is refused (400), and one past 64 MiB is 413 on
+its headers with the body drained, never held (`set_accumulate(False)` in
+the early handler).
 
 **Adding and cloning projects.** The sidebar header's folder button is a
 `Gtk.MenuButton`: *Open folder…* (`win.add-project`, a `Gtk.FileDialog`)
