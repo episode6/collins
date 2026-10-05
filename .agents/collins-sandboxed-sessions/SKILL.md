@@ -235,8 +235,10 @@ read_plan` plus an `inputs` check (version 2, a box id, the box's paths);
 re-issues a plan with `--chdir` changed (`cwd` recorded beside
 `workspace`) and every path under the parent's box moved to the
 sibling's.
-The service owns one (`ServiceCore.start_sandbox_host`, `core.sandbox_host`,
-PR-1.12a; the live grants beside it as `core.sandbox_grants`); the window
+The service owns one (`ServiceCore.start_sandbox_host`, `core.sandbox_host`;
+the live grants beside it as `core.sandbox_grants`): the boxes, grants,
+sweeps and probe are the service's, and so are the lease pid, the bindfs
+fsname and `PR_SET_PDEATHSIG`. The window
 reaches it only through requests (`sandbox.forget` for a forgotten
 transcript's box, `sandbox.derive` / `sandbox.drop` for a sibling's plan).
 Rule 5 holds on both: `sandbox.drop` releases only a plan file this
@@ -364,29 +366,28 @@ changes no session that exists.
 
 | The session is | Its box | Its grants at launch |
 | --- | --- | --- |
-| new (Send, the header button, a project row) | `mint_box(cwd)` by its tab | the project's defaults |
+| new (Send, the header button, a project row) | `mint_box(cwd)` by the session on the service (`Session._launch_command`) | the project's defaults |
 | resumed | the one the state maps it to | that box's |
 | resumed with no box (`""`) | `mint_box(cwd)` by the service at the spawn (`ServiceCore._box_for_launch`) | the project's defaults |
 | a fork | `mint_box(cwd, seed=False)` by the service at the spawn (`_box_for_launch`) | a copy of its origin's, taken once |
-| a `--continue` tab | `mint_box(cwd, seed=False)` by its tab | none until it resolves |
+| a `--continue` tab | `mint_box(cwd, seed=False)` by its session on the service | none until it resolves |
 | a sibling of a sandboxed parent | `mint_box(cwd, seed=False)` by `derive` | its parent's static grants as launched |
-| a sibling of an unsandboxed parent | `mint_box(cwd)` by its tab | the project's defaults |
+| a sibling of an unsandboxed parent | `mint_box(cwd)` by its session on the service | the project's defaults |
 | the same conversation under a forwarded id | the same box | the same |
 
 `host.settle_box(session_id, box, workspace, owed)` is what the
 service's `ServiceCore.session_resolved` calls when the resolver binds
-(what `MainWindow._settle_sandbox_box` did before PR-1.12a; the window
-mints and settles nothing since, verified for PR-1.12d): for a
-`--continue` tab (`tab.take_sandbox_defaults_owed()`) whose session
-already had a box, the tab's box takes over that box's grants and the
+(the window mints and settles nothing): for a
+`--continue` session (`session.take_sandbox_defaults_owed()`) whose session
+already had a box, the session's box takes over that box's grants and the
 old box is forgotten; one whose session had none is seeded with the
 defaults then. It answers whether `GrantMounts.sync(box)` is owed.
 
 **Forgetting.** Grants leave the state with their box.
 `host.forget_box(box)` (main loop) drops the grants of a box no session
 names and then asks `discard_box_async`; **every caller outside
-`sandboxplan.py` uses it, never `discard_box_async`** — the tab at its
-shell's exit (landed on the main loop first), a launch that couldn't be
+`sandboxplan.py` uses it, never `discard_box_async`** — the session at its
+shell's exit, a launch that couldn't be
 prepared, the `--continue` takeover, a forgotten transcript (the
 service's `ServiceCore.forget_session`, behind `store.forget`), every
 `start_session` refusal that drops a sibling's box.
@@ -403,7 +404,7 @@ nothing. `discard_box` has no such check: it is only called for a box
 this instance's own state named or its own tab minted.
 
 **The tab.** The launch is the session's (`collins/service/session.py`,
-the service's since PR-1.12a; the tab's mirror forwards `sandboxed`,
+on the service; the tab's mirror forwards `sandboxed`,
 `sandbox_plan_path`, `sandbox_box`, `restart_sandboxed` and the rest, off
 the `session` event's sandbox fields): every method named here and under
 the restart below lives there.
@@ -437,13 +438,13 @@ too, in its own home. A resume or fork opened with no box of its own is
 minted one on the service at its spawn (`ServiceCore._box_for_launch`: a
 fork's seeded with a copy of its origin's grants and tool switches), and
 a resolving session's box is recorded and settled there
-(`ServiceCore.session_resolved`, what `MainWindow._settle_sandbox_box`
-did).
+(`ServiceCore.session_resolved`). **Known, unfixed:** a sandboxed fork
+whose spawn then fails leaves the box `_box_for_launch` minted for it.
 
 **Also.** A restart keeps the tab's box. A sandboxed panel shell runs in
 the session's, since it runs the session's plan file. A trashed or
 deleted transcript: the window's `_forget_transcript` asks
-`store.forget {session}` and waits for the reply (PR-1.12d, spec §3.22),
+`store.forget {session}` and waits for the reply,
 and the service's `ServiceCore.forget_session` clears the entry's box
 and forgets the box — unlinked, not trashed, its grants gone with it,
 kept while a live session runs in it — while the sticky flag stays, so a
@@ -531,7 +532,7 @@ at {inside}" (live, not linked), "… — restart the session to apply"
 `sandbox.revoke` (`host.revoke` then `grants.revoke` on the service), and
 the popover is drawn again when its event lands.
 
-**The chip is a client** (PR-1.11, split spec §3.9). Everything above is
+**The chip is a client** (split spec §3.9). Everything above is
 decided on the service (`service/sandbox.py`, `SandboxRequests`) from its
 own records, by the box the request names (and the asking session's
 `handle`, whose restart it is): `sandbox.plan` (the plan the box launched
@@ -557,7 +558,7 @@ reaches `MainWindow._on_tab_toast` (markup-escaped, over the sidebar's
 toast overlay).
 
 **Live grants (`sandboxgrants.py`, GTK-free).** One `GrantMounts(host)`
-per service (`ServiceCore.sandbox_grants`, PR-1.12a; the sessions reach it
+per service (`ServiceCore.sandbox_grants`; the sessions reach it
 through the core); it owns every mount this instance made.
 
 - **One worker thread**, `sandbox-grants`, fed by a queue and alive until
@@ -717,7 +718,7 @@ sandboxed=True)` / the strip menu's *New sandboxed shell* (offered while
 `set_sandboxed_shell_offer` says there is a plan) are the ways in;
 `TerminalTab.open_sandboxed_shell(focus)` opens one beside the last shell
 or in a strip of its own on the home edge. The shell
-(PR-1.8) asks the service for a `shell` pty with `sandbox` and
+asks the service for a `shell` pty with `sandbox` and
 the session's box id, and the service spawns the same launcher argv on the
 plan its records hold for that box (`ServiceCore`'s `sandbox_plan`; the
 pty keeps the plan, which is the shell's `sandbox_plan`) and queues the
@@ -736,7 +737,7 @@ flag"** — so nothing about it is the caller's to say:
 - **Where it is decided.** `mcptools.run_tool_call(..., is_offered=)`,
   after the arguments, the global switch and the identity, before any
   handler: `SessionTools.tool_offered(session, tool)` (service/tools.py;
-  `App._mcp_tool_offered` until PR-1.11, moved word for word) is True for
+  the service's) is True for
   a session that isn't `sandboxed`, else
   the service host's `tool_enabled(session.sandbox_box, tool)`. The session is
   the one the peer's `SO_PEERCRED` pid walks up to; `session.sandboxed`

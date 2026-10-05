@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-02. Full change history: git log for this file.
+fork. Last modified: 2026-10-05. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -34,6 +34,27 @@ sidebar row simply stays put. Older CLI versions instead forked the
 conversation to a new session id; when that happens, Collins tracks the
 forwarding so the old sidebar row is replaced by the live one and names,
 favorites, emoji, and panel state carry over.
+
+## Two processes
+
+Collins is a window and a service. `collins-service` is a plain Python program
+on a GLib main loop that imports no GTK: it owns the agents' ptys, the screen
+model of each, the session store and `state.json`, the `gh` and `git` calls,
+the session tools' MCP socket, the sandboxes and everything that spends
+tokens. The window connects to it over a Unix socket (one WebSocket per
+window, JSON frames for requests and events, binary frames for terminal bytes)
+and keeps mirrors of the service's store and settings; every write is a
+request and every change comes back as an event. A window that goes away,
+however it goes, changes nothing on the service except "no client is attached".
+
+Each session's logic (launching the agent, reading and typing into the CLI's
+input box, finding a new session's transcript, the graceful close) is a
+`Session` on the service, and busy / finished-run detection and the `/bg`
+bookkeeping are the service's too, so they keep working with no window open.
+The window shows what the service says and asks for what you do. A window
+terminal is a childless VTE painted from the service's output stream for its
+pty, so a fresh window attaching mid-turn is redrawn from the screen model.
+Details, startup and what quitting means are on [The service](/guide/service).
 
 ## Worktrees
 
@@ -220,7 +241,10 @@ moves the keys over and keeps a copy of the old file as
 `state.json.pre-split`, which an older version can be pointed back at by
 renaming it over `state.json`. The headless runs' scratch directory is
 `~/.config/collins/title-scratch/` beside them.
-The terminal panel's per-session scrollback lives in
+The service keeps its socket, its lock and its local proof in
+`$XDG_RUNTIME_DIR/collins/<app id>/` (`api.sock`, `service.lock`,
+`local-proof`), and which tabs this window had open in `ui-state.json`
+(`open_tabs`). The terminal panel's per-session scrollback lives in
 `~/.local/state/collins/panel_history/` (one file per panel tab), and the
 sidebar's Chats project in `~/.local/share/collins/chats/`. Each sandboxed
 session has a box of its own — its `$HOME` inside the sandbox — under
@@ -239,8 +263,10 @@ Each session tab embeds a [VTE](https://gitlab.gnome.org/GNOME/vte) terminal —
 widget behind GNOME Terminal and Ptyxis. The app spawns your `$SHELL` and types
 the agent's resume command (e.g. `claude --resume <id>`) into it, so your
 aliases and environment apply and you drop back to a prompt when the agent
-exits. The secondary panel terminal is another VTE running a plain shell —
-the same widget, minus the agent. The git page has no terminal in it: its
+exits. The VTE is a view: the shell runs on a pty of the service, so the
+terminal outlives the window that shows it. The secondary panel terminal is
+another such view of a plain shell on the service — the same widget, minus
+the agent. The git page has no terminal in it: its
 diff is drawn by Collins from one `git diff` / `git show` read per load
 (`gitops.read_diff`, parsed by `diffmodel`), one GtkSourceView per hunk in
 the editor's style scheme, and its staging arithmetic (`gitpatch`) writes
@@ -302,8 +328,9 @@ Preferences says so.
 
 ## The stack
 
-Collins is built with **GTK4**, **libadwaita**, **VTE**, and
-**PyGObject** — pure Python, no build step. VTE is the deciding factor: it's the
+Collins is built with **GTK4**, **libadwaita**, **VTE**, **libsoup 3** (the
+socket between the window and its service) and **PyGObject** — pure Python, no
+build step. VTE is the deciding factor: it's the
 only production-grade embeddable terminal on Linux, which is why the app is
 Linux-native. The data layer (session discovery, parsing, state, titles,
 usage, git info) is GTK-free and unit-tested.
@@ -368,7 +395,11 @@ collins/
 ├── newchatview.py    # the new-chat screen itself
 ├── editor.py         # the editor panel (GtkSourceView)
 ├── docktree.py       # the panel docking tree: strips, splits, moves
-├── mcpserver.py      # the in-app MCP server sessions can call
+├── connection.py     # how the window finds, starts and reconnects to its service
+├── clientsession.py  # the window's mirror of one session on the service
+├── api/              # the socket's protocol, server (service) and client (window)
+├── service/          # collins-service: the core, pty server, sessions, tracker, background agents
+├── mcpserver.py      # the MCP socket sessions call, run by the service
 ├── mcptools.py       # the tools it offers (notify, spawn, show_image, …)
 ├── prstore.py        # single source of truth for pull request state (gh)
 ├── prview.py         # the in-app pull request page

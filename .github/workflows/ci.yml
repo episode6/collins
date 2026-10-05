@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 name: CI
 
@@ -126,6 +126,9 @@ jobs:
           dpkg -x dist/collins_*_all.deb /tmp/deb-root
           cd /tmp
           PYTHONPATH=/tmp/deb-root/usr/lib/python3/dist-packages python3 -c "import collins.app; print(collins.app.__file__)"
+          # The session service's command and its (never enabled) user unit.
+          test -x /tmp/deb-root/usr/bin/collins-service
+          test -f /tmp/deb-root/usr/lib/systemd/user/collins-service.service
 
   # Everything release.yml's ppa job does short of signing and uploading, in
   # the same images -- so a build-dep an image lacks fails a PR here, not the
@@ -177,6 +180,9 @@ jobs:
           test -f /usr/share/metainfo/com.episode6.Collins.metainfo.xml
           test -f /usr/share/icons/hicolor/scalable/apps/com.episode6.Collins.svg
           test -x /usr/bin/collins
+          # The session service: its command and its (never enabled) user unit.
+          test -x /usr/bin/collins-service
+          test -f /usr/lib/systemd/user/collins-service.service
           # The action icons ride inside the wheel (app.py's _PACKAGE_ICONS);
           # from / so the import resolves to the installed copy, not the checkout.
           cd /

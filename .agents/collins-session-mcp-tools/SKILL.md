@@ -91,7 +91,7 @@ import it. It holds:
 - `TYPES`: every message type, each with a request form (always client →
   service, with the fields of its ok reply) and/or an event form (either
   way, the sender recorded). `state.set` and `seen` have both. The set of
-  names is pinned against the spec's Phase 1 list; a new type is a
+  names is pinned against the spec's list; a new type is a
   deliberate edit there, and ships behind a name in `CAPABILITIES`.
 - Field specs (`Field`: kind, bounds, pattern, choices, nested shapes).
   Every string is bounded, every list and map capped, free JSON (state
@@ -128,17 +128,19 @@ field shape chosen beyond the spec's text; read it before adding a field.
 
 ## Identity and dispatch (`service/tools.py`, `toolclient.py`)
 
-Since PR-1.11 the dispatcher is the service's: `SessionTools` (built by
-`ServiceCore.start_tools`, reachable as `app.session_tools`; the core also
-starts the socket, `start_mcp`). There is no session id in an MCP server's
+The dispatcher is the service's: `SessionTools` (built by
+`ServiceCore.start_tools`; the core also runs the MCP socket, `start_mcp`,
+so `mcp.sock` belongs to the `collins-service` process and an agent keeps its
+tools with no window open; the window's half is `app.tool_client`). There is no session id in an MCP server's
 environment. `SessionTools.find(pid)` walks the shim's `/proc` ancestry
 (`proctree.ancestor_pids`) and asks every `Session` the service holds
-`owns_pid_ancestors` (`ServiceCore.sessions`, the service's own since
-PR-1.12a) — so a tool acts on the session whose shell the
-CLI descends from. Anything not launched from a tab (a daemon-hosted `/bg`
-job, whose ancestry tops out at systemd; a closed tab) gets a clean "not
-from a Collins session" error. `list_tools`, `tool_enabled` and
-`tool_offered` are `App._mcp_*`'s as they were, over the Session (§5 of the
+`owns_pid_ancestors` (`ServiceCore.sessions`: a `hosting.SessionRecord`
+per live agent pty) — so a tool acts on the session whose shell the
+CLI descends from, the pid being the kernel's (`SO_PEERCRED`), never the
+shim's word. Anything not launched from a session's pty (a daemon-hosted
+`/bg` job, whose ancestry tops out at systemd; an ended session) gets a
+clean "not from a Collins session" error. `list_tools`, `tool_enabled` and
+`tool_offered` are over the Session (§5 of the
 split spec: nothing a sandboxed session is offered or refused changes;
 `tests/test_service_tools.py` pins the parity), reading the service's
 settings.
@@ -156,9 +158,9 @@ answers inside the event, so a call that finishes at once still returns
 `(ok, text)` at once (`_settled`) — the e2e checks rely on it. The client
 half is `toolclient.ToolClient` (`app.tool_client`): it finds the tab by
 the Session's `handle` (an unresolved session is still found) and runs
-`<tool>(found, args, sandboxed)` with `found = (window, tab)` — the old
-`App._mcp_<tool>` bodies, `_ShowDiff`, `_BackgroundSpawn` and the
-per-root spawn queue (`app._start_session_chains`, shared). **With no
+`<tool>(found, args, sandboxed)` with `found = (window, tab)` —
+`_ShowDiff`, `_BackgroundSpawn` and the per-root spawn queue
+(`app._start_session_chains`, shared). **With no
 client attached** each tool does what §3.7 says (`_headless_<tool>`):
 `open_in_editor` replies that no window is open; `show_image` records the
 attachment; `notify_user` records an unread row in the service's history
@@ -169,8 +171,8 @@ service's `diffnotes` store over its own read of the diff (`service/
 diffs.py`); `read_terminal` / `run_in_terminal` reach the session's shell
 ptys on the pty server (`run_in_terminal` opens at most one shell of its
 own per session, reused and refused when busy, closed when the session's
-agent pty exits); `start_session` is still refused with no client (its
-client half spawns a tab; a service-side spawn is PR-1.12d's). With a
+agent pty exits); `start_session` is refused with no client
+(`START_NEEDS_CLIENT`: its client half spawns a tab). With a
 client, the tab is found by the event's `handle`
 (`ToolClient.found_for_handle`, `found_for_pid` through
 `SessionTools.find`); the sibling's derived plan and box come from the
@@ -286,7 +288,7 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   (`window._sandbox_for_new_session`); a sandboxed parent's sibling runs
   on the parent's *launched* plan re-issued for its directory and for a
   box of its own — the service host's `derive` (the `sandbox.derive`
-  request, PR-1.12a) returns (plan file, box id, reason), records the parent's launch-time grants as the sibling's
+  request) returns (plan file, box id, reason), records the parent's launch-time grants as the sibling's
   own list (grants are a session's: nothing the parent holds live or is
   allowed later reaches the sibling, and it takes no project defaults),
   and both ride in the options (`sandbox_plan`,
@@ -318,8 +320,8 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   command` queues input until the pty exists. Multi-line input feeds each
   newline as Enter — `sudo` then eats the next line as its password, so
   privileged sequences must be one `a && b` line.
-- Over the pty server (PR-1.8) the
-  handlers are unchanged: the panel shell routes. `capture_contents()` is
+- The panel shell is a client view of a `shell` pty on the service:
+  the handlers route through it. `capture_contents()` is
   the service's screen model of the shell's pty, `has_running_command()`
   the pty server's foreground read, `run_command` input frames to the
   service, and a shell opened for the call is spawned there (a sandboxed
@@ -349,8 +351,14 @@ shim — so it should arm and ride the busy→idle finish edge
    the `docs/guide/how-it-works.md` token-use list.
 5. An e2e check with a real `App`: either call the client half directly
    (`app.tool_client.<name>(found, args)`: `scripts/check_terminal_tools.py`,
-   `check_start_session.py`) or the dispatcher (`app.session_tools.
-   dispatch(pid, tool, args)`, `check_sandbox_policy.py`), or go
+   `check_start_session.py`) or the service's dispatcher through the probe door
+   (`debug_tools_list` / `debug_tools_dispatch` / `debug_tools_result` on
+   the core, served only to a service started with `COLLINS_DEBUG_API=1`,
+   which every check's service is: `check_sandbox_policy.py`; a UI-bound
+   tool answers a deferred id the check polls, since the check is the
+   client). A tool's canned data inside the service (gh, models) is
+   `scripts/e2e_stubs.py`, never a monkeypatch in the check's process: the
+   service is another process. Or go
    the whole way through the socket as `check_show_diff.py` does — its
    `claude` stub spawns the real `collins.mcp_shim` from the tab's
    `--mcp-config` file (so the shim's ancestry reaches the tab and the
