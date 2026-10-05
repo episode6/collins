@@ -2,7 +2,24 @@ import pytest
 
 gi = pytest.importorskip("gi")
 
-from collins import openwith  # noqa: E402
+from collins import apilink, openwith  # noqa: E402
+
+
+class _Link:
+    """The app's link as the local extras read it: only its `local` proof."""
+
+    def __init__(self, local: bool) -> None:
+        self.local = local
+
+
+@pytest.fixture(autouse=True)
+def local_link(monkeypatch):
+    """Launching an app is a local extra (split-service spec §3.12): these
+    tests run as a client on the service's machine, as the app did before
+    the split; the ones at the end of the file run as one that is not."""
+    link = _Link(True)
+    monkeypatch.setattr(apilink, "_current", link)
+    return link
 
 
 class _FakeAppInfo:
@@ -418,3 +435,30 @@ def test_open_file_with_says_what_went_wrong(monkeypatch, tmp_path):
     assert openwith.open_file_with("gone.desktop", str(path)) == "gone.desktop is not installed"
     # An app that can't take a file (its Exec line has no placeholder).
     assert openwith.open_file_with("term.desktop", str(path)) == "Couldn't open f.txt with Fake Terminal"
+
+
+# -- not local: none of it (split-service spec §3.12, PR-2.8) ---------------------------------
+
+
+def test_a_client_that_is_not_local_lists_no_apps_for_a_file(monkeypatch, tmp_path, local_link):
+    monkeypatch.setattr(openwith.footerapps, "resolve_apps", lambda ids: [])
+    monkeypatch.setattr(openwith, "default_file_app", lambda path: None)
+    assert openwith.file_open_with_entries([], str(tmp_path / "f.txt"))  # local: never empty
+    local_link.local = False
+    assert openwith.file_open_with_entries([], str(tmp_path / "f.txt")) == []
+    monkeypatch.setattr(apilink, "_current", None)  # no link at all is not local either
+    assert openwith.file_open_with_entries([], str(tmp_path / "f.txt")) == []
+
+
+def test_a_client_that_is_not_local_launches_nothing(monkeypatch, tmp_path, local_link):
+    """No read of this device's disk and no process: the file and the
+    folder are paths on the service's machine."""
+    local_link.local = False
+    path = tmp_path / "f.txt"
+    path.write_text("x")
+    spawned = []
+    monkeypatch.setattr(openwith.subprocess, "Popen", lambda *a, **k: spawned.append(a))
+    monkeypatch.setattr(openwith.shutil, "which", lambda name: spawned.append(name) or "/usr/bin/" + name)
+    assert openwith.open_file_default(str(path)) is False
+    openwith.launch_terminal(_FakeAppInfo("ptyxis.desktop", "ptyxis"), str(tmp_path))
+    assert spawned == []

@@ -2605,6 +2605,16 @@ class App(Adw.Application):
         self._scheme_provider.load_from_data((_SCHEME_CSS % colors).encode())
 
     @property
+    def local(self) -> bool:
+        """Whether this window runs on the service's machine: the link's
+        `local` proof (D11), read through `apilink.is_local`, the one
+        reader. What the local extras hang on (§3.12): external apps,
+        "Reveal" in the file manager, Open in Ghostty, `file:` URIs on
+        the clipboard, a dropped file's own path. Not local, they are
+        hidden, never greyed out."""
+        return apilink.is_local()
+
+    @property
     def caffeine_enabled(self) -> bool:
         """Whether Caffeine Mode is on, as the user sees it: an inhibitor
         held, or an Until-idle mode dozing — still armed, just not holding

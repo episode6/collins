@@ -475,7 +475,8 @@ class PreferencesDialog(Adw.Dialog):
     def _browse_clone_directory(self) -> None:
         picker = Gtk.FileDialog(title=_("Choose the folder new clones go in"))
         current = clonerepo.parent_directory(self._state.get_setting("clone_directory"))
-        if os.path.isdir(current):
+        # The native chooser is a `local` client's (§3.11).
+        if apilink.is_local() and os.path.isdir(current):
             picker.set_initial_folder(Gio.File.new_for_path(current))
 
         def picked(picker: Gtk.FileDialog, result) -> None:

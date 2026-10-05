@@ -5909,6 +5909,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_session(session, fork=True)
 
     def _on_open_ghostty(self, _action, param: GLib.Variant) -> None:
+        if not apilink.is_local():
+            # A local extra (§3.12): Ghostty would open on this device, at a
+            # path of the service's. The sidebar hides the item too.
+            return
         session = self._session_for(param)
         if session is None or _GHOSTTY is None:
             return
@@ -5992,6 +5996,8 @@ class MainWindow(Adw.ApplicationWindow):
         """Show the folder in the desktop's file manager. FileLauncher is the
         fallback: it goes through the portal, which finds a handler even when
         nothing has registered for inode/directory."""
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         folder = param.get_string()
         info = openwith.default_file_manager()
         if info is not None:
@@ -6006,6 +6012,8 @@ class MainWindow(Adw.ApplicationWindow):
         terminal button offers it on every right-click, so a desktop with no
         terminal at all says so rather than swallowing the click.
         """
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         info = openwith.default_terminal()
         if info is None:
             dialogs.error_dialog(
@@ -6278,12 +6286,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.toast_overlay.add_toast(Adw.Toast(title=title))
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         app_id, folder = param.unpack()
         info = footerapps.resolve_app(app_id)
         if info is not None:
             footerapps.launch_app(info, folder)
 
     def _on_reveal_transcript(self, _action, param: GLib.Variant) -> None:
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         session = self._session_for(param)
         if session is None:
             return
@@ -6938,7 +6950,9 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_filters(filters)
         dialog.set_default_filter(jsonl_filter)
         claude_dir = Path.home() / ".claude"
-        if claude_dir.is_dir():
+        # The native chooser is a `local` client's (§3.11): only then is
+        # this device's ~/.claude the service's.
+        if apilink.is_local() and claude_dir.is_dir():
             dialog.set_initial_folder(Gio.File.new_for_path(str(claude_dir)))
         dialog.open(self, None, self._on_session_file_chosen)
 

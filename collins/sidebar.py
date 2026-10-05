@@ -31,6 +31,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import (
+    apilink,
     checkouts,
     contextmenu,
     desktopentry,
@@ -2665,7 +2666,12 @@ class SessionSidebar(Gtk.Box):
             # session runs on in the Collins service, and the row says so.
             # Not while a close is under way, nor for a shell whose CLI left.
             open_section.append_item(item(_("Detach"), "detach-session"))
-        if _GHOSTTY:
+        # The local extras (§3.12): Ghostty, the "Open In…" apps and the
+        # file manager's Reveal run on this device, on the service's paths.
+        # A window that is not on the service's machine (`apilink.is_local`,
+        # which is `app.local`) gets none of them: hidden, not greyed out.
+        local = apilink.is_local()
+        if _GHOSTTY and local:
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))
         if provider.supports_fork:
             open_section.append_item(item(_("Fork session"), "fork-session"))
@@ -2687,7 +2693,7 @@ class SessionSidebar(Gtk.Box):
         # worktree (which resume_cwd deliberately honors) still gets the menu.
         rows: list[Gtk.Widget] = []
         cwd = self._session_cwd(row.item.session)
-        if cwd and not is_chat_cwd(cwd):
+        if local and cwd and not is_chat_cwd(cwd):
             open_section.append_submenu(_("Open In…"), self._open_with_menu(cwd, rows))
 
         edit_section = Gio.Menu()
@@ -2735,7 +2741,8 @@ class SessionSidebar(Gtk.Box):
         edit_section.append_item(item(_("Replay…"), "replay-session"))
         edit_section.append_item(item(_("Copy session ID"), "copy-session-id"))
         edit_section.append_item(item(_("Export as Markdown…"), "export-session"))
-        edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
+        if local:
+            edit_section.append_item(item(_("Reveal transcript"), "reveal-transcript"))
         # Recovery for a row whose background agent it lost track of (e.g. a
         # /bg handoff the app never got to pair): find the agent and link it.
         edit_section.append_item(item(_("Repair session link"), "repair-session"))
@@ -2923,7 +2930,8 @@ class SessionSidebar(Gtk.Box):
                     "win.open-github",
                     GLib.Variant("s", row.cwd),
                 )
-            open_section.append_submenu(_("Open In…"), self._open_with_menu(row.cwd, rows))
+            if apilink.is_local():  # a local extra (§3.12): hidden otherwise
+                open_section.append_submenu(_("Open In…"), self._open_with_menu(row.cwd, rows))
 
         menu = Gio.Menu()
         menu.append_section(None, open_section)
