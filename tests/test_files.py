@@ -472,6 +472,10 @@ def test_list_is_confined_to_a_known_root_and_to_its_own(served, tmp_path):
     with pytest.raises(inproc.RequestRefused):
         client.request({"t": "fs.list", "path": str(other), "hidden": False, "root": str(other)})
     core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    # Nor may it name a looser root than the ones the service knows: an
+    # ancestor would let the link out of the project be listed.
+    with pytest.raises(inproc.RequestRefused):
+        client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(tmp_path)})
     reply = client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)})
     assert [e["name"] for e in reply["entries"]] == ["a.txt"]  # the link out of the root is not listed
     with pytest.raises(inproc.RequestRefused) as refused:

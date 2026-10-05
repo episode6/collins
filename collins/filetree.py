@@ -82,6 +82,18 @@ class _Node(GObject.Object):
         # (`_create_children`) and kept: the model asks again at every bind
         # and every expansion, and must get the same store each time.
         self.children: Gio.ListStore | None = None
+        # The row box showing this node right now (`_on_bind`; rows are
+        # recycled, so `set_dim` checks the box still shows this node).
+        self.box: Gtk.Widget | None = None
+
+    def set_dim(self, dim: bool) -> None:
+        """The dimming changed (a name git now ignores, or no longer):
+        kept on this node, so an expanded folder keeps its row, its
+        expansion and its watch, and the row on screen is restyled."""
+        self.dim = dim
+        box = self.box
+        if box is not None and getattr(box, "node", None) is self:
+            box.set_css_classes(["filetree-dim"] if dim else [])
 
 
 class FileTree(Gtk.Box):
@@ -265,8 +277,10 @@ class FileTree(Gtk.Box):
         for entry in entries:
             dim = entry.name.startswith(".") or entry.ignored
             node = by_key.get((entry.name, entry.kind))
-            if node is None or node.dim != dim:
+            if node is None:
                 node = _Node(entry.name, directory / entry.name, entry.kind, dim=dim)
+            elif node.dim != dim:
+                node.set_dim(dim)
             target.append(node)
         keep = {id(node) for node in target}
         for node in old:
@@ -501,6 +515,8 @@ class FileTree(Gtk.Box):
         # dimming of whatever node it showed last.
         icon.set_css_classes([color_class] if color_class else [])
         box.set_css_classes(["filetree-dim"] if node.dim else [])
+        box.node = node  # what `_Node.set_dim` checks before restyling
+        node.box = box
         label.set_label(node.name)
 
     def _on_activate(self, _list_view: Gtk.ListView, position: int) -> None:

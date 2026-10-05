@@ -640,17 +640,24 @@ class Files:
     def listing(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`fs.list {path, hidden, root}`: `list_reply` on a thread, for a
         directory the client may name (`allowed`) inside the *root* it
-        names (checked on the worker, against the resolved directory)."""
+        names (checked on the worker, against the resolved directory),
+        the root itself one the client may name too."""
         path = self._path(message)
         if isinstance(path, dict):
             return path
         root = self._path(message, "root")
         if isinstance(root, dict):
             return root
-        if not allowed(self.core, client, path):
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID, {"path": path[: protocol.ARG_TEXT_MAX]}
-            )
+        # The root the client names is what a listed symlink must stay
+        # inside (`list_entries`), so it is held to the same rule as the
+        # path: a known root (or under one), never a looser ancestor that
+        # would let a link out of the project be listed (review of PR 611).
+        for named in (path, root):
+            if not allowed(self.core, client, named):
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, OUTSIDE_MSGID,
+                    {"path": named[: protocol.ARG_TEXT_MAX]},
+                )
         hidden = bool(message.get("hidden"))
 
         def work() -> dict:

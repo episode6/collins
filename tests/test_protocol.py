@@ -1689,3 +1689,6 @@ def test_a_walks_paths_and_a_listings_entries_chunk_as_json():
     assert joined["paths"] == paths and "paths_chunked" not in joined
     assert p.join_reply(slim, data[:-1]) is None
     assert not isinstance(p.validate_response(joined, "fs.walk"), p.Refusal)
+    # A chunked list field whose JSON is not a list is refused at the join.
+    odd = b'{"a": 1}'
+    assert p.join_reply({**slim, "paths_bytes": len(odd)}, odd) is None

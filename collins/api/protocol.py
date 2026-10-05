@@ -2916,9 +2916,12 @@ def join_message(message: dict, chunks: bytes | None) -> dict | None:
     text = data.decode("utf-8", "replace")
     if field in CHUNKED_JSON_FIELDS:
         try:
-            joined[field] = json.loads(text)
+            value = json.loads(text)
         except ValueError:
             return None
+        if not isinstance(value, list):
+            return None  # a CHUNKED_JSON_FIELD is a list, or the join is refused
+        joined[field] = value
         return joined
     joined[field] = text
     return joined
