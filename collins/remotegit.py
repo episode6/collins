@@ -63,7 +63,9 @@ log = logging.getLogger(__name__)
 CALL_MARGIN_S = 10.0
 # How long a blob GET may take (a 64 MiB blob over a local socket).
 BLOB_TIMEOUT_S = 60.0
-# The most entries the mirror keeps (a cwd per tab, plus the menus').
+# The most entries the mirror keeps (a cwd per tab, plus the menus'); past
+# it the least recently read goes (a hit moves an entry to the back, so a
+# long-lived tab's cwd is never the one evicted).
 MAX_ENTRIES = 256
 
 Listener = Callable[[dict], None]
@@ -105,8 +107,10 @@ class Mirror:
         when the service could not be asked at all."""
         with self._lock:
             entry = self._entries.get(cwd)
-        if entry is not None and not changes and not state and time.monotonic() - entry.fetched_at <= max_age:
-            return entry
+            fresh = entry is not None and time.monotonic() - entry.fetched_at <= max_age
+            if fresh and not changes and not state:
+                self._entries[cwd] = self._entries.pop(cwd)  # most recently read: last out
+                return entry
         return self._fetch(cwd, entry, changes, state)
 
     def _fetch(self, cwd: str, previous: GitInfo | None, changes: bool, state: bool) -> GitInfo | None:
@@ -127,8 +131,9 @@ class Mirror:
     def _store(self, cwd: str, fields: dict, previous: GitInfo | None) -> GitInfo:
         entry = GitInfo.from_fields(fields, previous)
         with self._lock:
-            if len(self._entries) >= MAX_ENTRIES and cwd not in self._entries:
-                self._entries.pop(next(iter(self._entries)))
+            self._entries.pop(cwd, None)
+            if len(self._entries) >= MAX_ENTRIES:
+                self._entries.pop(next(iter(self._entries)))  # the least recently read or stored
             self._entries[cwd] = entry
         return entry
 

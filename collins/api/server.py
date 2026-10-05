@@ -617,6 +617,13 @@ class ApiServer:
             msg.set_status(405, None)
             return
         params = dict(query or {})
+        # The header is taken at its word, like the hello's client_id: an
+        # id is a grouping key, not a credential (§3.16 — whoever reaches
+        # this 0600 socket is the service's own uid and already trusted
+        # with a shell). Naming a `local` client's id widens a GET to any
+        # path that client could read itself; it proves nothing to a peer
+        # who could not already reach the socket. Phase 4's token, when a
+        # listener is not a Unix socket, is what makes this a credential.
         client_id = msg.get_request_headers().get_one(CLIENT_HEADER) or ""
         client = self.clients.get(client_id)
         if params.get("kind") != "git":

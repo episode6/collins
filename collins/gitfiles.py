@@ -111,7 +111,8 @@ class GitInfo:
     is not inside a repository and every other field is empty. *heads* is
     local branch → sha, *remote_heads* `remote/branch` → sha (both bounded
     by REFS_LIMIT), *remotes* the remote names in rank order; *refs* is a
-    digest of refs_signature's tuple, *markers* operation_markers',
+    digest of refs_signature's tuple, *index_mtime* microseconds since the
+    epoch (index_mtime's unit, local and on the wire), *markers* operation_markers',
     *operation* the in-progress kind (gitops' OPERATION_KINDS) or None;
     *changes* is (staged, unstaged) when a status was asked for and
     *state* gitops.tree_state_signature's digest when that was, else
@@ -172,9 +173,7 @@ class GitInfo:
             branch=self.branch,
             default_branch=self.default_branch,
             github_url=self.github_url,
-            # Microseconds on the wire: nanoseconds since the epoch pass
-            # the protocol's integer bound (2**53) only in 2255.
-            index_mtime=self.index_mtime // 1000 if self.index_mtime is not None else None,
+            index_mtime=self.index_mtime,  # microseconds, as index_mtime() reads it
             head=self.head,
             markers=list(self.markers),
             operation=self.operation,
@@ -352,11 +351,13 @@ def head_sha(git_dir: Path) -> str | None:
 
 
 def index_mtime(git_dir: Path) -> int | None:
-    """st_mtime_ns of the repository's index file (in the worktree's own git
-    dir, not the common dir). None when there is no index yet or it can't be
-    stat'd."""
+    """The mtime of the repository's index file (in the worktree's own git
+    dir, not the common dir) in microseconds since the epoch: one unit on
+    both paths, local and over the wire (nanoseconds pass the protocol's
+    integer bound, 2**53, only in 2255). None when there is no index yet
+    or it can't be stat'd."""
     try:
-        return (git_dir / "index").stat().st_mtime_ns
+        return (git_dir / "index").stat().st_mtime_ns // 1000
     except OSError:
         return None
 

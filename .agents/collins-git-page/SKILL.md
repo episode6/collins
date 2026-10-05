@@ -1016,8 +1016,11 @@ open, every mutation), `git-changed` refreshes by `send`, and
 `resolve_branch` / `parent_branch` resolve any name off the mirror's
 heads, remote-tracking refs and ranked remotes (`GitInfo.resolve_branch`),
 so the main loop makes no round trip per name. `index_mtime` is
-microseconds over the wire (nanoseconds since the epoch pass the
-protocol's integer bound only in 2255). `has_changes` / `change_summary`
+microseconds since the epoch on both paths: `gitfiles.index_mtime`
+divides the stat's nanoseconds once, so the local fallback and the wire
+agree (nanoseconds pass the protocol's integer bound only in 2255). The
+mirror keeps `MAX_ENTRIES` (256) cwds and evicts the least recently read
+(a hit moves the entry to the back). `has_changes` / `change_summary`
 are `git.info` with `changes` (one `git status` on the service, asked
 fresh and on demand, never on a tick), `ignored_names` is `git.run` with
 `check_ignore_argv`, and `gitops.in_progress_at(cwd)` /
