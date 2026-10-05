@@ -517,25 +517,17 @@ swap 2 of §3.5:
 - **The tab's end.** `TerminalTab.release_pty()` (from
   `MainWindow._on_close_page`, the final close) sends `close` (mode
   `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
-  SIGKILL after the grace), detaches and closes the loopback client:
-  closing a tab ends the session (D12) until *Detach* in PR-1.12.
-  `App.do_shutdown` shuts the loopback down, which finishes every pty on
-  the spot, records its row gone and removes its model file (Phase 1:
-  quitting ends the sessions; scrollback survives a crash only, and only
-  once PR-3.6's keeper exists to re-adopt a live pty from its file).
-- **The wiring.** `App._start_service` builds one
-  `service.core.ServiceCore` (`ServiceCore.with_state`: the service's own
-  `AppState`, whose `set_pty` / `set_pty_next_id` write the pty table;
-  the pty half: `spawn`, `attach`, `detach`, `paint`, `close`; the
-  `resize`/`focus`/`theme` events; and since PR-1.10 the store and state
-  half, see `collins-sessions-and-sidebar`) behind an
-  `api.loopback.LoopbackServer` in `terminal.SERVICE_LOOPBACK`; a tab
-  built without an app gets one made on the spot. The loopback passes
-  the same dicts and bytes the socket will, every message through
-  `protocol.validate` both ways, with no framing and no queue (a request
-  is answered before it returns; every live frame is reported drained
-  as the callback takes it). Its one shortcut the socket will not have is
-  `write_panel_history` (the tab's save; D21, PR-1.12b).
+  SIGKILL after the grace), detaches and closes its `PtyClient`:
+  closing a tab ends the session (D12) until *Detach* in PR-1.12c.
+  `App.do_shutdown` closes the panel shells' ptys and the link; the
+  agents' ptys live on (§3.10) and the next client attaches.
+- **The wiring.** `App._start_service` builds the `SocketLink` and the
+  `ConnectionManager`, which finds or starts `collins-service` (the
+  `ServiceCore.with_state` over the service's own `AppState`; the pty
+  half: `spawn`, `attach`, `detach`, `paint`, `close`; the
+  `resize`/`focus`/`theme`/`ack` events; the store and state half, see
+  `collins-sessions-and-sidebar`) and connects both channels; a tab
+  built without an app gets a link through `scripts/e2e_service.py`.
 - **What differs, by design.** A row written before a resize is kept by
   the model as it was (no reflow, D19) where VTE re-wraps it: a shell's
   echo from before the tab's first allocation reads differently in

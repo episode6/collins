@@ -6,8 +6,8 @@
 """A `Vte.Terminal` with no child, fed by the service (spec §3.4).
 
 `ClientTerminal` binds one VTE widget to one pty of the service through a
-client of the API (`api.loopback.LoopbackClient` through Phase 1, the
-socket from PR-1.12b): output frames are `feed()`, what VTE `commit`s goes
+client of the API (`api.client.PtyClient` on the app's `SocketLink`,
+PR-1.12b): output frames are `feed()`, what VTE `commit`s goes
 back as input frames, the grid and the focus go as `resize` and `focus`
 events, and `pty-exited` is what `child-exited` used to be. Nothing
 reaches the VTE that did not come out of the service's stream for the pty,

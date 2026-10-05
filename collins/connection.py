@@ -173,6 +173,9 @@ class ConnectionManager:
         self.attempts = 0  # reconnect attempts since the last loss
         self.connected_once = False
         self.stopped = False
+        # Each handshake is one attempt: a landing from an attempt the link
+        # has lost since (or a newer attempt superseded) is ignored.
+        self._generation = 0
         self._pending = None  # the scheduled retry, if the schedule hands one back
         link.on_lost = self._on_link_lost
 
@@ -234,9 +237,15 @@ class ConnectionManager:
 
     # -- loss and reconnect, on the owner's loop ----------------------------------------
 
+    def lost(self, reason: str) -> None:
+        """The owner found the link dead (a resubscribe refused ``gone``):
+        the same road as the link's own `on_lost`."""
+        self._on_link_lost(reason)
+
     def _on_link_lost(self, reason: str) -> None:
         if self.stopped or self.state == LOST:
             return
+        self._generation += 1  # a handshake in flight is nobody's now
         self._set_state(LOST)
         if self.on_lost is not None:
             try:
@@ -294,6 +303,8 @@ class ConnectionManager:
     def _try_connect(self) -> None:
         """The handshake on the owner's thread, the outcome on its loop."""
         self._set_state(CONNECTING)
+        self._generation += 1
+        generation = self._generation
 
         def handshake() -> None:
             try:
@@ -301,14 +312,23 @@ class ConnectionManager:
                 self.link.prove_local()
             except Exception as exc:
                 error = exc  # the except name is cleared before the landing runs
-                self._land(lambda: self._connect_failed(error))
+                self._land(lambda: self._connect_failed(error, generation))
                 return
-            self._land(self._connect_landed)
+            self._land(lambda: self._connect_landed(generation))
 
         self._run_async(handshake)
 
-    def _connect_landed(self) -> None:
+    def _connect_landed(self, generation: int | None = None) -> None:
         if self.stopped:
+            return
+        if generation is not None and generation != self._generation:
+            return  # a newer attempt is under way
+        if not getattr(self.link, "connected", True):
+            # Lost between the handshake and this landing: the loss's own
+            # retry is scheduled (or will be); nothing to celebrate.
+            if self.state != LOST:
+                self._set_state(LOST)
+                self._retry_later()
             return
         first = not self.connected_once
         self.connected_once = True
@@ -317,8 +337,8 @@ class ConnectionManager:
         if self.on_connected is not None:
             self.on_connected(first)
 
-    def _connect_failed(self, exc: Exception) -> None:
-        if self.stopped:
+    def _connect_failed(self, exc: Exception, generation: int | None = None) -> None:
+        if self.stopped or (generation is not None and generation != self._generation):
             return
         log.warning("connection: connect failed: %s", exc)
         self._set_state(LOST)

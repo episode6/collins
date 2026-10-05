@@ -151,6 +151,35 @@ _CWD_TICK_MS = 2000
 _log = logging.getLogger(__name__)
 
 
+def _pty_unknown(refusal: RequestRefused) -> bool:
+    """Whether a refusal says the service no longer has the pty (the
+    core's ``no such pty``), as against the link being gone again."""
+    return refusal.error == protocol.ERROR_GONE and refusal.msgid.startswith("no such pty")
+
+
+# A `panel.history` request stays under the frame cap: the texts of the
+# shells with no pty are the only part that grows.
+_HISTORY_REQUEST_BUDGET = 900_000
+
+
+def _history_requests(key: str, shells: list[dict]) -> list[dict]:
+    """The `panel.history` requests for *shells*: one when the texts fit
+    `_HISTORY_REQUEST_BUDGET`, else a first request naming every ordinal
+    (ptys as they are, texts emptied) followed by one request per text
+    that would not fit together with the others."""
+    total = sum(len(e.get("text", "").encode("utf-8", "surrogateescape")) for e in shells)
+    if total <= _HISTORY_REQUEST_BUDGET:
+        return [{"t": "panel.history", "key": key, "shells": shells}]
+    first = [dict(e, text="") if "text" in e else e for e in shells]
+    out = [{"t": "panel.history", "key": key, "shells": first}]
+    for entry in shells:
+        if "text" in entry:
+            others = [dict(e, text="") if "text" in e and e is not entry else e for e in shells]
+            shells_now = [entry if e is entry else e for e in others]
+            out.append({"t": "panel.history", "key": key, "shells": shells_now})
+    return out
+
+
 def _pty_client(on_output, on_event):
     """A tab's or a panel shell's client of the service (spec §3.20): a
     `api.client.PtyClient` on the app's link (`apilink.current`; an e2e
@@ -1211,6 +1240,20 @@ class PanelTerminal(Gtk.Box):
         view.detach()
         client.close()
 
+    def close_pty(self) -> None:
+        """End the shell's pty on the service and keep its history (the
+        app's quit: `TerminalTab.close_panel_ptys`)."""
+        view, client = self._view, self._client
+        if client.closed:
+            return
+        if view.pty is not None and not view.exited:
+            try:
+                client.request({"t": "close", "pty": view.pty, "mode": "kill"})
+            except (RequestRefused, ValueError):
+                pass
+        view.detach()
+        client.close()
+
     def reattach(self) -> None:
         """The link came back (spec §3.20): show the shell's pty again; a
         pty the service no longer has reads as the shell's exit, so the
@@ -1221,8 +1264,13 @@ class PanelTerminal(Gtk.Box):
         client.claim(view.pty)
         try:
             view.attach(view.pty)
-        except (RequestRefused, ValueError):
-            self._on_pty_exited(None)
+        except RequestRefused as refusal:
+            if _pty_unknown(refusal):
+                self._on_pty_exited(None)
+            # Any other refusal (the link gone again, a timeout): the pty
+            # stays claimed for the next `connected`.
+        except ValueError:
+            pass
 
     def set_history_key(self, key: str | None, handle: str | None = None) -> None:
         """Re-file this shell's history on the service under *key* (the
@@ -2352,10 +2400,26 @@ class TerminalTab(Gtk.Box):
         try:
             self._view.attach(pty)
         except RequestRefused as refusal:
-            _log.info("pty %s is gone after the reconnect: %s", pty, refusal.msgid)
-            self._on_pty_exited(None)
+            if _pty_unknown(refusal):
+                _log.info("pty %s is gone after the reconnect: %s", pty, refusal.msgid)
+                self._on_pty_exited(None)
+            else:
+                # The link went again under the reattach: the pty stays
+                # claimed for the next `connected`.
+                _log.info("reattach of pty %s deferred: %s", pty, refusal.msgid)
         except ValueError:
-            self._on_pty_exited(None)
+            pass
+
+    def close_panel_ptys(self) -> None:
+        """The app is quitting: end every panel shell's pty on the service
+        (a shell has no row to reattach from until PR-1.12c, and the
+        service writes its history from the model when it exits, under the
+        key the tab's saves filed it by). The agent's pty is left running
+        (§3.10: quitting ends nothing)."""
+        for shell in self._dock.shell_pages():
+            close = getattr(shell, "close_pty", None)
+            if close is not None:
+                close()
 
     def can_restart_sandboxed(self) -> bool:
         """Whether *Restart to apply* is on offer (the service's
@@ -5204,14 +5268,19 @@ class TerminalTab(Gtk.Box):
             source = shell.history_source()
             entry: dict = {"ordinal": int(shell.hist)}
             if isinstance(source, str):
-                entry["text"] = source[: protocol.TEXT_MAX]
+                entry["text"] = source[-protocol.TEXT_MAX :]  # the tail: what a reopen shows last
             else:
                 entry["pty"] = int(source)
             shells.append(entry)
         if self._client.closed:
             return
+        # The mapping is the keep-set, so it goes in one request when it
+        # fits the frame; larger, the texts are split across several,
+        # the first naming every ordinal (a pty, or an empty text the next
+        # requests fill in).
         try:
-            self._client.request({"t": "panel.history", "key": history_id, "shells": shells})
+            for message in _history_requests(history_id, shells):
+                self._client.request(message)
         except (RequestRefused, ValueError) as exc:
             _log.warning("panel history of %s not written: %s", history_id, exc)
 

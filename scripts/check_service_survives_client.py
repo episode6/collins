@@ -204,11 +204,21 @@ agent_pid = (rows_before.get(str(pty_id)) or {}).get("pid")
 os.kill(first.pid, signal.SIGKILL)
 first.wait()
 check("the first Collins is dead (SIGKILL)", first.returncode == -signal.SIGKILL, first.returncode)
-# The service notices the client's departure within its keepalive window
-# at most; it must still be there, with the pty, once it has.
-deadline = time.monotonic() + 5
-while time.monotonic() < deadline and service.poll() is None and str(pty_id) not in pty_rows():
+# A SIGKILLed process's sockets close at once, so the service sees the
+# client go without waiting for a pong timeout: wait until it counts no
+# clients (a probe link of our own asks, then goes), bounded.
+from collins.api import server as api_server  # noqa: E402
+from collins.api.client import SocketLink  # noqa: E402
+
+probe = SocketLink(api_server.socket_path(os.environ["COLLINS_APP_ID"]), device="probe")
+probe.connect()
+deadline = time.monotonic() + 10
+while time.monotonic() < deadline:
+    if probe.call({"t": "service.status"}).get("clients") == 1:  # the probe itself
+        break
     time.sleep(0.1)
+check("the service dropped the killed client", probe.call({"t": "service.status"}).get("clients") == 1)
+probe.shutdown()
 check("the service is alive", service.poll() is None)
 rows_after = pty_rows()
 check("the pty is still in the table", str(pty_id) in rows_after, sorted(rows_after))
@@ -251,9 +261,10 @@ def steps():
         status.get("ptys", 0) >= 1 and status.get("clients") == 1,
         status,
     )
-    # Open it: Phase 1's open is a resume, which spawns a second pty for
-    # the same session; the running pty is attached to directly here, the
-    # way PR-1.12c's attach-on-activate will (a tab is a view over a pty).
+    # Open it: a resume would ask the service for a second pty on the same
+    # session, which it refuses (PR-1.12b); the running pty is attached to
+    # directly here, the way PR-1.12c's attach-on-activate will (a tab is a
+    # view over a pty), and this check is re-pointed at that path then.
     tab = win.start_background_session(TRUSTED)
     for _ in range(30):
         if tab._view.pty is not None:

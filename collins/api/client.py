@@ -127,6 +127,7 @@ class SocketLink(apilink.Link):
         self,
         path: str,
         *,
+        app_id: str = "",
         client_id: str | None = None,
         device: str = "",
         locale: str = "",
@@ -137,6 +138,9 @@ class SocketLink(apilink.Link):
     ) -> None:
         super().__init__()
         self.path = path
+        # The app id the proof file is found by (`prove_local`); "" for a
+        # client that never claims to be local.
+        self.app_id = app_id
         self.client_id = client_id or new_client_id()
         self.device = device[: protocol.HOST_MAX]
         self.locale = locale
@@ -339,18 +343,21 @@ class SocketLink(apilink.Link):
             raise ConnectionLost(f"hello refused: {refusal.msgid}") from None
 
     def prove_local(self) -> bool:
-        """Read the proof file the hello named from this client's own
-        filesystem and send it (`local`). True when the service took it."""
+        """Send the local proof (`local`) when this client can read it from
+        its own filesystem; True when the service took it.
+
+        The path is **this side's** (`api.server.proof_path(app_id)`, D11
+        as amended by PR-1.12b's review), never the one the hello names: a
+        hostile remote service could name any file of the client's and be
+        sent its first 4 KiB. The hello's `local_proof.length` must be the
+        protocol's 32; the file must be a regular file, not a symlink
+        (`O_NOFOLLOW`), mode 0600, owned by this user, of exactly 32 bytes.
+        Anything else sends no `local` at all."""
         proof = (self.hello or {}).get("local_proof") or {}
-        path = proof.get("path")
-        if not path:
+        if not self.app_id or proof.get("length") != protocol.LOCAL_PROOF_BYTES:
             return False
-        try:
-            with open(path, "rb") as fh:
-                data = fh.read(protocol.LOCAL_PROOF_MAX + 1)
-        except OSError:
-            return False
-        if not data or len(data) > protocol.LOCAL_PROOF_MAX:
+        data = read_local_proof(self.app_id)
+        if data is None:
             return False
         try:
             self.call({"t": "local", "proof": data.hex()})
@@ -669,6 +676,10 @@ class SocketLink(apilink.Link):
     # -- acks -------------------------------------------------------------------------
 
     def _count_fed(self, pty: int, n: int) -> None:
+        """*n* more live bytes fed to a VTE for *pty*: ack at once once
+        `ACK_BYTES` are unacked, else arm one `ACK_MS` timer that acks
+        every pty (one timer for all of them, started by the first unacked
+        frame: a frame later than that waits at most ACK_MS too)."""
         fed = self._fed.get(pty, 0) + n
         self._fed[pty] = fed
         if fed - self._acked.get(pty, 0) >= protocol.ACK_BYTES:
@@ -768,6 +779,37 @@ class PtyClient:
         self.closed = True
         self.ptys.clear()
         self.link._forget_pty_client(self)
+
+
+def read_local_proof(app_id: str) -> bytes | None:
+    """The 32 proof bytes of the service for *app_id* on this filesystem,
+    or None when the file is not what the service writes (see
+    `SocketLink.prove_local`)."""
+    import stat
+
+    from . import server as api_server
+
+    path = api_server.proof_path(app_id)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return None
+        if stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.getuid():
+            return None
+        if info.st_size != protocol.LOCAL_PROOF_BYTES:
+            return None
+        data = os.read(fd, protocol.LOCAL_PROOF_BYTES + 1)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    if len(data) != protocol.LOCAL_PROOF_BYTES:
+        return None
+    return data
 
 
 def default_locale() -> str:

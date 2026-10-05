@@ -138,11 +138,8 @@ i18n.init(AppState().get_setting("language"))
 trust.trust_dir(E2E)
 
 # The service is its own process (PR-1.12b): started here, with this
-
 # check's environment, before the app connects to it.
-
 e2e_service.start_service()
-
 app = App()
 exit_code = 1
 tries = 0

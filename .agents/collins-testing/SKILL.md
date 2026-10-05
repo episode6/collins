@@ -111,7 +111,11 @@ at exit. A check that drives widgets with **no `App`** behind them and
 reaches the service (a PR page's gh requests, a job, the model catalog)
 calls `e2e_service.harness_link()` instead: a `SocketLink` to a service
 of its own, installed as the current link. `scripts/run_e2e.py` sets
-nothing new.
+nothing new. Importing `e2e_service` sets `XDG_RUNTIME_DIR` to a short
+scratch directory of the check's own (a Unix socket path is bounded at
+107 bytes; the user's `/run/user/<uid>/collins/` never sees a check's
+id), removed at exit; the service is spawned with `PR_SET_PDEATHSIG` so
+a check dying on its deadline takes it along.
 
 **A patch over a service-side module does not reach the service.** What a
 check used to monkeypatch in its own process (`claudemodels.*`,

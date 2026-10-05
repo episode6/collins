@@ -915,6 +915,17 @@ class MainWindow(Adw.ApplicationWindow):
         if banner is not None:
             banner.set_revealed(bool(reconnecting))
 
+    def close_panel_ptys(self) -> None:
+        """The app is quitting: every tab's panel shells end on the service
+        (`TerminalTab.close_panel_ptys`); the agents keep running."""
+        for i in range(self.tab_view.get_n_pages()):
+            tab = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(tab, TerminalTab):
+                try:
+                    tab.close_panel_ptys()
+                except Exception:
+                    log.exception("a tab's panel shells did not close")
+
     def reattach_tabs(self) -> None:
         """The link came back: every tab re-attaches its pty and its panel
         shells theirs (spec §3.20)."""

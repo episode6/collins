@@ -37,12 +37,41 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
+# Every check's runtime directory is a scratch one of its own, made at
+# import and removed at exit, so nothing of a check lands under the user's
+# own `collins/` runtime tree. It is a short subdirectory of the real
+# runtime directory, not of the check's scratch tree nor of /tmp: a Unix
+# socket path is bounded at 107 bytes (the scratch tree under a long app
+# id passes it), and /tmp is inside every sandbox box, where a plan file
+# must never be (sandboxplan.plan_dir).
+import tempfile  # noqa: E402
+
+_old_runtime = os.environ.get("XDG_RUNTIME_DIR")
+RUNTIME_DIR = tempfile.mkdtemp(prefix="cr-", dir=_old_runtime if _old_runtime else None)
+# The headless compositor's socket is named relative to the runtime
+# directory the check was started under: make it absolute first, or GTK
+# finds no display (CI's Xvfb names its display in DISPLAY and is unmoved).
+_wayland = os.environ.get("WAYLAND_DISPLAY")
+if _old_runtime and _wayland and not _wayland.startswith("/"):
+    os.environ["WAYLAND_DISPLAY"] = os.path.join(_old_runtime, _wayland)
+os.environ["XDG_RUNTIME_DIR"] = RUNTIME_DIR
+
 from collins.api import server as api_server  # noqa: E402
 
 WAIT_S = 20.0
 STOP_S = 15.0
 
 _services: list[subprocess.Popen] = []
+
+
+def _die_with_parent() -> None:
+    import ctypes
+
+    PR_SET_PDEATHSIG = 1
+    try:
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
+    except (OSError, AttributeError):
+        pass
 
 
 def _stop(proc: subprocess.Popen) -> None:
@@ -62,6 +91,9 @@ def _stop(proc: subprocess.Popen) -> None:
 def _stop_all() -> None:
     for proc in list(_services):
         _stop(proc)
+    import shutil
+
+    shutil.rmtree(RUNTIME_DIR, ignore_errors=True)
     if _stubs_data:
         for path in (_stubs_data, _stubs_data + ".calls.jsonl"):
             try:
@@ -110,6 +142,10 @@ def start_service(
         env=env,
         cwd=REPO,
         stdin=subprocess.DEVNULL,
+        # A check that dies on its deadline (os._exit, no atexit) takes
+        # its service with it: the kernel sends SIGTERM when the parent
+        # goes (PR_SET_PDEATHSIG).
+        preexec_fn=_die_with_parent,
     )
     _services.append(proc)
     deadline = time.monotonic() + wait_s
@@ -140,7 +176,7 @@ def harness_link(device: str = "harness", stubs: dict | None = None):
 
     app_id = os.environ["COLLINS_APP_ID"]
     start_service(app_id=app_id, stubs=stubs)
-    link = SocketLink(api_server.socket_path(app_id), device=device)
+    link = SocketLink(api_server.socket_path(app_id), app_id=app_id, device=device)
     link.connect()
     link.prove_local()
     apilink.set_current(link)

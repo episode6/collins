@@ -445,20 +445,6 @@ class ToolClient:
                     return window, tab
         return None
 
-    def found_for_pid(self, shim_pid: int):
-        """The window and tab of the session the service binds a call from
-        *shim_pid* to (`SessionTools.find`): who a call is from, as the
-        client sees it."""
-        # The walk is the service's (its /proc, its sessions); the e2e
-        # checks are its callers, so it goes through the probe (D27).
-        try:
-            handle = apilink.call(
-                {"t": "debug.sandbox", "target": "core", "name": "debug_find_handle", "args": [int(shim_pid)]}
-            ).get("value")
-        except RequestRefused:
-            return None
-        return self.found_for_handle(handle or "")
-
     # -- the events ------------------------------------------------------------
 
     def _on_tool(self, event: dict) -> None:

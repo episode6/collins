@@ -336,3 +336,116 @@ def test_the_subscription_fills_over_the_primary(app_state, projects_dir, tmp_pa
         server.stop()
         core.shutdown()
         pump(0.3)
+
+
+# -- takeovers, foreign ids, bad frames, the cut-off, restart ------------------
+
+
+def test_a_second_primary_takes_a_client_id_over(served):
+    server, path = served
+    first = Raw(path)
+    first.hello(client_id="c")
+    old = server.clients["c"]
+    second = Raw(path)
+    second.hello(client_id="c")
+    assert server.clients["c"] is not old and old.gone
+    assert pump(2, lambda: first.closed)
+    assert second.request({"t": "service.status"})["ok"]
+    second.close()
+
+
+def test_a_sync_hello_on_a_foreign_id_is_sequence(served):
+    _server, path = served
+    primary = Raw(path)
+    primary.hello(client_id="mine")
+    sync = Raw(path)
+    reply = sync.hello(client_id="theirs", channel="sync")
+    assert reply["ok"] is False and reply["error"] == "sequence"
+    primary.close()
+    sync.close()
+
+
+def test_bad_binary_frames_are_dropped_and_the_connection_kept(served):
+    server, path = served
+    client = Raw(path)
+    client.send_binary(b"\x02\x00")  # input before hello, and too short for a header
+    client.hello()
+    client.send_binary(b"\x02\x00\x00")  # a header too short
+    client.send_binary(protocol.pack_frame(protocol.TAG_OUTPUT, 0, 1, 0, b"x"))  # a service's tag
+    client.send_binary(protocol.pack_frame(protocol.TAG_INPUT, 0, 999, 0, b"x"))  # no such pty
+    pump(0.3)
+    assert not client.closed
+    assert client.request({"t": "service.status"})["ok"]
+    client.close()
+
+
+def test_an_event_before_hello_is_dropped(served):
+    _server, path = served
+    client = Raw(path)
+    client.send({"t": "ack", "pty": 1, "offset": 10})
+    client.send({"t": "theme", "term": {"vte": 8400}})
+    pump(0.3)
+    assert client.texts == [] and not client.closed
+    client.close()
+
+
+def test_the_cut_off_redraws_and_acks_after_a_drop_still_count(served, monkeypatch):
+    from collins.service import ptyserver
+
+    server, path = served
+    monkeypatch.setattr(protocol, "ACK_WINDOW", 4096)
+    monkeypatch.setattr(ptyserver, "QUEUE_BYTES", 16 * 1024)
+    drained = []
+    real = server.core.ptys.drained
+    server.core.ptys.drained = lambda pty, sink, n: (drained.append(n), real(pty, sink, n))
+    client = Raw(path)
+    client.hello()
+    pty = client.request({"t": "spawn", "kind": "shell", "cwd": "/tmp", "cols": 200, "rows": 24})["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 200, "rows": 24})
+    assert pump(2, lambda: any(h.flags & protocol.FLAG_REDRAW_END for h, _ in client.frames))
+    client.frames.clear()
+    sink = server.clients["client-1"].sink_for(pty)
+    dropped = []
+    real_drop = api_server._Sink.drop_queued
+    monkeypatch.setattr(api_server._Sink, "drop_queued", lambda s: (dropped.append(s.acked), real_drop(s)))
+    # Never acked: the server counts past QUEUE_BYTES, cuts the sink off
+    # (drop_queued) and redraws it.
+    for _ in range(6):
+        client.send_binary(protocol.pack_frame(protocol.TAG_INPUT, 0, pty, 0, b"y" * 4000 + b"\r"))
+    assert pump(5, lambda: dropped and any(h.flags & protocol.FLAG_REDRAW for h, _ in client.frames))
+    assert sink.acked == dropped[0]  # the drop moved no ack mark
+    # An ack after the drop is still reported, and reopens the window.
+    sent = sink.sent
+    client.send({"t": "ack", "pty": pty, "offset": sent})
+    assert pump(2, lambda: sum(drained) > 0 and sink.acked == sent)
+    client.close()
+
+
+def test_service_restart_now_is_served_and_idle_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", CAT)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    (tmp_path / "run").mkdir()
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    restarts = []
+    server = api_server.ApiServer(core, "com.example.Restart", on_restart=restarts.append)
+    path = server.listen()
+    try:
+        client = Raw(path)
+        client.hello()
+        idle = client.request({"t": "service.restart", "when": "idle"})
+        assert idle["ok"] is False and idle["error"] == "refused"
+        now = client.request({"t": "service.restart", "when": "now"})
+        assert now["ok"] is True
+        assert pump(2, lambda: restarts == ["now"])
+        client.close()
+    finally:
+        server.stop()
+        core.shutdown()
+        pump(0.3)
+
+
+def test_a_connection_with_no_hello_is_closed_after_the_timeout(served, monkeypatch):
+    monkeypatch.setattr(api_server, "HELLO_TIMEOUT_S", 1)
+    _server, path = served
+    client = Raw(path)
+    assert pump(3, lambda: client.closed)

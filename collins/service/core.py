@@ -74,9 +74,10 @@ A client is anything the transport represents as a `Client`: it has a
 `device` name, a sink per pty (`sink_for(pty)`: the object the pty server
 hands output and events to), `forget(pty)` for when a pty is gone, and
 `deliver(event)` for the store and state events of its subscription. The
-loopback of PR-1.7 (`api.loopback`) is the one transport until PR-1.12
-brings the socket; both give the core the same dicts, already validated
-by `api.protocol`, and get the same replies back.
+socket server (`api.server.SocketClient`, PR-1.12b) is the transport, and
+the unit suite's `tests/inproc.py` stands in for it; both give the core
+the same dicts, already validated by `api.protocol`, and get the same
+replies back.
 
 Spawning is the core's: a client asks for an agent's or a shell's pty in a
 directory at a grid, and the core runs the user's `$SHELL` there with the
@@ -136,6 +137,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from gi.repository import GLib
+
 from .. import chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
 from ..api import protocol
 from ..shellinput import shell_command
@@ -153,6 +156,22 @@ log = logging.getLogger(__name__)
 # refused as `unknown` by a core with no store. ``trust.*`` is not gated: the
 # CLI's folder trust is a file of the service's machine, not the store's.
 _STORE_REQUESTS = frozenset({"subscribe", "state.get", "state.set"})
+
+# What a spawned shell never inherits from the service: the e2e probe's
+# flag and stubs (D27: a child cannot tell it runs under a probing
+# service), and systemd's per-invocation variables.
+SPAWN_ENV_STRIPPED = (
+    "COLLINS_DEBUG_API",
+    "COLLINS_E2E_STUBS",
+    "COLLINS_E2E_STUBS_DATA",
+    "NOTIFY_SOCKET",
+    "INVOCATION_ID",
+    "JOURNAL_STREAM",
+)
+ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
+# How long stop_sessions waits for every close flow (the agent's exit
+# budget, the shell's, the SIGKILL grace) before shutting what is left.
+STOP_BOUND_S = 30.0
 
 
 class Client(Protocol):
@@ -444,6 +463,16 @@ class ServiceCore:
         options = self._launch_options(message)
         if options is not None and message.get("sandbox") and not options.sandbox_plan:
             options = self._box_for_launch(message, options)
+        wanted = message.get("session")
+        if wanted:
+            for live in self._records():
+                if live.pty_id in self.ptys.ptys and live.session.session_id == wanted:
+                    # Two CLIs on one transcript would both write it; the
+                    # client paints this where a spawn error goes, and
+                    # PR-1.12c attaches to the running pty instead.
+                    return protocol.refuse(
+                        message.id, protocol.ERROR_REFUSED, ALREADY_RUNNING_MSGID, {"pty": live.pty_id}
+                    )
         record = hosting.SessionRecord(
             self,
             provider=provider,
@@ -540,7 +569,8 @@ class ServiceCore:
         e2e probe's flag (D27: a child never sees it, so a check's agent
         shell cannot tell it runs under a probing service)."""
         env = dict(self._environment())
-        env.pop("COLLINS_DEBUG_API", None)
+        for name in SPAWN_ENV_STRIPPED:
+            env.pop(name, None)
         return env
 
     def spawn_agent_pty(self, record: hosting.SessionRecord, cwd: str) -> None:
@@ -1706,13 +1736,18 @@ class ServiceCore:
 
     # -- stopping (§3.10 item 1)
 
-    def stop_sessions(self) -> list[str]:
-        """End every session the way *Stop sessions and quit* does: the ids
-        of the live agent sessions are recorded as `resume_on_start` (a
-        client reopening its tabs finds them resumable; the next service
-        resumes nothing by itself) and every pty is closed (`shutdown`:
-        SIGHUP, the master closed, SIGKILL after the grace). Returns the
-        ids recorded."""
+    def stop_sessions(self, done: Callable[[], None] | None = None) -> list[str]:
+        """End every session the way *Stop sessions and quit* does (§3.10
+        item 1): the ids of the live agent sessions are recorded as
+        `resume_on_start` (a client reopening its tabs finds them resumable;
+        the next service resumes nothing by itself); each agent session
+        runs its graceful close flow (the provider's exit keystrokes, the
+        nudges, the worktree dialog answered, its budget, then the pty
+        closed: SIGHUP, and SIGKILL after `CLOSE_GRACE_MS`); once every
+        agent pty has exited, or `STOP_BOUND_S` has passed, `shutdown()`
+        closes what is left and *done* is called. The main loop keeps
+        running meanwhile (the flows and the grace are its timers). Returns
+        the ids recorded."""
         ids: list[str] = []
         for record in self._records():
             session_id = getattr(record.session, "session_id", None)
@@ -1723,8 +1758,53 @@ class ServiceCore:
                 self.state.set_resume_on_start(ids)
             except Exception:
                 log.exception("could not record the sessions to resume")
-        self.shutdown()
+        for record in self._records():
+            pty_id = record.pty_id
+            if pty_id is None or pty_id not in self.ptys.ptys:
+                continue
+            session = record.session
+            exit_text = None
+            try:
+                exit_text = session.provider.graceful_exit()
+            except Exception:  # noqa: BLE001 - a provider's failure is not the stop's
+                log.exception("stop: no exit keystrokes for %s", record.handle)
+            force = self._force_close_for(pty_id)
+            if exit_text and session.has_running_command():
+                try:
+                    session.begin_close(exit_text, False, force)
+                    continue
+                except Exception:  # noqa: BLE001
+                    log.exception("stop: the close flow of %s failed", record.handle)
+            force()
+        deadline = time.monotonic() + STOP_BOUND_S
+
+        def settled() -> bool:
+            live = [r for r in self._records() if r.pty_id in self.ptys.ptys]
+            if live and time.monotonic() < deadline:
+                return GLib.SOURCE_CONTINUE
+            if live:
+                log.warning(
+                    "stop: %d session(s) still up after %.0f s; closing them", len(live), STOP_BOUND_S
+                )
+            self.shutdown()
+            if done is not None:
+                done()
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(100, settled)
         return ids
+
+    def _force_close_for(self, pty_id: int) -> Callable[[], None]:
+        def force() -> None:
+            record = self.sessions.get(pty_id)
+            if record is not None:
+                record.session.end_close()
+            try:
+                self.ptys.close(pty_id)
+            except KeyError:
+                pass
+
+        return force
 
     def shutdown(self) -> None:
         if self.activity is not None:

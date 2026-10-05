@@ -219,14 +219,17 @@ def _reload_units() -> None:
     session, or a failing daemon-reload leaves the files in place."""
     if shutil.which("systemctl") is None:
         return
-    subprocess.run(
-        ["systemctl", "--user", "daemon-reload"],
-        check=False,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=15,
-    )
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # the files are in place; the next login reads them
 
 
 def install_cli() -> int:

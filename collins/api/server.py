@@ -75,6 +75,7 @@ log = logging.getLogger(__name__)
 WS_PATH = "/api/ws"
 SOCKET_NAME = "api.sock"
 PROOF_NAME = "local-proof"
+HELLO_TIMEOUT_S = 5  # a connection with no hello by then is closed
 
 
 # ---- paths -----------------------------------------------------------------------
@@ -95,8 +96,9 @@ def runtime_dir(app_id: str) -> str:
     app id) falls back to a user-private, id-hashed directory under the
     temp directory, 0700 like the rest."""
     if os.environ.get("XDG_RUNTIME_DIR"):
-        return mcptools.runtime_dir(app_id)
-    directory = os.path.join(sandboxplan.state_base(), "collins", app_id)
+        directory = mcptools.runtime_dir(app_id)
+    else:
+        directory = os.path.join(sandboxplan.state_base(), "collins", app_id)
     if len(os.path.join(directory, SOCKET_NAME).encode()) <= SOCKET_PATH_MAX:
         return directory
     import hashlib
@@ -104,6 +106,11 @@ def runtime_dir(app_id: str) -> str:
 
     digest = hashlib.sha1(app_id.encode()).hexdigest()[:16]
     return os.path.join(tempfile.gettempdir(), f"collins-{os.getuid()}", digest)
+
+
+def lock_path(app_id: str) -> str:
+    """The single-instance lock a service holds for its life (`service.main`)."""
+    return os.path.join(runtime_dir(app_id), "service.lock")
 
 
 def socket_path(app_id: str) -> str:
@@ -191,10 +198,11 @@ class _Sink:
     def drop_queued(self) -> None:
         """Discard what of this pty is still in the sink's own list; what
         libsoup already took is sent. The redraw that follows supersedes
-        it, and the counters follow the redraw's fresh start."""
+        it. `acked` stays where it is: what libsoup holds is still unacked,
+        and moving the mark would open a fresh window on top of it (one
+        window per fallback cycle until the pong timeout cut the client)."""
         self.pending.clear()
         self.pending_bytes = 0
-        self.acked = self.sent
 
     def ack(self, offset: int) -> int:
         """The client fed live output up to *offset*: release what the
@@ -316,6 +324,15 @@ class Connection:
         ws.connect("message", self._on_message)
         ws.connect("error", self._on_error)
         ws.connect("closed", self._on_closed)
+        # A connection that never says hello is closed after HELLO_TIMEOUT_S.
+        self._hello_source = GLib.timeout_add(HELLO_TIMEOUT_S * 1000, self._hello_overdue)
+
+    def _hello_overdue(self) -> bool:
+        self._hello_source = 0
+        if self.client is None and not self.closed:
+            log.info("api: a connection said no hello in %d s; closing it", HELLO_TIMEOUT_S)
+            self.close()
+        return GLib.SOURCE_REMOVE
 
     # -- sending
 
@@ -339,6 +356,9 @@ class Connection:
         if self.closed:
             return
         self.closed = True
+        if getattr(self, "_hello_source", 0):
+            GLib.source_remove(self._hello_source)
+            self._hello_source = 0
         if self.ws.get_state() == Soup.WebsocketState.OPEN:
             try:
                 self.ws.close(Soup.WebsocketCloseCode.NORMAL, None)
@@ -428,6 +448,9 @@ class Connection:
 
     def _on_closed(self, _ws) -> None:
         self.closed = True
+        if getattr(self, "_hello_source", 0):
+            GLib.source_remove(self._hello_source)
+            self._hello_source = 0
         self.server.connection_gone(self)
 
 
@@ -467,6 +490,9 @@ class ApiServer:
         """Listen on the socket, write the proof. Returns the socket's path.
         Raises `OSError` for a live socket (another service) and
         `GLib.Error` when libsoup cannot listen."""
+        if len(os.fsencode(self.path)) > 107:
+            # sun_path is 108 bytes with the NUL; Gio truncates silently.
+            raise OSError(errno.ENAMETOOLONG, f"socket path too long for AF_UNIX: {self.path}")
         directory = os.path.dirname(self.path)
         os.makedirs(directory, mode=0o700, exist_ok=True)
         os.chmod(directory, 0o700)
@@ -566,8 +592,11 @@ class ApiServer:
             client.sync = connection
         else:
             if client is not None and client.primary is not None:
-                # The same client again (a reconnect the old connection has
-                # not yet been seen to close): the newcomer is the client.
+                # The same client_id again (a reconnect whose old connection
+                # has not yet been seen to close): the newcomer takes the id
+                # over, by design. Every client that reaches this socket is
+                # already trusted with a shell (same uid, §3.2), so an id is
+                # a grouping key, not a credential.
                 old = client
                 old.end()
             client = SocketClient(self, client_id)
