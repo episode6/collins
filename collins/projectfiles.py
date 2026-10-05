@@ -19,23 +19,43 @@ the agent writes in the same folders by design, and a client's write
 must land inside its root even when something planted a symlink at the
 name between the check and the write. So nothing here lands by a call
 that replaces what it finds: a file copy opens its target
-`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (`_copy_file_exclusive`: the bytes,
-then `copystat`); a tree is `shutil.copytree` with that copy function and
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (`_copy_file_exclusive`: the source
+opened `O_NOFOLLOW` too and read only when it is a regular file, the
+bytes by a `sendfile` loop with `copyfileobj` as shutil's fallback, then
+`copystat`); a tree is `shutil.copytree` with that copy function and
 `dirs_exist_ok` False (its own `makedirs` at the top and at every
 subdirectory is the exclusive step, and a link in the source stays a
-link, `os.symlink` failing `EEXIST` on a planted name); a move on the
-same filesystem is `os.link` then `unlink` for a file and `os.mkdir`
-then `os.rename` for a directory (a rename replaces only the empty
-directory just made; an entry planted inside it fails `ENOTEMPTY`,
-never over anything), and across filesystems (`EXDEV`, or a filesystem
-without links: `EPERM`, `EMLINK`) the exclusive copy and then the
-source removed, as `shutil.move` does (`_move_exclusive`). `EEXIST` at a
-paste's target is the next name of `unique_target`'s sequence
-(`paste_entries`' loop: try, and on `EEXIST` the next; `no_room` after
-the hundredth); at a rename's it is `exists`; `make_directory`'s
-`os.mkdir` is exclusive already. No lock serializes the operations: with
-exclusive placement two requests cannot land one name, and a lock would
-hold every client's rename behind a long copy.
+link, `os.symlink` failing `EEXIST` on a planted name).
+
+A move (a cut's paste, and a rename, which is a move within one
+directory; `_move_exclusive`) is first `renameat2(RENAME_NOREPLACE)`
+through `ctypes` (`_rename_noreplace`): the one exclusive primitive with
+`rename`'s own semantics for a file, a directory, a link, a FIFO alike —
+no placeholder, no ownership or read permission needed, the inode kept.
+Where the flag is not supported (`EINVAL`, `ENOSYS`, `ENOTSUP`, or no
+such symbol in libc: NFS, a FUSE mount without `rename2`, an old FAT,
+another libc) the placeholder path (`_move_by_placeholder`): a file's
+target is created `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` and then replaced
+by `os.rename`, which replaces it without following anything at the
+name; a directory's is `os.mkdir` then `os.rename`, which replaces only
+the empty directory just made (an entry planted inside it fails
+`ENOTEMPTY`: the name counts as taken and the placeholder stays with
+what is not ours). Across filesystems (`EXDEV` from either) the exclusive
+copy and then the source removed, as `shutil.move` does
+(`_move_by_copy`). What a failed move leaves (D46): only what this
+operation made and that holds nothing of anyone else's is removed — a
+file placeholder whose rename failed (only while `lstat` still shows the
+inode made), a file copied across filesystems whose source then cannot
+be unlinked (the entry `failed` with the `unlink`'s words, the source
+intact, nothing at the destination); a tree copied across whose
+`rmtree` then fails is kept with both halves on disk, since part of the
+source may already be gone. `EEXIST` at a paste's target is the next
+name of `unique_target`'s sequence (`paste_entries`' loop: try, and on
+`EEXIST` the next; `no_room` after the hundredth); at a rename's it is
+`exists`; `make_directory`'s `os.mkdir` is exclusive already. No lock
+serializes the operations: with exclusive placement two requests cannot
+land one name, and a lock would hold every client's rename behind a
+long copy.
 
 They moved here out of `editorfiles` (a module the client calls, which
 the pathless walker reads) when the tree and quick open went over the
@@ -50,6 +70,7 @@ Stdlib only (plus `sessions.worktree_project_root`, a string rule)."""
 
 from __future__ import annotations
 
+import ctypes
 import enum
 import errno
 import os
@@ -477,12 +498,70 @@ class PasteOutcome:
     message: str = ""
 
 
-# The errnos `os.link` answers on a filesystem the link cannot be made on:
-# another filesystem, one without hard links, one whose link count is
-# full. Any of them takes the move down the copy-then-remove branch, as
-# `shutil.move` goes on `EXDEV`.
-_NO_LINK_ERRNOS = frozenset({errno.EXDEV, errno.EPERM, errno.EMLINK})
-_COPY_CHUNK = 1024 * 1024
+# `renameat2(2)` through glibc's wrapper (Linux >= 3.15, glibc >= 2.28): the
+# exclusive move. Looked up once, in a try: no libc, or none with the
+# symbol (another libc, the macOS port), means the placeholder path.
+_AT_FDCWD = -100
+_RENAME_NOREPLACE = 1
+try:
+    _RENAMEAT2 = getattr(ctypes.CDLL(None, use_errno=True), "renameat2", None)
+except (OSError, AttributeError):
+    _RENAMEAT2 = None
+if _RENAMEAT2 is not None:
+    _RENAMEAT2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+    _RENAMEAT2.restype = ctypes.c_int
+# What `renameat2` answers where the flag is not supported (an old kernel,
+# NFS, a FUSE mount without `rename2`, an old FAT): the placeholder path.
+_NOT_HERE_ERRNOS = frozenset({errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP})
+# What a first `sendfile` answers when it cannot serve this pair of
+# descriptors (`shutil._fastcopy_sendfile`'s give-up set): `copyfileobj`.
+_NO_SENDFILE_ERRNOS = frozenset({errno.EINVAL, errno.ENOTSOCK, errno.ENOSYS, errno.EOPNOTSUPP})
+_COPY_CHUNK = 8 * 1024 * 1024
+
+
+def _rename_noreplace(source: str | Path, target: str | Path) -> bool:
+    """`renameat2(AT_FDCWD, source, AT_FDCWD, target, RENAME_NOREPLACE)`:
+    True once *source* is at *target*; False where the flag is not
+    supported (`_NOT_HERE_ERRNOS`, or no `renameat2` in libc), so the
+    caller takes the placeholder path; `FileExistsError` when the name is
+    taken; any other failure (`EXDEV` among them, the caller's copy path)
+    its `OSError`."""
+    if _RENAMEAT2 is None:
+        return False
+    rc = _RENAMEAT2(_AT_FDCWD, os.fsencode(source), _AT_FDCWD, os.fsencode(target), _RENAME_NOREPLACE)
+    if rc == 0:
+        return True
+    code = ctypes.get_errno()
+    if code == errno.EEXIST:
+        raise FileExistsError(code, os.strerror(code), os.fspath(source), None, os.fspath(target))
+    if code in _NOT_HERE_ERRNOS:
+        return False
+    raise OSError(code, os.strerror(code), os.fspath(source), None, os.fspath(target))
+
+
+def _copy_bytes(src_fd: int, dst_fd: int) -> None:
+    """The bytes of *src_fd* onto *dst_fd*: `os.sendfile` in a loop until
+    it answers 0, `copyfileobj`'s read-and-write loop only when the first
+    call fails with nothing written and an errno of `_NO_SENDFILE_ERRNOS`
+    (shutil's own rule; `ENOSPC`, and any failure after bytes went, raise)."""
+    offset = 0
+    try:
+        while True:
+            sent = os.sendfile(dst_fd, src_fd, offset, _COPY_CHUNK)
+            if sent == 0:
+                return
+            offset += sent
+    except OSError as err:
+        if offset != 0 or err.errno not in _NO_SENDFILE_ERRNOS:
+            raise
+    os.lseek(src_fd, 0, os.SEEK_SET)
+    while True:
+        chunk = os.read(src_fd, _COPY_CHUNK)
+        if not chunk:
+            return
+        view = memoryview(chunk)
+        while view:
+            view = view[os.write(dst_fd, view) :]
 
 
 def _copy_file_exclusive(source: str | Path, target: str | Path) -> None:
@@ -490,9 +569,11 @@ def _copy_file_exclusive(source: str | Path, target: str | Path) -> None:
     which must not be there: the target is opened `O_CREAT|O_EXCL|
     O_NOFOLLOW`, so a name taken in between — a file, a planted symlink —
     fails `FileExistsError` and nothing is written through it; a link is
-    `os.symlink`, which fails the same way. The bytes, then `copystat`
-    (mode and times, as `copy2` keeps them). The source is opened
-    non-blocking and read only when it is a regular file: a FIFO or a
+    `os.symlink`, which fails the same way. The bytes (`_copy_bytes`),
+    then `copystat` (mode and times, as `copy2` keeps them). The source
+    is opened `O_NOFOLLOW` (a source swapped for a link after the `islink`
+    check is `ELOOP`, never read through past the caller's confinement)
+    and non-blocking, and read only when it is a regular file: a FIFO or a
     device is refused rather than read (a FIFO would wait for a writer,
     `/dev/zero` would fill the disk). `shutil.copytree`'s copy function
     for a tree."""
@@ -501,19 +582,18 @@ def _copy_file_exclusive(source: str | Path, target: str | Path) -> None:
         os.symlink(os.readlink(source), target)
         shutil.copystat(source, target, follow_symlinks=False)
         return
-    src_fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY)
+    src_fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_NOFOLLOW)
     try:
         if not stat_mod.S_ISREG(os.fstat(src_fd).st_mode):
             raise OSError(errno.ENOTSUP, f"Not a regular file: {os.path.basename(source)}")
-        src_fh = os.fdopen(src_fd, "rb")
-    except BaseException:
-        os.close(src_fd)
-        raise
-    with src_fh:
         dst_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NOCTTY, 0o666)
-        with os.fdopen(dst_fd, "wb") as dst_fh:
-            shutil.copyfileobj(src_fh, dst_fh, _COPY_CHUNK)
-    shutil.copystat(source, target)
+        try:
+            _copy_bytes(src_fd, dst_fd)
+        finally:
+            os.close(dst_fd)
+    finally:
+        os.close(src_fd)
+    shutil.copystat(source, target, follow_symlinks=False)
 
 
 def _copy_tree_exclusive(source: Path, target: Path) -> None:
@@ -527,37 +607,98 @@ def _copy_tree_exclusive(source: Path, target: Path) -> None:
     shutil.copytree(source, target, symlinks=True, copy_function=_copy_file_exclusive)
 
 
+def _is_real_dir(path: Path) -> bool:
+    """A directory itself, not a link to one (moved and copied as a link)."""
+    return path.is_dir() and not path.is_symlink()
+
+
 def _move_exclusive(source: Path, target: Path) -> None:
     """*source* moved to *target*, which must not be there (a rename, or a
-    cut's paste): a file by `os.link` then `unlink` (a hard link is made
-    only on a free name; a symlink is linked as the link itself), a
-    directory by `os.mkdir` then `os.rename` (the rename replaces only the
-    empty directory just made; an entry planted inside it meanwhile fails
-    `ENOTEMPTY`); `FileExistsError` when the name is taken. Where the link
-    or the rename cannot cross (`_NO_LINK_ERRNOS`, `EXDEV`) the exclusive
-    copy and then the source removed, as `shutil.move` does."""
-    if source.is_dir() and not source.is_symlink():
+    cut's paste): `_rename_noreplace` first; where the flag is not
+    supported, the placeholder path (`_move_by_placeholder`); `EXDEV` from
+    either, the copy path (`_move_by_copy`). `FileExistsError` when the
+    name is taken; any other `OSError` is the move's failure, which leaves
+    nothing of this operation's behind (D46)."""
+    try:
+        if _rename_noreplace(source, target):
+            return
+        _move_by_placeholder(source, target)
+        return
+    except OSError as err:
+        if err.errno != errno.EXDEV:
+            raise
+    _move_by_copy(source, target)
+
+
+def _move_by_placeholder(source: Path, target: Path) -> None:
+    """The move where `renameat2` cannot refuse to replace: a placeholder
+    made exclusively at *target*, then `os.rename`, which replaces it
+    without following anything at the name. For a directory the
+    placeholder is `os.mkdir`'s empty directory, which the rename
+    replaces only while it is empty: `ENOTEMPTY` (or `EEXIST`) means
+    someone put something in it, so it stays (it holds what is not ours)
+    and the name counts as taken (`FileExistsError`); any other failure
+    removes it and is the move's. For a file, a link or anything else
+    the placeholder is an empty file created `O_CREAT|O_EXCL|O_NOFOLLOW`,
+    its `(st_dev, st_ino)` kept; a failed rename removes it only while
+    `lstat` still shows that inode (never something swapped over it) and
+    is the move's failure, as `rename` refused it before the split."""
+    if _is_real_dir(source):
         os.mkdir(target)
         try:
             os.rename(source, target)
-            return
         except OSError as err:
+            if err.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                raise FileExistsError(
+                    errno.EEXIST, os.strerror(errno.EEXIST), os.fspath(source), None, os.fspath(target)
+                ) from err
             try:
                 os.rmdir(target)
             except OSError:
-                pass  # ENOTEMPTY: something was planted inside; the error below says so
-            if err.errno != errno.EXDEV:
-                raise
+                pass
+            raise
+        return
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NOCTTY, 0o600)
+    try:
+        st = os.fstat(fd)
+        made = (st.st_dev, st.st_ino)
+    finally:
+        os.close(fd)
+    try:
+        os.rename(source, target)
+    except OSError:
+        try:
+            now = os.lstat(target)
+            if (now.st_dev, now.st_ino) == made:
+                os.unlink(target)
+        except OSError:
+            pass
+        raise
+
+
+def _move_by_copy(source: Path, target: Path) -> None:
+    """The move across filesystems: the exclusive copy of the file (or
+    the tree), then the source removed, as `shutil.move` does. A file
+    whose source then cannot be unlinked (its folder not writable) is
+    removed again from the destination and the `unlink`'s error is the
+    move's: the source intact, nothing at the destination, a retry the
+    same again (D46). A tree whose `rmtree` fails is kept: `rmtree`
+    removes what it can before it raises, so part of the source may be
+    gone and the copy may be the one complete set; both halves stay, as
+    `shutil.move` left them."""
+    if _is_real_dir(source):
         _copy_tree_exclusive(source, target)
         shutil.rmtree(source)
         return
+    _copy_file_exclusive(source, target)
     try:
-        os.link(source, target, follow_symlinks=False)
-    except OSError as err:
-        if err.errno not in _NO_LINK_ERRNOS:
-            raise
-        _copy_file_exclusive(source, target)
-    os.unlink(source)
+        os.unlink(source)
+    except OSError:
+        try:
+            os.unlink(target)
+        except OSError:
+            pass
+        raise
 
 
 def _place(source: Path, target: Path, move: bool) -> None:
@@ -565,7 +706,7 @@ def _place(source: Path, target: Path, move: bool) -> None:
     module docstring): `FileExistsError` when the name is taken."""
     if move:
         _move_exclusive(source, target)
-    elif source.is_dir() and not source.is_symlink():
+    elif _is_real_dir(source):
         _copy_tree_exclusive(source, target)
     else:
         _copy_file_exclusive(source, target)

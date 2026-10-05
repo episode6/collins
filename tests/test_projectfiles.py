@@ -5,8 +5,10 @@ split-service spec §3.23, PR-2.5): the rename in place (`rename_name_error`,
 source confinement) and the new folder (`make_directory`). The directory
 reads' tests (PR-2.4) are still in test_editorfiles.py."""
 
+import ctypes
 import os
 import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -586,23 +588,382 @@ def test_a_tree_lands_beside_a_name_taken_in_between_and_never_into_a_planted_on
     assert (outcome.target / "sub").is_dir() and not (tmp_path / "tree2").exists()
 
 
-def test_a_cut_of_a_folder_never_replaces_an_entry_planted_inside_its_landing(tmp_path, monkeypatch):
-    """`os.mkdir` then `os.rename`: the rename replaces only the empty
-    directory just made; an entry planted inside it fails `ENOTEMPTY`."""
+def test_a_cut_of_a_folder_never_replaces_an_entry_planted_inside_its_placeholder(tmp_path, monkeypatch):
+    """The placeholder path (`renameat2` not supported): `os.mkdir` then
+    `os.rename`, which replaces only the empty directory just made; an
+    entry planted inside it fails `ENOTEMPTY`, which counts as the name
+    taken: the paste lands as "(copy)" and the placeholder stays with
+    what is not ours (D44 as amended, D46)."""
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
     (tmp_path / "dest").mkdir()
     (tmp_path / "tree").mkdir()
     (tmp_path / "tree" / "a.txt").write_text("a")
     real_mkdir = projectfiles.os.mkdir
+    planted: list = []
 
     def mkdir_then_plant(path, *args, **kwargs):
         real_mkdir(path, *args, **kwargs)
-        (Path(path) / "theirs.txt").write_text("theirs")
+        if not planted:
+            planted.append(path)
+            (Path(path) / "theirs.txt").write_text("theirs")
 
     monkeypatch.setattr(projectfiles.os, "mkdir", mkdir_then_plant)
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move=True)
-    assert outcome.error is PasteError.FAILED and "not empty" in outcome.message.lower()
-    assert (tmp_path / "dest" / "tree" / "theirs.txt").read_text() == "theirs"
-    assert (tmp_path / "tree" / "a.txt").read_text() == "a"  # nothing moved
+    assert outcome.error is None and outcome.target == tmp_path / "dest" / "tree (copy)"
+    assert os.listdir(tmp_path / "dest" / "tree") == ["theirs.txt"]  # the placeholder, left
+    assert (outcome.target / "a.txt").read_text() == "a" and not (tmp_path / "tree").exists()
+
+
+# -- the move's primitive (D44 as amended): renameat2(RENAME_NOREPLACE) ----------------
+#
+# The same matrix on the real primitive and on the placeholder path it falls
+# back to (`_rename_noreplace` patched to answer "not supported here"): a
+# file, a directory, a relative link, a dangling link and a FIFO moved with
+# the inode kept; a name taken by a file, a link and a directory answering
+# the next "(copy N)" for a paste and `exists` for a rename.
+
+
+def _stage_move_matrix(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "file.txt").write_text("file")
+    (src / "folder" / "in").mkdir(parents=True)
+    (src / "folder" / "in" / "x").write_text("x")
+    (src / "rel").symlink_to("file.txt")
+    (src / "dangling").symlink_to("/nonexistent/x")
+    os.mkfifo(src / "pipe")
+    (tmp_path / "dest").mkdir()
+    return src, [src / n for n in ("file.txt", "folder", "rel", "dangling", "pipe")]
+
+
+def _inodes(paths):
+    return [os.lstat(p).st_ino for p in paths]
+
+
+@pytest.mark.parametrize("primitive", ["renameat2", "placeholder"])
+def test_a_cut_moves_every_kind_of_entry_with_its_inode_kept(tmp_path, monkeypatch, primitive):
+    if primitive == "placeholder":
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    elif projectfiles._RENAMEAT2 is None:
+        pytest.skip("no renameat2 in this libc")
+    src, entries = _stage_move_matrix(tmp_path)
+    inodes = _inodes(entries)
+    outcomes = paste_entries(tmp_path, tmp_path / "dest", [str(e) for e in entries], move=True)
+    assert [o.error for o in outcomes] == [None] * 5
+    landed = [tmp_path / "dest" / e.name for e in entries]
+    assert [o.target for o in outcomes] == landed
+    assert _inodes(landed) == inodes
+    assert os.listdir(src) == []
+    assert (landed[0]).read_text() == "file" and (landed[1] / "in" / "x").read_text() == "x"
+    assert os.readlink(landed[2]) == "file.txt" and os.readlink(landed[3]) == "/nonexistent/x"
+    assert stat.S_ISFIFO(os.lstat(landed[4]).st_mode)
+    # A rename, the same: in place, the inode kept.
+    for path in landed:
+        renamed, error = rename_entry(tmp_path / "dest", path, path.with_name(path.name + ".r"))
+        assert error is None and os.lstat(renamed).st_ino == os.lstat(path.with_name(path.name + ".r")).st_ino
+    assert sorted(os.listdir(tmp_path / "dest")) == sorted(e.name + ".r" for e in entries)
+
+
+@pytest.mark.parametrize("primitive", ["renameat2", "placeholder"])
+@pytest.mark.parametrize("taken_by", ["file", "link", "dir"])
+def test_a_name_taken_in_between_is_the_next_copy_for_a_paste_and_exists_for_a_rename(
+    tmp_path, monkeypatch, primitive, taken_by
+):
+    if primitive == "placeholder":
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    elif projectfiles._RENAMEAT2 is None:
+        pytest.skip("no renameat2 in this libc")
+
+    def plant(target: Path) -> None:
+        if taken_by == "file":
+            target.write_text("theirs")
+        elif taken_by == "link":
+            target.symlink_to(tmp_path / "victim.txt")
+        else:
+            target.mkdir()
+            (target / "theirs.txt").write_text("theirs")
+
+    (tmp_path / "victim.txt").write_text("victim")
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("moved")
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "folder" / "x").write_text("x")
+    _plant_once(monkeypatch, plant)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
+    assert outcome.error is None and outcome.target == tmp_path / "dest" / "a (copy).txt"
+    assert outcome.target.read_text() == "moved" and not (tmp_path / "a.txt").exists()
+    _plant_once(monkeypatch, plant)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "folder")], move=True)
+    assert outcome.error is None and outcome.target == tmp_path / "dest" / "folder (copy)"
+    assert (outcome.target / "x").read_text() == "x" and not (tmp_path / "folder").exists()
+    # What was planted is exactly as planted.
+    assert (tmp_path / "victim.txt").read_text() == "victim"
+    for planted in (tmp_path / "dest" / "a.txt", tmp_path / "dest" / "folder"):
+        if taken_by == "file":
+            assert planted.read_text() == "theirs"
+        elif taken_by == "link":
+            assert planted.is_symlink()
+        else:
+            assert os.listdir(planted) == ["theirs.txt"]
+    # A rename onto such a name is `exists`, nothing moved.
+    (tmp_path / "b.txt").write_text("B")
+    real = projectfiles.rename_target
+
+    def plant_at_rename(root, path, name):
+        target, error = real(root, path, name)
+        if target is not None:
+            plant(target)
+        return target, error
+
+    monkeypatch.setattr(projectfiles, "rename_target", plant_at_rename)
+    assert rename_entry(tmp_path, tmp_path / "b.txt", tmp_path / "c.txt") == (None, RenameError.EXISTS)
+    assert (tmp_path / "b.txt").read_text() == "B" and (tmp_path / "victim.txt").read_text() == "victim"
+
+
+def test_the_placeholder_path_refuses_a_rename_it_cannot_do_and_leaves_no_placeholder(tmp_path, monkeypatch):
+    if os.geteuid() == 0:
+        pytest.skip("root renames anywhere")
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "a.txt").write_text("A")
+    (tmp_path / "dest").mkdir()
+    locked.chmod(0o555)
+    try:
+        with pytest.raises(PermissionError):
+            rename_entry(locked, locked / "a.txt", locked / "b.txt")
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(locked / "a.txt")], move=True)
+    finally:
+        locked.chmod(0o755)
+    assert outcome.error is PasteError.FAILED and "denied" in outcome.message
+    assert os.listdir(tmp_path / "dest") == [] and os.listdir(locked) == ["a.txt"]
+
+
+def test_the_placeholder_path_never_removes_something_swapped_over_its_placeholder(tmp_path, monkeypatch):
+    """A failed rename removes the file placeholder only while `lstat`
+    still shows the inode made: something swapped over it meanwhile is
+    not ours and stays."""
+    import errno
+
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda src, target: False)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("A")
+    real_rename = projectfiles.os.rename
+
+    def swap_then_refuse(src, dst, *args, **kwargs):
+        os.unlink(dst)
+        Path(dst).write_text("someone else's")
+        raise OSError(errno.EACCES, "Permission denied")
+
+    monkeypatch.setattr(projectfiles.os, "rename", swap_then_refuse)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
+    monkeypatch.setattr(projectfiles.os, "rename", real_rename)
+    assert outcome.error is PasteError.FAILED
+    assert (tmp_path / "dest" / "a.txt").read_text() == "someone else's"
+    assert (tmp_path / "a.txt").read_text() == "A"
+
+
+def _force_copy_path(monkeypatch):
+    """The copy path without a second mount: the primitive and `os.rename`
+    answer `EXDEV`, as another filesystem would."""
+    import errno
+
+    def exdev(*args, **kwargs):
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", exdev)
+    monkeypatch.setattr(projectfiles.os, "rename", exdev)
+
+
+def test_a_file_copied_across_whose_source_cannot_be_unlinked_leaves_nothing_at_the_destination(
+    tmp_path, monkeypatch
+):
+    """D46: the copy the service just made is removed again, the source
+    intact, the entry `failed` with the `unlink`'s words; a retry is the
+    same again, never a growing pile."""
+    import errno
+
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("A")
+    real_unlink = projectfiles.os.unlink
+
+    def refuse_source(path, *args, **kwargs):
+        if os.fspath(path) == str(tmp_path / "a.txt"):
+            raise PermissionError(errno.EACCES, "Permission denied", str(path))
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(projectfiles.os, "unlink", refuse_source)
+    for _ in range(2):
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")], move=True)
+        assert outcome.error is PasteError.FAILED and "denied" in outcome.message
+        assert os.listdir(tmp_path / "dest") == []
+    assert (tmp_path / "a.txt").read_text() == "A"
+
+
+def test_a_cut_from_a_folder_the_user_cannot_write_fails_and_leaves_nothing(tmp_path):
+    """N3 of the verification, on the real path: a `0555` source folder,
+    `failed`, the destination empty, no link and no copy left, a retry
+    the same."""
+    if os.geteuid() == 0:
+        pytest.skip("root unlinks anywhere")
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    (ro / "keep.txt").write_text("keep")
+    (tmp_path / "dest").mkdir()
+    ro.chmod(0o555)
+    try:
+        for _ in range(2):
+            (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(ro / "keep.txt")], move=True)
+            assert outcome.error is PasteError.FAILED and "denied" in outcome.message
+            assert os.listdir(tmp_path / "dest") == []
+        assert (ro / "keep.txt").read_text() == "keep"
+    finally:
+        ro.chmod(0o755)
+
+
+def test_a_file_copied_across_a_mount_from_a_read_only_folder_leaves_nothing(tmp_path):
+    """N3's case across a real second mount: the exclusive copy lands, the
+    `unlink` is refused, the copy is removed again (D46)."""
+    import tempfile
+
+    if os.geteuid() == 0:
+        pytest.skip("root unlinks anywhere")
+    mount = _other_mount(tmp_path)
+    if mount is None:
+        pytest.skip("no second filesystem on this runner")
+    elsewhere = Path(tempfile.mkdtemp(prefix="collins-xdev-", dir=mount))
+    try:
+        (elsewhere / "ro").mkdir()
+        (elsewhere / "ro" / "k.txt").write_text("k")
+        (elsewhere / "ro").chmod(0o555)
+        (tmp_path / "dest").mkdir()
+        source = str(elsewhere / "ro" / "k.txt")
+        try:
+            (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [source], move=True)
+        finally:
+            (elsewhere / "ro").chmod(0o755)
+        assert outcome.error is PasteError.FAILED and "denied" in outcome.message
+        assert os.listdir(tmp_path / "dest") == [] and (elsewhere / "ro" / "k.txt").read_text() == "k"
+    finally:
+        shutil.rmtree(elsewhere, ignore_errors=True)
+
+
+def test_a_tree_copied_across_whose_rmtree_fails_keeps_both_halves(tmp_path, monkeypatch):
+    """D46: part of the source may already be gone, so the copy may be
+    the one complete set; both stay, the entry `failed`."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "a.txt").write_text("a")
+
+    def refuse_rmtree(path, *args, **kwargs):
+        raise OSError(13, "Permission denied", str(path))
+
+    monkeypatch.setattr(projectfiles.shutil, "rmtree", refuse_rmtree)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move=True)
+    assert outcome.error is PasteError.FAILED and "denied" in outcome.message
+    assert (tmp_path / "dest" / "tree" / "sub" / "a.txt").read_text() == "a"
+    assert (tmp_path / "tree" / "sub" / "a.txt").read_text() == "a"
+
+
+def test_a_file_the_user_cannot_read_is_renamed_and_cut_with_its_inode(tmp_path):
+    """N5 of the verification: a `0000` file (standing in for another
+    owner's) moves as `rename` moved it, no read or ownership needed."""
+    if os.geteuid() == 0:
+        pytest.skip("root reads anything")
+    theirs = tmp_path / "theirs.txt"
+    theirs.write_text("T")
+    theirs.chmod(0)
+    inode = theirs.stat().st_ino
+    (tmp_path / "dest").mkdir()
+    try:
+        renamed, error = rename_entry(tmp_path, theirs, tmp_path / "r.txt")
+        assert error is None and renamed.stat().st_ino == inode
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(renamed)], move=True)
+        assert outcome.error is None and outcome.target.stat().st_ino == inode
+        assert not renamed.exists()
+    finally:
+        (tmp_path / "dest" / "r.txt").chmod(0o600)
+
+
+def test_the_sendfile_fallback_copies_the_same_bytes(tmp_path, monkeypatch):
+    import errno
+
+    data = os.urandom(3 * 1024 * 1024 + 17)
+    (tmp_path / "big.bin").write_bytes(data)
+    (tmp_path / "dest").mkdir()
+    calls: list = []
+
+    def no_sendfile(*args, **kwargs):
+        calls.append(args)
+        raise OSError(errno.EINVAL, "Invalid argument")
+
+    monkeypatch.setattr(projectfiles.os, "sendfile", no_sendfile)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "big.bin")])
+    assert outcome.error is None and outcome.target.read_bytes() == data and len(calls) == 1
+    # And on the fast path itself.
+    monkeypatch.undo()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "big.bin")])
+    assert outcome.target == tmp_path / "dest" / "big (copy).bin" and outcome.target.read_bytes() == data
+
+
+def test_a_source_swapped_for_a_link_after_the_islink_check_is_refused(tmp_path, monkeypatch):
+    """The copy's source is opened `O_NOFOLLOW`: a link swapped in after
+    the check is `ELOOP`, never read through past the confinement."""
+    victim = tmp_path / "victim.txt"
+    victim.write_text("secret")
+    (tmp_path / "dest").mkdir()
+    source = tmp_path / "a.txt"
+    source.write_text("A")
+    real_islink = projectfiles.os.path.islink
+
+    def swap(path):
+        answer = real_islink(path)
+        if os.fspath(path) == str(source) and not answer:
+            source.unlink()
+            source.symlink_to(victim)
+        return answer
+
+    monkeypatch.setattr(projectfiles.os.path, "islink", swap)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(source)])
+    assert outcome.error is PasteError.FAILED and os.listdir(tmp_path / "dest") == []
+
+
+def test_renameat2_answers_the_name_taken_and_not_here(tmp_path, monkeypatch):
+    """`_rename_noreplace` itself: True on a move, `FileExistsError` on a
+    taken name, False where the flag is not supported, and the move's
+    own error otherwise."""
+    import errno
+
+    if projectfiles._RENAMEAT2 is None:
+        pytest.skip("no renameat2 in this libc")
+    (tmp_path / "a").write_text("a")
+    (tmp_path / "b").write_text("b")
+    assert projectfiles._rename_noreplace(tmp_path / "a", tmp_path / "c") is True
+    with pytest.raises(FileExistsError):
+        projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "b")
+    with pytest.raises(FileNotFoundError):
+        projectfiles._rename_noreplace(tmp_path / "gone", tmp_path / "d")
+    assert sorted(os.listdir(tmp_path)) == ["b", "c"]
+
+    class Fake:
+        def __init__(self, code):
+            self.code = code
+
+        def __call__(self, *args):
+            ctypes.set_errno(self.code)
+            return -1
+
+    for code in sorted(projectfiles._NOT_HERE_ERRNOS):
+        monkeypatch.setattr(projectfiles, "_RENAMEAT2", Fake(code))
+        assert projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "e") is False
+    monkeypatch.setattr(projectfiles, "_RENAMEAT2", Fake(errno.EXDEV))
+    with pytest.raises(OSError) as raised:
+        projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "e")
+    assert raised.value.errno == errno.EXDEV
+    monkeypatch.setattr(projectfiles, "_RENAMEAT2", None)
+    assert projectfiles._rename_noreplace(tmp_path / "c", tmp_path / "e") is False
 
 
 def test_a_writer_that_takes_every_name_is_no_room_and_nothing_is_overwritten(tmp_path, monkeypatch):
