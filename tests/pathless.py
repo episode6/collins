@@ -7,19 +7,23 @@ opens no project file and runs no program of the project's: a GTK module
 or a client-side helper that reads the filesystem or spawns a process is
 a site this walker finds, and `tests/pathless_allowlist.py` is the list
 of the sites that are the device's own (`ui-state.json`, the caches, the
-notification sound, the Markdown export, the desktop entry, the app's
-icons, the update check, `buildinfo`) or not yet moved. The allowlist
-shrinks per PR and never grows (`tests/test_client_is_pathless.py`).
+Markdown export's destination, the desktop entry, the app's icons, the
+update check, `buildinfo`, the service's process) or a local extra behind
+`apilink.is_local()` (`function_asks_local` reads a site's function for
+the ask). The allowlist shrank per PR and never grows
+(`tests/test_client_is_pathless.py`).
 
 **What is walked.** `walk()` reads every module of `collins/` (never
 `collins/service/` or `collins/api/`, which are the service's and the
 wire's) with `ast` and keeps the GTK modules — those importing a widget
 library from `gi.repository` (`GTK_NAMES`) — plus `CLIENT_HELPERS`, the
-GTK-free modules the client calls for files and processes. Shared
-modules the service runs too (`gitops`, `sessions`, `store`, `chats`,
-`trust`, ...) are not walked: their reads are the service's, and the
-client reaches them behind a transport (`gitops.set_transport`) or a
-mirror.
+GTK-free modules the client calls for files and processes (PR-2.8 added
+the four the final list names and no GTK import marked: `buildinfo`,
+`desktopentry`, `updatecheck`, and `openwith`, the local extras'
+launcher). Shared modules the service runs too (`gitops`, `sessions`,
+`store`, `chats`, `trust`, ...) are not walked: their reads are the
+service's, and the client reaches them behind a transport
+(`gitops.set_transport`) or a mirror.
 
 **What is a site.** A call to `open`; to `os.path.exists / isfile /
 isdir / getsize / getmtime / islink / lexists`; `os.listdir / scandir /
@@ -63,13 +67,16 @@ GTK_NAMES = frozenset({"Gtk", "Adw", "Gdk", "Gsk", "Graphene", "Vte", "GtkSource
 CLIENT_HELPERS = (
     "apilink",
     "blobcache",
+    "buildinfo",
     "clientsession",
     "connection",
+    "desktopentry",
     "editorfiles",
     "gitinfo",
     "gitloads",
     "gitpatch",
     "linkpatterns",
+    "openwith",
     "projecticons",
     "remotegit",
     "remoteicons",
@@ -77,6 +84,7 @@ CLIENT_HELPERS = (
     "remoteuploads",
     "transcriptlinks",
     "uistate",
+    "updatecheck",
 )
 
 OS_PATH_CALLS = frozenset(
@@ -348,6 +356,48 @@ def walk() -> set[str]:
     for name, tree in modules().items():
         found |= sites_of(name, tree)
     return found
+
+
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _function(tree: ast.Module, qualname: str) -> ast.AST | None:
+    """The function or method *qualname* names (`Class.method`, `f`, a
+    nested `f.inner`), or None."""
+    node: ast.AST = tree
+    for part in qualname.split("."):
+        found = None
+        for child in ast.walk(node):
+            if child is node:
+                continue
+            if isinstance(child, _SCOPES) and child.name == part:
+                found = child
+                break
+        if found is None:
+            return None
+        node = found
+    return node if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) else None
+
+
+def function_asks_local(site: str, trees: dict[str, ast.Module] | None = None) -> bool:
+    """Whether the function a ``module:qualname:call`` *site* sits in asks
+    `apilink.is_local()` (a call whose name ends in ``is_local``): the
+    static half of "a local extra is behind `app.local`". A site at module
+    level has no function to ask in and is False. *trees* is `modules()`
+    when the caller has it already (it parses every walked module)."""
+    module, qualname, _call = site.split(":", 2)
+    tree = (modules() if trees is None else trees).get(module)
+    if tree is None or qualname == "<module>":
+        return False
+    function = _function(tree, qualname)
+    if function is None:
+        return False
+    for node in ast.walk(function):
+        if isinstance(node, ast.Call):
+            name = _dotted(node.func) or ""
+            if name.split(".")[-1] == "is_local":
+                return True
+    return False
 
 
 if __name__ == "__main__":

@@ -1105,7 +1105,18 @@ _TABLE: tuple[MessageType, ...] = (
                 "ordinal": _i(0, 65535),
             },
             # `handle` is the service's name for an agent's session (`s-N`).
-            reply={"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS), "handle": _ID},
+            # `cwd` is where the pty was started (D39): the request's, or,
+            # when that is no directory on the service's machine, what the
+            # service fell back to (its `$HOME`; for an agent whose worktree
+            # is gone, the repository first). The pty's row says the same,
+            # and the tab and its shells take it from here.
+            reply={
+                "pty": _req(_PTY),
+                "cols": _req(_COLS),
+                "rows": _req(_ROWS),
+                "handle": _ID,
+                "cwd": _PATH,
+            },
         ),
     ),
     MessageType(
@@ -1158,6 +1169,9 @@ _TABLE: tuple[MessageType, ...] = (
                 "foreground_pgrp": _null(_i(-1, PID_MAX)),
                 "running_command": _req(_BOOL),
                 "process_cwd": _null(_PATH),
+                # Where the service started the pty (its row's `cwd`, D39):
+                # the spawn's, or the fallback when that was no directory.
+                "cwd": _PATH,
                 "plan": _null(_PATH),
                 # Its grid now: what a tab that attaches to a running pty
                 # starts its terminal at, so the attach paints the screen

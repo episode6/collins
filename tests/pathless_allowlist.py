@@ -1,92 +1,154 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
-"""The pathless allowlist (split-service spec §3.23, Phase 2's rule).
+"""The pathless allowlist (split-service spec §3.23, Phase 2's rule): the
+final list, as PR-2.8 leaves it.
 
 Every filesystem and subprocess site `tests/pathless.py` finds in the
 client's modules, named ``module:qualname:call``. Created in PR-2.1 with
-every site the client had then, minus the git page's, gitinfo's and
-window._run_git's (git goes over the API); each later chunk of Phase 2
-removes the sites it moves to the service, and PR-2.8 leaves the final
-list: the device's own files (`ui-state.json`, `~/.cache/collins/blobs`
-and the other caches, the notification sound, the Markdown export's
-destination, the desktop entry, the app's icons, the update check,
-`buildinfo`) and the local extras a `local` client lights up.
+every site the client had then; each chunk of Phase 2 took off the sites
+it moved to the service (git in PR-2.1 and PR-2.2, the editor's files in
+PR-2.3, the tree, quick open and roots in PR-2.4, the file operations in
+PR-2.5, the links and the worktree checks in PR-2.6, the pictures in
+PR-2.7, the tab's and the shells' cwd checks in PR-2.8, D39). What is
+left is in three groups, and `tests/test_client_is_pathless.py` holds
+each to its rule:
+
+- `DEVICE`: this device's own files and programs. Nothing here names a
+  path of the service's.
+- `LOCAL_EXTRAS`: the sites that hand a path of the service's to
+  something on this device (another app, the file manager, a native
+  chooser's starting folder). They exist only for a client on the
+  service's machine: the function each sits in asks `apilink.is_local()`
+  (which is `app.local`, the `local` proof of D11), and the test reads
+  the function to see that it does.
+- `UNRULED`: three sites that are neither, which PR-2.8's entry in the
+  spec does not assign and whose move needs a design the spec does not
+  give (§5: reported, not improvised). The test pins the group so it can
+  only shrink; it is empty once they are ruled.
 
 **The list never grows** (`tests/test_client_is_pathless.py`): a new
 site in a GTK module or a client helper is a failing test, and so is an
 entry nothing matches any more (a site that moved comes off the list in
-the same PR). The groups below say which chunk takes each site.
+the same PR).
 """
 
-ALLOWLIST = frozenset(
+DEVICE = frozenset(
     {
-        # -- this device's own files: stay (PR-2.8 keeps them) --------------------
-        "app:<module>:Path.resolve",  # the bundled icons' path
+        # -- the app's own icons: the bundled path beside the package ----------------
+        "app:<module>:Path.resolve",
+        # -- ~/.cache/collins/blobs: the blob cache (PR-2.2, PR-2.7) -----------------
         "blobcache:fetch:Path.exists",
         "blobcache:fetch:Path.mkdir",
-        "blobcache:fetch:Path.read_text",
+        "blobcache:fetch:Path.read_text",  # a blob's saved tag
         "blobcache:fetch:Path.unlink",
         "blobcache:fetch:Path.write_text",
         "blobcache:fetch:os.replace",  # the fetch's own temporary into place
         "blobcache:fetch:os.unlink",
+        "blobcache:fetch:os.utime",  # a 304 marks the blob used: the prune clock
         # The one read of a fetched blob's bytes, refused outside the cache:
         # every decoder (animatedimage, pictures, imagediff, remoteicons)
-        # reads through it (PR-2.7, in place of imagediff's own read_bytes).
+        # reads through it.
         "blobcache:read:Path.read_bytes",
-        "blobcache:fetch:os.utime",  # a 304 marks the blob used: the prune clock (PR-2.2)
+        # The cache's prune (`blobcache` calls it on its own folder).
         "remoteimages:prune_stale:Path.is_file",
         "remoteimages:prune_stale:Path.iterdir",
         "remoteimages:prune_stale:Path.stat",
         "remoteimages:prune_stale:Path.unlink",
+        # -- ui-state.json: this device's half of the state (§3.8) -------------------
         "uistate:UiState._load:Path.read_text",
         "uistate:UiState.save:Path.exists",
-        "uistate:UiState.save:shutil.copy2",
+        "uistate:UiState.save:shutil.copy2",  # the one-time `state.json.pre-split` backup
         "uistate:write_json_atomic:Path.mkdir",
-        "window:MainWindow._on_export_save.work:Path.write_text",  # the Markdown export's destination
-        # -- the service's process, which the client finds and starts (stay) --------
+        # -- the Markdown export's destination: the file the chooser named. The
+        # transcript is the service's (`store.transcript-export`, PR-2.8) ------------
+        "window:MainWindow._on_export_save.work:Path.write_text",
+        # -- the desktop entry: `collins --install-desktop` and the sidebar's
+        # *Add to applications* write this device's launcher, icon and units ----------
+        "desktopentry:<module>:Path.resolve",
+        "desktopentry:_refresh:shutil.which",
+        "desktopentry:_refresh:subprocess.run",
+        "desktopentry:_reload_units:shutil.which",
+        "desktopentry:_reload_units:subprocess.run",
+        "desktopentry:install:Path.mkdir",
+        "desktopentry:install:Path.write_text",
+        "desktopentry:install:shutil.copyfile",
+        "desktopentry:is_installed:Path.is_file",
+        "desktopentry:launcher_path:Path.resolve",
+        "desktopentry:launcher_path:shutil.which",
+        "desktopentry:service_launcher_path:Path.resolve",
+        "desktopentry:service_launcher_path:shutil.which",
+        # -- the update check: its stamp under ~/.cache/collins, and whether this
+        # device has a `gh` to ask with ------------------------------------------------
+        "updatecheck:gh_usable:shutil.which",
+        "updatecheck:read_record:Path.read_text",
+        "updatecheck:write_record:Path.mkdir",
+        # -- buildinfo: which build this is, read off the package's own checkout ------
+        "buildinfo:<module>:Path.resolve",
+        "buildinfo:_read:shutil.which",
+        "buildinfo:_read:subprocess.run",
+        # -- the service's process, which this device finds and starts (§3.10,
+        # §3.20): its pid, its launcher, the user unit ----------------------------------
         "connection:pid_is_alive:open",
         "connection:service_argv:shutil.which",
         "connection:spawn_service:subprocess.Popen",
         "connection:systemctl_start:shutil.which",
         "connection:systemctl_start:subprocess.run",
         "prefs:PreferencesDialog._on_restart:subprocess.Popen",
-        # -- the local extras (PR-2.8 gates them on the `local` capability) ---------
-        "attachpanel:AttachmentsView._on_show_folder:os.path.exists",
-        "attachpanel:AttachmentsView._with_local_file:os.path.isfile",
-        "clonedialog:CloneDialog._browse_target:os.path.isdir",
-        "clonedialog:CloneDialog._clone_done:os.path.isdir",
-        "clonedialog:CloneDialog._refresh_destination:shutil.which",
+        # -- which programs this device has, for the local extras' offers: Ghostty
+        # on its PATH (the offer and the launch are LOCAL_EXTRAS' below), the
+        # desktop's terminal preference (`xdg-terminals.list`, the alternatives
+        # link, `$TERMINAL`) -----------------------------------------------------------
+        "sidebar:<module>:shutil.which",
+        "window:<module>:shutil.which",
+        "openwith:_alternatives_terminal:os.access",
+        "openwith:_alternatives_terminal:shutil.which",
+        "openwith:_configured_terminal_ids:Path.read_text",
+        "openwith:_from_command:shutil.which",
+    }
+)
+
+# Each of these sits in a function that returns before the site unless
+# `apilink.is_local()` (the test reads the function's source for the ask).
+LOCAL_EXTRAS = frozenset(
+    {
+        # -- another app, the file manager, a terminal: a folder or a file of the
+        # service's handed to a program of this device's ------------------------------
         "footerapps:launch_app:Path.is_dir",
         "footerapps:launch_app:subprocess.Popen",
         "footerapps:launch_app_file:Path.is_file",
-        "prefs:PreferencesDialog._browse_clone_directory:os.path.isdir",
-        "sidebar:<module>:shutil.which",
-        "window:<module>:shutil.which",
+        "openwith:launch_terminal:Path.is_dir",
+        "openwith:launch_terminal:subprocess.Popen",
+        "openwith:open_file_default:Path.is_file",
+        "openwith:open_file_default:shutil.which",  # xdg-open
+        "openwith:open_file_default:subprocess.Popen",
+        # -- the attachments panel's Open With… and Show in Folder ----------------------
+        "attachpanel:AttachmentsView._on_show_folder:os.path.exists",
+        "attachpanel:AttachmentsView._with_local_file:os.path.isfile",
+        # -- Open in Ghostty ---------------------------------------------------------
         "window:MainWindow._on_open_ghostty:Path.is_dir",
         "window:MainWindow._on_open_ghostty:shutil.which",
         "window:MainWindow._on_open_ghostty:subprocess.Popen",
+        # -- a native chooser's starting folder (§3.11: the native choosers are a
+        # `local` client's; PR-3.2 gives the others the path picker) --------------------
+        "clonedialog:CloneDialog._browse_target:os.path.isdir",
+        "prefs:PreferencesDialog._browse_clone_directory:os.path.isdir",
         "window:MainWindow._open_session_file:Path.is_dir",
-        "window:MainWindow._visible_project_dir:Path.is_dir",
-        # -- the editor's files (PR-2.3) and the tree, quick open and roots (PR-2.4):
-        # the monitors, the first-line read, the highlight stat, the load guard,
-        # the listing, the walk, the follow scope, the reroot's and the Agent
-        # files' checks and the git page's file-row check went to the service
-        # (`fs.read` / `fs.stat` / `fs.list` / `fs.walk` / `cwd.settle`; the
-        # directory reads into `projectfiles.py`, which the service runs).
-        # Left: the tab's and the panel shells' cwd checks, which fall back to
-        # this device's home — the service's home is no request's answer yet
-        # (named in PR-2.4's report; PR-2.6 or PR-2.8 settles them) --------------
-        "terminal:PanelTerminal._spawn:Path.is_dir",
-        "terminal:PanelTerminal._sync_cwd:Path.is_dir",
-        "terminal:PanelTerminal.follow_cwd:Path.is_dir",
-        "terminal:TerminalTab.__init__:Path.is_dir",
-        # -- file operations and the clipboard (PR-2.5): the rename, the paste
-        # (and the "is the name taken" check) went to the service (`fs.rename`
-        # / `fs.paste` / `fs.mkdir`; the rules into `projectfiles.py`). Nothing
-        # left. ------------------------------------------------------------------------
-        # -- uploads, attachments, lightbox, icons (PR-2.7): none left. The
-        # project icon is the service's `kind=icon` blob, every picture a blob
-        # decoded from its bytes through `blobcache.read`; `image_guard` went
-        # with its last caller (the editor's image pages guard over `fs.stat`
-        # since PR-2.4, the lightbox is on the blob GET) ------------------------
     }
 )
+
+# Not this device's files and not local extras: a path of the service's
+# read on this device, in code no chunk of Phase 2 was given. Reported by
+# PR-2.8 for a ruling (its report's questions); nothing may be added.
+UNRULED = frozenset(
+    {
+        # The clone dialog: whether the clone's folder is there once the job
+        # says it is done, and whether `gh` (the service's, which does the
+        # clone) is installed, for the destination note's "with gh / git".
+        "clonedialog:CloneDialog._clone_done:os.path.isdir",
+        "clonedialog:CloneDialog._refresh_destination:shutil.which",
+        # "Is the visible session's project directory still there", asked
+        # synchronously by the five ways a new session picks its folder.
+        "window:MainWindow._visible_project_dir:Path.is_dir",
+    }
+)
+
+ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED
