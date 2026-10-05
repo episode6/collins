@@ -137,14 +137,11 @@ class ImageLightbox(Gtk.Box):
     ) -> None:
         """*path* is the blob-cache file to show (None: the fetch failed,
         *why* says why); *open_with* the file "Open With…" hands another
-        app (the cache's copy by default). Another app is a local extra
-        (§3.12): a client that is not `local` (`apilink.is_local`) gets no
-        "Open With…" button, whatever the picture."""
+        app (the cache's copy by default: a file of this device's, which
+        any client may hand to an app of this device's)."""
         super().__init__()
         self._path = Path(path) if path is not None else None
         self._open_with = open_with or (str(self._path) if self._path is not None else None)
-        if not apilink.is_local():
-            self._open_with = None
         # Called with -1/+1 when the left/right (or up/down) arrow is pressed,
         # to step to the previous/next image; None when this lightbox was
         # opened somewhere with no gallery to walk (a clicked path, the
@@ -836,11 +833,11 @@ def show_image(
             if on_shown is not None:
                 on_shown(False, "superseded" if mine != _showing else "gone")
             return
-        # "Open With…" is a local extra (§3.12): the service's own file for
-        # a client on its machine (the cache's copy for a web image), and no
-        # button at all for one that is not (`apilink.is_local`).
-        local = apilink.is_local()
-        open_with = key if (not remote and local) else None
+        # "Open With…" hands another app the service's own file only as a
+        # local extra (§3.12: a client on the service's machine,
+        # `apilink.is_local`); otherwise, and for a web image, this
+        # device's copy in the blob cache, which is the device's own file.
+        open_with = key if (not remote and apilink.is_local()) else None
         box = ImageLightbox(
             path,
             can_open_in_editor,

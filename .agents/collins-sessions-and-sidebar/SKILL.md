@@ -214,6 +214,32 @@ then `trust_chat_dir`), the clone and the repository list it picks from
 (`clone`, `clone.repos`) all go this way; the dialogs keep their
 confirmations and read the events.
 
+**The Markdown export** (PR-2.8) is `store.transcript-export {session}`:
+the service takes the session, its display name and its transcript's
+path from its own store (the request names only the session; the path
+must pass `transcript_path_allowed`), runs `sessions.export_markdown` on
+a thread (`Files._later`) and answers the text, a chunked field bounded
+at `protocol.TRANSCRIPT_EXPORT_MAX` characters (a render over it is
+refused, never cut). `remotestore.transcript_export(session_id)` is the
+blocking call; `MainWindow._on_export_save` runs it on a worker and
+writes the file the native chooser named, which is this device's. The
+window opens no transcript for it.
+
+**`app.local` and the local extras** (§3.12, PR-2.8). `apilink.
+is_local()` is the one reader of the link's `local` proof (D11);
+`App.local`, the file clipboard's scope and a dropped file's own path
+all go through it. In the sidebar it gates the session row's *Open in
+Ghostty*, *Open In…* and *Reveal transcript* and the project header's
+*Open In…* (`show_row_menu`, `_show_group_menu`): hidden, not greyed
+out, for a window that is not on the service's machine; *Open on
+GitHub* is a web link and stays. The window's `open-ghostty`,
+`open-folder`, `open-folder-terminal`, `open-folder-app` and
+`reveal-transcript` actions return early too. Not gated, and still a
+read of the service's file on this device that the pathless walker
+cannot see (they go through `sessions` / `providers` / `replaymodel`,
+which the service runs too): *Details…* (`provider.parse_details`),
+*Replay…* and *Open transcript file*; reported with PR-2.8 for a ruling.
+
 ## AppState (`state.py`)
 
 Sandboxing mirrors the worktree pair exactly: `sandbox_new_sessions` +
