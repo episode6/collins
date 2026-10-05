@@ -26,7 +26,8 @@ sent `removed`. The sessions kept out of sight are not sent until the
 client asks: `page()` (the `store.page-archived` request) marks the
 subscriber and sends them all, `send_one()` (`store.lookup`) one. A session
 once sent stays known until it is removed, so the client's copy never goes
-stale. Busy, unread, status and the background handoff's two flags are
+stale. Busy, unread, status and the background agents' three facts
+(`backgrounding`, `can_background` and `background`, PR-1.12d) are
 properties of the store's `SessionItem`s set outside a refresh: the feed
 watches each row item's `notify` for them and sends the one field at once
 (rule 3 of §3.1: the service decides, the client shows). `running` (an
@@ -61,15 +62,18 @@ from ..store import _relative_time, display_name_for
 log = logging.getLogger(__name__)
 
 # The SessionItem properties set outside a refresh (the tracker's verdicts,
-# the handoff's flags), sent the moment they move.
-FLAGS = ("status", "busy", "unread", "backgrounding", "can_background")
+# the background agents' facts), sent the moment they move.
+FLAGS = ("status", "busy", "unread", "backgrounding", "can_background", "background")
 _FLAG_DEFAULTS: dict[str, Any] = {
     "status": "",
     "busy": False,
     "unread": False,
     "backgrounding": False,
     "can_background": False,
+    "background": "",
 }
+# The flags that are words, not switches.
+_TEXT_FLAGS = frozenset({"status", "background"})
 
 # A map key larger than this (as JSON) goes out entry by entry in a
 # snapshot, so no frame nears the cap and no value nears the node bound.
@@ -279,7 +283,7 @@ class StoreFeed:
         if name not in _FLAG_DEFAULTS:
             return
         value = item.get_property(name)
-        if name == "status":
+        if name in _TEXT_FLAGS:
             value = _clamp(value, protocol.SHORT_MAX)
         session_id = item.session_id
         for sub in list(self._subscribers.values()):
@@ -330,7 +334,7 @@ class StoreFeed:
             "size": max(0, int(session.size)),
         }
         for name, value in flags.items():
-            fields[name] = _clamp(value, protocol.SHORT_MAX) if name == "status" else bool(value)
+            fields[name] = _clamp(value, protocol.SHORT_MAX) if name in _TEXT_FLAGS else bool(value)
         # Whether an agent pty on the service runs this session: a fact of
         # the pty table, not of the item, so worked out on every rebuild.
         try:

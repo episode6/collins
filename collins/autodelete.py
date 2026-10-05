@@ -24,15 +24,18 @@ a project is a statement about the folder, not each conversation in it.
 **What deletion is** is the sidebar's *Move transcript to trash*: the
 transcript goes to the system trash (recoverable), and everything the app
 kept for it (panel layout, scrollback, PRs, attachments, draft) goes with
-it, through the same window path the manual bulk delete uses
-(`MainWindow.trash_expired_archives`). A session that is still running — a
-tab open in any window, or a background agent — is skipped until it isn't.
+it, through the service's path for the manual bulk delete's work
+(`ServiceCore.trash_expired_archives`, which tells every client to drop
+what its device kept: the `forgotten` event). A session that is still
+running — an agent pty on the service, or a background agent — is skipped
+until it isn't.
 
 **Once a day** is kept the way updatecheck keeps its own: a small cache
 file under the app's cache directory (`cache_path`) records when the last
-sweep ran. Losing it costs one early sweep, never a setting. The app calls
-`maybe_sweep` at launch and then every hour (the same timer the update
-check rides); `due` says whether a day has passed. A sweep that finds
+sweep ran. Losing it costs one early sweep, never a setting. The service
+calls `maybe_sweep` once its store's first scan has landed and then every
+hour (`ServiceCore.start_housekeeping`, split-service spec §3.22, PR-1.12d:
+the cache is the service machine's); `due` says whether a day has passed. A sweep that finds
 nothing to delete still counts as done for the day.
 
 GTK-free: the span arithmetic, the expiry test, the cache and the
@@ -207,15 +210,15 @@ def maybe_sweep(
 ) -> list[str] | None:
     """One sweep when the setting is on and a day has passed: works out
     which sessions have expired, hands them to *trash* (which takes the
-    list of ids and returns the ids it could not trash — the window's
-    `trash_expired_archives`), and stamps the day as done. Returns the ids
+    list of ids and returns the ids it could not trash — the service's
+    `ServiceCore.trash_expired_archives`), and stamps the day as done. Returns the ids
     trashed, or None when nothing ran (the setting is off, or the day isn't
     up). The stamp is written whether or not anything expired, and even
-    when *trash* refused some: a session the window skipped (still
+    when *trash* refused some: a session the service skipped (still
     running) is picked up tomorrow, and one it couldn't trash (a file that
     won't move) is not something to retry every hour.
 
-    Call from the main loop: *trash* touches the window."""
+    Call from the main loop: *trash* touches the store."""
     if now is None:
         now = time.time()
     span = describe(settings.get(SETTING_COUNT), settings.get(SETTING_UNIT))

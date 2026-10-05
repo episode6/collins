@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -884,6 +884,13 @@ class SessionStore(GObject.Object):
         item = self._items.get(session_id)
         if item is not None and item.can_background != flag:
             item.can_background = flag
+
+    def set_background(self, session_id: str, background: str) -> None:
+        """Whether the row's conversation runs as a background agent:
+        "running", "pending" or "" (service.bgagents decides)."""
+        item = self._items.get(session_id)
+        if item is not None and item.background != background:
+            item.background = background
 
     def row_ids(self) -> list[str]:
         """Every session id with a row, so callers can re-evaluate a property

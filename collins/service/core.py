@@ -55,9 +55,23 @@ tracker (`tracking.ServiceActivity`, `start_activity`) is fed by the stream
 filter's `Progress` events, every pty's output after the filter, the input
 frames and the ``/proc`` poll, and sets `busy` and a counted finish's
 `unread` on the store's items itself. `store.flags` keeps what a person did
-at a client's screen — `status`, `unread: false`, the /bg orchestration's
-`backgrounding` and `can_background` — and refuses `busy` and
-`unread: true` from a client.
+at a client's screen — `status`, `unread` — and refuses `busy`.
+
+**The background agents are the service's** (§3.22, PR-1.12d,
+`bgagents.BackgroundAgents`, `start_background`): the agent list's poller
+and the rows' yellow-line fact (`background`), the /bg handoff a session's
+``close {mode: background}`` starts (the fork watch, the pending detach,
+the rows' `backgrounding`), the gate (`can_background`), the replay at
+start, the repair (the ``session.repair`` job) and the busy feed into the
+tracker. `store.flags` refuses `backgrounding` and `can_background`. The
+rest of what the window did with the service's files moved with them: a
+transcript that moved under a session on worktree entry is followed here
+(`sync_transcript_paths`, on every refresh of the store), the archive's
+worktree ask reads the transcript here (the ``worktree.check`` job), a
+forgotten transcript's files and records go here (`store.forget`), the
+archive sweep runs on the service's own timer (`start_housekeeping`, over
+`autodelete`), a chat's throwaway folder is made again before a spawn in
+it, and `service.status` says whether the service's `gh` is ready.
 
 **The sandbox host is the service's** (`start_sandbox_host`): the
 `sandboxplan.SandboxHost` over the service's state, the live grants, the
@@ -139,12 +153,12 @@ from typing import Any, Protocol
 
 from gi.repository import GLib
 
-from .. import chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
+from .. import autodelete, chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
+from . import bgagents, hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
 from . import diffs as diffs_mod
-from . import hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
@@ -172,6 +186,10 @@ ALREADY_RUNNING_MSGID = protocol.ALREADY_RUNNING_MSGID
 # How long stop_sessions waits for every close flow (the agent's exit
 # budget, the shell's, the SIGKILL grace) before shutting what is left.
 STOP_BOUND_S = 30.0
+
+# How often the archive sweep asks autodelete whether a day has passed
+# (the hour the client's update check rode before PR-1.12d).
+SWEEP_POLL_S = 3600
 
 
 class Client(Protocol):
@@ -263,6 +281,14 @@ class ServiceCore:
         self.sandbox_host: sandboxplan.SandboxHost | None = None
         self.sandbox_grants: sandboxgrants.GrantMounts | None = None
         self.activity: tracking.ServiceActivity | None = None
+        # The background agents (start_background, PR-1.12d).
+        self.background: bgagents.BackgroundAgents | None = None
+        # The service's gh, as ghsetup last found it (None: not asked yet),
+        # and the archive sweep's timer (start_housekeeping).
+        self.gh_status: str | None = None
+        self._gh_checking = False
+        self._gh_wanted = 0  # bumped by each drop of the answer (check_gh)
+        self._sweep_source = 0
         self.app_id = ""
         # The e2e probe (D27): served only when the service runs with the
         # flag in its environment.
@@ -393,6 +419,9 @@ class ServiceCore:
             return self._spawn_agent(message, client)
         shell = os.environ.get("SHELL") or "/bin/bash"
         cwd = message.get("cwd")
+        # A chat's throwaway folder may have been swept since (PR-1.12d: the
+        # client never makes it).
+        chats.ensure_chat_dir(cwd)
         env = self._spawn_env()
         cols = message.get("cols") or ptyserver.termscreen.DEFAULT_COLS
         rows = message.get("rows") or ptyserver.termscreen.DEFAULT_ROWS
@@ -520,6 +549,10 @@ class ServiceCore:
         if prompt:
             session.hold_new_chat_prompt(prompt)
         session.set_transcript_path(message.get("jsonl_path"))
+        # A chat's throwaway folder may have been swept or trashed since:
+        # made again rather than the spawn falling back to $HOME (what the
+        # window did before it opened the tab, PR-1.12d).
+        chats.ensure_chat_dir(message.get("cwd"))
         session.spawn(message.get("cwd"), message.get("session"))
         if record.spawn_error is not None:
             return _spawn_refusal(message, record.spawn_error)
@@ -543,6 +576,8 @@ class ServiceCore:
         # the events the reply implies are drained, api.client), so its tab
         # knows its own pty by the time the table names it.
         self.publish_pty(record.pty_id)
+        if self.background is not None:
+            self.background.sessions_changed()
         return protocol.reply(
             message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
         )
@@ -672,6 +707,9 @@ class ServiceCore:
         if pty is not None:
             # The row of the pty table names the session now (PR-1.12c).
             self.publish_pty(pty.id)
+        if self.background is not None:
+            # Half of registering: the id is known; the row is the other half.
+            self.background.sessions_changed()
 
     def session_forked(self, record: hosting.SessionRecord, session_id: str) -> None:
         """A sandboxed fork's resolver found the forked conversation: its
@@ -926,6 +964,8 @@ class ServiceCore:
             fields["sandbox"] = reason[: protocol.ARG_TEXT_MAX]
         if self.sandbox_grants is not None:
             fields["live"] = (self.sandbox_grants.capable() or "")[: protocol.ARG_TEXT_MAX]
+        if self.gh_status is not None:
+            fields["gh"] = self.gh_status[: protocol.SHORT_MAX]
         return protocol.reply(message.id, **fields)
 
     def activity_call(self, name: str, *args, **kwargs):
@@ -997,6 +1037,18 @@ class ServiceCore:
                 return protocol.refuse(
                     message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"
                 )
+            if mode == "background" and self.background is not None:
+                # The gate, on the service (§5: a sandboxed session is never
+                # handed to the CLI's daemon, which would respawn it outside
+                # its box): a /bg that could not be tracked is refused, and
+                # the window falls back to the graceful exit.
+                blocker = self.background.blocker(record.session)
+                if blocker:
+                    return protocol.refuse(message.id, protocol.ERROR_REFUSED, blocker)
+                # The fork watch and the pre-emptive "detached" (PR-1.12d),
+                # before the /bg is typed: the agents listed so far are noted
+                # first.
+                self.background.handoff(record)
             record.session.begin_close(text, mode == "background", record.close_budget)
             return protocol.reply(message.id)
         if record is not None:
@@ -1084,6 +1136,8 @@ class ServiceCore:
                     log.exception("session %s: the exit's clean-up failed", record.handle)
                 if self.activity is not None:
                     self.activity.ended(record)
+            if self.background is not None:
+                self.background.session_ended(ran or pty.session)
             if self.tools is not None and pty.session:
                 self.tools.agent_exited(pty.session)
             return
@@ -1094,7 +1148,24 @@ class ServiceCore:
     # -- jobs (PR-1.11)
 
     def _req_job_start(self, message: protocol.Message, client: Client) -> dict:
-        job_id = self.jobs.start(message.get("kind"), message.get("args") or {}, client.deliver)
+        args = message.get("args") or {}
+        if message.get("kind") == "session.repair":
+            # What the match reads off the store and the state, here on the
+            # main loop; the job's thread only asks the agent CLI.
+            session_id = args.get("session")
+            inputs = None
+            if self.background is not None and isinstance(session_id, str):
+                inputs = self.background.repair_inputs(session_id)
+            args = {"inputs": inputs}
+        elif message.get("kind") == "worktree.check":
+            # The session's transcript and directory, looked up here on the
+            # main loop; the job's thread reads the transcript.
+            session_id = args.get("session")
+            session = self.store.get_session(session_id) if isinstance(session_id, str) else None
+            args = {"session": session_id if session is not None else None}
+            if session is not None:
+                args.update(path=str(session.jsonl_path), cwd=session.cwd or "")
+        job_id = self.jobs.start(message.get("kind"), args, client.deliver)
         return protocol.reply(message.id, job=job_id)
 
     # -- notifications (PR-1.11; service.notifications)
@@ -1192,6 +1263,10 @@ class ServiceCore:
         if self.tools is not None:
             # A show_diff asked for while nobody was attached opens now.
             self.tools.apply_pending_diffs(client)
+        # A client's launch is when gh is asked about (ghsetup, the notice
+        # ghwelcome shows): the last answer may predate an install or a
+        # login, so it is dropped and asked again.
+        self.check_gh(fresh=True)
         return protocol.reply(message.id, items=items, ptys=ptys)
 
     def _req_state_get(self, message: protocol.Message, client: Client) -> dict:
@@ -1268,6 +1343,8 @@ class ServiceCore:
             if name == "settings":
                 self.store.apply_pr_titles()
                 self.store.apply_cli_titles()
+                if self.background is not None:
+                    self.background.settings_changed()
         return protocol.reply(message.id)
 
     def _req_store_lookup(self, message: protocol.Message, client: Client) -> dict:
@@ -1356,15 +1433,59 @@ class ServiceCore:
             return protocol.refuse(
                 message.id, protocol.ERROR_REFUSED, "Busy is decided by the service, not a client"
             )
+        if message.get("backgrounding") is not None or message.get("can_background") is not None:
+            # §3.22: the /bg handoff and its gate are the service's own
+            # (bgagents), sent to every client as `item` fields.
+            return protocol.refuse(
+                message.id,
+                protocol.ERROR_REFUSED,
+                "The background handoff is decided by the service, not a client",
+            )
         if (status := message.get("status")) is not None:
             store.set_status(session_id, status)
         if (unread := message.get("unread")) is not None:
             store.set_unread(session_id, unread)
-        if (backgrounding := message.get("backgrounding")) is not None:
-            store.set_backgrounding(session_id, backgrounding)
-        if (can_background := message.get("can_background")) is not None:
-            store.set_can_background(session_id, can_background)
         return protocol.reply(message.id)
+
+    def _req_store_forget(self, message: protocol.Message, client: Client) -> dict:
+        session_id = message.get("session")
+        if self.store.get_session(session_id) is not None:
+            # Its transcript is still there (a forget is what follows a trash
+            # or a delete, which take the session out of the store first):
+            # its records are not a client's to drop.
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "This session's transcript is still there"
+            )
+        self.forget_session(session_id)
+        return protocol.reply(message.id)
+
+    def forget_session(self, session_id: str, announce: bool = False) -> None:
+        """Let go of what the service kept for a session whose transcript
+        went (what MainWindow._forget_transcript did with the service's
+        files): its panel history, its PRs, its images, its draft, and its
+        box with what the box was allowed — unlinked, not trashed (Collins'
+        own derived data). The sticky flag stays, so a transcript restored
+        from the trash resumes boxed, in a fresh home. A box another id of
+        the conversation still names keeps its grants and stays; one a
+        live session runs in goes when that lets go. *announce* tells the
+        clients (`forgotten`): the sweep's forget, which no client asked
+        for."""
+        if not session_id:
+            return
+        panelhistory.delete(session_id)
+        state = self.state
+        state.set_session_draft(session_id, "")
+        state.set_session_attachments(session_id, [])
+        self.store.pr_store.set_records(session_id, [])
+        if session_id in state.sandboxed_sessions:
+            box = state.sandboxed_sessions[session_id]
+            state.set_sandboxed(session_id, True, box="")
+            if box and self.session_for_box(box) is not None:
+                log.info("forget %s: a session runs in its box %s; kept", session_id, box)
+            elif box and self.sandbox_host is not None:
+                self.sandbox_host.forget_box(box)
+        if announce:
+            self._broadcast({"t": "forgotten", "session": session_id})
 
     def _req_trust_check(self, message: protocol.Message, client: Client) -> dict:
         root = trust.trust_root(message.get("path"))
@@ -1515,6 +1636,241 @@ class ServiceCore:
             announce=self._announce_finished,
         )
         return self.activity
+
+    def start_background(self, **kwargs) -> bgagents.BackgroundAgents:
+        """The background agents (§3.22, PR-1.12d): built over the core's
+        store, state, sessions and tracker, the repair's job registered, and
+        started (the watch, the first reading, the replay). *kwargs* are a
+        test's own fetches, timers and poller."""
+        if self.store is None or self.state is None:
+            raise RuntimeError("the core has no store to keep the background agents in")
+        background = bgagents.BackgroundAgents(
+            store=self.store,
+            state=self.state,
+            records=self._records,
+            activity=self.activity,
+            running=lambda: {sid for sid in self.agent_pty_sessions().values() if sid},
+            get_setting=self._get_setting,
+            **kwargs,
+        )
+        self.background = background
+        if self.activity is not None:
+            self.activity.on_sessions_changed = background.sync_busy_poll
+        else:
+            # The busy feed has nobody to tell: start_activity first.
+            log.warning("background agents started with no tracker: the busy feed is off")
+        self.jobs.register("session.repair", self._repair_job)
+        self.jobs.register("worktree.check", self._worktree_check_job)
+        self.store.connect("refreshed", lambda *_a: self.sync_transcript_paths())
+        background.start()
+        return background
+
+    def _repair_job(self, job: jobs.Job, args: dict) -> dict:
+        """The ``session.repair`` job's worker, on its thread: the match
+        (the agent CLI, the transcripts), then the forward recorded back on
+        the main loop before the job's outcome is reported. The result's
+        ``found`` is the agent's id, "" when the session is itself the
+        listed agent, None when nothing (or more than one) matches."""
+        inputs = args.get("inputs")
+        background = self.background
+        if background is None or not isinstance(inputs, dict):
+            raise jobs.JobRefused("No such session")
+        found = background.repair_match(inputs)
+        landed = threading.Event()
+
+        def land() -> None:
+            try:
+                background.repair_landed(inputs, found)
+            finally:
+                landed.set()
+
+        background._land(land)
+        landed.wait(10)
+        return {"found": found}
+
+    def _worktree_check_job(self, job: jobs.Job, args: dict) -> dict:
+        """The ``worktree.check`` job's worker (the archive's worktree ask,
+        §3.22): on its thread, the worktree the session's transcript still
+        records on disk (`sessions.removable_worktree`, a read of the whole
+        transcript, never on the main loop); then, back on the main loop,
+        whether it is not the client's to take — the session runs on as a
+        background agent, or one works in there. The result is
+        ``removable`` (the worktree state, or None) and ``shares``. The tabs
+        that may work in it are the client's to count."""
+        session_id = args.get("session")
+        if not session_id:
+            return {"removable": None, "shares": False}
+        state = sessions.removable_worktree(args.get("path") or None, args.get("cwd") or "")
+        shares = [False]
+        background = self.background
+        if background is not None:
+            landed = threading.Event()
+
+            def land() -> None:
+                try:
+                    if state is not None:
+                        shares[0] = background.worktree_shared(session_id, str(state["worktreePath"]))
+                    else:
+                        shares[0] = background.is_detached(session_id)
+                finally:
+                    landed.set()
+
+            background._land(land)
+            landed.wait(10)
+        return {"removable": _jsonable(state), "shares": bool(shares[0])}
+
+    def sync_transcript_paths(self) -> None:
+        """Follow a transcript that moved out from under a live session (what
+        MainWindow._sync_transcript_paths did, §3.22). The CLI keys a
+        session's transcript by its working directory, so a session that
+        enters a git worktree has its file re-homed under a new project
+        directory; the session's tail would otherwise follow a path that
+        no longer exists for the rest of the run. Only a session whose own
+        path has gone missing is touched, and only when the store found
+        that same session somewhere that exists, so a session deliberately
+        pointed at another file (an attached fork tails the fork's
+        transcript) is never dragged off it. The client hears the new path
+        as the session's `transcript_path` and the row's `path`."""
+        if self.store is None:
+            return
+        for record in self._records():
+            session = record.session
+            if record.exited or not session.session_id or session.fork:
+                continue
+            current = session.transcript_path
+            if not current or Path(current).exists():
+                continue
+            found = self.store.get_session(session.session_id)
+            if found is None:
+                continue
+            moved = str(found.jsonl_path)
+            if moved == current or not Path(moved).exists():
+                continue
+            log.info("transcript moved: %s -> %s", current, moved)
+            try:
+                session.relocate_transcript(moved)
+            except Exception:
+                log.exception("session %s: following the moved transcript failed", record.handle)
+
+    def start_housekeeping(self) -> None:
+        """The service's own timers (PR-1.12d): the archive sweep at start
+        and every `SWEEP_POLL_S` (autodelete makes it one sweep a day, none
+        until the setting is on), and gh asked about once. The first sweep
+        waits for the store's first scan: before it the store knows no
+        session, and a sweep then would stamp the day having trashed
+        nothing."""
+        if self.store is not None and not self.store.applied:
+            handler = None
+
+            def first(*_args) -> None:
+                self.store.disconnect(handler)
+                self.sweep_archived()
+
+            handler = self.store.connect("refreshed", first)
+        else:
+            self.sweep_archived()
+        if not self._sweep_source:
+            self._sweep_source = GLib.timeout_add_seconds(SWEEP_POLL_S, self._sweep_tick)
+        self.check_gh()
+
+    def _sweep_tick(self) -> bool:
+        self.sweep_archived()
+        return True
+
+    def sweep_archived(self) -> list[str] | None:
+        """Ask autodelete whether a sweep is due (the setting and the
+        once-a-day file are its to weigh) and trash what has expired."""
+        if self.store is None or self.state is None:
+            return None
+        try:
+            return autodelete.maybe_sweep(
+                self.state.settings, dict(self.state.archived_at), self.trash_expired_archives
+            )
+        except Exception:  # never let housekeeping take the service down
+            log.warning("archive sweep failed", exc_info=True)
+            return None
+
+    def trash_expired_archives(self, session_ids: list[str]) -> list[str]:
+        """The automatic delete (autodelete.maybe_sweep's *trash*): the path
+        of *Delete archived sessions…* without the dialog. A session still
+        running (an agent pty on the service, or a background agent) is
+        skipped — it comes round again tomorrow — and a project this
+        empties is kept as an empty header: an automatic delete has nobody
+        to ask. Returns the ids that were not trashed."""
+        from ..store import emptied_projects
+
+        store, state = self.store, self.state
+        sessions_by_id = {s.session_id: s for s in store.all_sessions()}
+        running = self.background.session_is_running if self.background is not None else (lambda _s: False)
+        wanted = [
+            sid
+            for sid in session_ids
+            if sid in sessions_by_id and state.is_archived(sid) and not running(sid)
+        ]
+        skipped = [sid for sid in session_ids if sid not in wanted]
+        if not wanted:
+            return skipped
+        emptied = emptied_projects(list(sessions_by_id.values()), set(wanted))
+        if emptied:
+            store.keep_projects(emptied)
+        errors = store.trash_many(wanted)
+        for session_id in wanted:
+            if session_id in errors:
+                continue
+            self.forget_session(session_id, announce=True)
+            # The row is gone for good: its id (and its archive stamp) go
+            # from the state too.
+            state.set_archived(session_id, False)
+        for session_id, error in errors.items():
+            log.warning("archive sweep: could not trash %s: %s", session_id, error)
+        return skipped + list(errors)
+
+    def check_gh(self, fresh: bool = False) -> None:
+        """Ask ghsetup, off the main loop, whether the service's gh is there
+        to be used; `service.status` carries the answer once it has landed.
+        *fresh* drops the last answer first (a client's launch: the user
+        may have installed gh or logged in since): a check already running
+        then started before the drop, so its answer is not kept and one
+        more check follows it."""
+        if fresh:
+            self.gh_status = None
+            self._gh_wanted += 1
+        if self._gh_checking:
+            return
+        self._gh_checking = True
+        asked = self._gh_wanted
+        from gi.repository import GLib
+
+        def landed(status: str | None) -> bool:
+            self._gh_checking = False
+            if asked == self._gh_wanted:
+                self.gh_status = status
+            else:
+                self.check_gh()  # dropped while it ran: ask again
+            return False
+
+        def work() -> None:
+            from .. import ghsetup
+
+            try:
+                status = ghsetup.check()
+            except Exception:
+                log.exception("gh: the check failed")
+                status = None
+            GLib.idle_add(landed, status, priority=GLib.PRIORITY_DEFAULT)
+
+        threading.Thread(target=work, name="gh-check", daemon=True).start()
+
+    def background_call(self, name: str, *args, **kwargs):
+        """A method of the background agents by dotted name
+        (`mark_backgrounding`, `poller.background_ids.add`): the probe's door
+        (`debug.sandbox` with target ``core``), as `activity_call` is the
+        tracker's."""
+        target: Any = self.background
+        parts = name.split(".")
+        for part in parts[:-1]:
+            target = getattr(target, part)
+        return getattr(target, parts[-1])(*args, **kwargs)
 
     def _announce_finished(self, session_id: str) -> None:
         """A counted finish, to every subscriber (§3.19): a `notify` event of
@@ -1995,6 +2351,13 @@ class ServiceCore:
 
     def shutdown(self) -> None:
         self.cancel_restart()
+        if self.background is not None:
+            self.background.stop()
+        if self._sweep_source:
+            from gi.repository import GLib
+
+            GLib.source_remove(self._sweep_source)
+            self._sweep_source = 0
         if self.activity is not None:
             self.activity.stop()
         self.ptys.shutdown()

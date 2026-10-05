@@ -176,6 +176,12 @@ class JobRunner:
         self._ids = itertools.count(1)
         self.jobs: dict[str, Job] = {}
 
+    def register(self, kind: str, worker: Callable[[Job, dict], dict | None]) -> None:
+        """Run *kind* with *worker*: a job whose work needs the service's
+        own objects (the core registers its background agents' and the
+        worktree ask's)."""
+        self._workers[kind] = worker
+
     def start(self, kind: str, args: dict, deliver: Deliver) -> str:
         """Start a job of *kind* and return its id; its events go to
         *deliver*. A kind with no worker is refused as a job (its outcome
@@ -409,6 +415,10 @@ def chats_trust(job: Job, args: dict) -> dict:
             raise failure(error) from None
     else:
         cwd = _path(args, "cwd")
+        # One that was swept or trashed since is made again (what the
+        # window's chats.ensure_chat_dir did before PR-1.12d): a no-op for a
+        # folder outside the chats root.
+        chats.ensure_chat_dir(cwd)
     chats.trust_chat_dir(cwd)
     return {"cwd": cwd}
 

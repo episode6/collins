@@ -136,12 +136,18 @@ each taken from the code the message replaces:
   by `store.lookup`, and a session once sent is kept current until it is
   `removed`. The store's mutations are `store.*` requests named after
   `SessionStore`'s methods, bulk ones carrying up to `ROWS_MAX` sessions;
-  `store.flags` carries the activity tracker's verdicts (busy, unread,
-  status, the background handoff) while the tracker still runs in the
-  client (Phase 1), and the service sets them and sends them back as
-  `item` fields. `trust.check` and `trust.grant` are the CLI's folder
-  trust (`trust.py`), which only the service's machine can read and
-  write.
+  `store.flags` carries what the person did at a client's screen (a row's
+  `status`, `unread`), and the service sets it and sends it back as an
+  `item` field; `busy`, `backgrounding` and `can_background` stay in its
+  shape for an older client and are refused (the tracker and the
+  background agents are the service's, PR-1.12a and PR-1.12d, whose
+  verdicts arrive as `item` fields, `background` among them).
+  The ``worktree.check`` job reads the worktree a session's transcript
+  still records (the archive's ask) and `store.forget` lets go of what the
+  service kept for a session whose transcript went; `forgotten` tells the
+  clients the service did that by itself (the archive sweep).
+  `trust.check` and `trust.grant` are the CLI's folder trust
+  (`trust.py`), which only the service's machine can read and write.
 - `pr` carries a session's PR records in `prstatus.to_record`'s shape, as
   bounded JSON objects: `prstatus.from_record` re-validates them on arrival.
   It is the service's `PrStore` seen from a client (§3.15, PR-1.11): sent
@@ -443,6 +449,10 @@ JOB_KINDS = frozenset(
         "chats.trust",
         "icon",
         "login.repair",
+        # A row's link to its background agent, repaired, and the worktree
+        # an archive would trash, read off the transcript (PR-1.12d).
+        "session.repair",
+        "worktree.check",
     }
 )
 JOB_RUNNING = "running"
@@ -1258,6 +1268,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "syncing": _BOOL,
                 "backgrounding": _BOOL,
                 "can_background": _BOOL,
+                # The row's conversation runs as a background agent (PR-1.12d,
+                # §3.22): "running" when the agent list says so, "pending"
+                # while a /bg waits for it to, "" otherwise.
+                "background": _SHORT,
                 # An agent pty on the service names this session (PR-1.12c,
                 # §3.21): the row of a session nobody here shows is a
                 # running row, and opening it attaches.
@@ -1293,6 +1307,11 @@ _TABLE: tuple[MessageType, ...] = (
     MessageType(
         "put-away",
         "A session was archived: whatever it still asked of the user goes with it.",
+        event=_event(SERVICE, {"session": _req(_ID)}),
+    ),
+    MessageType(
+        "forgotten",
+        "A session's transcript went (the archive sweep): what a client kept for it goes too.",
         event=_event(SERVICE, {"session": _req(_ID)}),
     ),
     MessageType(
@@ -1379,8 +1398,13 @@ _TABLE: tuple[MessageType, ...] = (
         request=_request({"project": _req(_PROJECT), "before": _null(_PROJECT)}),
     ),
     MessageType(
+        "store.forget",
+        "A session's transcript went: its panel history, records and box go too.",
+        request=_request({"session": _req(_ID)}),
+    ),
+    MessageType(
         "store.flags",
-        "The activity tracker's verdicts for a session's row (Phase 1: it runs in the client).",
+        "What the person did at a client's screen, for a session's row: its status, unread off.",
         request=_request(
             {
                 "session": _req(_ID),
@@ -1872,6 +1896,10 @@ _TABLE: tuple[MessageType, ...] = (
                 "sandbox": _s(ARG_TEXT_MAX),
                 "live": _s(ARG_TEXT_MAX),
                 "pid": _i(1, PID_MAX),
+                # Whether the service's gh is there to be used (ghsetup's
+                # word: "ready", "missing", "logged-out"); absent until the
+                # service has asked (PR-1.12d).
+                "gh": _SHORT,
             }
         ),
     ),

@@ -1164,3 +1164,443 @@ def test_shutdown_cancels_a_waiting_restart(tmp_path, monkeypatch):
     core.activity = _Busy(0)
     pump(0.2)
     assert restarted == [] and not core.restart_pending
+
+
+# -- the background agents and the rest of PR-1.12d (§3.22) ---------------------------------
+
+
+class _Poller:
+    """The agent list's poller, standing still: what it lists is set by hand."""
+
+    def __init__(self):
+        self.background_ids = set()
+        self._on_change = lambda changed: None
+
+    def start(self, dirs):
+        pass
+
+    def stop(self):
+        pass
+
+    def set_polling(self, enabled):
+        pass
+
+    def refresh(self):
+        pass
+
+
+class _Host:
+    def __init__(self):
+        self.forgotten = []
+
+    def forget_box(self, box):
+        self.forgotten.append(box)
+
+
+def _store_core(app_state, tmp_path):
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    poller = _Poller()
+    core.start_background(poller=poller, watch_dirs=lambda: [], fetch_busy=lambda: set())
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    client.request({"t": "subscribe"})
+    return core, store, poller, srv, client, ends
+
+
+def test_the_background_handoff_flags_are_refused_from_a_client(app_state, projects_dir, tmp_path):
+    _root, ids = projects_dir
+    _core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    try:
+        for flag in ("backgrounding", "can_background"):
+            with pytest.raises(loopback.RequestRefused) as refused:
+                client.request({"t": "store.flags", "session": ids["alpha1"], flag: True})
+            assert refused.value.error == protocol.ERROR_REFUSED
+        assert not store.get_item(ids["alpha1"]).backgrounding
+        assert not store.get_item(ids["alpha1"]).can_background
+        # The person's own word at their screen still lands.
+        client.request({"t": "store.flags", "session": ids["alpha1"], "status": "open"})
+        assert store.get_item(ids["alpha1"]).status == "open"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_background_fact_reaches_the_clients_as_an_item_field(app_state, projects_dir, tmp_path):
+    _root, ids = projects_dir
+    core, _store, _poller, srv, _client, ends = _store_core(app_state, tmp_path)
+    try:
+        core.background.mark_backgrounding(ids["alpha1"])
+        fields = [e for e in ends.of("item") if e["session"] == ids["alpha1"]]
+        assert any(e.get("backgrounding") is True for e in fields)
+        assert any(e.get("background") == "pending" for e in fields)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_worktree_check_reads_the_transcript_on_the_service(app_state, projects_dir, tmp_path):
+    import json
+
+    root, ids = projects_dir
+    repo = tmp_path / "repo"
+    worktree = repo / ".claude" / "worktrees" / "oasis"
+    (repo / ".git").mkdir(parents=True)
+    worktree.mkdir(parents=True)
+    (worktree / "readme.md").write_text("hi\n", encoding="utf-8")
+    transcript = next(root.glob(f"*/{ids['alpha1']}.jsonl"))
+    record = {"worktreePath": str(worktree), "worktreeName": "oasis", "worktreeBranch": "worktree-oasis"}
+    with transcript.open("a", encoding="utf-8") as fh:
+        fh.write("\n" + json.dumps({"type": "worktree-state", "worktreeSession": record}) + "\n")
+    core, _store, poller, srv, client, ends = _store_core(app_state, tmp_path)
+
+    def check(session_id):
+        """The ``worktree.check`` job's result (the transcript read on the
+        job's thread, the sharing judged back on the main loop)."""
+        message = {"t": "job.start", "kind": "worktree.check", "args": {"session": session_id}}
+        job = client.request(message)["job"]
+
+        def done():
+            return [e for e in ends.of("job") if e["job"] == job and e["state"] != "running"]
+
+        assert pump(5, lambda: bool(done()))
+        assert done()[-1]["state"] == "done"
+        return done()[-1]["result"]
+
+    try:
+        reply = check(ids["alpha1"])
+        assert reply["removable"]["worktreePath"] == str(worktree) and reply["shares"] is False
+        plain = check(ids["beta1"])
+        assert plain["removable"] is None and plain["shares"] is False
+        assert check("not-a-session") == {"removable": None, "shares": False}
+        # A background agent works in there: not the client's to take.
+        poller.background_ids = {ids["alpha2"]}
+        core.store.get_session(ids["alpha2"]).cwd = str(worktree)
+        shared = check(ids["alpha1"])
+        assert shared["shares"] is True
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_store_forget_removes_the_history_file_and_the_box(app_state, projects_dir, tmp_path):
+    from collins import panelhistory
+
+    _root, ids = projects_dir
+    sid = ids["alpha1"]
+    box = "0123456789abcdef0123456789abcdef"
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    host = _Host()
+    core.sandbox_host = host
+    try:
+        panelhistory.save(sid, "$ make\nok\n")
+        assert panelhistory.load(sid)
+        state = core.state
+        state.set_sandboxed(sid, True, box=box)
+        state.set_session_draft(sid, "half a prompt")
+        state.set_session_attachments(sid, [{"path": "/tmp/x.png"}])
+        # Its transcript is still there: not a client's to forget.
+        with pytest.raises(loopback.RequestRefused):
+            client.request({"t": "store.forget", "session": sid})
+        assert panelhistory.load(sid) and state.sandbox_box(sid) == box and host.forgotten == []
+        _gone(store, sid, ids["beta1"])  # trashed: the store lets go first
+        client.request({"t": "store.forget", "session": sid})
+        assert panelhistory.load(sid) is None
+        assert host.forgotten == [box]
+        assert state.is_sandboxed(sid) and state.sandbox_box(sid) == ""  # the sticky flag stays
+        assert state.get_session_draft(sid) == "" and state.get_session_attachments(sid) == []
+        # An unsandboxed session's forget marks nothing and forgets no box.
+        client.request({"t": "store.forget", "session": ids["beta1"]})
+        assert not state.is_sandboxed(ids["beta1"]) and host.forgotten == [box]
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def _gone(store, *session_ids):
+    """What a trash or a delete does to the store before the forget: the
+    sessions leave its scan."""
+    store._last_sessions = [s for s in store._last_sessions if s.session_id not in session_ids]
+    store._apply()
+
+
+def test_store_forget_keeps_a_live_sessions_box_and_takes_an_unknown_id(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    sid = ids["alpha1"]
+    box = "fedcba9876543210fedcba9876543210"
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    host = _Host()
+    core.sandbox_host = host
+    try:
+        pty = spawn_agent(client, tmp_path)["pty"]
+        core.sessions[pty].session.sandbox_box = box  # a live session runs in the box
+        core.state.set_sandboxed(sid, True, box=box)
+        _gone(store, sid)
+        client.request({"t": "store.forget", "session": sid})
+        assert core.state.sandbox_box(sid) == "" and host.forgotten == []  # kept for the live one
+        client.request({"t": "store.forget", "session": "00000000-aaaa-bbbb-cccc-000000000000"})
+        assert host.forgotten == [] and not core.state.is_sandboxed("00000000-aaaa-bbbb-cccc-000000000000")
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_moved_transcript_is_followed_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):
+    """`sync_transcript_paths` (what the window's `_sync_transcript_paths`
+    did): a live session whose transcript moved to another project
+    directory (worktree entry) is re-aimed on the store's refresh, and again
+    on a second move; a fork and a session whose path still exists are
+    left alone."""
+    monkeypatch.setenv("SHELL", CAT)
+    root, ids = projects_dir
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    try:
+        moving = core.sessions[spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]].session
+        staying = core.sessions[spawn_agent(client, tmp_path, session=ids["alpha2"])["pty"]].session
+        fork = core.sessions[spawn_agent(client, tmp_path, session=ids["beta1"], fork=True)["pty"]].session
+        for session, sid in ((moving, ids["alpha1"]), (staying, ids["alpha2"]), (fork, ids["beta1"])):
+            session.set_transcript_path(str(store.get_session(sid).jsonl_path))
+        fork_path = fork.transcript_path
+        staying_path = staying.transcript_path
+
+        def move(sid, project):
+            old = store.get_session(sid).jsonl_path
+            new_dir = root / project
+            new_dir.mkdir(exist_ok=True)
+            new = new_dir / f"{sid}.jsonl"
+            old.rename(new)
+            store._last_sessions = discover_sessions()
+            store._apply()
+            return str(new)
+
+        first = move(ids["alpha1"], "-home-user-alpha--claude-worktrees-one")
+        assert moving.transcript_path == first
+        second = move(ids["alpha1"], "-home-user-alpha--claude-worktrees-two")
+        assert moving.transcript_path == second
+        move(ids["beta1"], "-home-user-beta--claude-worktrees-one")
+        assert fork.transcript_path == fork_path  # a fork tails what it was pointed at
+        assert staying.transcript_path == staying_path
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_poll_setting_written_by_a_client_reaches_the_poller(app_state, projects_dir, tmp_path):
+    core, _store, poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    seen = []
+    poller.set_polling = seen.append
+
+    def setting(value):
+        return {"t": "state.set", "key": "settings", "entry": "background_status_poll", "value": value}
+
+    try:
+        client.request(setting(True))
+        client.request(setting(False))
+        assert seen == [True, False]
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_an_agent_spawn_in_a_chat_folder_makes_it_again(app_state, projects_dir, tmp_path, monkeypatch):
+    from collins import chats
+
+    monkeypatch.setenv("SHELL", CAT)
+    monkeypatch.setattr(chats, "CHATS_DIR", tmp_path / "chats")
+    folder = tmp_path / "chats" / "chat-swept"
+    assert chats.is_chat_cwd(str(folder)) and not folder.exists()
+    core, _store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    try:
+        pty = spawn_agent(client, folder)["pty"]
+        assert folder.is_dir()
+        assert core.sessions[pty].session.cwd == str(folder)  # not the fallback to $HOME
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_sandboxed_sessions_background_close_is_refused(app_state, projects_dir, tmp_path, monkeypatch):
+    """§5: the CLI's daemon would respawn a backgrounded agent outside its
+    box, so the service's gate refuses the /bg and marks nothing."""
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    watches = []
+    core, store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    core.background._spawn = watches.append
+    try:
+        pty = spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]
+        session = core.sessions[pty].session
+        monkeypatch.setattr(type(session), "sandboxed", property(lambda self: True))
+        with pytest.raises(loopback.RequestRefused) as refused:
+            client.request({"t": "close", "pty": pty, "mode": "background", "text": "/bg\r"})
+        assert refused.value.msgid == "sandboxed"
+        assert watches == [] and core.state.get_pending_detaches() == {}
+        assert not store.get_item(ids["alpha1"]).backgrounding
+        assert not core.background.pending
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_service_status_says_whether_gh_is_ready(server, monkeypatch):
+    from collins import ghsetup
+
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    assert "gh" not in client.request({"t": "service.status"})  # not asked yet
+    monkeypatch.setattr(ghsetup, "check", lambda: ghsetup.LOGGED_OUT)
+    server.core.check_gh()
+    assert pump(2, lambda: server.core.gh_status is not None)
+    assert client.request({"t": "service.status"})["gh"] == "logged-out"
+    monkeypatch.setattr(ghsetup, "check", lambda: ghsetup.READY)
+    server.core.check_gh(fresh=True)
+    assert "gh" not in client.request({"t": "service.status"})  # asked again: no stale answer
+    assert pump(2, lambda: server.core.gh_status == ghsetup.READY)
+    assert client.request({"t": "service.status"})["gh"] == "ready"
+    # A drop while a check runs: that check's answer predates the drop and
+    # is not kept; the one after it is.
+    answers = iter([ghsetup.MISSING, ghsetup.LOGGED_OUT])
+    monkeypatch.setattr(ghsetup, "check", lambda: next(answers))
+    server.core.check_gh(fresh=True)
+    server.core.check_gh(fresh=True)
+    assert pump(3, lambda: server.core.gh_status is not None)
+    assert server.core.gh_status == ghsetup.LOGGED_OUT
+
+
+def test_the_archive_sweep_runs_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):
+    import time as time_mod
+
+    from collins import autodelete
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    _root, ids = projects_dir
+    core, store, poller, srv, _client, ends = _store_core(app_state, tmp_path)
+    try:
+        state = core.state
+        state.update_settings({autodelete.SETTING_COUNT: 1, autodelete.SETTING_UNIT: "days"})
+        old = time_mod.time() - 3 * 86400
+        for sid in (ids["alpha2"], ids["beta1"]):
+            state.set_archived(sid, True)
+            state.archived_at[sid] = old
+        poller.background_ids = {ids["beta1"]}  # still running as an agent: skipped
+        monkeypatch.setattr(store, "trash_many", lambda sids: {})
+        trashed = core.sweep_archived()
+        assert trashed == [ids["alpha2"]]
+        assert not state.is_archived(ids["alpha2"]) and state.is_archived(ids["beta1"])
+        assert [e["session"] for e in ends.of("forgotten")] == [ids["alpha2"]]
+        assert core.sweep_archived() is None  # once a day
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_background_close_starts_the_handoff_on_the_service(app_state, projects_dir, tmp_path, monkeypatch):
+    """§3.22: the fork watch's thread starts when the session's close
+    {mode: background} runs; the pending detach is on disk and the rows are
+    disabled and pending before the /bg is typed."""
+    from collins import providers
+
+    monkeypatch.setenv("SHELL", CAT)
+    monkeypatch.setattr(providers.ClaudeProvider, "background_agents", lambda self, **_kw: [])
+    _root, ids = projects_dir
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    watches = []
+    core.start_background(poller=_Poller(), watch_dirs=lambda: [], spawn=watches.append)
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        pty = spawn_agent(client, tmp_path, session=ids["alpha1"])["pty"]
+        assert store.get_item(ids["alpha1"]).can_background is True  # the gate: a live, registered session
+        client.request({"t": "close", "pty": pty, "mode": "background", "text": "/bg\r"})
+        assert len(watches) == 1  # the watch's thread
+        assert ids["alpha1"] in service_state.get_pending_detaches()
+        item = store.get_item(ids["alpha1"])
+        assert item.backgrounding is True and item.background == "pending"
+        assert item.can_background is False  # one handoff at a time
+        sent = [e for e in ends.of("item") if e["session"] == ids["alpha1"]]
+        assert any(e.get("backgrounding") is True for e in sent)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_repair_job_matches_off_the_loop_and_records_the_link(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    """`session.repair` (PR-1.12d): the inputs read on the main loop, the
+    match on the job's thread, the forward recorded back on the main loop
+    before the job's outcome; nothing matching is ``found: None``."""
+    from collins.service import bgagents as bgagents_mod
+
+    _root, ids = projects_dir
+    core, store, _poller, srv, client, ends = _store_core(app_state, tmp_path)
+    try:
+        asked = []
+
+        def match(provider, old_id, cwd, uuid, claimed, unique_cwd=False):
+            asked.append((old_id, cwd, set(claimed), unique_cwd))
+            return "fork-0003" if old_id == ids["alpha1"] else None
+
+        monkeypatch.setattr(bgagents_mod.bgstatus, "match_background_fork", match)
+
+        def repair(session_id):
+            message = {"t": "job.start", "kind": "session.repair", "args": {"session": session_id}}
+            return client.request(message)["job"]
+
+        def outcome(job_id):
+            done = [e for e in ends.of("job") if e["job"] == job_id and e["state"] != "running"]
+            return done[-1] if done else None
+
+        job = repair(ids["alpha1"])
+        assert pump(5, lambda: outcome(job) is not None)
+        assert outcome(job)["state"] == "done" and outcome(job)["result"] == {"found": "fork-0003"}
+        assert core.state.resolve_forward(ids["alpha1"]) == "fork-0003"
+        assert asked[0][0] == ids["alpha1"] and asked[0][1] == "/home/user/alpha" and asked[0][3] is True
+        missing = repair(ids["beta1"])
+        assert pump(5, lambda: outcome(missing) is not None)
+        assert outcome(missing)["result"] == {"found": None}
+        assert core.state.resolve_forward(ids["beta1"]) == ids["beta1"]
+        unknown = repair("nope")
+        assert pump(5, lambda: outcome(unknown) is not None)
+        assert outcome(unknown)["state"] == "refused"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_first_sweep_waits_for_the_stores_first_scan(app_state, projects_dir, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    swept = []
+    monkeypatch.setattr(core, "sweep_archived", lambda: swept.append(store.applied))
+    monkeypatch.setattr(core, "check_gh", lambda fresh=False: None)
+    try:
+        core.start_housekeeping()
+        assert swept == []  # no scan yet: a sweep would stamp the day for nothing
+        store._last_sessions = discover_sessions()
+        store._apply()
+        assert swept == [True]
+        store._apply()
+        assert swept == [True]  # once: the timer takes it from there
+        assert core._sweep_source
+    finally:
+        core.shutdown()
+        assert not core._sweep_source
