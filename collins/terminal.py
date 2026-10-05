@@ -244,11 +244,8 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     _RootNameLinks(terminal, tag_kinds)
 
     def on_pressed(gesture: Gtk.GestureClick, _n_press, x: float, y: float) -> None:
-        state = gesture.get_current_event_state()
-        if not state & Gdk.ModifierType.CONTROL_MASK:
+        if not gesture.get_current_event_state() & Gdk.ModifierType.CONTROL_MASK:
             return
-        if state & Gdk.ModifierType.SHIFT_MASK:
-            return  # Shift is the terminal's own selection modifier: never claimed (D40)
         kind = "url"
         uri = terminal.check_hyperlink_at(x, y)
         # An OSC 8 hyperlink carries its target in the escape sequence, whole
