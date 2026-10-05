@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import stat
+import threading
 import time
 
 import inproc
@@ -761,6 +762,12 @@ def _paste(client, project, entries, target, cut=False, root=None) -> dict:
     )
 
 
+def _placed(reply: dict) -> list[str]:
+    """The paths a paste landed at, in order: what the reply's `placed`
+    said before D42 dropped it (derivable from `results`)."""
+    return [r["target"] for r in reply["results"] if r["target"] is not None]
+
+
 def test_rename_renames_in_place_and_answers_the_files_mtime(served):
     core, client, project, _events = served
     before = mtime_of(project / "a.txt")
@@ -855,10 +862,17 @@ def test_paste_copies_and_never_overwrites(served):
     (project / "pkg" / "a.txt").write_text("mine")
     reply = _paste(client, project, [project / "a.txt"], project / "pkg")
     copy = project / "pkg" / "a (copy).txt"
-    assert reply["placed"] == [str(copy)]
+    assert _placed(reply) == [str(copy)]
     assert reply["results"] == [
-        {"source": str(project / "a.txt"), "target": str(copy), "error": None, "message": ""}
+        {
+            "source": str(project / "a.txt"),
+            "target": str(copy),
+            "mtime": mtime_of(copy),
+            "error": None,
+            "message": "",
+        }
     ]
+    assert "placed" not in reply
     assert (project / "pkg" / "a.txt").read_text() == "mine"
     assert copy.read_text() == "one\ntwo\n"
     assert (project / "a.txt").exists()  # a copy leaves the original
@@ -870,13 +884,13 @@ def test_paste_of_a_cut_moves(served):
     (project / "folder" / "sub").mkdir(parents=True)
     (project / "folder" / "sub" / "deep.txt").write_text("deep")
     reply = _paste(client, project, [project / "a.txt", project / "folder"], project / "pkg", cut=True)
-    assert reply["placed"] == [str(project / "pkg" / "a.txt"), str(project / "pkg" / "folder")]
+    assert _placed(reply) == [str(project / "pkg" / "a.txt"), str(project / "pkg" / "folder")]
     assert not (project / "a.txt").exists() and not (project / "folder").exists()
     assert (project / "pkg" / "a.txt").read_text() == "one\ntwo\n"
     assert (project / "pkg" / "folder" / "sub" / "deep.txt").read_text() == "deep"
     # A cut pasted back where it came from: nothing to do, no error.
     reply = _paste(client, project, [project / "pkg" / "a.txt"], project / "pkg", cut=True)
-    assert reply["placed"] == [] and reply["results"][0]["target"] is None
+    assert _placed(reply) == [] and reply["results"][0]["target"] is None
     assert reply["results"][0]["error"] is None
 
 
@@ -889,7 +903,7 @@ def test_paste_source_outside_every_root_is_refused_unless_local(served, tmp_pat
     client.local = False
     _knows(core, project)
     reply = _paste(client, project, [outside, project / "a.txt"], project / "pkg")
-    assert reply["placed"] == [str(project / "pkg" / "a.txt")]
+    assert _placed(reply) == [str(project / "pkg" / "a.txt")]
     assert [r["error"] for r in reply["results"]] == ["source_outside", None]
     assert not (project / "pkg" / "outside.txt").exists()
     # A link inside to a file outside: the source is confined resolved.
@@ -900,7 +914,7 @@ def test_paste_source_outside_every_root_is_refused_unless_local(served, tmp_pat
     # exactly what paste is for, and the service does the copy.
     client.local = True
     reply = _paste(client, project, [outside], project / "pkg")
-    assert reply["placed"] == [str(project / "pkg" / "outside.txt")]
+    assert _placed(reply) == [str(project / "pkg" / "outside.txt")]
     assert (project / "pkg" / "outside.txt").read_text() == "secret"
 
 
@@ -909,7 +923,7 @@ def test_paste_destination_is_confined_to_the_root(served, tmp_path):
     other = tmp_path / "other"
     other.mkdir()
     reply = _paste(client, project, [project / "a.txt"], other)
-    assert reply["placed"] == [] and reply["results"][0]["error"] == "outside"
+    assert _placed(reply) == [] and reply["results"][0]["error"] == "outside"
     assert not (other / "a.txt").exists()
     # Not local: the root must be one the service knows.
     client.local = False
@@ -924,7 +938,7 @@ def test_paste_reports_each_entrys_rule(served):
     sources = [project / "gone.txt", project / "pkg", project / "a.txt"]
     reply = _paste(client, project, sources, project / "pkg")
     assert [r["error"] for r in reply["results"]] == ["missing", "into_itself", None]
-    assert reply["placed"] == [str(project / "pkg" / "a.txt")]
+    assert _placed(reply) == [str(project / "pkg" / "a.txt")]
     reply = _paste(client, project, [project / "a.txt"], project / "nowhere")
     assert reply["results"][0]["error"] == "not_a_dir"
     if os.geteuid() != 0:
@@ -1015,3 +1029,92 @@ def test_a_paste_worker_that_raises_settles_failed(served, monkeypatch):
     with pytest.raises(inproc.RequestRefused) as refused:
         _paste(client, project, [project / "a.txt"], project)
     assert refused.value.error == protocol.ERROR_FAILED and refused.value.details["error"] == "disk on fire"
+
+
+def test_paste_results_carry_the_landed_files_mtime(served):
+    """Each result's `mtime` is the landed file's (null for a folder, or
+    nothing landed): what `_retarget_open` takes for a moved open file,
+    so a `gone` that beat the reply is taken back (D41, S1)."""
+    core, client, project, _events = served
+    (project / "pkg").mkdir()
+    (project / "folder").mkdir()
+    before = mtime_of(project / "a.txt")
+    entries = [project / "a.txt", project / "folder", project / "gone"]
+    reply = _paste(client, project, entries, project / "pkg", cut=True)
+    assert [r["mtime"] for r in reply["results"]] == [mtime_of(project / "pkg" / "a.txt"), None, None]
+    assert reply["results"][0]["mtime"] == before  # a move keeps the inode's
+
+
+def test_a_cut_from_another_known_root_lands_and_one_from_outside_every_root_is_refused(served, tmp_path):
+    """D43: the roots are what a client may reach, not walls between
+    projects: the one clipboard moves a cut from project B's tree into
+    project A's, for a client that is not local too; a source inside no
+    root the service knows is `source_outside`."""
+    core, client, project, _events = served
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "b.txt").write_text("from b")
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    (nowhere / "n.txt").write_text("n")
+    client.local = False
+    _knows(core, project, other)
+    reply = _paste(client, project, [other / "b.txt", nowhere / "n.txt"], project, cut=True)
+    assert [r["error"] for r in reply["results"]] == [None, "source_outside"]
+    assert (project / "b.txt").read_text() == "from b" and not (other / "b.txt").exists()
+    assert (nowhere / "n.txt").exists() and not (project / "n.txt").exists()
+
+
+def test_the_root_is_confined_on_the_worker_not_the_handler(served, monkeypatch):
+    """S3 of PR 613's review: `allowed` resolved every root on the main
+    loop for the three operations; now the handler computes the roots
+    and `_confine` runs on the thread, as `fs.list`'s does."""
+    core, client, project, _events = served
+    client.local = False
+    _knows(core, project)
+    resolved: list[str] = []
+    real_is_inside = files.is_inside
+
+    def spy(root, path):
+        resolved.append(threading.current_thread().name)
+        return real_is_inside(root, path)
+
+    monkeypatch.setattr(files, "is_inside", spy)
+    (project / "pkg").mkdir()
+    root = str(project)
+    frames = (
+        {
+            "t": "fs.rename",
+            "id": 21,
+            "path": str(project / "a.txt"),
+            "target": str(project / "b.txt"),
+            "root": root,
+        },
+        {
+            "t": "fs.paste",
+            "id": 22,
+            "entries": [str(project / "b.txt")],
+            "target": str(project / "pkg"),
+            "cut": False,
+            "root": root,
+        },
+        {"t": "fs.mkdir", "id": 23, "path": str(project / "made"), "root": root},
+    )
+    inline = core.files
+    for frame in frames:
+        work: list = []
+        resolved.clear()
+        collect = lambda fn, name, work=work: work.append(fn)  # noqa: E731
+        core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=collect)
+        raw = core.handle(protocol.validate(frame, protocol.CLIENT), client)
+        assert isinstance(raw, protocol.Deferred) and not raw.settled
+        assert resolved == [], f"{frame['t']} resolved a path on the handler"
+        work[0]()
+        assert raw.settled and raw.reply["ok"], raw.reply
+        assert resolved and all(name == threading.current_thread().name for name in resolved)
+    assert (project / "pkg" / "b.txt").exists() and (project / "made").is_dir()
+    # And a root the client may not name is refused by that worker check.
+    core.files = inline
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.mkdir", "path": str(project.parent / "x"), "root": str(project.parent)})
+    assert refused.value.error == protocol.ERROR_REFUSED and not (project.parent / "x").exists()

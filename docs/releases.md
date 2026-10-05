@@ -44,13 +44,19 @@ downloads of each version, see the
   destination and the project it stays inside, and the service checks the
   rules it used to check itself (a rename keeps its folder and never
   lands on a taken name; a paste never overwrites, landing as "name
-  (copy)"; nothing leaves the project) before touching a file. An open
-  file still follows its rename or move with its unsaved edits. Copying
-  a file puts a `collins://` reference to it on the clipboard for a paste
-  within Collins, with the ordinary file URIs beside it when the service
-  is this machine, so files still round-trip with the file manager.
-  Otherwise nothing looks different (the fifth chunk of the split's
-  Phase 2).
+  (copy)"; nothing leaves the project) before touching a file — and the
+  placement itself is exclusive, so "never overwrites" holds against the
+  agent writing in the same folder at the same moment, and against two
+  pastes landing one name at once (the second gets the next "(copy N)").
+  An open file still follows its rename or move with its unsaved edits,
+  even when the move took long enough for the editor to be told the old
+  path was gone first. A paste of a big folder takes as long as it takes
+  with the window live, and a clipboard of any size goes through in
+  slices. Copying a file puts a `collins://` reference to it on the
+  clipboard for a paste within Collins, with the ordinary file URIs
+  beside it when the service is this machine, so files still round-trip
+  with the file manager. Otherwise nothing looks different (the fifth
+  chunk of the split's Phase 2).
 - **Drops, pastes and pictures go over the service's socket.** An image
   dropped or pasted into the composer or onto the terminal is sent to the
   service and saved under `~/.local/share/collins/uploads/<session>/`,

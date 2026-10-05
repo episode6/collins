@@ -264,12 +264,57 @@ touches the disk.
   Each source is confined on the worker: a client that is not `local`
   may name a source only inside a root the service knows
   (`PasteError.SOURCE_OUTSIDE`, per entry — the rest of the clipboard
-  still lands); a `local` client may paste anything, and the service does
-  the copy. The reply's `results` are one `remotefiles.PasteOutcome` per
-  entry (source, target, error, message; paths as strings) and `placed`
-  the paths that landed; `_pasted` refreshes the tree, re-keys an open
-  file a cut moved, spends the cut (`_spend_cut`: what failed stays on
-  the clipboard, still cut) and names a failure in the banner.
+  still lands; a source inside *another* known root is fine: the one
+  clipboard moves a cut from project B's tree into project A's, D43); a
+  `local` client may paste anything, and the service does the copy. The
+  reply's `results` are one `remotefiles.PasteOutcome` per entry (source,
+  target, error, message, and the landed file's `mtime`; paths as
+  strings; a `CHUNKED_JSON_FIELD`, since a thousand deep paths echoed
+  twice pass a frame; there is no `placed` list, D42); `_pasted`
+  refreshes the tree, re-keys an open file a cut moved
+  (`_retarget_open(old, new, mtime)`, which also takes back the "was
+  deleted" mark a `file-changed {gone}` set when the service's watch saw
+  the file leave its old path before the paste answered), spends the cut
+  (`_spend_cut`: what failed stays on the clipboard, still cut) and names
+  a failure in the banner. `paste_files` sends the clipboard in slices of
+  `protocol.FS_PASTE_MAX` (1000), one request each, and joins the
+  outcomes (a slice refused before anything landed raises as one
+  request's would; one refused after something landed ends the batching
+  with its entries and the unsent ones as `FAILED` outcomes carrying the
+  refusal's words), and waits `PASTE_TIMEOUT_S` (a day: a guard, not a
+  deadline; the link's death ends the wait sooner) rather than
+  `CALL_TIMEOUT_S`, since a folder copy takes as long as it takes and the
+  sync channel pipelines the other calls (D41).
+- **Placement is exclusive (D44)**: "never over anything" holds against
+  every writer, not only Collins' own requests — the agent writes in the
+  same folders, and a planted symlink at the chosen name must not be
+  written through. `projectfiles` lands a file copy by opening the target
+  `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (`_copy_file_exclusive`: the
+  bytes, then `copystat`; the source is read only when it is a regular
+  file, so a FIFO or a device is `failed`), a tree by `shutil.copytree`
+  with that copy function and `dirs_exist_ok` False (`_copy_tree_
+  exclusive`: `makedirs` at the top and every subdirectory is the
+  exclusive step, links stay links), a same-filesystem move by `os.link`
+  + `unlink` for a file and `os.mkdir` + `os.rename` for a directory
+  (`_move_exclusive`; across filesystems, `EXDEV` / `EPERM` / `EMLINK`,
+  the exclusive copy then the source removed, as `shutil.move` does).
+  `EEXIST` at a paste's target is the next name of `unique_target`'s
+  sequence (`paste_entries`' loop; `no_room` after the hundredth), at a
+  rename's it is `exists`. **No lock** serializes the operations: two
+  requests cannot land one name, and a lock would hold every client's
+  rename behind a long copy. The tests in `test_projectfiles.py` make
+  each race deterministic by patching `unique_target` / `rename_target`
+  to plant something at the name they answer. Still as before: a
+  cross-filesystem cut that fails mid-tree leaves the partial copy at the
+  destination (a retry lands as "tree (copy)") and its `message` is
+  `shutil.Error`'s list.
+- `fs.rename` is `_move_exclusive` too (the inode kept; `exists` when
+  the name was taken between the check and the link), the request's
+  `root` is confined on the worker like `fs.list`'s (never `allowed` on
+  the main loop), a target name with surrounding whitespace is refused
+  `not_a_name` (the dialog's trimming is the client's, before the
+  request), and `fs.mkdir` takes a folder called `~` (`name_error`, the
+  pure name check `rename_name_error` and `make_directory` share).
 - `fs.mkdir {path, root}` (`remotefiles.make_dir`; `projectfiles.
   make_directory`): one folder inside the root, never over anything; the
   refusal's `reason` is one of `protocol.FS_MKDIR_REASONS`. Served for
@@ -286,9 +331,15 @@ touches the disk.
   prefers Collins' own payload (`editorfiles.parse_copied_files(text,
   service_id, local)`: another service's URIs are dropped; `file:` URIs
   only when local), then — local only — the GNOME payload and GDK's file
-  list. `has_files` judges the formats alone, so another service's
-  payload does not grey Paste out; the read yields nothing. PR-2.8's
-  `app.local` gate takes `local` over from the link's flag.
+  list; a payload that yields no path falls through to the next format
+  (`read_files`' attempts chain), so a local client beside another local
+  Collins still reads the `file:` formats the same clipboard carries.
+  `has_files` judges the formats alone, so another service's payload does
+  not grey Paste out; the read yields nothing (when not local). A hostile
+  line `urlsplit` refuses is dropped, not raised, and a name that is not
+  UTF-8 round-trips byte for byte (`collins_uri` / `path_from_collins_
+  uri`). PR-2.8's `app.local` gate takes `local` over from the link's
+  flag.
 - `check_filetree_ops.py` drives all of it against a scratch service:
   the rename with the file open (key, mtime, watch), the renamed folder,
   the refusals, Copy / Paste / Cut through the service, the spent cut,

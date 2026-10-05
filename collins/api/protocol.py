@@ -331,11 +331,15 @@ each taken from the code the message replaces:
   FS_RENAME_REASONS) and answers the renamed file's ``mtime`` (null for a
   folder) so an editor holding it open can take it; `fs.paste` copies
   (or moves, when ``cut``) ``entries`` into the folder ``target``, never
-  over anything (``placed``, the paths it landed at, and ``results``, one
-  per entry with its ``error`` of FS_PASTE_ERRORS); `fs.mkdir` makes one
-  folder. Each names the ``root`` the operation is confined to (the
-  asking editor's), and the paste's sources must be inside a root the
-  service knows unless the client is ``local``.
+  over anything (``results``, one per entry in the request's order: where
+  it landed, the landed file's ``mtime``, or its ``error``, an open string
+  the client maps through FS_PASTE_ERRORS and anything newer to
+  ``failed``; a CHUNKED_JSON_FIELD, since a thousand deep paths echoed
+  twice take the reply past a frame); `fs.mkdir` makes one folder. Each
+  names the ``root`` the operation is confined to (the asking editor's),
+  and the paste's sources must be inside a root the service knows unless
+  the client is ``local``. A paste takes at most FS_PASTE_MAX entries, one
+  request's wire bound: a longer clipboard goes in slices (D42).
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -454,19 +458,23 @@ ERRORS = frozenset(
 # (`split_reply` / `join_reply`, `split_request` / `join_request`):
 # `git.run`'s stdout, which a whole diff can take past MAX_FRAME (PR-2.1),
 # `fs.read`'s / `fs.write`'s text, a file of up to FILE_TEXT_MAX
-# (PR-2.3), and `fs.walk`'s paths / `fs.list`'s entries (PR-2.4), lists
-# that 20 000 deep paths take past a frame. The field travels as TAG_BLOB frames whose `stream` is the
+# (PR-2.3), `fs.walk`'s paths / `fs.list`'s entries (PR-2.4), lists
+# that 20 000 deep paths take past a frame, and `fs.paste`'s results
+# (PR-2.5: a thousand entries echoing source and target). The field
+# travels as TAG_BLOB frames whose `stream` is the
 # request's id (masked to 32 bits, STREAM_MASK) ahead of the message,
 # which then says `<field>_chunked` and `<field>_bytes`; a request's
 # chunks go ahead of the request on the connection that carries it and
 # the service joins them before it validates. One field per message is
 # ever chunked: the first of CHUNKED_FIELDS the message holds as text (or,
-# for CHUNKED_JSON_FIELDS, as a list).
+# for CHUNKED_JSON_FIELDS, as a list: `pr.sweep`'s `results`, a map, is
+# never chunked).
 CHUNKED_FIELD = "stdout"
-CHUNKED_FIELDS = ("stdout", "text", "paths", "entries")
+CHUNKED_FIELDS = ("stdout", "text", "paths", "entries", "results")
 # Of CHUNKED_FIELDS, the lists (PR-2.4: `fs.walk`'s paths, `fs.list`'s
-# entries): chunked as their compact JSON, decoded back on joining.
-CHUNKED_JSON_FIELDS = frozenset({"paths", "entries"})
+# entries; PR-2.5: `fs.paste`'s results): chunked as their compact JSON,
+# decoded back on joining.
+CHUNKED_JSON_FIELDS = frozenset({"paths", "entries", "results"})
 CHUNKED_MAX = 64 * 1024 * 1024  # the most bytes a chunked field runs to, either way
 STREAM_MASK = 0xFFFF_FFFF
 
@@ -725,8 +733,11 @@ _FS_ENTRY = Field(
 # File operations (§3.23, PR-2.5): the rule a refused rename or mkdir
 # broke (`projectfiles.RenameError` / `MkdirError`), carried as the
 # refusal's ``reason``; the rule a paste entry broke
-# (`projectfiles.PasteError`), carried in its result's ``error``. A paste
-# takes at most FS_PASTE_MAX entries (a clipboard's worth).
+# (`projectfiles.PasteError`), carried in its result's ``error``: the
+# values this build knows, for the client's mapping (the field itself is
+# open: a string the service sends, bounded, never `choices`). A paste
+# takes at most FS_PASTE_MAX entries per request (one request's wire
+# bound, like FS_LIST_MAX: the client sends a longer clipboard in slices).
 FS_RENAME_REASONS = frozenset({"empty", "not_a_name", "exists", "missing", "outside"})
 FS_MKDIR_REASONS = frozenset({"not_a_name", "exists", "outside", "no_parent"})
 FS_PASTE_ERRORS = frozenset(
@@ -740,7 +751,10 @@ _FS_PASTE_RESULT = Field(
         # Where it landed (the name it got, "(copy)" when the name was taken),
         # or null with `error` saying why not.
         "target": _req(_null(_PATH)),
-        "error": _req(_null(Field(K_STR, choices=FS_PASTE_ERRORS, high=SHORT_MAX))),
+        # The landed file's mtime (null for a folder, or nothing landed):
+        # an editor holding a moved file open takes it.
+        "mtime": _req(_null(_MTIME)),
+        "error": _req(_null(_s(SHORT_MAX))),
         # The OS's words for a `failed` one.
         "message": _s(ARG_TEXT_MAX),
     },
@@ -2406,10 +2420,13 @@ _TABLE: tuple[MessageType, ...] = (
                 "root": _req(_PATH),
             },
             reply={
-                # The paths the entries landed at, in order, for those that did.
-                "placed": _req(Field(K_LIST, high=FS_PASTE_MAX, item=_PATH)),
-                # One per entry, in the request's order: where it landed, or why not.
+                # One per entry, in the request's order: where it landed (and
+                # the landed file's mtime), or why not.
                 "results": _req(Field(K_LIST, high=FS_PASTE_MAX, item=_FS_PASTE_RESULT)),
+                # Set by the transport when the results went ahead as
+                # TAG_BLOB frames (CHUNKED_JSON_FIELDS).
+                "results_chunked": _BOOL,
+                "results_bytes": _i(0, SIZE_MAX),
             },
         ),
     ),

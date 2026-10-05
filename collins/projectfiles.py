@@ -13,6 +13,30 @@ tree's context menu does to the disk: a rename in place
 (`unique_target`, `paste_target`, `paste_entries`) and a new folder
 (`make_directory`).
 
+**Placement is exclusive** (split-service spec D44, §3.23): "never over
+anything" holds against every writer, not only Collins' own requests —
+the agent writes in the same folders by design, and a client's write
+must land inside its root even when something planted a symlink at the
+name between the check and the write. So nothing here lands by a call
+that replaces what it finds: a file copy opens its target
+`O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW` (`_copy_file_exclusive`: the bytes,
+then `copystat`); a tree is `shutil.copytree` with that copy function and
+`dirs_exist_ok` False (its own `makedirs` at the top and at every
+subdirectory is the exclusive step, and a link in the source stays a
+link, `os.symlink` failing `EEXIST` on a planted name); a move on the
+same filesystem is `os.link` then `unlink` for a file and `os.mkdir`
+then `os.rename` for a directory (a rename replaces only the empty
+directory just made; an entry planted inside it fails `ENOTEMPTY`,
+never over anything), and across filesystems (`EXDEV`, or a filesystem
+without links: `EPERM`, `EMLINK`) the exclusive copy and then the
+source removed, as `shutil.move` does (`_move_exclusive`). `EEXIST` at a
+paste's target is the next name of `unique_target`'s sequence
+(`paste_entries`' loop: try, and on `EEXIST` the next; `no_room` after
+the hundredth); at a rename's it is `exists`; `make_directory`'s
+`os.mkdir` is exclusive already. No lock serializes the operations: with
+exclusive placement two requests cannot land one name, and a lock would
+hold every client's rename behind a long copy.
+
 They moved here out of `editorfiles` (a module the client calls, which
 the pathless walker reads) when the tree and quick open went over the
 API: the service runs them for `fs.list`, `fs.walk`, `fs.stat` and
@@ -27,8 +51,10 @@ Stdlib only (plus `sessions.worktree_project_root`, a string rule)."""
 from __future__ import annotations
 
 import enum
+import errno
 import os
 import shutil
+import stat as stat_mod
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -258,13 +284,10 @@ class PasteError(enum.Enum):
     FAILED = "failed"  # the copy/move itself failed; `message` says why
 
 
-def rename_name_error(path: str | Path, new_name: str) -> RenameError | None | bool:
-    """The pure half of `rename_target`: `RenameError.EMPTY` or
-    `NOT_A_NAME` when *new_name* is no bare name, False when it is the
-    name *path* already has (nothing to do), None when the rename is
-    worth asking the disk about. No disk is read: the client runs this
-    before the request."""
-    name = new_name.strip()
+def name_error(name: str) -> RenameError | None:
+    """Whether *name* (already stripped) is a bare name an entry can have:
+    `RenameError.EMPTY`, `NOT_A_NAME` (a path, "." or "..", a NUL), or None
+    when it is. Pure; `rename_name_error` and `make_directory` share it."""
     if not name:
         return RenameError.EMPTY
     # The .name comparison catches separators (and "." on its own, whose name
@@ -272,6 +295,19 @@ def rename_name_error(path: str | Path, new_name: str) -> RenameError | None | b
     # happily right up to the syscall that rejects it.
     if name in (".", "..") or "\x00" in name or Path(name).name != name:
         return RenameError.NOT_A_NAME
+    return None
+
+
+def rename_name_error(path: str | Path, new_name: str) -> RenameError | None | bool:
+    """The pure half of `rename_target`: `RenameError.EMPTY` or
+    `NOT_A_NAME` when *new_name* is no bare name, False when it is the
+    name *path* already has (nothing to do), None when the rename is
+    worth asking the disk about. No disk is read: the client runs this
+    before the request."""
+    name = new_name.strip()
+    verdict = name_error(name)
+    if verdict is not None:
+        return verdict
     if name == Path(path).name:
         return False
     return None
@@ -321,16 +357,25 @@ def rename_entry(
     """`fs.rename`'s work: *path* renamed to *target*, which must be the
     same directory's (`rename_target` decides, from *target*'s name; a
     target in another directory is `NOT_A_NAME`: a rename never moves
-    things elsewhere — a paste of a cut does). `(target, None)` once it is
-    done, `(None, None)` for an unchanged name, `(None, error)` when it was
-    refused; an `OSError` from the rename itself is the caller's."""
-    path, target = Path(path), Path(target)
-    if target.parent != path.parent:
+    things elsewhere — a paste of a cut does), and exactly the name asked
+    for (`rename_target` trims surrounding whitespace for the dialog; a
+    request is refused `NOT_A_NAME` rather than landed somewhere the reply
+    does not say). `(target, None)` once it is done, `(None, None)` for an
+    unchanged name, `(None, error)` when it was refused: `EXISTS` when the
+    name was free at the check and taken by the time of the placement,
+    which is exclusive (`_move_exclusive`, D44); an `OSError` from the
+    rename itself is the caller's. Both paths are normalized first
+    (`sub/..` names its parent, not an entry called "..")."""
+    path, target = Path(os.path.normpath(path)), Path(os.path.normpath(target))
+    if target.parent != path.parent or target.name != target.name.strip():
         return None, RenameError.NOT_A_NAME
     landing, error = rename_target(root, path, target.name)
     if landing is None:
         return None, error
-    os.rename(path, landing)
+    try:
+        _move_exclusive(path, landing)
+    except FileExistsError:
+        return None, RenameError.EXISTS
     return landing, None
 
 
@@ -432,6 +477,100 @@ class PasteOutcome:
     message: str = ""
 
 
+# The errnos `os.link` answers on a filesystem the link cannot be made on:
+# another filesystem, one without hard links, one whose link count is
+# full. Any of them takes the move down the copy-then-remove branch, as
+# `shutil.move` goes on `EXDEV`.
+_NO_LINK_ERRNOS = frozenset({errno.EXDEV, errno.EPERM, errno.EMLINK})
+_COPY_CHUNK = 1024 * 1024
+
+
+def _copy_file_exclusive(source: str | Path, target: str | Path) -> None:
+    """One file (or one symlink, copied as a link) placed at *target*,
+    which must not be there: the target is opened `O_CREAT|O_EXCL|
+    O_NOFOLLOW`, so a name taken in between — a file, a planted symlink —
+    fails `FileExistsError` and nothing is written through it; a link is
+    `os.symlink`, which fails the same way. The bytes, then `copystat`
+    (mode and times, as `copy2` keeps them). The source is opened
+    non-blocking and read only when it is a regular file: a FIFO or a
+    device is refused rather than read (a FIFO would wait for a writer,
+    `/dev/zero` would fill the disk). `shutil.copytree`'s copy function
+    for a tree."""
+    source, target = os.fspath(source), os.fspath(target)
+    if os.path.islink(source):
+        os.symlink(os.readlink(source), target)
+        shutil.copystat(source, target, follow_symlinks=False)
+        return
+    src_fd = os.open(source, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY)
+    try:
+        if not stat_mod.S_ISREG(os.fstat(src_fd).st_mode):
+            raise OSError(errno.ENOTSUP, f"Not a regular file: {os.path.basename(source)}")
+        src_fh = os.fdopen(src_fd, "rb")
+    except BaseException:
+        os.close(src_fd)
+        raise
+    with src_fh:
+        dst_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NOCTTY, 0o666)
+        with os.fdopen(dst_fd, "wb") as dst_fh:
+            shutil.copyfileobj(src_fh, dst_fh, _COPY_CHUNK)
+    shutil.copystat(source, target)
+
+
+def _copy_tree_exclusive(source: Path, target: Path) -> None:
+    """A directory tree placed at *target*: `copytree`'s own `makedirs`
+    (with `dirs_exist_ok` False) is the exclusive step at the top and at
+    every subdirectory, every file goes through `_copy_file_exclusive`
+    and every link stays a link (`os.symlink`, exclusive too). A name
+    taken at the top is `FileExistsError` (the caller's next name); one
+    taken deeper is one of the `shutil.Error`'s entries (the tree landed
+    short, as `copytree` leaves it)."""
+    shutil.copytree(source, target, symlinks=True, copy_function=_copy_file_exclusive)
+
+
+def _move_exclusive(source: Path, target: Path) -> None:
+    """*source* moved to *target*, which must not be there (a rename, or a
+    cut's paste): a file by `os.link` then `unlink` (a hard link is made
+    only on a free name; a symlink is linked as the link itself), a
+    directory by `os.mkdir` then `os.rename` (the rename replaces only the
+    empty directory just made; an entry planted inside it meanwhile fails
+    `ENOTEMPTY`); `FileExistsError` when the name is taken. Where the link
+    or the rename cannot cross (`_NO_LINK_ERRNOS`, `EXDEV`) the exclusive
+    copy and then the source removed, as `shutil.move` does."""
+    if source.is_dir() and not source.is_symlink():
+        os.mkdir(target)
+        try:
+            os.rename(source, target)
+            return
+        except OSError as err:
+            try:
+                os.rmdir(target)
+            except OSError:
+                pass  # ENOTEMPTY: something was planted inside; the error below says so
+            if err.errno != errno.EXDEV:
+                raise
+        _copy_tree_exclusive(source, target)
+        shutil.rmtree(source)
+        return
+    try:
+        os.link(source, target, follow_symlinks=False)
+    except OSError as err:
+        if err.errno not in _NO_LINK_ERRNOS:
+            raise
+        _copy_file_exclusive(source, target)
+    os.unlink(source)
+
+
+def _place(source: Path, target: Path, move: bool) -> None:
+    """One attempt at landing *source* at *target*, exclusively (see the
+    module docstring): `FileExistsError` when the name is taken."""
+    if move:
+        _move_exclusive(source, target)
+    elif source.is_dir() and not source.is_symlink():
+        _copy_tree_exclusive(source, target)
+    else:
+        _copy_file_exclusive(source, target)
+
+
 def paste_entries(
     root: str | Path,
     dest_dir: str | Path,
@@ -445,14 +584,21 @@ def paste_entries(
     being gone is no reason to drop the rest. *source_allowed*, when given,
     is asked about each source first (the service's confinement: a source
     inside no root it knows is `SOURCE_OUTSIDE` for a client that is not
-    `local`), on the source resolved through its symlinks.
+    `local`), on the source resolved through its symlinks. Each source is
+    normalized first (`sub/..` is the parent, not an entry called "..").
+
+    The placement is exclusive (D44): `paste_target` picks the first free
+    name, `_place` lands on it only if it is still free, and a name taken
+    in between (another request's paste, the agent, a planted symlink)
+    is `FileExistsError`, answered by the next name of `unique_target`'s
+    sequence — until it runs out (`NO_ROOM`).
 
     Symlinks are copied as symlinks rather than followed: the tree already
     refuses to show one that leaves the project, and following one here would
     quietly duplicate whatever it points at into the repo."""
     outcomes: list[PasteOutcome] = []
     for source in sources:
-        src = Path(source)
+        src = Path(os.path.normpath(source))
         if source_allowed is not None and not source_allowed(os.path.realpath(src)):
             outcomes.append(PasteOutcome(src, None, PasteError.SOURCE_OUTSIDE))
             continue
@@ -461,15 +607,22 @@ def paste_entries(
             outcomes.append(PasteOutcome(src, None, error))
             continue
         try:
-            if move:
-                shutil.move(str(src), str(target))
-            elif src.is_dir() and not src.is_symlink():
-                shutil.copytree(src, target, symlinks=True)
+            for _attempt in range(_MAX_COPY_SUFFIXES + 1):
+                try:
+                    _place(src, target, move)
+                    break
+                except FileExistsError:
+                    target = unique_target(dest_dir, src.name)
+                    if target is None:
+                        break
             else:
-                shutil.copy2(src, target, follow_symlinks=False)
+                target = None
         except (OSError, shutil.Error) as err:
             message = getattr(err, "strerror", None) or str(err)
             outcomes.append(PasteOutcome(src, None, PasteError.FAILED, message))
+            continue
+        if target is None:
+            outcomes.append(PasteOutcome(src, None, PasteError.NO_ROOM))
             continue
         outcomes.append(PasteOutcome(src, target))
     return outcomes
@@ -489,10 +642,11 @@ def make_directory(root: str | Path, path: str | Path) -> MkdirError | None:
     """`fs.mkdir`'s work: one new folder at *path*, inside *root* (its
     parent resolved through its symlinks has to be inside the root too, so
     a link out of the project makes nothing outside it); never one over
-    something that is there. An `OSError` from the mkdir itself is the
-    caller's."""
+    something that is there (`os.mkdir` is exclusive: a name taken between
+    the check and the call is `EXISTS` too). An `OSError` from the mkdir
+    itself is the caller's."""
     path = Path(path)
-    if rename_name_error(path.parent / "~", path.name) is not None:
+    if name_error(path.name) is not None:
         return MkdirError.NOT_A_NAME
     if not is_inside(root, path.parent) or not is_inside(root, path):
         return MkdirError.OUTSIDE
@@ -500,5 +654,8 @@ def make_directory(root: str | Path, path: str | Path) -> MkdirError | None:
         return MkdirError.NO_PARENT
     if _exists(path):
         return MkdirError.EXISTS
-    os.mkdir(path)
+    try:
+        os.mkdir(path)
+    except FileExistsError:
+        return MkdirError.EXISTS
     return None

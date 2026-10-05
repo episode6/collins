@@ -929,16 +929,24 @@ REPLIES = {
     "fs.walk": {"paths": ["a.txt", "src/b.py"], "truncated": False, "paths_chunked": False, "paths_bytes": 2},
     "fs.rename": {"mtime": 1700000000000000},
     "fs.paste": {
-        "placed": ["/home/u/project/src/a.txt"],
         "results": [
             {
                 "source": "/home/u/project/a.txt",
                 "target": "/home/u/project/src/a.txt",
+                "mtime": 1700000000000000,
                 "error": None,
                 "message": "",
             },
-            {"source": "/home/u/other/c.txt", "target": None, "error": "source_outside", "message": ""},
+            {
+                "source": "/home/u/other/c.txt",
+                "target": None,
+                "mtime": None,
+                "error": "source_outside",
+                "message": "",
+            },
         ],
+        "results_chunked": False,
+        "results_bytes": 2,
     },
     "fs.mkdir": {},
     "service.restart": {},
@@ -1722,3 +1730,45 @@ def test_a_walks_paths_and_a_listings_entries_chunk_as_json():
     # A chunked list field whose JSON is not a list is refused at the join.
     odd = b'{"a": 1}'
     assert p.join_reply({**slim, "paths_bytes": len(odd)}, odd) is None
+
+
+def test_a_pastes_results_chunk_as_json_at_the_tables_bound():
+    """PR-2.5 (D42, M2 of PR 613's review): FS_PASTE_MAX results, each
+    echoing a source and a target at PATH_MAX with a message at its bound,
+    are far past a frame; the list travels as its JSON in TAG_BLOB frames
+    and validates back as the reply."""
+    results = [
+        {
+            "source": "/" + "s" * (p.PATH_MAX - 1),
+            "target": "/" + "t" * (p.PATH_MAX - 1),
+            "mtime": 1700000000000000,
+            "error": None,
+            "message": "m" * p.ARG_TEXT_MAX,
+        }
+        for _ in range(p.FS_PASTE_MAX)
+    ]
+    reply = {"re": 9, "ok": True, "results": results}
+    frames, slim = p.split_reply(reply)
+    assert frames and "results" not in slim and slim["results_chunked"] is True
+    assert len(frames) > 1 and all(len(frame) <= p.MAX_FRAME for frame in frames)
+    data = b"".join(p.unpack_frame(frame)[1] for frame in frames)
+    joined = p.join_reply(slim, data)
+    assert joined["results"] == results and "results_chunked" not in joined
+    assert not isinstance(p.validate_response(joined, "fs.paste"), p.Refusal)
+    assert p.join_reply(slim, data[:-1]) is None
+    # `pr.sweep`'s `results` is a map, never chunked: a reply past a frame
+    # with only that field raises as it did.
+    with pytest.raises(ValueError):
+        p.split_reply({"re": 9, "ok": True, "results": {str(i): [] for i in range(300_000)}})
+
+
+def test_a_paste_results_error_is_an_open_string():
+    """S5 of PR 613's review: a string the service sends is bounded and
+    mapped by the receiver, never `choices`: a newer service's rule does
+    not fail the whole reply after the files moved."""
+    result = {"source": "/p/a", "target": None, "mtime": None, "error": "newer_rule", "message": ""}
+    checked = p.validate_response({"re": 9, "ok": True, "results": [result]}, "fs.paste")
+    assert not isinstance(checked, p.Refusal) and checked.fields["results"][0]["error"] == "newer_rule"
+    too_long = {"re": 9, "ok": True, "results": [{**result, "error": "x" * (p.SHORT_MAX + 1)}]}
+    assert isinstance(p.validate_response(too_long, "fs.paste"), p.Refusal)
+    assert "placed" not in p.TYPES["fs.paste"].request.reply

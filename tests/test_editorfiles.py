@@ -862,3 +862,23 @@ def test_walk_files_caps_the_folders_it_queues(tmp_path):
         (tmp_path / f"d{index}" / "f.txt").write_text("x")
     paths, truncated = walk_files(tmp_path, dirs_cap=3)
     assert truncated is True and paths == ["d0/f.txt", "d1/f.txt"]
+
+
+# -- the clipboard's hostile lines and odd names (review of PR 613) -----------------
+
+
+def test_a_clipboard_line_urlsplit_refuses_is_dropped_not_raised():
+    """`urlsplit` raises ValueError on `collins://[bad/p`; a hostile payload
+    must not leave Paste doing nothing with no banner."""
+    assert path_from_collins_uri("collins://[bad/p/a.txt", "svc1") is None
+    assert path_from_file_uri("file://[bad/p") is None
+    text = "copy\ncollins://[bad/p/a.txt\nfile://[bad/p\ncollins://svc1/p/ok.txt"
+    assert parse_copied_files(text, "svc1", local=True) == (["/p/ok.txt"], False)
+
+
+def test_collins_uri_carries_a_name_that_is_not_utf8_byte_for_byte():
+    name = os.fsdecode(b"/p/bad-\xff.txt")  # a surrogate-escaped byte
+    uri = collins_uri("svc1", name)
+    assert uri == "collins://svc1/p/bad-%FF.txt"
+    assert path_from_collins_uri(uri, "svc1") == name
+    assert parse_copied_files(f"copy\n{uri}", "svc1", local=False) == ([name], False)
