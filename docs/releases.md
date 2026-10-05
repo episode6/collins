@@ -48,6 +48,11 @@ downloads of each version, see the
   placement itself is exclusive, so "never overwrites" holds against the
   agent writing in the same folder at the same moment, and against two
   pastes landing one name at once (the second gets the next "(copy N)").
+  Each operation works from the folder it opened, not from its path, so
+  a folder or a file swapped for a link in mid-operation carries nothing
+  out of the project and nothing into it; a copy that fails partway
+  leaves no partial file behind, and a failed move removes only what it
+  put there itself.
   An open file still follows its rename or move with its unsaved edits,
   even when the move took long enough for the editor to be told the old
   path was gone first (and anything typed meanwhile stays unsaved until
