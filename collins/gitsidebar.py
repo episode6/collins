@@ -70,7 +70,6 @@ from . import (  # noqa: E402
     contextmenu,
     dialogs,
     filetypes,
-    gitinfo,
     gitloads,
     gitmodel,
     gitops,
@@ -1357,7 +1356,7 @@ class GitSidebar(Gtk.Box):
         cwd = self._cwd_provider()
 
         def work() -> None:
-            operation = gitops.in_progress_operation(gitinfo.git_dir(cwd))
+            operation = gitops.in_progress_operation_at(cwd)
             staged = gitops.staged_paths(cwd) if operation is None else []
             GLib.idle_add(self._commit_gated, operation, staged, then, priority=GLib.PRIORITY_DEFAULT)
 
@@ -1461,7 +1460,7 @@ class GitSidebar(Gtk.Box):
         cwd = self._cwd_provider()
 
         def work() -> None:
-            operation = gitops.in_progress_operation(gitinfo.git_dir(cwd))
+            operation = gitops.in_progress_operation_at(cwd)
             GLib.idle_add(self._revert_gated, sha, operation, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, name="git-sidebar-revert-gate", daemon=True).start()

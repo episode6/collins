@@ -471,3 +471,107 @@ def test_a_connection_with_no_hello_is_closed_after_the_timeout(served, monkeypa
     _server, path = served
     client = Raw(path)
     assert pump(3, lambda: client.closed)
+
+
+# -- git over the API (PR-2.1): the deferred reply, the chunked reply, the blob GET ---------
+
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git isn't on PATH")
+
+
+def _git_repo(root):
+    repo = root / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    (repo / "a.txt").write_text("one\n")
+    (repo / "big.txt").write_text("".join(f"line {i} " + "x" * 80 + "\n" for i in range(20000)))
+    return repo
+
+
+def _local_client(server, path):
+    client = Raw(path)
+    client.hello(client_id="git-client")
+    proof = open(server.proof_file, "rb").read().hex()
+    assert client.request({"t": "local", "proof": proof})["ok"]
+    return client
+
+
+@needs_git
+def test_a_request_answered_off_the_main_loop_is_a_deferred_reply(served, tmp_path):
+    """`git.sizes` runs on the feed's thread: the reply comes later on the
+    connection that asked, as any other (the Deferred the core returned)."""
+    server, path = served
+    repo = _git_repo(tmp_path)
+    client = _local_client(server, path)
+    reply = client.request({"t": "git.sizes", "cwd": str(repo), "paths": ["a.txt", "nope"]}, timeout=10)
+    assert reply["ok"] and reply["sizes"] == {"a.txt": 4, "nope": None}
+    client.close()
+
+
+@needs_git
+def test_a_reply_over_the_frame_cap_is_chunked_and_joined(served, tmp_path):
+    """A `git.run` whose stdout exceeds MAX_FRAME arrives as TAG_BLOB frames
+    on the asking connection ahead of a slim reply; `join_reply` puts it
+    back together (what the client's link does)."""
+    server, path = served
+    repo = _git_repo(tmp_path)
+    client = _local_client(server, path)
+    args = {"path": "big.txt"}
+    message = {"t": "git.run", "cwd": str(repo), "builder": "untracked_diff_argv", "args": args}
+    reply = client.request(message, timeout=20)
+    assert reply["ok"] and reply["stdout_chunked"] and reply["stdout_bytes"] > protocol.MAX_FRAME
+    chunks = b"".join(data for header, data in client.frames if header.tag == protocol.TAG_BLOB)
+    assert len(chunks) == reply["stdout_bytes"]
+    assert all(header.stream == reply["re"] & protocol.STREAM_MASK for header, _d in client.frames)
+    joined = protocol.join_reply(reply, chunks)
+    assert joined["stdout"].startswith("diff --git") and "line 19999" in joined["stdout"]
+    assert protocol.join_reply(reply, chunks[:-1]) is None
+    client.close()
+
+
+def _http_get(path: str, query: str, headers: dict) -> tuple[int, dict, bytes]:
+    session = Soup.Session(remote_connectable=Gio.UnixSocketAddress.new(path))
+    message = Soup.Message.new("GET", "http://collins/api/blob?" + query)
+    for name, value in headers.items():
+        message.get_request_headers().replace(name, value)
+    box = {}
+
+    def done(sess, result):
+        try:
+            box["body"] = bytes(sess.send_and_read_finish(result).get_data() or b"")
+        except GLib.Error as err:
+            box["error"] = err.message
+
+    session.send_and_read_async(message, GLib.PRIORITY_DEFAULT, None, done)
+    assert pump(10, lambda: "body" in box or "error" in box), "no answer"
+    assert "error" not in box, box
+    got = {}
+    for name in ("ETag", "Content-Type"):
+        value = message.get_response_headers().get_one(name)
+        if value is not None:
+            got[name] = value
+    return int(message.get_status()), got, box["body"]
+
+
+@needs_git
+def test_the_blob_route_answers_bytes_with_a_tag_and_304_on_it(served, tmp_path):
+    server, path = served
+    repo = _git_repo(tmp_path)
+    client = _local_client(server, path)
+    query = f"kind=git&cwd={repo}&at=worktree&path=a.txt"
+    status, headers, body = _http_get(path, query, {"Collins-Client": "git-client"})
+    assert status == 200 and body == b"one\n" and headers["ETag"]
+    mine = {"Collins-Client": "git-client"}
+    status, _h, body = _http_get(path, query, {**mine, "If-None-Match": headers["ETag"]})
+    assert status == 304 and body == b""
+    status, _h, _b = _http_get(path, f"kind=git&cwd={repo}&at=worktree&path=nope.txt", mine)
+    assert status == 404
+    # Without the client's header the request is confined like a remote
+    # client's: a temp repository is outside every root.
+    status, _h, _b = _http_get(path, query, {})
+    assert status == 403
+    status, _h, _b = _http_get(path, f"kind=file&path={repo}/a.txt", {"Collins-Client": "git-client"})
+    assert status == 404
+    client.close()

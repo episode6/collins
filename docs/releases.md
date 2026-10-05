@@ -38,6 +38,18 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **Git goes over the service's socket.** The git page, the footer's
+  branch, the sidebar's *Git pull* / *Checkout* and *Open on GitHub* and
+  the diff's images now run every `git` on the service: the window sends
+  the name of the command it wants and its arguments (never a command
+  line), reads a repository's branch, trunk and freshness from one
+  `git.info` answer per directory, lets the service watch the working
+  tree for the page's reloads, and hands a stage / discard / revert plan
+  to the service, which re-reads the file and refuses to apply a plan the
+  file has moved under. A discarded untracked file goes to the trash on
+  the service's machine. Nothing looks different; the window no longer
+  opens a project file or runs git itself, which is what a window on
+  another machine needs (the first chunk of the split's Phase 2).
 - **Collins is two programs: a service and a window.** `collins-service`
   runs your sessions (every agent's terminal, the terminal panel's shells,
   the sandboxes, the shared state, the session tools' MCP socket, every

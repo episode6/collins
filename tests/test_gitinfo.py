@@ -432,7 +432,7 @@ def test_nowhere_at_all(tmp_path):
 
 def test_no_git_on_path(repo, monkeypatch):
     """Nothing to ask, so nothing is claimed."""
-    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
+    monkeypatch.setattr("collins.gitfiles.shutil.which", lambda _name: None)
     assert has_changes(repo) is False
 
 
@@ -493,7 +493,7 @@ def test_no_names_asks_nothing(repo):
 
 
 def test_ignored_names_without_git(repo, monkeypatch):
-    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: None)
+    monkeypatch.setattr("collins.gitfiles.shutil.which", lambda _name: None)
     assert ignored_names(repo, ["a.txt"]) == set()
 
 
@@ -929,7 +929,7 @@ def test_refs_signature_reads_the_common_dir_of_a_worktree(tmp_path):
 
 
 def test_refs_signature_bounds_its_walk(tmp_path, monkeypatch):
-    monkeypatch.setattr("collins.gitinfo._REFS_DIR_LIMIT", 3)
+    monkeypatch.setattr("collins.gitfiles.REFS_DIR_LIMIT", 3)  # the walk moved to gitfiles (PR-2.1)
     repo = make_repo(tmp_path / "repo")
     for name in ("a/b", "c/d", "e/f", "g/h"):
         with_remote_branch(repo, "origin", name, SHA_A)

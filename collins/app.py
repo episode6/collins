@@ -38,6 +38,7 @@ from . import (
     prmenu,
     ptyclient,
     remotediffs,
+    remotegit,
     sandboxstatus,
     statusicon,
     tooltipmute,
@@ -2214,6 +2215,9 @@ class App(Adw.Application):
         self.notification_center.on_finished.append(self._on_run_finished)
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
+        # Git goes over the link too (PR-2.1, §3.23): gitinfo reads the
+        # per-cwd mirror and gitops' runners send builders by name.
+        remotegit.install(link)
         self.store.subscribe()
         self._refresh_service_status()
 
@@ -2261,6 +2265,7 @@ class App(Adw.Application):
         mirror = remotediffs.mirror_for(self._service_link)
         if mirror is not None:
             mirror.reset()
+        remotegit.reset()
         try:
             self.store.subscribe()
         except RequestRefused as refusal:

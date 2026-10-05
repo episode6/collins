@@ -270,6 +270,30 @@ each taken from the code the message replaces:
   probe's verdict (`what: "probe"`, `reason`). The `term` carries the
   sixteen-colour `palette`, for the dim judgement the service makes. The
   `debug.*` family (D27) is served only with `COLLINS_DEBUG_API=1`.
+- Git over the API (§3.23, PR-2.1, D33; behind the ``git`` cap). `git.run`
+  names one of gitops' argv builders (its registry's Python name) and the
+  builder's keyword *args* as a bounded JSON object: the wire never carries
+  an argv, and the service runs what its own builder makes of the args. The
+  reply is `GitResult`'s shape with git's exit *status* (null: unreachable),
+  the client's runner deciding which statuses are ok. A reply the frame cap
+  can't hold travels as `split_reply` says: the stdout as TAG_BLOB frames on
+  the asking connection ahead of a slim reply (``stdout_chunked``,
+  ``stdout_bytes``), joined back by the receiver (`join_reply`). `git.info`
+  answers every `.git` read gitinfo makes at once (the root, the branch,
+  the trunk, the GitHub page, HEAD, the index's mtime, the in-progress
+  markers and operation, the refs digest, and the heads when the client's
+  ``known_refs`` digest differs; with ``changes`` the `git status` of
+  has_changes / change_summary; with ``state`` the watch's tree-state
+  digest), `git.sizes` the on-disk size of repository paths, `git.watch` /
+  `git.unwatch` install the page's directory monitors on the service and
+  `git-changed` is their event, `git.plan` carries a gitpatch plan out on
+  the service, refused ``stale`` when a stable key it names is no longer in
+  the fresh patch, and `fs.trash` is §3.23's trash. A handler that must
+  not block the main loop answers with a `Deferred` the transport settles
+  later: exactly one response per request, on the connection that asked,
+  which may take longer; `tests/inproc.py` pumps the loop until it does.
+  ``GET /api/blob?kind=git`` on the same socket is a blob's bytes
+  (`api.server`), never a path on the wire.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -296,7 +320,8 @@ MIN_PROTOCOL = 1
 # ships behind a new name here; a peer uses it only when the other lists it.
 CAP_LOCAL = "local"  # the service offers the local-extras proof (§3.2)
 CAP_DEBUG = "debug"  # the service runs with COLLINS_DEBUG_API=1 and serves debug.* (D27)
-CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG})
+CAP_GIT = "git"  # git over the API: git.*, fs.trash, git-changed, GET /api/blob?kind=git (PR-2.1)
+CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG, CAP_GIT})
 
 # The client's second connection (D26): a hello carrying ``channel: "sync"``
 # opens the channel `Link.call` blocks on; the primary (the default) carries
@@ -361,6 +386,10 @@ ERROR_SEQUENCE = "sequence"
 ERROR_GONE = "gone"
 ERROR_REFUSED = "refused"
 ERROR_FAILED = "failed"
+# What the request was planned against has moved since (PR-2.1): a git
+# plan whose stable keys the fresh patch no longer holds, later a write
+# whose expected mtime moved (§3.23). The client reloads and asks again.
+ERROR_STALE = "stale"
 ERRORS = frozenset(
     {
         ERROR_UNKNOWN,
@@ -371,8 +400,17 @@ ERRORS = frozenset(
         ERROR_GONE,
         ERROR_REFUSED,
         ERROR_FAILED,
+        ERROR_STALE,
     }
 )
+
+# A reply's one field the transport may carry outside the text frame
+# (`split_reply` / `join_reply`): `git.run`'s stdout, which a whole diff
+# can take past MAX_FRAME. The field travels as TAG_BLOB frames whose
+# `stream` is the request's id (masked to 32 bits, STREAM_MASK) ahead of
+# the reply, which then says `stdout_chunked` and `stdout_bytes`.
+CHUNKED_FIELD = "stdout"
+STREAM_MASK = 0xFFFF_FFFF
 
 # A `spawn` refused because the service runs that session already (its
 # args name the running `pty`): the client attaches to it instead (D31).
@@ -552,6 +590,30 @@ _TOOL_NAME = Field(K_STR, low=1, high=64, pattern=_TOOL_RE)
 _CODE = Field(K_STR, low=1, high=32, pattern=_CODE_RE)
 # A session field the service fills before the id has resolved: may be "".
 _SESSION_OR_EMPTY = Field(K_STR, high=ID_MAX, pattern=re.compile(f"(?:{_ID_RE.pattern})?"))
+
+# Git over the API (§3.23, D33). A builder is named by its Python name in
+# gitops' registry; its args are a bounded JSON object the service hands
+# the builder as keyword arguments (a builder that refuses them is
+# `invalid`). A whole diff's stdout may run to diffmodel.MAX_PATCH_CHARS;
+# stderr is cut at GIT_STDERR_MAX. The ops are gitpatch.OPS, pinned by
+# tests/test_protocol.py; MAX_PATH is diffmodel.MAX_PATH_CHARS.
+_BUILDER = Field(K_STR, low=1, high=64, pattern=re.compile(r"[a-z][a-z0-9_]{0,63}"))
+GIT_TIMEOUT_MAX = 3600.0
+GIT_ENV_DEFAULT = "default"
+GIT_ENV_NO_EDITOR = "no_editor"
+GIT_ENV_NO_PROMPT = "no_prompt"
+GIT_ENVS = frozenset({GIT_ENV_DEFAULT, GIT_ENV_NO_EDITOR, GIT_ENV_NO_PROMPT})
+GIT_OUTPUT_MAX = 64 * 1024 * 1024
+GIT_STDERR_MAX = 64 * 1024
+REFS_MAX = 4096
+MAX_PATH = 512
+REPO_PATHS_MAX = 4000
+_SHA = Field(K_STR, high=40, pattern=re.compile(r"[0-9a-f]{40}"))
+_REFS_MAP = Field(K_MAP, high=REFS_MAX, item=_SHA)
+_REPO_PATHS = Field(K_LIST, high=REPO_PATHS_MAX, item=_s(MAX_PATH, low=1))
+PLAN_OPS = frozenset(
+    {"add", "reset", "apply-cached", "apply-cached-reverse", "apply-worktree-reverse", "checkout", "trash"}
+)
 
 _TERM = Field(
     K_OBJ,
@@ -1869,6 +1931,149 @@ _TABLE: tuple[MessageType, ...] = (
             },
         ),
     ),
+    # -- git over the API (§3.23, PR-2.1, D33)
+    MessageType(
+        "git.run",
+        "Run one of gitops' argv builders, by name and keyword args, on the service's git.",
+        request=_request(
+            {
+                "cwd": _req(_PATH),
+                "builder": _req(_BUILDER),
+                "args": Field(K_JSON_OBJECT),
+                # The bytes on git's stdin, as text (check-ignore's names);
+                # a plan's patch travels in `git.plan`.
+                "stdin": _TEXT,
+                "timeout": Field(K_NUM, low=0.1, high=GIT_TIMEOUT_MAX),
+                # Which environment the run gets: the service's own, one
+                # with no editor (the continue runners'), or one that
+                # also answers no prompt (the sidebar's pull).
+                "env": Field(K_STR, choices=GIT_ENVS, high=SHORT_MAX),
+            },
+            reply={
+                # git's exit status; null when git couldn't be run at all
+                # (`unreachable`, with the reason as `stderr`). The client's
+                # runner decides which statuses are ok.
+                "status": _req(_null(_i(-1, COUNT_MAX))),
+                "stdout": _s(GIT_OUTPUT_MAX),
+                "stderr": _s(GIT_STDERR_MAX),
+                "unreachable": _BOOL,
+                # Set by the transport when stdout went ahead as TAG_BLOB
+                # frames (CHUNKED_FIELD): the client joins them back.
+                "stdout_chunked": _BOOL,
+                "stdout_bytes": _i(0, SIZE_MAX),
+            },
+        ),
+    ),
+    MessageType(
+        "git.info",
+        "Everything gitinfo reads off a repository's .git, at once (the client's per-cwd mirror).",
+        request=_request(
+            {
+                "cwd": _req(_PATH),
+                # With `changes`, the service runs `git status` too (the
+                # on-demand has_changes / change_summary; never on a tick).
+                "changes": _BOOL,
+                # With `state`, gitops.tree_state_signature's digest too (the
+                # watch's seed, sampled by the page's read worker).
+                "state": _BOOL,
+                # The refs digest the client holds: the heads are sent
+                # only when the service's differs.
+                "known_refs": _s(64),
+            },
+            reply={
+                # Absent fields mean "not a repository" (root null).
+                "root": _req(_null(_PATH)),
+                "git_dir": _null(_PATH),
+                "branch": _null(_NAME),
+                "default_branch": _null(_NAME),
+                "github_url": _null(Field(K_URL, high=2048)),
+                "index_mtime": _null(_i(0, SIZE_MAX)),
+                "head": _null(_s(64)),
+                "markers": Field(K_LIST, high=8, item=_s(32)),
+                "operation": _null(_s(32)),
+                "refs": _null(_s(64)),
+                "remotes": Field(K_LIST, high=REFS_MAX, item=_NAME),
+                "heads": _REFS_MAP,
+                "remote_heads": _REFS_MAP,
+                "changes": _null(Field(K_OBJ, fields={"staged": _req(_BOOL), "unstaged": _req(_BOOL)})),
+                "state": _null(_s(64)),
+            },
+        ),
+    ),
+    MessageType(
+        "git.sizes",
+        "The size on disk of repository paths (the read's too-large gate for untracked and unmerged files).",
+        request=_request(
+            {"cwd": _req(_PATH), "paths": _req(_REPO_PATHS)},
+            reply={"sizes": _req(Field(K_MAP, high=REPO_PATHS_MAX, item=_null(_i(0, SIZE_MAX))))},
+        ),
+    ),
+    MessageType(
+        "git.watch",
+        "Watch a working tree for this client: the page's directory monitors, on the service.",
+        request=_request(
+            {
+                "cwd": _req(_PATH),
+                "files": Field(K_LIST, high=REPO_PATHS_MAX, item=_s(MAX_PATH)),
+                # The tree-state digest the page's read sampled: the
+                # watch's first compare is against it.
+                "state": _null(_s(64)),
+            }
+        ),
+    ),
+    MessageType(
+        "git.unwatch",
+        "Stop watching a working tree for this client.",
+        request=_request({"cwd": _req(_PATH)}),
+    ),
+    MessageType(
+        "git-changed",
+        "A watched working tree moved: the three signatures, each a short digest.",
+        event=_event(
+            SERVICE,
+            {"cwd": _req(_PATH), "tree": _req(_s(64)), "refs": _req(_s(64)), "state": _req(_null(_s(64)))},
+        ),
+    ),
+    MessageType(
+        "git.plan",
+        "Carry a gitpatch plan out on the service, refused stale when its keys moved.",
+        request=_request(
+            {
+                "cwd": _req(_PATH),
+                "load": _req(Field(K_JSON)),
+                "path": _req(_s(MAX_PATH, low=1)),
+                "previous_path": _null(_s(MAX_PATH)),
+                "parent_target": _null(_s(256)),
+                "op": _req(Field(K_STR, choices=PLAN_OPS, high=SHORT_MAX)),
+                "paths": _req(_REPO_PATHS),
+                "patch": _null(_TEXT),
+                "three_way": _BOOL,
+                # The stable keys (diffmodel.stable_key) the plan was made
+                # against: every one must still be in the fresh patch.
+                "keys": Field(K_LIST, high=REPO_PATHS_MAX, item=_s(1024)),
+            },
+            reply={
+                # `ok` is the envelope's: the plan's outcome is `applied`.
+                "applied": _req(_BOOL),
+                "stdout": _s(GIT_STDERR_MAX),
+                "stderr": _s(GIT_STDERR_MAX),
+                "unreachable": _BOOL,
+                "three_way": _BOOL,
+                "conflicts": _BOOL,
+            },
+        ),
+    ),
+    MessageType(
+        "fs.trash",
+        "Move files to the trash on the service's machine (§3.23).",
+        request=_request(
+            {"paths": _req(Field(K_LIST, low=1, high=REPO_PATHS_MAX, item=_PATH))},
+            reply={
+                "trashed": Field(K_LIST, high=REPO_PATHS_MAX, item=_PATH),
+                "removed": Field(K_LIST, high=REPO_PATHS_MAX, item=_PATH),
+            },
+        ),
+    ),
     # -- the service itself (§3.10)
     MessageType(
         "service.restart",
@@ -2351,6 +2556,82 @@ def reply(re_id: int, /, **fields) -> dict:
 
 def refuse(re_id: int, error: str, msgid: str, args: Mapping | None = None) -> dict:
     return {"re": re_id, "ok": False, "error": error, "msgid": msgid, "args": dict(args or {})}
+
+
+class Deferred:
+    """A reply that arrives later (PR-2.1). A request handler that must
+    not block the service's main loop (one that runs git) returns one
+    instead of a reply dict; the transport answers the request when
+    `settle` is called with the reply (`reply` / `refuse`'s dict), on the
+    main loop. The contract is unchanged for the peer: exactly one
+    response per request, on the connection that asked, a reply that
+    may simply take longer. `then` registers the transport's callback;
+    one registered after the settle runs at once."""
+
+    __slots__ = ("reply", "_callbacks", "settled")
+
+    def __init__(self) -> None:
+        self.reply: dict | None = None
+        self.settled = False
+        self._callbacks: list = []
+
+    def then(self, callback) -> None:
+        if self.settled:
+            callback(self.reply)
+            return
+        self._callbacks.append(callback)
+
+    def settle(self, reply: dict) -> None:
+        if self.settled:
+            return
+        self.settled = True
+        self.reply = reply
+        callbacks, self._callbacks = self._callbacks, []
+        for callback in callbacks:
+            callback(reply)
+
+
+def split_reply(reply: dict) -> tuple[list[bytes], dict]:
+    """*reply* as the transport sends it: unchanged when it fits a frame;
+    else, when it holds CHUNKED_FIELD as text, the TAG_BLOB frames that
+    carry that field's UTF-8 (stream: the request id masked to 32 bits,
+    offset: the byte offset) and the reply with the field replaced by
+    ``stdout_chunked`` and ``stdout_bytes``. Raises ValueError when the
+    reply fits no frame even so."""
+    text = json.dumps(reply, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    if len(text.encode("utf-8", "surrogatepass")) <= MAX_FRAME:
+        return [], reply
+    field_text = reply.get(CHUNKED_FIELD)
+    re_id = reply.get("re")
+    if not isinstance(field_text, str) or not _is_int(re_id):
+        raise ValueError("message exceeds the frame limit")
+    data = field_text.encode("utf-8", "replace")
+    frames = [
+        pack_frame(TAG_BLOB, 0, re_id & STREAM_MASK, offset, data[offset : offset + MAX_PAYLOAD])
+        for offset in range(0, len(data), MAX_PAYLOAD)
+    ]
+    slim = {key: value for key, value in reply.items() if key != CHUNKED_FIELD}
+    slim["stdout_chunked"] = True
+    slim["stdout_bytes"] = len(data)
+    encode(slim)  # raises when the rest of the reply is itself too large
+    return frames, slim
+
+
+def join_reply(reply: dict, chunks: bytes | None) -> dict:
+    """The receiver's half of `split_reply`: a reply saying
+    ``stdout_chunked`` gets its field back from the *chunks* collected
+    for its stream (decoded with replacement); one short of
+    ``stdout_bytes`` is refused as ``invalid`` by the caller (None)."""
+    if not reply.get("stdout_chunked"):
+        return reply
+    joined = dict(reply)
+    joined.pop("stdout_chunked", None)
+    wanted = joined.pop("stdout_bytes", None)
+    data = chunks or b""
+    if wanted is not None and len(data) != wanted:
+        return None
+    joined[CHUNKED_FIELD] = data.decode("utf-8", "replace")
+    return joined
 
 
 # ---- versions ----------------------------------------------------------------

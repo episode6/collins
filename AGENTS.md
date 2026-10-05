@@ -280,6 +280,25 @@ service, against its machine's login: the UI asks (`usage.get`,
 `pr.*` requests (`remoteprs.py`'s functions keep the old names); without
 `gh` a PR is a number and an empty menu.
 
+**Git goes over the API** (§3.23, D33). The git page, the sidebar's
+menus, the footer's branch and the project row's pull and checkout keep
+calling `gitinfo` and `gitops`; in the client those reach the service:
+every runner maps its argv back to the **builder** that makes it
+(`gitops.BUILDERS`: every `*_argv` plus the nine ad-hoc argv promoted to
+builders) and sends `git.run {cwd, builder, args}` — the wire never
+carries an argv, and the service runs only what its own builder makes —
+`gitinfo`'s `.git` reads are a per-cwd mirror of `git.info`
+(`remotegit.py`; the readers themselves are `gitfiles.py`, the service's),
+a blob is `GET /api/blob?kind=git` (`blobcache.py` caches it), the page's
+watch is `git.watch` / `git-changed` on the service (`service/gitfeed.py`)
+and a plan is `git.plan`, refused `stale` when a stable key moved;
+`service/files.py` is the trash and the rule confining every path to a
+root the service knows (or anything for a `local` client). The client
+opens no project file and runs no git: `tests/test_client_is_pathless.py`
+walks the GTK modules and the client helpers for filesystem and
+subprocess sites and holds them to `tests/pathless_allowlist.py`, which
+shrinks per Phase 2 chunk and never grows.
+
 ## Where state lives
 
 | What | Where |
@@ -302,6 +321,7 @@ service, against its machine's login: the UI asks (`usage.get`,
 | The pty table (a row per live pty: kind, session, cwd, pid, size, box, plan, options) and the next pty id | `state.json` (`AppState.set_pty` / `remove_pty` / `set_pty_next_id`, written by the service's `PtyServer`: an agent's pty and a panel shell's) |
 | A live pty's saved screen model (`termscreen.Screen.dump()` as JSON, for a restarted service's re-adoption, a later phase's keeper); removed with the pty's row, pruned at service start | `~/.local/state/collins/pty/<pty id>.model` |
 | Model catalog, update-check stamp, fetched images | `~/.cache/collins/` |
+| Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
 | Everything of the CLI's | `~/.claude/` — read only |
 
 Every one of these has an environment override used by tests, captures and
@@ -419,13 +439,13 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store and its mirror, sidebar, state.json and its mirror, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `remotestore` `models` `state` `remotestate` `sidebar` `titles` `bgstatus` `bgblock` `service/bgagents` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): `collins-service`'s process (lock, login-shell capture, stop sequence, `--check`); the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router; a session on the service (`Session`, its hosted record and pushed facts, the busy and finish tracker, background agents); the socket (server, client with its sync channel, the connection manager and its reconnect); the client's mirror of a session, the childless VTE and its ports; the API's message table, validation, framing, binary header, protocol version; the debug API | `service/main` `service/core` `service/termstream` `service/termscreen` `service/ptyserver` `service/storefeed` `service/jobs` `service/diffs` `service/session` `service/hosting` `service/ports` `service/tracking` `service/finish` `service/bgagents` `api/protocol` `api/server` `api/client` `apilink` `connection` `clientsession` `ptyclient` `jobclient` `remotediffs` `remotestore` `remotestate` `sandboxstatus` `bgblock` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side, detach and reopen), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors, running rows, background agents), `collins-sandboxed-sessions` (the sandbox host on the service), `collins-testing` (the per-check service, the debug API) |
+| Service (the split): `collins-service`'s process (lock, login-shell capture, stop sequence, `--check`); the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router; a session on the service (`Session`, its hosted record and pushed facts, the busy and finish tracker, background agents); the socket (server, client with its sync channel, the connection manager and its reconnect); the client's mirror of a session, the childless VTE and its ports; the API's message table, validation, framing, binary header, protocol version; the debug API | `service/main` `service/core` `service/termstream` `service/termscreen` `service/ptyserver` `service/storefeed` `service/jobs` `service/diffs` `service/gitfeed` `service/files` `service/session` `service/hosting` `service/ports` `service/tracking` `service/finish` `service/bgagents` `api/protocol` `api/server` `api/client` `apilink` `connection` `clientsession` `ptyclient` `jobclient` `remotediffs` `remotegit` `blobcache` `remotestore` `remotestate` `sandboxstatus` `bgblock` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side, detach and reopen), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors, running rows, background agents), `collins-sandboxed-sessions` (the sandbox host on the service), `collins-testing` (the per-check service, the debug API) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` `sandboxstatus` `service/sandbox` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `service/tools` `toolclient` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
 | Pull requests: status, hub, detail page, body markdown, actions, menus, gh setup | `prstatus` `prstore` `service/prfeed` `remoteprs` `prdetail` `practions` `prmenu` `prview` `mdblocks` `mdwidgets` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
-| The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info, the panels' model and git runners | `gitpage` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitmodel` `gitops` `commitcard` `gitoperation` `keyedslots` `imagediff` | `collins-git-page` |
+| The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info and its mirror, the builders and runners over the API, the panels' model | `gitpage` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitfiles` `remotegit` `gitmodel` `gitops` `service/gitfeed` `service/files` `blobcache` `commitcard` `gitoperation` `keyedslots` `imagediff` | `collins-git-page` |
 | Editor panel: file tree, quick open, pop-out, narrow mode | `editor` `editorfiles` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
 | Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `service/notifications` `remotenotify` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
 | Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `modelcatalog` `usage` `usagepanel` `tokenrefresh` `tokensettings` `service/tokenuse` `service/jobs` `jobclient` `welcome` `welcomegate` `clisetup` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |

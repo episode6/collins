@@ -102,6 +102,8 @@ class LoopbackClient:
         if checked.kind != protocol.REQUEST:
             raise ValueError(f"{checked.type} is an event, not a request")
         raw = self._server.core.handle(checked, self)
+        if isinstance(raw, protocol.Deferred):
+            raw = self._await(raw, checked.type)
         answer = protocol.validate_response(raw, checked.type)
         if isinstance(answer, protocol.Refusal):
             raise ValueError(f"{checked.type}: the service's reply was not valid: {answer.msgid}")
@@ -110,6 +112,24 @@ class LoopbackClient:
                 answer.error or protocol.ERROR_FAILED, answer.msgid or "", dict(answer.args or {})
             )
         return dict(answer.fields)
+
+    @staticmethod
+    def _await(deferred: protocol.Deferred, type_: str, timeout_s: float = 30.0) -> dict:
+        """Pump the default main context until a `Deferred` reply settles
+        (a handler that answered off the main loop, PR-2.1): what the
+        socket's connection does by sending the reply when it lands."""
+        import time
+
+        from gi.repository import GLib
+
+        context = GLib.MainContext.default()
+        deadline = time.monotonic() + timeout_s
+        while not deferred.settled:
+            if time.monotonic() >= deadline:
+                raise RequestRefused(protocol.ERROR_GONE, f"{type_}: the deferred reply never settled", {})
+            if not context.iteration(False):
+                time.sleep(0.002)
+        return deferred.reply
 
     def send_event(self, message: dict) -> None:
         if self.closed:
@@ -179,7 +199,7 @@ class LoopbackLink(apilink.Link):
     def bind(self, client) -> None:
         self.client = client
 
-    def _request(self, message: dict) -> dict:
+    def _request(self, message: dict, timeout: float | None = None) -> dict:
         if self.client is None:
             raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
         try:

@@ -75,6 +75,11 @@ from . import protocol
 log = logging.getLogger(__name__)
 
 WS_PATH = "/api/ws"
+# Plain HTTP on the same listener (§3.2): a blob's bytes, never a path.
+BLOB_PATH = "/api/blob"
+# The header a blob GET names its client by (the hello's client_id), so
+# the `local` capability's confinement applies to it (gitfeed.blob).
+CLIENT_HEADER = "Collins-Client"
 SOCKET_NAME = "api.sock"
 PROOF_NAME = "local-proof"
 HELLO_TIMEOUT_S = 5  # a connection with no hello by then is closed
@@ -411,11 +416,35 @@ class Connection:
                 self.send_text(reply)
             return
         if checked.kind == protocol.REQUEST:
-            self.send_text(self._answer(checked))
+            answer = self._answer(checked)
+            if isinstance(answer, protocol.Deferred):
+                # A handler that answers off the main loop (PR-2.1): the
+                # reply is sent when it settles, on this connection, as
+                # any other. `then` runs at once for one already settled.
+                answer.then(lambda raw: self.send_reply(self._checked(checked, raw)))
+            else:
+                self.send_reply(answer)
         else:
             self._event(checked)
 
-    def _answer(self, message: protocol.Message) -> dict:
+    def send_reply(self, reply: dict) -> None:
+        """A response, split into TAG_BLOB frames and a slim reply when it
+        would not fit a frame (`protocol.split_reply`: git's stdout)."""
+        try:
+            frames, slim = protocol.split_reply(reply)
+        except ValueError as exc:
+            log.error("api: the reply to %s cannot be sent: %s", reply.get("re"), exc)
+            re_id = reply.get("re")
+            if isinstance(re_id, int):
+                self.send_text(
+                    protocol.refuse(re_id, protocol.ERROR_FAILED, "The service's reply was too large to send")
+                )
+            return
+        for frame in frames:
+            self.send_binary(frame)
+        self.send_text(slim)
+
+    def _answer(self, message: protocol.Message) -> dict | protocol.Deferred:
         who = self.client.client_id if self.client else "?"
         log.debug("api: %s on %s from %s", message.type, self.channel, who)
         if message.type == "hello":
@@ -429,6 +458,14 @@ class Connection:
         if message.type == "service.restart":
             return self.server.restart(self.client, message)
         raw = self.server.core.handle(message, self.client)
+        if isinstance(raw, protocol.Deferred):
+            return raw
+        return self._checked(message, raw)
+
+    def _checked(self, message: protocol.Message, raw: dict) -> dict:
+        """*raw*, the core's reply to *message*, validated against the
+        type's reply shape (a reply that does not fit is the service's bug,
+        answered `failed` and logged)."""
         answer = protocol.validate_response(raw, message.type)
         if isinstance(answer, protocol.Refusal):
             log.error("api: the reply to %s does not validate: %s", message.type, answer.msgid)
@@ -524,6 +561,7 @@ class ApiServer:
             os.unlink(self.path)
         self.server = Soup.Server()
         self.server.add_websocket_handler(WS_PATH, None, None, self._on_websocket)
+        self.server.add_handler(BLOB_PATH, self._on_blob)
         self.server.listen(Gio.UnixSocketAddress.new(self.path), Soup.ServerListenOptions(0))
         os.chmod(self.path, 0o600)  # F7: created 0775 under the default umask
         self.proof = secrets.token_bytes(protocol.LOCAL_PROOF_BYTES)
@@ -565,6 +603,47 @@ class ApiServer:
         self.server = None
 
     # -- connections
+
+    def _on_blob(self, _server, msg: Soup.ServerMessage, _path, query, *_rest) -> None:
+        """`GET /api/blob?kind=git&…` (§3.11, §3.23): the blob's bytes with
+        its ETag, answered off the main loop — the message is paused while
+        the service's thread reads it, and unpaused with the answer. The
+        request names its client with the ``Collins-Client`` header (the
+        hello's client_id, for the `local` capability's confinement); a
+        request with none, or one of a client the server does not know,
+        is confined like a remote client's. ``kind`` other than ``git``
+        is 404 until the later chunks serve it."""
+        if not self.accepting or msg.get_method() != "GET":
+            msg.set_status(405, None)
+            return
+        params = dict(query or {})
+        client_id = msg.get_request_headers().get_one(CLIENT_HEADER) or ""
+        client = self.clients.get(client_id)
+        if params.get("kind") != "git":
+            msg.set_status(404, None)
+            return
+        feed = getattr(self.core, "git", None)
+        if feed is None:
+            msg.set_status(404, None)
+            return
+        if_none_match = msg.get_request_headers().get_one("If-None-Match")
+        uri = msg.get_uri()
+        raw_query = uri.get_query() if uri is not None else ""
+        msg.pause()
+
+        def respond(status: int, headers: dict, body: bytes) -> None:
+            try:
+                response = msg.get_response_headers()
+                for name, value in headers.items():
+                    response.replace(name, value)
+                if body:
+                    msg.set_response(headers.get("Content-Type") or "application/octet-stream",
+                                     Soup.MemoryUse.COPY, body)
+                msg.set_status(status, None)
+            finally:
+                msg.unpause()
+
+        feed.blob(client, raw_query or "", if_none_match, respond)
 
     def _on_websocket(self, _server, _msg, _path, ws, *_rest) -> None:
         if not self.accepting:

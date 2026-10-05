@@ -71,10 +71,14 @@ class Link:
             except Exception:
                 log.exception("link: a %s handler failed", event.get("t"))
 
-    def call(self, message: dict) -> dict:
+    def call(self, message: dict, timeout: float | None = None) -> dict:
         """Send a request and return its reply's fields. Raises
-        `RequestRefused`."""
-        return self._request(message)
+        `RequestRefused`. *timeout* is how long to wait for the reply
+        (the link's default when None): a git run with its own timeout
+        waits that long and a little more."""
+        if timeout is None:
+            return self._request(message)
+        return self._request(message, timeout)
 
     def send(self, message: dict, on_reply: Reply | None = None, on_refused: Refused | None = None) -> None:
         """Send a request; its reply goes to *on_reply*, a refusal to
@@ -119,9 +123,9 @@ def current() -> Link | None:
     return _current
 
 
-def call(message: dict) -> dict:
+def call(message: dict, timeout: float | None = None) -> dict:
     """`current().call`, refused as ``gone`` when there is no link at all."""
     link = current()
     if link is None:
         raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
-    return link.call(message)
+    return link.call(message, timeout)

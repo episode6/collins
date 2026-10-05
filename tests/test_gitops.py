@@ -273,7 +273,7 @@ def test_commit_message_goes_through_the_runner(monkeypatch):
 def test_status_porcelain_goes_through_the_runner(tmp_path, monkeypatch):
     """has_changes and change_summary read one `git status` through
     run_git, with gitinfo's own 2 s budget."""
-    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr("collins.gitfiles.shutil.which", lambda _name: "/usr/bin/git")
     run = _recording_run(_Result(0, "M  a.txt\n?? b.txt\n"))
     seen = _spy(monkeypatch, "run_git", run)
     assert gitinfo.has_changes(tmp_path) is True
@@ -299,7 +299,7 @@ def test_ignored_names_goes_through_the_bytes_runner(tmp_path, monkeypatch):
     through run_git_bytes, with gitinfo's own 0.5 s budget; exit 1 (none
     ignored), a refusal and a git that couldn't be run all read as none."""
     (tmp_path / ".git").mkdir()
-    monkeypatch.setattr("collins.gitinfo.shutil.which", lambda _name: "/usr/bin/git")
+    monkeypatch.setattr("collins.gitfiles.shutil.which", lambda _name: "/usr/bin/git")
     run = _recording_run(_Result(0, b"junk\0build\0", b""))
     seen = _spy(monkeypatch, "run_git_bytes", run)
     assert gitinfo.ignored_names(tmp_path, ["a.txt", "junk", "build"]) == {"junk", "build"}
@@ -1957,3 +1957,171 @@ def test_resolve_paths_resolves_every_clash_with_one_side(repo):
     assert answer.result.ok and (repo / "f.txt").read_text() == "main\n"
     assert gitops.remove_paths(repo, ["g.txt"]).ok and not (repo / "g.txt").exists()
     assert not gitops.remove_paths(repo, ["../g.txt"]).ok
+
+
+# -- the builder registry and the transport (split-service spec §3.23, D33) ----------------
+
+REGISTRY_SAMPLES = {
+    "fixup_argv": {"sha": SHA_A},
+    "commit_argv": {"summary": "hi", "body": "there"},
+    "log_argv": {"range_args": ["main..HEAD", "--not", "--remotes"], "limit": 50},
+    "unpushed_argv": {},
+    "has_remote_tracking_argv": {},
+    "status_argv": {},
+    "branch_tips_argv": {},
+    "stack_walk_argv": {"lower": "main", "upper": "HEAD", "limit": 100},
+    "staged_paths_argv": {},
+    "stage_all_argv": {},
+    "unstage_all_argv": {},
+    "revert_argv": {"sha": SHA_B, "commit": False},
+    "revert_quit_argv": {},
+    "continue_argv": {"kind": "rebase"},
+    "abort_argv": {"kind": "merge"},
+    "resolve_commit_argv": {"ref": "HEAD~2"},
+    "rev_parse_argv": {"rev": "main"},
+    "head_abbrev_argv": {},
+    "merge_base_argv": {"a": "main", "b": "HEAD"},
+    "show_argv": {"ref": "abc", "pathspecs": ["a.txt"], "excludes": ["big.bin"]},
+    "diff_argv": {
+        "load": "branch", "parent_target": "main", "untracked": True, "pathspecs": [], "excludes": []
+    },
+    "numstat_argv": {"load": {"show": "abc"}, "parent_target": None, "pathspecs": ["x"]},
+    "untracked_diff_argv": {"path": "new.txt"},
+    "conflict_diff_argv": {"paths": ["c.txt"]},
+    "file_at_argv": {"ref": "", "path": "a/b.png"},
+    "apply_argv": {"cached": True, "reverse": True, "three_way": False},
+    "checkout_side_argv": {"side": "ours", "paths": ["c.txt"]},
+    "checkout_paths_argv": {"paths": ["a.txt"]},
+    "add_paths_argv": {"paths": ["a.txt", "b.txt"]},
+    "reset_paths_argv": {"paths": ["a.txt"]},
+    "unmerged_stages_argv": {"path": "c.txt"},
+    "remove_paths_argv": {"paths": ["c.txt"]},
+    "commit_subject_argv": {"ref": "HEAD"},
+    "commit_message_argv": {"ref": "abc"},
+    "status_porcelain_argv": {},
+    "check_ignore_argv": {},
+    "pull_argv": {},
+    "checkout_branch_argv": {"branch": "main"},
+}
+
+
+def test_the_registry_names_every_builder_and_each_round_trips():
+    """Every ``*_argv`` builder (and the nine promoted ad-hoc argv) is in
+    the registry; built from its sample args, matched back, and rebuilt
+    from what the matcher parsed, the argv is the same."""
+    assert set(REGISTRY_SAMPLES) == set(gitops.BUILDERS)
+    for name, args in REGISTRY_SAMPLES.items():
+        argv = gitops.build(name, args)
+        matched = gitops.match_argv(argv)
+        assert matched is not None, (name, argv)
+        assert gitops.build(*matched) == argv, (name, matched)
+    # The module's builders are all registered (a new one is a new entry).
+    builders = {n for n in dir(gitops) if n.endswith("_argv") and not n.startswith("_") and n != "match_argv"}
+    assert builders - set(gitops.BUILDERS) == {"file_patch_argv"}  # diff_argv's argv with pathspecs
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["status"],
+        ["push", "--force"],
+        ["log", "--no-decorate", LOG_FORMAT, "-n", "x", "--"],
+        ["checkout", "-q", "--", "plain.txt"],  # not a literal pathspec
+        ["apply", "--recount", "--unidiff-zero", "--3way", "--cached", "-"],  # flags out of order
+        ["commit", "-q", "-m", "s", "--amend"],
+        ["show", "HEAD"],
+        ["checkout", "-b", "x"],
+        ["rebase", "--continue", "--", "x"],
+        ["merge-base", "a", "b", "c"],
+        ["-c", "core.quotePath=true", "diff", "--", ":(literal)a"],
+        [],
+    ],
+)
+def test_an_argv_no_builder_makes_matches_nothing(argv):
+    assert gitops.match_argv(argv) is None
+
+
+def test_diff_argv_matches_file_patch_and_a_range_and_every_load():
+    loads = (("unstaged", None), ("staged", None), ("branch", "main"), ({"range": "a...b"}, None))
+    for load, parent in loads:
+        argv = gitops.diff_argv(load, parent, pathspecs=["x"], excludes=["y"])
+        name, args = gitops.match_argv(argv)
+        assert name == "diff_argv" and args["pathspecs"] == ["x"] and args["excludes"] == ["y"]
+        assert gitops.build(name, args) == argv
+    argv = gitops.file_patch_argv("unstaged", "a.txt", "old.txt")
+    name, args = gitops.match_argv(argv)
+    assert name == "diff_argv" and args["pathspecs"] == ["old.txt", "a.txt"]
+    argv = gitops.diff_argv({"show": "abc"}, pathspecs=["p"])
+    assert gitops.match_argv(argv)[0] == "show_argv"
+
+
+def test_build_refuses_what_the_service_must_not_run():
+    with pytest.raises(KeyError):
+        gitops.build("push_argv", {})
+    with pytest.raises(ValueError):
+        gitops.build("commit_argv", {"summary": 5})
+    with pytest.raises(ValueError):
+        gitops.build("commit_argv", {"summary": "a\0b"})
+    with pytest.raises(ValueError):
+        gitops.build("continue_argv", {"kind": "push"})
+    with pytest.raises(ValueError):
+        gitops.build("checkout_branch_argv", {"branch": "-f"})
+    with pytest.raises(ValueError):
+        gitops.build("status_argv", {"extra": 1})
+    with pytest.raises(ValueError):
+        gitops.build("diff_argv", {"load": "branch"})  # no parent: None, no argv
+    with pytest.raises(ValueError):
+        gitops.build("status_argv", ["not", "a", "dict"])
+
+
+class _Transport:
+    """A `gitops.GitTransport` that records what the runners hand it."""
+
+    def __init__(self) -> None:
+        self.runs: list = []
+        self.blobs: list = []
+
+    def run(self, cwd, argv, stdin, timeout, env, ok_statuses):
+        self.runs.append((cwd, list(argv), stdin, timeout, env, ok_statuses))
+        return gitops.GitResult(True, "remote", "")
+
+    def blob(self, cwd, at, ref, path, timeout):
+        self.blobs.append((cwd, at, ref, path))
+        return gitops.BlobResult(True, b"blob", "")
+
+    def sizes(self, root, paths):
+        return dict.fromkeys(paths, 1)
+
+    def tree_state(self, cwd):
+        return "state"
+
+    def plan(self, cwd, plan, context, three_way, timeout):
+        return gitops.ApplyResult(True, "", "", stale=False)
+
+
+def test_set_transport_routes_the_runners_and_a_local_run_bypasses_it():
+    transport = _Transport()
+    gitops.set_transport(transport)
+    try:
+        assert gitops.transport() is transport
+        assert gitops.run_git("/repo", ["status"], timeout=2.0, env={"A": "b"}).stdout == "remote"
+        assert gitops.run_git_bytes("/repo", ["diff"], stdin=b"x", ok_statuses=(0, 1)).stdout == "remote"
+        assert transport.runs == [
+            ("/repo", ["status"], None, 2.0, {"A": "b"}, (0,)),
+            ("/repo", ["diff"], b"x", gitops.GIT_TIMEOUT_S, None, (0, 1)),
+        ]
+        assert gitops.run_git_blob("/repo", gitops.file_at_argv("HEAD", "a.png")).data == b"blob"
+        assert gitops.run_git_blob("/repo", gitops.file_at_argv(gitops.INDEX_REF, "a.png")).data == b"blob"
+        assert transport.blobs == [("/repo", "ref", "HEAD", "a.png"), ("/repo", "index", None, "a.png")]
+        assert gitops.run_git_blob("/repo", ["cat-file", "-p", "x"]).unreachable
+        assert gitops.tree_state_signature("/repo") == "state"
+        assert gitops.file_sizes("/root", ["a", "../b"]) == {"a": 1}
+        # No cwd is still no cwd, before any transport.
+        assert gitops.run_git(None, ["status"]).unreachable and len(transport.runs) == 2
+        # A caller with its own run never sees the transport.
+        run = fake_runner({"status": ok("local")})
+        assert gitops.run_git("/repo", ["status"], run=run).stdout == "local"
+        assert len(transport.runs) == 2
+    finally:
+        gitops.set_transport(None)
+    assert gitops.transport() is None
