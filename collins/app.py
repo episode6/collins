@@ -2147,6 +2147,9 @@ class App(Adw.Application):
             self.get_application_id(),
             link,
             schedule=lambda ms, fn: GLib.timeout_add(ms, fn),
+            land=lambda fn: GLib.idle_add(
+                lambda: (fn(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT
+            ),
             on_state=self._on_connection_state,
             on_connected=self._on_connected,
             on_lost=self._on_connection_lost,

@@ -28,6 +28,7 @@ class HeldLink(Link):
 
     def send(self, message, on_reply=None, on_refused=None):
         self.sent.append(message)
+        self.handlers = (on_reply, on_refused)
 
     def call(self, message):
         self.calls.append(message)
@@ -115,3 +116,18 @@ def test_green_remove_clear_and_rekey_apply_at_once():
     assert center.clear() == 1
     assert [r.id for r in center.rows()] == [notifycenter.green_id("s1")]  # the synthetic row stays
     assert center.set_green("s1", False) is True and not center.is_green("s1")
+
+
+def test_a_refused_client_flag_is_put_back(tmp_path, app_state):
+    from collins.api.protocol import RequestRefused
+
+    link, store = _store(tmp_path, app_state)
+    item = store.get_item("s1")
+    heard = []
+    store.connect("unread-changed", lambda _s, sid, flag: heard.append((sid, flag)))
+    store.set_unread("s1", True)
+    assert item.unread is True
+    _reply, refused = link.handlers
+    refused(RequestRefused("refused", "no", {}))
+    assert item.unread is False
+    assert heard == [("s1", True), ("s1", False)]

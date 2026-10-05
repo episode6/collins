@@ -9,6 +9,14 @@ export PYBUILD_NAME=collins
 
 # The wheel ships the package + the collins command. The desktop
 # entry, icons, and metainfo are not in the wheel, so install them here.
+# The service's user unit is installed and never enabled or started by the
+# package (split-service spec §3.10): the window starts it on demand.
+override_dh_installsystemd:
+	dh_installsystemd --no-enable --no-start
+
+override_dh_installsystemduser:
+	dh_installsystemduser --no-enable
+
 execute_after_dh_install:
 	install -Dm644 data/com.episode6.Collins.metainfo.xml \
 	  debian/collins/usr/share/metainfo/com.episode6.Collins.metainfo.xml

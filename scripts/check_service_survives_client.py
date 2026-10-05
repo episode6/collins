@@ -204,7 +204,11 @@ agent_pid = (rows_before.get(str(pty_id)) or {}).get("pid")
 os.kill(first.pid, signal.SIGKILL)
 first.wait()
 check("the first Collins is dead (SIGKILL)", first.returncode == -signal.SIGKILL, first.returncode)
-time.sleep(1.0)
+# The service notices the client's departure within its keepalive window
+# at most; it must still be there, with the pty, once it has.
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline and service.poll() is None and str(pty_id) not in pty_rows():
+    time.sleep(0.1)
 check("the service is alive", service.poll() is None)
 rows_after = pty_rows()
 check("the pty is still in the table", str(pty_id) in rows_after, sorted(rows_after))
@@ -242,7 +246,11 @@ def steps():
     found = app.store.get_session(session_id)
     check("the second Collins finds the session in its sidebar", found is not None, session_id)
     status = app._service_link.call({"t": "service.status"})
-    check("the service counts the pty and this client", status.get("ptys", 0) >= 1 and status.get("clients") == 1, status)
+    check(
+        "the service counts the pty and this client",
+        status.get("ptys", 0) >= 1 and status.get("clients") == 1,
+        status,
+    )
     # Open it: Phase 1's open is a resume, which spawns a second pty for
     # the same session; the running pty is attached to directly here, the
     # way PR-1.12c's attach-on-activate will (a tab is a view over a pty).
@@ -266,8 +274,14 @@ def steps():
     vte_text = terminal_mod._capture_contents(tab.terminal)
     model_lines = [line.rstrip() for line in screen["capture"].splitlines() if line.strip()]
     vte_lines = [line.rstrip() for line in vte_text.splitlines() if line.strip()]
-    check("the VTE shows what the first Collins typed", any(TYPED in line for line in vte_lines), vte_lines[-4:])
-    check("the VTE's screen matches the service's model", vte_lines == model_lines, (vte_lines[-3:], model_lines[-3:]))
+    check(
+        "the VTE shows what the first Collins typed", any(TYPED in line for line in vte_lines), vte_lines[-4:]
+    )
+    check(
+        "the VTE's screen matches the service's model",
+        vte_lines == model_lines,
+        (vte_lines[-3:], model_lines[-3:]),
+    )
     app.quit()
 
 

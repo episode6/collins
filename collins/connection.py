@@ -143,6 +143,8 @@ class ConnectionManager:
         find: Callable[[str], tuple[str, str]] | None = None,
         start: Callable[[str], str] | None = None,
         schedule: Callable[[int, Callable[[], bool]], object] | None = None,
+        run_async: Callable[[Callable[[], None]], None] | None = None,
+        land: Callable[[Callable[[], None]], None] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
         on_state: Callable[[str], None] | None = None,
@@ -154,6 +156,12 @@ class ConnectionManager:
         self._find = find or self._default_find
         self._start = start or default_starter
         self._schedule = schedule
+        # A reconnect's handshake (up to CONNECT_TIMEOUT_S of waiting) runs
+        # on a thread the owner provides and lands on its loop, so the
+        # window keeps drawing its banner meanwhile; the first connect at
+        # startup is synchronous, no window exists yet.
+        self._run_async = run_async or self._thread
+        self._land = land or (lambda fn: fn())
         self._sleep = sleep
         self._now = now
         self.on_state = on_state
@@ -167,6 +175,12 @@ class ConnectionManager:
         self.stopped = False
         self._pending = None  # the scheduled retry, if the schedule hands one back
         link.on_lost = self._on_link_lost
+
+    @staticmethod
+    def _thread(fn: Callable[[], None]) -> None:
+        import threading
+
+        threading.Thread(target=fn, name="collins-reconnect", daemon=True).start()
 
     @staticmethod
     def _default_find(app_id: str) -> tuple[str, str]:
@@ -278,12 +292,37 @@ class ConnectionManager:
         return False
 
     def _try_connect(self) -> None:
-        try:
-            self._connect()
-        except Exception as exc:
-            log.warning("connection: connect failed: %s", exc)
-            self._set_state(LOST)
-            self._retry_later()
+        """The handshake on the owner's thread, the outcome on its loop."""
+        self._set_state(CONNECTING)
+
+        def handshake() -> None:
+            try:
+                self.link.connect()
+                self.link.prove_local()
+            except Exception as exc:
+                error = exc  # the except name is cleared before the landing runs
+                self._land(lambda: self._connect_failed(error))
+                return
+            self._land(self._connect_landed)
+
+        self._run_async(handshake)
+
+    def _connect_landed(self) -> None:
+        if self.stopped:
+            return
+        first = not self.connected_once
+        self.connected_once = True
+        self.attempts = 0
+        self._set_state(CONNECTED)
+        if self.on_connected is not None:
+            self.on_connected(first)
+
+    def _connect_failed(self, exc: Exception) -> None:
+        if self.stopped:
+            return
+        log.warning("connection: connect failed: %s", exc)
+        self._set_state(LOST)
+        self._retry_later()
 
     def stop(self) -> None:
         """The client is quitting: no more retries."""

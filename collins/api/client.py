@@ -311,7 +311,9 @@ class SocketLink(apilink.Link):
 
         done2 = threading.Event()
         self._post(wire)
-        done2.wait(max(0.0, deadline - time.monotonic()))
+        if not done2.wait(max(0.0, deadline - time.monotonic())):
+            self.close()
+            raise ConnectionLost(f"the {channel.name} channel could not be wired in time")
 
     def _hello(self, channel: _Channel, deadline: float) -> dict:
         message = {
@@ -361,11 +363,12 @@ class SocketLink(apilink.Link):
         """Close both channels: asked for, so not a loss."""
         self.connected = False
         for channel in (self._primary, self._sync):
-            ws = channel.ws
-            channel.closing = True
+            with self._lock:
+                ws = channel.ws
+                channel.closing = True
+                channel.ws = None
             if ws is None:
                 continue
-            channel.ws = None
 
             def do_close(ws=ws):
                 try:
