@@ -46,6 +46,7 @@ os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
+os.environ["XDG_CACHE_HOME"] = f"{E2E}/cache"  # the blob cache the pictures are staged in
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -58,7 +59,7 @@ gi.require_version("GdkPixbuf", "2.0")
 import e2e_service  # noqa: E402
 from gi.repository import Adw, Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
-from collins import i18n, mdblocks, mdwidgets, pictures, prdetail, prview  # noqa: E402
+from collins import blobcache, i18n, mdblocks, mdwidgets, pictures, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
 from collins.editor import GtkSource  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
@@ -857,12 +858,15 @@ def step_code_cap() -> bool:
     check("…the copy still the whole fence", code.text == content)
     # A table of pictures: the screenshot skill's before/after pair, one
     # <img> per cell, and one wider than the picture cap beside it. The
-    # pictures are staged into the fetch cache, so no download runs.
+    # pictures are staged into the fetch cache, so no download runs (in
+    # the blob cache's directory: the decoders read nothing outside it).
     pngs = {}
+    staged = blobcache.directory()
+    staged.mkdir(parents=True, exist_ok=True)
     for name, rgb in (("before", 0xCC3333FF), ("after", 0x33AA33FF)):
         pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 800, 500)
         pixbuf.fill(rgb)
-        pngs[name] = f"{E2E}/{name}.png"
+        pngs[name] = f"{staged}/{name}.png"
         pixbuf.savev(pngs[name], "png", [], [])
         pictures._files[f"https://x.example/{name}.png"] = Path(pngs[name])
     cell = "![i](https://x.example/before.png)"

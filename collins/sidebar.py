@@ -40,6 +40,7 @@ from . import (
     openwithrows,
     pkgrepos,
     prmenu,
+    remoteicons,
     remoteprs,
     sandboxstatus,
 )
@@ -49,7 +50,6 @@ from .formatting import format_size
 from .gitinfo import current_branch, default_branch, github_url
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
-from .projecticons import project_icon_data
 from .providers import default_provider, get_provider
 from .prstatus import (
     PullRequest,
@@ -226,17 +226,21 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         box.add_css_class("group-header")
 
         # One image doubles as project icon and collapse caret: the icon at
-        # rest, the caret while the pointer is over the row.
-        self._icon_svg = project_icon_data(cwd) if group_key[0] == "proj" else None
+        # rest, the caret while the pointer is over the row. The icon is the
+        # service's (`kind=icon`, PR-2.7): what is held for the project now,
+        # and the row re-draws when a fetch brings a different answer.
+        if group_key == FAV_GROUP:
+            self._fallback_icon_name = "starred-symbolic"
+        elif group_key == CHATS_GROUP:
+            self._fallback_icon_name = "chat-bubble-symbolic"
+        else:
+            self._fallback_icon_name = "folder-symbolic"
+        self._icon_svg = (
+            remoteicons.icon_bytes(cwd, self._on_icon_bytes) if group_key[0] == "proj" else None
+        )
         self._texture = svg_texture(self._icon_svg, icon_size)
         if self._texture is None:
             self._icon_svg = None  # unrenderable — stay on the fallback
-            if group_key == FAV_GROUP:
-                self._fallback_icon_name = "starred-symbolic"
-            elif group_key == CHATS_GROUP:
-                self._fallback_icon_name = "chat-bubble-symbolic"
-            else:
-                self._fallback_icon_name = "folder-symbolic"
         icon = Gtk.Image(valign=Gtk.Align.CENTER)
         icon.set_pixel_size(icon_size)
         self._icon = icon
@@ -380,6 +384,15 @@ class GroupHeaderRow(Gtk.ListBoxRow):
         texture = svg_texture(self._icon_svg, size)
         if texture is not None:
             self._texture = texture
+        self._update_icon()
+
+    def _on_icon_bytes(self, data: bytes | None) -> None:
+        """The project's icon arrived (or went): re-render it at the row's
+        size, the fallback when there is none or it won't render."""
+        self._icon_svg = data
+        self._texture = svg_texture(data, self._icon.get_pixel_size())
+        if self._texture is None:
+            self._icon_svg = None
         self._update_icon()
 
     def _update_icon(self) -> None:

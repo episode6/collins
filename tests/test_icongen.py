@@ -4,6 +4,7 @@ import pytest
 
 from collins import icongen, projecticons
 from collins.claudemodels import NO_MODEL
+from collins.service.blobs import read_icon
 
 _SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect/></svg>'
 
@@ -143,13 +144,13 @@ def test_save_icon_round_trips_through_discovery(tmp_path):
     assert path == tmp_path / projecticons.PROJECT_ICON_FILENAME
     assert path.read_bytes() == data
     # What Save wrote is exactly what the sidebar will pick up.
-    assert projecticons.project_icon_data(tmp_path) == data
+    assert read_icon(str(tmp_path))[0] == data
 
 
 def test_save_icon_overwrites_existing(tmp_path):
     (tmp_path / projecticons.PROJECT_ICON_FILENAME).write_text("old")
     icongen.save_icon(tmp_path, _SVG.encode())
-    assert projecticons.project_icon_data(tmp_path) == _SVG.encode()
+    assert read_icon(str(tmp_path))[0] == _SVG.encode()
 
 
 # -- IconRun model selection ----------------------------------------------------

@@ -49,15 +49,29 @@ click, or an arrow walking the gallery) closes whatever shade is already up
 and takes its place, rather than stacking shades (and leaking their root key
 controllers). The overlay remembers its live one in `_active_lightbox`.
 
+**What it shows is a blob** (split-service spec §3.23, PR-2.7): every
+picture is a file in this device's blob cache, fetched from the service
+and decoded from its bytes (`animatedimage.load` reads through
+`blobcache.read`). `show_image(parent, key, …)` is the entry for an image
+named by an absolute path on the service's machine or an http(s) URL: it
+fetches the blob (`pictures.fetch`, its run cache dropped first so a file
+the agent rewrote shows anew; `GET /api/blob?kind=file` or `kind=remote`,
+the service downloading a URL) and floats the lightbox when it lands, or
+its "Couldn't display image" page with the reason. `present_image_lightbox`
+floats one over a file already fetched (a PR body's picture, a diff's
+side). Only the newest `show_image` lands: one asked for while another is
+still fetching wins.
+
 Presented when a clicked file reference turns out to be an image (see
-terminal._setup_links), and by the `show_image` session tool — which may
-hand over a copy it downloaded for a URL the agent named (remoteimages.py),
-in which case `origin` carries that URL so a failed decode names what the
-agent asked for rather than the cache file. Deliberately read-only — it can
-therefore show any readable path, including the /tmp screenshots agent
-output loves to reference. "Open in Editor" only appears when the file is
-inside the clicking tab's editor project (the caller's call via
-`can_open_in_editor`).
+terminal._setup_links), from the attachments gallery and the composer's
+previews, and by the `show_image` session tool, whose path the service
+resolved (and admitted for the session, D38) and whose URL the service
+downloaded; `origin` carries what the agent named, so a failed decode
+names that rather than the cache file. Deliberately read-only. "Open in
+Editor" only appears when the file is inside the clicking tab's editor
+project (the caller's call via `can_open_in_editor`). "Open With…" hands
+the cache's copy to another app of this device — the service's own file
+when the client is `local` (the same machine), as it always did.
 
 An optional caption ends the image column — under the image, and under the
 zoom bar too when that sits below a small image — wrapping to the image's
@@ -84,7 +98,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from . import animatedimage, editorfiles  # noqa: E402
+from . import animatedimage, apilink, pictures, remoteimages  # noqa: E402
 from .editorfiles import (  # noqa: E402
     LIGHTBOX_BUTTON_STRIP,
     LIGHTBOX_MIN_H,
@@ -112,15 +126,21 @@ class ImageLightbox(Gtk.Box):
 
     def __init__(
         self,
-        path: str | Path,
+        path: str | Path | None,
         can_open_in_editor: bool = False,
         on_open_in_editor: Callable[[], None] | None = None,
         caption: str | None = None,
         origin: str | None = None,
         navigate: Callable[[int], None] | None = None,
+        open_with: str | None = None,
+        why: str | None = None,
     ) -> None:
+        """*path* is the blob-cache file to show (None: the fetch failed,
+        *why* says why); *open_with* the file "Open With…" hands another
+        app (the cache's copy by default)."""
         super().__init__()
-        self._path = Path(path)
+        self._path = Path(path) if path is not None else None
+        self._open_with = open_with or (str(self._path) if self._path is not None else None)
         # Called with -1/+1 when the left/right (or up/down) arrow is pressed,
         # to step to the previous/next image; None when this lightbox was
         # opened somewhere with no gallery to walk (a clicked path, the
@@ -131,7 +151,7 @@ class ImageLightbox(Gtk.Box):
         # name, unless the caller knows the path is a stand-in for something
         # the user would recognize better (show_image's downloaded copy of a
         # URL — see remoteimages.py — whose cache name means nothing).
-        self._origin = origin or self._path.name
+        self._origin = origin or (self._path.name if self._path is not None else "")
         self._on_open_in_editor = on_open_in_editor
         self._overlay: Gtk.Overlay | None = None
         self._esc: Gtk.EventControllerKey | None = None
@@ -156,6 +176,7 @@ class ImageLightbox(Gtk.Box):
         self.set_can_focus(True)
 
         self._paintable = self._load_paintable()
+        self.decoded = self._paintable is not None
         if self._paintable is not None:
             self._picture = Gtk.Picture.new_for_paintable(self._paintable)
             self._picture.set_can_shrink(True)
@@ -183,7 +204,7 @@ class ImageLightbox(Gtk.Box):
             self._slot = Adw.StatusPage(
                 icon_name="image-missing-symbolic",
                 title=_("Couldn't display image"),
-                description=self._origin,
+                description=f"{self._origin}\n{why}" if why else self._origin,
             )
         self._slot.set_hexpand(True)
         self._slot.set_vexpand(True)
@@ -262,11 +283,12 @@ class ImageLightbox(Gtk.Box):
                     "document-edit-symbolic", _("Open in Editor"), self._on_editor_clicked
                 )
             )
-        self._buttons.append(
-            self._caption_button(
-                "document-open-symbolic", _("Open With…"), self._on_open_with_clicked
+        if self._open_with is not None:
+            self._buttons.append(
+                self._caption_button(
+                    "document-open-symbolic", _("Open With…"), self._on_open_with_clicked
+                )
             )
-        )
 
     def _caption_button(self, icon_name: str, caption: str, callback) -> Gtk.Button:
         icon = Gtk.Image.new_from_icon_name(icon_name)
@@ -294,8 +316,9 @@ class ImageLightbox(Gtk.Box):
     def _load_paintable(self) -> Gdk.Paintable | None:
         """The image, animated when the file is: an agent that hands over a
         GIF to show a flow, or a demo GIF clicked out of a terminal, means
-        the moving picture — a still first frame is a different file."""
-        if editorfiles.image_guard(self._path) != editorfiles.LoadGuard.OK:
+        the moving picture — a still first frame is a different file. The
+        service capped the blob's size; the decode reads the cache's bytes."""
+        if self._path is None:
             return None
         return animatedimage.load(self._path)  # None when it won't decode
 
@@ -311,8 +334,9 @@ class ImageLightbox(Gtk.Box):
         if overlay is None:
             # A window without the overlay (shouldn't happen for terminals):
             # degrade to the default app rather than dead-ending the click.
-            launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(str(self._path)))
-            launcher.launch(root, None, lambda lch, res: _launch_done(lch, res))
+            if self._open_with is not None:
+                launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(self._open_with))
+                launcher.launch(root, None, lambda lch, res: _launch_done(lch, res))
             return
         self._overlay = overlay
         # One lightbox at a time: a second image (a fresh click, or an arrow
@@ -746,7 +770,9 @@ class ImageLightbox(Gtk.Box):
             callback()
 
     def _on_open_with_clicked(self, _btn: Gtk.Button) -> None:
-        launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(str(self._path)))
+        if self._open_with is None:
+            return
+        launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(self._open_with))
         launcher.set_always_ask(True)  # "another app": always show the chooser
         launcher.launch(self.get_root(), None, lambda lch, res: _launch_done(lch, res))
 
@@ -770,3 +796,56 @@ def present_image_lightbox(
     ImageLightbox(
         path, can_open_in_editor, on_open_in_editor, caption, origin, navigate
     ).present_over(parent)
+
+
+# The newest show_image asked for; an older one landing after it is dropped.
+_showing = 0
+
+
+def show_image(
+    parent: Gtk.Widget,
+    key: str,
+    *,
+    session: str = "",
+    can_open_in_editor: bool = False,
+    on_open_in_editor: Callable[[], None] | None = None,
+    caption: str | None = None,
+    origin: str | None = None,
+    navigate: Callable[[int], None] | None = None,
+    on_shown: Callable[[bool, str | None], None] | None = None,
+) -> None:
+    """Fetch the image *key* names — an absolute path on the service's
+    machine or an http(s) URL — and float it over *parent*'s window (see the
+    module docstring). *session* is the asking session's id (or handle),
+    for the service's confinement of a path (D38). *on_shown(ok, why)* is
+    called once the lightbox is up: *ok* False when the blob didn't arrive
+    or won't decode (the status page is up then), or when the lightbox
+    never went up (*parent* gone, a newer show_image won). Main thread."""
+    global _showing
+    _showing += 1
+    mine = _showing
+    remote = remoteimages.looks_remote(key)
+    pictures.forget(key)  # a fresh look: the agent may have rewritten the file
+
+    def landed(path: Path | None, error: str | None) -> None:
+        if mine != _showing or parent.get_root() is None:
+            if on_shown is not None:
+                on_shown(False, "superseded" if mine != _showing else "gone")
+            return
+        link = apilink.current()
+        open_with = key if (not remote and getattr(link, "local", False)) else None
+        box = ImageLightbox(
+            path,
+            can_open_in_editor,
+            on_open_in_editor,
+            caption,
+            origin or (key if remote else None),
+            navigate,
+            open_with=open_with,
+            why=error,
+        )
+        box.present_over(parent)
+        if on_shown is not None:
+            on_shown(box.decoded, error)
+
+    pictures.fetch(key, landed, session=session)

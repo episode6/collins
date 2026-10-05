@@ -218,4 +218,4 @@ def test_downloads_live_beside_the_dropped_image_copies(monkeypatch, tmp_path):
     from collins import dropimages
 
     assert remoteimages.default_directory().parent == dropimages.cache_directory()
-    assert remoteimages.default_directory() != dropimages.default_directory()
+    assert remoteimages.default_directory() != dropimages.cache_directory() / "dropped-images"

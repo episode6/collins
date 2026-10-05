@@ -7,18 +7,22 @@ into, solved once here rather than once per panel — the pictures a PR body
 embeds (`bodyimages`) and the ones a session has seen (`attachpanel`) both
 draw from this.
 
-**The file behind a URL.** `fetch` turns a remote image into a file on disk
-once per run and hands every later caller the same one. The download goes
-through `remoteimages` — the same capped, timeout-bounded, redirect-gated
-fetch `show_image` uses, into the same pruned cache directory — on a worker
-thread, landing back on the main loop. A caller whose images aren't at a
-public URL passes its own fetcher instead (the PR view's file previews and
-the git page's diff ask the service for the blob: `blobcache.fetch` over the
-blob GET) and keeps everything around it. Failures are remembered too: a URL
+**The file behind a key.** `fetch` turns an image a surface names — an
+http(s) URL, or an absolute path on the service's machine — into a file in
+this device's blob cache once per run and hands every later caller the same
+one. Nothing is read or downloaded here: the default fetcher is
+`blobcache.fetch_image`, the service's `GET /api/blob?kind=remote` (the
+service downloads, with `remoteimages`' cap, redirect gate and deadline)
+or `kind=file` (split-service spec §3.23, PR-2.7), on a worker thread,
+landing back on the main loop at `PRIORITY_DEFAULT`. A caller whose images
+are another kind passes its own fetcher (the PR view's file previews and the
+git page's diff: `kind=pr` and `kind=git`) and keeps everything around it. Failures are remembered too: a URL
 that 404s must not be re-fetched by every rebuild. A cached file that has
 since been pruned (downloads live a day) counts as a miss rather than a hit,
 so what a caller is handed is a file that is really there — which is what
-lets a click pass it to the lightbox, or to another app.
+lets a click pass it to the lightbox, or to another app. The decode reads it
+back through `blobcache.read` (bytes, never a filename): the client decodes
+only what the service sent.
 
 **A picture that fits.** `Gtk.Picture` reports its paintable's size in both
 directions and never relates them, so in a column narrower than the image it
@@ -43,7 +47,7 @@ gi.require_version("GdkPixbuf", "2.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GdkPixbuf, GLib, Gtk  # noqa: E402
 
-from . import animatedimage, remoteimages  # noqa: E402
+from . import animatedimage, blobcache  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +78,7 @@ def fetch(
     url: str,
     on_ready: Callable[[Path | None, str | None], None],
     fetcher: Callable[[], Path] | None = None,
+    session: str = "",
 ) -> None:
     """Hand *on_ready* the file *url* was downloaded into, or why it wasn't.
 
@@ -82,14 +87,16 @@ def fetch(
     first should put it up before calling, so a cache hit replaces it in the
     same frame rather than flashing.
 
-    *fetcher* replaces the download for a caller whose images don't come off
-    a public URL: the PR view's file previews and the git page's ask the
-    service's blob GET instead (`blobcache.fetch`), and want the caching,
-    the thread, the in-flight coalescing and the remembered failure all the
-    same. *url* is then only a cache key —
-    it is never parsed — so it has to name the bytes exactly (a commit, not a
-    branch). The call is made on the worker thread and may raise; whatever it
-    raises becomes the failure the caller is handed."""
+    *url* is an http(s) URL or an absolute path on the service's machine,
+    fetched by `blobcache.fetch_image` (*session*: the session asking, for
+    the service's confinement of a path, D38). *fetcher* replaces that for
+    a caller whose images are another kind of blob: the PR view's file
+    previews and the git page's (`blobcache.fetch` of `kind=pr` / `kind=git`),
+    which want the caching, the thread, the in-flight coalescing and the
+    remembered failure all the same. *url* is then only a cache key — it is
+    never parsed — so it has to name the bytes exactly (a commit, not a
+    branch). The call is made on the worker thread and may raise; whatever
+    it raises becomes the failure the caller is handed."""
     if url in _files:
         cached = _files[url]
         if cached is None or cached.exists():
@@ -102,6 +109,11 @@ def fetch(
         _waiting[url].append(on_ready)
         return
     _waiting[url] = [on_ready]
+    if fetcher is None:
+
+        def fetcher() -> Path:
+            return blobcache.fetch_image(url, session)
+
     threading.Thread(
         target=_fetch, args=(url, fetcher), name="image-fetch", daemon=True
     ).start()
@@ -113,21 +125,15 @@ def forget(url: str) -> None:
     _errors.pop(url, None)
 
 
-def _fetch(url: str, fetcher: Callable[[], Path] | None = None) -> None:
+def _fetch(url: str, fetcher: Callable[[], Path]) -> None:
     path = error = None
     try:
         with _GATE:
-            path = (
-                fetcher()
-                if fetcher is not None
-                else remoteimages.fetch_to_file(url, remoteimages.default_directory())
-            )
-    except remoteimages.FetchError as failure:
-        error = str(failure)
+            path = fetcher()
     except Exception as failure:  # a fetch must never take the thread with it
         error = str(failure)
         log.debug("pictures: fetching %s failed", url, exc_info=True)
-    GLib.idle_add(_landed, url, path, error)
+    GLib.idle_add(_landed, url, path, error, priority=GLib.PRIORITY_DEFAULT)
 
 
 def _landed(url: str, path: Path | None, error: str | None) -> bool:
@@ -161,24 +167,43 @@ def thumbnail(
     nothing. None when the file can't be decoded at all — every caller has a
     "couldn't show this" stand-in, and this never raises into one.
     """
-    path = Path(path)
-    if path.suffix.lower() == ".gif":
-        return animatedimage.load(path)
-    info = GdkPixbuf.Pixbuf.get_file_info(str(path))
-    known = info is not None and info[0] is not None
-    if not known or (info[1] <= width and info[2] <= max_height):
-        # An unrecognized file lands here too: gdk-pixbuf doesn't know the
-        # format, and GdkTexture's own decoders get their turn.
-        return animatedimage.load(path)
-    try:
-        # Both bounds with preserve_aspect: gdk-pixbuf fits the picture
-        # inside the box, so whichever dimension is the binding one decides.
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-            str(path), width, max_height, True
-        )
-    except GLib.Error:
-        return animatedimage.load(path)
+    data = blobcache.read(path)
+    if not data:
+        return None
+    if animatedimage.is_gif(data):
+        return animatedimage.load_bytes(data)
+    pixbuf = _scaled(data, width, max_height)
+    if pixbuf is None:
+        # An unrecognized format lands here too: gdk-pixbuf doesn't know
+        # it, and GdkTexture's own decoders get their turn.
+        return animatedimage.load_bytes(data)
     return Gdk.Texture.new_for_pixbuf(pixbuf)
+
+
+def _scaled(data: bytes, width: int, max_height: int) -> GdkPixbuf.Pixbuf | None:
+    """*data* decoded by gdk-pixbuf to fit inside *width* x *max_height*
+    (never scaled up), the size set as the loader learns it so the
+    full-size picture is never held; None when gdk-pixbuf can't."""
+    loader = GdkPixbuf.PixbufLoader()
+
+    def prepared(loader, natural_w: int, natural_h: int) -> None:
+        if natural_w <= width and natural_h <= max_height:
+            return  # fits: as it is, since upscaling only blurs
+        # Both bounds with the aspect kept: whichever binds decides.
+        scale = min(width / max(natural_w, 1), max_height / max(natural_h, 1))
+        loader.set_size(max(1, round(natural_w * scale)), max(1, round(natural_h * scale)))
+
+    loader.connect("size-prepared", prepared)
+    try:
+        loader.write(data)
+        loader.close()
+    except GLib.Error:
+        try:
+            loader.close()
+        except GLib.Error:
+            pass
+        return None
+    return loader.get_pixbuf()
 
 
 class BoundedPicture(Gtk.Picture):
