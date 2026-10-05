@@ -54,22 +54,70 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
 
 ## Behaviours
 
-**Opening** (`open_file(path, restore_cursor)`): guarded by
-`editorfiles.load_guard` (size, binary, image) and `is_inside(root)`;
-language from `guess_language_id` (extension, then the first line's shebang;
-its sibling `fence_language_id` maps a markdown fence's info word — `python`
-→ `python3`, `bash` → `sh` — for the PR page's code blocks in `mdwidgets`);
-style scheme from `editor.style_scheme(setting, dark)` (a bare
-`GtkSource.Buffer` defaults to the light `classic` scheme — never leave it
-unset). Cursor placement on a fresh buffer must re-issue `scroll_to_mark` from
-a `PRIORITY_LOW` idle (`_apply_cursor`): line heights are estimates until
+**Opening** (`open_file(path, restore_cursor)`): guarded by `is_inside(root)`
+and `editorfiles.is_image_path`; everything else about the file is the
+service's (below). Language from `guess_language_id` (extension, then the
+first line's shebang — `editorfiles.first_line` of the text the service
+read; its sibling `fence_language_id` maps a markdown fence's info word —
+`python` → `python3`, `bash` → `sh` — for the PR page's code blocks in
+`mdwidgets`), switched off above 512 KiB (`should_highlight(size)`); style
+scheme from `editor.style_scheme(setting, dark)` (a bare `GtkSource.Buffer`
+defaults to the light `classic` scheme — never leave it unset). Cursor
+placement on a fresh buffer must re-issue `scroll_to_mark` from a
+`PRIORITY_LOW` idle (`_apply_cursor`): line heights are estimates until
 validation idles run, so an immediate scroll lands ~line 44 for a target of
 602. `open_in_editor` (the MCP tool, the terminal's Ctrl+click on a path,
 "Add to chat" in reverse) all land in `MainWindow.open_in_tab_editor`.
 
-**External changes**: each open file has a `Gio.FileMonitor`; a clean buffer
-reloads silently, a dirty one is told. The agent rewrites these files
-constantly, so this path is exercised more than manual saves are.
+**The files are the service's** (split-service spec §3.23, PR-2.3). The
+pane opens no file and writes none: `GtkSource.File`, `FileLoader` and
+`FileSaver` are gone, and every path is a path on the service's machine.
+`collins/remotefiles.py` (GTK-free) is the client's end, `collins/service/
+files.py` the service's:
+
+- `_start_load` asks `fs.read` from a worker thread (`_off_main`: a daemon
+  thread, the answer landed at `GLib.PRIORITY_DEFAULT`) and `_on_loaded`
+  fills the buffer outside the undo history (`_fill`), keeping the reply's
+  `mtime` and `encoding` on the `_OpenFile`. The guards moved with the
+  read: the service refuses a path that is not a regular file, one over
+  5 MiB (`protocol.FILE_TEXT_MAX`) and one outside every root it knows
+  (`files.allowed`: a live session's cwd, a store session's cwd or project
+  root, anything for a `local` client), and flags `binary` (a NUL in the
+  first 8 KiB) and `latin-1` (bytes that are not UTF-8, written back the
+  same way). A refusal's words come translated through
+  `remotefiles.refusal_words` into the banner; a fresh open closes its tab,
+  a reload keeps it. `load_id` still makes a superseded read (a rename's)
+  a no-op.
+- `_do_save` sends `fs.write` with the buffer's text and `expect_mtime`:
+  Ctrl+S (`_save`) expects the mtime of the last read or write, and a file
+  that moved underneath is refused `stale` by the service with **nothing
+  written** — `_on_saved` raises the "changed on disk" dialog, whose
+  Overwrite saves again with `expect_mtime` null. `save_all` and the close
+  flows' Save pass null from the start (the user's explicit consent, as
+  before). The service writes by a temp file in the directory and one
+  `os.replace`, keeps the mode and follows a symlink to the file.
+- `_watch_external_changes` installs `fs.watch kind: file` under a handle
+  the client mints (`remotefiles.Watcher`; `_teardown_page` unwatches);
+  the service's `Gio.FileMonitor` debounces 300 ms, stats on a thread and
+  pushes `file-changed {handle, path, mtime, size, gone}` once per burst
+  whose stat moved. `_check_external` judges it against `opened.mtime`: a
+  clean buffer reloads silently (cursor kept), a dirty one is told
+  (Reload), `gone` marks the buffer dirty and says so. An event that
+  arrives while a save or load is in flight waits (`pending_change`) for
+  the reply's mtime, so the editor's own write never reads as a change.
+  The link is installed behind the `files` capability of the service's
+  hello (`App._install_file_transport`, decided on every connect like
+  git's); against a service without it nothing is sent and every open
+  lands in the banner. A reconnect (`remotefiles.reset()` in
+  `App._on_connected`) re-sends every live watch. The agent rewrites these files constantly, so this path is
+  exercised more than manual saves are.
+- A text over the 1 MiB frame cap crosses as `TAG_BLOB` chunks either way
+  (`protocol.split_request` / `split_reply`, the `text_chunked` /
+  `text_bytes` fields), so a 5 MiB file saves.
+- `check_editor_save.py` drives all of it against a scratch service through
+  `e2e_service.harness_link()` plus `remotefiles.install(link)`; a widget
+  check that opens files needs the same two lines, or every open lands in
+  the banner with "Not connected to the service".
 
 **Following the session** (`request_root` / `offer_root`): the tab's cwd tick
 calls `_maybe_follow_editor`; `editorfiles.follow_scope(root, cwd)` and
@@ -137,4 +185,6 @@ close state joins all three.
   the missing-typelib exit.
 
 Related: `collins-terminal-tab`, `collins-panel-dock`,
-`collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`).
+`collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`,
+`check_editor_save.py`), `collins-session-mcp-tools` (the API's message
+table in `api/protocol.py`: the `fs.*` types).

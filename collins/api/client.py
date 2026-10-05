@@ -458,6 +458,25 @@ class SocketLink(apilink.Link):
 
         self._post(do_send)
 
+    def _send_encoded(self, channel: _Channel, frames: list[bytes], text: str) -> None:
+        """A request on *channel*, already encoded by `_encode_request`: its
+        TAG_BLOB *frames* (if any) ahead of the request's *text* on the same
+        connection, in one I/O job so nothing can come between them."""
+        encoded = [GLib.Bytes.new(frame) for frame in frames]
+
+        def do_send():
+            ws = channel.ws
+            if ws is None or ws.get_state() != Soup.WebsocketState.OPEN:
+                return
+            try:
+                for frame in encoded:
+                    ws.send_message(Soup.WebsocketDataType.BINARY, frame)
+                ws.send_text(text)
+            except GLib.Error as exc:
+                log.error("api client: send failed: %s", exc)
+
+        self._post(do_send)
+
     def _blocking(self, channel: _Channel, message: dict, timeout: float) -> dict:
         """Send on *channel* and wait for the reply (any thread but the I/O
         one)."""
@@ -468,13 +487,13 @@ class SocketLink(apilink.Link):
         checked = self._check(message)
         if checked.kind != protocol.REQUEST:
             raise RequestRefused(protocol.ERROR_INVALID, f"{checked.type} is an event, not a request", {})
-        text = self._encode_request(checked.type, message)  # before the pending: no entry to leak
+        frames, text = self._encode_request(checked.type, message)  # before the pending: no entry to leak
         pending = _Pending(checked.type, event=threading.Event())
         with self._lock:
             if channel.ws is None:
                 raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
             channel.pending[message["id"]] = pending
-        self._send_text(channel, message, text)
+        self._send_encoded(channel, frames, text)
         if not pending.event.wait(timeout):
             with self._lock:
                 channel.pending.pop(message["id"], None)
@@ -559,7 +578,7 @@ class SocketLink(apilink.Link):
                 on_refused(RequestRefused(protocol.ERROR_INVALID, f"{checked.type} is an event", {}))
             return
         try:
-            text = self._encode_request(checked.type, message)
+            frames, text = self._encode_request(checked.type, message)
         except RequestRefused as refusal:
             if on_refused is not None:
                 on_refused(refusal)
@@ -576,16 +595,20 @@ class SocketLink(apilink.Link):
                     log.warning("api client: %s refused: not connected", checked.type)
                 return
             self._primary.pending[message["id"]] = pending
-        self._send_text(self._primary, message, text)
+        self._send_encoded(self._primary, frames, text)
 
     @staticmethod
-    def _encode_request(kind: str, message: dict) -> str:
-        """The frame of a request, or the `invalid` refusal of one the
-        protocol can't carry (over MAX_FRAME, a lone surrogate): decided
-        before the pending entry exists, so nothing is left behind (the
-        review of PR 604, should-fix 1 and nit 12)."""
+    def _encode_request(kind: str, message: dict) -> tuple[list[bytes], str]:
+        """The frames of a request: its TAG_BLOB frames (none for one that
+        fits a frame; `protocol.split_request` for a `fs.write`'s text)
+        and the text frame of the request itself (slim when chunked). Or
+        the `invalid` refusal of one the protocol can't carry (over
+        CHUNKED_MAX, a lone surrogate): decided before the pending entry
+        exists, so nothing is left behind (the review of PR 604,
+        should-fix 1 and nit 12)."""
         try:
-            return protocol.encode(message)
+            frames, slim = protocol.split_request(message)
+            return frames, protocol.encode(slim)
         except ValueError as error:
             raise RequestRefused(protocol.ERROR_INVALID, f"{kind}: {error}", {}) from error
 
@@ -662,7 +685,7 @@ class SocketLink(apilink.Link):
             if not wanted:
                 return  # no request of ours: a late chunk, or not for this link
             buffer = channel.blobs.setdefault(header.stream, bytearray())
-            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.GIT_OUTPUT_MAX:
+            if header.offset != len(buffer) or len(buffer) + len(data) > protocol.CHUNKED_MAX:
                 channel.blobs.pop(header.stream, None)  # out of order or over the bound: the reply is refused
                 return
             buffer += data
