@@ -257,8 +257,7 @@ def commit_subject(
         return None
     from . import gitops  # at call time: gitops imports this module
 
-    argv = ["log", "-1", "--format=%s", f"{ref}^{{commit}}", "--"]
-    result = gitops.run_git(cwd, argv, run=run, timeout=timeout)
+    result = gitops.run_git(cwd, commit_subject_argv(ref), run=run, timeout=timeout)
     if result.unreachable:
         return ""
     if not result.ok:
@@ -267,12 +266,39 @@ def commit_subject(
     return lines[0].strip() if lines else ""
 
 
+def commit_subject_argv(ref: str) -> list[str]:
+    """["log", "-1", "--format=%s", "<ref>^{commit}", "--"]: the subject of
+    the commit *ref* names (commit_subject's; one of the builders promoted
+    for the API, D33). ValueError for a ref that isn't safe."""
+    if not safe_ref(ref):
+        raise ValueError(f"not a safe ref: {ref!r}")
+    return ["log", "-1", "--format=%s", f"{ref}^{{commit}}", "--"]
+
+
+def commit_message_argv(ref: str) -> list[str]:
+    """["log", "-1", "--format=<COMMIT_FORMAT>", "<ref>^{commit}", "--"]:
+    the whole message of the commit *ref* names (commit_message's).
+    ValueError for a ref that isn't safe."""
+    if not safe_ref(ref):
+        raise ValueError(f"not a safe ref: {ref!r}")
+    return ["log", "-1", f"--format={COMMIT_FORMAT}", f"{ref}^{{commit}}", "--"]
+
+
+def resolve_commit_argv(ref: str) -> list[str]:
+    """["rev-parse", "--verify", "--quiet", "<ref>^{commit}"]: the full sha
+    of the commit *ref* names (resolve_commit's). ValueError for a ref
+    that isn't safe."""
+    if not safe_ref(ref):
+        raise ValueError(f"not a safe ref: {ref!r}")
+    return ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]
+
+
 # The whole of a commit message the page's card holds: its subject and
 # body are repository content (rule 5) — a body past this is cut, and the
 # fold's own "Show more" step is what the reader sees of that.
 COMMIT_BODY_MAX_CHARS = 20_000
 _COMMIT_FIELD_MAX_CHARS = 200
-_COMMIT_FORMAT = "%H%x00%an%x00%aI%x00%s%x00%b"
+COMMIT_FORMAT = "%H%x00%an%x00%aI%x00%s%x00%b"
 
 
 @dataclass(frozen=True)
@@ -304,8 +330,7 @@ def commit_message(
         return None
     from . import gitops  # at call time: gitops imports this module
 
-    argv = ["log", "-1", f"--format={_COMMIT_FORMAT}", f"{ref}^{{commit}}", "--"]
-    result = gitops.run_git(cwd, argv, run=run, timeout=timeout)
+    result = gitops.run_git(cwd, commit_message_argv(ref), run=run, timeout=timeout)
     if not result.ok:
         return None
     parts = result.stdout.split("\0", 4)
@@ -390,8 +415,7 @@ def resolve_commit(
         return None
     from . import gitops  # at call time: gitops imports this module
 
-    argv = ["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"]
-    result = gitops.run_git(cwd, argv, run=run, timeout=timeout)
+    result = gitops.run_git(cwd, resolve_commit_argv(ref), run=run, timeout=timeout)
     if result.unreachable:
         return ""
     if not result.ok:

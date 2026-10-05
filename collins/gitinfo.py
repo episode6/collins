@@ -1,93 +1,133 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
-"""Best-effort git repository info, read straight from `.git` where it can be.
+"""Best-effort git repository info: what the footer, the sidebar's menus and
+the git page's freshness check ask about a repository, answered without a
+`git` process.
 
 Finding the branch (`current_branch`), the branch the repository treats as
 its trunk (`default_branch`) or the repository's page on GitHub
-(`github_url`) is a couple of stat calls and one small file read, with no
-`git` processes spawned — cheap enough for the tab footer's 2s poll, and for
-a context menu that asks on every right-click. Asking whether the tree is
-dirty (`has_changes`, `change_summary`) or which entries are ignored
-(`ignored_names`) can't be answered that way, so those run git — through
-gitops' runner (`run_git`, `run_git_bytes`), like every other git call — and
-are only ever asked on demand.
+(`github_url`) is a couple of stat calls and one small file read — cheap
+enough for the tab footer's 2s poll, and for a context menu that asks on
+every right-click. Asking whether the tree is dirty (`has_changes`,
+`change_summary`) or which entries are ignored (`ignored_names`) can't be
+answered that way, so those run git — through gitops' runner (`run_git`,
+`run_git_bytes`), like every other git call — and are only ever asked on
+demand.
 
-The git page (gitpage) reads the same files for its freshness check: where
-the working tree root is (`repo_root`), when the index last moved
+**Where the reads run** (split-service spec §3.23, PR-2.1). The `.git`
+reads themselves are `gitfiles` (stdlib only), which the service runs: the
+client's copy of this module answers from a per-cwd **mirror** of the
+service's `git.info` reply (`remotegit` installs it with `set_reader`),
+refreshed by the page's tick (`refresh`), aged out after `MAX_AGE_S` on any
+other read and refreshed by the service's `git-changed` events. With no
+reader set (the service's own code, the unit tests over a temp repository)
+every function reads the files itself, as before. `has_changes` and
+`change_summary` are the mirror's `changes`, fetched fresh on demand
+(`git.info` with ``changes``, one `git status` on the service), so the
+on-demand rule holds either way.
+
+The git page reads the same facts for its freshness check: where the
+working tree root is (`repo_root`), when the index last moved
 (`index_mtime`), what HEAD and the parent branch point at (`head_sha`,
 `resolve_branch`, `base_ref`), folded into one comparable `tree_signature`
-— and, for its commits list (the stack of branches, the `↑` marks), when
-any ref last moved (`refs_signature`: a commit on another branch or a
-push lands as a ref rewritten under `refs/heads` or `refs/remotes`, or a
-`packed-refs` rewrite) — and names the branch it measures the current one
-against when git shows no stack (`parent_branch`: the first of the host's
-candidates the tree can resolve, else the default branch). Its
-commit gate looks for git's in-progress markers in the worktree's own
-git directory, which `git_dir` names.
+— and, for its commits list, when any ref last moved (`refs_signature`) —
+and names the branch it measures the current one against when git shows
+no stack (`parent_branch`: the first of the host's candidates the tree can
+resolve, else the default branch). Its commit gate looks for git's
+in-progress markers in the worktree's own git directory, which `git_dir`
+names (and which the mirror carries as `operation`: `gitops.in_progress_at`).
 """
 
 from __future__ import annotations
 
 import logging
-import re
-import shutil
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from urllib.parse import urlsplit
+
+from . import gitfiles
+from .gitfiles import OPERATION_MARKERS, GitInfo
+
+__all__ = [
+    "OPERATION_MARKERS",
+    "GitInfo",
+    "base_ref",
+    "change_summary",
+    "check_ignore_argv",
+    "current_branch",
+    "default_branch",
+    "git_dir",
+    "github_url",
+    "has_changes",
+    "head_sha",
+    "ignored_names",
+    "index_mtime",
+    "info",
+    "operation_markers",
+    "parent_branch",
+    "reader",
+    "refresh",
+    "refs_signature",
+    "remote_branch_name",
+    "repo_root",
+    "resolve_branch",
+    "set_reader",
+    "status_porcelain_argv",
+    "tree_signature",
+]
 
 log = logging.getLogger(__name__)
 
-_REF_PREFIX = "ref:"
-_BRANCH_REF_PREFIX = "refs/heads/"
-
-# A `[remote "name"]` stanza in a git config; git treats section names
-# case-insensitively, so this does too.
-_REMOTE_SECTION = re.compile(r'^\[remote\s+"([^"]+)"\]', re.IGNORECASE)
-
-# Which remote speaks for the project when several do. Anything unlisted goes
-# after these in name order, so the answer can't wobble between right-clicks.
-_REMOTE_ORDER = ("origin", "upstream", "github")
-
-# The one host whose remotes get a GitHub page. An enterprise install answers
-# on its own domain and isn't recognized here — better no menu item than one
-# pointing at github.com for a repository that doesn't live there.
-_GITHUB_HOST = "github.com"
-
-# Schemes a remote may be written in. `file:`/`javascript:` and friends never
-# get this far: what this module hands back is always an https URL it built
-# itself, but the path it builds it out of comes from a repository's config,
-# which is untrusted like any other repo content.
-_REMOTE_SCHEMES = frozenset({"https", "http", "ssh", "git"})
-
-# A remote written the scp way — `git@github.com:owner/repo.git` — which has
-# no scheme for urlsplit to find. Only tried when there is no `://` at all.
-_SCP_LIKE = re.compile(r"^(?:[^/@]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
-
-# One path segment of an owner/repo pair, as GitHub mints them: this is the
-# gate that keeps whatever a config invented out of the URL a browser is
-# handed, so a segment of nothing but dots (which would climb the path) is
-# out too.
-_REPO_NAME = re.compile(r"^(?!\.+$)[A-Za-z0-9._-]+$")
-
-# Where a clone records which branch its remote considers the main one:
-# `refs/remotes/<remote>/HEAD` is a symbolic ref to it (`ref:
-# refs/remotes/origin/main`). Only a clone writes one — `git remote add` and
-# `git init` don't — so the names git and GitHub mint by default stand in
-# where there is none, in the order GitHub's own default came to be.
-_REMOTE_HEAD_FILE = "HEAD"
-_DEFAULT_BRANCH_NAMES = ("main", "master")
-
-# Long enough for `git status` in a repository of any size worth working in,
-# short enough that a menu built on the answer doesn't visibly stall waiting
-# for it. A repository slower than this is treated as clean.
+# The whole-tree status check (`has_changes`, `change_summary`): one
+# subprocess, asked on demand only, with a budget that fits a large tree and
+# refuses a hung git.
 _STATUS_TIMEOUT_S = 2.0
-
-# `ignored_names` runs on the GTK main loop (the file tree asks while
-# building rows), so its budget is much tighter than the menu-building
-# _STATUS_TIMEOUT_S: `check-ignore` reads only the exclude files, never the
-# index, and answers in milliseconds — a repository that can't make this
-# deadline just renders undimmed rather than stalling every expand.
+# `ignored_names` runs on the GTK main loop (the file tree's expand), so its
+# budget is short: past it the rows simply aren't dimmed.
 _IGNORE_TIMEOUT_S = 0.5
+
+# How old a mirror entry may be before a read refreshes it (the footer's
+# tick is 2 s; a right-click a moment after it reads the tick's answer).
+MAX_AGE_S = 1.0
+
+# The client's reader (remotegit): `reader(cwd, max_age=, changes=, state=)`
+# -> GitInfo, or None when the service could not be asked at all (then the
+# answer is "not a repository" rather than the files of this machine, which
+# are not the service's). None: the local files are read.
+Reader = Callable[..., "GitInfo | None"]
+_reader: Reader | None = None
+
+_safe_branch_name = gitfiles.safe_branch_name
+
+
+def set_reader(fn: Reader | None) -> None:
+    """Install the client's `git.info` mirror as this module's source (the
+    app, through `remotegit.install`); None reads the local files again."""
+    global _reader
+    _reader = fn
+
+
+def reader() -> Reader | None:
+    return _reader
+
+
+def info(cwd: str | Path | None, max_age: float = MAX_AGE_S, changes: bool = False) -> GitInfo | None:
+    """The mirror's entry for *cwd*, refreshed when older than *max_age*
+    (or when *changes* is wanted: a status is never served stale); None
+    with no reader installed."""
+    if _reader is None or not cwd:
+        return None
+    return _reader(str(cwd), max_age=max_age, changes=changes)
+
+
+def refresh(cwd: str | Path | None) -> None:
+    """Re-read *cwd*'s entry now (the git page's tick, before it compares
+    the signatures). No-op with no reader: the files are always fresh."""
+    if _reader is not None and cwd:
+        _reader(str(cwd), max_age=0.0)
+
+
+def _local(cwd: str | Path | None) -> bool:
+    return _reader is None
 
 
 def current_branch(cwd: str | Path | None) -> str | None:
@@ -97,8 +137,11 @@ def current_branch(cwd: str | Path | None) -> str | None:
     A detached HEAD yields the abbreviated commit hash instead of a name.
     Handles worktrees/submodules, whose `.git` is a pointer file.
     """
-    git_dir = _git_dir(cwd)
-    return _read_head(git_dir) if git_dir else None
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.branch if entry is not None else None
+    git = gitfiles.git_dir(cwd)
+    return gitfiles.read_head(git) if git else None
 
 
 def default_branch(cwd: str | Path | None) -> str | None:
@@ -117,19 +160,13 @@ def default_branch(cwd: str | Path | None) -> str | None:
     caller offers to check the branch out, so a guess would be worse than
     no answer.
     """
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.default_branch if entry is not None else None
+    git = gitfiles.git_dir(cwd)
+    if git is None:
         return None
-    common = _common_dir(git_dir)
-    remotes = _remote_urls(common / "config")
-    for name in sorted(remotes, key=_remote_rank):
-        branch = _remote_head(common, name)
-        if branch:
-            return branch
-    for name in _DEFAULT_BRANCH_NAMES:
-        if _has_local_branch(common, name):
-            return name
-    return None
+    return gitfiles.default_branch_of(gitfiles.common_dir(git))
 
 
 def parent_branch(cwd: str | Path | None, candidates: Iterable[str | None]) -> str | None:
@@ -176,18 +213,21 @@ def remote_branch_name(cwd: str | Path | None, name: str | None) -> str | None:
     remote that isn't the first-ranked one, may name another remote's copy
     of the branch than the one typed.
     """
-    if not _safe_branch_name(name) or "/" not in name:
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.remote_branch_name(name) if entry is not None else None
+    if not gitfiles.safe_branch_name(name) or "/" not in name:
         return None
     remote, _, rest = name.partition("/")
     if not remote or not rest:
         return None
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
+    git = gitfiles.git_dir(cwd)
+    if git is None:
         return None
-    common = _common_dir(git_dir)
-    if remote not in _remote_urls(common / "config"):
+    common = gitfiles.common_dir(git)
+    if remote not in gitfiles.remote_urls(common / "config"):
         return None
-    return rest if _ref_sha(common, f"refs/remotes/{remote}/{rest}") else None
+    return rest if gitfiles.ref_sha(common, f"refs/remotes/{remote}/{rest}") else None
 
 
 def github_url(cwd: str | Path | None) -> str | None:
@@ -203,15 +243,13 @@ def github_url(cwd: str | Path | None) -> str | None:
     remote path that isn't a plain `owner/repo`. The caller offers a menu item
     claiming there is a page to open, so anything short of certain means no.
     """
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.github_url if entry is not None else None
+    git = gitfiles.git_dir(cwd)
+    if git is None:
         return None
-    urls = _remote_urls(_common_dir(git_dir) / "config")
-    for name in sorted(urls, key=_remote_rank):
-        page = _github_page(urls[name])
-        if page is not None:
-            return page
-    return None
+    return gitfiles.github_url_of(gitfiles.common_dir(git))
 
 
 def has_changes(cwd: str | Path | None) -> bool:
@@ -227,15 +265,16 @@ def has_changes(cwd: str | Path | None) -> bool:
     every tracked file against the index, which is `git status`' whole job and
     not something to re-derive off `.git`. `--no-optional-locks` keeps it from
     taking the index lock or writing a refreshed index, so it can't collide
-    with the agent's own git commands in the same repository.
+    with the agent's own git commands in the same repository. Over the API it
+    is `git.info`'s ``changes``, asked fresh (never the mirror's old answer).
 
     False for every question that can't be answered — no cwd, no git, not a
     repository, a git that took too long. What is built on the answer is a
     menu item claiming there is something to open a pull request *for*, so
     anything short of git saying so means no.
     """
-    status = _status_porcelain(cwd)
-    return status is not None and bool(status.strip())
+    staged, unstaged = change_summary(cwd)
+    return staged or unstaged
 
 
 def change_summary(cwd: str | Path | None) -> tuple[bool, bool]:
@@ -253,7 +292,17 @@ def change_summary(cwd: str | Path | None) -> tuple[bool, bool]:
     `has_changes` says False: a wrong "staged" would open the page on the
     index when the tree is what changed.
     """
-    status = _status_porcelain(cwd)
+    if not _local(cwd):
+        entry = info(cwd, max_age=0.0, changes=True)
+        if entry is None or entry.changes is None:
+            return False, False
+        return entry.changes
+    return summarize_status(_status_porcelain(cwd))
+
+
+def summarize_status(status: str | None) -> tuple[bool, bool]:
+    """change_summary's reading of a `status --porcelain` text: (staged,
+    unstaged); (False, False) for None (git couldn't answer)."""
     if status is None:
         return False, False
     staged = unstaged = False
@@ -272,21 +321,24 @@ def change_summary(cwd: str | Path | None) -> tuple[bool, bool]:
     return staged, unstaged
 
 
+def status_porcelain_argv() -> list[str]:
+    """["--no-optional-locks", "status", "--porcelain"]: the whole-tree
+    status has_changes / change_summary read (one of the builders promoted
+    for the API, D33)."""
+    return ["--no-optional-locks", "status", "--porcelain"]
+
+
+def check_ignore_argv() -> list[str]:
+    """["--no-optional-locks", "check-ignore", "-z", "--stdin"]: which of
+    the NUL-separated names on stdin git ignores (ignored_names')."""
+    return ["--no-optional-locks", "check-ignore", "-z", "--stdin"]
+
+
 def _status_porcelain(cwd: str | Path | None) -> str | None:
     """`git --no-optional-locks status --porcelain` in *cwd*, or None when git
     can't answer: no cwd, no git on PATH, not a repository, a non-zero exit,
     a run longer than _STATUS_TIMEOUT_S."""
-    if not cwd or not Path(cwd).is_dir():
-        return None
-    if shutil.which("git") is None:
-        return None
-    from . import gitops  # at call time: gitops imports this module
-
-    result = gitops.run_git(cwd, ["--no-optional-locks", "status", "--porcelain"], timeout=_STATUS_TIMEOUT_S)
-    if not result.ok:
-        log.debug("gitinfo: git status in %s failed: %s", cwd, gitops.first_line(result.stderr))
-        return None
-    return result.stdout
+    return gitfiles.status_porcelain(cwd, _STATUS_TIMEOUT_S)
 
 
 def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
@@ -299,16 +351,20 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
 
     The caller is on the GTK main loop, so this is kept cheap: outside a
     repository no process is spawned at all (a pure-filesystem `.git` walk,
-    like `current_branch`'s, answers first), and inside one the subprocess
-    gets only `_IGNORE_TIMEOUT_S` before the answer becomes "nothing".
+    like `current_branch`'s, answers first — over the API the mirror's
+    answer), and inside one the subprocess gets only `_IGNORE_TIMEOUT_S`
+    before the answer becomes "nothing".
 
     Empty set for every case that can't be answered — no git on PATH, not a
     repository, a timeout. What is built on the answer is only a dimmed row,
     so anything short of git saying "ignored" means shown at full strength.
     """
-    if not directory or not names or not _in_repository(Path(directory)):
+    if not directory or not names:
         return set()
-    if shutil.which("git") is None:
+    if _local(directory):
+        if not gitfiles.in_repository(Path(directory)) or not gitfiles.has_git():
+            return set()
+    elif repo_root(directory) is None:
         return set()
     from . import gitops  # at call time: gitops imports this module
 
@@ -317,12 +373,7 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
     except UnicodeError as err:  # a name that isn't text (surrogate-escaped bytes)
         log.debug("gitinfo: git check-ignore in %s failed: %s", directory, err)
         return set()
-    result = gitops.run_git_bytes(
-        directory,
-        ["--no-optional-locks", "check-ignore", "-z", "--stdin"],
-        stdin=stdin,
-        timeout=_IGNORE_TIMEOUT_S,
-    )
+    result = gitops.run_git_bytes(directory, check_ignore_argv(), stdin=stdin, timeout=_IGNORE_TIMEOUT_S)
     # 0 = some ignored, 1 = none ignored; anything else (128: not a repo,
     # bad input) means "don't know", which reads the same as "none" — and
     # so does a git that couldn't be run at all (a timeout, not on PATH).
@@ -334,64 +385,60 @@ def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
 def repo_root(cwd: str | Path | None) -> Path | None:
     """The working tree root enclosing *cwd*: the directory holding the
     nearest `.git` entry (a directory, or a worktree/submodule pointer file).
-    None outside a repository."""
-    found = _find_git_entry(cwd)
-    return found[0] if found else None
+    None outside a repository. Over the API the path is the service's."""
+    if not _local(cwd):
+        entry = info(cwd)
+        return Path(entry.root) if entry is not None and entry.root else None
+    return gitfiles.repo_root(cwd)
 
 
 def index_mtime(cwd: str | Path | None) -> int | None:
     """st_mtime_ns of the repository's index file (in the worktree's own git
     dir, not the common dir). None when there is no index yet or it can't be
     stat'd."""
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
-        return None
-    try:
-        return (git_dir / "index").stat().st_mtime_ns
-    except OSError:
-        return None
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.index_mtime if entry is not None else None
+    git = gitfiles.git_dir(cwd)
+    return gitfiles.index_mtime(git) if git is not None else None
 
 
 def head_sha(cwd: str | Path | None) -> str | None:
     """The commit HEAD points at: a symbolic HEAD resolved through the loose
     ref or packed-refs in the common dir, a detached HEAD's own hash. None
     outside a repository or for an unborn branch."""
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
-        return None
-    try:
-        head = (git_dir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return None
-    if head.startswith(_REF_PREFIX):
-        ref = head[len(_REF_PREFIX) :].strip()
-        return _ref_sha(_common_dir(git_dir), ref) if ref else None
-    return head or None
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.head if entry is not None else None
+    git = gitfiles.git_dir(cwd)
+    return gitfiles.head_sha(git) if git is not None else None
 
 
 def resolve_branch(cwd: str | Path | None, name: str | None) -> tuple[str, str] | None:
     """(*target*, sha) for a branch a diff can name: ("main", sha) when
     refs/heads/<name> exists, else ("<remote>/<name>", sha) for the first
-    remote in _REMOTE_ORDER rank that has refs/remotes/<remote>/<name>. None
-    when neither exists, outside a repository, or for a *name* that isn't
-    safe as an argument (empty, whitespace, leading "-", containing "..").
+    remote in rank order that has refs/remotes/<remote>/<name>. None when
+    neither exists, outside a repository, or for a *name* that isn't safe
+    as an argument (empty, whitespace, leading "-", containing "..").
 
     The remote fallback is what lets a clone that never checked `main` out
     locally still diff against it: `origin/main` is a ref git knows just as
     well. The name is what ends up on git's argv, hence the gate on it.
     """
-    if not _safe_branch_name(name):
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.resolve_branch(name) if entry is not None else None
+    if not gitfiles.safe_branch_name(name):
         return None
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
+    git = gitfiles.git_dir(cwd)
+    if git is None:
         return None
-    common = _common_dir(git_dir)
-    sha = _ref_sha(common, f"{_BRANCH_REF_PREFIX}{name}")
+    common = gitfiles.common_dir(git)
+    sha = gitfiles.ref_sha(common, f"{gitfiles.BRANCH_REF_PREFIX}{name}")
     if sha:
         return name, sha
-    remotes = _remote_urls(common / "config")
-    for remote in sorted(remotes, key=_remote_rank):
-        sha = _ref_sha(common, f"refs/remotes/{remote}/{name}")
+    for remote in gitfiles.ranked_remotes(common):
+        sha = gitfiles.ref_sha(common, f"refs/remotes/{remote}/{name}")
         if sha:
             return f"{remote}/{name}", sha
     return None
@@ -403,38 +450,16 @@ def base_ref(cwd: str | Path | None, base: str | None) -> str | None:
     return resolved[1] if resolved else None
 
 
-# The files and directories git leaves in the git directory while an
-# operation waits on the user: a rebase (either backend; rebase-apply is
-# `git am`'s too), a merge, a cherry-pick or a revert, and the sequencer
-# a multi-commit cherry-pick / revert keeps between its steps. What
-# operation_markers reports and gitops.in_progress reads.
-OPERATION_MARKERS: tuple[str, ...] = (
-    "rebase-merge",
-    "rebase-apply",
-    "MERGE_HEAD",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "sequencer",
-)
-
-
 def operation_markers(cwd: str | Path | None) -> tuple[str, ...]:
     """Which of OPERATION_MARKERS exist in the repository's own git
     directory (a worktree's, where git keeps them) — empty outside a
     repository or with nothing half-finished. Stats only, no git: part
     of tree_signature, so the page notices `git merge --quit` and its
-    kin, which forget an operation without moving the index or HEAD."""
-    git_dir = _git_dir(cwd)
-    if git_dir is None:
-        return ()
-    found = []
-    for marker in OPERATION_MARKERS:
-        try:
-            if (git_dir / marker).exists():
-                found.append(marker)
-        except OSError:
-            continue
-    return tuple(found)
+    kin, which forget an operation without touching the index or HEAD."""
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.markers if entry is not None else ()
+    return gitfiles.operation_markers(gitfiles.git_dir(cwd))
 
 
 def tree_signature(cwd: str | Path | None, base: str | None) -> tuple | None:
@@ -443,7 +468,13 @@ def tree_signature(cwd: str | Path | None, base: str | None) -> tuple | None:
     2 s poll; any element moving means the loaded diff is stale (the
     markers: an operation started, finished, aborted or quit, which the
     page's in-progress bar follows). None outside a repository."""
-    if _git_dir(cwd) is None:
+    if not _local(cwd):
+        entry = info(cwd)
+        if entry is None or entry.root is None:
+            return None
+        resolved = entry.resolve_branch(base)
+        return entry.index_mtime, entry.head, resolved[1] if resolved else None, entry.markers
+    if gitfiles.git_dir(cwd) is None:
         return None
     return index_mtime(cwd), head_sha(cwd), base_ref(cwd, base), operation_markers(cwd)
 
@@ -452,264 +483,28 @@ def git_dir(cwd: str | Path | None) -> Path | None:
     """The git directory of the repository enclosing *cwd* — a worktree's
     own (`.git/worktrees/<name>`), not the common one, which is where git
     leaves its in-progress markers (MERGE_HEAD, rebase-merge, …) and the
-    index. None outside a repository."""
-    return _git_dir(cwd)
+    index. None outside a repository. Over the API the path is the
+    service's: a name, not a directory this machine can read."""
+    if not _local(cwd):
+        entry = info(cwd)
+        return Path(entry.git_dir) if entry is not None and entry.git_dir else None
+    return gitfiles.git_dir(cwd)
 
 
-# How many directories under refs/heads and refs/remotes refs_signature
-# will stat before it stops descending: a branch name makes one directory
-# per slash in it, and the walk runs on the footer's 2 s poll.
-_REFS_DIR_LIMIT = 256
-
-
-def refs_signature(cwd: str | Path | None) -> tuple | None:
+def refs_signature(cwd: str | Path | None) -> tuple | str | None:
     """What moves when a ref is written — a commit on another branch (in
     another worktree), a branch created or deleted, a push, a fetch —
-    folded into one comparable value for the git page's poll: the mtime
-    of `packed-refs` (where `git gc` and `fetch --prune` rewrite refs
-    wholesale) and, for every directory under `refs/heads` and
-    `refs/remotes` (each remote, and each slash-separated prefix of a
-    branch name), its mtime — git writes a loose ref by renaming a lock
-    file into its directory, which moves that directory's mtime and no
-    other. The local half tells the page a branch of the stack moved; the
-    remote half moves the `↑` marks. All read from the common dir (a
-    worktree's refs are the main checkout's). None outside a repository; a
-    repository with no refs at all answers a value that stays put."""
-    git = _git_dir(cwd)
+    folded into one comparable value for the git page's poll
+    (gitfiles.refs_signature; over the API the service's digest of it, a
+    string: the page only ever compares two). None outside a repository."""
+    if not _local(cwd):
+        entry = info(cwd)
+        return entry.refs if entry is not None and entry.root is not None else None
+    git = gitfiles.git_dir(cwd)
     if git is None:
         return None
-    common = _common_dir(git)
-    try:
-        packed = (common / "packed-refs").stat().st_mtime_ns
-    except OSError:
-        packed = None
-    directories: list[tuple[str, int]] = []
-    pending = [common / "refs" / "remotes", common / "refs" / "heads"]
-    while pending and len(directories) < _REFS_DIR_LIMIT:
-        directory = pending.pop()
-        try:
-            stamp = directory.stat().st_mtime_ns
-            children = [entry for entry in directory.iterdir() if entry.is_dir()]
-        except OSError:
-            continue
-        directories.append((str(directory.relative_to(common)), stamp))
-        pending.extend(sorted(children, reverse=True))
-    return packed, tuple(sorted(directories))
-
-
-def _safe_branch_name(name: str | None) -> bool:
-    """Whether *name* can be handed to git as a revision without it reading
-    as an option or a range: no empty or blank names, no leading dash, no
-    `..` (which would make a range of it), no whitespace."""
-    if not name or any(ch.isspace() for ch in name):
-        return False
-    return not name.startswith("-") and ".." not in name
-
-
-def _git_dir(cwd: str | Path | None) -> Path | None:
-    """The git directory of the repository enclosing *cwd* — the nearest
-    `.git` walking upwards, resolved through the pointer file a worktree or
-    submodule has there instead of a directory. None outside a repository, and
-    for a pointer file that doesn't point anywhere."""
-    found = _find_git_entry(cwd)
-    if found is None:
-        return None
-    _root, git = found
-    if git.is_dir():
-        return git
-    return _resolve_gitdir_pointer(git)  # worktree or submodule: "gitdir: <real git dir>"
-
-
-def _find_git_entry(cwd: str | Path | None) -> tuple[Path, Path] | None:
-    """(working tree root, its `.git` entry) for the repository enclosing
-    *cwd*: the nearest directory walking upwards that has a `.git` — a
-    directory in an ordinary checkout, a pointer file in a worktree or
-    submodule. None outside a repository."""
-    if not cwd:
-        return None
-    start = Path(cwd)
-    if not start.is_dir():
-        return None
-    for directory in (start, *start.parents):
-        git = directory / ".git"
-        if git.is_dir() or git.is_file():
-            return directory, git
-    return None
-
-
-def _common_dir(git_dir: Path) -> Path:
-    """Where the parts every worktree shares live — the config among them.
-
-    A linked worktree's git directory (`.git/worktrees/<name>`) has its own
-    HEAD but no config of its own; its `commondir` file names the directory
-    that has one. Everywhere else this is *git_dir* itself.
-    """
-    try:
-        target = (git_dir / "commondir").read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return git_dir
-    return git_dir / target if target else git_dir  # "/abs" replaces the base
-
-
-def _remote_urls(config: Path) -> dict[str, str]:
-    """Every remote's fetch URL in *config*, by remote name.
-
-    Hand-parsed rather than handed to `configparser`: git's format only looks
-    like an INI file, and the indentation git writes its variables with is
-    what configparser reads as a continuation line. Empty for a config that
-    can't be read — the same answer as one with no remotes in it.
-    """
-    try:
-        text = config.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return {}
-    urls: dict[str, str] = {}
-    remote: str | None = None
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line[0] in "#;":
-            continue
-        if line.startswith("["):
-            match = _REMOTE_SECTION.match(line)
-            remote = match.group(1) if match else None
-            continue
-        if remote is None:
-            continue
-        key, separator, value = line.partition("=")
-        # First url wins: a remote repeating the key is git's own
-        # last-one-wins, but a config that odd isn't worth a second read.
-        if separator and key.strip().lower() == "url":
-            urls.setdefault(remote, value.strip())
-    return urls
-
-
-def _remote_rank(name: str) -> tuple[int, str]:
-    conventional = name.lower() in _REMOTE_ORDER
-    index = _REMOTE_ORDER.index(name.lower()) if conventional else len(_REMOTE_ORDER)
-    return index, name
-
-
-def _github_page(remote_url: str) -> str | None:
-    """The web page for *remote_url*, when it is a GitHub remote.
-
-    Every form a remote is written in comes down to a host and a path:
-    `git@github.com:owner/repo.git`, `ssh://git@github.com/owner/repo`,
-    `https://github.com/owner/repo.git`. The URL handed back is built from
-    the owner and repo, never from the remote's own text.
-    """
-    text = remote_url.strip()
-    if not text:
-        return None
-    if "://" in text:
-        parsed = urlsplit(text)
-        if parsed.scheme.lower() not in _REMOTE_SCHEMES:
-            return None
-        host, path = parsed.hostname or "", parsed.path
-    else:
-        match = _SCP_LIKE.match(text)
-        if match is None:
-            return None
-        host, path = match.group("host"), match.group("path")
-    if host.lower().removeprefix("www.") != _GITHUB_HOST:
-        return None
-    path = path.strip("/")
-    if path.lower().endswith(".git"):
-        path = path[: -len(".git")]
-    owner, separator, repo = path.partition("/")
-    if not separator or not _REPO_NAME.match(owner) or not _REPO_NAME.match(repo):
-        return None
-    return f"https://{_GITHUB_HOST}/{owner}/{repo}"
+    return gitfiles.refs_signature(git)
 
 
 def _in_repository(start: Path) -> bool:
-    """Whether *start* is inside a git repository — a couple of stat calls
-    (`.git` may be a directory, or a worktree/submodule pointer file), so a
-    tree outside any repository never pays for a `git` process."""
-    if not start.is_dir():
-        return False
-    return any((directory / ".git").exists() for directory in (start, *start.parents))
-
-
-def _resolve_gitdir_pointer(git_file: Path) -> Path | None:
-    try:
-        text = git_file.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    for line in text.splitlines():
-        if line.startswith("gitdir:"):
-            target = line[len("gitdir:") :].strip()
-            if target:  # Path("/a") / "/abs" keeps the absolute target as-is
-                return git_file.parent / target
-    return None
-
-
-def _remote_head(common_dir: Path, remote: str) -> str | None:
-    """The branch `refs/remotes/<remote>/HEAD` points at, or None — for a
-    remote that has no HEAD ref (never cloned from, or pruned), or one whose
-    HEAD is detached (`git remote set-head --delete` leaves none; a bare
-    commit hash in there is a remote with no default to speak of)."""
-    ref_file = common_dir / "refs" / "remotes" / remote / _REMOTE_HEAD_FILE
-    try:
-        head = ref_file.read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return None
-    if not head.startswith(_REF_PREFIX):
-        return None
-    prefix = f"refs/remotes/{remote}/"
-    ref = head[len(_REF_PREFIX) :].strip()
-    if not ref.startswith(prefix):
-        return None
-    return ref[len(prefix) :] or None
-
-
-def _has_local_branch(common_dir: Path, name: str) -> bool:
-    """Whether `refs/heads/<name>` exists — as a loose ref file, or packed
-    into `packed-refs` (`<hash> refs/heads/<name>` per line), which is where
-    `git gc` moves it."""
-    if (common_dir / "refs" / "heads" / name).is_file():
-        return True
-    return _packed_ref(common_dir, f"{_BRANCH_REF_PREFIX}{name}") is not None
-
-
-def _ref_sha(common_dir: Path, ref: str) -> str | None:
-    """The hash *ref* (`refs/heads/main`, `refs/remotes/origin/main`) holds:
-    the loose ref file first, then `packed-refs`. None for a ref that exists
-    nowhere, and for a loose ref that is itself symbolic (git writes those
-    only for HEADs, which never come through here)."""
-    try:
-        text = (common_dir / ref).read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        text = ""
-    if text and not text.startswith(_REF_PREFIX):
-        return text
-    return _packed_ref(common_dir, ref)
-
-
-def _packed_ref(common_dir: Path, ref: str) -> str | None:
-    """The hash `packed-refs` records for *ref*, or None. Peeled lines (`^`)
-    and the header are skipped; the first match wins, as git's own reader
-    takes the file as sorted."""
-    try:
-        packed = (common_dir / "packed-refs").read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    for line in packed.splitlines():
-        if line.startswith(("#", "^")):
-            continue
-        parts = line.split(" ", 1)
-        if len(parts) == 2 and parts[1].strip() == ref:
-            return parts[0].strip() or None
-    return None
-
-
-def _read_head(git_dir: Path) -> str | None:
-    try:
-        head = (git_dir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
-    except OSError:
-        return None
-    if head.startswith(_REF_PREFIX):
-        ref = head[len(_REF_PREFIX) :].strip()
-        if ref.startswith(_BRANCH_REF_PREFIX):
-            return ref[len(_BRANCH_REF_PREFIX) :] or None
-        return ref or None
-    return head[:8] or None  # detached HEAD
+    return gitfiles.in_repository(start)

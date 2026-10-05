@@ -21,6 +21,8 @@ The data (every key optional)::
     pr_threads  a list of prdetail.thread_record: prdetail.fetch_threads
     gh_json     a map of "<first two argv words>" -> the JSON prstatus.gh_json
                 answers (a missing key answers null)
+    trash_aside a directory: the git page's trash (service.files.trash_paths)
+                moves files there instead, recording each ask as "trash"
 
 Every stubbed call is appended as a JSON line to ``<data>.calls.jsonl``
 (``{"stub": name, "args": [...]}``), which `e2e_service.stub_calls()`
@@ -105,6 +107,26 @@ def apply() -> None:
             return (_data().get("gh_json") or {}).get(" ".join(args[:2]))
 
         prstatus.gh_json = gh_json
+    if "trash_aside" in data:
+        # The git page's trash is the service's (service.files.trash_paths,
+        # through git.plan, PR-2.1). Gio refuses to trash on "system
+        # internal" mounts (a tmpfs /tmp, where a check's repository
+        # lives), so the mover is stubbed with one that records the ask
+        # and moves each file into the `trash_aside` directory, as the
+        # trash would. Recorded as ``{"stub": "trash", "args": [root,
+        # [paths]]}``.
+        from collins import gitops
+        from collins.service import files
+
+        def trash_paths(root, paths):
+            aside = _data().get("trash_aside") or ""
+            listed = [str(p) for p in paths]
+            _record("trash", [str(root), listed])
+            for path in listed:
+                os.rename(os.path.join(str(root), path), os.path.join(aside, os.path.basename(path)))
+            return gitops.GitResult(True, "", "")
+
+        files.trash_paths = trash_paths
 
 
 apply()

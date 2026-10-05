@@ -431,14 +431,59 @@ unreachable)`, and `run_git_blob` (binary capture, stdout kept raw) →
 the decode would change an image or a non-UTF-8 file; a stdout that
 isn't bytes is `b""` and not ok. **`unreachable` is True only where the
 runner couldn't run git at all** (no cwd, `OSError`, a timeout or any
-`SubprocessError`); every other construction leaves it False, so it is
+`SubprocessError` — and, over the API, a service that could not be
+asked or has no git); every other construction leaves it False, so it is
 the one way to tell "git couldn't be asked" from "git said no" —
 `commit_subject` / `resolve_commit` answer `""` for the first and None
 for the second. `gitloads`, `gitinfo`, `file_at` and `window._run_git`
 (the project row's pull and checkout) all go through these; `gitloads`
 and `gitinfo` import `gitops` at call time (`gitops` imports both). A
-new git call goes through one of the three too: they are the seam the
-split's remote transport replaces.
+new git call goes through one of the three too, **with a builder of its
+own** (below): they are the seam the transport sits on.
+
+**Git goes over the API (split-service spec §3.23, PR-2.1, D33).** In
+the app every runner is routed through `remotegit.Transport`
+(`gitops.set_transport`, installed by `remotegit.install(link)` once the
+app connects; a caller that brings its own `run=` — a test, the service's
+own code — never sees it): the argv a caller built is mapped back to the
+**builder** that makes it and its keyword args (`gitops.match_argv`: every
+`*_argv` of gitops plus the nine ad-hoc argv promoted to builders —
+`gitloads.commit_subject_argv` / `commit_message_argv` /
+`resolve_commit_argv`, `gitinfo.status_porcelain_argv` /
+`check_ignore_argv`, `gitops.revert_quit_argv` / `head_abbrev_argv` /
+`pull_argv` / `checkout_branch_argv` — each registered in
+`gitops.BUILDERS` with a matcher over its argv's leading tokens, and the
+match proven by rebuilding the argv from what was parsed) and sent as
+`git.run {cwd, builder, args, stdin, timeout, env}`; **the wire never
+carries an argv**, and the service (`service/gitfeed.py`) runs only what
+its own copy of the builder makes of the args (`gitops.build`: an
+unknown name is `unknown`, args the builder refuses or an argv that isn't
+bounded text `invalid`). An argv no builder makes is `unreachable` with a
+logged error: a new git call is a new builder, matcher and registry
+entry, and `tests/test_gitops.py` pins that every builder round-trips.
+The reply is git's exit status (null: unreachable) and both streams as
+text, the client's runner deciding which statuses are ok; a stdout past
+the frame cap travels as `TAG_BLOB` chunks on the asking connection
+ahead of a slim reply (`protocol.split_reply` / `join_reply`, the
+client's link joining them). The `env` a runner is handed crosses as a
+name (`default`, `no_editor`, `no_prompt`; the service builds the
+environment), and a `cwd` must be a directory the service can see inside
+a session's roots or a project root the store knows — or anything for a
+client that proved it is `local` (`service/files.py`'s `allowed`).
+`file_at` of any side is `GET /api/blob?kind=git&cwd=…&at=worktree|
+index|ref&ref=…&path=…` on the same socket (`SocketLink.http_get`, the
+`Collins-Client` header naming the client for the confinement; an ETag
+of the commit and path, the index entry's blob or the file's mtime and
+size, `304` on `If-None-Match`, `404`, `413` over `MAX_BLOB_BYTES`):
+**the client opens no project file.** The on-disk size gate of the
+untracked and unmerged readers is `git.sizes` (`gitops.file_sizes`), the
+watch's tree state `git.info` with `state`, and a plan is one `git.plan`
+(below). The service answers every one of these off its main loop: the
+handler returns a `protocol.Deferred` and the thread's reply settles it
+(`gitfeed._later`); `tests/inproc.py` pumps the loop for one. A
+`blobcache.fetch(url)` is the `pictures.fetch` fetcher over the same GET
+into `~/.cache/collins/blobs/<service id>/` with the ETag kept beside the
+file (PR-2.2 moves the diff's images onto it).
 
 **`gitloads.py` is the `Loaded` vocabulary**: `MODES` / `DEFAULT_MODE`,
 `SHOW_KEY` / `RANGE_KEY`, `safe_ref` (the one rule for a ref that goes on
@@ -767,14 +812,23 @@ the request's own `gen` and `cwd` ride along, and a confirm answered
 after the page moved on (the generation bumped, `request.load` no
 longer `_loaded`) runs nothing — a toast, the buttons freed — since the
 plan described a tree the page no longer shows; else
-`gitops.run_plan(cwd, plan, three_way=request.three_way(plan), trash=
-_trash_paths)` on the sidebar's `run_mutation` thread — OP_TRASH through
-`gitpage._trash_paths` (`Gio.File.trash`, never an unlink; the e2e stubs
-it — **Gio refuses to trash on "system internal" mounts**, a tmpfs `/tmp`
-included, and the toast then says so) — the toast from `gitpatch.
-outcome_words`, and `sidebar.emit("mutated")` when it landed or left
-conflicts → `_on_mutated` re-seeds the signatures, re-reads the stack and
-reloads by key. `three_way` is only a revert's: **`--3way` implies
+`gitops.run_plan(cwd, plan, three_way=request.three_way(plan), context=
+PlanContext(load, path, previous_path, parent_target, keys))` on the
+sidebar's `run_mutation` thread — over the API one `git.plan` (§3.23):
+the plan's op, paths and patch with **the stable keys it was made
+against** (the hunk's `diffmodel.stable_key` for a hunk or lines plan,
+every key of the file for a whole-file apply, none for the path-level
+ops), and the service re-reads `file_patch` and refuses `stale` when a
+key is no longer in it — `ApplyResult.stale`, which the page toasts and
+answers with a reload — before `gitops.run_plan` runs there with
+OP_TRASH through `service.files.trash_paths` (`Gio.File.trash`, never an
+unlink; the e2e stubs it inside the service with `e2e_stubs`'
+`trash_aside` — **Gio refuses to trash on "system internal" mounts**, a
+tmpfs `/tmp` included, and the toast then says so). The sidebar's
+*Discard file…* of an untracked row is the same plan. The toast from
+`gitpatch.outcome_words`, and `sidebar.emit("mutated")` when it landed
+or left conflicts → `_on_mutated` refreshes the mirror, re-seeds the
+signatures, re-reads the stack and reloads by key. `three_way` is only a revert's: **`--3way` implies
 `--index`, so it needs the file clean against the index** — a dirty file
 is refused with "does not match index" (what the warning anticipates),
 the case it helps is a *committed* move of the context, and it stages the
@@ -795,26 +849,35 @@ can't give "3 of 12". Matches are re-counted (position kept) on every
 `load`, `filter` and layout change; the page re-reads the label
 (`_sync_search_label`). Closing the bar focuses the current match's view.
 
-**Watch mode.** After a working-tree load lands, `_install_monitors` puts
-a `Gio.FileMonitor` (`monitor_directory`) on each distinct directory of
-the loaded files (old paths of renames too) — over `MAX_DIR_MONITORS`
-(64), or with no file at all, the repository root alone; a commit / range
-load gets none. Events (not for the `.git` entry itself) debounce
-`_WATCH_DEBOUNCE_MS` (300) into `_watch_check`: `gitops.
-tree_state_signature` on a thread, compared against the state the load's
-own worker seeded (`_tree_state`); a move is a `_read_diff` by key. One
-compare at a time, and none beside a read in flight: either marks the
-event `_watch_stale`, and the compare (`_watch_checked`) or the read
-(`_diff_read`, after re-making the monitors) re-runs `_watch_check` when
-it lands. The worker samples the signature **before** `read_diff` (an
-edit between the two costs one reload by key on the next compare,
-harmless). `_tick` re-compares every `_WATCH_SLOW_TICKS` (5) ticks
-regardless. The signature hashes `git status` **and** `numstat` **and**
-the size + mtime of every path on the working-tree side: an edit that
-rewrites an already-changed line moves neither the letter nor the counts
-and went unnoticed until the stats were added. Measured: the monitor fires
-at once, the compare lands ~20 ms after the debounce, the reload ~40 ms
-later (0.38 s edit-to-view on the e2e's fixture).
+**Watch mode (the service's since PR-2.1).** After a working-tree load
+lands, `_install_watch` sends `git.watch {cwd, files, state}`
+(`remotegit.Mirror.watch`) and listens for the cwd's `git-changed`
+events (`Mirror.on_changed`); a commit / range load watches nothing, and
+`_drop_watch` (`_close_view`, a reload) sends `git.unwatch`. On the
+service (`gitfeed._Watch`, one per client and cwd) the same rules as the
+page had: a `Gio.FileMonitor` on each distinct directory of the loaded
+files (old paths of renames too) — over `MAX_DIR_MONITORS` (64), or with
+no file at all, the repository root alone; events (not for the `.git`
+entry itself) debounce `WATCH_DEBOUNCE_MS` (300) into a compare on a
+thread of the three signatures (`gitfeed.signatures`: the tree digest of
+index mtime, HEAD and markers; the refs digest; `gitops.
+tree_state_signature`), one compare at a time with a stale mark for an
+event landing during one, and a slow tick every `WATCH_SLOW_TICK_S` (10)
+regardless; any move is one `git-changed {cwd, tree, refs, state}` to
+the watching client. **The seed is the client's**: the page's read
+worker samples `tree_state_signature` **before** `read_diff` and sends it
+with the watch, so an edit between the read and the watch's first look
+is a move (the service adopts the tree and refs digests on that first
+compare without a push). On the page `_on_git_changed` compares the
+event's `state` with `_tree_state` and reloads by key; one landing beside
+a read in flight is kept (`_watch_stale`) and compared when the read
+lands (`_diff_read`). The signature hashes `git status` **and** `numstat`
+**and** the size + mtime of every path on the working-tree side: an edit
+that rewrites an already-changed line moves neither the letter nor the
+counts and went unnoticed until the stats were added. The tick's index
+and HEAD compares read the mirror, refreshed once per tick
+(`gitinfo.refresh`) and after every mutation and stack read, so a move
+the page itself made is never reloaded twice.
 
 **Measured (this machine, headless).** `read_diff` + `DiffView.load` of
 PR 500's squash (`git show 449fc98`: 16 files, 76 hunks, 3118 patch
@@ -930,18 +993,42 @@ on the parent-branch entry. `scripts/probe_diffview.py` draws a real
 repository's diff to a PNG and prints the timings above; `--notes`
 renders the note cards.
 
-## gitinfo (`gitinfo.py`, GTK-free)
+## gitinfo (`gitinfo.py`, GTK-free) and its mirror (`remotegit.py`, `gitfiles.py`)
 
-Cheap reads straight from `.git` for the footer's 2 s poll and every
+The public names of the cheap reads for the footer's 2 s poll and every
 right-click: `current_branch`, `default_branch`, `github_url`, `repo_root`,
 `index_mtime`, `head_sha`, `resolve_branch`, `base_ref`, `tree_signature`,
-`refs_signature` (mtimes of `packed-refs` and every directory under
-`refs/heads` and `refs/remotes`, so a branch written anywhere or a push
-moves it), `git_dir`, `parent_branch`. Anything that needs `git`
-(`has_changes`, `change_summary`, `ignored_names`) runs it through
-`gitops.run_git` / `run_git_bytes` (imported at call time: `gitops`
-imports `gitinfo`) with its own timeouts, and is asked on demand only.
-`gitloads`' three git calls go through `gitops.run_git` the same way.
+`refs_signature` (over the API a digest string; locally the tuple of
+mtimes of `packed-refs` and every directory under `refs/heads` and
+`refs/remotes`, so a branch written anywhere or a push moves it),
+`git_dir`, `parent_branch`, `operation_markers`. **The `.git` reads
+themselves are `gitfiles.py`** (stdlib only; the service's and the local
+fallback's: `read_info` answers every one at once as a `GitInfo`, with
+`list_refs` — local heads and remote-tracking refs, cached per common
+dir by the refs digest — `operation_kind`, `refs_signature`,
+`status_porcelain`). In the app `gitinfo` reads a **per-cwd mirror** of
+the service's `git.info` reply (`remotegit.Mirror`, installed with
+`gitinfo.set_reader`): an entry younger than `MAX_AGE_S` (1 s) is served,
+an older one re-fetched with one blocking `call` on the caller's thread
+(the footer's tick, a right-click, a page's worker — never the link's
+I/O thread), `gitinfo.refresh(cwd)` forces one (the page's tick, its
+open, every mutation), `git-changed` refreshes by `send`, and
+`resolve_branch` / `parent_branch` resolve any name off the mirror's
+heads, remote-tracking refs and ranked remotes (`GitInfo.resolve_branch`),
+so the main loop makes no round trip per name. `index_mtime` is
+microseconds over the wire (nanoseconds since the epoch pass the
+protocol's integer bound only in 2255). `has_changes` / `change_summary`
+are `git.info` with `changes` (one `git status` on the service, asked
+fresh and on demand, never on a tick), `ignored_names` is `git.run` with
+`check_ignore_argv`, and `gitops.in_progress_at(cwd)` /
+`in_progress_operation_at` (the page's bar and the sidebar's gates) read
+the mirror's `operation` kind. A service that cannot be asked reads as
+"not a repository" — never this machine's `.git`, which is not the
+service's. With no reader (the service's own code, the unit tests over a
+temp repository) every function reads the files through `gitfiles`, as
+before. `gitloads`' three git calls go through `gitops.run_git` with
+their builders (`commit_subject_argv`, `commit_message_argv`,
+`resolve_commit_argv`).
 
 ## Footguns
 

@@ -54,7 +54,24 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import gi
+# A service of this check's own (PR-2.1: the page's git runs there), on a
+# scratch tree and a fresh app id, so nothing of the user's is read or
+# reaped. Set before anything of collins is imported.
+_SCRATCH = tempfile.mkdtemp(prefix="collins-gp-")
+_RUN = "r" + "".join(c for c in os.path.basename(_SCRATCH) if c.isalnum())
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{_RUN}"
+os.environ["COLLINS_PROJECTS_DIR"] = os.path.join(_SCRATCH, "projects")
+os.environ["COLLINS_CLAUDE_CONFIG"] = os.path.join(_SCRATCH, "claude.json")
+os.environ["COLLINS_CHATS_DIR"] = os.path.join(_SCRATCH, "chats")
+os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
+os.environ["XDG_STATE_HOME"] = os.path.join(_SCRATCH, "state")
+os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
+os.makedirs(os.environ["COLLINS_PROJECTS_DIR"])
+with open(os.environ["COLLINS_CLAUDE_CONFIG"], "w") as _fh:
+    _fh.write("{}")
+
+import e2e_service  # noqa: E402
+import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
@@ -62,7 +79,7 @@ from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
-from collins import diffnotes, gitloads, gitops, gitpage  # noqa: E402
+from collins import diffnotes, gitloads, gitops, gitpage, remotegit  # noqa: E402
 from collins.diffnotes import HighlightSpec, NoteSpec  # noqa: E402
 from collins.editor import GtkSource  # noqa: E402
 from collins.gitpage import GitPage  # noqa: E402
@@ -1168,10 +1185,10 @@ def check_native(repo: str) -> None:
         kinds,
     )
     check("a picture added by the commit shows its one side", dict((label, p) for label, _b, p in view.badge_rows()).get("pic.png") is True)
-    check("no monitors on a commit load", page._monitors == [])
+    check("no monitors on a commit load", not page.watching)
     page.load("unstaged")
     check("back to the working tree", wait_for(lambda: page.settled() and page.loaded == "unstaged"))
-    check("monitors are back", page._monitors != [])
+    check("monitors are back", page.watching)
     check("page_state carries the load", page.page_state() == {"kind": "git", "loaded": "unstaged"}, page.page_state())
 
     check_native_notes(repo, page, window, lines)
@@ -1230,10 +1247,10 @@ def check_native(repo: str) -> None:
     window.set_content(None)  # a drag to another strip: unrealized, then realized again
     window.set_content(page)
     wait_for(lambda: False, timeout=0.3)
-    check("a re-parented page keeps its view and monitors", page.opened and page._monitors != [])
+    check("a re-parented page keeps its view and monitors", page.opened and page.watching)
     page.page_closed()
     window.destroy()
-    check("closing dropped the monitors", page._monitors == [])
+    check("closing dropped the monitors", not page.watching)
 
     # -- restored from a layout: a commit, and a commit git no longer has -----------------------
     print("-- the view restored from a layout")
@@ -1525,22 +1542,20 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         elif on_dismiss is not None:
             on_dismiss()
 
-    # Gio refuses to trash on "system internal" mounts (a tmpfs /tmp, where
-    # this repository lives): the mover is stubbed with one that records
-    # the ask and moves the file aside, as the trash would.
-    trashed: list[tuple[str, tuple[str, ...]]] = []
-    aside = tempfile.mkdtemp(prefix="collins-trash-")
-
-    def fake_trash(root: str, paths) -> gitops.GitResult:
-        trashed.append((root, tuple(paths)))
-        for path in paths:
-            os.rename(os.path.join(root, path), os.path.join(aside, os.path.basename(path)))
-        return gitops.GitResult(True, "", "")
+    # The trash is the service's (service.files.trash_paths, through
+    # git.plan): Gio refuses to trash on "system internal" mounts (a tmpfs
+    # /tmp, where this repository lives), so the mover is stubbed inside
+    # the service with one that records the ask and moves the file aside,
+    # as the trash would (e2e_stubs' `trash_aside`, staged by main()).
+    def trashed() -> list[tuple[str, tuple[str, ...]]]:
+        return [
+            (call["args"][0], tuple(call["args"][1]))
+            for call in e2e_service.stub_calls()
+            if call["stub"] == "trash"
+        ]
 
     real_confirm = gitpage.dialogs.confirm_dialog
-    real_trash = gitpage._trash_paths
     gitpage.dialogs.confirm_dialog = fake_confirm
-    gitpage._trash_paths = fake_trash
     try:
         # -- the buttons' words on the unstaged load -----------------------------------
         check("the file header offers Stage file · Discard file", view.file_action_labels("text.txt") == ("Stage file", "Discard file"), view.file_action_labels("text.txt"))
@@ -1715,7 +1730,7 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         lines[44] = "line 45\n"
         check("Discard file on an untracked file moves it to the trash after the confirm", view.click_file_action("untracked.txt", discard=True) and wait_for(idle, timeout=5.0) and wait_for(lambda: not os.path.exists(os.path.join(repo, "untracked.txt")), timeout=5.0), (asked[-1], os.path.exists(os.path.join(repo, "untracked.txt"))))
         check("its question said trash", asked[-1] == ("Move to the trash?", "Move untracked.txt to the trash?", "Move to trash"), asked[-1])
-        check("the mover was handed the repository root and the one path", trashed == [(repo, ("untracked.txt",))], trashed)
+        check("the mover was handed the repository root and the one path", trashed() == [(repo, ("untracked.txt",))], trashed())
         check("the section left the view", wait_for(lambda: "untracked.txt" not in [p for p, _k, _s in view.file_rows()], timeout=5.0), view.file_rows())
         check("Discard file on a deleted file restores it", view.click_file_action("gone.txt", discard=True) and wait_for(idle, timeout=5.0) and wait_for(lambda: os.path.exists(os.path.join(repo, "gone.txt")), timeout=5.0), asked[-1])
         check("its question said restore", asked[-1][0] == "Restore the file?" and asked[-1][2] == "Restore", asked[-1])
@@ -1833,7 +1848,7 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("Discard file… from the row's menu, cancelled", sidebar.activate_file_menu("menu.txt", "Discard file…", "unstaged"))
         check("asked the trash question and left the file", wait_for(idle, timeout=5.0) and asked[asks:] == [("Move to the trash?", "Move menu.txt to the trash?", "Move to trash")] and os.path.exists(os.path.join(repo, "menu.txt")), asked[asks:])
         check("Discard file… from the row's menu, confirmed", sidebar.activate_file_menu("menu.txt", "Discard file…", "unstaged"))
-        check("moves it to the trash, with the toast", wait_for(idle, timeout=5.0) and wait_for(lambda: not os.path.exists(os.path.join(repo, "menu.txt")), timeout=5.0) and trashed[-1] == (repo, ("menu.txt",)) and toasts[-1:] == ["Moved menu.txt to the trash"], (trashed[-1:], toasts[-1:]))
+        check("moves it to the trash, with the toast", wait_for(idle, timeout=5.0) and wait_for(lambda: not os.path.exists(os.path.join(repo, "menu.txt")), timeout=5.0) and trashed()[-1] == (repo, ("menu.txt",)) and toasts[-1:] == ["Moved menu.txt to the trash"], (trashed()[-1:], toasts[-1:]))
         check("and the row left the list", wait_for(lambda: idle() and sidebar.file_menu_labels("menu.txt", "unstaged") is None, timeout=5.0), sidebar.file_rows())
         view.set_busy(True)
         before = len(toasts)
@@ -1923,8 +1938,6 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
     finally:
         page._toast = real_toast
         gitpage.dialogs.confirm_dialog = real_confirm
-        gitpage._trash_paths = real_trash
-        shutil.rmtree(aside, ignore_errors=True)
 
 
 def check_outside_a_repo(scratch: str) -> None:
@@ -1981,8 +1994,14 @@ def main() -> int:
     scratch = tempfile.mkdtemp(prefix="collins-git-page-")
     try:
         # The page's git (the reads, a commit's subject, a saved commit's
-        # existence) comes off a PATH holding nothing but git: the page
-        # needs no other program.
+        # existence) runs on the service (PR-2.1): a service of this
+        # check's own, started on the full PATH before the swap below,
+        # with the trash stubbed inside it (e2e_stubs' trash_aside); the
+        # page itself then runs on a PATH holding nothing but git — and
+        # needs no program at all, every call going over the link.
+        aside = tempfile.mkdtemp(prefix="collins-trash-")
+        link = e2e_service.harness_link(stubs={"trash_aside": aside})
+        remotegit.install(link)
         bindir = os.path.join(scratch, "bin")
         os.mkdir(bindir)
         os.symlink(GIT, os.path.join(bindir, "git"))

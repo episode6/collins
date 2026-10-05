@@ -44,17 +44,21 @@ back is foreign content and is bounded by gitmodel's parsers.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import subprocess
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
-from . import diffmodel, gitinfo, gitloads, gitpatch
+from . import diffmodel, gitfiles, gitinfo, gitloads, gitpatch
 from .diffmodel import File
 from .gitmodel import LOG_FORMAT, BranchRef, Commit, Status, parse_log, parse_status_v2
 from .i18n import _
+
+log = logging.getLogger(__name__)
 
 # Reads and the two whole-index mutations: milliseconds in any repository
 # worth working in; a git slower than this answers "couldn't be asked".
@@ -92,21 +96,8 @@ _OPERATION_WORDS: dict[str, str] = {
     "revert": "revert",
 }
 # The markers git leaves in its directory while an operation waits on the
-# user, in the order they are checked (a rebase beats a merge beats a
-# cherry-pick), and the kind each names. `sequencer` alone — a multi-commit
-# cherry-pick or revert between two of its steps, the stopped step already
-# committed by hand — is read from its todo (see in_progress).
-_IN_PROGRESS_MARKERS: tuple[tuple[str, str], ...] = (
-    ("rebase-merge", "rebase"),
-    ("rebase-apply", "rebase"),
-    ("MERGE_HEAD", "merge"),
-    ("CHERRY_PICK_HEAD", "cherry-pick"),
-    ("REVERT_HEAD", "revert"),
-    ("sequencer", "cherry-pick"),
-)
-# The sequencer's todo is read this far to tell a revert's from a
-# cherry-pick's: its first line is `pick <sha> …` or `revert <sha> …`.
-_SEQUENCER_TODO_BYTES = 4096
+# user, and the kind each names, are gitfiles.IN_PROGRESS_MARKERS (read by
+# gitfiles.operation_kind: the service's read, and the local fallback's).
 
 
 @dataclass(frozen=True)
@@ -206,6 +197,62 @@ class BlobResult:
     unreachable: bool = False
 
 
+class GitTransport(Protocol):
+    """What the client installs with `set_transport` (split-service spec
+    §3.23, PR-2.1): every runner, blob read, size read, tree-state digest
+    and plan goes to the service through it instead of this machine's
+    git. `remotegit.Transport` is the one implementation; the service's
+    own code and the tests, which pass a local *run* or install none,
+    never see it."""
+
+    def run(
+        self,
+        cwd: str,
+        argv: Sequence[str],
+        stdin: bytes | None,
+        timeout: float,
+        env: dict[str, str] | None,
+        ok_statuses: tuple[int, ...],
+    ) -> GitResult: ...
+
+    def blob(self, cwd: str, at: str, ref: str | None, path: str, timeout: float) -> BlobResult: ...
+
+    def sizes(self, root: str, paths: Sequence[str]) -> dict[str, int | None]: ...
+
+    def tree_state(self, cwd: str) -> str | None: ...
+
+    def plan(
+        self, cwd: str, plan: gitpatch.Plan, context: PlanContext, three_way: bool, timeout: float
+    ) -> ApplyResult: ...
+
+
+_transport: GitTransport | None = None
+
+
+def set_transport(transport: GitTransport | None) -> None:
+    """Route every runner through *transport* (the app's, over the API);
+    None runs git on this machine again."""
+    global _transport
+    _transport = transport
+
+
+def transport() -> GitTransport | None:
+    return _transport
+
+
+def _remote(run) -> GitTransport | None:
+    """The transport, when the caller did not bring a *run* of its own
+    (a test's fake, the service's local run)."""
+    return _transport if run is subprocess.run else None
+
+
+# Where a blob is read from, for the transport's `blob` (`GET /api/blob?
+# kind=git&at=`): the working tree, the index (`:path`) or a revision.
+AT_WORKTREE = "worktree"
+AT_INDEX = "index"
+AT_REF = "ref"
+
+
 def first_line(text: str | None) -> str:
     """The first non-blank line of *text*, stripped — what a toast shows of
     git's stderr; "" for nothing."""
@@ -229,6 +276,9 @@ def run_git(
     with the exception's text as stderr."""
     if not cwd:
         return GitResult(False, "", "no working directory", unreachable=True)
+    remote = _remote(run)
+    if remote is not None:
+        return remote.run(str(cwd), list(argv), None, timeout, env, (0,))
     kwargs = {"env": env} if env is not None else {}
     try:
         result = run(
@@ -262,6 +312,9 @@ def run_git_bytes(
     couldn't be run is unreachable, as run_git's."""
     if not cwd:
         return GitResult(False, "", "no working directory", unreachable=True)
+    remote = _remote(run)
+    if remote is not None:
+        return remote.run(str(cwd), list(argv), stdin, timeout, None, tuple(ok_statuses))
     try:
         result = run(["git", *argv], cwd=str(cwd), input=stdin, capture_output=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as err:
@@ -289,6 +342,17 @@ def run_git_blob(
     that couldn't be run is unreachable, as run_git's."""
     if not cwd:
         return BlobResult(False, b"", "no working directory", unreachable=True)
+    remote = _remote(run)
+    if remote is not None:
+        # The one argv a blob is read with is file_at_argv's `show <ref>:<path>`:
+        # over the API that is the blob GET, never a run.
+        parsed = _match_file_at(list(argv))
+        if parsed is None:
+            log.error("gitops: a blob argv no builder matches: %s", list(argv)[:4])
+            return BlobResult(False, b"", "not a blob read", unreachable=True)
+        ref, path = parsed["ref"], parsed["path"]
+        at = AT_INDEX if ref == INDEX_REF else AT_REF
+        return remote.blob(str(cwd), at, None if at == AT_INDEX else ref, path, timeout)
     try:
         result = run(["git", *argv], cwd=str(cwd), capture_output=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as err:
@@ -334,6 +398,24 @@ class ApplyResult(GitResult):
 
     three_way: bool = False
     conflicts: bool = False
+    # The service refused the plan `stale` (PR-2.1): a stable key it was
+    # made against is no longer in the fresh patch. The page reloads.
+    stale: bool = False
+
+
+@dataclass(frozen=True)
+class PlanContext:
+    """What a plan was made against, for the service's stale check
+    (`git.plan`, §3.23): the load and the file's paths the patch was read
+    for, the parent target, and the stable keys (`diffmodel.stable_key`)
+    of the hunks the plan touches — every one must still be in the
+    patch the service re-reads, or nothing is applied."""
+
+    load: object
+    path: str
+    previous_path: str | None = None
+    parent_target: str | None = None
+    keys: tuple[str, ...] = ()
 
 
 # -- argv builders -----------------------------------------------------------------
@@ -428,6 +510,33 @@ def revert_argv(sha: str, commit: bool) -> list[str]:
     if commit:
         return ["revert", "--no-edit", sha]
     return ["revert", "--no-commit", sha]
+
+
+def revert_quit_argv() -> list[str]:
+    """["revert", "--quit"]: forget a `--no-commit` revert git counts as
+    in progress, keeping the index and the tree (see `revert`)."""
+    return ["revert", "--quit"]
+
+
+def head_abbrev_argv() -> list[str]:
+    """["rev-parse", "--short", "HEAD"]: HEAD's abbreviated sha, for the
+    commit toast (head_abbrev)."""
+    return ["rev-parse", "--short", "HEAD"]
+
+
+def pull_argv() -> list[str]:
+    """["pull", "--no-edit"]: the project row's *Git pull* — a merge that
+    needs a message takes git's own (window._on_git_pull)."""
+    return ["pull", "--no-edit"]
+
+
+def checkout_branch_argv(branch: str) -> list[str]:
+    """["checkout", branch]: the project row's *Checkout <trunk>*
+    (window._on_git_checkout). ValueError for a name that isn't safe as
+    a revision."""
+    if not gitfiles.safe_branch_name(branch):
+        raise ValueError(f"not a branch name: {branch!r}")
+    return ["checkout", branch]
 
 
 def continue_argv(kind: str) -> list[str]:
@@ -917,39 +1026,30 @@ def in_progress(git_dir: str | Path | None) -> InProgress | None:
     waits would be that operation's next step, not the user's, so the
     commit buttons ask this before they ask for a message, and the page's
     bar offers the step (`--continue`) and the way out (`--abort`)."""
-    if not git_dir:
+    kind = gitfiles.operation_kind(git_dir)
+    return operation_of_kind(kind)
+
+
+def operation_of_kind(kind: str | None) -> InProgress | None:
+    """An `InProgress` for a *kind* the files (or the service's `git.info`)
+    named: None for None or a kind this build doesn't know."""
+    if kind is None or kind not in _OPERATION_WORDS:
         return None
-    base = Path(git_dir)
-    for marker, kind in _IN_PROGRESS_MARKERS:
-        try:
-            if not (base / marker).exists():
-                continue
-            if marker == "rebase-apply" and (base / marker / "applying").exists():
-                kind = "am"
-            elif marker == "sequencer" and _sequencer_reverts(base / marker / "todo"):
-                kind = "revert"
-        except OSError:
-            continue
-        return InProgress(kind, _(_OPERATION_WORDS[kind]))
-    return None
+    return InProgress(kind, _(_OPERATION_WORDS[kind]))
 
 
-def _sequencer_reverts(todo: Path) -> bool:
-    """Whether the sequencer's *todo* names reverts: its first
-    non-comment line starts with `revert` (a cherry-pick's with `pick`).
-    A todo that can't be read is a cherry-pick's — the likelier of the
-    two, and the words are all that ride on it."""
-    try:
-        with todo.open("rb") as handle:
-            text = handle.read(_SEQUENCER_TODO_BYTES).decode("utf-8", "replace")
-    except OSError:
-        return False
-    for line in text.splitlines():
-        word = line.strip().split(" ", 1)[0]
-        if not word or word.startswith("#"):
-            continue
-        return word == "revert"
-    return False
+def in_progress_at(cwd: str | Path | None) -> InProgress | None:
+    """`in_progress` of the repository enclosing *cwd* — the client's
+    door: the mirror's `operation` over the API (gitinfo.info, asked
+    fresh: the gates and the read worker want the markers as they are
+    now, as the file read gave them), else the worktree's own git
+    directory read here."""
+    entry = gitinfo.info(cwd, max_age=0.0)
+    if entry is not None:
+        return operation_of_kind(entry.operation)
+    if gitinfo.reader() is not None:
+        return None  # the service could not be asked: nothing to gate on
+    return in_progress(gitinfo.git_dir(cwd))
 
 
 def in_progress_operation(git_dir: str | Path | None) -> str | None:
@@ -957,6 +1057,12 @@ def in_progress_operation(git_dir: str | Path | None) -> str | None:
     _("cherry-pick"), _("revert") or _("git am") — or None: what the
     commit and revert gates' words take."""
     found = in_progress(git_dir)
+    return found.label if found is not None else None
+
+
+def in_progress_operation_at(cwd: str | Path | None) -> str | None:
+    """in_progress_at's label alone (the gates' words, over the API too)."""
+    found = in_progress_at(cwd)
     return found.label if found is not None else None
 
 
@@ -1052,7 +1158,7 @@ def revert(
         return GitResult(False, "", f"not a commit: {sha!r}")
     result = run_git(cwd, revert_argv(sha, commit), run=run, timeout=timeout)
     if result.ok and not commit:
-        quit_result = run_git(cwd, ["revert", "--quit"], run=run, timeout=GIT_TIMEOUT_S)
+        quit_result = run_git(cwd, revert_quit_argv(), run=run, timeout=GIT_TIMEOUT_S)
         if not quit_result.ok:
             return GitResult(
                 False,
@@ -1078,7 +1184,7 @@ def unstage_all(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT
 def head_abbrev(cwd: str | Path | None, run=subprocess.run, timeout: float = GIT_TIMEOUT_S) -> str | None:
     """HEAD's abbreviated sha (`rev-parse --short HEAD`) for the commit
     toast; None when git couldn't say, or said something that isn't one."""
-    result = run_git(cwd, ["rev-parse", "--short", "HEAD"], run=run, timeout=timeout)
+    result = run_git(cwd, head_abbrev_argv(), run=run, timeout=timeout)
     text = result.stdout.strip()
     return text if result.ok and re.fullmatch(r"[0-9a-f]{4,40}", text) else None
 
@@ -1187,6 +1293,12 @@ def _conflict_files(
     paths: list[str] = []
     files: list[File] = []
     seen: set[str] = set()
+    wanted = [
+        row.path
+        for row in status.unstaged
+        if row.code == _STATUS_UNMERGED and safe_path(row.path) and _under(row.path, pathspecs)
+    ]
+    sizes = file_sizes(root, wanted[: MAX_CONFLICT_DIFFS + 1], run=run)
     for row in status.unstaged:
         if row.code != _STATUS_UNMERGED or row.path in seen or not safe_path(row.path):
             continue
@@ -1195,7 +1307,7 @@ def _conflict_files(
         seen.add(row.path)
         if len(seen) > MAX_CONFLICT_DIFFS:
             break
-        size = _file_size(os.path.join(root, row.path))
+        size = sizes.get(row.path)
         if size is not None and size > diffmodel.TOO_LARGE_BYTES:
             files.append(_placeholder(row.path, 0, 0, conflict=True))
             continue
@@ -1227,6 +1339,23 @@ def _file_size(path: str) -> int | None:
         return None
 
 
+def file_sizes(root: str, paths: Sequence[str], run=subprocess.run) -> dict[str, int | None]:
+    """The size on disk of each repository-relative path under *root*
+    (None: gone or unreadable) — read_diff's too-large gate for the files
+    git won't size (untracked, unmerged). One stat each here; over the API
+    one `git.sizes` request (the transport's `sizes`)."""
+    listed = [path for path in paths if safe_path(path)]
+    remote = _remote(run)
+    if remote is not None:
+        try:
+            answer = remote.sizes(root, listed)
+        except Exception:  # the transport answers; a failure reads as "gone"
+            log.debug("gitops: sizes failed", exc_info=True)
+            return dict.fromkeys(listed)
+        return {path: answer.get(path) for path in listed}
+    return {path: _file_size(os.path.join(root, path)) for path in listed}
+
+
 def _untracked_files(
     root: str, status: Status, pathspecs: Sequence[str], run, timeout: float
 ) -> list[File]:
@@ -1237,6 +1366,12 @@ def _untracked_files(
     read, one that vanished or that git wouldn't diff dropped."""
     files: list[File] = []
     seen: set[str] = set()
+    wanted = [
+        row.path
+        for row in status.unstaged
+        if row.code == _STATUS_UNTRACKED and safe_path(row.path) and _under(row.path, pathspecs)
+    ]
+    sizes = file_sizes(root, wanted[: MAX_UNTRACKED_DIFFS + 1], run=run)
     for row in status.unstaged:
         if row.code != _STATUS_UNTRACKED or row.path in seen or not safe_path(row.path):
             continue
@@ -1245,7 +1380,7 @@ def _untracked_files(
         seen.add(row.path)
         if len(seen) > MAX_UNTRACKED_DIFFS:
             break
-        size = _file_size(os.path.join(root, row.path))
+        size = sizes.get(row.path)
         if size is None:
             continue
         if size > diffmodel.TOO_LARGE_BYTES:
@@ -1372,6 +1507,12 @@ def file_at(
     if root is None:
         return None
     if ref is None:
+        remote = _remote(run)
+        if remote is not None:
+            # The working tree is the service's: the blob GET reads it
+            # there (the client opens no project file, §3.23).
+            result = remote.blob(root, AT_WORKTREE, None, path, timeout)
+            return result.data if result.ok and len(result.data) <= MAX_BLOB_BYTES else None
         try:
             full = os.path.join(root, path)
             if os.path.getsize(full) > MAX_BLOB_BYTES:
@@ -1578,15 +1719,28 @@ def run_plan(
     trash: Trash | None = None,
     run=subprocess.run,
     timeout: float = GIT_TIMEOUT_S,
+    context: PlanContext | None = None,
 ) -> ApplyResult:
     """Carry out a gitpatch.Plan from the repository root: `add` /
     `reset` / `checkout` of its paths (stage_paths / unstage_paths /
     checkout_paths), the applies of its patch (apply_patch, to the index
     forward or in reverse, or to the working tree in reverse — with the
     `--3way` retry when *three_way*, a revert's), or *trash* — the
-    caller's mover (the page's Gio.File.trash; never an unlink), handed
+    caller's mover (the service's Gio.File.trash; never an unlink), handed
     the root and the paths — for OP_TRASH, refused without one. Worker
-    thread; never raises."""
+    thread; never raises.
+
+    Over the API (a transport installed, PR-2.1) the whole plan goes to
+    the service as one `git.plan` with *context* — what it was made
+    against, the stable keys included — and the service re-reads the
+    file's patch and refuses `stale` (ApplyResult.stale) when a key moved;
+    the trash is the service's. A plan with no context is refused there:
+    the page always has one."""
+    remote = _remote(run)
+    if remote is not None:
+        if context is None:
+            return ApplyResult(False, "", "no plan context")
+        return remote.plan(str(cwd) if cwd else "", plan, context, three_way, timeout)
     root = _root(cwd)
     if root is None:
         return ApplyResult(False, "", "not a git repository")
@@ -1637,6 +1791,9 @@ def tree_state_signature(
     index and HEAD moves are gitinfo.tree_signature's, on the tick. None
     when either git read couldn't be made — a None never equals anything,
     so the caller reloads."""
+    remote = _remote(run)
+    if remote is not None:
+        return remote.tree_state(str(cwd)) if cwd else None
     root = _root(cwd)
     status = run_git_bytes(root, status_argv(), run=run, timeout=timeout)
     if not status.ok:
@@ -1658,3 +1815,374 @@ def tree_state_signature(
             mark = f"{stat.st_size}:{stat.st_mtime_ns}".encode()
         digest.update(row.path.encode("utf-8", "replace") + b"\0" + mark + b"\0")
     return digest.hexdigest()
+
+
+# -- the builder registry (split-service spec §3.23, D33) ------------------------------
+#
+# Git crosses the API as `(builder name, keyword args)`, never an argv. The
+# service calls the named builder with the args and runs what it makes
+# (`build`); the client's transport maps the argv a caller built back to
+# the builder and its args (`match_argv`: each builder registers a matcher
+# over its argv's leading tokens) and re-builds the argv from what it
+# parsed to prove the round trip before anything is sent. An argv no
+# builder matches, or one whose round trip differs, is `unreachable` with a
+# logged error: a new git call is a new builder here, and nothing else.
+# `file_patch_argv` is diff_argv's argv with pathspecs, so diff_argv
+# matches it; fixup_argv's argv is commit_argv's with a `fixup! ` summary,
+# matched first so the service runs the narrower builder.
+
+Matcher = Callable[[list[str]], dict | None]
+
+
+def _exact(argv_fn: Callable[[], list[str]]) -> Matcher:
+    expected = argv_fn()
+    return lambda argv: {} if argv == expected else None
+
+
+def _literal_paths(tokens: Sequence[str]) -> list[str] | None:
+    """The paths behind `:(literal)` pathspecs, None for any other token."""
+    prefix = literal_pathspec("")
+    out: list[str] = []
+    for token in tokens:
+        if not token.startswith(prefix):
+            return None
+        out.append(token[len(prefix) :])
+    return out
+
+
+def _specs(tokens: Sequence[str]) -> tuple[list[str], list[str]] | None:
+    """(pathspecs, excludes) behind a `--` tail of literal and
+    exclude-literal specs; None for any other token."""
+    literal, exclude = literal_pathspec(""), _exclude_pathspec("")
+    paths: list[str] = []
+    excludes: list[str] = []
+    for token in tokens:
+        if token.startswith(exclude):
+            excludes.append(token[len(exclude) :])
+        elif token.startswith(literal):
+            paths.append(token[len(literal) :])
+        else:
+            return None
+    return paths, excludes
+
+
+def _after(argv: list[str], head: Sequence[str]) -> list[str] | None:
+    """argv's tail after *head*, None when argv doesn't start with it."""
+    head = list(head)
+    return argv[len(head) :] if argv[: len(head)] == head else None
+
+
+def _split_dashes(tail: list[str]) -> tuple[list[str], list[str]] | None:
+    """(before, after) around the first `--` of *tail*; None without one."""
+    if "--" not in tail:
+        return None
+    at = tail.index("--")
+    return tail[:at], tail[at + 1 :]
+
+
+def _load_of(revisions: list[str]) -> tuple[object, str | None] | None:
+    """(load, parent_target) behind diff_argv's revision tokens."""
+    if revisions == []:
+        return "unstaged", None
+    if revisions == ["--staged"]:
+        return "staged", None
+    if len(revisions) != 1 or "..." not in revisions[0]:
+        return None
+    left, _dots, right = revisions[0].partition("...")
+    if right == "HEAD" and left:
+        return "branch", left
+    return {gitloads.RANGE_KEY: revisions[0]}, None
+
+
+def _match_log(argv: list[str]) -> dict | None:
+    tail = _after(argv, ["log", "--no-decorate", LOG_FORMAT, "-n"])
+    if tail is None or len(tail) < 2 or tail[-1] != "--" or not tail[0].isdigit():
+        return None
+    return {"range_args": tail[1:-1], "limit": int(tail[0])}
+
+
+def _match_stack_walk(argv: list[str]) -> dict | None:
+    tail = _after(argv, ["rev-list", "--topo-order", "-n"])
+    if tail is None or len(tail) != 3 or tail[2] != "--" or not tail[0].isdigit():
+        return None
+    rev = tail[1]
+    if ".." in rev:
+        lower, _d, upper = rev.partition("..")
+        return {"lower": lower, "upper": upper, "limit": int(tail[0])}
+    return {"lower": None, "upper": rev, "limit": int(tail[0])}
+
+
+def _match_commit(argv: list[str]) -> dict | None:
+    tail = _after(argv, ["commit", "-q", "-m"])
+    if tail is None or len(tail) not in (1, 3) or (len(tail) == 3 and tail[1] != "-m"):
+        return None
+    return {"summary": tail[0], "body": tail[2] if len(tail) == 3 else None}
+
+
+def _match_fixup(argv: list[str]) -> dict | None:
+    if len(argv) == 4 and argv[:3] == ["commit", "-q", "-m"] and argv[3].startswith("fixup! "):
+        return {"sha": argv[3][len("fixup! ") :]}
+    return None
+
+
+def _match_revert(argv: list[str]) -> dict | None:
+    if len(argv) == 3 and argv[0] == "revert" and argv[1] in ("--no-edit", "--no-commit"):
+        return {"sha": argv[2], "commit": argv[1] == "--no-edit"}
+    return None
+
+
+def _match_operation(flag: str) -> Matcher:
+    def match(argv: list[str]) -> dict | None:
+        if len(argv) == 2 and argv[1] == flag and argv[0] in OPERATION_KINDS:
+            return {"kind": argv[0]}
+        return None
+
+    return match
+
+
+def _match_rev_parse(argv: list[str]) -> dict | None:
+    tail = _after(argv, ["rev-parse", "--verify", "--quiet"])
+    return {"rev": tail[0]} if tail is not None and len(tail) == 1 else None
+
+
+def _match_merge_base(argv: list[str]) -> dict | None:
+    return {"a": argv[1], "b": argv[2]} if len(argv) == 3 and argv[0] == "merge-base" else None
+
+
+def _match_show(argv: list[str]) -> dict | None:
+    tail = _after(argv, [*DIFF_PREFIX_ARGS, "show", "--format=", *DIFF_ARGS])
+    if tail is None:
+        return None
+    halves = _split_dashes(tail)
+    if halves is None or len(halves[0]) != 1:
+        return None
+    specs = _specs(halves[1])
+    if specs is None:
+        return None
+    return {"ref": halves[0][0], "pathspecs": specs[0], "excludes": specs[1]}
+
+
+def _match_diff(argv: list[str]) -> dict | None:
+    tail = _after(argv, [*DIFF_PREFIX_ARGS, "diff", *DIFF_ARGS])
+    if tail is None:
+        return None
+    halves = _split_dashes(tail)
+    if halves is None:
+        return None
+    loaded = _load_of(halves[0])
+    specs = _specs(halves[1])
+    if loaded is None or specs is None:
+        return None
+    return {
+        "load": loaded[0],
+        "parent_target": loaded[1],
+        "untracked": True,
+        "pathspecs": specs[0],
+        "excludes": specs[1],
+    }
+
+
+def _match_numstat(argv: list[str]) -> dict | None:
+    if argv[:1] == ["show"]:
+        tail = _after(argv, ["show", "--format=", "--numstat", "-z", *DIFF_ARGS])
+        if tail is None:
+            return None
+        halves = _split_dashes(tail)
+        if halves is None or len(halves[0]) != 1:
+            return None
+        paths = _literal_paths(halves[1])
+        if paths is None:
+            return None
+        return {"load": {gitloads.SHOW_KEY: halves[0][0]}, "parent_target": None, "pathspecs": paths}
+    tail = _after(argv, ["diff", "--numstat", "-z", *DIFF_ARGS])
+    if tail is None:
+        return None
+    halves = _split_dashes(tail)
+    if halves is None:
+        return None
+    loaded = _load_of(halves[0])
+    paths = _literal_paths(halves[1])
+    if loaded is None or paths is None:
+        return None
+    return {"load": loaded[0], "parent_target": loaded[1], "pathspecs": paths}
+
+
+def _match_untracked_diff(argv: list[str]) -> dict | None:
+    head = [*DIFF_PREFIX_ARGS, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", _DEV_NULL]
+    tail = _after(argv, head)
+    return {"path": tail[0]} if tail is not None and len(tail) == 1 else None
+
+
+def _match_conflict_diff(argv: list[str]) -> dict | None:
+    tail = _after(argv, [*DIFF_PREFIX_ARGS, "diff", *DIFF_ARGS, "--ours", "--"])
+    paths = _literal_paths(tail) if tail is not None else None
+    return {"paths": paths} if paths else None
+
+
+def _match_file_at(argv: list[str]) -> dict | None:
+    if len(argv) != 2 or argv[0] != "show" or ":" not in argv[1]:
+        return None
+    ref, _colon, path = argv[1].partition(":")
+    return {"ref": ref, "path": path}
+
+
+def _match_apply(argv: list[str]) -> dict | None:
+    tail = _after(argv, list(APPLY_ARGS))
+    if tail is None or not tail or tail[-1] != "-":
+        return None
+    flags = tail[:-1]
+    allowed = ["--cached", "--reverse", "--3way"]
+    if any(flag not in allowed for flag in flags) or flags != [f for f in allowed if f in flags]:
+        return None
+    return {"cached": "--cached" in flags, "reverse": "--reverse" in flags, "three_way": "--3way" in flags}
+
+
+def _match_paths(head: Sequence[str], name: str = "paths") -> Matcher:
+    def match(argv: list[str]) -> dict | None:
+        tail = _after(argv, head)
+        paths = _literal_paths(tail) if tail is not None else None
+        return {name: paths} if paths else None
+
+    return match
+
+
+def _match_unmerged_stages(argv: list[str]) -> dict | None:
+    tail = _after(argv, ["ls-files", "-u", "-z", "--"])
+    paths = _literal_paths(tail) if tail is not None else None
+    return {"path": paths[0]} if paths and len(paths) == 1 else None
+
+
+def _match_checkout_side(argv: list[str]) -> dict | None:
+    if len(argv) < 5 or argv[:2] != ["checkout", "-q"] or argv[3] != "--":
+        return None
+    side = argv[2][2:] if argv[2].startswith("--") else ""
+    paths = _literal_paths(argv[4:])
+    return {"side": side, "paths": paths} if side in RESOLVE_SIDES and paths else None
+
+
+def _match_commit_ref(head: Sequence[str]) -> Matcher:
+    """gitloads' three: `<head> <ref>^{commit} --` (or no trailing `--`)."""
+
+    def match(argv: list[str]) -> dict | None:
+        tail = _after(argv, head)
+        if tail is None or not tail:
+            return None
+        if tail[-1] == "--":
+            tail = tail[:-1]
+        if len(tail) != 1 or not tail[0].endswith("^{commit}"):
+            return None
+        return {"ref": tail[0][: -len("^{commit}")]}
+
+    return match
+
+
+def _match_checkout_branch(argv: list[str]) -> dict | None:
+    if len(argv) == 2 and argv[0] == "checkout" and gitfiles.safe_branch_name(argv[1]):
+        return {"branch": argv[1]}
+    return None
+
+
+def _registry() -> dict[str, tuple[Callable[..., list[str] | None], Matcher]]:
+    return {
+        "fixup_argv": (fixup_argv, _match_fixup),
+        "commit_argv": (commit_argv, _match_commit),
+        "log_argv": (log_argv, _match_log),
+        "unpushed_argv": (unpushed_argv, _exact(unpushed_argv)),
+        "has_remote_tracking_argv": (has_remote_tracking_argv, _exact(has_remote_tracking_argv)),
+        "status_argv": (status_argv, _exact(status_argv)),
+        "branch_tips_argv": (branch_tips_argv, _exact(branch_tips_argv)),
+        "stack_walk_argv": (stack_walk_argv, _match_stack_walk),
+        "staged_paths_argv": (staged_paths_argv, _exact(staged_paths_argv)),
+        "stage_all_argv": (stage_all_argv, _exact(stage_all_argv)),
+        "unstage_all_argv": (unstage_all_argv, _exact(unstage_all_argv)),
+        "revert_argv": (revert_argv, _match_revert),
+        "revert_quit_argv": (revert_quit_argv, _exact(revert_quit_argv)),
+        "continue_argv": (continue_argv, _match_operation("--continue")),
+        "abort_argv": (abort_argv, _match_operation("--abort")),
+        "resolve_commit_argv": (
+            gitloads.resolve_commit_argv,
+            _match_commit_ref(["rev-parse", "--verify", "--quiet"]),
+        ),
+        "rev_parse_argv": (rev_parse_argv, _match_rev_parse),
+        "head_abbrev_argv": (head_abbrev_argv, _exact(head_abbrev_argv)),
+        "merge_base_argv": (merge_base_argv, _match_merge_base),
+        "show_argv": (show_argv, _match_show),
+        "diff_argv": (diff_argv, _match_diff),
+        "numstat_argv": (numstat_argv, _match_numstat),
+        "untracked_diff_argv": (untracked_diff_argv, _match_untracked_diff),
+        "conflict_diff_argv": (conflict_diff_argv, _match_conflict_diff),
+        "file_at_argv": (file_at_argv, _match_file_at),
+        "apply_argv": (apply_argv, _match_apply),
+        "checkout_side_argv": (checkout_side_argv, _match_checkout_side),
+        "checkout_paths_argv": (checkout_paths_argv, _match_paths(["checkout", "-q", "--"])),
+        "add_paths_argv": (add_paths_argv, _match_paths(["add", "-A", "--"])),
+        "reset_paths_argv": (reset_paths_argv, _match_paths(["reset", "-q", "--"])),
+        "unmerged_stages_argv": (unmerged_stages_argv, _match_unmerged_stages),
+        "remove_paths_argv": (remove_paths_argv, _match_paths(["rm", "-q", "--"])),
+        "commit_subject_argv": (
+            gitloads.commit_subject_argv,
+            _match_commit_ref(["log", "-1", "--format=%s"]),
+        ),
+        "commit_message_argv": (
+            gitloads.commit_message_argv,
+            _match_commit_ref(["log", "-1", f"--format={gitloads.COMMIT_FORMAT}"]),
+        ),
+        "status_porcelain_argv": (gitinfo.status_porcelain_argv, _exact(gitinfo.status_porcelain_argv)),
+        "check_ignore_argv": (gitinfo.check_ignore_argv, _exact(gitinfo.check_ignore_argv)),
+        "pull_argv": (pull_argv, _exact(pull_argv)),
+        "checkout_branch_argv": (checkout_branch_argv, _match_checkout_branch),
+    }
+
+
+BUILDERS: dict[str, tuple[Callable[..., list[str] | None], Matcher]] = _registry()
+# The most argv elements a built argv may have, and the longest one: what
+# the service checks a builder's result against before running it.
+MAX_ARGV_ITEMS = 8192
+MAX_ARGV_ITEM_CHARS = 4096
+
+
+def build(name: str, args: dict) -> list[str]:
+    """The argv builder *name* makes of *args* (the service's half of
+    `git.run`). ValueError for a name outside BUILDERS (`unknown`) or args
+    the builder refuses or an argv that isn't all bounded text (`invalid`):
+    KeyError for the former, ValueError for the latter."""
+    entry = BUILDERS.get(name)
+    if entry is None:
+        raise KeyError(name)
+    builder = entry[0]
+    if not isinstance(args, dict) or not all(isinstance(key, str) for key in args):
+        raise ValueError("args must be an object of keyword arguments")
+    try:
+        argv = builder(**args)
+    except (TypeError, ValueError, AttributeError) as err:
+        raise ValueError(f"{name}: {err}") from None
+    if argv is None:
+        raise ValueError(f"{name}: no argv for these arguments")
+    argv = list(argv)
+    if len(argv) > MAX_ARGV_ITEMS:
+        raise ValueError(f"{name}: too many arguments")
+    for item in argv:
+        if not isinstance(item, str) or "\0" in item or len(item) > MAX_ARGV_ITEM_CHARS:
+            raise ValueError(f"{name}: an argument is not bounded text")
+    return argv
+
+
+def match_argv(argv: Sequence[str]) -> tuple[str, dict] | None:
+    """(builder name, keyword args) that make *argv*, or None when no
+    builder does — including one whose matcher parses it but whose
+    re-built argv differs (the round trip is the proof)."""
+    listed = [str(item) for item in argv]
+    for name, (builder, matcher) in BUILDERS.items():
+        try:
+            parsed = matcher(listed)
+        except (TypeError, ValueError, IndexError):
+            parsed = None
+        if parsed is None:
+            continue
+        try:
+            rebuilt = builder(**parsed)
+        except (TypeError, ValueError):
+            continue
+        if rebuilt is not None and list(rebuilt) == listed:
+            return name, parsed
+    return None
