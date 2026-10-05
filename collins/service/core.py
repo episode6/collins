@@ -454,6 +454,9 @@ class ServiceCore:
         # A chat's throwaway folder may have been swept since (PR-1.12d: the
         # client never makes it).
         chats.ensure_chat_dir(cwd)
+        # D39: the client sends the cwd it has and never looks; a cwd that
+        # is no directory here starts the shell in this machine's home.
+        cwd = spawn_cwd(cwd)
         env = self._spawn_env()
         cols = message.get("cols") or ptyserver.termscreen.DEFAULT_COLS
         rows = message.get("rows") or ptyserver.termscreen.DEFAULT_ROWS
@@ -498,7 +501,7 @@ class ServiceCore:
         pty.handle = message.get("handle")
         if plan:
             self._enter_cwd_in_box(pty_id, plan, cwd)
-        return protocol.reply(message.id, pty=pty_id, cols=pty.cols, rows=pty.rows)
+        return protocol.reply(message.id, pty=pty_id, cols=pty.cols, rows=pty.rows, cwd=pty.cwd)
 
     # -- the sessions (§3.19)
 
@@ -610,8 +613,17 @@ class ServiceCore:
         self.publish_pty(record.pty_id)
         if self.background is not None:
             self.background.sessions_changed()
+        # `cwd` (D39): where the session's shell started, which is the
+        # request's unless that was no directory here (`Session.spawn`'s
+        # fallback: the repository of a worktree that is gone, else this
+        # machine's home). The pty's row carries the same.
         return protocol.reply(
-            message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
+            message.id,
+            pty=record.pty_id,
+            cols=pty.cols,
+            rows=pty.rows,
+            handle=record.handle,
+            cwd=session.cwd or pty.cwd,
         )
 
     @staticmethod
@@ -1119,6 +1131,7 @@ class ServiceCore:
             foreground_pgrp=pty.foreground_pgrp(),
             running_command=bool(pty.has_running_command()),
             process_cwd=pty.process_cwd(),
+            cwd=pty.cwd,
             plan=pty.plan,
             cols=pty.cols,
             rows=pty.rows,
@@ -2518,6 +2531,16 @@ def _spawn_refusal(message: protocol.Message, exc: ptyserver.SpawnError) -> dict
         "failed to start shell: {msg}",
         {"msg": f"{exc.strerror}: {exc.filename}"},
     )
+
+
+def spawn_cwd(cwd: object) -> str:
+    """Where a `spawn` starts its shell (D39): *cwd* when it is a directory
+    on this machine, else this machine's home. The service's check, in
+    place of the four `Path.is_dir` reads the client made of its own disk
+    before PR-2.8; the reply and the pty's row say which it was."""
+    if isinstance(cwd, str) and cwd and os.path.isdir(cwd):
+        return cwd
+    return str(Path.home())
 
 
 def transcript_path_allowed(path: object) -> bool:

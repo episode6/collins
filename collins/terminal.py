@@ -1079,6 +1079,9 @@ class PanelTerminal(Gtk.Box):
         self._child_pid: int | None = None
         self._spawned = False
         self._ever_spawned = False  # panel was used at some point in this tab's life
+        self._cd_seq = 0  # the newest `cd` asked of the service's `fs.stat` (_sync_cwd)
+        # Where the service started this shell (D39; `spawn`'s `cwd`).
+        self.started_cwd: str | None = None
         self._easy_copy_paste = False
         self._keys = keymap.KeyMatcher(keybindings.current())
         # Agent input (run_command) that arrived while the shell was still
@@ -1174,8 +1177,10 @@ class PanelTerminal(Gtk.Box):
             self._history_paint = (
                 restore_text.replace("\n", "\r\n") + f"\r\n\x1b[2m{marker}\x1b[0m\r\n"
             )
-        if cwd is None or not Path(cwd).is_dir():
-            cwd = str(Path.home())
+        # D39: the cwd goes to the service as the tab has it; whether it is
+        # a directory there, and where the shell starts when it is not (the
+        # service's home), is the service's to say (`spawn`'s `cwd`).
+        cwd = cwd or str(Path.home())
         sandboxed = False
         if self._plan_lookup is not None:
             plan = self._plan_lookup()
@@ -1224,6 +1229,8 @@ class PanelTerminal(Gtk.Box):
             reply = client.request(request)
             pty = int(reply["pty"])
             view.attach(pty)
+            # Where the service started it (D39): *cwd*, or its fallback.
+            self.started_cwd = reply.get("cwd") or cwd
         except RequestRefused as exc:
             reason = _(exc.msgid).format_map(exc.details) if exc.msgid else _("failed to start shell")
             self._pending_input.clear()
@@ -1404,7 +1411,7 @@ class PanelTerminal(Gtk.Box):
         TerminalTab._offer_shells_follow). False when the shell is busy and
         was left alone, or already there."""
         shell_pid = self._shell_pid()
-        if not cwd or not Path(cwd).is_dir() or shell_pid is None:
+        if not cwd or shell_pid is None:
             return False
         if self.has_running_command():
             return False
@@ -1414,16 +1421,33 @@ class PanelTerminal(Gtk.Box):
         return True
 
     def _sync_cwd(self, cwd: str | None) -> None:
+        """`cd` the idle shell to *cwd*, once the service has said *cwd* is
+        a directory on its machine (D39: this device's disk is not asked;
+        `fs.stat`, off the main loop). The `cd` is typed when the answer
+        lands, if the shell is still idle and still elsewhere; a path that
+        is no directory there, or a service that cannot say, types
+        nothing, as a missing directory never did."""
         shell_pid = self._shell_pid()
-        if not cwd or not Path(cwd).is_dir() or shell_pid is None:
+        if not cwd or shell_pid is None:
             return
         if self.has_running_command():
             return  # don't interrupt whatever the user left running
         if self._shell_cwd(shell_pid) == cwd:
             return
-        # The line reset clears any half-typed input before the cd; see
-        # shellinput for what else can be sitting on that line.
-        self._write(shell_command(f"cd {shlex.quote(cwd)}\n").encode())
+        self._cd_seq += 1
+        seq = self._cd_seq
+
+        def landed(status: str, found: object) -> None:
+            if seq != self._cd_seq or status != "ok" or not found.is_dir:
+                return  # a newer move, or nowhere to move to
+            pid = self._shell_pid()
+            if pid is None or self.has_running_command() or self._shell_cwd(pid) == cwd:
+                return  # it exited, got busy or got there while the service answered
+            # The line reset clears any half-typed input before the cd; see
+            # shellinput for what else can be sitting on that line.
+            self._write(shell_command(f"cd {shlex.quote(cwd)}\n").encode())
+
+        remotefiles.off_main(lambda: remotefiles.stat_path(cwd), landed, name="shell-cwd-stat")
 
     def has_running_command(self) -> bool:
         """True when something other than the shell owns the terminal's
@@ -1992,12 +2016,18 @@ class TerminalTab(Gtk.Box):
         # split above, in a new outer paned. Built now (but hidden) rather
         # than on first toggle, so per-session restore can reopen it without
         # a construct-on-demand race.
-        editor_root = cwd if cwd and Path(cwd).is_dir() else str(Path.home())
+        # The cwd the tab was handed, as it is (D39): whether it is still a
+        # directory is the service's to say, and where the session starts
+        # when it is not comes back in the `spawn` reply (or, for a pty the
+        # tab attaches to, in its row); `_land_where_the_service_says`
+        # moves the editor there.
+        editor_root = cwd or str(Path.home())
         # Where bare root-name links look (_RootNameLinks): the directory the
-        # editor opens at. That includes the HOME fallback above,
-        # deliberately: when a project dir is gone this whole tab is already
-        # rooted at home — the editor, quick open, and click-time resolution
-        # — so bare names follow suit rather than becoming the one link kind
+        # editor opens at. That includes the service's fallback,
+        # deliberately: when a project dir is gone this whole tab is
+        # rooted where the session started instead — the editor, quick open,
+        # and click-time resolution — so bare names follow suit (the
+        # editor's `root-changed`) rather than becoming the one link kind
         # that goes dark.
         self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root)
@@ -2368,6 +2398,7 @@ class TerminalTab(Gtk.Box):
             session.pty = int(reply["pty"])
             session.handle = str(reply.get("handle") or "")
             view.attach(session.pty)
+            self._land_where_the_service_says(request["cwd"], reply.get("cwd"))
             # The shells opened before the spawn (the new-chat screen's)
             # learn the session they belong to, so the service re-files
             # their history when it resolves (`rekey_shells`).
@@ -2391,6 +2422,38 @@ class TerminalTab(Gtk.Box):
             self.feed_message(_("failed to start shell: {msg}").format(msg=str(exc)))
             return
 
+    def _land_where_the_service_says(self, asked: str | None, started: object) -> None:
+        """D39: the session's shell started in *started* (the `spawn`
+        reply's `cwd`), which is *asked* unless that was no directory on
+        the service's machine: then the service fell back (its home; the
+        repository of a worktree that is gone), and the tab lands there
+        with it — the editor, and through its `root-changed` the bare
+        root-name links and the click-time resolver. Only the tab's own
+        root moves: an editor already re-rooted elsewhere (a follow into a
+        worktree) is left where it is. The tab's own cwd is the session
+        mirror's, which takes the service's from the `session` event."""
+        if not isinstance(started, str) or not started or started == asked:
+            return
+        if self.editor_root != (asked or ""):
+            return
+        self._editor.request_root(started)
+
+    def _land_where_the_pty_started(self, started: object) -> None:
+        """The same for a pty the tab attaches to (D31): its row's `cwd`
+        is where the service started it. The tab's own cwd stands when it
+        is a directory there (`fs.stat`, off the main loop); when it is
+        not, the tab lands where the pty started, as a spawn's would."""
+        asked = self.editor_root
+        if not isinstance(started, str) or not started or started == asked:
+            return
+
+        def landed(status: str, found: object) -> None:
+            if status != "ok" or found.is_dir or self._editor is None or self.editor_root != asked:
+                return
+            self._editor.request_root(started)
+
+        remotefiles.off_main(lambda: remotefiles.stat_path(asked), landed, name="tab-cwd-stat")
+
     def _service_attach(self, pty: int) -> None:
         """Show an agent pty the service already runs (D31: a tab is a view
         over a pty): `attach` and its redraw, the session's facts whole in
@@ -2408,6 +2471,7 @@ class TerminalTab(Gtk.Box):
             if info.get("cols") and info.get("rows"):
                 self.terminal.set_size(int(info["cols"]), int(info["rows"]))
             self._view.attach(pty)
+            self._land_where_the_pty_started(info.get("cwd"))
         except (RequestRefused, ValueError) as exc:
             _log.info("pty %s could not be attached: %s", pty, exc)
             self.session.pty = None
