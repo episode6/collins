@@ -704,6 +704,8 @@ class _RootNameLinks:
             return
         if status == "ok":
             names = frozenset(value[0])
+            if value[1]:
+                _log.debug("root names of %s truncated at %d", root, len(names))
         elif isinstance(value, RequestRefused) and value.error == protocol.ERROR_GONE:
             names = frozenset()  # the root is not there (any more)
         else:
