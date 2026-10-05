@@ -158,7 +158,7 @@ def startup_held(tab) -> bool:
     """The service's word on the fresh spawn's hold (ServiceActivity.
     startup_held, reached through the probe where the window's
     `_startup_held(page)` was read)."""
-    return tab.probe("handle") in (tab.probe_call("activity.held_handles") or [])
+    return bool(tab.probe_call("activity.startup_held_for", tab.probe("handle")))
 
 
 def stage() -> bool:

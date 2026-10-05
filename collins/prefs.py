@@ -32,6 +32,7 @@ from . import (  # noqa: E402
     prefssearch,
     sandboxgrants,
     sandboxplan,
+    sandboxstatus,
     statusicon,
     tokensettings,
     updatecheck,
@@ -779,17 +780,14 @@ class PreferencesDialog(Adw.Dialog):
             )
         )
         self._refresh_sandbox_status()
-        if sandboxplan.probe_reason() is None:
-            # The launch probe hasn't landed yet: ask again, off the main loop.
-            sandboxplan.probe_async(
-                lambda _reason: GLib.idle_add(
-                    self._refresh_sandbox_status, priority=GLib.PRIORITY_DEFAULT
-                )
-            )
+        # The probe is the service's; its verdict reaches this client as an
+        # event (sandboxstatus). Until it lands the row says so.
+        stop = sandboxstatus.listen(lambda _reason: self._refresh_sandbox_status())
+        self.connect("closed", lambda *_a: stop())
         return group
 
     def _refresh_sandbox_status(self) -> bool:
-        reason = sandboxplan.probe_reason()
+        reason = sandboxstatus.probe_reason()
         available = reason == ""
         for row in self._sandbox_rows:
             row.set_sensitive(available)

@@ -77,11 +77,20 @@ p)`). Up: the session reports through a `SessionHost` listener (`alive`,
 `mapped`, `paint`, `focus_terminal`, `spawn_shell`, `session_resolved`,
 `transcript_landed`, `process_exited`, ...) which the service's
 `hosting.SessionRecord` implements: as `session`, `cut`, `composer`,
-`focus`, `shells` and `close` events to the pty's attached clients, which
-the tab turns into its existing signals. A composer's open-cut reaches the
+`focus.terminal`, `shells` and `close` events to the pty's attached
+clients, which the tab turns into its existing signals (`focus` stays the
+client's own event, `focused` required). A composer's open-cut reaches the
 composer through a `CutSink` (`hosting.CutSink`: `alive` is "the client
-is still attached and hasn't called the cut off", `seed` and `refuse` are
-`cut` events by handle). `input_sent` is the one host call that never
+is still attached and hasn't called the cut off"; `seed`, `refuse` and —
+for a cut that ends with nothing to seed, an empty box or one that never
+settles — `ended` are `cut` events by handle, `seeded` / `refused` /
+`cancelled`; a seeded cut's handle is let go of at once, and `cut.cancel`
+reaches only the asking client's cuts, calling the session's chain off
+when it is that client's). The tab's decisions on those events are
+`ClientSession.cut_action` (seed an open composer, `_restore_or_stash` for
+one that closed meanwhile, lower one whose box can't be read) and
+`ClientSession.close_action` (`budget` → the forced close), GTK-free and
+tested in `tests/test_clientsession.py`. `input_sent` is the one host call that never
 reaches a client: every write the session makes (`Session.write_text`: an
 injected prompt, a switch, a close flow's keys) is announced *before* the
 bytes go to the pty, and on the service's pty they never pass a client's
@@ -92,7 +101,7 @@ baseline's last pristine snapshot on a "\\r", as `on_input` does for a
 typed Enter. A fresh spawn whose turns were only ever sent that way would
 otherwise sit in its startup hold for good (no pole, no unread flag, no
 finished notification); `scripts/check_injected_prompt_pole.py` drives the
-road end to end through the probe (`activity.held_handles`,
+road end to end through the probe (`activity.startup_held_for`,
 `echo_gate.armed`).
 
 **Testing a state machine.** `tests/test_session.py` builds a `Session`
@@ -579,11 +588,14 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   "[session manager]" line and inserts it into the stream (a line painted
   before the spawn waits for the pty). `focus_terminal`,
   `refocus_composer`, `resend_composed`, `stash_draft` and
-  `mark_stale_shells` are `focus`, `composer` and `shells` events; a
-  close budget running out is a `close` event (`state: budget`) the
-  window answers by forcing the close.
+  `mark_stale_shells` are `focus.terminal`, `composer` and `shells`
+  events; a close budget running out is a `close` event (`state: budget`)
+  the window answers by forcing the close.
 - **The requests** (`ServiceCore._req_*`, each routed to the session by
-  its pty): `prompt {text, focus}`, `write`, `switch {model|effort,
+  its pty): `prompt {text, focus, when_empty}` (with `when_empty` the
+  service re-reads `takes_prompt` off the live screen and refuses with
+  `PROMPT_BLOCK_MSGID`: the PR menu's send and `start_session`'s poll use
+  it), `write {text, mention}`, `switch {model|effort,
   composer_open}`, `send {text, composer_open}` (reply `sent`: now, or
   waiting on a cut, which comes back as `composer resend`), `cut` (reply
   the cut's `handle`), `cut.cancel`, `draft.restore` (reply `restored`),

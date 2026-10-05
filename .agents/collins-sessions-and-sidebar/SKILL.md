@@ -291,7 +291,10 @@ speaks no progress). All of it runs on the service since PR-1.12a
 (`service/tracking.py` `ServiceActivity`, `tests/test_tracking.py`).
 Ungated sources are held on fresh spawns until the gate arms
 (`ServiceActivity.startup_held`): on a "\r" in a client's input frame (an
-Enter typed into the VTE, `ServiceActivity.on_input`) *or* on a "\r" the
+Enter typed into the VTE, `ServiceActivity.on_input`; the pole starts
+pre-emptively on a bare Return alone — Alt+Enter and a pasted newline arm
+the gate but start no pole, as the window's Enter key was the one starter)
+*or* on a "\r" the
 session writes itself (`Session.write_text` pokes its own gate and tells its
 host `input_sent`, which the service's `SessionRecord` hands to
 `ServiceActivity.input_sent` for the baseline's last pristine snapshot; the

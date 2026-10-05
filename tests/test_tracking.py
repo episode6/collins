@@ -7,7 +7,8 @@ with the window's three exemptions; a resolved session's handle edge
 passes while its id edge is judged; the background-busy poll's answer
 marks and finishes the attached session."""
 
-from collins.activity import PROGRESS_FINISH_GRACE_S, EchoGate, FinishLedger
+from collins.activity import PROGRESS_FINISH_GRACE_S, EchoGate, FinishLedger, ProgressWatch
+from collins.service import termstream
 from collins.service.tracking import ServiceActivity
 
 SID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
@@ -32,6 +33,7 @@ class Timers:
 class FakeProgress:
     def __init__(self):
         self.ended = 0
+        self.busy = False  # what the hint reads right now (ProgressWatch.busy)
 
     def turn_ended(self):
         self.ended += 1
@@ -47,6 +49,11 @@ class FakeSession:
         self.finish_ledger = FinishLedger()
         self.stamp, self.size = (1, 1), 100
         self.updates = 0
+        self.redraws = False  # what `redraw_counts` answers
+        self.descendants = False  # what `has_background_descendant` answers
+
+    def redraw_counts(self, startup_held):
+        return self.redraws and not startup_held
 
     def finish_witness(self):
         return self.stamp, self.size
@@ -58,7 +65,7 @@ class FakeSession:
         return set(getattr(self, "cmdlines", ()))
 
     def has_background_descendant(self, ignore):
-        return False
+        return self.descendants
 
 
 class FakeRecord:
@@ -67,12 +74,13 @@ class FakeRecord:
         self.handle = session.handle
         self.sent = []
         self.on_settled = None
+        self.process_reads = 0
 
     def send(self, fields, active_only=False):
         self.sent.append(dict(fields))
 
     def refresh_process_facts(self):
-        pass
+        self.process_reads += 1
 
 
 class Item:
@@ -119,14 +127,14 @@ class FakeState:
         self.baselines[session_id] = set(cmdlines)
 
 
-def make(*records, store=None, state=None, fetch=None):
+def make(*records, store=None, state=None, fetch=None, settings=None):
     timers = Timers()
     announced = []
     activity = ServiceActivity(
         records=lambda: list(records),
         store=store,
         state=state,
-        get_setting=lambda key: True,
+        get_setting=(settings or {}).get if settings is not None else (lambda key: True),
         timeout_add=timers.add,
         source_remove=timers.remove,
         land=lambda fn, *args: fn(*args),
@@ -322,3 +330,135 @@ def test_the_attached_session_is_found_through_the_forward_chain():
     activity._apply_background_busy(set())
     assert activity.tracker.finish_pending(FORK) and record.session.progress.ended == 1
     assert PROGRESS_FINISH_GRACE_S > 0
+
+
+# -- the feeds -------------------------------------------------------------------------
+
+
+def test_a_bare_return_arms_the_gate_marks_the_pole_and_snapshots_the_baseline():
+    """What the window did on the Enter key and the VTE's commit: a "\r"
+    frame arms the gate (`poked`), takes the baseline's last snapshot and
+    starts the pole pre-emptively."""
+    state = FakeState()
+    session = FakeSession("s-1", SID)
+    record = FakeRecord(session)
+    activity, _timers, _announced = make(record, state=state)
+    activity.started(record, fresh=True)
+    session.cmdlines = {"mcp --stdio"}
+    activity.on_input(record, b"hel")
+    assert not session.echo_gate.armed and not activity.tracker.busy()
+    activity.on_input(record, b"\r")
+    assert session.echo_gate.armed
+    assert state.baselines[SID] == {"mcp --stdio"}
+    assert activity.tracker.busy() == {SID, "s-1"}
+
+
+def test_a_return_inside_another_key_or_a_paste_arms_but_does_not_mark():
+    """Alt+Enter (ESC CR) and a bracketed paste with a newline arm the gate
+    (the CLI gets a submit or a newline either way, and redraws) but start
+    no pole: only a bare Return did, on the window's Enter key."""
+    for frame in (b"\x1b\r", b"\x1b[200~a\rb\x1b[201~"):
+        session = FakeSession("s-1", SID)
+        record = FakeRecord(session)
+        activity, _timers, _announced = make(record, state=FakeState())
+        activity.started(record, fresh=True)
+        activity.on_input(record, frame)
+        assert session.echo_gate.armed, frame
+        assert not activity.tracker.busy(), frame
+
+
+def test_a_progress_hint_marks_and_its_clear_arms_a_grace_finish():
+    session = FakeSession("s-1", SID)
+    session.progress = ProgressWatch()
+    session.echo_gate.arm()  # past the startup hold
+    record = FakeRecord(session)
+    activity, _timers, _announced = make(record, state=FakeState())
+    activity.started(record, fresh=True)
+    activity.on_progress(record, termstream.Progress(state=3, percent=None))
+    assert activity.tracker.is_busy(SID)
+    activity.on_progress(record, termstream.Progress(state=0, percent=None))
+    assert activity.tracker.is_busy(SID) and activity.tracker.finish_pending(SID)
+    activity.on_progress(record, termstream.Progress(state=3, percent=None))
+    assert not activity.tracker.finish_pending(SID)  # the agent took its word back
+
+
+def test_a_progress_hint_is_dropped_under_the_startup_hold_and_with_the_setting_off():
+    session = FakeSession("s-1", SID)
+    session.progress = ProgressWatch()
+    record = FakeRecord(session)
+    activity, _timers, _announced = make(record, state=FakeState())
+    activity.started(record, fresh=True)  # fresh and unarmed: held
+    activity.on_progress(record, termstream.Progress(state=3, percent=None))
+    assert not activity.tracker.busy()
+    session.echo_gate.arm()
+    off = FakeSession("s-2", FORK)
+    off.progress = ProgressWatch()
+    off.echo_gate.arm()
+    off_record = FakeRecord(off)
+    quiet, _t, _a = make(off_record, state=FakeState(), settings={"progress_termprop": False})
+    quiet.on_progress(off_record, termstream.Progress(state=3, percent=None))
+    assert not quiet.tracker.busy()
+
+
+def test_a_settled_redraw_marks_when_it_reads_as_the_agents():
+    session = FakeSession("s-1", SID)
+    record = FakeRecord(session)
+    activity, _timers, _announced = make(record, state=FakeState())
+    activity.started(record, fresh=False)
+    assert record.on_settled == activity.on_settled
+    activity.on_settled(record)
+    assert not activity.tracker.busy()  # nothing the gate called the agent's
+    session.redraws = True
+    activity.on_settled(record)
+    assert activity.tracker.is_busy(SID)
+    # A busy session is re-marked on any settle: the window kept it alive
+    # on every redraw once up.
+    session.redraws = False
+    activity.on_settled(record)
+    assert activity.tracker.is_busy(SID)
+    activity.ended(record)
+    assert record.on_settled is None and not activity.tracker.busy()
+
+
+def test_the_process_poll_reads_the_facts_of_a_fresh_session_too():
+    """A fresh spawn with nothing submitted absorbs its children into the
+    baseline instead of marking — but its process facts are still read
+    (a sandboxed launch's `agent_running` turns true under one); a session
+    past its first submit with work under its agent is marked."""
+    fresh, working = FakeSession("s-1", SID), FakeSession("s-2", FORK)
+    working.echo_gate.arm()
+    working.descendants = True
+    fresh_record, working_record = FakeRecord(fresh), FakeRecord(working)
+    activity, _timers, _announced = make(fresh_record, working_record, state=FakeState())
+    activity.started(fresh_record, fresh=True)
+    activity.started(working_record, fresh=False)
+    assert activity._poll_processes() is True
+    assert fresh_record.process_reads == 1 and working_record.process_reads == 1
+    assert not activity.tracker.is_busy(SID) and activity.tracker.is_busy(FORK)
+
+
+def test_a_detach_under_any_row_standing_for_the_session_is_a_handoff():
+    """The window's `_detaching_now` read the chain: a /bg fork's row is
+    the origin's, and the flag sits on that row."""
+    store, state = FakeStore(SID), FakeState()
+    store.represented[FORK] = [SID]  # the fork's finishes are the origin's row's
+    store.items[SID].backgrounding = True
+    record = FakeRecord(FakeSession("s-2", FORK))
+    activity, _timers, announced = make(record, store=store, state=state)
+    activity.tracker.mark(FORK)
+    activity.tracker.finish(FORK)
+    assert announced == [] and {"finished": True} not in record.sent
+    assert store.items[SID].unread is False
+
+
+def test_the_busy_count_counts_sessions_not_keys():
+    store, state = FakeStore(SID), FakeState()
+    record = FakeRecord(FakeSession("s-1", SID))
+    activity, _timers, _announced = make(record, store=store, state=state)
+    activity.tracker.mark(SID)
+    activity.tracker.mark("s-1")
+    assert len(activity.tracker.busy()) == 2 and activity.busy_count() == 1
+    activity.tracker.mark(FORK)  # a background agent's id, no live session
+    assert activity.busy_count() == 2
+    assert activity.startup_held_for("s-1") is False  # not fresh
+    assert activity.startup_held_for("s-9") is False  # no such session

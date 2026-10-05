@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Callable
 
 from .. import mcptools, sandboxgrants, sandboxplan
@@ -56,6 +57,12 @@ from ..api import protocol
 log = logging.getLogger(__name__)
 
 _NOT_SET_UP = "Sandboxed sessions aren't set up here"
+
+
+_PLAN_NAME_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json")
+
+
+_PLAN_NAME_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json")
 
 
 def delivery_record(delivery) -> dict:
@@ -85,12 +92,21 @@ class SandboxRequests:
         sessions: Callable,
         broadcast: Callable[[dict], None],
         dispatch: Callable | None = None,
+        app_id: Callable[[], str] | None = None,
+        session_for_box: Callable[[str], object] | None = None,
     ) -> None:
         self._host = host
         self._grants = grants
         self._plan_of = plan_of
         self._sessions = sessions
         self._broadcast = broadcast
+        self._app_id = app_id or (lambda: "")
+        self._session_for_box = session_for_box or (lambda box: None)
+        # The plans this service derived, by the box each describes: the
+        # only files `sandbox.drop` releases (rule 5: the client names a
+        # path; whether it is one of the service's own is the service's
+        # to say).
+        self._derived: dict[str, set[str]] = {}
         if dispatch is None:
             from gi.repository import GLib
 
@@ -294,22 +310,48 @@ class SandboxRequests:
         fields: dict = {"reason": reason or ""}
         if derived:
             fields["plan"] = derived
+            self._derived.setdefault(sibling_box or box, set()).add(derived)
+            self._derived.setdefault(sibling_box or box, set()).add(derived)
         if sibling_box:
             fields["box"] = sibling_box
         return protocol.reply(message.id, **fields)
 
     def _drop(self, message: protocol.Message, box: str) -> dict:
         """A derived plan and its box let go of (toolclient's
-        `_drop_sibling_box`): the plan file released, the box's lease
-        released and the box forgotten with the grants recorded for it."""
-        sandboxplan.release_plan(message.get("plan"))
+        `_drop_sibling_box`): the plan file released — only one this
+        service derived for that box, under its own plan directory — the
+        box's lease released and the box forgotten with the grants
+        recorded for it. A box a session runs in is not dropped."""
+        if self._session_for_box(box) is not None:
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "A session is running in this sandbox")
+        plan = message.get("plan")
+        if plan:
+            if plan not in self._derived.get(box, ()) or not self._own_plan_path(plan):
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, "Not a plan this service derived for the sandbox"
+                )
+            self._derived[box].discard(plan)
+            sandboxplan.release_plan(plan)
         host = self._host()
         if host is not None:
             host.release(box)
             host.forget_box(box)
         return protocol.reply(message.id)
 
+    def _own_plan_path(self, plan: str) -> bool:
+        """Whether *plan* is a `<uuid>.json` right under this service's
+        plan directory (`sandboxplan.plan_dir`): the one shape of file
+        the service ever writes and may unlink."""
+        try:
+            own = os.path.realpath(sandboxplan.plan_dir(self._app_id()))
+            parent = os.path.realpath(os.path.dirname(plan))
+        except (OSError, ValueError):
+            return False
+        return parent == own and _PLAN_NAME_RE.fullmatch(os.path.basename(plan)) is not None
+
     def _forget(self, message: protocol.Message, box: str) -> dict:
+        if self._session_for_box(box) is not None:
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "A session is running in this sandbox")
         host = self._host()
         if host is not None:
             host.forget_box(box)

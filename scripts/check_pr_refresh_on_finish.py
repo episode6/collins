@@ -356,8 +356,7 @@ def step_page_reread() -> bool:
     # spend nothing: the run is being handed on, not completing. The window
     # marks a detach on its rows (`backgrounding`, the client flag the
     # service's tracker reads, PR-1.12a) as well as in its own set.
-    state["win"]._detaching.add(SESSION)
-    app.store.set_backgrounding(SESSION, True)
+    state["win"]._mark_backgrounding(SESSION)
     age_the_throttles()
     forget_page_loads()
     state["before"] = status_fetches()
@@ -372,7 +371,7 @@ def step_detaching() -> bool:
         f"{state['before']} -> {status_fetches()}, {page_loads()}",
     )
     state["win"]._detaching.discard(SESSION)
-    app.store.set_backgrounding(SESSION, False)
+    state["win"]._set_row_backgrounding(SESSION, False)
     return done()
 
 

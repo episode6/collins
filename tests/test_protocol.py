@@ -81,6 +81,8 @@ PHASE_ONE_TYPES = [
     "detach",
     "resize",
     "focus",
+    # PR-1.12a: the session asks its active client for the keyboard.
+    "focus.terminal",
     "theme",
     "spawn",
     # PR-1.11: the panel history key moves into the service.
@@ -250,7 +252,7 @@ def test_table_shapes_are_sound():
             assert entry.request.sender == p.CLIENT  # requests only ever go client -> service
             assert entry.request.reply is not None
         if entry.event is not None:
-            assert entry.event.sender in p.PEERS | {p.EITHER}
+            assert entry.event.sender in p.PEERS
             assert entry.event.reply is None
         for _name, _kind, shape in [f for f in _forms() if f[0] == entry.name]:
             assert not set(shape.fields) & p.ENVELOPE, entry.name
@@ -350,6 +352,7 @@ SAMPLES = {
     ("detach", p.REQUEST): {"pty": 7},
     ("resize", p.EVENT): {"pty": 7, "cols": 100, "rows": 30},
     ("focus", p.EVENT): {"pty": 7, "focused": True},
+    ("focus.terminal", p.EVENT): {"pty": 7},
     ("theme", p.EVENT): {"term": TERM},
     ("spawn", p.REQUEST): {
         "kind": "agent",
@@ -375,10 +378,10 @@ SAMPLES = {
         "history": ID,
         "ordinal": 2,
     },
-    ("panel.key", p.REQUEST): {"pty": 7, "history": ID},
+    ("panel.key", p.REQUEST): {"pty": 7, "history": ID, "handle": "s-4"},
     ("pty.info", p.REQUEST): {"pty": 7},
     ("pty.capture", p.REQUEST): {"pty": 7},
-    ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld", "focus": False},
+    ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld", "focus": False, "when_empty": True},
     ("switch", p.REQUEST): {"pty": 7, "model": "opus", "effort": "max", "composer_open": True},
     ("write", p.REQUEST): {"pty": 7, "text": " @a.py#L2-4 ", "mention": True},
     ("send", p.REQUEST): {"pty": 7, "text": "Fix the build", "composer_open": True},
@@ -767,9 +770,7 @@ REPLIES = {
 
 def _sender(name, kind):
     entry = p.TYPES[name]
-    sender = (entry.request if kind == p.REQUEST else entry.event).sender
-    # A form either peer may send round-trips as the client's.
-    return p.CLIENT if sender == p.EITHER else sender
+    return (entry.request if kind == p.REQUEST else entry.event).sender
 
 
 def _other(sender):
@@ -1204,10 +1205,6 @@ def test_validate_needs_a_known_sender():
 @pytest.mark.parametrize(("name", "kind"), FORMS, ids=[f"{n}:{k}" for n, k in FORMS])
 def test_a_form_from_the_wrong_peer_is_refused(name, kind):
     sender = _sender(name, kind)
-    if _shape(name, kind).sender == p.EITHER:
-        for peer in p.PEERS:  # `focus`: both peers send it
-            assert isinstance(p.validate(_frame(name, kind, SAMPLES[(name, kind)]), peer), p.Message)
-        return
     wrong = _other(sender)
     refusal = p.validate(_frame(name, kind, SAMPLES[(name, kind)]), wrong)
     assert isinstance(refusal, p.Refusal)

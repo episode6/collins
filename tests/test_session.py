@@ -298,6 +298,7 @@ class FakeSink:
         self.is_alive = True
         self.seeded: list[str] = []
         self.refused = 0
+        self.ended_count = 0  # cuts that ended with nothing to seed
 
     def alive(self):
         return self.is_alive
@@ -307,6 +308,9 @@ class FakeSink:
 
     def refuse(self):
         self.refused += 1
+
+    def ended(self):
+        self.ended_count += 1
 
 
 @pytest.fixture
@@ -1018,19 +1022,25 @@ def test_a_session_without_termprops_has_no_progress_watch(agent):
 # -- the cwd poll and follow ------------------------------------------------------------
 
 
-def test_the_cwd_poll_ticks_while_mapped(rig, agent):
+def test_the_cwd_poll_ticks_while_the_session_lives(rig, agent):
+    """The poll runs for as long as the host is alive — mapped or not: on
+    the service the host has no screen, and `agent_cwd` is a fact every
+    client reads (PR-1.12a) — and stops once the host is gone."""
     session, _term, host, clock = rig
     session.start_cwd_poll()
     assert host.cwds == ["/work"]
     clock.advance(session_mod.CWD_POLL_MS * 2)
     assert host.cwds == ["/work"] * 3
     host.is_mapped = False
+    clock.advance(session_mod.CWD_POLL_MS * 2)
+    assert len(host.cwds) == 5  # an unmapped host still hears it
+    host.is_alive = False
     clock.advance(session_mod.CWD_POLL_MS * 3)
-    assert len(host.cwds) == 3
-    host.is_mapped = True
-    session.start_cwd_poll()  # the next map
-    clock.advance(session_mod.CWD_POLL_MS)
     assert len(host.cwds) == 5
+    host.is_alive = True
+    session.start_cwd_poll()  # a new life: polls again
+    clock.advance(session_mod.CWD_POLL_MS)
+    assert len(host.cwds) == 7
 
 
 def test_a_move_settles_once(rig, tmp_path):

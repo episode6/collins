@@ -84,6 +84,15 @@ _FIELD_DEFAULTS: dict[str, Any] = {
     "busy": False,
 }
 _ONE_SHOTS = ("landed", "reset", "finished", "forked")
+# What `apply` may set: the facts above and the identity the tab was opened
+# with (a `session` event carries nothing else the mirror has a home for).
+_IDENTITY = ("session_id", "fork", "options", "command_override", "cwd")
+_SETTABLE = frozenset(_FIELD_DEFAULTS) | frozenset(_IDENTITY)
+
+# What a `cut` event asks of the tab (`cut_action`): seed the composer,
+# put the text back where a closed composer's would go, lower a composer
+# whose box can't be read, or nothing.
+CUT_SEED, CUT_STASH, CUT_REFUSE, CUT_IGNORE = "seed", "stash", "refuse", "ignore"
 
 
 class ClientSession:
@@ -157,10 +166,38 @@ class ClientSession:
                 continue  # the provider object is the tab's, built from the id
             else:
                 attr = name
+            if attr not in _SETTABLE:
+                continue  # a newer service's field: no home for it here (rule 5)
             if getattr(self, attr, _MISSING) != value:
                 setattr(self, attr, value)
                 changed.add(attr)
         return changed
+
+    # -- the decisions the tab makes on the session's events (GTK-free) ---------------
+
+    @staticmethod
+    def cut_action(state: str | None, composer_open: bool) -> str:
+        """What a `cut` event asks of the tab whose composer began it.
+        `seeded` with the composer still up seeds it (`CUT_SEED`); arriving
+        after the composer closed — over a socket the erase can land after
+        the `cut.cancel` — the text goes back where a closing composer's
+        does (`CUT_STASH`: `_restore_or_stash`), never lost. `refused` with
+        the composer up lowers it (`CUT_REFUSE`); `refused` after it closed,
+        and `cancelled` (the service let the handle go: an empty box, a box
+        that never settled, a cancel of our own), ask nothing."""
+        if state == "seeded":
+            return CUT_SEED if composer_open else CUT_STASH
+        if state == "refused":
+            return CUT_REFUSE if composer_open else CUT_IGNORE
+        return CUT_IGNORE
+
+    @staticmethod
+    def close_action(state: str | None) -> str | None:
+        """What a `close` event asks of the window: `budget` (the graceful
+        close's poll ran out on the service) is the forced close the
+        window's own budget always was ("force"); `exited` asks nothing —
+        the pty's exit reaches the tab on its own."""
+        return "force" if state == "budget" else None
 
     def exit(self) -> None:
         """The pty exited (`pty-exited`): every read answers as with no child."""
@@ -247,13 +284,25 @@ class ClientSession:
         if text:
             self._ask({"t": "write"}, text=text, mention=True)
 
-    def inject_prompt(self, text: str) -> None:
-        if text:
-            self._ask({"t": "prompt"}, text=text, focus=True)
+    def inject_prompt(self, text: str, when_empty: bool = False) -> bool:
+        """Type *text* into the box and submit it; with *when_empty* only
+        into an empty box, as the service reads it off the live screen
+        (the mirror is a settle behind). Whether it went."""
+        if not text:
+            return False
+        message = {"t": "prompt"}
+        fields = {"text": text, "focus": True}
+        if when_empty:
+            fields["when_empty"] = True
+        return self._ask(message, **fields) is not None
 
-    def inject_prompt_unfocused(self, text: str) -> None:
-        if text:
-            self._ask({"t": "prompt"}, text=text, focus=False)
+    def inject_prompt_unfocused(self, text: str, when_empty: bool = False) -> bool:
+        if not text:
+            return False
+        fields = {"text": text, "focus": False}
+        if when_empty:
+            fields["when_empty"] = True
+        return self._ask({"t": "prompt"}, **fields) is not None
 
     def switch_model(self, model_id: str, composer_open: bool = False) -> None:
         if model_id:

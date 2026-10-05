@@ -136,7 +136,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-from .. import panelhistory, providers, sandboxgrants, sandboxplan, trust
+from .. import chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
@@ -145,6 +145,7 @@ from . import hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse,
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
+from .session import PROMPT_BLOCK_MSGID
 
 log = logging.getLogger(__name__)
 
@@ -475,7 +476,6 @@ class ServiceCore:
             return protocol.refuse(
                 message.id, protocol.ERROR_FAILED, "failed to start shell: {msg}", {"msg": "no pty"}
             )
-        self.sessions[record.pty_id] = record
         fresh = message.get("session") is None
         if message.get("jsonl_path") is None and fresh:
             session.start_resolver(session.cwd or message.get("cwd"))
@@ -565,6 +565,10 @@ class ServiceCore:
         record.pty_id = pty_id
         pty = self.ptys.get(pty_id)
         pty.handle = record.handle
+        # Registered the moment the pty is live, so an exception later in
+        # the spawn (the session's own set-up) leaves no pty without its
+        # record: the exit still reaches the session's clean-up.
+        self.sessions[pty_id] = record
 
     def _on_pty_output(self, pty: ptyserver.Pty) -> None:
         record = self.sessions.get(pty.id)
@@ -615,6 +619,10 @@ class ServiceCore:
 
     def _req_prompt(self, message: protocol.Message, client: Client) -> dict:
         session = self._record(message).session
+        if message.get("when_empty") and not session.takes_prompt():
+            # The client's mirror is a settle behind the screen: the live
+            # model decides whether the box is empty.
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, PROMPT_BLOCK_MSGID)
         if message.get("focus", True):
             session.inject_prompt(message.get("text"))
         else:
@@ -654,8 +662,10 @@ class ServiceCore:
         return protocol.reply(message.id, handle=handle)
 
     def _req_cut_cancel(self, message: protocol.Message, client: Client) -> dict:
+        """A client calls its cuts off: one by handle, else every one of its
+        own (never another client's)."""
         record = self._record(message)
-        record.cancel_cuts(handle=message.get("handle"))
+        record.cancel_cuts(sink=client.sink_for(record.pty_id), handle=message.get("handle"))
         record.set_composer_open(False)
         return protocol.reply(message.id)
 
@@ -705,11 +715,17 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_transcript_set(self, message: protocol.Message, client: Client) -> dict:
-        self._record(message).session.set_transcript_path(message.get("path"))
+        path = message.get("path")
+        if path is not None and not transcript_path_allowed(path):
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Not a transcript Collins reads")
+        self._record(message).session.set_transcript_path(path)
         return protocol.reply(message.id)
 
     def _req_transcript_relocate(self, message: protocol.Message, client: Client) -> dict:
-        self._record(message).session.relocate_transcript(message.get("path"))
+        path = message.get("path")
+        if not transcript_path_allowed(path):
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Not a transcript Collins reads")
+        self._record(message).session.relocate_transcript(path)
         return protocol.reply(message.id)
 
     def _req_prs_restore(self, message: protocol.Message, client: Client) -> dict:
@@ -819,7 +835,7 @@ class ServiceCore:
         live grants' word."""
         from .. import __version__
 
-        busy = len(self.activity.tracker.busy()) if self.activity is not None else 0
+        busy = self.activity.busy_count() if self.activity is not None else 0
         fields: dict = {
             "version": __version__,
             "protocol": protocol.PROTOCOL,
@@ -955,6 +971,11 @@ class ServiceCore:
         if pty.kind != "shell":
             return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Only a shell has a panel history")
         pty.history = message.get("history")
+        if message.get("handle"):
+            # A shell opened before its session was spawned (the new-chat
+            # screen's) learns the session it belongs to: `rekey_shells`
+            # re-files it when the session resolves.
+            pty.handle = message.get("handle")
         return protocol.reply(message.id)
 
     def _on_pty_exit(self, pty: ptyserver.Pty) -> None:
@@ -1354,6 +1375,8 @@ class ServiceCore:
             plan_of=self._sandbox_plan,
             sessions=sessions or self._sessions_list,
             broadcast=self._broadcast,
+            app_id=lambda: self.app_id,
+            session_for_box=self.session_for_box,
         )
 
     def start_sandbox_host(self, app_id: str) -> None:
@@ -1600,6 +1623,26 @@ def _spawn_refusal(message: protocol.Message, exc: ptyserver.SpawnError) -> dict
         "failed to start shell: {msg}",
         {"msg": f"{exc.strerror}: {exc.filename}"},
     )
+
+
+def transcript_path_allowed(path: object) -> bool:
+    """Whether *path* is a transcript the service may tail for a client
+    (rule 5): a `.jsonl` under the CLI's projects directory
+    (`COLLINS_PROJECTS_DIR`) or the chats directory, after symlinks."""
+    if not isinstance(path, str) or not path.endswith(".jsonl"):
+        return False
+    try:
+        real = os.path.realpath(path)
+    except (OSError, ValueError):
+        return False
+    for root in (sessions.CLAUDE_PROJECTS_DIR, chats.CHATS_DIR):
+        try:
+            base = os.path.realpath(str(root))
+        except (OSError, ValueError):
+            continue
+        if real.startswith(base.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 def _jsonable(value):

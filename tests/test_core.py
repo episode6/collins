@@ -454,3 +454,290 @@ def test_nothing_in_the_service_loads_gtk():
     )
     assert out.returncode == 0, out.stderr
     assert "Gtk" not in out.stdout and "Vte" not in out.stdout
+
+
+# -- the review's gaps (PR-1.12a) ------------------------------------------------------------
+
+
+def _cut_state(ends, handle):
+    """The last `cut` event's state for *handle*, or None."""
+    states = [e.get("state") for e in ends.of("cut") if e.get("handle") == handle]
+    return states[-1] if states else None
+
+
+def _ready_agent(server, client, tmp_path):
+    """A spawned agent whose typed `true` has echoed, attached: a clean box
+    to draw the CLI's prompt into."""
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    screen = server.core.ptys.get(pty).screen
+    assert pump(3, lambda: screen.capture_contents().count("true") >= 2)
+    return pty, screen
+
+
+def test_the_settle_delivers_the_last_change_of_a_burst(server, tmp_path):
+    """Two moves inside the 50 ms settle: one event, with the state at the
+    end of the burst (an empty box, then text in it: not empty)."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, screen = _ready_agent(server, client, tmp_path)
+    before = len(ends.of("session"))
+    client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")  # the prompt mark: an empty box
+    client.send_input(pty, b"half")  # and at once, text in it
+    assert pump(3, lambda: "half" in screen.capture_contents())
+    pump(0.3)  # the settle and a margin
+    events = [e for e in ends.of("session")[before:] if "takes_prompt" in e or "entered" in e]
+    assert events, ends.of("session")[before:]
+    # The box reads as written-in at the burst's end, and the burst's
+    # start (an empty box) never went out on its own.
+    assert events[-1]["entered"]["text"].startswith("half")
+    assert server.core.sessions[pty]._sent["takes_prompt"] is False
+    assert not any(e.get("takes_prompt") is True for e in events)
+
+
+def test_a_fact_that_does_not_fit_costs_the_others_nothing(server, tmp_path):
+    """Rule 5 on the facts: a touched path with a NUL is dropped and the
+    model beside it still goes; a permission mode over the bound is cut to
+    it; the recording of what was sent happens after the fit, so the bad
+    fact is tried again next time."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    before = len(ends.of("session"))
+    record._send_changed(
+        {
+            "model": "claude-opus-5-5",
+            "touched_files": ["/ok.py", "/bad\x00.py"],
+            "permission_mode": "p" * 40,
+            "entered": {"text": "x", "rows_below": 5000},
+        }
+    )
+    sent = ends.of("session")[before:]
+    assert len(sent) == 1, sent
+    event = sent[0]
+    assert event["model"] == "claude-opus-5-5"
+    assert "touched_files" not in event and "entered" not in event
+    assert event["permission_mode"] == "p" * 32
+    # Nothing of the bad facts was recorded as sent: they are tried again.
+    assert record._sent["touched_files"] == [] and record._sent["model"] == "claude-opus-5-5"
+    assert record._sent.get("entered") is None
+
+
+def test_a_second_attach_does_not_starve_the_first(server, tmp_path):
+    """What moved since the last send goes to the clients already attached
+    before the newcomer's snapshot; the snapshot records nothing, so the
+    first client's next settle still sees the change."""
+    first, second = Client(), Client()
+    client_a = server.connect(first.on_output, first.on_event, device="laptop")
+    client_b = server.connect(second.on_output, second.on_event, device="desk")
+    pty = spawn_agent(client_a, tmp_path)["pty"]
+    client_a.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    assert record._sent.get("takes_prompt") is False
+    # The box changed under the record, before any settle has run.
+    original = record.box_facts
+    record.box_facts = lambda: {**original(), "takes_prompt": True}
+    client_b.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert first.of("session")[-1].get("takes_prompt") is True  # A heard the change
+    assert second.of("session")[-1].get("takes_prompt") is True  # B's snapshot has it
+    record.box_facts = original
+
+
+def test_the_close_budget_running_out_is_an_event_and_force_ends_the_pty(server, tmp_path, monkeypatch):
+    """The graceful close on a shell that never leaves: the service's poll
+    runs out its budget and says so (a `close` event, `state: budget`);
+    the client's answer, `close force: true`, ends the pty."""
+    from collins.service import session as session_mod
+
+    monkeypatch.setattr(session_mod, "SHELL_EXIT_TICKS", 2)
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, _screen = _ready_agent(server, client, tmp_path)
+    # cat is the shell and runs no command: the close goes straight to the
+    # shell's exit, which cat ignores (it echoes `exit`). The exit text is
+    # a typed command here, not Claude's Ctrl+C Ctrl+C, which would kill cat.
+    client.request({"t": "close", "pty": pty, "mode": "exit", "text": "/exit\r"})
+    assert pump(5, lambda: any(e.get("state") == "budget" for e in ends.of("close")))
+    budget = [e for e in ends.of("close") if e.get("state") == "budget"][-1]
+    assert budget["pty"] == pty and budget["phase"] == "shell"
+    assert pty in server.core.ptys.ptys  # nothing was killed on the service's own
+    client.request({"t": "close", "pty": pty, "mode": "exit", "force": True})
+    assert pump(3, lambda: pty not in server.core.ptys.ptys)
+    assert ends.of("pty-exited")
+
+
+def test_a_cut_seeds_the_box_and_refuses_a_foreign_paste(server, tmp_path):
+    """The composer's cut end to end: the box's text comes back as a
+    `seeded` event and the box is erased; a box holding a paste stand-in
+    that isn't ours comes back `refused`. The agent is cat here, so the
+    'agent running' question is answered for it."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, screen = _ready_agent(server, client, tmp_path)
+    record = server.core.sessions[pty]
+    record.session.agent_is_running = lambda: True
+    client.send_input(pty, "❯\xa0hello".encode())
+    assert pump(3, lambda: "hello" in screen.capture_contents())
+    handle = client.request({"t": "cut", "pty": pty})["handle"]
+    assert record.composer_open() is True and handle in record.cuts
+    assert pump(5, lambda: _cut_state(ends, handle) == "seeded")
+    seeded = [e for e in ends.of("cut") if e.get("handle") == handle][-1]
+    # cat's bare screen has no bottom border: the box read runs to the
+    # screen's last row, so the seed carries the empty rows below.
+    assert seeded["text"].rstrip("\n") == "hello" and seeded["pty"] == pty
+    assert pump(3, lambda: handle not in record.cuts)  # the sink is let go of once it told
+    # A stand-in no paste-back of ours left: refused.
+    client.send_input(pty, b"\r")
+    client.send_input(pty, "❯\xa0[Pasted text #1 +3 lines]".encode())
+    assert pump(3, lambda: "+3 lines" in screen.capture_contents())
+    handle = client.request({"t": "cut", "pty": pty})["handle"]
+    assert pump(5, lambda: _cut_state(ends, handle) == "refused")
+    assert handle not in record.cuts
+
+
+def test_a_cut_that_finds_nothing_ends_with_a_cancelled_word(server, tmp_path):
+    """An empty box: the settle agrees with itself and cuts nothing; the
+    client hears `cancelled` and the record lets the handle go."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, screen = _ready_agent(server, client, tmp_path)
+    record = server.core.sessions[pty]
+    record.session.agent_is_running = lambda: True
+    client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")
+    assert pump(3, lambda: "❯" in screen.capture_contents())
+    handle = client.request({"t": "cut", "pty": pty})["handle"]
+    assert pump(5, lambda: _cut_state(ends, handle) == "cancelled")
+    assert handle not in record.cuts
+
+
+def test_a_cut_cancel_is_scoped_to_the_clients_own_cuts(server, tmp_path):
+    first, second = Client(), Client()
+    client_a = server.connect(first.on_output, first.on_event, device="laptop")
+    client_b = server.connect(second.on_output, second.on_event, device="desk")
+    pty = spawn_agent(client_a, tmp_path)["pty"]
+    client_a.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    client_b.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    a_handle = client_a.request({"t": "cut", "pty": pty})["handle"]
+    b_handle = client_b.request({"t": "cut", "pty": pty})["handle"]
+    client_a.request({"t": "cut.cancel", "pty": pty})  # no handle: every one of A's, none of B's
+    assert a_handle not in record.cuts and b_handle in record.cuts
+    assert [e["state"] for e in first.of("cut") if e.get("handle") == a_handle] == ["cancelled"]
+    assert not [e for e in second.of("cut") if e.get("handle") == b_handle]
+
+
+def test_sandbox_drop_refuses_a_path_the_service_did_not_derive(server, tmp_path):
+    """Through the core: with no derive behind it, a drop naming a plan file
+    is refused and the file stays (rule 5)."""
+    probe = tmp_path / "probe.json"
+    probe.write_text("{}")
+
+    class Host:
+        def release(self, box):
+            pass
+
+        def forget_box(self, box):
+            pass
+
+    server.core.start_sandbox(host=lambda: Host(), grants=lambda: None)
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "sandbox.drop", "box": "a" * 32, "plan": str(probe)})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    assert probe.exists()
+
+
+def test_session_resolved_settles_the_box_and_syncs_the_grants(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    settled, synced = [], []
+
+    class Host:
+        def settle_box(self, session_id, box, workspace, owed):
+            settled.append((session_id, box, workspace, owed))
+            return True
+
+    class Grants:
+        def sync(self, box, done=None):
+            synced.append(box)
+
+        def shutdown(self):
+            pass
+
+    core.sandbox_host, core.sandbox_grants = Host(), Grants()
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        pty = spawn_agent(client, tmp_path)["pty"]
+        record = core.sessions[pty]
+        from collins.providers import SessionOptions
+
+        record.session.options = SessionOptions(sandbox=True, sandbox_box="b" * 32)
+        record.session.sandbox_box = "b" * 32  # what the launch records off its plan
+        record.session.session_id = ids["alpha1"]
+        core.session_resolved(record, ids["alpha1"])
+        assert settled == [(ids["alpha1"], "b" * 32, str(tmp_path), False)]
+        assert synced == ["b" * 32]
+        assert core.ptys.get(pty).session == ids["alpha1"]
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_shell_opened_before_the_spawn_is_refiled_once_it_names_its_session(server, tmp_path):
+    """A new-chat screen's shell has no handle at its spawn; `panel.key`
+    with the handle (the tab's, after the agent's spawn) puts it among
+    the session's shells, and the resolve re-files its history."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    spawn = {"t": "spawn", "kind": "shell", "cwd": str(tmp_path), "cols": 80, "rows": 24}
+    shell = client.request(spawn)["pty"]
+    assert server.core.ptys.get(shell).handle is None
+    reply = spawn_agent(client, tmp_path)
+    agent, handle = reply["pty"], reply["handle"]
+    client.request({"t": "panel.key", "pty": shell, "history": None, "handle": handle})
+    assert server.core.ptys.get(shell).handle == handle
+    record = server.core.sessions[agent]
+    record.session.session_id = "11111111-2222-3333-4444-555555555555"
+    record.session_resolved("11111111-2222-3333-4444-555555555555")
+    assert server.core.ptys.get(shell).history == "11111111-2222-3333-4444-555555555555"
+
+
+def test_a_transcript_path_outside_the_projects_is_refused(server, tmp_path, monkeypatch):
+    from collins import sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "projects")
+    (tmp_path / "projects" / "p").mkdir(parents=True)
+    inside = tmp_path / "projects" / "p" / "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl"
+    inside.write_text("")
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    for bad in (str(tmp_path / "elsewhere.jsonl"), "/etc/passwd", str(tmp_path / "projects" / "p" / "x.txt")):
+        with pytest.raises(loopback.RequestRefused):
+            client.request({"t": "transcript.set", "pty": pty, "path": bad})
+        with pytest.raises(loopback.RequestRefused):
+            client.request({"t": "transcript.relocate", "pty": pty, "path": bad})
+    client.request({"t": "transcript.set", "pty": pty, "path": str(inside)})
+    assert server.core.sessions[pty].session.transcript_path == str(inside)
+    client.request({"t": "transcript.set", "pty": pty, "path": None})
+
+
+def test_a_prompt_only_when_empty_is_refused_off_the_live_screen(server, tmp_path):
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, screen = _ready_agent(server, client, tmp_path)
+    with pytest.raises(loopback.RequestRefused) as refused:  # cat's box: never the CLI's empty one
+        client.request({"t": "prompt", "pty": pty, "text": "hello", "when_empty": True})
+    assert refused.value.error == protocol.ERROR_REFUSED
+    assert "hello" not in screen.capture_contents()
+    client.request({"t": "prompt", "pty": pty, "text": "hello"})  # unconditional: typed
+    assert pump(3, lambda: "hello" in screen.capture_contents())

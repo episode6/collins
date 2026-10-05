@@ -259,7 +259,10 @@ class ServiceActivity:
         if submit:
             self.absorb_baseline(session)
         session.echo_gate.poked(text)
-        if submit:
+        # The pole starts pre-emptively on a bare Return alone, as the
+        # window started it on the Enter key: a Return inside a bracketed
+        # paste is a newline in the box, Alt+Enter is one too.
+        if data == b"\r":
             for key in self._keys(session):
                 self.tracker.mark(key)
 
@@ -276,13 +279,24 @@ class ServiceActivity:
         if "\r" in (text or ""):
             self.absorb_baseline(record.session)
 
-    def held_handles(self) -> list[str]:
-        """The handles of the fresh spawns still in their startup hold
-        (`startup_held`): what an e2e check reads through the probe where
-        the window's `_startup_held(page)` was."""
-        return sorted(
-            record.handle for record in self._records() if self.startup_held(record.session)
-        )
+    def startup_held_for(self, handle: str) -> bool:
+        """`startup_held` by the session's handle: what an e2e check reads
+        through the probe where the window's `_startup_held(page)` was."""
+        record = self._record_by_handle(handle)
+        return record is not None and self.startup_held(record.session)
+
+    def busy_count(self) -> int:
+        """How many sessions are busy: a session marked under both its id
+        and its handle counts once; a busy id with no live session (a
+        background agent's) counts as its own."""
+        busy = set(self.tracker.busy())
+        count = 0
+        for record in self._records():
+            keys = set(self._keys(record.session))
+            if keys & busy:
+                count += 1
+                busy -= keys
+        return count + len(busy)
 
     # -- the verdicts ----------------------------------------------------------------
 
@@ -336,6 +350,11 @@ class ServiceActivity:
         item = self.store.get_item(row_id) if self.store is not None else None
         return bool(item is not None and item.backgrounding)
 
+    def _detaching_now(self, session_id: str) -> bool:
+        """Whether a /bg is in flight for *session_id* under any row that
+        stands for it (the window's `_detaching_now`, which read its chain)."""
+        return any(self._detaching(row_id) for row_id in self._rows(session_id))
+
     def _detached_without_tab(self, row_id: str) -> bool:
         """A row running as a background agent with no tab on it: its line
         is the yellow of its status, never a flag."""
@@ -348,7 +367,7 @@ class ServiceActivity:
         the way MainWindow._land_finish always did it, exemptions
         included."""
         busy = self.tracker.busy()
-        if not (self._chain(session_id) & busy or self._detaching(session_id)):
+        if not (self._chain(session_id) & busy or self._detaching_now(session_id)):
             # Every subscriber hears the finish (a `notify` of kind finished,
             # never persisted): the delivery and the PR refresh run there.
             record = self._record_for(session_id)
@@ -424,12 +443,14 @@ class ServiceActivity:
             return False
         for record in records:
             session = record.session
+            # The process facts are read every tick, a fresh spawn's too (a
+            # sandboxed launch's `agent_running` turns true under one).
+            record.refresh_process_facts()
             if self.absorb_baseline(session):
                 continue  # nothing ever submitted: children are plumbing, not work
             if session.has_background_descendant(self._ignores(session)):
                 for key in self._keys(session):
                     self.tracker.mark(key, idle_s=PROCESS_IDLE_S)
-            record.refresh_process_facts()
         return True
 
     def _poll_background_busy(self) -> bool:

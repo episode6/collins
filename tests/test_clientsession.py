@@ -359,3 +359,46 @@ def test_a_refused_probe_is_an_error_and_a_gone_pty_is_none(mirror):
         session.probe("session_id")
     session.exit()
     assert session.probe("session_id") is None and session.probe_call("child_pid") is None
+
+
+# -- the decisions the tab makes on the session's events --------------------------------
+
+
+def test_the_cuts_three_states_decide_what_the_tab_does():
+    """`seeded` seeds an open composer and stashes for a closed one (the
+    erase can land after the cancel, over a socket); `refused` lowers an
+    open composer and asks nothing of a closed one; `cancelled` asks
+    nothing — the service let the handle go."""
+    from collins.clientsession import CUT_IGNORE, CUT_REFUSE, CUT_SEED, CUT_STASH
+
+    assert ClientSession.cut_action("seeded", True) == CUT_SEED
+    assert ClientSession.cut_action("seeded", False) == CUT_STASH
+    assert ClientSession.cut_action("refused", True) == CUT_REFUSE
+    assert ClientSession.cut_action("refused", False) == CUT_IGNORE
+    assert ClientSession.cut_action("cancelled", True) == CUT_IGNORE
+    assert ClientSession.cut_action(None, True) == CUT_IGNORE
+
+
+def test_the_close_budget_is_the_forced_close():
+    assert ClientSession.close_action("budget") == "force"
+    assert ClientSession.close_action("exited") is None
+    assert ClientSession.close_action(None) is None
+
+
+def test_a_prompt_only_into_an_empty_box_says_so_and_reports_the_refusal(mirror):
+    session, client = mirror
+    assert session.inject_prompt("go", when_empty=True) is True
+    assert client.sent[-1] == {"t": "prompt", "pty": 7, "text": "go", "focus": True, "when_empty": True}
+    assert session.inject_prompt_unfocused("go", when_empty=True) is True
+    assert client.sent[-1] == {"t": "prompt", "pty": 7, "text": "go", "focus": False, "when_empty": True}
+    client.refuse.add("prompt")
+    assert session.inject_prompt("go", when_empty=True) is False
+    assert session.inject_prompt("") is False
+
+
+def test_a_field_the_mirror_has_no_home_for_is_dropped(mirror):
+    """A newer service's field (rule 5): never set on the mirror, never
+    reported as moved."""
+    session, _client = mirror
+    assert session.apply(event(brand_new_fact=1, takes_prompt=True)) == {"takes_prompt"}
+    assert not hasattr(session, "brand_new_fact")

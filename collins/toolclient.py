@@ -335,8 +335,9 @@ class _BackgroundSpawn:
             return GLib.SOURCE_REMOVE
         if not tab.takes_prompt():
             return GLib.SOURCE_CONTINUE
+        if not tab.inject_prompt_unfocused(self._prompt, when_empty=True):
+            return GLib.SOURCE_CONTINUE  # the live box wasn't empty after all: next tick
         self._poll_source = None
-        tab.inject_prompt_unfocused(self._prompt)
         # From here the id arrives on session-resolved (connected in begin) —
         # never synchronously: it comes from a transcript this submit only now
         # creates, which the resolver finds on a later poll.

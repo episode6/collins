@@ -38,6 +38,7 @@ from . import (
     providers,
     ptyclient,
     remotediffs,
+    sandboxstatus,
     statusicon,
     tooltipmute,
     traymodel,
@@ -45,7 +46,7 @@ from . import (
     welcome,
 )
 from . import terminal as terminal_mod
-from .api.loopback import LoopbackServer
+from .api.loopback import LoopbackServer, RequestRefused
 from .apilink import LoopbackLink
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
 from .copylabel import open_uri
@@ -2189,6 +2190,14 @@ class App(Adw.Application):
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
         self.store.subscribe()
+        # The sandbox probe's verdict so far (the service's; a client never
+        # probes): what the sidebar, the new-chat screen and Preferences
+        # read (sandboxstatus). The `sandbox what=probe` event keeps it.
+        try:
+            status = link.call({"t": "service.status"})
+        except RequestRefused:
+            status = {}
+        sandboxstatus.set_probe_reason(status.get("sandbox"))
 
     def _on_run_finished(self, session_id: str) -> None:
         """The service counted a finish for *session_id* (D29): the window
@@ -2213,6 +2222,7 @@ class App(Adw.Application):
         Sandboxed box accordingly."""
         if event.get("what") != "probe":
             return
+        sandboxstatus.set_probe_reason(event.get("reason"))
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.refresh_sandbox_availability()

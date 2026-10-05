@@ -451,6 +451,11 @@ class CutSink(Protocol):
         """Put the cut text in the composer (appended, cursor at the end)."""
         ...
 
+    def ended(self) -> None:
+        """The cut ended with nothing seeded and nothing refused: an empty
+        box, or one that never settled. The composer keeps what it has."""
+        ...
+
     def refuse(self) -> None:
         """The box holds a paste no read can recover: put back whatever the
         composer gathered meanwhile, lower it without restoring, and say
@@ -1066,6 +1071,7 @@ class Session:
             self._end_settling()
             return GLib.SOURCE_REMOVE
         if attempt >= CUT_SETTLE_TRIES:
+            sink.ended()
             self._end_settling()  # never still: the box keeps its text
             return GLib.SOURCE_REMOVE
         self.scheduler.timeout_add(
@@ -1120,6 +1126,7 @@ class Session:
         an empty box is the one thing a cut must never make of it."""
         if prompt is None or not prompt.text.strip():
             self.pasted_back = {}  # nothing folded is left on screen
+            sink.ended()
             return
         text = self._expand_box_read(prompt.text)
         if text is None:
@@ -1127,6 +1134,7 @@ class Session:
             return
         keys = self.provider.clear_prompt_keys(prompt)
         if not keys:
+            sink.ended()
             return
         self.write_text(keys)
         self.cut_pending = prompt.text
@@ -1822,7 +1830,7 @@ class Session:
             self._cwd_source = self.scheduler.timeout_add(CWD_POLL_MS, self._cwd_tick)
 
     def _cwd_tick(self) -> bool:
-        if not self.host.mapped():  # hidden/closed tab → resume on next map
+        if not self.host.alive():  # the session is gone: nothing to read
             self._cwd_source = None
             return GLib.SOURCE_REMOVE
         self.host.cwd_polled(self.current_agent_cwd())
@@ -2544,6 +2552,12 @@ class Session:
         """The page this session's tab sat in is closed: no poll goes on."""
         self.closing = False
         self._shell_exit_ticks = None
+
+    def close_phase(self) -> str:
+        """Where a close stands: "agent" while the CLI is being asked to
+        leave, "shell" once the shell has been told to exit (the `close`
+        event's `phase`)."""
+        return "shell" if self._shell_exit_ticks is not None else "agent"
 
     def _poll_close(self) -> bool:
         if not self.closing:

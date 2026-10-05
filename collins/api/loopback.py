@@ -201,7 +201,9 @@ class LoopbackClient:
         if checked.type == "pty-exited":
             self.forget(int(checked.get("pty")))
         try:
-            self._on_event(dict(event))
+            # What the protocol kept, not what was sent: the fields the type
+            # lists, bounded (as a socket's client will see them).
+            self._on_event({"t": checked.type, **checked.fields})
         except Exception:
             log.exception("loopback: a client's event callback failed")
 

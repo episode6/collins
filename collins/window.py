@@ -50,7 +50,7 @@ from . import (
     paneldnd,
     panelhistory,
     pkgrepos,
-    sandboxplan,
+    sandboxstatus,
     updatecheck,
     welcome,
 )
@@ -1939,7 +1939,7 @@ class MainWindow(Adw.ApplicationWindow):
         return newchat.effective_sandbox(
             choice,
             self.state.sandbox_for_project(project_name_for_cwd(cwd)),
-            sandboxplan.probe_reason() == "",
+            sandboxstatus.probe_reason() == "",
         )
 
     def refresh_sandbox_availability(self) -> None:
@@ -1949,7 +1949,7 @@ class MainWindow(Adw.ApplicationWindow):
             tab = self.tab_view.get_nth_page(i).get_child()
             if isinstance(tab, TerminalTab) and tab.is_new_chat:
                 tab.set_sandbox_available(
-                    sandboxplan.probe_reason() == "", self._sandbox_for_new_session(tab.cwd)
+                    sandboxstatus.probe_reason() == "", self._sandbox_for_new_session(tab.cwd)
                 )
 
     def _sandboxed_options(self, options):
@@ -3423,7 +3423,9 @@ class MainWindow(Adw.ApplicationWindow):
         so it is worth saying out loud: the click looked like it did something,
         and nothing was typed anywhere."""
         tab = self._session_tab(session_id)
-        if tab is None or not tab.takes_prompt():
+        # The mirror's word first (no round trip for the plain no), then the
+        # service's, off the live screen: the box must be empty right now.
+        if tab is None or not tab.takes_prompt() or not tab.inject_prompt(prompt, when_empty=True):
             dialogs.error_dialog(
                 self,
                 _("Couldn't send that to the session"),
@@ -3431,7 +3433,6 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return
         self.tab_view.set_selected_page(self._page_for(session_id))
-        tab.inject_prompt(prompt)
 
     def view_pr(self, session_id: str, url: str, unresolved: bool) -> None:
         """A sidebar PR mark's "View in Collins": the PR's native page, docked

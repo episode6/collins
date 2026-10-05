@@ -22,10 +22,11 @@ gi.require_version("Vte", "3.91")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango, Vte  # noqa: E402
 
 from . import (  # noqa: E402
-    apilink,  # noqa: E402
+    apilink,  # noqa: E402,
     apppicker,
     attachpanel,
     attachrecords,
+    clientsession,
     composerkeys,
     dialogs,
     dropimages,
@@ -40,11 +41,11 @@ from . import (  # noqa: E402
     panelhistory,
     panellayout,
     prmenu,
-    ptyclient,  # noqa: E402
+    ptyclient,  # noqa: E402,
     remotediffs,
     remoteprs,
     sandboxchip,
-    sandboxplan,
+    sandboxstatus,
     themes,
     transcriptlinks,
 )
@@ -1221,15 +1222,20 @@ class PanelTerminal(Gtk.Box):
         view.detach()
         client.close()
 
-    def set_history_key(self, key: str | None) -> None:
+    def set_history_key(self, key: str | None, handle: str | None = None) -> None:
         """Re-file this shell's history on the service under *key* (the
         tab's key moved: its session resolved, a draft became one or
-        stopped being one). A no-op with no pty."""
+        stopped being one), and name the session it belongs to (*handle*:
+        a shell opened on the new-chat screen learns it at the spawn). A
+        no-op with no pty."""
         view, client = self._view, self._client
         if client.closed or view.pty is None or view.exited:
             return
+        message: dict = {"t": "panel.key", "pty": view.pty, "history": key or None}
+        if handle:
+            message["handle"] = handle
         try:
-            client.request({"t": "panel.key", "pty": view.pty, "history": key or None})
+            client.request(message)
         except (RequestRefused, ValueError):
             pass
 
@@ -1784,9 +1790,9 @@ class TerminalTab(Gtk.Box):
                 effort=(options.effort if options else "") or "",
                 pick_effort=self._can_switch_effort(),
                 sandbox_default=sandbox_default,
-                # The cached verdict only — never the blocking probe on the
-                # main loop; the app refreshes the box when it lands.
-                sandbox_available=sandboxplan.probe_reason() == "",
+                # The service's verdict as this client last heard it — never
+                # a probe of our own; the app refreshes the box when it lands.
+                sandbox_available=sandboxstatus.probe_reason() == "",
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
             self._new_chat.connect(
@@ -2177,6 +2183,10 @@ class TerminalTab(Gtk.Box):
             session.pty = int(reply["pty"])
             session.handle = str(reply.get("handle") or "")
             view.attach(session.pty)
+            # The shells opened before the spawn (the new-chat screen's)
+            # learn the session they belong to, so the service re-files
+            # their history when it resolves (`rekey_shells`).
+            self._rekey_panel_shells()
         except RequestRefused as exc:
             reason = _(exc.msgid).format_map(exc.details) if exc.msgid else _("failed to start shell")
             self.feed_message(reason)
@@ -2216,14 +2226,17 @@ class TerminalTab(Gtk.Box):
             self._on_cut_event(event)
         elif kind == "composer":
             self._on_composer_event(event)
-        elif kind == "focus":
+        elif kind == "focus.terminal":
             if event.get("pty") == self.session.pty:
                 self.grab_terminal_focus()
         elif kind == "shells":
             if event.get("pty") == self.session.pty and event.get("what") == "stale":
                 self._mark_stale_sandboxed_shells()
         elif kind == "close":
-            if event.get("pty") == self.session.pty and event.get("state") == "budget":
+            if (
+                event.get("pty") == self.session.pty
+                and self.session.close_action(event.get("state")) == "force"
+            ):
                 self.emit("close-budget", str(event.get("phase") or ""))
         else:
             self._view.on_event(event)
@@ -2267,12 +2280,18 @@ class TerminalTab(Gtk.Box):
         if event.get("pty") != self.session.pty:
             return
         composer = self._cuts.pop(str(event.get("handle") or ""), None)
-        state = event.get("state")
-        if composer is None or composer is not self._composer or not self.composer_open():
+        if composer is None:
             return
-        if state == "seeded":
-            composer.seed_text(str(event.get("text") or ""))
-        elif state == "refused":
+        text = str(event.get("text") or "")
+        up = composer is self._composer and self.composer_open()
+        action = self.session.cut_action(event.get("state"), up)
+        if action == clientsession.CUT_SEED:
+            composer.seed_text(text)
+        elif action == clientsession.CUT_STASH:
+            # The cut landed after the composer closed: what it took out of
+            # the box goes where a closing composer's text goes.
+            self._restore_or_stash(text)
+        elif action == clientsession.CUT_REFUSE:
             self._stash_draft(composer.peek_text())
             self.close_composer(restore=False)
             self.feed_message(_("Composer: the input box holds a paste Collins can't read"))
@@ -4537,16 +4556,18 @@ class TerminalTab(Gtk.Box):
             return
         composer.insert_mention(reference + " ")
 
-    def inject_prompt(self, text: str) -> None:
+    def inject_prompt(self, text: str, when_empty: bool = False) -> bool:
         """Type *text* into the agent, send it, and put the tab in front —
-        what the PR menu's prompt actions do (`Session.inject_prompt`)."""
-        self.session.inject_prompt(text)
+        what the PR menu's prompt actions do (`Session.inject_prompt`).
+        With *when_empty* the service types it only into a box it reads
+        as empty right now. Whether it went."""
+        return self.session.inject_prompt(text, when_empty=when_empty)
 
-    def inject_prompt_unfocused(self, text: str) -> None:
+    def inject_prompt_unfocused(self, text: str, when_empty: bool = False) -> bool:
         """Submit *text* to the agent as one bracketed paste, without taking
         focus or the view — a background spawn's start_session prompt
-        (`Session.inject_prompt_unfocused`)."""
-        self.session.inject_prompt_unfocused(text)
+        (`Session.inject_prompt_unfocused`). Whether it went."""
+        return self.session.inject_prompt_unfocused(text, when_empty=when_empty)
 
     def switch_model(self, model_id: str) -> None:
         """Post the provider's model-switch command to the chat — what a
@@ -5135,10 +5156,11 @@ class TerminalTab(Gtk.Box):
         it holds (the key and the moment are the service's to act on when
         a shell exits, §3.15)."""
         key = self._shell_history_key()
+        handle = self.session.handle or None
         for shell in self._dock.shell_pages():
             rekey = getattr(shell, "set_history_key", None)
             if rekey is not None:
-                rekey(key)
+                rekey(key, handle)
 
     def _history_id(self) -> str | None:
         """What this tab's panel scrollback is filed under: the session id,

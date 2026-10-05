@@ -235,6 +235,7 @@ from collins import (  # noqa: E402
     panellayout,
     sandboxgrants,
     sandboxplan,
+    sandboxstatus,
     terminal,
     trust,
 )
@@ -359,11 +360,12 @@ def stage() -> bool:
     global tries
     tries += 1
     win = app.get_active_window()
-    if win is None or sandboxplan.probe_reason() is None:
+    # The probe is the service's; the client hears its verdict (sandboxstatus).
+    if win is None or sandboxstatus.probe_reason() is None:
         if tries > 60:
             return bail("timed out waiting for the window / the sandbox probe")
         return GLib.SOURCE_CONTINUE
-    check("the fake bwrap passes the probe", sandboxplan.probe_reason() == "")
+    check("the fake bwrap passes the probe", sandboxstatus.probe_reason() == "")
     state["win"] = win
     # An empty tab view makes the background launch fall through to the
     # foreground; the project default (sandbox_new_sessions) boxes it.

@@ -239,6 +239,11 @@ The service owns one (`ServiceCore.start_sandbox_host`, `core.sandbox_host`,
 PR-1.12a; the live grants beside it as `core.sandbox_grants`); the window
 reaches it only through requests (`sandbox.forget` for a forgotten
 transcript's box, `sandbox.derive` / `sandbox.drop` for a sibling's plan).
+Rule 5 holds on both: `sandbox.drop` releases only a plan file this
+service derived for that box (`SandboxRequests._derived`, popped on the
+drop) and only one shaped `<uuid>.json` right under its own plan
+directory (`sandboxplan.plan_dir`), and `drop` / `forget` refuse a box a
+live session runs in (`ServiceCore.session_for_box`).
 
 **A worktree launch is narrowed to its worktree.** `claude -w` makes
 `<repo>/.claude/worktrees/<name>` *after* it has started, inside the box,
@@ -824,12 +829,19 @@ row's button stays greyed through the blocker like every other reason.
 
 **The probe.** `sandboxplan.probe()` runs `bwrap --unshare-user
 --unshare-pid … -- /bin/true` once per launch on a thread
-(`probe_async` from `App._start_sandbox_support`) and caches
-`probe_reason()`: `""`, `REASON_NO_BWRAP`, `REASON_NO_USERNS`.
-`available()` probes synchronously (5 s cap) if asked before the thread
-landed — only `prepare_launch` calls it; every UI path reads
-`probe_reason() == ""` and treats None as "not yet", and
-`App._on_sandbox_probe_landed` → `MainWindow.refresh_sandbox_availability`
+(`probe_async` from `ServiceCore.start_sandbox_host`, the service's) and
+caches `probe_reason()` *in the service's process*: `""`,
+`REASON_NO_BWRAP`, `REASON_NO_USERNS`. `available()` probes synchronously
+(5 s cap) if asked before the thread landed — only `prepare_launch` calls
+it, on the service. A client never probes: its copy is
+`collins/sandboxstatus.py` (GTK-free, `tests/test_sandboxstatus.py`),
+filled from the `service.status` reply's `sandbox` at connect
+(`App._start_service_client`) and from the `sandbox` event of `what:
+"probe"` (`App._on_sandbox_event`), and every UI path — the sidebar's
+project menu, the new-chat screen, `MainWindow._sandbox_for_new_session`,
+Preferences' status row (which listens for the verdict instead of probing)
+— reads `sandboxstatus.probe_reason() == ""` and treats None as "not
+yet"; `App._on_sandbox_event` → `MainWindow.refresh_sandbox_availability`
 → `NewChatView.set_sandbox_available` puts the checkbox on screens built
 before the verdict. The new-chat checkbox and the project-menu item are
 shown only when it passes; the Preferences group is always built, its

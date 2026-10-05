@@ -253,9 +253,11 @@ each taken from the code the message replaces:
   `prs.restore`, `cwd.settle` (reply the follow scope's name),
   `shells.follow`, `finish.witness`, `baseline.absorb`,
   `baseline.cmdlines` and `restart.worktreeless` are the requests a tab
-  makes of its session; `composer`, `shells`, `focus` (from the service:
-  `EITHER` is the one event form both peers send) and `close` (`budget`
-  or `exited`) are the events the session sends. `pty.info` and
+  makes of its session (`prompt` with `when_empty` is re-checked against
+  the live box and refused when it isn't empty); `composer`, `shells`,
+  `focus.terminal` (the session asks the active client to put the
+  keyboard in the terminal; `focus` stays the client's own event) and
+  `close` (`budget` or `exited`) are the events the session sends. `pty.info` and
   `pty.capture` are a panel shell's reads. `sandbox.derive`,
   `sandbox.drop` and `sandbox.forget` are the sandbox host's three calls
   the client still makes; the `sandbox` event's `box` is optional for the
@@ -325,7 +327,6 @@ SERVICE = "service"
 PEERS = frozenset({CLIENT, SERVICE})
 # An event form either peer may send (`focus`: the client's focus report,
 # and the service asking the active client to focus a terminal, PR-1.12a).
-EITHER = "either"
 
 REQUEST = "request"
 EVENT = "event"
@@ -613,7 +614,9 @@ _DEBUG_KWARGS = Field(K_JSON_OBJECT)
 # its tab's session, sent whole on attach and as single changed fields after.
 # Every field but `pty` and `handle` is optional; the one-shots (`landed`,
 # `reset`, `finished`, `forked`) are sent true once and never false.
-_ENTERED = Field(K_OBJ, fields={"text": _req(_TEXT), "rows_below": _req(_i(0, MAX_ROWS))})
+# The box's text is a preview (§3.19): what the composer's cut seeds is the
+# `cut` event's, not this.
+_ENTERED = Field(K_OBJ, fields={"text": _req(_s(PREVIEW_MAX)), "rows_below": _req(_i(0, MAX_ROWS))})
 _SESSION_FIELDS = {
     "pty": _req(_PTY),
     "handle": _req(_ID),
@@ -666,6 +669,10 @@ _SESSION_FIELDS = {
     # a sandboxed fork's resolver found the forked conversation's id
     "forked": _ID,
 }
+
+SESSION_FIELDS = _SESSION_FIELDS  # the `session` event's fields, for the service's fitter
+
+SESSION_FIELDS = _SESSION_FIELDS  # the `session` event's fields, for the service's fitter
 
 _STATE_FIELDS = {
     "key": Field(K_STR, required=True, low=1, high=KEY_MAX, pattern=_KEY_RE),
@@ -778,8 +785,13 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "focus",
-        "A client's view of a pty gained or lost focus; from the service, a request to focus it.",
-        event=_event(EITHER, {"pty": _req(_PTY), "focused": _BOOL}),
+        "A client's view of a pty gained or lost focus.",
+        event=_event(CLIENT, {"pty": _req(_PTY), "focused": _req(_BOOL)}),
+    ),
+    MessageType(
+        "focus.terminal",
+        "The session asks its active client to put the keyboard in the terminal.",
+        event=_event(SERVICE, {"pty": _req(_PTY)}),
     ),
     MessageType(
         "theme",
@@ -827,8 +839,11 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "panel.key",
-        "File a shell's panel history under a new key, or under none.",
-        request=_request({"pty": _req(_PTY), "history": _req(_null(_ID))}),
+        "File a shell's panel history under a new key, or under none; name the session it belongs to.",
+        # `handle`: the session the shell is a panel of, for one opened
+        # before that session was spawned (a new-chat screen's shell), so
+        # its history is re-filed when the session resolves.
+        request=_request({"pty": _req(_PTY), "history": _req(_null(_ID)), "handle": _ID}),
     ),
     MessageType(
         "pty.info",
@@ -862,6 +877,10 @@ _TABLE: tuple[MessageType, ...] = (
                 # True: `inject_prompt`; False is the unfocused, bracketed
                 # paste of a background spawn's prompt).
                 "focus": _BOOL,
+                # Only into an empty box: the service re-reads `takes_prompt`
+                # off the live screen and refuses (PROMPT_BLOCK_MSGID) when
+                # it isn't, rather than trusting the client's mirror.
+                "when_empty": _BOOL,
             }
         ),
     ),
@@ -1872,6 +1891,27 @@ def _check_text(name: str, value: str) -> None:
         raise _Invalid("{field} is not valid text", field=name) from None
 
 
+def fit_field(name: str, value, spec: Field) -> tuple[bool, object]:
+    """*value* as *spec* would keep it (what `validate` does per field),
+    for a sender fitting its own facts before they go out: a string over
+    its bound is cut to it; anything else that doesn't fit is reported.
+    Returns (True, the kept value) or (False, why it doesn't fit)."""
+    try:
+        return True, _check(name, value, spec)
+    except _Invalid as first:
+        if (
+            spec.kind == K_STR
+            and isinstance(value, str)
+            and spec.high is not None
+            and len(value) > spec.high
+        ):
+            try:
+                return True, _check(name, value[: int(spec.high)], spec)
+            except _Invalid as again:
+                return False, again.msgid.format_map(again.args_)
+        return False, first.msgid.format_map(first.args_)
+
+
 def _check_string(name: str, value, spec: Field) -> str:
     if not isinstance(value, str):
         raise _Invalid("{field} must be a string", field=name)
@@ -2081,7 +2121,7 @@ def validate(message: object, sender: str) -> Message | Refusal:
         return Refusal(
             request_id, ERROR_INVALID, "{type} is an event and takes no id", {"type": name}
         )
-    if shape.sender not in (sender, EITHER):
+    if shape.sender != sender:
         return Refusal(
             request_id,
             ERROR_DIRECTION,

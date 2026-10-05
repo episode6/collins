@@ -193,17 +193,34 @@ class CutSink:
         return attached and not self.cancelled
 
     def seed(self, text: str) -> None:
+        """The box's text for the composer. The record lets the handle go
+        here — the client has what it asked for; the chain's verify rounds
+        go on under `alive` (the client still attached) and are called
+        off by the client's `cut.cancel` through the record's chain."""
         self._tell("seeded", text)
+        self.record.cuts.pop(self.handle, None)
 
     def refuse(self) -> None:
         self._tell("refused")
         self.record.cuts.pop(self.handle, None)
 
-    def cancel(self) -> None:
-        """The client called it off, or went away (`client_gone`)."""
+    def ended(self) -> None:
+        """The cut ended with nothing to seed (an empty box, a box that
+        never settled): the client hears `cancelled` and lets the handle
+        go, as this record does."""
         if not self.cancelled:
             self.cancelled = True
             self.record.cuts.pop(self.handle, None)
+            self._tell("cancelled")
+
+    def cancel(self, tell: bool = True) -> None:
+        """The client called it off, or went away (`client_gone`: nothing
+        to tell)."""
+        if not self.cancelled:
+            self.cancelled = True
+            self.record.cuts.pop(self.handle, None)
+            if tell:
+                self._tell("cancelled")
 
     def _tell(self, state: str, text: str | None = None) -> None:
         # The record's pty id, not the live pty: a sink is told its cut's
@@ -230,6 +247,7 @@ class SessionRecord:
         self.exited = False
         self.spawn_error: ptyserver.SpawnError | None = None
         self.cuts: dict[str, CutSink] = {}
+        self._chain: CutSink | None = None  # the cut whose chain the session runs now
         self._composer_open = False  # the last word a request carried
         self._shown_prs: list[prstatus.PullRequest] = []
         self._pending_paints: list[str] = []
@@ -304,20 +322,46 @@ class SessionRecord:
                 log.exception("session %s: a client's sink failed", self.handle)
 
     def send_to(self, sink, fields: dict) -> None:
-        """A `session` event to one client (the one attaching)."""
+        """A `session` event to one client (the one attaching), checked
+        against the protocol as every event is."""
         if self.pty_id is None:
             return
         event = {"t": "session", "pty": self.pty_id, "handle": self.handle, **fields}
+        checked = protocol.validate(dict(event), protocol.SERVICE)
+        if isinstance(checked, protocol.Refusal):
+            log.error("session %s: a snapshot the protocol refuses: %s", self.handle, checked.msgid)
+            return
         try:
             sink.send_event(event)
         except Exception:
             log.exception("session %s: a client's sink failed", self.handle)
 
+    def _fit(self, fields: dict) -> dict:
+        """*fields* as the `session` event may carry them (rule 5: a fact
+        read off the transcript, the screen or the process tree is foreign
+        content): each fitted to its own field of the protocol — a string
+        over its bound cut to it — and one that doesn't fit dropped, with
+        a log line, so the others still go."""
+        kept = {}
+        for name, value in fields.items():
+            spec = protocol.SESSION_FIELDS.get(name)
+            if spec is None:
+                continue
+            ok, fitted = protocol.fit_field(name, value, spec)
+            if ok:
+                kept[name] = fitted
+            else:
+                log.warning("session %s: the fact %s doesn't fit the protocol: %s", self.handle, name, fitted)
+        return kept
+
     def _send_changed(self, fields: dict, always: tuple[str, ...] = ()) -> None:
         """Send the fields of *fields* that differ from what was last sent
-        (*always* names the one-shots, sent whatever was sent before)."""
+        (*always* names the one-shots, sent whatever was sent before). A
+        fact that doesn't fit the protocol is dropped before anything is
+        recorded, so it is tried again next time and never costs the
+        others their event."""
         changed = {}
-        for name, value in fields.items():
+        for name, value in self._fit(fields).items():
             if name in always or self._sent.get(name, _UNSENT) != value:
                 changed[name] = value
             if name not in always:
@@ -345,12 +389,12 @@ class SessionRecord:
             **self.transcript_facts(),
             "busy": bool(self._sent.get("busy", False)),
         }
-        self._sent.update({k: v for k, v in facts.items()})
-        return facts
+        return self._fit(facts)
 
     def launch_facts(self) -> dict:
         session = self.session
         return {
+            "cwd": session.cwd,  # moves once: a reaped worktree put back (`_recreated`)
             "options": options_record(session.options),
             "initial_command": session.initial_command,
             "worktree_launch": bool(session.worktree_launch),
@@ -384,7 +428,7 @@ class SessionRecord:
             "takes_prompt": takes,
             "entered": (
                 {
-                    "text": entered.text[: protocol.TEXT_MAX],
+                    "text": entered.text[: protocol.PREVIEW_MAX],
                     "rows_below": max(0, int(entered.rows_below)),
                 }
                 if entered is not None
@@ -423,7 +467,13 @@ class SessionRecord:
         if self.pty() is None:
             return
         facts = {**self.box_facts(), **self.launch_facts()}
-        if facts.get("running_command") != self._sent.get("running_command"):
+        # The process questions walk the tree: re-asked when the foreground
+        # flips, and while a command runs with no agent found under it yet
+        # (a sandboxed launch: the launcher is up before the CLI execs, and
+        # the composer waits on `agent_running`).
+        if facts.get("running_command") != self._sent.get("running_command") or (
+            facts.get("running_command") and not self._sent.get("agent_running")
+        ):
             facts.update(self.process_facts())
         self._send_changed(facts)
 
@@ -452,7 +502,7 @@ class SessionRecord:
         pty = self.pty()
         if pty is None:
             return
-        self._event({"t": "focus", "pty": pty.id}, active_only=True)
+        self._event({"t": "focus.terminal", "pty": pty.id}, active_only=True)
 
     def refocus_composer(self) -> None:
         self._composer("refocus")
@@ -473,7 +523,13 @@ class SessionRecord:
         self._event(event, active_only=True)
 
     def mapped(self) -> bool:
-        return True
+        """Never, to the session: the one thing it asks this for is the
+        resolver's budget (`Session._resolver_tick`: a mapped tab polls
+        without end, an unmapped one for RESOLVER_BACKGROUND_TICKS), and
+        the service has no screen to be mapped on. The budget holds, and
+        a tab mapping re-arms it (`resolver.arm`), as §3.19 says; the cwd
+        poll runs for as long as the session lives (`alive`)."""
+        return False
 
     def composer_open(self) -> bool:
         """The client fact `_post_switch` reads: whether the composer is up
@@ -567,8 +623,7 @@ class SessionRecord:
         pty = self.pty()
         if pty is None:
             return
-        phase = "shell" if self.session._shell_exit_ticks is not None else "agent"
-        self._event({"t": "close", "pty": pty.id, "state": "budget", "phase": phase})
+        self._event({"t": "close", "pty": pty.id, "state": "budget", "phase": self.session.close_phase()})
 
     def _event(self, event: dict, active_only: bool = False) -> None:
         pty = self.pty()
@@ -595,29 +650,42 @@ class SessionRecord:
         handle = f"cut-{next(_cuts)}"
         cut = CutSink(self, sink, handle)
         self.cuts[handle] = cut
+        self._chain = cut  # the session runs one chain: the newest cut's
         self.session.begin_cut(cut)
         return handle
 
     def cancel_cuts(self, sink=None, handle: str | None = None) -> None:
         """Call cuts off: one by handle, every one of a client's (*sink*),
-        or all."""
+        or all. The session's own chain is called off with the last cut
+        (another client's cut, still live, keeps its chain)."""
         for cut in list(self.cuts.values()):
             if handle is not None and cut.handle != handle:
                 continue
             if sink is not None and cut.sink is not sink:
                 continue
             cut.cancel()
-        self.session.cancel_cut()
+        chain = self._chain
+        ours = chain is not None and (sink is None or chain.sink is sink)
+        if ours and (handle is None or chain.handle == handle):
+            # The chain in flight is this client's (its seed may have been
+            # told already, its verify rounds still running): called off, so
+            # no round of it erases what the composer's close puts back.
+            self._chain = None
+            self.session.cancel_cut()
 
     # -- the attach -------------------------------------------------------------------
 
     def client_attached(self, sink) -> None:
+        """The facts whole to the one attaching — after what moved since
+        the last send went to everyone already attached, so a second attach
+        inside a settle starves no one (the snapshot records nothing)."""
+        self.refresh_facts()
         self.send_to(sink, self.snapshot())
 
     def client_gone(self, sink) -> None:
         for cut in list(self.cuts.values()):
             if cut.sink is sink:
-                cut.cancel()
+                cut.cancel(tell=False)
 
 
 _UNSENT = object()
