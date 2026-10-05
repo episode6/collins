@@ -104,6 +104,28 @@ def test_a_path_the_sessions_show_image_named_is_admitted_for_that_session_only(
     assert _get(feed, f"path={picture}")[0] == 403
 
 
+def test_a_link_swapped_in_at_an_admitted_path_is_refused(picture, tmp_path):
+    """D38 admits the exact resolved path: a symlink put at the path the
+    agent named, after the call, points at a file nobody admitted."""
+    named = tmp_path / "named.png"
+    named.write_bytes(b"\x89PNG-named")
+    core = Core([Session()])
+    core.image_registry.admit(["sid-1"], str(named))
+    feed = _inline(blobs.FileBlobs, core)
+    assert _get(feed, f"path={named}&session=sid-1")[0] == 200
+    named.unlink()
+    os.symlink(picture, named)  # now points outside, at an unadmitted file
+    assert _get(feed, f"path={named}&session=sid-1")[0] == 403
+
+
+def test_an_admitted_link_is_held_by_its_target(picture, tmp_path):
+    link = tmp_path / "link.png"
+    os.symlink(picture, link)
+    registry = blobs.ImageRegistry()
+    registry.admit(["sid-1"], str(link))
+    assert registry.paths("sid-1") == frozenset({str(picture)})
+
+
 def test_an_image_the_service_saw_in_the_sessions_transcript_is_admitted(picture):
     feed = _inline(blobs.FileBlobs, Core([Session(seen=[str(picture)])]))
     assert _get(feed, f"path={picture}&session=sid-1")[0] == 200

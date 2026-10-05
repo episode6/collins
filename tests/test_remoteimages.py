@@ -42,6 +42,21 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 b"HTTP/1.0 200 OK\r\nContent-Type: image/png\r\n\r\n" + b"x" * 4096
             )
             self.close_connection = True
+        elif path.startswith("/drip"):
+            # A server that keeps every socket read alive with a few bytes
+            # and never finishes inside the deadline (PR 612's review).
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(1024 * 1024))
+            self.end_headers()
+            try:
+                for _ in range(60):
+                    self.wfile.write(b"x" * 70)
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except OSError:
+                pass  # the client gave up, as it should
+            self.close_connection = True
         elif path.startswith("/hop"):
             self._redirect("/ok.png")
         elif path.startswith("/badhop"):
@@ -219,3 +234,14 @@ def test_downloads_live_beside_the_dropped_image_copies(monkeypatch, tmp_path):
 
     assert remoteimages.default_directory().parent == dropimages.cache_directory()
     assert remoteimages.default_directory() != dropimages.cache_directory() / "dropped-images"
+
+
+def test_a_dripping_body_hits_the_deadline_while_it_drips(server):
+    """`read1`: each receive's bytes come back at once, so the deadline is
+    checked between the drips (a `read(64 KiB)` waited for all of them,
+    past the deadline, as long as each drip beat the socket timeout)."""
+    start = time.monotonic()
+    clock = iter(range(0, 10_000, 3))  # 3 s per check: past the 10 s deadline in a few reads
+    with pytest.raises(remoteimages.FetchError, match="Timed out"):
+        remoteimages.fetch(f"{server}/drip.png", now=lambda: next(clock))
+    assert time.monotonic() - start < 3  # the server drips for 6 s

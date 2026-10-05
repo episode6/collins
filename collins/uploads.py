@@ -126,6 +126,8 @@ def write(session_id: str | None, name: object, data: bytes) -> Path:
     `MAX_BYTES`; `OSError` when the disk refuses."""
     if len(data) > MAX_BYTES:
         raise ValueError("too large")
+    if not data:
+        raise ValueError("empty")
     safe = safe_name(name)
     if safe is None:
         raise ValueError("not a file name")
