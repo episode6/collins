@@ -125,6 +125,11 @@ def test_the_box_facts_move_with_the_screen(server, tmp_path):
     before = len(ends.of("session"))
     record.refresh_facts()
     assert len(ends.of("session")) == before  # nothing moved: nothing sent
+    # The typed `true` is echoed twice: by the line discipline at once and
+    # by cat when it gets to run. Wait for cat's copy, or the mark sent next
+    # lands on the line cat's output then ends, leaving the cursor below it.
+    screen = server.core.ptys.get(pty).screen
+    assert pump(3, lambda: screen.capture_contents().count("true") >= 2)
     client.send_input(pty, b"\xe2\x9d\xaf\xc2\xa0")  # the CLI's prompt mark, drawn by cat's echo
     assert pump(3, lambda: any(e.get("takes_prompt") for e in ends.of("session")))
     moved = [e for e in ends.of("session") if "takes_prompt" in e][-1]
