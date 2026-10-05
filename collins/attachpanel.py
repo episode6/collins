@@ -56,7 +56,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import contextmenu, editorfiles, pictures, scrolling  # noqa: E402
+from . import apilink, contextmenu, editorfiles, pictures, scrolling  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -339,10 +339,13 @@ class AttachmentsView(Gtk.Box):
         """A row was activated: a picture goes to the lightbox; any other
         file goes to whatever the desktop opens it with — the panel has no
         way to show a spreadsheet, and the default handler is what a
-        double-click on the file anywhere else would do."""
+        double-click on the file anywhere else would do. That handler is
+        this device's and the file the service's: a local extra (§3.12),
+        so a window that is not on the service's machine opens nothing for
+        a row that is no picture (`apilink.is_local`, which is `app.local`)."""
         if one.kind == "image":
             self._open_image(one, one.key, lambda step: self._navigate_from(one, step))
-        else:
+        elif apilink.is_local():
             self._with_local_file(one, self._launch_default)
 
     def _navigate_from(self, one: Attachment, step: int) -> None:
@@ -380,7 +383,13 @@ class AttachmentsView(Gtk.Box):
         that exists right now. A local file that has since been deleted, and
         a download that fails, are both said out loud: the row is still
         there, so silence would read as a click that did nothing.
+
+        Only a `local` client comes here (every caller is a local extra,
+        gated on `apilink.is_local`): the `isfile` below reads this device's
+        disk for a path of the service's, which is the same file only then.
         """
+        if not apilink.is_local():
+            return
         if not one.remote:
             if not os.path.isfile(one.key):
                 self._notify(_gone(one))
@@ -407,8 +416,12 @@ class AttachmentsView(Gtk.Box):
     def popup_menu(self, row: _Row, one: Attachment, x: float, y: float) -> None:
         """The right-click menu for *one*, pointing at where it was clicked."""
         menu = Gio.Menu()
-        menu.append_item(_item(_("Open With…"), "attachments.open-with", one.key))
-        if not one.remote:
+        # Another app and the file manager are local extras (§3.12): hidden,
+        # not greyed out, in a window that is not on the service's machine.
+        local = apilink.is_local()
+        if local:
+            menu.append_item(_item(_("Open With…"), "attachments.open-with", one.key))
+        if local and not one.remote:
             # A remote image's own folder is the download cache, which is
             # nobody's idea of where that picture lives.
             menu.append_item(_item(_("Show in Folder"), "attachments.show-folder", one.key))
@@ -430,7 +443,7 @@ class AttachmentsView(Gtk.Box):
 
     def _on_open_with(self, _action, target: GLib.Variant) -> None:
         one = self._records.get(target.get_string())
-        if one is not None:
+        if one is not None and apilink.is_local():
             self._with_local_file(one, self._launch)
 
     def _launch(self, path: str) -> None:
@@ -446,7 +459,7 @@ class AttachmentsView(Gtk.Box):
 
     def _on_show_folder(self, _action, target: GLib.Variant) -> None:
         one = self._records.get(target.get_string())
-        if one is None or one.remote:
+        if one is None or one.remote or not apilink.is_local():
             return
         if not os.path.exists(one.key):
             self._notify(_gone(one))

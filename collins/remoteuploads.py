@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 def is_local() -> bool:
     """Whether this client proved it runs on the service's machine (a
     dropped file's own path names the same file there)."""
-    return bool(getattr(apilink.current(), "local", False))
+    return apilink.is_local()
 
 
 def upload(data: bytes, name: str, session: str | None = None, link: apilink.Link | None = None) -> str:

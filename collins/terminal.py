@@ -301,6 +301,8 @@ def _launch_uri(terminal: Vte.Terminal, uri: str) -> None:
         if path is not None:
             _open_file_reference(terminal, path, None, None)
             return
+        if not apilink.is_local():
+            return  # a file handed to this device's apps: a local extra (§3.12)
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
     else:
         launcher = Gtk.UriLauncher.new(uri)
@@ -784,6 +786,14 @@ def _open_file_reference(
 
 
 def _launch_default(terminal: Vte.Terminal, path: str) -> None:
+    """Hand a clicked path (a directory, a file outside the project) to the
+    desktop's default app: a local extra (§3.12), since the app is this
+    device's and the path the service's. A window that is not on the
+    service's machine opens nothing for such a click (`apilink.is_local`,
+    which is `app.local`); a file inside the project still opens in the
+    editor, an image in the lightbox, a URL in the browser."""
+    if not apilink.is_local():
+        return
     launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(path))
     launcher.launch(terminal.get_root(), None, _on_link_launched)
 
@@ -2893,23 +2903,30 @@ class TerminalTab(Gtk.Box):
         files_btn.add_css_class("flat")
         files_btn.set_tooltip_text(_("Open this folder in your file manager"))
         files_btn.connect("clicked", self._on_open_file_manager)
+        # The footer's three ways out of Collins (this button, the app
+        # launchers, the toggle's right-click) are local extras (§3.12):
+        # they run this device's apps on the service's folder, so a window
+        # that is not on the service's machine has none of them.
+        local = apilink.is_local()
+        files_btn.set_visible(local)
+        self._files_btn = files_btn  # (the e2e reads its visibility)
 
         # Only the selected tab is visible (and thus clickable), so routing
         # through the window's actions still targets the right tab.
         toggle_btn = Gtk.Button(icon_name="utilities-terminal-symbolic")
-        toggle_btn.set_tooltip_text(
-            keybindings.with_hint(_("Show/hide terminal panel"), "win.toggle-panel")
-            + "\n"
-            + _("Right-click to open this folder in your terminal")
-        )
+        toggle_tip = keybindings.with_hint(_("Show/hide terminal panel"), "win.toggle-panel")
+        if local:
+            toggle_tip += "\n" + _("Right-click to open this folder in your terminal")
+        toggle_btn.set_tooltip_text(toggle_tip)
         toggle_btn.set_action_name("win.toggle-panel")
         # The button already means "a shell here"; a right-click asks for the
         # same thing outside Collins, in the terminal the desktop nominates —
         # for the times the panel isn't enough (a full-screen TUI, a second
         # monitor). Its own gesture, so the panel never toggles on the way.
-        open_external = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
-        open_external.connect("pressed", self._on_open_external_terminal)
-        toggle_btn.add_controller(open_external)
+        if local:
+            open_external = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
+            open_external.connect("pressed", self._on_open_external_terminal)
+            toggle_btn.add_controller(open_external)
 
         # The git page, one click away beside the panel toggles: the same
         # glyph the page's own tab wears, so the button and what it opens
@@ -5849,6 +5866,8 @@ class TerminalTab(Gtk.Box):
         IDs are skipped."""
         while (child := self._footer_apps_box.get_first_child()) is not None:
             self._footer_apps_box.remove(child)
+        if not apilink.is_local():
+            return  # the launchers are local extras (§3.12): none when not local
         for _app_id, info in footerapps.resolve_apps(list(app_ids)):
             btn = Gtk.Button(child=apppicker.app_icon_image(info, 16))
             btn.add_css_class("flat")
@@ -5857,6 +5876,8 @@ class TerminalTab(Gtk.Box):
             self._footer_apps_box.append(btn)
 
     def _on_footer_app_clicked(self, _btn, info) -> None:
+        if not apilink.is_local():
+            return
         footerapps.launch_app(info, self.current_agent_cwd())
 
     def _on_open_file_manager(self, _btn) -> None:

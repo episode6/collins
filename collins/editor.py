@@ -34,6 +34,7 @@ except (ValueError, ImportError):
 
 from . import (  # noqa: E402
     animatedimage,
+    apilink,
     contextmenu,
     dialogs,
     editorfiles,
@@ -870,7 +871,8 @@ class EditorPane(Gtk.Box):
         menu.append(_("Add to chat"), "editor.add-file-to-chat")
         rows: list[Gtk.Widget] = []
         submenu = openwithrows.file_open_with_menu(rows, self._footer_apps, path, "editor.open-file-with")
-        menu.append_submenu(_("Open In…"), submenu)
+        if submenu.get_n_items():  # none for a client that is not local (§3.12)
+            menu.append_submenu(_("Open In…"), submenu)
         popover = Gtk.PopoverMenu.new_from_model(menu)
         openwithrows.slot_them(popover, rows)
         contextmenu.popup_at(popover, row, x, y)
@@ -880,8 +882,8 @@ class EditorPane(Gtk.Box):
         handed to the footer app, or to the desktop's default app through
         xdg-open (openwith.open_file_with); a refusal shows in the banner,
         the pane's one line for saying something."""
-        if not path:
-            return
+        if not path or not apilink.is_local():
+            return  # another app is a local extra (§3.12); the submenu is hidden too
         failure = openwith.open_file_with(app_id, path)
         if failure:
             self._show_banner(failure, _("Dismiss"), lambda: None)

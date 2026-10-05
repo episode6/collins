@@ -418,3 +418,14 @@ def test_root_names_is_fs_names(link):
     with pytest.raises(RequestRefused) as refused:
         remotefiles.root_names("/srv/p")
     assert refused.value.error == protocol.ERROR_GONE
+
+
+def test_is_local_is_the_links_proof_and_false_without_a_link(link, monkeypatch):
+    """PR-2.8: `apilink.is_local` is the one reader of the `local` proof
+    (`App.local`, the clipboard's scope, a dropped file's own path, every
+    gate of the local extras)."""
+    assert apilink.is_local() is False  # a link that never proved it
+    link.local = True
+    assert apilink.is_local() is True
+    monkeypatch.setattr(apilink, "_current", None)
+    assert apilink.is_local() is False
