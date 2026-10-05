@@ -536,6 +536,21 @@ class SessionRecord:
             return
         self._event({"t": "shells", "pty": pty.id, "what": "stale"})
 
+    def input_sent(self, text: str) -> None:
+        """The session is about to type *text* into its pty (`Session.
+        write_text`: an injected prompt, a switch, a close flow's keys),
+        told before the write lands. The gate the session pokes itself;
+        the tracker takes the process baseline's last pristine snapshot on
+        a "\\r" here, as it does on a client's input frame carrying one
+        (`ServiceActivity.input_sent`; the window's `_on_input_sent` of
+        PR 602, moved with the tracker)."""
+        activity = self.core.activity
+        if activity is not None:
+            try:
+                activity.input_sent(self, text)
+            except Exception:  # noqa: BLE001 - the tracker's failure is not the write's
+                log.exception("session %s: the tracker failed on the session's own write", self.handle)
+
     def process_exited(self, status: int) -> None:
         self.exited = True
         if self._settle is not None:

@@ -387,6 +387,30 @@ def test_busy_is_refused_from_a_client(app_state, projects_dir, tmp_path):
         pump(0.3)
 
 
+def test_a_prompt_the_service_types_arms_the_gate_and_snapshots_the_baseline(server, tmp_path):
+    """PR 602 on the service: a write through the API (an injected prompt,
+    a switch, a close flow's keys) never passes a client's VTE, so the
+    session arms its own echo gate on the "\\r" and its host hands the
+    announcement to the tracker, which takes the plumbing baseline's last
+    snapshot and lets the fresh spawn out of its startup hold."""
+    activity = server.core.start_activity()
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    record = server.core.sessions[pty]
+    session = record.session
+    assert activity.startup_held(session) and not session.echo_gate.armed
+    # What runs under the agent from here on: the submit's snapshot is the
+    # last one that folds it into the baseline.
+    session.background_descendant_cmdlines = lambda: {"mcp-server --stdio"}
+    client.request({"t": "write", "pty": pty, "text": "hello"})
+    assert activity.startup_held(session)
+    assert "mcp-server --stdio" not in activity._captures.get(record.handle, set())
+    client.request({"t": "write", "pty": pty, "text": "\r"})
+    assert session.echo_gate.armed and not activity.startup_held(session)
+    assert "mcp-server --stdio" in activity._captures[record.handle]  # taken on the submit
+
+
 def test_the_tracker_sets_busy_on_the_store(app_state, projects_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", CAT)
     _root, ids = projects_dir

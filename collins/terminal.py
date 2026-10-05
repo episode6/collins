@@ -1421,11 +1421,6 @@ class TerminalTab(Gtk.Box):
         # forked conversation: its id, for the sticky sandboxed set. The
         # tab itself stays bound to the id it was opened with.
         "fork-resolved": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
-        # The session is about to type str into its pty (an injected prompt,
-        # a model switch, a close flow's keys): the app's own input, which
-        # on the service's pty never passes the VTE and so never arrives as
-        # its "commit". The window feeds its echo gate from both.
-        "input-sent": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
         # A short message for the user, to float over the window as a toast
         # (the tab has no overlay of its own): the sandbox chip's refusal of
         # a directory, and the like. Plain text — the window escapes it.

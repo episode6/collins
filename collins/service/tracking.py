@@ -263,6 +263,27 @@ class ServiceActivity:
             for key in self._keys(session):
                 self.tracker.mark(key)
 
+    def input_sent(self, record, text: str) -> None:
+        """The session's own write (`Session.write_text`, through its
+        host's `input_sent`): an injected prompt, a switch, a close flow's
+        keys. On the service's pty these bytes never pass a client's VTE,
+        so they never arrive as an input frame (`on_input`); the session
+        pokes and arms its own gate, and this takes the baseline's last
+        pristine snapshot on a "\\r" — told before the write lands, so the
+        agent can't have spawned anything for the turn yet. No pre-emptive
+        mark: the pole comes up on the agent's own hint, as it did for the
+        window's `_on_input_sent` (PR 602)."""
+        if "\r" in (text or ""):
+            self.absorb_baseline(record.session)
+
+    def held_handles(self) -> list[str]:
+        """The handles of the fresh spawns still in their startup hold
+        (`startup_held`): what an e2e check reads through the probe where
+        the window's `_startup_held(page)` was."""
+        return sorted(
+            record.handle for record in self._records() if self.startup_held(record.session)
+        )
+
     # -- the verdicts ----------------------------------------------------------------
 
     def _on_change(self, key: str, busy: bool) -> None:

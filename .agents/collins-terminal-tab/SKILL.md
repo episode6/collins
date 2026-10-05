@@ -81,7 +81,19 @@ p)`). Up: the session reports through a `SessionHost` listener (`alive`,
 the tab turns into its existing signals. A composer's open-cut reaches the
 composer through a `CutSink` (`hosting.CutSink`: `alive` is "the client
 is still attached and hasn't called the cut off", `seed` and `refuse` are
-`cut` events by handle).
+`cut` events by handle). `input_sent` is the one host call that never
+reaches a client: every write the session makes (`Session.write_text`: an
+injected prompt, a switch, a close flow's keys) is announced *before* the
+bytes go to the pty, and on the service's pty they never pass a client's
+VTE, so they never arrive as an input frame — the session pokes and arms
+its own `echo_gate` in `write_text` (PR 602), and `SessionRecord.input_sent`
+hands the text to `ServiceActivity.input_sent`, which takes the process
+baseline's last pristine snapshot on a "\\r", as `on_input` does for a
+typed Enter. A fresh spawn whose turns were only ever sent that way would
+otherwise sit in its startup hold for good (no pole, no unread flag, no
+finished notification); `scripts/check_injected_prompt_pole.py` drives the
+road end to end through the probe (`activity.held_handles`,
+`echo_gate.armed`).
 
 **Testing a state machine.** `tests/test_session.py` builds a `Session`
 over fakes: a `FakeTerminal` that is both ports and models just enough of

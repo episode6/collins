@@ -55,7 +55,7 @@ class FakeSession:
         self.updates += 1
 
     def background_descendant_cmdlines(self):
-        return set()
+        return set(getattr(self, "cmdlines", ()))
 
     def has_background_descendant(self, ignore):
         return False
@@ -180,6 +180,37 @@ def test_a_resolved_sessions_handle_edge_passes_while_its_id_edge_is_judged():
     activity.transcript_landed(record)
     assert store.items[SID].unread is True and announced == [SID]
     assert record.sent.count({"finished": True}) == 2  # the id's, now counted
+
+
+# -- the session's own writes --------------------------------------------------------
+
+
+def test_the_sessions_own_submit_takes_the_baselines_last_snapshot():
+    """An injected prompt, a switch or a close flow's keys never arrive as
+    an input frame: the session's host announces them (`input_sent`) and
+    the tracker snapshots the plumbing baseline on the "\\r", as it does
+    for a typed Enter (PR 602's `_on_input_sent`, moved with the tracker).
+    The gate itself the session pokes; no pre-emptive mark is taken."""
+    state = FakeState()
+    session = FakeSession("s-1", SID)
+    record = FakeRecord(session)
+    activity, _timers, _announced = make(record, state=state)
+    activity.started(record, fresh=True)
+    assert activity.startup_held(session)
+    session.cmdlines = {"mcp-server --stdio"}
+    activity.input_sent(record, "hello")
+    assert "mcp-server --stdio" not in activity._captures.get("s-1", set())
+    activity.input_sent(record, "\r")
+    assert "mcp-server --stdio" in activity._captures["s-1"]
+    assert state.baselines[SID] == {"mcp-server --stdio"}
+    assert not activity.tracker.busy()  # the pole waits for the agent's own hint
+    # The gate armed by the session's own poke releases the hold; from then
+    # on the baseline is frozen.
+    session.echo_gate.poked("\r")
+    assert not activity.startup_held(session)
+    session.cmdlines = {"mcp-server --stdio", "bash -c work"}
+    activity.input_sent(record, "\r")
+    assert state.baselines[SID] == {"mcp-server --stdio"}
 
 
 # -- a counted finish and its exemptions ---------------------------------------------

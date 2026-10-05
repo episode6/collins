@@ -6,18 +6,21 @@ Spawns a real TerminalTab on a `claude` shim that waits at a prompt box,
 then — on the submit — announces itself busy with an ST-terminated OSC 9;4
 progress hint for a few seconds and clears it. The prompt is sent through
 `tab.inject_prompt`, the road the new-chat screen, the composer and the
-start_session tool all take: through the session to the service's pty,
-never through the client VTE's "commit". That road has to count as the
-tab's first submit: it releases the fresh spawn's startup hold
-(MainWindow._startup_held), the agent's own progress hint then marks the
-row busy, and the hint's clear brings the pole down through the grace.
+start_session tool all take: through the session on the service to its
+pty, never through the client VTE's "commit". That road has to count as
+the tab's first submit: it releases the fresh spawn's startup hold
+(ServiceActivity.startup_held, read through the debug probe), the agent's
+own progress hint (the stream filter's Progress event on the service) then
+marks the row busy, and the hint's clear brings the pole down through the
+grace.
 
 Through PR-1.8 every app write was VTE's `feed_child`, whose `commit`
 told the echo gate; PR-1.9's service pty bypassed it, and every tab whose
 turns were only ever sent this way sat in the startup hold for good — no
 pole, no unread flag, no finished notification. This is the check that
-would have caught it. The VTE shim detail matters: VTE parses only the
-ST-terminated OSC 9;4, so the shim ends its hints with ESC \\.
+would have caught it. The shim detail matters: the stream filter (as VTE)
+parses only the ST-terminated OSC 9;4, so the shim ends its hints with
+ESC \\.
 
 Stages its own throwaway scratch tree and app id, so it runs anywhere the
 e2e suite does:
@@ -45,6 +48,7 @@ os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 
 TRUSTED = f"{E2E}/dev/alpha"
 SHIM = f"{E2E}/bin/claude"
@@ -98,7 +102,6 @@ from gi.repository import GLib  # noqa: E402
 from collins import i18n, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
-from collins.terminal import PROGRESS_HINT_TERMPROP  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -119,7 +122,7 @@ def cleanup(win) -> None:
     otherwise be reaped only by its pty closing."""
     for i in range(win.tab_view.get_n_pages()):
         tab = win.tab_view.get_nth_page(i).get_child()
-        pid = getattr(tab, "_child_pid", None)
+        pid = tab.probe_call("child_pid") if hasattr(tab, "probe_call") else None
         if pid:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)
@@ -137,11 +140,6 @@ def bail(win, why: str) -> bool:
     return GLib.SOURCE_REMOVE
 
 
-if PROGRESS_HINT_TERMPROP is None:
-    print("SKIP: this VTE has no progress termprop")
-    shutil.rmtree(E2E, ignore_errors=True)
-    sys.exit(77)
-
 seed = AppState()
 i18n.init(seed.get_setting("language"))
 seed.update_settings({"gh_welcome_dismissed": True, "welcome_seen": True})
@@ -154,6 +152,13 @@ state: dict = {}
 def row_busy() -> bool | None:
     item = state["win"].store.get_item(state["tab"].session_id)
     return None if item is None else bool(item.busy)
+
+
+def startup_held(tab) -> bool:
+    """The service's word on the fresh spawn's hold (ServiceActivity.
+    startup_held, reached through the probe where the window's
+    `_startup_held(page)` was read)."""
+    return tab.probe("handle") in (tab.probe_call("activity.held_handles") or [])
 
 
 def stage() -> bool:
@@ -188,7 +193,7 @@ def wait_prompt() -> bool:
         return GLib.SOURCE_CONTINUE
     page = win.tab_view.get_page(tab)
     state["page"] = page
-    check("a fresh spawn starts in the startup hold", win._startup_held(page))
+    check("a fresh spawn starts in the startup hold", startup_held(tab))
     check("the row is idle before the prompt", row_busy() is False, row_busy())
     tab.inject_prompt("hello")  # the new-chat screen's, the composer's, start_session's road
     state["t0"] = time.monotonic()
@@ -202,10 +207,10 @@ def wait_busy() -> bool:
     must put the pole on the row."""
     global tries
     tries += 1
-    win, page = state["win"], state["page"]
-    if not (row_busy() and not win._startup_held(page)):
+    win, tab = state["win"], state["tab"]
+    if not (row_busy() and not startup_held(tab)):
         if tries > 40:  # ~10s
-            check("the injected prompt released the startup hold", not win._startup_held(page))
+            check("the injected prompt released the startup hold", not startup_held(tab))
             check("the row went busy on the injected prompt", bool(row_busy()), row_busy())
             cleanup(win)
             app.quit()
@@ -213,8 +218,7 @@ def wait_busy() -> bool:
         return GLib.SOURCE_CONTINUE
     check("the injected prompt released the startup hold", True)
     check("the row went busy on the injected prompt", True)
-    session = win._session_of(page)
-    check("the session's echo gate is armed", session is not None and session.echo_gate.armed)
+    check("the session's echo gate is armed", tab.probe("echo_gate.armed") is True)
     tries = 0
     GLib.timeout_add(500, wait_idle)
     return GLib.SOURCE_REMOVE
