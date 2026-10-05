@@ -214,8 +214,9 @@ pathless walker reads as `Path` methods):
   listing's landing (`_continue_reveal`); a newer reveal or a re-root
   replaces it.
 - `fs.walk {root, hidden}` answers at most 20 000 relative paths; the walk's
-  `paths` and the listing's `entries` are `protocol.CHUNKED_JSON_FIELDS`
-  (past a frame they travel as their JSON in `TAG_BLOB` frames).
+  `paths`, the listing's `entries` and `fs.names`' `names` are
+  `protocol.CHUNKED_JSON_FIELDS`, as `fs.paste`'s `results` is (past a
+  frame they travel as their JSON in `TAG_BLOB` frames).
 - `fs.stat {path, root}` answers the kind a symlink names (`symlink` only
   for a dangling one, `missing`), a file's size, the mtime and `inside`
   (of *root*, or of every root the service knows); it is unconfined.

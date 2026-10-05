@@ -545,6 +545,53 @@ def test_names_is_bounded_and_leaves_out_a_name_over_the_bound(served, monkeypat
     assert all(len(name) <= protocol.FS_NAME_MAX for name in reply["names"])
 
 
+def test_a_truncated_reply_is_the_sorted_first_names_whatever_order_the_directory_gives(
+    tmp_path, monkeypatch
+):
+    """D45 (PR-2.8): the names are collected, sorted, then cut, so a
+    truncated reply is the sorted first FS_NAMES_MAX and the same between
+    asks. `scandir` is made to answer in two different orders, both with
+    the names that sort first arriving last: a cut taken in `scandir`'s
+    order (what `names_reply` did before) would keep neither set."""
+    monkeypatch.setattr(protocol, "FS_NAMES_MAX", 4)
+    names = [f"n{index:02d}.txt" for index in range(10)]
+    for name in names:
+        (tmp_path / name).touch()
+    (tmp_path / "a-folder").mkdir()  # sorts first, and is not a name
+    real_scandir = os.scandir
+
+    class _Scan:
+        """`os.scandir`, its entries handed over in the order *key* gives."""
+
+        def __init__(self, path, key):
+            with real_scandir(path) as entries:
+                self.entries = sorted(entries, key=key)
+
+        def __enter__(self):
+            return iter(self.entries)
+
+        def __exit__(self, *_exc):
+            return False
+
+    # Last name first, then an order with the first names in the middle.
+    orders = [lambda e: [-ord(c) for c in e.name], lambda e: (e.name[2] != "5", e.name)]
+    seen: list[list[str]] = []
+    for key in orders:
+        monkeypatch.setattr(files.os, "scandir", lambda path, key=key: _Scan(path, key))
+        seen.append([entry.name for entry in _Scan(str(tmp_path), key).entries])
+        assert files.names_reply(str(tmp_path)) == {"names": names[:4], "truncated": True}
+    monkeypatch.setattr(files.os, "scandir", real_scandir)
+    # The directory really was read in two orders, neither with the sorted
+    # first names in its first four.
+    assert seen[0] != seen[1]
+    assert all(set(order[:4]) != set(names[:4]) for order in seen)
+    # Exactly the bound is not truncated; one more is.
+    monkeypatch.setattr(protocol, "FS_NAMES_MAX", 10)
+    assert files.names_reply(str(tmp_path)) == {"names": names, "truncated": False}
+    monkeypatch.setattr(protocol, "FS_NAMES_MAX", 9)
+    assert files.names_reply(str(tmp_path)) == {"names": names[:9], "truncated": True}
+
+
 def test_a_full_bound_of_long_names_chunks_through_the_real_framing(tmp_path):
     """Review of PR 614: 5000 names of 250 characters validate but are
     past a frame as one message; `names` travels as TAG_BLOB frames like a
