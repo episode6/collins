@@ -160,7 +160,10 @@ each taken from the code the message replaces:
   (re-read the statuses of some URLs), `pr.sweep` (the sidebar's sweep),
   `pr.detail` and `pr.threads` (the PR page's data, `prdetail`'s, as JSON
   objects), `pr.blob` (an image in the Files view: the gates checked and
-  the URL of its blob GET answered, ``GET /api/blob?kind=pr``, PR-2.2) and
+  the URL of its blob GET answered, ``GET /api/blob?kind=pr``, PR-2.2: its
+  reply's `file` became `url`, the one non-additive change of Phase 2 so
+  far, made without a `PROTOCOL` bump because no release has shipped the
+  split — no service or client of another build speaks `pr.blob`) and
   the actions:
   `pr.action` (`practions.perform`'s keys), `pr.comment`, `pr.review` and
   `pr.thread` (reply in a review thread, or resolve it). Each names the PR

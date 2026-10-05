@@ -97,7 +97,15 @@ def fetch(url: str, suffix: str = "", link: apilink.Link | None = None) -> Path:
     except Exception as err:  # the socket went away under the GET
         raise ValueError(str(err) or _("The service did not answer.")) from None
     if status == 304 and target.exists():
-        return target  # kept as it is: the tag says the bytes are the same
+        # Kept as it is (the tag says the bytes are the same), its clock
+        # restarted: the prune goes by mtime, so it reads "last used" — a
+        # blob looked at daily is never pruned and fetched whole again.
+        for held in (target, etag_file):
+            try:
+                os.utime(held)
+            except OSError:
+                pass
+        return target
     if status != 200:
         raise ValueError(_reason(status))
     if len(data) > MAX_BYTES:

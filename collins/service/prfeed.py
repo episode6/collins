@@ -47,14 +47,12 @@ GLib only; nothing here imports GTK.
 from __future__ import annotations
 
 import logging
-import threading
 from collections.abc import Callable
 from urllib.parse import parse_qs
 
-from gi.repository import GLib
-
 from .. import practions, prblobs, prdetail, prstatus
 from ..api import protocol
+from . import gitfeed
 
 log = logging.getLogger(__name__)
 
@@ -197,14 +195,6 @@ def handle_gh(message: protocol.Message) -> dict:
 # ---- the blob GET (PR-2.2) ----------------------------------------------------------
 
 
-def _dispatch_default(fn: Callable[[], object]) -> None:
-    GLib.idle_add(lambda: fn() and False, priority=GLib.PRIORITY_DEFAULT)
-
-
-def _spawn_default(fn: Callable[[], None], name: str) -> None:
-    threading.Thread(target=fn, name=name, daemon=True).start()
-
-
 class PrBlobs:
     """`GET /api/blob?kind=pr` (see the module docstring), in
     `gitfeed.GitFeed.blob`'s shape. *dispatch* lands the thread's answer
@@ -215,8 +205,8 @@ class PrBlobs:
         dispatch: Callable[[Callable[[], object]], None] | None = None,
         spawn: Callable[[Callable[[], None], str], None] | None = None,
     ) -> None:
-        self._dispatch = dispatch or _dispatch_default
-        self._spawn = spawn or _spawn_default
+        self._dispatch = dispatch or gitfeed.dispatch_default
+        self._spawn = spawn or gitfeed.spawn_default
 
     def blob(
         self, client, query: str, if_none_match: str | None, respond: Callable[[int, dict, bytes], None]
