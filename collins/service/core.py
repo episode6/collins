@@ -1532,6 +1532,44 @@ class ServiceCore:
             lambda: protocol.reply(message.id, links=transcripttail.read_links(path)),
         )
 
+    def _req_store_transcript_export(
+        self, message: protocol.Message, client: Client
+    ) -> dict | protocol.Deferred:
+        """A session's transcript as Markdown (§3.23, PR-2.8): what the
+        window's *Export as Markdown…* wrote from the transcript itself
+        before the split. The session, its title and its transcript's path
+        are the store's (never a client's: the request names only the
+        session), the path a `.jsonl` under the CLI's projects directory
+        or the chats' (`transcript_path_allowed`, rule 5), read and
+        rendered on a thread (`sessions.export_markdown`, which reads a
+        transcript that has gone as one with no messages, as it always
+        did). A render over TRANSCRIPT_EXPORT_MAX is refused rather than
+        cut: half a conversation under the whole one's title is worse
+        than a refusal that says why."""
+        session = self.store.get_session(message.get("session"))
+        if session is None:
+            return protocol.refuse(message.id, protocol.ERROR_GONE, "This session is not here any more")
+        path = str(session.jsonl_path) if session.jsonl_path else None
+        if path is None or not transcript_path_allowed(path):
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "This session's transcript is not one Collins reads"
+            )
+        title = self.store.display_name(session)
+        session_id, cwd = session.session_id, session.cwd
+
+        def work() -> dict:
+            text = sessions.export_markdown(Path(path), title, session_id, cwd)
+            if len(text) > protocol.TRANSCRIPT_EXPORT_MAX:
+                return protocol.refuse(
+                    message.id,
+                    protocol.ERROR_REFUSED,
+                    "The transcript is too long to export ({size} characters; the most is {limit})",
+                    {"size": len(text), "limit": protocol.TRANSCRIPT_EXPORT_MAX},
+                )
+            return protocol.reply(message.id, text=text)
+
+        return self.files._later(message, "transcript-export", work)
+
     def _req_store_forget(self, message: protocol.Message, client: Client) -> dict:
         session_id = message.get("session")
         if self.store.get_session(session_id) is not None:
