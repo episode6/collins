@@ -274,3 +274,85 @@ def test_a_core_without_state_refuses_the_store(tmp_path):
         client.request({"t": "subscribe"})
     assert refused.value.error == "unknown"
     server.shutdown()
+
+
+# -- running sessions (PR-1.12c, §3.21) -------------------------------------------------
+
+
+def _pump(seconds, until):
+    import time
+
+    from gi.repository import GLib
+
+    ctx = GLib.MainContext.default()
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        ctx.iteration(False)
+        if until():
+            return True
+        time.sleep(0.005)
+    return until()
+
+
+def _spawn(link, cwd, **extra):
+    message = {"t": "spawn", "kind": "agent", "cwd": str(cwd), "cols": 80, "rows": 24}
+    return link.call({**message, "command_override": "true", **extra})["pty"]
+
+
+def test_a_running_session_is_a_running_row_until_its_pty_exits(world, tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/cat")
+    _store, remote, _state, ids, link = world
+    heard = []
+    remote.connect("running-changed", lambda _s, sid: heard.append(sid))
+    item = remote.get_item(ids["alpha1"])
+    assert item.running is False and remote.pty_for(ids["alpha1"]) is None
+    pty = _spawn(link, tmp_path, session=ids["alpha1"])
+    # The pty table's row and the item field both say so.
+    assert item.running is True and remote.is_running(ids["alpha1"])
+    assert remote.pty_for(ids["alpha1"]) == pty and remote.pty_running(pty)
+    assert ids["alpha1"] in heard
+    assert remote.unresolved_ptys() == {}
+    link.call({"t": "close", "pty": pty, "mode": "kill"})
+    assert _pump(8, lambda: not remote.pty_running(pty))
+    assert _pump(2, lambda: item.running is False)
+    assert remote.pty_for(ids["alpha1"]) is None
+
+
+def test_a_fresh_spawn_is_an_unresolved_running_pty(world, tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/cat")
+    _store, remote, _state, _ids, link = world
+    pty = _spawn(link, tmp_path)
+    assert remote.unresolved_ptys() == {pty: str(tmp_path)}
+    link.call({"t": "close", "pty": pty, "mode": "kill"})
+    assert _pump(8, lambda: remote.unresolved_ptys() == {})
+
+
+def test_the_running_field_alone_marks_the_row(world):
+    """An `item` event's `running`, with no row of the pty table to go by
+    (the order the service's two words may land in)."""
+    _store, remote, _state, ids, link = world
+    item = remote.get_item(ids["alpha2"])
+    link.dispatch({"t": "item", "session": ids["alpha2"], "running": True})
+    assert item.running is True and remote.is_running(ids["alpha2"])
+    link.dispatch({"t": "item", "session": ids["alpha2"], "running": False})
+    assert item.running is False
+
+
+def test_a_table_row_names_the_session_and_its_exit_clears_it(world):
+    _store, remote, _state, ids, link = world
+    item = remote.get_item(ids["alpha2"])
+    link.dispatch({"t": "pty", "pty": 41, "kind": "agent", "cwd": "/w", "table": True})
+    assert remote.unresolved_ptys() == {41: "/w"} and item.running is False
+    # The resolve: the row names the session now.
+    link.dispatch({"t": "pty", "pty": 41, "kind": "agent", "session": ids["alpha2"], "table": True})
+    assert remote.unresolved_ptys() == {} and item.running is True
+    assert remote.pty_for(ids["alpha2"]) == 41
+    # A view's `pty` event (no table flag) moves nothing here.
+    link.dispatch({"t": "pty", "pty": 42, "kind": "agent", "session": ids["alpha1"]})
+    assert remote.pty_for(ids["alpha1"]) is None
+    link.dispatch({"t": "pty-exited", "pty": 41, "status": 0, "table": True})
+    assert item.running is False and remote.pty_for(ids["alpha2"]) is None
+    # A reset forgets the table: the next snapshot brings it whole.
+    link.dispatch({"t": "pty", "pty": 43, "kind": "agent", "session": ids["alpha2"], "table": True})
+    remote.reset()
+    assert item.running is False and remote.agent_ptys() == {}

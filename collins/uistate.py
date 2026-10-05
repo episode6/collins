@@ -23,9 +23,14 @@ Shape:
      "services": {"<service id>": {"panel_layout": {}, "editor_states": {},
                                    "open_tabs": [], "last_active_session": ""}}}
 
-`connections`, `last_connection` and `open_tabs` are written with their
-defaults and read by nobody yet: PR-3.1 and PR-1.12 fill them in. What
-this module decides on its own, where the spec left room:
+`connections` and `last_connection` are written with their defaults and
+read by nobody yet: PR-3.1 fills them in. `open_tabs` is the tabs this
+device had open on that service, in tab order (session ids, and
+``pty:<id>`` for a tab whose session had not resolved): written by the
+window on every tab open, close, detach and reorder, read at launch and
+after a reconnect to reattach or resume each (PR-1.12c, §3.21; see
+`AppState.get_open_tabs`). What this module decides on its own, where the
+spec left room:
 
 - The spec's per-service block names a `panel_states` key. There is no
   such thing in the code any more: it was the pre-tree panel shape, which
@@ -99,6 +104,40 @@ def _record_map(raw: object) -> dict[str, dict]:
     return {k: v for k, v in raw.items() if isinstance(k, str) and k and isinstance(v, dict)}
 
 
+# How many open tabs a block keeps, and how long an entry may be: a session
+# id is a uuid, ``pty:<id>`` a few digits more.
+OPEN_TABS_MAX = 256
+_OPEN_TAB_MAX_LEN = 128
+
+
+def clean_open_tabs(raw: object) -> list[str]:
+    """An `open_tabs` list as the file (or a caller) gave it, cut to what
+    fits: strings with no control characters, at most `_OPEN_TAB_MAX_LEN`
+    long, a ``pty:`` entry naming a positive integer, no duplicates, at
+    most `OPEN_TABS_MAX` (rule 5: the file is foreign content)."""
+    if not isinstance(raw, list):
+        return []
+    clean: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, str) or not entry or len(entry) > _OPEN_TAB_MAX_LEN:
+            continue
+        if any(ord(c) < 32 or c == "\x7f" for c in entry) or entry in clean:
+            continue
+        if entry.startswith("pty:") and not (entry[4:].isdigit() and int(entry[4:]) > 0):
+            continue
+        clean.append(entry)
+        if len(clean) >= OPEN_TABS_MAX:
+            break
+    return clean
+
+
+def open_tab_pty(entry: str) -> int | None:
+    """The pty id an ``open_tabs`` entry names (``pty:<id>``), else None."""
+    if isinstance(entry, str) and entry.startswith("pty:") and entry[4:].isdigit():
+        return int(entry[4:])
+    return None
+
+
 def _block(raw: object) -> dict:
     """One per-service block read off the file, every key present and of
     the right shape."""
@@ -107,8 +146,7 @@ def _block(raw: object) -> dict:
         "panel_layout": _record_map(data.get("panel_layout")),
         "editor_states": _record_map(data.get("editor_states")),
     }
-    tabs = data.get("open_tabs")
-    block["open_tabs"] = [t for t in tabs if isinstance(t, str)] if isinstance(tabs, list) else []
+    block["open_tabs"] = clean_open_tabs(data.get("open_tabs"))
     last = data.get("last_active_session")
     block["last_active_session"] = last if isinstance(last, str) else ""
     return block

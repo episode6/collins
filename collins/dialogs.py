@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """Reusable dialogs, kept out of the main window."""
 
@@ -414,6 +414,55 @@ def save_changes_dialog(
 
     dialog.connect("response", respond)
     _present(dialog, parent)
+
+
+def answer_dialog(
+    parent: Gtk.Widget,
+    heading: str,
+    body: str,
+    choices: list[tuple[str, str, str]],
+    on_choice: Callable[[str], None],
+    default_response: str,
+    keys: dict[str, str] | None = None,
+) -> Adw.AlertDialog:
+    """An alert with Cancel and the *choices* after it, left to right: each
+    ``(id, label, look)`` with look ``""``, ``"suggested"`` or
+    ``"destructive"``. *on_choice* hears the id, ``"cancel"`` for Cancel and
+    Escape. *keys* maps bare key names to ids, as confirm_dialog's do. The
+    quit dialog, *Restart service* and the protocol mismatch ask through
+    this (split-service spec §3.21)."""
+    dialog = Adw.AlertDialog(heading=heading, body=body)
+    dialog.add_response("cancel", _("Cancel"))
+    looks = {
+        "suggested": Adw.ResponseAppearance.SUGGESTED,
+        "destructive": Adw.ResponseAppearance.DESTRUCTIVE,
+    }
+    for response, label, look in choices:
+        dialog.add_response(response, label)
+        if look in looks:
+            dialog.set_response_appearance(response, looks[look])
+    dialog.set_default_response(default_response)
+    dialog.set_close_response("cancel")
+    if keys:
+        ids = {response for response, _label, _look in choices} | {"cancel"}
+
+        def on_key(_ctrl, keyval, _keycode, state) -> bool:
+            if state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
+                return Gdk.EVENT_PROPAGATE
+            response = keys.get(Gdk.keyval_name(Gdk.keyval_to_lower(keyval)) or "")
+            if response not in ids:
+                return Gdk.EVENT_PROPAGATE
+            # As confirm_dialog: through close(), so "response" fires once.
+            dialog.set_close_response(response)
+            dialog.close()
+            return Gdk.EVENT_STOP
+
+        controller = Gtk.EventControllerKey()
+        controller.connect("key-pressed", on_key)
+        dialog.add_controller(controller)
+    dialog.connect("response", lambda _dialog, response: on_choice(response))
+    _present(dialog, parent)
+    return dialog
 
 
 def progress_dialog(

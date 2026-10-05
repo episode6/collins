@@ -86,6 +86,7 @@ from .state import (
     SHARED_KEYS,
     AppState,
     diff_shared,
+    migrate_device_settings,
 )
 
 log = logging.getLogger(__name__)
@@ -158,6 +159,11 @@ class RemoteState(AppState):
     def _load(self) -> None:
         ui_settings = {k: v for k, v in self.ui.settings.items() if k not in SERVICE_SETTINGS}
         self._ui_only_keys = frozenset(k for k in ui_settings if k not in DEFAULT_SETTINGS)
+        before = dict(ui_settings)
+        migrate_device_settings(ui_settings)
+        # The device's own reads (get_setting answers off UiState) see a
+        # moved value too; the next device write saves it.
+        self.ui.settings.update({k: v for k, v in ui_settings.items() if before.get(k) != v})
         self.settings = {**DEFAULT_SETTINGS, **ui_settings}
 
     def _write_ui(self) -> None:

@@ -52,6 +52,10 @@ NEW_SERVICE_RECORDS = {
     "service_id", "ptys", "pty_next_id", "diff_notes", "pending_diffs", "resume_on_start",
 }
 
+# Device settings added since v0.1.4 (not in its file): the quit dialog's
+# one-time notice and the ask -> detach move's marker (PR-1.12c).
+NEW_DEVICE_SETTINGS = {"quit_detach_migrated", "quit_notice_shown"}
+
 # Every settings key v0.1.4 wrote, frozen as a literal: the migration
 # fixture is built from this list, not from DEFAULT_SETTINGS, so a key the
 # catalogue gains or loses later cannot change what the fixture stands for.
@@ -114,8 +118,8 @@ def test_the_device_settings_are_everything_else():
     assert DEVICE_SETTINGS == {
         "font", "keybindings", "scrollback", "color_scheme", "terminal_theme",
         "terminal_max_width", "easy_copy_paste", "language",
-        "quit_with_running_sessions", "hide_notice_shown", "show_tab_bar",
-        "status_icon", "inapp_notifications", "notification_sound",
+        "quit_with_running_sessions", "quit_detach_migrated", "quit_notice_shown",
+        "hide_notice_shown", "show_tab_bar", "status_icon", "inapp_notifications", "notification_sound",
         "bell_notifications", "announce_finished_runs", "check_for_updates",
         "notification_color_scheme", "attach_overlay_button",
         "composer_enter_sends", "composer_on_typing", "composer_spell_click",
@@ -231,6 +235,8 @@ def _v014_state() -> dict:
         "welcome_seen": True,
         "git_layout": "stack",
         "git_log_page": 50,
+        # What v0.1.4 wrote back for the quit setting: its default then.
+        "quit_with_running_sessions": "ask",
     })
     return {
         "names": {"sid-1": "My session"},
@@ -303,7 +309,7 @@ def test_first_start_migrates_with_every_key_accounted_for(app_state, v014):
     assert set(service["settings"]) == SERVICE_SETTINGS
     device_in_ui = set(ui["device"]["settings"]) | uistate.SERVICE_SCOPED_SETTINGS
     assert device_in_ui == DEVICE_SETTINGS
-    assert set(service["settings"]) | device_in_ui == set(v014["settings"])
+    assert set(service["settings"]) | device_in_ui == set(v014["settings"]) | NEW_DEVICE_SETTINGS
     assert not (set(service["settings"]) & set(ui["device"]["settings"]))
     # With their values.
     assert service["settings"]["title_model"] == "claude-haiku-4-5-20251001"
@@ -634,3 +640,62 @@ def test_a_corrupt_ui_state_is_copied_aside_before_it_is_overwritten(app_state):
     assert ui["device"]["settings"]["sidebar_width"] == 510
     state.set_setting("sidebar_width", 520)  # a second save does not copy again
     assert aside.read_text(encoding="utf-8") == "{broken"
+
+
+# -- the quit setting's ask -> detach move (PR-1.12c, D30) ----------------------
+
+
+def _write_ui_settings(app_state, settings: dict) -> None:
+    _write_ui(app_state, {"device": {"settings": settings}})
+
+
+def test_the_new_quit_settings_are_this_devices():
+    assert {"quit_notice_shown", "quit_detach_migrated"} <= DEVICE_SETTINGS
+    assert DEFAULT_SETTINGS["quit_with_running_sessions"] == "detach"
+    assert DEFAULT_SETTINGS["quit_notice_shown"] is False
+    assert DEFAULT_SETTINGS["quit_detach_migrated"] is False
+
+
+def test_a_stored_ask_moves_to_detach_once(app_state):
+    _write_ui_settings(app_state, {"quit_with_running_sessions": "ask"})
+    state = app_state.AppState()
+    assert state.get_setting("quit_with_running_sessions") == "detach"
+    state.set_setting("sidebar_width", 300)  # any device write saves the move
+    ui = json.loads(app_state._ui_state_file().read_text(encoding="utf-8"))
+    assert ui["device"]["settings"]["quit_with_running_sessions"] == "detach"
+    assert ui["device"]["settings"]["quit_detach_migrated"] is True
+    # Once: an "ask" chosen afterwards stays.
+    state.set_setting("quit_with_running_sessions", "ask")
+    assert app_state.AppState().get_setting("quit_with_running_sessions") == "ask"
+
+
+def test_the_other_quit_values_are_not_moved(app_state):
+    for value in ("exit", "background", "hide"):
+        _write_ui_settings(app_state, {"quit_with_running_sessions": value})
+        assert app_state.AppState().get_setting("quit_with_running_sessions") == value
+
+
+def test_a_v014_file_migrates_its_ask_to_detach(app_state, v014):
+    state = app_state.AppState(migrate=True)
+    assert state.get_setting("quit_with_running_sessions") == "detach"
+    _service, ui = _files(app_state)
+    assert ui["device"]["settings"]["quit_with_running_sessions"] == "detach"
+    assert ui["device"]["settings"]["quit_detach_migrated"] is True
+
+
+def test_the_mirror_moves_a_stored_ask_too(app_state, tmp_path):
+    from collins.remotestate import RemoteState
+
+    class _Link:
+        def on(self, *_args):
+            pass
+
+    ui_path = tmp_path / "client-ui.json"
+    ui_path.write_text(
+        json.dumps({"device": {"settings": {"quit_with_running_sessions": "ask"}}}),
+        encoding="utf-8",
+    )
+    ui = uistate.UiState(ui_path, app_state.device_defaults())
+    state = RemoteState(_Link(), ui=ui)
+    assert state.get_setting("quit_with_running_sessions") == "detach"
+    assert state.get_setting("quit_detach_migrated") is True
