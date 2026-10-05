@@ -30,8 +30,7 @@ derived plan).
 person's screen is a `tool` event to the session's **active client** (D20:
 that one only; `ServiceCore._tool_client` picks it) and a
 `mcptools.DeferredResult` that resolves on the client's `tool-reply` or at
-`TOOL_BOUND_S`, under the shim's own 15 s call timeout. On the loopback the
-client answers inside the event, so a call that finishes at once still
+`TOOL_BOUND_S`, under the shim's own 15 s call timeout. A call that finishes at once still
 returns its ``(ok, text)`` at once (`_settled`). The table, as implemented:
 
 ====================  ====================================  ===========================================
@@ -41,9 +40,9 @@ set_session_title     the service's store renames; the      the same
                       client's tab title follows its mirror
 attach_pr             the session's own PR list             the same
                       (`Session.attach_pr`)
-start_session         the active client's window spawns     refused: in Phase 1 a session's logic
-                      the sibling (a new tab)               runs in its client's tab (escalated)
-read_terminal,        the active client (Phase 1: the       the session's shell ptys on the pty server,
+start_session         the active client's window spawns     refused: no window to spawn it
+                      the sibling (a new tab)               in (`START_NEEDS_CLIENT`)
+read_terminal,        the active client (the                the session's shell ptys on the pty server,
 run_in_terminal       shells' pages)                        read through the model; one of its own spawned
                                                             when none is idle (one at most, reused; busy
                                                             is refused), closed when the agent exits
@@ -88,8 +87,8 @@ log = logging.getLogger(__name__)
 # How long a UI-bound call waits for its client's reply: under the shim's
 # own call timeout (mcp_shim._CALL_TIMEOUT, 15 s), so the agent hears
 # Collins' words rather than a transport timeout. That leaves about a
-# second for the answer to cross back to the shim, which the loopback (and
-# a local socket) needs a fraction of; PR-1.12's remote link may want more.
+# second for the answer to cross back to the shim, which a local socket needs a
+# fraction of; a remote link may want more.
 # It stays above the client's own deadlines (a show_diff's load and a
 # start_session's spawn are 12 s, gitloads.SHOW_DIFF_DEADLINE_S and
 # toolclient._START_SESSION_DEADLINE_MS) on purpose: their failure says
@@ -138,8 +137,7 @@ class SessionTools:
     """The dispatcher the socket service is handed. See the module docstring.
 
     *get_setting* reads the service's settings; *sessions* lists every
-    session the service holds (`service.session.Session`s; through Phase 1
-    the tabs' own, the app's lookup); *sandbox_host* is the SandboxHost or
+    session the service holds (`service.session.Session`s); *sandbox_host* is the SandboxHost or
     None; *send_tool(session, event)* hands a `tool` event to the session's
     active client and answers which client took it (None: no client is
     attached); *store* is the service's SessionStore, *state* its AppState,

@@ -171,8 +171,10 @@ login shell's `PATH`.
 - **The CLI on `PATH`.** Shells spawn with the service's environment
   overlaid by a login-shell capture (`$SHELL -lic 'env -0'`, once at start,
   5 s, failing soft), which is what finds `~/.local/bin/claude` and your
-  `PATH` on a box with no desktop. It never overrides a variable the
-  service was started with. `SSH_AUTH_SOCK` is yours to provide there, as
+  `PATH` on a box with no desktop. The capture wins (your `PATH` order
+  too), except `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and
+  systemd's own variables, which stay as the service was started with,
+  and the service's own leading `PATH` entries stay first. `SSH_AUTH_SOCK` is yours to provide there, as
   it is over ssh.
 
 `collins-service --print-socket` starts the service if needed and prints the

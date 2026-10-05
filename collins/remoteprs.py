@@ -11,9 +11,8 @@ client: `prstore.PrStore`'s signals (``status-changed``,
 `set_records`, `set_prs`, `attach`), over a copy of the service hub's
 lists filled by the `pr` events (the subscribe snapshot, then every change)
 and its statuses kept by `pr-status` (absorbed into `prstatus`'s cache,
-which `prs` and every widget read with `prstatus.known`; in Phase 1 the
-service's cache is that same cache, and an entry already there changes
-nothing). **The equality guard holds on both sides**: an identical write is
+which `prs` and every widget read with `prstatus.known`; an entry already
+there changes nothing). **The equality guard holds on both sides**: an identical write is
 dropped here without a request or a signal, and an event that brings the
 list the mirror already has (the echo of its own write) emits nothing, so
 the subscribers that write back what they adopted still start no
@@ -181,8 +180,8 @@ def fetch_threads(url: str) -> tuple:
 
 
 def fetch_blob(repository: str, ref: str, path: str) -> Path:
-    """`prblobs.fetch_to_file`, on the service: the file it wrote (through
-    Phase 1 a path on this machine; PR-1.12 makes it a blob transfer).
+    """`prblobs.fetch_to_file`, on the service: the path of the file it wrote
+    (on the service's machine; a blob transfer is Phase 2's).
     Raises `prblobs.BlobError`."""
     from .prblobs import BlobError
 

@@ -1748,8 +1748,8 @@ def status_entry(url: str) -> dict | None:
 
 def absorb_entry(url: str, entry: object) -> bool:
     """A `pr-status` event's entry, put in this process's cache (a client's
-    copy of the service's; in Phase 1 they are the same cache, and an entry
-    that is already there changes nothing and tells nobody). Whether it
+    copy of the service's; an entry that is already there changes nothing
+    and tells nobody). Whether it
     changed anything."""
     if not isinstance(url, str) or not _FETCHABLE.match(url) or not isinstance(entry, dict):
         return False
