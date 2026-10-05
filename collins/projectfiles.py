@@ -640,9 +640,11 @@ def _move_by_placeholder(source: Path, target: Path) -> None:
     and the name counts as taken (`FileExistsError`); any other failure
     removes it and is the move's. For a file, a link or anything else
     the placeholder is an empty file created `O_CREAT|O_EXCL|O_NOFOLLOW`,
-    its `(st_dev, st_ino)` kept; a failed rename removes it only while
-    `lstat` still shows that inode (never something swapped over it) and
-    is the move's failure, as `rename` refused it before the split."""
+    its identity kept (`_identity`: the inode, and since a filesystem
+    hands a just-freed inode number straight back, its ctime, size and
+    type with it); a failed rename removes it only while `lstat` still
+    shows that identity (never something swapped over it) and is the
+    move's failure, as `rename` refused it before the split."""
     if _is_real_dir(source):
         os.mkdir(target)
         try:
@@ -660,20 +662,26 @@ def _move_by_placeholder(source: Path, target: Path) -> None:
         return
     fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NOCTTY, 0o600)
     try:
-        st = os.fstat(fd)
-        made = (st.st_dev, st.st_ino)
+        made = _identity(os.fstat(fd))
     finally:
         os.close(fd)
     try:
         os.rename(source, target)
     except OSError:
         try:
-            now = os.lstat(target)
-            if (now.st_dev, now.st_ino) == made:
+            if _identity(os.lstat(target)) == made:
                 os.unlink(target)
         except OSError:
             pass
         raise
+
+
+def _identity(st: os.stat_result) -> tuple:
+    """What tells the placeholder just made from anything swapped over its
+    name: the inode (`st_dev`, `st_ino`), and because ext4 hands a
+    just-freed inode number straight back to the next file made in the
+    directory (CI showed it), the inode's ctime, size and type too."""
+    return (st.st_dev, st.st_ino, st.st_ctime_ns, st.st_size, stat_mod.S_IFMT(st.st_mode))
 
 
 def _move_by_copy(source: Path, target: Path) -> None:

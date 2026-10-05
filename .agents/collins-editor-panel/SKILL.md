@@ -316,7 +316,9 @@ touches the disk.
   name taken, `EINVAL` / `ENOSYS` / `ENOTSUP` or no such symbol take the
   placeholder path (`_move_by_placeholder`: a file's target created
   `O_CREAT|O_EXCL|O_NOFOLLOW` then replaced by `os.rename`, removed on a
-  failed rename only while `lstat` still shows the inode made; a
+  failed rename only while `lstat` still shows the placeholder made
+  (`_identity`: the inode plus its ctime, size and type, since ext4
+  hands a just-freed inode number straight back — CI showed it); a
   directory's `os.mkdir` then `os.rename`, `ENOTEMPTY` meaning someone
   put something in it, so it stays and the name counts as taken), `EXDEV`
   from either takes the copy path (`_move_by_copy`: the exclusive copy
