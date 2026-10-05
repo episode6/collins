@@ -6,10 +6,11 @@ translated text, events that arrive before the reply, a refused start."""
 
 import threading
 
+import inproc as loopback
 import pytest
 
-from collins import apilink, jobclient
-from collins.api import loopback, protocol
+from collins import jobclient
+from collins.api import protocol
 from collins.service import jobs
 from collins.service.core import ServiceCore
 
@@ -134,7 +135,7 @@ def test_login_repair_takes_a_mode(monkeypatch):
 # -- through the loopback and the client's end
 
 
-class _Link(apilink.LoopbackLink):
+class _Link(loopback.LoopbackLink):
     pass
 
 

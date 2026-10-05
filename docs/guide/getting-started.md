@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-09-27. Full change history: git log for this file.
+fork. Last modified: 2026-10-04. Full change history: git log for this file.
 -->
 
 # Getting Started
@@ -11,7 +11,7 @@ fork. Last modified: 2026-09-27. Full change history: git log for this file.
 Collins is a GTK4 app. You'll need:
 
 - **Python ≥ 3.10**
-- **GTK ≥ 4.10**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), **GtkSourceView 5**, and **PyGObject**
+- **GTK ≥ 4.10**, **libadwaita ≥ 1.5**, **VTE** (the GTK 4 build), **GtkSourceView 5**, **libsoup 3** (the socket between the app and its service), and **PyGObject**
 - **markdown-it-py** with **linkify-it-py** (the PR page's markdown parser — without
   them a PR's description falls back to plain text)
 - Optional: **libspelling** (spell-check in the composer), **GStreamer** with its base
@@ -36,15 +36,15 @@ Install the system libraries with your distro's package manager:
 ::: code-group
 
 ```bash [Ubuntu / Debian]
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 bubblewrap bindfs fuse3
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-vte-3.91 gir1.2-gtksource-5 gir1.2-soup-3.0 python3-markdown-it python3-linkify-it gir1.2-spelling-1 gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 bubblewrap bindfs fuse3
 ```
 
 ```bash [Fedora]
-sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base bubblewrap bindfs fuse3
+sudo dnf install python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libsoup3 python3-markdown-it-py python3-linkify-it-py libspelling gstreamer1 gstreamer1-plugins-base bubblewrap bindfs fuse3
 ```
 
 ```bash [Arch]
-sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs bubblewrap fuse3
+sudo pacman -S python-gobject gtk4 libadwaita vte4 gtksourceview5 libsoup3 python-markdown-it-py python-linkify-it-py libspelling gstreamer gst-plugins-base-libs bubblewrap fuse3
 ```
 
 :::

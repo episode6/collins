@@ -25,7 +25,7 @@ import time
 from gi.repository import Adw, Gio, GLib, Gtk
 
 from . import apilink, jobclient, usage
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import _
 from .state import AppState
 

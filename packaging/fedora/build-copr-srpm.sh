@@ -81,7 +81,8 @@ rpmbuild -bs \
     --define 'dist %{nil}' \
     "$spec"
 
-rpmlint "$spec" "$out"/*.src.rpm
+rpmlintrc="$(dirname "$spec")/collins.rpmlintrc"
+rpmlint "$spec" "$out"/*.src.rpm  # the rpmlintrc filters fire on the binary rpm alone
 
 if $rebuild; then
     rpmbuild --rebuild \
@@ -90,7 +91,7 @@ if $rebuild; then
         --define '_build_name_fmt %%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm' \
         --define 'dist %{nil}' \
         "$out"/*.src.rpm
-    rpmlint "$out"/*.noarch.rpm
+    rpmlint -r "$rpmlintrc" "$out"/*.noarch.rpm
 fi
 
 echo

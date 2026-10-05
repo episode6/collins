@@ -153,6 +153,7 @@ def test_can_offer_install_only_when_missing_and_launchable(monkeypatch, tmp_pat
 
 def test_install_writes_the_three_files(monkeypatch, tmp_path):
     monkeypatch.setattr(desktopentry, "_refresh", lambda *a: None)
+    monkeypatch.setattr(desktopentry, "_reload_units", lambda: None)
     monkeypatch.setattr(desktopentry, "exec_command", lambda: "collins")
 
     written = desktopentry.install(tmp_path)
@@ -160,8 +161,12 @@ def test_install_writes_the_three_files(monkeypatch, tmp_path):
     entry = tmp_path / "applications" / f"{APP_ID}.desktop"
     icon = tmp_path / "icons" / "hicolor" / "scalable" / "apps" / f"{APP_ID}.svg"
     appdata = tmp_path / "metainfo" / f"{APP_ID}.metainfo.xml"
-    assert written == [entry, icon, appdata]
+    unit = tmp_path / "systemd" / "user" / desktopentry.UNIT
+    assert written == [entry, icon, appdata, unit]
     assert all(p.is_file() for p in written)
+    # The service's unit (PR-1.12b): ExecStart resolved like Exec, nothing
+    # enabled.
+    assert "ExecStart=" in unit.read_text()
 
     text = entry.read_text()
     assert "Exec=collins" in text
@@ -191,3 +196,12 @@ def test_package_carries_the_action_icons():
     actions = desktopentry._PACKAGE / "icons" / "hicolor" / "scalable" / "actions"
     assert (actions / "tab-close-symbolic.svg").is_file()
     assert (desktopentry._PACKAGE / "icons" / f"{APP_ID}.svg").is_file()
+
+
+def test_the_service_unit_resolves_execstart_and_names_a_non_default_id():
+    template = "[Unit]\nDescription=x\n\n[Service]\nType=notify\nExecStart=/usr/bin/collins-service\n"
+    unit = desktopentry.service_unit(template, "/home/u/.local/bin/collins-service")
+    assert "ExecStart=/home/u/.local/bin/collins-service\n" in unit
+    assert "Environment=" not in unit
+    debug = desktopentry.service_unit(template, "collins-service", app_id="com.episode6.Collins.Debug")
+    assert "[Service]\nEnvironment=COLLINS_APP_ID=com.episode6.Collins.Debug\n" in debug

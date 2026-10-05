@@ -24,7 +24,6 @@ from . import (
     apilink,
     autodelete,
     buildinfo,
-    clisetup,
     desktopentry,
     ghwelcome,
     is_debug_app_id,
@@ -35,7 +34,6 @@ from . import (
     notifypanel,
     notifysound,
     prmenu,
-    providers,
     ptyclient,
     remotediffs,
     sandboxstatus,
@@ -45,10 +43,11 @@ from . import (
     updatecheck,
     welcome,
 )
-from . import terminal as terminal_mod
-from .api.loopback import LoopbackServer, RequestRefused
-from .apilink import LoopbackLink
+from .api import protocol
+from .api.client import SocketLink, default_locale
+from .api.protocol import RequestRefused
 from .caffeine import duration_seconds, follow_poll, follows_activity, grace_seconds
+from .connection import ConnectionManager
 from .copylabel import open_uri
 from .i18n import _
 from .prefs import apply_color_scheme
@@ -56,9 +55,10 @@ from .remotenotify import RemoteNotifications
 from .remoteprs import RemotePrStore
 from .remotestate import RemoteState
 from .remotestore import RemoteStore
-from .service.core import ServiceCore
 from .toolclient import ToolClient
 from .window import HIDE_NOTICE_ID, MainWindow, session_window
+
+log = logging.getLogger(__name__)
 
 # Bundled icons (e.g. tab-close-symbolic); found by name when installed.
 # collins/icons is a symlink to data/icons, so this is the checkout's own
@@ -1618,17 +1618,15 @@ class App(Adw.Application):
         # the mode keeps watching — and only turning the mode off clears it.
         self._caffeine_mode: str | None = None
 
-        # The service, in this process through Phase 1 (the split-service
-        # spec, PR-1.10): it owns state.json and the session store, shared
-        # by every window so scans and monitors aren't duplicated and
-        # state.json has one writer. Its AppState is the one that migrates
-        # the state split (see state.py's docstring). main() builds a
-        # throwaway one first, also with migrate=True, so that i18n reads
+        # The service is its own process (the split-service spec, §3.20,
+        # PR-1.12b): `collins-service`, found or started by the connection
+        # manager, owns state.json and the session store. main() builds a
+        # throwaway AppState with migrate=True so that i18n reads
         # `language` (a device key) off the merged view before any GTK
-        # object exists; whichever of the two finds an unsplit file
-        # commits the split, and the other finds it done and only reads.
+        # object exists; the service's own AppState commits the split when
+        # it finds an unsplit file.
         self._start_service()
-        # The client's side of it: one loopback connection, the mirrors of
+        # The client's side of it: the link's two channels, the mirrors of
         # the store and the state on it (remotestore, remotestate), filled
         # by the subscribe snapshot. Everything in the UI reads and writes
         # through these two: `app.state` and `app.store` keep their names.
@@ -2128,54 +2126,52 @@ class App(Adw.Application):
     # the sessions are its own (ServiceCore.sessions, PR-1.12a).
 
     def _start_session_tools(self) -> None:
-        """The tools' dispatcher on the service, its socket and the
-        `--mcp-config` file it's named in, and this client's half; the
-        sandbox host beside them (§3.9: the service's, `start_sandbox_host`,
-        whose probe's verdict comes back as a `sandbox` event). Any failure
-        leaves providers.MCP_CONFIG_PATH unset, so launched commands come
-        out exactly as they did before the feature."""
-        core = self._service_core
+        """This client's half of the session tools (the dispatcher, the
+        socket and the sandbox host are the service's); the sandbox probe's
+        verdict comes back as a `sandbox` event."""
         self.tool_client = ToolClient(self, self._service_link)
-        core.start_sandbox_host(self.get_application_id())
-        self.session_tools = core.start_tools()
-        # The Sandboxed chip's requests, on the same records.
-        core.start_sandbox()
         self._service_link.on("sandbox", self._on_sandbox_event)
-        config = core.start_mcp(self.get_application_id())
-        if config is not None:
-            providers.MCP_CONFIG_PATH = config
 
     def _start_service(self) -> None:
-        """The service, in-process (spec §3.5 swap 2, PR-1.10): its state
-        (the pty table's writer too), its store, and the loopback every
-        client connection goes through — the app's own, and every tab's
-        on the ``server`` backend. Built on every backend (the pty half
-        costs nothing idle) so a check can flip a tab's backend without
-        the app knowing."""
-        core = ServiceCore.with_state()
-        self._service_core = core
-        # A remembered CLI location goes on PATH before anything looks for
-        # the CLI — the store's first scan is the very next line.
-        clisetup.apply_saved(core.state)
-        core.start_store()
-        # Busy and the finish verdict are the service's (§3.6, D29): the
-        # tracker over its sessions, fed by the pty server from here on.
-        core.start_activity()
-        self._service_loopback = LoopbackServer(core)
-        terminal_mod.SERVICE_LOOPBACK = self._service_loopback
+        """Find or start the service and connect to it (spec §3.20,
+        `connection.ConnectionManager`): the link's two channels, the
+        hello, the local proof. Blocking, before any window exists; a
+        service that cannot be reached is fatal here, as a state file that
+        cannot be read would be."""
+        link = SocketLink(
+            "",  # the path is the manager's to find
+            app_id=self.get_application_id(),
+            device=ptyclient.device_name(),
+            locale=default_locale(),
+        )
+        self._service_link = link
+        self._connection = ConnectionManager(
+            self.get_application_id(),
+            link,
+            find=self._find_service,
+            schedule=lambda ms, fn: GLib.timeout_add(ms, fn),
+            land=lambda fn: GLib.idle_add(
+                lambda: (fn(), GLib.SOURCE_REMOVE)[1], priority=GLib.PRIORITY_DEFAULT
+            ),
+            on_state=self._on_connection_state,
+            on_connected=self._on_connected,
+            on_lost=self._on_connection_lost,
+        )
+        self._connection.start_local()
+
+    def _find_service(self, app_id: str):
+        from .api import server as api_server
+
+        path = api_server.socket_path(app_id)
+        self._service_link.path = path
+        return path, api_server.probe_socket(path)
 
     def _start_service_client(self) -> None:
-        """The app's connection to the service and the two mirrors on it
-        (see remotestate, remotestore). Subscribing fills both before
-        anything reads them: on the loopback the snapshot arrives inside
-        the call."""
-        link = LoopbackLink()
-        client = self._service_loopback.connect(
-            lambda *_frame: None, link.dispatch, ptyclient.device_name()
-        )
-        link.bind(client)
-        self._service_client = client
-        self._service_link = link
+        """The two mirrors on the link (see remotestate, remotestore) and
+        the first subscription. `subscribe` is the one call whose snapshot
+        is drained inside the call (api.client), so both are filled before
+        anything reads them, as they were on the loopback."""
+        link = self._service_link
         # Every other ask of the service (PRs, jobs, tools, token use)
         # goes over the same connection (apilink.current).
         apilink.set_current(link)
@@ -2190,14 +2186,54 @@ class App(Adw.Application):
         # And the copy of the marks on each session's diff (remotediffs).
         remotediffs.mirror_for(link)
         self.store.subscribe()
-        # The sandbox probe's verdict so far (the service's; a client never
-        # probes): what the sidebar, the new-chat screen and Preferences
-        # read (sandboxstatus). The `sandbox what=probe` event keeps it.
+        self._refresh_service_status()
+
+    def _refresh_service_status(self) -> None:
+        """The sandbox probe's verdict so far (the service's; a client never
+        probes): what the sidebar, the new-chat screen and Preferences
+        read (sandboxstatus). Asked at connect and again after a reconnect;
+        the `sandbox what=probe` event keeps it between."""
         try:
-            status = link.call({"t": "service.status"})
+            status = self._service_link.call({"t": "service.status"})
         except RequestRefused:
             status = {}
         sandboxstatus.set_probe_reason(status.get("sandbox"))
+
+    # -- the connection's life (§3.20) ------------------------------------------
+
+    def _on_connection_state(self, state: str) -> None:
+        reconnecting = state != "connected" and getattr(self, "store", None) is not None
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.set_reconnecting(reconnecting)
+
+    def _on_connection_lost(self, reason: str) -> None:
+        log.warning("the service connection was lost: %s", reason)
+
+    def _on_connected(self, first: bool) -> None:
+        """Connected: on the first time the mirrors are built next
+        (`_start_service_client`); on a reconnect they are reset and
+        refilled by a fresh subscribe (the sidebar redraws once), every
+        tab re-attaches its pty, and the banner comes down."""
+        if first:
+            return
+        self.state.reset()
+        self.store.reset()
+        self.notification_center.reset()
+        mirror = remotediffs.mirror_for(self._service_link)
+        if mirror is not None:
+            mirror.reset()
+        try:
+            self.store.subscribe()
+        except RequestRefused as refusal:
+            log.warning("resubscribe refused: %s", refusal.msgid)
+            if refusal.error == protocol.ERROR_GONE and self._connection is not None:
+                self._connection.lost("the resubscribe found the link gone")
+            return
+        self._refresh_service_status()
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                window.reattach_tabs()
 
     def _on_run_finished(self, session_id: str) -> None:
         """The service counted a finish for *session_id* (D29): the window
@@ -2228,36 +2264,29 @@ class App(Adw.Application):
                 window.refresh_sandbox_availability()
 
     def do_shutdown(self) -> None:
-        # Stops accepting and unlinks the socket; mcp.json stays behind on
-        # purpose — the app-id-keyed path is stable across restarts, so a
-        # session that outlives this run reconnects to the next one, and
-        # until then its shim degrades to clean "Collins is not running"
-        # errors rather than breaking the session.
-        core = getattr(self, "_service_core", None)
-        if core is not None:
-            core.stop_mcp()
         state = getattr(self, "state", None)
         if state is not None:
             # A draft still waiting on the debounce reaches the service
             # before it goes (remotestate).
             state.flush_drafts()
-        client = getattr(self, "_service_client", None)
-        if client is not None:
+        connection = getattr(self, "_connection", None)
+        if connection is not None:
+            # The panel shells this client spawned end with it (a shell has
+            # no row to reattach from until PR-1.12c; the service writes
+            # each one's history when it exits); the agents live on.
+            for window in self.get_windows():
+                if isinstance(window, MainWindow):
+                    window.close_panel_ptys()
+            # Quitting the client ends nothing else on the service (§3.10):
+            # the link closes, the agent ptys live on, and the next client
+            # attaches.
             apilink.set_current(None)
-            client.close()
-            self._service_client = None
-        loopback = getattr(self, "_service_loopback", None)
-        if loopback is not None:
-            # Phase 1: quitting ends every session the service's pty server
-            # holds (§3.10): every pty finished, its row recorded gone and
-            # its model file removed with it (a model file lives as long as
-            # its row; in Phase 1 scrollback survives a crash only, and only
-            # once PR-3.6's keeper exists to re-adopt a live pty).
-            # The live grants go with the core: every directory mounted
-            # into a running box is unmounted (ServiceCore.shutdown).
-            terminal_mod.SERVICE_LOOPBACK = None
-            loopback.shutdown()
-            self._service_loopback = None
+            connection.stop()
+            self._connection = None
+        link = getattr(self, "_service_link", None)
+        if link is not None:
+            link.shutdown()
+            self._service_link = None
         if self._status_icon is not None:
             self._status_icon.stop()
             self._status_icon = None

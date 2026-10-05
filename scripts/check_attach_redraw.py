@@ -114,10 +114,13 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk, Vte  # noqa: E402
 
-from collins import i18n, ptyclient, trust  # noqa: E402
+from collins import apilink, i18n, ptyclient, trust  # noqa: E402
 from collins import terminal as terminal_mod  # noqa: E402
+from collins.api import server as api_server  # noqa: E402
+from collins.api.client import SocketLink  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -154,6 +157,9 @@ threading.Thread(target=watchdog, daemon=True).start()
 
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(TRUSTED)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 state: dict = {}
 
@@ -225,8 +231,8 @@ def steps():
         yield 100
     yield 300
     pty = tab._view.pty
-    loopback = terminal_mod.SERVICE_LOOPBACK
-    check("the tab shows a pty of the app's service", pty is not None and loopback is not None)
+    link = apilink.current()
+    check("the tab shows a pty of the app's service", pty is not None and link is not None)
     screen = tab._client.request({"t": "debug.screen", "pty": pty})
     grid = (first.get_column_count(), first.get_row_count())
     check(
@@ -256,15 +262,15 @@ def steps():
     red_html = row_html(first, "line 60 is red")
     check("the first VTE draws line 60 in a colour", "color" in red_html, red_html[:120])
 
-    # Everything the pty is written from now on, as the service sees it.
-    written: list[bytes] = []
-    real_write = loopback.core.ptys.write
+    # Everything the pty is written from now on, as the service sees it
+    # (the probe's write spy on the service's core, D27).
+    tab._client.request({"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [pty]})
 
-    def spy_write(pty_id, data, sink=None):
-        written.append(bytes(data))
-        return real_write(pty_id, data, sink=sink)
-
-    loopback.core.ptys.write = spy_write
+    def written() -> list[bytes]:
+        reply = tab._client.request(
+            {"t": "debug.sandbox", "target": "core", "name": "debug_written", "args": [pty]}
+        )
+        return [bytes.fromhex(entry) for entry in reply["value"]]
 
     # A second client: a fresh VTE in its own window, pinned to the first
     # one's grid, attached to the same pty.
@@ -294,7 +300,12 @@ def steps():
         (second.get_column_count(), second.get_row_count()) == grid,
         ((second.get_column_count(), second.get_row_count()), grid),
     )
-    client = loopback.connect(
+    # A second client of the service: its own link (its own client id),
+    # as another Collins on this machine would be.
+    app_id = os.environ["COLLINS_APP_ID"]
+    second_link = SocketLink(api_server.socket_path(app_id), app_id=app_id, device="second")
+    second_link.connect()
+    client = second_link.pty_client(
         lambda p, d, f: state["view"].on_output(p, d, f),
         lambda e: (events.append(e), state["view"].on_event(e)),
         device="second",
@@ -311,7 +322,7 @@ def steps():
     check("the guard came down on the sentinel's answer", not view.guarded)
     check("the guard swallowed what the fresh VTE said", view.dropped_commits >= 1, view.dropped_commits)
     check(
-        "nothing the fresh VTE said reached the pty", not any(b"\x1b[0n" in w for w in written), written
+        "nothing the fresh VTE said reached the pty", not any(b"\x1b[0n" in w for w in written()), written()
     )
     yield 300
     second_text = lines(terminal_mod._capture_contents(second))
@@ -343,7 +354,7 @@ def steps():
     # client detaching changes nothing for it.
     client.send_input(pty, b"d")
     yield 600
-    check("the second's typing reaches the pty", any(w == b"d" for w in written), written[-3:])
+    check("the second's typing reaches the pty", any(w == b"d" for w in written()), written()[-3:])
     check(
         "…and shows on both",
         "abcd" in terminal_mod._capture_contents(second) and "abcd" in terminal_mod._capture_contents(first),
@@ -370,6 +381,7 @@ def steps():
         yield 100
     check("the second hears the exit", any("exit" in e for e in events), events[-1:])
     client.close()
+    second_link.shutdown()
     app.quit()
 
 

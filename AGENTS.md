@@ -145,7 +145,7 @@ the input frames and the `/proc` poll, its finish edges judged by
 finish's `unread` on the store's items, and a session with no row yet
 hears them as `busy` / `finished` fields of its `session` event. The tab
 has **one backend** (PR-1.9): the terminal has no child and shows a pty of
-the service's pty server through the loopback (`ptyclient.ClientTerminal`:
+the service's pty server over the socket (`ptyclient.ClientTerminal`:
 output frames are `feed()`, the VTE's commits go back as input, the redraw
 guard, the mouse coalescing). The panel shells beside it are the same: each
 `PanelTerminal` is a `ClientTerminal` over a service pty of kind `shell` (a
@@ -210,16 +210,46 @@ long-running operations as jobs (`service/jobs.py`: `job.start` and `job`
 events for the clone, the repository list, worktree trash and restore, a
 chat folder's trust, icon generation, the login repair; `jobclient.py` is
 the client's end). Client modules reach the service through
-`apilink.current()` (the app's link, or a harness's own loopback). The
-service also writes a panel shell's history from its model when the shell
-exits, under the key `spawn`'s `history` and `panel.key` give it.
-`collins/api/loopback.py` is the one transport until PR-1.12's socket: the
-same dicts and bytes, every message through `protocol.validate` both
-ways, in one process (deleted at the end of Phase 1, D21). The app owns
-one `ServiceCore` behind a `LoopbackServer` (`terminal.SERVICE_LOOPBACK`,
-`App._start_service`) with its state as the pty table's writer, and one
-app-level client on it (`App._start_service_client`: an `apilink.
-LoopbackLink` carrying the two mirrors).
+`apilink.current()` (the app's link, or the one an e2e check driving bare
+widgets built through `scripts/e2e_service.py`). The service also writes
+a panel shell's history from its model when the shell exits, under the
+key `spawn`'s `history` and `panel.key` give it, and from the tab's three
+saves (`panel.history`).
+**The service is its own process** (PR-1.12b, §3.20): `collins-service`
+(`collins/service/main.py`, the entry point in `pyproject.toml`; the
+login-shell capture into the core's environment, `sd_notify`, SIGTERM /
+SIGINT ending every session as *Stop sessions and quit* does with the ids
+recorded as `resume_on_start`, exit 0). `collins/api/server.py` (Gio and
+libsoup) is its `Soup.Server` on `api.sock` (`ApiServer`: a `SocketClient`
+per `client_id` grouping that client's two WebSockets, the `_Sink` per
+pty with the ack window; `hello`, `local` and `service.restart` served
+there, everything else through `ServiceCore.handle`). `collins/api/
+client.py` is the client's `SocketLink` (an `apilink.Link`): a daemon
+thread with its own `GLib.MainContext` drives both WebSockets, `call`
+blocks the calling thread on the **sync channel** (D26), `send` and every
+event ride the **primary** and land on the main loop through one ordered
+queue at `PRIORITY_DEFAULT`; `subscribe` is the one call drained inside
+the call so the mirrors are filled when it returns; a `PtyClient` per tab
+or panel shell is what the Phase 1 loopback client was. `collins/
+connection.py` is the GTK-free `ConnectionManager` (find → start through
+`systemctl --user start collins-service.service` for the default id, else
+a detached spawn → wait → connect → connected; lost → backoff 1, 2, 5, 10,
+30 s → reconnect, the mirrors `reset()` and resubscribed, every tab
+`reattach()`ed, the window's "Reconnecting" banner meanwhile). The in-
+process loopback is gone (D21); `tests/inproc.py` is the unit suite's
+harness over a core, and every e2e check starts a `collins-service` of its
+own (`scripts/e2e_service.py`). What the loopback answered inside a call
+the socket answers a moment later on the main loop: a mirror write is
+applied optimistically (D16) and a check that reads a write's outcome
+waits for it (`e2e_service.settle`), never the other way round. **Until
+PR-1.12c lands, a session with a live agent pty cannot be opened**: the
+service refuses a second `spawn` of it (`refused`, "This session is
+already running in the Collins service", `args.pty`), which the tab
+paints as a spawn error; the panel shells a client spawned end with it
+(`App.do_shutdown` → `close_panel_ptys`), the agents do not. The local
+proof is read from **the client's own** `proof_path(app_id)` (never the
+path the hello names: a remote service could name any file), a regular
+0600 file of exactly 32 bytes owned by the user.
 `collins/service/session.py` is a tab's `Session` (see "The tab"), the
 first module the app did use: the tab's logic carved out of the widget,
 reaching its terminal through the two ports in `collins/service/ports.py`
@@ -260,6 +290,10 @@ service, against its machine's login: the UI asks (`usage.get`,
 | Chats virtual project | `~/.local/share/collins/chats/` |
 | MCP config file | `~/.local/share/collins/<app id>/` |
 | MCP socket | `$XDG_RUNTIME_DIR/collins/<app id>/mcp.sock` |
+| The API socket and the local proof (32 random bytes, 0600, minted at service start; a client that can read it from its own filesystem is `local`) | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` and `local-proof` (0700 directory; with no runtime dir, `~/.local/state/collins/<app id>/`) |
+| The sessions a stopping service ended, for a client to reopen | `state.json` (`resume_on_start`, the service's alone) |
+| The service's single-instance lock (an `flock`, taken as its first step and held for its life; a second service for the id exits 0 on it) | `<runtime dir>/collins/<app id>/service.lock` |
+| The service's systemd user unit (never enabled by a package; started on demand by the client) | `data/collins-service.service`, installed to `/usr/lib/systemd/user/` by the packages and `~/.local/share/systemd/user/` by `collins --install-desktop` |
 | A sandboxed session's box: its `$HOME` (`home/`), the carrier its live grants mount in (`grants/`), its anchors | `~/.local/share/collins/sandbox/<box id>/` |
 | Per-launch sandbox plan | `$XDG_RUNTIME_DIR/collins/<app id>/sandbox/<uuid>.json` (mode 0600, unlinked when the tab's shell exits; with no runtime dir, `~/.local/state/collins/sandbox/<app id>/` — never the temp dir, which every box shares) |
 | Sandbox grants per session, keyed by box id; per-project defaults for new sessions; the session tools each sandboxed session is offered, by box id, over the defaults in the settings; the session → box map; the sandbox switches | `state.json` |
@@ -328,6 +362,7 @@ ruff check collins/ tests/                  # CI pins ruff 0.16.4; rules E F W I
 bash .agents/capture-screenshots/scripts/with-headless-display.sh \
     python3 scripts/run_e2e.py [--only NAME] [--shard N/5] # e2e checks behind a headless compositor
 python3 scripts/verify_versions.py          # every version copy agrees
+python3 -m collins.service.main --app-id X  # a service by hand (the checks start their own: scripts/e2e_service.py)
 ./start-debug                               # a debug instance (COLLINS_APP_ID=com.episode6.Collins.Debug)
 ```
 
@@ -368,7 +403,7 @@ spec's `%changelog`.
 | --- | --- | --- |
 | Session discovery, the store and its mirror, sidebar, state.json and its mirror, titles, worktrees, background agents, busy detection, adding and cloning projects | `sessions` `providers` `store` `remotestore` `models` `state` `remotestate` `sidebar` `titles` `bgstatus` `activity` `trust` `chats` `projecticons` `clonerepo` `clonedialog` | `collins-sessions-and-sidebar` |
 | The session tab: VTE, spawn/resume/attach, close flows, prompt-line reading, links, footer, transcript resolver | `terminal` `window` `shellinput` `linkpatterns` `transcriptlinks` `transcript` `vtehtml` `proctree` `taborder` | `collins-terminal-tab` |
-| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the in-process loopback; a tab's `Session` behind its pty and screen ports; the client side of the pty server (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/jobs` `service/diffs` `jobclient` `remotediffs` `service/session` `service/ports` `api/loopback` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
+| Service (the split): the pty stream filter, query responder and mode tracker; the screen model of record with its goldens, parity check and redraw; the pty server (spawn, the read loop and write queue, attach by redraw, the active client's size, sinks and their flow control, exit, the saved model, the `ptys` table); the request router and the socket server; a tab's `Session` behind its pty and screen ports; the client side of the pty server (the childless VTE, the redraw guard, the mouse coalescing, the ports over the service); the API's message table, validation, framing, binary header, protocol version | `service/termstream` `service/termscreen` `service/ptyserver` `service/core` `service/storefeed` `service/jobs` `service/diffs` `jobclient` `remotediffs` `service/session` `service/ports` `api/server` `api/client` `connection` `service/main` `ptyclient` `api/protocol` `apilink` `remotestore` `remotestate` | `collins-terminal-tab` (the stream, the screen model, the pty server, Session, the client side), `collins-panel-dock` (panel shells on the pty server, the history the service writes), `collins-session-mcp-tools` (the protocol), `collins-sessions-and-sidebar` (the store and state over the API, the mirrors) |
 | Sandboxed sessions: the bubblewrap mount plan, the host launcher, the sticky flag and per-project override, the new-chat checkbox, trust mirroring, the /bg and attach refusals, the probe and the Preferences group, the footer chip with its grants and restart, live grants (a directory allowed while a session runs, mounted into the running box), the sandboxed panel shell, the session tools a sandboxed session is offered and the policy for the ones that reach the host, a worktree launch narrowed to its worktree | `sandboxplan` `sandboxrun` `sandboxgrants` `sandboxchip` `sandboxstatus` `service/sandbox` | `collins-sandboxed-sessions` |
 | Panel docking: strips, splits, DnD, layout persistence, sizes | `docktree` `dockzones` `paneldock` `panelstrip` `paneldnd` `tabguard` `panellayout` `panelhistory` `panedsizer` `panelsizing` `panelkeys` | `collins-panel-dock` |
 | Composer, drafts, the new-chat screen, model/effort pickers, drops and pastes | `composer` `composerkeys` `newchat` `newchatview` `modelmenu` `dropimages` | `collins-composer-and-new-chat` |

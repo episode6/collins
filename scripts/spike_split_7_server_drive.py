@@ -85,6 +85,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 import spike_split_1_end_to_end as spike  # noqa: E402
 from gi.repository import Gio, GLib, Graphene, Gtk, Vte  # noqa: E402
 
@@ -152,6 +153,10 @@ def cleanup():
 threading.Thread(target=watchdog, daemon=True).start()
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(WORK)
+# The service is its own process (PR-1.12b): started here, with this
+# spike's environment, before the app connects to it.
+os.environ["COLLINS_DEBUG_API"] = "1"
+e2e_service.start_service()
 app = App()
 state = {"written": []}
 
@@ -204,14 +209,21 @@ def steps():
     check("a tab on the service's pty server", tab is not None and tab._view is not None)
     win.tab_view.set_selected_page(win.tab_view.get_page(tab))
     term = tab.terminal
-    loopback = terminal_mod.SERVICE_LOOPBACK
-    real_write = loopback.core.ptys.write
+    # Everything written to the pty, as the service sees it: the probe's
+    # write spy on the service's core (D27; the service runs with
+    # COLLINS_DEBUG_API=1 in this spike's environment).
+    probe_pty = tab._view.pty
+    tab._client.request(
+        {"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [probe_pty]}
+    )
 
-    def spy(pty_id, data, sink=None):
-        state["written"].append(bytes(data))
-        return real_write(pty_id, data, sink=sink)
+    def written_so_far() -> list[bytes]:
+        reply = tab._client.request(
+            {"t": "debug.sandbox", "target": "core", "name": "debug_written", "args": [probe_pty]}
+        )
+        return [bytes.fromhex(entry) for entry in reply["value"]]
 
-    loopback.core.ptys.write = spy
+    state["written_so_far"] = written_so_far
     commits = []
     term.connect("commit", lambda _t, text, size: commits.append(text[:size] if text else ""))
     keys = []
@@ -245,7 +257,9 @@ def steps():
     inp.button(False)
     ok = yield from until(lambda: focused(term), 2000)
     check("the click put the keyboard in the terminal", ok, win.get_focus())
-    state["written"].clear()
+    tab._client.request(
+        {"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [probe_pty]}
+    )
     commits.clear()
     keys.clear()
     before = tab._view.dropped_commits if tab._view is not None else 0
@@ -255,10 +269,10 @@ def steps():
         "term_has_focus": term.has_focus(),
     }
     inp.tap(ord("h"))
-    ok = yield from until(lambda: any(b"h" in w for w in state["written"]), 2000)
+    ok = yield from until(lambda: any(b"h" in w for w in written_so_far()), 2000)
     detail = {
         "at_key": at_key,
-        "written": state["written"][-4:],
+        "written": written_so_far()[-4:],
         "vte_commits": commits[-4:],
         "window_saw_keyvals": keys[-4:],
     }
@@ -282,14 +296,16 @@ def steps():
     yield 30
     inp.button(False)
     yield 150
-    state["written"].clear()
+    tab._client.request(
+        {"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [probe_pty]}
+    )
     keys.clear()
     inp.tap(ord("w"))
-    ok = yield from until(lambda: any(b"w" in w for w in state["written"]), 2000)
+    ok = yield from until(lambda: any(b"w" in w for w in written_so_far()), 2000)
     check(
         "the first keystroke after a second click reached the pty",
         ok,
-        {"written": state["written"][-4:], "window_saw_keyvals": keys[-4:]},
+        {"written": written_so_far()[-4:], "window_saw_keyvals": keys[-4:]},
     )
     yield 300
     shot(win, "2-typed")
@@ -333,7 +349,7 @@ def steps():
     check("a paste lands in the box", ok, tab.entered_prompt())
     check(
         "…as one bracketed commit",
-        any(w.startswith(b"\x1b[200~") and w.endswith(b"\x1b[201~") for w in state["written"]),
+        any(w.startswith(b"\x1b[200~") and w.endswith(b"\x1b[201~") for w in written_so_far()),
     )
     shot(win, "4-pasted")
     prompt = tab.entered_prompt()
@@ -344,7 +360,9 @@ def steps():
 
     # A Shift+drag selects locally (nothing reaches the pty).
     yield from pointer_to(term)
-    state["written"].clear()
+    tab._client.request(
+        {"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [probe_pty]}
+    )
     inp.key(spike.KEYSYM["Shift"], True)
     yield 120
     inp.button(True)
@@ -358,12 +376,14 @@ def steps():
     inp.key(spike.KEYSYM["Shift"], False)
     yield 400
     check("a Shift+drag selects in the VTE", term.get_has_selection())
-    check("…and sends nothing to the pty", not any(b"\x1b[<" in w for w in state["written"]))
+    check("…and sends nothing to the pty", not any(b"\x1b[<" in w for w in written_so_far()))
     shot(win, "5-selection")
     term.unselect_all()
 
     # One real turn, asking for a URL so the link match can be checked.
-    state["written"].clear()
+    tab._client.request(
+        {"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [probe_pty]}
+    )
     for ch in "Reply with exactly this and nothing else: https://example.com/collins":
         inp.tap(ord(ch) if ch != " " else spike.KEYSYM["space"])
         yield 25
@@ -417,15 +437,17 @@ def steps():
     # The wheel: in fullscreen mode the CLI gets SGR wheel reports; in
     # classic mode VTE scrolls its own scrollback.
     yield from pointer_to(term)
-    state["written"].clear()
+    tab._client.request(
+        {"t": "debug.sandbox", "target": "core", "name": "debug_spy_writes", "args": [probe_pty]}
+    )
     for _ in range(3):
         inp.wheel(1)
         yield 60
     yield 400
     if ARGS.mode == "fullscreen":
-        check("wheel steps reach the CLI as SGR reports", any(b"\x1b[<6" in w for w in state["written"]))
+        check("wheel steps reach the CLI as SGR reports", any(b"\x1b[<6" in w for w in written_so_far()))
     else:
-        check("wheel steps stay local in classic mode", not any(b"\x1b[<6" in w for w in state["written"]))
+        check("wheel steps stay local in classic mode", not any(b"\x1b[<6" in w for w in written_so_far()))
     shot(win, "7-wheel")
 
     # Leave: Ctrl+C Ctrl+C ends the CLI, the shell is then closed with the tab.

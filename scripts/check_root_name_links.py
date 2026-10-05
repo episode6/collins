@@ -25,11 +25,26 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+E2E = tempfile.mkdtemp(prefix="collins-rootlinks-")
+RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
+os.environ["COLLINS_DEBUG_API"] = "1"
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
+os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
+os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
+os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"
+os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
+os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
+for _path in (f"{E2E}/projects", f"{E2E}/chats"):
+    os.makedirs(_path, exist_ok=True)
+with open(f"{E2E}/claude.json", "w", encoding="utf-8") as _fh:
+    _fh.write("{}")
+
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
 import collins.terminal as terminal_mod  # noqa: E402
@@ -48,6 +63,8 @@ def main() -> int:
         open(os.path.join(root, name), "w").close()
     os.mkdir(os.path.join(root, "docs"))
 
+    # The tab spawns its shell on a service of this check's own (PR-1.12b).
+    e2e_service.harness_link()
     tab = terminal_mod.TerminalTab(cwd=root, command_override="true")
     assert tab.link_root == root, tab.link_root
 

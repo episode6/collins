@@ -38,7 +38,7 @@ from . import (  # noqa: E402
     updatecheck,
     welcome,
 )
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .caffeine import DURATION_KEYS, INDEFINITE, duration_label, grace_seconds
 from .formatting import display_path
 from .i18n import LANGUAGES, N_, _, ngettext

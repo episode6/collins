@@ -62,8 +62,11 @@ write reverts, notifies and toasts; an event landing while a write is
 unanswered does not clobber it; the draft debounce, with a fake timer;
 `get_setting`'s routing). `tests/test_remote_store.py` runs the real
 `ServiceCore` (its own `AppState` and a `SessionStore` fed the
-`projects_dir` sessions) behind a real `LoopbackServer` with both mirrors
-on a `LoopbackLink`: the snapshot, an `item` moving one property and its
+`projects_dir` sessions) behind the suite's in-process harness
+(`tests/inproc.py`: `LoopbackServer` / `LoopbackLink` over a core, the
+same dicts and bytes the socket carries, no socket and no thread; the
+product's loopback went with PR-1.12b) with both mirrors on it: the
+snapshot, an `item` moving one property and its
 signal, every mutation, archived paging, the service refusing a device
 setting. `tests/test_service_imports.py` imports every module of
 `collins.service` and `collins.api` in a subprocess and fails on any
@@ -96,12 +99,47 @@ every check sets it in its preamble (the service is in-process) and
 (before a new chat's Send, after the exit) and raises on a refusal. Keep a
 check's assertions as they were: only the call path moves.
 
-A check that drives widgets with **no `App`** behind them and reaches the
-service (a PR page's gh requests, a job, the model catalog: anything
-through `apilink.current()`) must opt in to the harness loopback with
-`apilink.allow_harness()` (as `check_pr_page_patch.py` does); in the real
-app that fallback is refused, so a window-less Preferences can't be served
-by a core with no store.
+**Every check starts its own service** (PR-1.12b). The service is its
+own process, so a check that builds an `App()` calls
+`e2e_service.start_service()` right before `App()`: after its scratch
+tree, every `COLLINS_*` / `XDG_*` override and the `claude` shim on
+`PATH` are in the environment, since the service inherits the environment
+it is started with and spawns the shells. The helper runs
+`python3 -m collins.service.main --app-id <the check's id>` out of this
+checkout with `COLLINS_DEBUG_API=1`, waits for the socket and SIGTERMs it
+at exit. A check that drives widgets with **no `App`** behind them and
+reaches the service (a PR page's gh requests, a job, the model catalog)
+calls `e2e_service.harness_link()` instead: a `SocketLink` to a service
+of its own, installed as the current link. `scripts/run_e2e.py` sets
+nothing new. Importing `e2e_service` sets `XDG_RUNTIME_DIR` to a short
+scratch directory of the check's own (a Unix socket path is bounded at
+107 bytes; the user's `/run/user/<uid>/collins/` never sees a check's
+id), removed at exit; the service is spawned with `PR_SET_PDEATHSIG` so
+a check dying on its deadline takes it along.
+
+**A patch over a service-side module does not reach the service.** What a
+check used to monkeypatch in its own process (`claudemodels.*`,
+`prdetail.fetch`, `prstatus.gh_json`) it hands to
+`start_service(stubs={...})` / `harness_link(stubs=...)` as JSON records;
+`scripts/e2e_stubs.py` applies them inside the service (only under the
+probe's flag), re-reads the data on every call (`e2e_service.
+update_stubs` restages a step's detail) and records every stubbed call to
+a file `e2e_service.stub_calls()` reads. A constant to lower on the
+service is `debug.sandbox` with target `core` and name `debug_patch`
+(`check_composer_paste_back.py`'s piece limits); the tools' dispatcher is
+`debug_tools_list` / `debug_tools_dispatch` the same way.
+
+**A write's outcome lands a moment later.** On the loopback a `state.set`,
+a `store.flags`, a `notify.post` was answered, saved and echoed as an
+event inside the call. Over the socket the reply and the event land on the
+main loop afterwards, so a check that reads the outcome off disk
+(`AppState().get_setting`, `state.json`), off a mirror (`center.rows()`,
+a green row) or off a tab (`session-resolved` from a probed
+`host.session_resolved`) pumps first: `e2e_service.settle()` (150 ms,
+then until nothing is pending) or `wait_until(predicate)`. Never loosen
+the assertion; wait for it. A check that must observe a transient (the
+clone dialog's box locked before the fast fake clone finishes) keeps a
+bare pending-pump for that step.
 
 Copy `scripts/check_new_chat.py`'s preamble rather than retyping it. The
 essentials, all of which are read at import time somewhere in `collins`:
@@ -243,7 +281,8 @@ outside a one-line code span — fails the PR rather than the deploy after
 the merge) on the bare runner;
 `test`, `e2e-shard (1)` … `(5)` (`xvfb-run … scripts/run_e2e.py
 --timeout 120 --shard N/5`: the suite, every tab and panel shell on the
-service's pty server through the loopback; 60-minute job cap each),
+service's pty server over the socket of a service each check starts;
+60-minute job cap each),
 `packaging` and `ppa-source
 (resolute)` inside the resolute CI image; `ppa-source (noble)` in the noble
 packaging image; `rpm` in the Fedora image. The e2e suite runs as five

@@ -10,12 +10,13 @@ history written from the models (`ServiceCore.write_panel_history`)."""
 import os
 import time
 
+import inproc as loopback
 import pytest
 from gi.repository import GLib
 
 import collins.panelhistory as panelhistory
 from collins import providers
-from collins.api import loopback, protocol
+from collins.api import protocol
 from collins.service import core as core_mod
 from collins.service import ptyserver
 from collins.service.core import ServiceCore

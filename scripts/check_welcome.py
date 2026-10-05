@@ -117,9 +117,19 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
-from collins import claudemodels, ghwelcome, i18n, mcptools, titles, tokenrefresh, welcome  # noqa: E402
+from collins import (  # noqa: E402
+    claudemodels,
+    ghwelcome,
+    i18n,
+    jobclient,
+    mcptools,
+    titles,
+    tokenrefresh,
+    welcome,
+)
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -155,22 +165,35 @@ claudemodels.cache_failed = lambda: False
 # up by attribute at call time, so patching the modules is enough.
 AFTER: list[str] = []
 ghwelcome.maybe_show = lambda *_a, **_k: AFTER.append("ghwelcome")
-tokenrefresh.maybe_start = lambda *_a, **_k: AFTER.append("tokenrefresh")
 
-# The mid-run entry stays real — it is the one the welcome doesn't sequence
-# — wrapped to record what each ask got back: None for a refusal, a thread
-# for a repair under way. The usage panel looks it up by attribute too.
+# The login repair is the service's `login.repair` job (tokenrefresh on its
+# machine, PR-1.11); the app and the usage panel ask for it through
+# jobclient.start, which is where it is recorded here (PR-1.12b: a patch
+# over tokenrefresh in this process would not reach the service). The
+# launch-time ask (mode start) is recorded rather than sent, as the
+# tokenrefresh.maybe_start stub was; the mid-run ask (mode repair) stays
+# real — it is the one the welcome doesn't sequence — and what it got back
+# is recorded: None for a refusal, the job's id for a repair under way.
 REPAIRS: list[object] = []
-_real_maybe_repair = tokenrefresh.maybe_repair
+_real_job_start = jobclient.start
 
 
-def _recording_maybe_repair(*args, **kwargs):
-    result = _real_maybe_repair(*args, **kwargs)
-    REPAIRS.append(result)
-    return result
+def _recording_job_start(kind, args, on_event):
+    if kind != "login.repair":
+        return _real_job_start(kind, args, on_event)
+    if args.get("mode") == "start":
+        AFTER.append("tokenrefresh")
+        return None
+
+    def recorded(event):
+        if event.finished:
+            REPAIRS.append(event.job if event.ok and event.result.get("ran") else None)
+        on_event(event)
+
+    return _real_job_start(kind, args, recorded)
 
 
-tokenrefresh.maybe_repair = _recording_maybe_repair
+jobclient.start = _recording_job_start
 
 
 def headless_runs() -> list[str]:
@@ -265,6 +288,11 @@ def later(fn, ms: int = 1000) -> bool:
 
 
 i18n.init(AppState().get_setting("language"))
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+# The model catalog the service answers with: the same canned list this
+# process patched over claudemodels (scripts/e2e_stubs.py).
+e2e_service.start_service(stubs={"models": claudemodels.model_records(CATALOG)})
 app = App()
 
 exit_code = 1
@@ -367,6 +395,7 @@ def step_pick_none() -> bool:
     labels = [model.get_string(i) for i in range(model.get_n_items())]
     check("the title picker lists None first", labels[:1] == ["None"], labels)
     combo.set_selected(0)
+    e2e_service.settle()  # the write's reply and the service's save, over the socket
     check(
         "picking None writes the setting at once",
         saved_settings().get("title_model") == "none",

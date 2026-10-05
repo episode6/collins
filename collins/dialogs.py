@@ -18,7 +18,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from . import apilink, claudemodels, composerkeys, editorfiles, jobclient, modelcatalog
 from .api import protocol
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .chats import is_chat_cwd
 from .formatting import display_path, format_size, format_timestamp, format_tokens
 from .i18n import _, ngettext

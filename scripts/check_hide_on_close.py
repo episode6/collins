@@ -92,12 +92,12 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Vte  # noqa: E402
 
 from collins import i18n, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.state import AppState  # noqa: E402
-from collins.window import MainWindow  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -164,6 +164,9 @@ seed.update_settings(
     {"quit_with_running_sessions": "hide", "gh_welcome_dismissed": True, "welcome_seen": True}
 )
 trust.trust_dir(TRUSTED)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 tries = 0
 state: dict = {}

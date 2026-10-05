@@ -1,6 +1,6 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """The loopback transport and the service core's pty half
-(collins.api.loopback, collins.service.core), against real ptys: every
+(tests/inproc.py over collins.service.core), against real ptys: every
 message validated both ways, the replies and events of the protocol, the
 refusals a client sees, and what a client going away leaves behind."""
 
@@ -8,10 +8,11 @@ import os
 import sys
 import time
 
+import inproc as loopback
 import pytest
 from gi.repository import GLib
 
-from collins.api import loopback, protocol
+from collins.api import protocol
 from collins.service.core import ServiceCore
 
 CAT = "/bin/cat"
@@ -236,6 +237,6 @@ def test_close_ends_the_pty_and_every_client_hears_it(server):
 
 
 def test_nothing_in_the_service_or_the_transport_loads_gtk():
-    for name in ("collins.api.loopback", "collins.service.core"):
+    for name in ("inproc", "collins.service.core"):
         assert name in sys.modules
     assert not any(m in sys.modules for m in ("gi.repository.Gtk", "gi.repository.Vte"))

@@ -11,10 +11,11 @@ import os
 import sys
 import time
 
+import inproc as loopback
 import pytest
 from gi.repository import GLib
 
-from collins.api import loopback, protocol
+from collins.api import protocol
 from collins.service.core import ServiceCore
 from collins.sessions import discover_sessions
 from collins.store import SessionStore
@@ -852,3 +853,108 @@ def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
     assert first not in record.cuts and second in record.cuts
     assert [e["state"] for e in ends.of("cut") if e.get("handle") == first] == ["cancelled"]
     assert record._chain is not None and record._chain.handle == second
+
+
+# -- a session that already runs, and the stop sequence (PR-1.12b) ---------------
+
+
+def test_a_second_spawn_of_a_running_session_is_refused_with_its_pty(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")  # a real shell: the typed command runs
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    server = loopback.LoopbackServer(core)
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    first = spawn_agent(client, tmp_path, session=session_id, command_override="sleep 300")
+    assert pump(5, lambda: server.core.ptys.get(first["pty"]).has_running_command())
+    with pytest.raises(loopback.RequestRefused) as refused:
+        spawn_agent(client, tmp_path, session=session_id)
+    assert refused.value.error == "refused"
+    assert refused.value.msgid == "This session is already running in the Collins service"
+    assert refused.value.details == {"pty": first["pty"]}
+    # Another session is fine.
+    other = spawn_agent(client, tmp_path, session="1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0")
+    assert other["pty"] != first["pty"]
+    server.shutdown()
+    pump(0.3)
+
+
+def test_spawned_shells_never_see_the_probe_or_systemd_variables(server, tmp_path, monkeypatch):
+    monkeypatch.setenv("COLLINS_DEBUG_API", "1")
+    monkeypatch.setenv("NOTIFY_SOCKET", "/run/x")
+    monkeypatch.setenv("INVOCATION_ID", "abc")
+    env = server.core._spawn_env()
+    names = ("COLLINS_DEBUG_API", "NOTIFY_SOCKET", "INVOCATION_ID", "JOURNAL_STREAM", "COLLINS_E2E_STUBS")
+    for name in names:
+        assert name not in env
+
+
+def _live_in_group(pgrp: int) -> list[int]:
+    """The pids of the processes in *pgrp* that are not zombies."""
+    found = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as fh:
+                stat = fh.read()
+        except OSError:
+            continue
+        fields = stat.rsplit(")", 1)[1].split()
+        if len(fields) > 3 and fields[0] != "Z" and int(fields[2]) == pgrp:
+            found.append(int(name))
+    return found
+
+
+def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup(tmp_path, monkeypatch):
+    from collins.service import ptyserver
+    from collins.service import session as session_mod
+
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(session_mod, "EXIT_FORCE_TICKS", 2)
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    # The agent's typed command ignores HUP, INT and TERM in a process
+    # group of its own (the shell's job control) and sits there.
+    reply = client.request({
+        "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
+        "command_override": "sh -c 'trap \"\" HUP INT TERM; while :; do sleep 1; done'",
+    })
+    pty = reply["pty"]
+    assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+    child = core.ptys.get(pty).child_pid()
+    assert child
+    job = core.ptys.get(pty).foreground_pgrp()
+    assert job and job != child
+    done = []
+    started = time.monotonic()
+    core.stop_sessions(done=lambda: done.append(time.monotonic()))
+    assert pump(15, lambda: bool(done))
+    assert pty not in core.ptys.ptys
+    assert not os.path.exists(f"/proc/{child}") or open(f"/proc/{child}/stat").read().split()[2] == "Z"
+    # The job's own group went too: nothing alive is left in it (a
+    # container with no reaper as pid 1 keeps the killed ones as zombies,
+    # which `killpg(pgrp, 0)` would still find).
+    assert pump(5, lambda: not _live_in_group(job)), _live_in_group(job)
+    # The flow ran: the exit budget (2 ticks), then SIGHUP ignored, then the
+    # grace and SIGKILL; well under the stop bound.
+    assert done[0] - started < 10
+    pump(0.3)
+
+
+def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):
+    """The CLI exited and the shell sits on the pty (a quit before
+    1.12c's attach): the resume is not refused; the old pty is closed and
+    a fresh one takes the session."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    first = spawn_agent(client, tmp_path, session=session_id)  # `true`: the CLI is gone at once
+    assert pump(5, lambda: not server.core.ptys.get(first["pty"]).has_running_command())
+    second = spawn_agent(client, tmp_path, session=session_id)
+    assert second["pty"] != first["pty"]
+    assert pump(5, lambda: first["pty"] not in server.core.ptys.ptys)
+    assert second["pty"] in server.core.ptys.ptys

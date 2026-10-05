@@ -1,0 +1,21 @@
+# New in the ghackett fork of agent-session-manager (GPL-3.0).
+#
+# The Collins session service as a systemd user unit (split-service spec
+# §3.10). Not enabled by the package: a local Collins starts it on demand
+# (`systemctl --user start collins-service.service`) when its socket is
+# absent, and `collins-service --check` says what a headless box needs
+# first (lingering, $XDG_RUNTIME_DIR). `collins --install-desktop` installs
+# a copy under ~/.local/share/systemd/user/ with ExecStart resolved to the
+# installed command for a pip install.
+
+[Unit]
+Description=Collins session service
+
+[Service]
+Type=notify
+ExecStart=/usr/bin/collins-service
+Restart=on-failure
+KillMode=control-group
+
+[Install]
+WantedBy=default.target

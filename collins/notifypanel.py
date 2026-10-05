@@ -445,6 +445,16 @@ class NotificationSheet(Gtk.Box):
         reaches the split that closes it and the arrow keys walk the list.
         Called by the window once the sheet is shown, and by the rebuild to
         put the focus back where it was."""
+        if not self.get_mapped():
+            # Called off the toggle's idle before the sheet's first frame
+            # (seen under Xvfb, whose loop never idles): a grab on an
+            # unmapped row fails silently, so wait for the map.
+            def mapped(*_args) -> None:
+                self.disconnect(handler)
+                self.take_focus(notification_id)
+
+            handler = self.connect("map", mapped)
+            return GLib.SOURCE_REMOVE
         rows = self.rows()
         target: Gtk.Widget = next(
             (row for row in rows if row.notification.id == notification_id),

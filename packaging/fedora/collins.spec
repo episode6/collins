@@ -31,6 +31,8 @@ BuildRequires:  pyproject-rpm-macros
 # %%check: the desktop entry and the AppStream metainfo the package installs.
 BuildRequires:  desktop-file-utils
 BuildRequires:  appstream
+# %%{_userunitdir}, for the service's systemd user unit.
+BuildRequires:  systemd-rpm-macros
 
 # Mirrors debian/control. GTK 4.10 (Gtk.FileDialog / Gtk.FontDialog) and
 # libadwaita 1.5 (Adw.Dialog and friends) are the measured floors; every
@@ -55,6 +57,7 @@ BuildRequires:  appstream
 # session reach it while it runs; without either the grant applies at the
 # session's next restart. bindfs is in EPEL on RHEL 10, fuse3 in its BaseOS.
 Requires:       python3-gobject
+Requires:       libsoup3
 Requires:       gtk4 >= 4.10
 Requires:       libadwaita >= 1.5
 Requires:       vte291-gtk4
@@ -102,6 +105,9 @@ install -Dm644 data/icons/com.episode6.Collins.svg \
   %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
 install -Dm644 data/com.episode6.Collins.metainfo.xml \
   %{buildroot}%{_metainfodir}/com.episode6.Collins.metainfo.xml
+# The session service's systemd user unit (not enabled: the app starts it).
+install -Dm644 data/collins-service.service \
+  %{buildroot}%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-service.service
 
 %check
 desktop-file-validate %{buildroot}%{_datadir}/applications/com.episode6.Collins.desktop
@@ -115,6 +121,8 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 %files -f %{pyproject_files}
 %doc README.md
 %{_bindir}/collins
+%{_bindir}/collins-service
+%{?_userunitdir}%{!?_userunitdir:/usr/lib/systemd/user}/collins-service.service
 %{_datadir}/applications/com.episode6.Collins.desktop
 %{_datadir}/icons/hicolor/scalable/apps/com.episode6.Collins.svg
 %{_metainfodir}/com.episode6.Collins.metainfo.xml

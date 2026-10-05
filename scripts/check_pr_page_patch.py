@@ -48,14 +48,11 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from collins import i18n, prdetail, prview  # noqa: E402
 from collins.app import apply_gtk_settings  # noqa: E402
-from collins import apilink  # noqa: E402
-
-# No app behind the page: its gh requests go to a loopback of its own.
-apilink.allow_harness()
 from collins.prstatus import PullRequest  # noqa: E402
 
 PR_URL = "https://github.com/episode6/collins/pull/55"
@@ -119,6 +116,10 @@ def base_detail() -> prdetail.PullRequestDetail:
 
 STAGED = {"detail": base_detail()}
 prdetail.fetch = lambda url: STAGED["detail"]
+# No app behind the page: a service of this check's own, answering the
+# page's `pr.detail` with the staged detail (scripts/e2e_stubs.py; `land`
+# restages it there), and a link to it as the current one (PR-1.12b).
+e2e_service.harness_link(stubs={"pr_detail": prdetail.detail_record(STAGED["detail"])})
 
 HOST = SimpleNamespace(
     archive=None, refresh=lambda: None, prompt_block=lambda: "", confirm_merges=lambda: True
@@ -189,6 +190,7 @@ def land(detail: prdetail.PullRequestDetail, then) -> bool:
     """Stage *detail*, fetch it the way the page does, and run *then* once it
     has landed and the scroll pin's idle has run."""
     STAGED["detail"] = detail
+    e2e_service.update_stubs(pr_detail=prdetail.detail_record(detail))
     page = state["page"]
     page._fetch(force=True)
 

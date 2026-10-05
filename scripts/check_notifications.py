@@ -114,7 +114,7 @@ for session, prompt, stamp in (
 with open(STATE_FILE, "w", encoding="utf-8") as fh:
     json.dump({
         "names": {SESSION_A: "Fix spinner animation", SESSION_B: "Router profiling"},
-        "settings": {"welcome_seen": True},
+        "settings": {"welcome_seen": True, "gh_welcome_dismissed": True},
         # An update row from a last run that announced a version this launch
         # has since caught up with: retired at startup (updatecheck.retire),
         # which runs the center's listener before any window exists.
@@ -131,6 +131,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from collins import app as app_mod  # noqa: E402
@@ -190,6 +191,25 @@ def finish_edge(app: App, session_id: str) -> None:
         )
 
 
+def _focus_facts(win, sheet) -> str:
+    """Where the keyboard is, in enough detail to read a failure off CI."""
+    focus = win.get_focus()
+    chain = []
+    widget = focus
+    while widget is not None and len(chain) < 8:
+        chain.append(type(widget).__name__)
+        widget = widget.get_parent()
+    label = tooltip = ""
+    if focus is not None:
+        label = getattr(focus, "get_label", lambda: "")() or ""
+        tooltip = focus.get_tooltip_text() or ""
+    active = Gtk.Window.get_property(win, "is-active")
+    return (
+        f"focus={type(focus).__name__ if focus else None} label={label!r} tooltip={tooltip!r} "
+        f"chain={chain} sheet_mapped={sheet.get_mapped()} rows={len(sheet.rows())} window_active={active}"
+    )
+
+
 def steps(app: App):
     """Each step runs after the one before had an idle to settle in."""
     center = app.notification_center
@@ -207,25 +227,34 @@ def steps(app: App):
 
     # -- quiet ------------------------------------------------------------------
     def quiet():
+        e2e_service.settle()
         check("the bell starts with no badge", bell.badge_text() == "", repr(bell.badge_text()))
+        e2e_service.settle()
         check("its tooltip names the sheet", bell.button.get_tooltip_text() == "Notifications")
+        e2e_service.settle()
         check("the sheet shows its empty state", sheet_page(win) == "empty")
+        e2e_service.settle()
         check("the last run's update row, caught up with, was retired at launch",
               center.rows() == [] and not any(
                   r.get("kind") == "update" for r in win.state.get_notifications()))
+        e2e_service.settle()
         check("the sheet is closed and the bell is off",
               not split.get_show_sidebar() and not bell.button.get_active())
+        e2e_service.settle()
         check("the split holds the content stack",
               split.get_content() is win.content_stack and split.get_collapsed())
+        e2e_service.settle()
         check("the sheet is 380 wide both ways",
               split.get_min_sidebar_width() == 380 and split.get_max_sidebar_width() == 380)
         # pack_end order is right to left, so the first packed lands nearest
         # the window controls; read the geometry rather than the sibling chain.
         _ok, bell_bounds = bell.compute_bounds(win._content_header)
         _ok, cup_bounds = win.caffeine_btn.compute_bounds(win._content_header)
+        e2e_service.settle()
         check("the bell sits right of the caffeine button",
               bell_bounds.get_x() > cup_bounds.get_x(),
               f"bell x={bell_bounds.get_x()}, cup x={cup_bounds.get_x()}")
+        e2e_service.settle()
         check("the footer names the default sound",
               sheet._sound_label.get_label() == "Sound: Default", sheet._sound_label.get_label())
     yield quiet
@@ -235,36 +264,47 @@ def steps(app: App):
         shared["msg"] = center.post(center.make(
             notifycenter.KIND_MESSAGE, SESSION_B, "Router profiling", "alpha-widgets",
             "Profiling done: p95 latency is down 31%."))
+        e2e_service.settle()
         check("a message badges the bell at once", bell.badge_text() == "1", bell.badge_text())
+        e2e_service.settle()
         check("and the tooltip counts it", bell.button.get_tooltip_text() == "1 unread notification")
     yield post_message
 
     def message_row():
+        e2e_service.settle()
         check("the sheet shows the row under Unread",
               sheet_page(win) == "list" and section_titles(win) == ["Unread 1"], str(section_titles(win)))
         rows = sheet.rows()
+        e2e_service.settle()
         check("the row is the message, unread",
               len(rows) == 1 and rows[0].notification is shared["msg"]
               and "unread" in rows[0].get_css_classes())
         icon = rows[0].get_child().get_first_child()
+        e2e_service.settle()
         check("the row wears the project's icon", icon.get_paintable() is not None)
     yield message_row
 
     # -- a synthetic row --------------------------------------------------------
     def go_green():
         store.set_unread(SESSION_A, True)
+        e2e_service.settle()
         check("a finished run counts beside the message", bell.badge_text() == "2")
     yield go_green
 
     def green_row():
+        e2e_service.settle()
         check("the newest row is first: the finished run above the message",
               row_titles(win) == ["Fix spinner animation", "Router profiling"], str(row_titles(win)))
+        e2e_service.settle()
         check("the Unread pill counts two", section_titles(win) == ["Unread 2"])
     yield green_row
 
     # -- the action and the binding ----------------------------------------------
     def open_by_action():
         win.activate_action("win.toggle-notifications")
+        # No pump here: the sheet's focus hand-off is an idle that must run
+        # once the sheet is mapped (the next frame), and these two read
+        # widget state of this process, no round trip.
         check("Ctrl+Shift+B's action opens the sheet", split.get_show_sidebar())
         check("and lights the bell", bell.button.get_active())
     yield open_by_action
@@ -272,7 +312,7 @@ def steps(app: App):
     def focus_in_sheet():
         focus = win.get_focus()
         check("the sheet took the keyboard", focus is not None and focus.is_ancestor(sheet),
-              type(focus).__name__ if focus else "None")
+              _focus_facts(win, sheet))
     yield focus_in_sheet
 
     # -- a row click ------------------------------------------------------------
@@ -280,27 +320,34 @@ def steps(app: App):
         row = next(r for r in sheet.rows() if r.notification is shared["msg"])
         row.grab_focus()  # a real click puts the keyboard on the row it lands on
         sheet.list.emit("row-activated", row)
+        e2e_service.settle()
         check("clicking the message row selects its session's tab",
               win.tab_view.get_selected_page() is page_b)
+        e2e_service.settle()
         check("the row is read", shared["msg"].read)
+        e2e_service.settle()
         check("the badge drops to the finished run", bell.badge_text() == "1")
+        e2e_service.settle()
         check("the sheet stays open", split.get_show_sidebar())
     yield click_message
 
     def after_click():
+        e2e_service.settle()
         check("the message moved under Earlier",
               section_titles(win) == ["Unread 1", "Earlier"], str(section_titles(win)))
         rows = sheet.rows()
+        e2e_service.settle()
         check("the read row lost its guide line",
               "unread" not in rows[1].get_css_classes() and rows[1].notification is shared["msg"])
         focus = win.get_focus()
         check("the keyboard is still in the sheet, on the row that was clicked",
               focus is not None and focus.is_ancestor(sheet) and focus is rows[1],
-              type(focus).__name__ if focus else "None")
+              _focus_facts(win, sheet))
     yield after_click
 
     def close_by_split():
         split.set_show_sidebar(False)  # what Escape and the scrim do
+        e2e_service.settle()
         check("closing the sheet turns the bell off", not bell.button.get_active())
     yield close_by_split
 
@@ -312,6 +359,7 @@ def steps(app: App):
         shared["placeholder_page"] = page
         win.tab_view.set_selected_page(page_a)
         win._on_session_finished(PLACEHOLDER)
+        e2e_service.settle()
         check("a placeholder's finish is a row under its key",
               center.get(notifycenter.green_id(PLACEHOLDER)) is not None and bell.badge_text() == "2")
     yield placeholder
@@ -319,8 +367,10 @@ def steps(app: App):
     def click_placeholder():
         row = next(r for r in sheet.rows() if r.notification.session_id == PLACEHOLDER)
         sheet.list.emit("row-activated", row)
+        e2e_service.settle()
         check("clicking a placeholder's row selects its tab",
               win.tab_view.get_selected_page() is shared["placeholder_page"])
+        e2e_service.settle()
         check("which clears its flag and drops the row",
               center.get(notifycenter.green_id(PLACEHOLDER)) is None and bell.badge_text() == "1")
     yield click_placeholder
@@ -328,15 +378,20 @@ def steps(app: App):
     # -- mark all read, clear, remove -------------------------------------------
     def mark_all():
         sheet.mark_all_button.emit("clicked")
+        e2e_service.settle()
         check("Mark all read zeroes the badge", bell.badge_text() == "")
+        e2e_service.settle()
         check("the finished row is read but still there",
               center.is_green(SESSION_A) and center.get(notifycenter.green_id(SESSION_A)).read)
     yield mark_all
 
     def after_mark_all():
+        e2e_service.settle()
         check("everything is under Earlier", section_titles(win) == ["Earlier"], str(section_titles(win)))
+        e2e_service.settle()
         check("Mark all read is greyed with nothing unread", not sheet.mark_all_button.get_sensitive())
         store.set_unread(SESSION_A, False)
+        e2e_service.settle()
         check("the finished row leaves with its flag", not center.is_green(SESSION_A))
     yield after_mark_all
 
@@ -345,27 +400,33 @@ def steps(app: App):
                                 "alpha-widgets", "Rang the bell"))
         center.post(center.make(notifycenter.KIND_BELL, SESSION_A, "Fix spinner animation",
                                 "alpha-widgets", "Rang the bell"))
+        e2e_service.settle()
         check("two bells from one session are one row", len(center.rows()) == 2 and bell.badge_text() == "1")
     yield clear
 
     def bell_row():
         row = sheet.rows()[0]
         body = row.get_child().get_first_child().get_next_sibling().get_last_child()
+        e2e_service.settle()
         check("the coalesced bell row counts itself",
               body.get_label() == "Rang the bell ×2", body.get_label())
         sheet.clear_button.emit("clicked")
+        e2e_service.settle()
         check("Clear empties the list", center.rows() == [] and bell.badge_text() == "")
     yield bell_row
 
     def after_clear():
+        e2e_service.settle()
         check("the sheet is back to its empty state", sheet_page(win) == "empty")
         shared["gone"] = center.post(center.make(
             notifycenter.KIND_MESSAGE, SESSION_B, "Router profiling", "alpha-widgets", "Removable"))
         sheet.activate_action("notify.remove", GLib.Variant("s", shared["gone"].id))
+        e2e_service.settle()
         check("a row's Remove drops it", center.get(shared["gone"].id) is None)
         shared["kept"] = center.post(center.make(
             notifycenter.KIND_MESSAGE, SESSION_B, "Router profiling", "alpha-widgets", "Readable"))
         sheet.activate_action("notify.mark-read", GLib.Variant("s", shared["kept"].id))
+        e2e_service.settle()
         check("a row's Mark read reads it", shared["kept"].read and bell.badge_text() == "")
     yield after_clear
 
@@ -373,10 +434,13 @@ def steps(app: App):
     def preferences():
         win._show_preferences("notifications")
         dialog = win.get_visible_dialog()
+        e2e_service.settle()
         check("the footer's link opens Preferences", dialog is not None)
         if dialog is not None:
+            e2e_service.settle()
             check("on the Notifications group, by its title in the search box",
                   dialog._search_entry.get_text() == "Notifications")
+            e2e_service.settle()
             check("and can open on another group that exists",
                   dialog.show_group("terminal") and dialog._search_entry.get_text() == "Terminal")
             dialog.force_close()
@@ -388,15 +452,18 @@ def steps(app: App):
         shared["win2"] = win2
         center.post(center.make(notifycenter.KIND_MESSAGE, SESSION_A, "Fix spinner animation",
                                 "alpha-widgets", "Seen twice"))
+        e2e_service.settle()
         check("every window's bell shows the same number",
               bell.badge_text() == "1" and win2.notify_bell.badge_text() == "1",
               f"{bell.badge_text()!r} / {win2.notify_bell.badge_text()!r}")
+        e2e_service.settle()
         check("the second window is a MainWindow with its own sheet",
               isinstance(win2, MainWindow) and win2.notify_sheet is not sheet)
     yield second_window
 
     def second_window_rows():
         win2 = shared["win2"]
+        e2e_service.settle()
         check("its sheet shows the same rows", row_titles(win2) == row_titles(win), str(row_titles(win2)))
         # A placeholder of the second window's, finished: its synthetic row
         # is in every sheet, this window's included.
@@ -407,6 +474,7 @@ def steps(app: App):
         win2.tab_view.append(Gtk.Label(label="tab C"))
         win2.tab_view.set_selected_page(win2.tab_view.get_nth_page(1))
         win2._on_session_finished(PLACEHOLDER_2)
+        e2e_service.settle()
         check("another window's placeholder finishing is a row here",
               center.get(notifycenter.green_id(PLACEHOLDER_2)) is not None and bell.badge_text() == "2")
     yield second_window_rows
@@ -415,8 +483,10 @@ def steps(app: App):
         win2 = shared["win2"]
         row = next(r for r in sheet.rows() if r.notification.session_id == PLACEHOLDER_2)
         sheet.list.emit("row-activated", row)
+        e2e_service.settle()
         check("clicking it from this window's sheet selects the tab in the window that has it",
               win2.tab_view.get_selected_page() is shared["placeholder_page_2"])
+        e2e_service.settle()
         check("which clears that window's flag and drops the row",
               center.get(notifycenter.green_id(PLACEHOLDER_2)) is None and bell.badge_text() == "1")
     yield click_other_windows_placeholder
@@ -427,12 +497,14 @@ def steps(app: App):
         win2 = shared["win2"]
         win2.sidebar.add_placeholder(PLACEHOLDER_3, PROJECT_DIR, "agent-claude-symbolic")
         win2._on_session_finished(PLACEHOLDER_3)
+        e2e_service.settle()
         check("a placeholder with no page still counts", bell.badge_text() == "2")
     yield dead_placeholder_click
 
     def dead_placeholder_click_lands_nowhere():
         row = next(r for r in sheet.rows() if r.notification.session_id == PLACEHOLDER_3)
         sheet.list.emit("row-activated", row)
+        e2e_service.settle()
         check("a synthetic row whose click goes nowhere stays unread",
               not row.notification.read and bell.badge_text() == "2")
         center.set_green(PLACEHOLDER_3, False)
@@ -441,6 +513,7 @@ def steps(app: App):
 
     def after_destroy():
         center.mark_all_read()
+        e2e_service.settle()
         check("a closed window let go of the center", bell.badge_text() == "")
     yield after_destroy
 
@@ -456,12 +529,16 @@ def steps(app: App):
         # The sound, for real, once: whatever this machine has (GStreamer and
         # a theme, or neither), play() answers and never raises.
         first = notifysound.play("default", force=True)
+        e2e_service.settle()
         check("play() answers for the default sound",
               first in (notifysound.PLAYED, notifysound.BEEPED, notifysound.MUTED), first)
         second = notifysound.play("default")
+        e2e_service.settle()
         check("a second play right after is debounced or busy",
               second in (notifysound.DEBOUNCED, notifysound.BUSY), second)
+        e2e_service.settle()
         check("silence is silence", notifysound.play("none", force=True) == notifysound.SILENT)
+        e2e_service.settle()
         check("GStreamer's absence is a fact, not an error", isinstance(notifysound.available(), bool))
         # From here the sound is recorded, not played, and every withdraw
         # of a desktop notification is noted on its way to the bus.
@@ -469,6 +546,7 @@ def steps(app: App):
         real_withdraw = app.withdraw_notification
         app.withdraw_notification = lambda key: withdrawn.append(key) or real_withdraw(key)
         # Focus is declared: this window is the active one.
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         center.clear()
         center.mark_all_read()
@@ -483,62 +561,84 @@ def steps(app: App):
         win._pages[SESSION_B] = page
         shared["tab_b"], shared["page_b"] = tab_b, page
         win.tab_view.set_selected_page(page_a)
+        e2e_service.settle()
         check("no cards stand before anything is delivered", cards.cards() == [])
     yield deliveries_setup
 
     def message_elsewhere():
         result = win.notify_session(shared["tab_b"], "Profiling done: p95 latency is down 31%.")
+        e2e_service.settle()
         check("a message from another tab is a card, the sound, a row, a flag and the flash",
               result == {notifycenter.DELIVER_CARD, notifycenter.DELIVER_SOUND, notifycenter.DELIVER_ROW,
                          notifycenter.DELIVER_FLAG, notifycenter.DELIVER_FLASH}, str(result))
+        e2e_service.settle()
         check("the sound was asked for, with the setting", played == ["default"], str(played))
         rows = [r for r in center.rows() if r.kind != notifycenter.KIND_FINISHED]
+        e2e_service.settle()
         check("the row is unread, under the session, with its name and project",
               len(rows) == 1 and not rows[0].read and rows[0].session_id == SESSION_B
               and rows[0].title == "Router profiling" and rows[0].project == "alpha-widgets",
               str([(r.kind, r.session_id, r.body, r.read) for r in rows]))
+        e2e_service.settle()
         check("the sidebar row is flagged", store.get_item(SESSION_B).unread)
         # The flag's own synthetic row rides along (set_green tracks every
         # flag edge, a message's included): the badge reads two until the
         # tab is visited, which takes both down.
+        e2e_service.settle()
         check("and the flag's synthetic row stands beside the message", center.is_green(SESSION_B))
+        e2e_service.settle()
         check("the tool reply says in Collins", notifycenter.tool_reply(result) == notifycenter.REPLY_IN_APP)
         shared["msg_row"] = rows[0]
     yield message_elsewhere
 
     def card_up():
         up = cards.cards()
+        e2e_service.settle()
         check("one card stands", len(up) == 1, str(len(up)))
         if not up:
             return
         card = up[0]
+        e2e_service.settle()
         check("it is revealed", card.get_reveal_child())
+        e2e_service.settle()
         check("it holds the row", card.notification is shared["msg_row"])
+        e2e_service.settle()
         check("it holds the page it came from", card.page is shared["page_b"])
         header_h = win._content_header.get_height()
+        e2e_service.settle()
         check("the stack sits 12px under the header bar",
               header_h > 0 and cards.get_margin_top() == header_h + 12,
               f"header {header_h}, margin {cards.get_margin_top()}")
+        e2e_service.settle()
         check("and 14px from the right edge", cards.get_margin_end() == 14)
         card.activate()
+        e2e_service.settle()
         check("clicking the card selects its tab", win.tab_view.get_selected_page() is shared["page_b"])
+        e2e_service.settle()
         check("which reads the row, clears the flag and drops the flag's row",
               shared["msg_row"].read and not store.get_item(SESSION_B).unread
               and not center.is_green(SESSION_B))
+        e2e_service.settle()
         check("and the card is on its way out", not card.get_reveal_child())
     yield card_up
     yield wait
     yield wait
 
     def card_gone():
+        e2e_service.settle()
         check("the card is gone once the slide ends", cards.cards() == [], str(len(cards.cards())))
         result = win.notify_session(shared["tab_b"], "Still here?")
+        e2e_service.settle()
         check("a message to the selected tab is a read row and the flash, no card",
               result == {notifycenter.DELIVER_ROW_READ, notifycenter.DELIVER_FLASH}, str(result))
+        e2e_service.settle()
         check("the row is read on arrival", center.rows()[0].read and center.rows()[0].body == "Still here?")
+        e2e_service.settle()
         check("no card came up", cards.cards() == [])
+        e2e_service.settle()
         check("the tool reply says the user is looking",
               notifycenter.tool_reply(result) == notifycenter.REPLY_SELECTED)
+        e2e_service.settle()
         check("the sound was not asked for", played == ["default"])
         win.tab_view.set_selected_page(page_a)
     yield card_gone
@@ -546,26 +646,34 @@ def steps(app: App):
     def message_unfocused():
         win.is_active = lambda: False
         result = win.notify_session(shared["tab_b"], "Away message")
+        e2e_service.settle()
         check("with no window active the message is a desktop notification, the sound, a row and a flag",
               result == {notifycenter.DELIVER_DESKTOP, notifycenter.DELIVER_SOUND,
                          notifycenter.DELIVER_ROW, notifycenter.DELIVER_FLAG},
               str(result))
+        e2e_service.settle()
         check("the tool reply says the desktop",
               notifycenter.tool_reply(result) == notifycenter.REPLY_DESKTOP)
+        e2e_service.settle()
         check("the sidebar row is flagged again", store.get_item(SESSION_B).unread)
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         # The app's tool dispatch, end to end: the reply is one of the three.
         ok, reply = app.tool_client.notify_user((win, shared["tab_b"]), {"message": "Through the tool"})
+        e2e_service.settle()
         check("the notify_user tool replies 'in Collins' for a card",
               ok and reply == "The user was notified in Collins.", reply)
     yield message_unfocused
 
     def visit_reads():
         unread_before = center.unread_count()
+        e2e_service.settle()
         check("three rows wait (the desktop one, the tool's, and the flag's)",
               unread_before == 3, str(unread_before))
         win.tab_view.set_selected_page(shared["page_b"])
+        e2e_service.settle()
         check("selecting the tab reads every row the session posted", center.unread_count() == 0)
+        e2e_service.settle()
         check("and takes its card down", all(not c.get_reveal_child() for c in cards.cards()))
         win.tab_view.set_selected_page(page_a)
     yield visit_reads
@@ -578,28 +686,35 @@ def steps(app: App):
         win._on_bell(shared["tab_b"])
         win._on_bell(shared["tab_b"])
         rows = center.rows()
+        e2e_service.settle()
         check("two bells from another tab are one unread bell row",
               len(rows) == before + 1 and rows[0].kind == notifycenter.KIND_BELL
               and rows[0].count == 2 and not rows[0].read and rows[0].body == "Rang the bell",
               f"{len(rows) - before} new, count {rows[0].count}")
+        e2e_service.settle()
         check("the sound was asked for each time (notifysound debounces)", played == ["default", "default"])
+        e2e_service.settle()
         check("a bell flags nothing", not store.get_item(SESSION_B).unread)
         shared["bell_row"] = rows[0]
     yield bell_elsewhere
 
     def bell_card():
         up = cards.cards()
+        e2e_service.settle()
         check("the bell's card stands, once, wearing the count",
               len(up) == 1 and up[0].notification is shared["bell_row"], str(len(up)))
         win.tab_view.set_selected_page(shared["page_b"])
         before = len(center.rows())
         win._on_bell(shared["tab_b"])
+        e2e_service.settle()
         check("a bell from the selected tab posts no row", len(center.rows()) == before)
+        e2e_service.settle()
         check("but flashes the tab's terminal veil",
               shared["tab_b"]._bell_veil.has_css_class("bell-flash"))
         win.tab_view.set_selected_page(page_a)
         win.state.set_setting("bell_notifications", False)
         win._on_bell(shared["tab_b"])
+        e2e_service.settle()
         check("nor does any bell with 'Bells from other sessions' off",
               len(center.rows()) == before and shared["bell_row"].count == 2)
         win.state.set_setting("bell_notifications", True)
@@ -610,6 +725,7 @@ def steps(app: App):
         # it; reading its row from the sheet is what takes the banner down.
         win.is_active = lambda: False
         win._on_bell(shared["tab_b"])
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         row = center.rows()[0]  # a fresh row: the visit above read the coalesced one
         check("an unfocused bell is a desktop notification and an unread bell row",
@@ -617,6 +733,7 @@ def steps(app: App):
               and SESSION_B in win._desktop_keys, f"{row.kind} read={row.read}")
         before = len(withdrawn)
         center.mark_read(row.id)
+        e2e_service.settle()
         check("marking the bell row read withdraws the session's desktop notification",
               withdrawn[before:] == [SESSION_B], str(withdrawn[before:]))
     yield bell_read_from_sheet
@@ -625,9 +742,11 @@ def steps(app: App):
         cards.dismiss_all()
         win.state.set_setting("inapp_notifications", False)
         result = win.notify_session(shared["tab_b"], "Cards off")
+        e2e_service.settle()
         check("with in-app notifications off the card becomes a desktop notification, sound kept",
               notifycenter.DELIVER_DESKTOP in result and notifycenter.DELIVER_CARD not in result
               and notifycenter.DELIVER_SOUND in result, str(result))
+        e2e_service.settle()
         check("the row and the flag still land",
               notifycenter.DELIVER_ROW in result and store.get_item(SESSION_B).unread)
         win.state.set_setting("inapp_notifications", True)
@@ -639,28 +758,34 @@ def steps(app: App):
 
     def announce_off():
         cards.dismiss_all()
+        e2e_service.settle()
         check("announce finished runs is off by default", not win.state.get_setting("announce_finished_runs"))
         finish_edge(app, SESSION_B)
+        e2e_service.settle()
         check("a finish flags the row and puts the synthetic row up",
               store.get_item(SESSION_B).unread and center.is_green(SESSION_B))
     yield announce_off
 
     def announce_off_no_card():
+        e2e_service.settle()
         check("but shows no card while the setting is off", cards.cards() == [], str(len(cards.cards())))
         store.set_unread(SESSION_B, False)
         win.state.set_setting("announce_finished_runs", True)
         played.clear()
         finish_edge(app, SESSION_B)
+        e2e_service.settle()
         check("with the setting on a finish plays the sound", played == ["default"], str(played))
     yield announce_off_no_card
 
     def announce_card():
         up = cards.cards()
+        e2e_service.settle()
         check("and shows a finished-run card for the synthetic row",
               len(up) == 1 and up[0].notification.kind == notifycenter.KIND_FINISHED
               and up[0].notification.id == notifycenter.green_id(SESSION_B), str(len(up)))
         if up:
             up[0].activate()
+            e2e_service.settle()
             check("clicking it selects the tab, which clears the flag and drops the row",
                   win.tab_view.get_selected_page() is shared["page_b"]
                   and not store.get_item(SESSION_B).unread and not center.is_green(SESSION_B))
@@ -675,11 +800,13 @@ def steps(app: App):
         # under the session's key (_reraise_green). Announced already under
         # the placeholder's, it is no second card and no second chime; only
         # the desktop banner goes out again, with the tab behind it.
+        e2e_service.settle()
         check("no card is standing before the re-raise", cards.cards() == [], str(len(cards.cards())))
         win.state.set_setting("announce_finished_runs", True)
         store.set_unread(SESSION_B, False)
         played.clear()
         win._reraise_green(SESSION_B)
+        e2e_service.settle()
         check("a re-raised green puts the synthetic row back without a card or the sound",
               center.is_green(SESSION_B) and cards.cards() == [] and played == [],
               f"{len(cards.cards())} {played}")
@@ -687,7 +814,9 @@ def steps(app: App):
         win._desktop_keys.discard(SESSION_B)
         win.is_active = lambda: False
         win._reraise_green(SESSION_B)
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
+        e2e_service.settle()
         check("and, away from Collins, re-sends the desktop notification under the session id",
               SESSION_B in win._desktop_keys and cards.cards() == [])
         store.set_unread(SESSION_B, False)
@@ -706,18 +835,22 @@ def steps(app: App):
         win.tab_view.set_selected_page(page_a)
         result = win.notify_session(tab_p, "From a tab with no id yet")
         row = center.rows()[0]
+        e2e_service.settle()
         check("a placeholder tab's message is a card and a row under the placeholder id",
               notifycenter.DELIVER_CARD in result and row.session_id == "placeholder-90"
               and row.project == "alpha-widgets", f"{row.session_id!r} {row.project!r}")
+        e2e_service.settle()
         check("and flags the placeholder row", win.sidebar.placeholder_unread("placeholder-90"))
         shared["p_row"] = row
     yield placeholder_card
 
     def placeholder_card_click():
         up = cards.cards()
+        e2e_service.settle()
         check("its card holds the page", len(up) == 1 and up[0].page is shared["page_p"], str(len(up)))
         if up:
             up[0].activate()
+            e2e_service.settle()
             check("clicking it selects the placeholder's tab and reads the row",
                   win.tab_view.get_selected_page() is shared["page_p"] and shared["p_row"].read
                   and not win.sidebar.placeholder_unread("placeholder-90"))
@@ -734,6 +867,7 @@ def steps(app: App):
         page = shared["page_p"]
         win.is_active = lambda: False
         win.notify_session(page.get_child(), "Away, from a tab with no id yet")
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         row = center.rows()[0]
         check("an unfocused placeholder message is a desktop notification under the placeholder id",
@@ -741,16 +875,20 @@ def steps(app: App):
         win._set_placeholder_unread("placeholder-90", False)  # the handoff takes the green row down first
         before = len(withdrawn)
         win._rekey_notifications("placeholder-90", "session-resolved-90", page)
+        e2e_service.settle()
         check("the handoff re-files the rows under the session id",
               row.session_id == "session-resolved-90"
               and not any(r.session_id == "placeholder-90" for r in center.rows()))
+        e2e_service.settle()
         check("withdraws the placeholder's desktop notification",
               "placeholder-90" in withdrawn[before:] and "placeholder-90" not in win._desktop_keys,
               str(withdrawn[before:]))
+        e2e_service.settle()
         check("and sends it again under the session id while the row is unread",
               "session-resolved-90" in win._desktop_keys)
         before = len(withdrawn)
         center.mark_session_read("session-resolved-90")
+        e2e_service.settle()
         check("which the session's read then withdraws",
               withdrawn[before:] == ["session-resolved-90"], str(withdrawn[before:]))
     yield placeholder_handoff
@@ -765,20 +903,25 @@ def steps(app: App):
     def three_stand():
         up = cards.cards()
         standing = [c for c in up if c.get_reveal_child()]
+        e2e_service.settle()
         check("a fourth card pushes the oldest out: three stand, newest on top",
               [c.notification.body for c in standing] == ["Message 3", LONG, "Message 1"],
               str([c.notification.body for c in up]))
         # A short message and a long one line up: the tile keeps to its 32px
         # and the text column starts at the same x in every card. (An icon
         # that expanded would hand the tile half of a short card's slack.)
+        e2e_service.settle()
         check("every card's tile is its 32px", all(c._tile.get_width() == 32 for c in standing),
               str([c._tile.get_width() for c in standing]))
         starts = [c._column.compute_bounds(c._body)[1].get_x() for c in standing]
+        e2e_service.settle()
         check("short and long cards start their text at the same x", len(set(starts)) == 1, str(starts))
         if up:
             top = up[0]
             top.close_button.emit("clicked")
+            e2e_service.settle()
             check("the × takes the card down", not top.get_reveal_child())
+            e2e_service.settle()
             check("and leaves the row unread", not top.notification.read and center.unread_count() >= 4)
         cards.dismiss_all()
         center.clear()
@@ -790,19 +933,24 @@ def steps(app: App):
         win.notify_session(shared["tab_b"], "Still asking")
         win.is_active = lambda: False
         win.notify_session(shared["tab_b"], "Asked while away")
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
     yield archive_setup
 
     def archive_reads():
         # Two message rows, plus the synthetic green row the flag raised;
         # the card revealed itself on the turn after it was posted.
+        e2e_service.settle()
         check("three rows and a card wait for session B before the archive",
               center.unread_count() == 3 and any(c.get_reveal_child() for c in cards.cards()),
               str(center.unread_count()))
         store.set_archived(SESSION_B, True)
+        e2e_service.settle()
         check("archiving the session reads every row it posted", center.unread_count() == 0,
               str(center.unread_count()))
+        e2e_service.settle()
         check("and the bell's badge is gone", bell.badge_text() == "", repr(bell.badge_text()))
+        e2e_service.settle()
         check("and takes its card down", all(not c.get_reveal_child() for c in cards.cards()))
         store.set_archived(SESSION_B, False)
         center.clear()
@@ -813,10 +961,12 @@ def steps(app: App):
     def preferences_group():
         win._show_preferences("notifications")
         dialog = win.get_visible_dialog()
+        e2e_service.settle()
         check("the sheet's link opens Preferences on the Notifications group",
               dialog is not None and dialog._search_entry.get_text() == "Notifications")
         if dialog is None:
             return
+        e2e_service.settle()
         check("the group is visible and holds the five rows",
               dialog._inapp_row.get_visible() and dialog._card_scheme_row.get_visible()
               and dialog._sound_row.get_visible()
@@ -825,37 +975,50 @@ def steps(app: App):
         # window's card stack wears the class from then on (a card standing
         # at the time would change with it — see NotificationCards.apply_settings).
         dialog._card_scheme_row.set_selected(2)
+        e2e_service.settle()
         check("picking Dark writes the card scheme",
               win.state.get_setting("notification_color_scheme") == "dark")
+        e2e_service.settle()
         check("and the card stack wears its class",
               win.notify_cards._scheme_class == "notification-card-dark")
         dialog._card_scheme_row.set_selected(0)
+        e2e_service.settle()
         check("Follow app clears both",
               win.state.get_setting("notification_color_scheme") == "app"
               and win.notify_cards._scheme_class == "")
+        e2e_service.settle()
         check("the sound row says what Default means",
               dialog._sound_row.get_subtitle() == (
                   "Default: the desktop's message sound" if notifysound.available()
                   else "Sound needs GStreamer (gir1.2-gstreamer-1.0); the desktop's beep is used instead"),
               dialog._sound_row.get_subtitle())
+        e2e_service.settle()
         check("and is greyed exactly when GStreamer is missing",
               dialog._sound_row.get_sensitive() == notifysound.available())
         if notifysound.available():
             dialog._sound_row.set_selected(1)
+            e2e_service.settle()
             check("picking None writes the setting", win.state.get_setting("notification_sound") == "none")
+            e2e_service.settle()
             check("and the subtitle says Silent", dialog._sound_row.get_subtitle() == "Silent")
+            e2e_service.settle()
             check("the ▶ is greyed for silence", not dialog._sound_play.get_sensitive())
+            e2e_service.settle()
             check("no folder button while no file is the choice", not dialog._sound_browse.get_visible())
             # A chosen file can be swapped for another: re-picking "Custom…"
             # in the combo emits nothing, so the folder button stands in.
             dialog._set_sound("/nonexistent/chime.ogg")
+            e2e_service.settle()
             check("a chosen file shows the folder button", dialog._sound_browse.get_visible())
+            e2e_service.settle()
             check("and the combo sits on Custom…", dialog._sound_row.get_selected() == 2)
             dialog._sound_row.set_selected(1)  # None again, for the footer check below
+            e2e_service.settle()
             check("leaving the file hides the folder button again",
                   not dialog._sound_browse.get_visible()
                   and win.state.get_setting("notification_sound") == "none")
         dialog._announce_row.set_active(True)
+        e2e_service.settle()
         check("the announce switch writes its setting",
               win.state.get_setting("announce_finished_runs") is True)
         dialog._announce_row.set_active(False)
@@ -864,6 +1027,7 @@ def steps(app: App):
 
     def footer_after_prefs():
         expected = "Sound: None" if notifysound.available() else "Sound: Default"
+        e2e_service.settle()
         check("the sheet's footer follows the sound setting",
               sheet._sound_label.get_label() == expected, sheet._sound_label.get_label())
         win.state.set_setting("notification_sound", "default")
@@ -882,7 +1046,9 @@ def steps(app: App):
         app_mod.open_uri = window_mod.open_uri
         played.clear()
         center.clear()
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
+        e2e_service.settle()
         check("no card stands before the update", cards.cards() == [], str(len(cards.cards())))
         app.announce_update(newer)
         rows = [r for r in center.rows() if r.kind == notifycenter.KIND_UPDATE]
@@ -901,44 +1067,58 @@ def steps(app: App):
 
     def update_card():
         up = cards.cards()
+        e2e_service.settle()
         check("its card stands", len(up) == 1 and up[0].notification is shared["update_row"], str(len(up)))
         if not up:
             return
         card = up[0]
+        e2e_service.settle()
         check("with no page behind it", card.page is None)
+        e2e_service.settle()
         check("wearing the update mark", any(
             isinstance(w, Gtk.Image) and w.get_icon_name() == notifypanel.UPDATE_MARK_ICON
             for w in _descendants(card)))
         card.activate()
+        e2e_service.settle()
         check("clicking the card opens the release page", opened == [newer.url], str(opened))
+        e2e_service.settle()
         check("reads the row", shared["update_row"].read)
+        e2e_service.settle()
         check("and the card is on its way out", not card.get_reveal_child())
     yield update_card
     yield wait
     yield wait
 
     def update_away():
+        e2e_service.settle()
         check("the update card is gone", cards.cards() == [], str(len(cards.cards())))
         win.is_active = lambda: False
         before = len(withdrawn)
         app.announce_update(newest)
+        e2e_service.settle()  # the delivery lands over the socket while the window is still away
         win.is_active = lambda: True
         rows = [r for r in center.rows() if r.kind == notifycenter.KIND_UPDATE]
+        e2e_service.settle()
         check("a newer release away from Collins replaces the row: one update row, the new version's",
               [r.id for r in rows] == ["update:9.9.10"] and not rows[0].read, str([r.id for r in rows]))
+        e2e_service.settle()
         check("no card, and the desktop notification is up",
               cards.cards() == [] and app._update_desktop_sent)
         app.activate_action("open-update", GLib.Variant("s", rows[0].url))
+        e2e_service.settle()
         check("the desktop notification's click opens the page and reads the row",
               opened[-1] == newest.url and rows[0].read, str(opened))
+        e2e_service.settle()
         check("which takes the desktop notification down",
               updatecheck.DESKTOP_KEY in withdrawn[before:] and not app._update_desktop_sent,
               str(withdrawn[before:]))
         # The sheet's row click goes the same way.
         opened.clear()
+        e2e_service.settle()
         check("the sheet's row click opens the page too",
               win._open_notification(rows[0]) is True and opened == [newest.url], str(opened))
         # A launch running the announced version (or newer) retires the row.
+        e2e_service.settle()
         check("a launch that caught up retires the row",
               updatecheck.retire(center, "9.9.10") == 1
               and not any(r.kind == notifycenter.KIND_UPDATE for r in center.rows()))
@@ -947,24 +1127,29 @@ def steps(app: App):
     def update_inapp_off():
         win.state.set_setting("inapp_notifications", False)
         app.announce_update(newer)
+        e2e_service.settle()
         check("with in-app cards off, an update in Collins is the desktop notification and the row",
               cards.cards() == [] and app._update_desktop_sent
               and center.has_unread_kind(notifycenter.KIND_UPDATE))
         win.state.set_setting("inapp_notifications", True)
         center.clear()
+        e2e_service.settle()
         check("clearing the history takes it down", not app._update_desktop_sent)
     yield update_inapp_off
 
     def update_preference():
         win._show_preferences()
         dialog = win.get_visible_dialog()
+        e2e_service.settle()
         check("the General group holds the Check for updates switch, on by default",
               dialog is not None and dialog._update_check_row.get_visible()
               and dialog._update_check_row.get_active())
         if dialog is None:
             return
         dialog._update_check_row.set_active(False)
+        e2e_service.settle()
         check("turning it off writes the setting", win.state.get_setting("check_for_updates") is False)
+        e2e_service.settle()
         check("which updatecheck reads as disabled", not updatecheck.enabled())
         dialog._update_check_row.set_active(True)
         dialog.force_close()
@@ -981,6 +1166,9 @@ def _descendants(widget):
 
 def main() -> int:
     i18n.init("")
+    # The service is its own process (PR-1.12b): started here, with this
+    # check's environment, before the app connects to it.
+    e2e_service.start_service()
     app = App()
     tries = 0
     exit_code = [1]

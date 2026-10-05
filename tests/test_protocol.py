@@ -39,7 +39,7 @@ def test_transport_numbers_are_the_specs():
 
 
 def test_capabilities_and_error_codes_are_closed():
-    assert p.CAPABILITIES == {"local"}
+    assert p.CAPABILITIES == {"local", "debug"}
     assert p.ERRORS == {
         "unknown",
         "invalid",
@@ -84,9 +84,11 @@ PHASE_ONE_TYPES = [
     # PR-1.12a: the session asks its active client for the keyboard.
     "focus.terminal",
     "theme",
+    "ack",
     "spawn",
     # PR-1.11: the panel history key moves into the service.
     "panel.key",
+    "panel.history",
     # PR-1.12a: a panel shell's reads, over the API.
     "pty.info",
     "pty.capture",
@@ -345,6 +347,7 @@ SAMPLES = {
         "device": "laptop",
         "locale": "de_DE.UTF-8",
         "term": TERM,
+        "channel": "sync",
     },
     ("local", p.REQUEST): {"proof": "ab" * 32},
     ("subscribe", p.REQUEST): {},
@@ -354,6 +357,7 @@ SAMPLES = {
     ("focus", p.EVENT): {"pty": 7, "focused": True},
     ("focus.terminal", p.EVENT): {"pty": 7},
     ("theme", p.EVENT): {"term": TERM},
+    ("ack", p.EVENT): {"pty": 7, "offset": 65536},
     ("spawn", p.REQUEST): {
         "kind": "agent",
         "cwd": "/home/u/project",
@@ -379,6 +383,11 @@ SAMPLES = {
         "ordinal": 2,
     },
     ("panel.key", p.REQUEST): {"pty": 7, "history": ID, "handle": "s-4"},
+    ("panel.history", p.REQUEST): {
+        "key": ID,
+        "shells": [{"ordinal": 0, "pty": 7, "text": "what the widget shows", "keep": False}],
+        "partial": False,
+    },
     ("pty.info", p.REQUEST): {"pty": 7},
     ("pty.capture", p.REQUEST): {"pty": 7},
     ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld", "focus": False, "when_empty": True},
@@ -707,6 +716,7 @@ REPLIES = {
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
     "panel.key": {},
+    "panel.history": {},
     "pr.set": {},
     "pr.fetch": {},
     "pr.sweep": {"results": {ID: [PR_RECORD]}},
@@ -764,6 +774,7 @@ REPLIES = {
         "started": 1790000000.0,
         "sandbox": "",
         "live": "bindfs not installed",
+        "pid": 4242,
     },
 }
 

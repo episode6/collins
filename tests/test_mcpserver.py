@@ -498,3 +498,35 @@ def test_shim_degrades_cleanly_after_the_service_stops(tmp_path):
 
     result = run_with_client(tmp_path, client)
     assert result["content"][0]["text"] == "Collins is not running"
+
+
+def test_a_live_socket_is_refused_not_stolen(tmp_path):
+    """PR-1.12b: a socket file somebody answers on belongs to another
+    service for this app id; starting over it would take its sessions'
+    tool calls away."""
+    import socket
+    import threading
+
+    from collins.mcpserver import SessionToolService
+
+    path = str(tmp_path / "mcp.sock")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(path)
+    listener.listen(1)
+
+    def accept():
+        try:
+            while True:
+                conn, _ = listener.accept()
+                conn.close()
+        except OSError:
+            pass
+
+    threading.Thread(target=accept, daemon=True).start()
+    service = SessionToolService(path, list_tools=lambda pid: [], dispatch=lambda *a: (False, ""))
+    try:
+        with pytest.raises(OSError):
+            service.start()
+        assert os.path.exists(path)  # untouched
+    finally:
+        listener.close()

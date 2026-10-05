@@ -227,9 +227,11 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from collins import (  # noqa: E402
+    apilink,
     i18n,
     mcptools,
     panellayout,
@@ -301,6 +303,9 @@ i18n.init(AppState().get_setting("language"))
 trust.trust_dir(TRUSTED)
 trust.trust_dir(CHECKOUT)
 trust.trust_dir(PLAIN)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 
 
@@ -412,7 +417,10 @@ def launched() -> bool:
         check("…and remounted read-only", sandboxplan.CARRIER_DEST in remounts, remounts)
         check("the box is on disk", os.path.isdir(f"{E2E}/sbx/{box}/home"))
         lease = sandboxplan.read_lease(box)
-        check("…leased to this instance", bool(lease) and lease["pid"] == os.getpid(), lease)
+        # The lease is the service's (its process forks the box, spec §3.20):
+        # the pid service.status answers, not this window's.
+        service_pid = apilink.call({"t": "service.status"}).get("pid")
+        check("…leased to this instance", bool(lease) and lease["pid"] == service_pid, (lease, service_pid))
         check(
             "no session names the box before the id resolves",
             box not in AppState().sandbox_boxes(),
@@ -497,16 +505,49 @@ def shells_up() -> bool:
 OFFERED = ["set_session_title", "open_in_editor", "show_diff", "show_image", "notify_user", "attach_pr"]
 
 
+def _core_call(name: str, *args):
+    """A method of the service's core by name (the probe, D27): the tools'
+    dispatcher is the service's since PR-1.12b."""
+    return apilink.call(
+        {"t": "debug.sandbox", "target": "core", "name": name, "args": list(args)}
+    )["value"]
+
+
+def found_for_pid(shim_pid: int):
+    """The window and tab of the session the service binds a call from
+    *shim_pid* to (`SessionTools.find`, through the probe: the walk is the
+    service's /proc and sessions), as `ToolClient.found_for_handle` finds
+    them. A check's helper: no product code asks a debug request."""
+    handle = _core_call("debug_find_handle", int(shim_pid))
+    return app.tool_client.found_for_handle(handle or "")
+
+
 def offered_to(tab) -> list[str]:
     """What the session in *tab* is told it may call: the list the socket
     serves the pid of a process under the tab's shell."""
-    return [tool["name"] for tool in app.session_tools.list_tools(tab.probe_call("child_pid"))]
+    return list(_core_call("debug_tools_list", tab.probe_call("child_pid")))
 
 
 def call_from(tab, tool: str, args: dict):
     """One tool call as the dispatcher sees it arrive from *tab*: by pid,
-    through every gate — not the handler alone."""
-    return app.session_tools.dispatch(tab.probe_call("child_pid"), tool, args)
+    through every gate — not the handler alone. ``(ok, text)``, or the
+    word "deferred" for a reply that waits on a client."""
+    got = _core_call("debug_tools_dispatch", tab.probe_call("child_pid"), tool, args)
+    if isinstance(got, dict) and got.get("deferred"):
+        # A UI-bound tool: its reply waits on this very client (the tool
+        # event lands on this loop), so pump until it has settled.
+        call_id = got["deferred"]
+        box = {}
+
+        def settled() -> bool:
+            box["result"] = _core_call("debug_tools_result", call_id)
+            return box["result"] is not None
+
+        e2e_service.wait_until(settled, timeout_s=15)
+        got = box.get("result")
+        if got is None:
+            return "deferred"
+    return tuple(got) if isinstance(got, list) else got
 
 
 def tools() -> bool:
@@ -515,7 +556,10 @@ def tools() -> bool:
     caller = state["caller"]
     host = probe_host()
     box = caller.sandbox_box
-    check("the pid of the session's shell resolves to its tab", app.tool_client.found_for_pid(caller.probe_call("child_pid")) == found())
+    check(
+        "the pid of the session's shell resolves to its tab",
+        found_for_pid(caller.probe_call("child_pid")) == found(),
+    )
     check("a sandboxed session is offered six tools", offered_to(caller) == OFFERED, offered_to(caller))
     shells = len(caller.panel_shells())
     refused = {
@@ -571,6 +615,7 @@ def tools() -> bool:
     check("the tool beside it is still refused", got == (False, mcptools.sandbox_disabled_error("read_terminal")), got)
     # Switched off for every session, it is off in the box whatever the box says.
     win_state().set_setting("mcp_tool_run_in_terminal", False)
+    e2e_service.settle()
     got = call_from(caller, "run_in_terminal", {"command": "echo nope"})
     check("a tool off in Preferences is off in the box too", got == (False, mcptools.disabled_error("run_in_terminal")), got)
     check("…and not offered", "run_in_terminal" not in offered_to(caller))
@@ -580,13 +625,17 @@ def tools() -> bool:
     )
     check("…its check greyed", run is not None and not run.get_sensitive() and not run.get_active())
     win_state().set_setting("mcp_tool_run_in_terminal", True)
+    e2e_service.settle()
     # The default for sandboxed sessions moves the boxes with no switch of
     # their own for the tool, and only those.
     win_state().set_setting("sandbox_tool_show_image", False)
+    e2e_service.settle()
     check("a default switched off reaches the session", "show_image" not in offered_to(caller), offered_to(caller))
     win_state().set_setting("sandbox_tool_run_in_terminal", False)
+    e2e_service.settle()
     check("…and leaves its own switch alone", "run_in_terminal" in offered_to(caller))
     win_state().set_setting("sandbox_tool_show_image", True)
+    e2e_service.settle()
     chip._rebuild()
     names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
     check("the chip offers the defaults back", "Use the defaults" in names, names)
@@ -714,6 +763,7 @@ def grants() -> bool:
         AppState().sandbox_box(RESUMED) == caller.sandbox_box == state["box1"],
         (AppState().sandboxed_sessions, caller.sandbox_box),
     )
+    e2e_service.settle()  # the session event carrying can_restart lands a moment later
     check("restart is on offer once it has", caller.can_restart_sandboxed())
     chip._rebuild()
     names = [b.get_label() for b in buttons(chip._content) if b.get_label()]
@@ -1118,6 +1168,7 @@ def forked() -> None:
     if fork is None:
         narrowed()
         return
+    e2e_service.settle()  # the session event carrying the options lands a moment later
     box = fork.launch_options.sandbox_box
     check("the window minted the fork's box", sandboxplan.valid_box_id(box) and box != ORIGIN_BOX, box)
     check("the fork's list equals its origin's at the fork", host.grants(box) == [OTHER], host.grants(box))

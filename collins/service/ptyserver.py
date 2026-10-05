@@ -1028,11 +1028,39 @@ class PtyServer:
         if pty._finished:
             return
         if pty.pid is not None and not pty._reaped:
+            # The foreground job's group too, read while the master is
+            # still open: a job the shell put in a group of its own, with
+            # HUP ignored, would otherwise outlive the shell and be
+            # orphaned (a spawned service inherits nothing of it).
+            fg = pty.foreground_pgrp()
             self._signal_group(pty, signal.SIGHUP)
+            if fg and fg > 0 and fg != pty.pid:
+                self._end_foreground_group(pty.id, fg)
             if not pty._kill_source:
                 pty._kill_source = GLib.timeout_add(CLOSE_GRACE_MS, self._on_close_grace_over, pty)
         self._close_master(pty)
         self._maybe_finish(pty)
+
+    @staticmethod
+    def _end_foreground_group(pty_id: int, pgrp: int) -> None:
+        """SIGHUP to the job's own group now and SIGKILL after the grace,
+        on a timer of its own: the shell usually dies of its HUP at once
+        and the pty is finished (its sources gone) before the grace is
+        over, which must not spare a job that ignores HUP."""
+        try:
+            os.killpg(pgrp, signal.SIGHUP)
+        except (ProcessLookupError, PermissionError):
+            return
+
+        def kill() -> bool:
+            try:
+                os.killpg(pgrp, signal.SIGKILL)
+                log.warning("pty %d: the foreground job (group %d) ignored SIGHUP; killed it", pty_id, pgrp)
+            except (ProcessLookupError, PermissionError):
+                pass
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(CLOSE_GRACE_MS, kill)
 
     def _signal_group(self, pty: Pty, sig: int) -> None:
         try:
