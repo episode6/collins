@@ -482,14 +482,14 @@ def test_a_cuts_paste_never_writes_through_a_planted_symlink(tmp_path, monkeypat
 
 
 def _force_cross_filesystem(monkeypatch):
-    """The move's `EXDEV` branch without a second mount: `os.link` and a
-    directory's `os.rename` answer as another filesystem would."""
+    """The move's `EXDEV` branch without a second mount: the primitive and
+    a directory's `os.rename` answer as another filesystem would."""
     import errno
 
     def exdev(*args, **kwargs):
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
-    monkeypatch.setattr(projectfiles.os, "link", exdev)
+    monkeypatch.setattr(projectfiles, "_rename_noreplace", exdev)
     real_rename = projectfiles.os.rename
 
     def rename(src, dst, *args, **kwargs):
