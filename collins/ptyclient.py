@@ -41,8 +41,8 @@ them.
 
 Sizing
 ------
-The service's pty is sized by its active client (§3.3): this one, through
-Phase 1. VTE's grid changes with the widget's allocation, so the terminal
+The service's pty is sized by its active client (§3.3): the active client's
+(the most recent to focus or resize). VTE's grid changes with the widget's allocation, so the terminal
 is subclassed to notice its own allocation and send the grid; `set_size`
 before the first allocation (a never-shown tab) reaches the service the
 same way. A `pty` event saying the pty is sized for someone else pins the

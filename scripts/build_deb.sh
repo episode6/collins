@@ -107,8 +107,8 @@ Version: $VERSION
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5, gir1.2-soup-3.0, python3-markdown-it, python3-linkify-it
-Recommends: gir1.2-glib-2.0, gir1.2-spelling-1, gir1.2-gstreamer-1.0, gir1.2-gst-plugins-base-1.0, bubblewrap, bindfs, fuse3
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-4.0 (>= 4.10), gir1.2-adw-1 (>= 1.5), gir1.2-vte-3.91, gir1.2-gtksource-5, gir1.2-glib-2.0, gir1.2-soup-3.0, python3-markdown-it, python3-linkify-it
+Recommends: gir1.2-spelling-1, gir1.2-gstreamer-1.0, gir1.2-gst-plugins-base-1.0, bubblewrap, bindfs, fuse3
 Installed-Size: $INSTALLED_SIZE
 Maintainer: episode6 <support@episode6.com>
 Homepage: https://github.com/episode6/collins

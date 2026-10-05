@@ -21,16 +21,15 @@ for that URL). `pr.set` is the hub's `set_records`, so the equality guard
 holds on this side too: an unchanged list writes nothing and tells nobody.
 
 The gh requests (`handle_gh`) need no store, so a core with none (a widget
-driven alone, its loopback the harness's) serves them all the same. They
+driven alone, a harness's own service) serves them all the same. They
 are made from a client's worker thread (they block on gh), as the page and
-the menus made the calls themselves; on the loopback the handler runs on
+the menus made the calls themselves; the handler runs on
 that thread and touches nothing but the gh modules, whose caches lock. A
 refusal or failure crosses as the reply's `error`, `practions`' own words.
 
 `pr.detail` and `pr.threads` are the large replies: a big PR's detail (its
 body, its timeline, every file's patch up to `prdetail.WIRE_PATCH_MAX`)
-can come near the 1 MiB frame cap once PR-1.12's socket encodes it (the
-loopback carries dicts and never meets the cap). The socket's sender will
+can come near the 1 MiB frame cap once the socket encodes it. The socket's sender will
 have to drop patches (they cross as None, drawn as over the cap) or chunk
 the reply there, as `storefeed`'s large state entries will.
 

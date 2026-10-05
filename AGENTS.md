@@ -79,8 +79,11 @@ Several windows, and several clients, can share one service.
 
 **The service process.** `service/main.py` takes the `flock` on
 `service.lock` first (a second service for the app id exits 0), captures the
-login shell's environment once (`$SHELL -lic 'env -0'`, fail-soft, never
-overriding what the service was started with), builds `ServiceCore`, starts
+login shell's environment once (`$SHELL -lic 'env -0'`, fail-soft) and
+**overlays** it on the service's own (the user's variables and `PATH` order
+win; `COLLINS_*`, `XDG_*`, `PYTHONPATH`, `HOME`, `USER` and the systemd
+variables are protected, and the service's own leading `PATH` entries stay
+first), builds `ServiceCore`, starts
 the store, tracker, background agents, sandbox host, session tools and MCP
 socket, listens, then `sd_notify`s ready. `SIGTERM` / `SIGINT` / a client's
 `service.restart` run the stop sequence: clients disconnected first, every
@@ -199,8 +202,8 @@ over a service pty of kind `shell` (a sandboxed one spawned by the service
 on its box's plan), its text, foreground and cwd read on the service
 (`pty.info`, `pty.capture`), its history written by the service from the
 screen model and painted back into the new pty's stream on reopen. The
-client's VTE still parses what it is fed, so the OSC 9;4 progress termprop
-the notification path listens to still arrives there.
+service reads the CLI's OSC 9;4 progress off the stream filter; the
+client's VTE only draws.
 
 **Data layer (GTK-free, unit-tested).** `sessions.py` discovers and parses
 transcripts; `providers.py` wraps the `claude` CLI (commands, prompt-line

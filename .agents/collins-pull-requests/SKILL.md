@@ -40,14 +40,14 @@ mirror, `remoteprs.RemotePrStore`: the same three signals and methods, the
 signals nothing; an event that brings the list the mirror holds — the
 echo of its own write — emits nothing), writes optimistic (`pr.set`) and
 reverted on a refusal; a `pr-status` is absorbed into `prstatus`'s cache
-(`absorb_entry`; the same cache in Phase 1, so nothing loops) and
+(`absorb_entry`; an entry already cached changes nothing, so nothing loops) and
 re-emitted. The gh calls keep their names as `remoteprs` functions —
 `perform`, `comment`, `review`, `reply_in_thread`, `set_thread_resolved`
 (`pr.action` / `pr.comment` / `pr.review` / `pr.thread`, the PR named by
 its record), `fetch_detail` / `fetch_threads` (`pr.detail` /
 `pr.threads`: `prdetail.detail_record` / `detail_from_record`, a patch
 over `WIRE_PATCH_MAX` crossing as None), `fetch_blob` (`pr.blob`; a path
-on this machine through Phase 1, a blob transfer from PR-1.12),
+on the service's machine, a blob transfer in Phase 2),
 `invalidate` and `sweep` / `resync` (`pr.fetch`, `pr.sweep`) — called from
 worker threads as before; a refusal reads as the function's own failure.
 The Session's own transcript-driven fetches (`enrich`, `discover_pr`) are

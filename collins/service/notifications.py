@@ -20,7 +20,7 @@ center's order), then each row that changed or appeared, and each that
 left (``removed``). A `seen` request reads rows (by id, by session, or
 all) and is told to every other subscriber as a `seen` event.
 
-What a client asks for (Phase 1: the app's window and bell): a row
+What a client asks for (a window's bell and `notify_user`): a row
 (`notify.post`, minted here: its id, its time; a bell coalesced into the
 unread bell of its session; an update replacing every other), a row's
 removal, the history cleared, a finished run's synthetic row raised or

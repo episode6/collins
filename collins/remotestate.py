@@ -60,8 +60,8 @@ takes is one write of `state.json`, as each `AppState` save was.
 What this module decides on its own: a write made before the snapshot
 (nothing does one) is sent like any other; an event for a key this client
 does not know (a newer service's) is ignored; `state_file()` names the
-local `state.json`, which is the service's file through Phase 1 (one
-machine), for the sandbox host's ownership check; the toast's text is
+local `state.json`, which is the service's file while both run on one
+machine, for the sandbox host's ownership check; the toast's text is
 "Not saved: <reason>".
 
 GTK-free: GLib only, for the debounce's timer.
