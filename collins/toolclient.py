@@ -15,8 +15,9 @@ names, runs the tool's half that touches widgets, and answers with a
 resolves). The halves are the bodies `App._mcp_*` had, taking the same
 ``(window, tab)`` and the service's `sandboxed` reading of the caller:
 
-- `open_in_editor`, `show_image` (the lightbox; remote images fetched on a
-  thread), `notify_user` (the delivery table, with this client's focus;
+- `open_in_editor`, `show_image` (the lightbox over the service's blob: the
+  path the service resolved, `kind=file`, or the URL it downloaded,
+  `kind=remote`; PR-2.7), `notify_user` (the delivery table, with this client's focus;
   the row itself is minted by the service through the notification mirror),
 - `show_diff` (the git page opened unfocused, the load awaited, the reveal;
   `_ShowDiff`), `diff_context`, `annotate_diff`, `highlight_diff`,
@@ -49,7 +50,6 @@ from gi.repository import GLib
 
 from . import (
     apilink,
-    attachrecords,
     diffmodel,
     diffnotes,
     editorfiles,
@@ -60,7 +60,7 @@ from . import (
     remoteimages,
 )
 from .api.protocol import RequestRefused
-from .lightbox import present_image_lightbox
+from .lightbox import show_image
 from .providers import SessionOptions
 from .sessions import worktree_project_root
 from .terminal import TerminalTab
@@ -674,110 +674,68 @@ class ToolClient:
         return self._on_diff_page(tab, act)
 
     def show_image(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
+        """Float the image over *tab*'s window, the way a clicked image
+        reference does (terminal._present_image). The service resolved a
+        path (the event carries it absolute, and admitted it for the
+        session, D38) and downloaded a URL before the call came here
+        (`service.tools`), so this fetches the blob (`lightbox.show_image`:
+        `kind=file` or `kind=remote`) and answers once the lightbox is up:
+        "Image shown." when it decoded, a failure when it didn't. Project
+        membership only gates the lightbox's "Open in Editor" button."""
         window, tab = found
         raw = args["path"]
-        if remoteimages.looks_remote(raw):
-            return self._show_remote_image(window, tab, raw, args.get("caption"))
-        path = self.resolve_file(tab, raw)
-        if path is None:
-            return False, f"No such file: {raw}"
-        if not editorfiles.is_image_path(path):
-            return False, f"Not an image Collins can display: {raw}"
-        # Project membership (the "Open in Editor" button) is the service's
-        # answer (PR-2.4): the reply waits for it.
-        deferred = mcptools.DeferredResult()
         caption = args.get("caption")
+        remote = remoteimages.looks_remote(raw)
+        if remote:
+            error = remoteimages.url_error(raw)
+            if error is not None:
+                return False, error
+        elif not os.path.isabs(raw) or not editorfiles.is_image_path(raw):
+            # The service sends the path it resolved; anything else is not
+            # one this client should guess at (rule 5).
+            return False, f"No such file: {raw}"
+        # Project membership (the "Open in Editor" button) is the service's
+        # answer (PR-2.4): the reply waits for it. A remote image is a URL,
+        # never the project's, so it is never asked.
+        deferred = mcptools.DeferredResult()
 
-        def landed(inside: bool) -> None:
+        def shown(ok: bool, _why: str | None) -> None:
+            if ok:
+                deferred.resolve(True, "Image shown.")
+            elif tab.get_root() is None:
+                deferred.resolve(False, "That session's tab closed before the image arrived")
+            else:
+                deferred.resolve(False, f"Collins couldn't display {raw}")
+
+        def present(can_edit: bool) -> None:
             if tab.get_root() is None:
                 deferred.resolve(False, "That session's tab closed before the image could show")
                 return
+            on_open = (lambda: window.open_in_tab_editor(tab, raw)) if can_edit else None
             try:
-                deferred.resolve(*self._present_image(window, tab, path, caption, raw, can_edit=inside))
+                # The one place every `show_image` passes through, local and
+                # remote alike, and the only one that has the agent's own
+                # caption in hand. A remote image is written down under its
+                # URL.
+                tab.record_attachment(raw, caption=caption, origin=raw)
+                show_image(
+                    tab,
+                    raw,
+                    session=tab.image_session(),
+                    can_open_in_editor=can_edit,
+                    on_open_in_editor=on_open,
+                    caption=caption,
+                    origin=raw,
+                    on_shown=shown,
+                )
             except Exception:  # noqa: BLE001 - the reply must land regardless
-                logging.getLogger(__name__).exception("show_image lightbox failed")
+                log.exception("show_image lightbox failed")
                 deferred.resolve(False, f"Collins couldn't show {raw}")
 
-        tab.ask_can_open_in_editor(path, landed)
-        return deferred
-
-    def _present_image(
-        self, window, tab, path: str, caption: str | None, origin: str, can_edit: bool = False
-    ) -> tuple[bool, str]:
-        """Float *path* over *tab*'s window, the way a clicked image
-        reference does (terminal._present_image): the lightbox shows any
-        readable image, project membership (*can_edit*, the service's
-        answer; never for a remote image's copy, which is this device's
-        cache) only gates its "Open in Editor" button. *origin* is what the
-        agent asked for — the file it named, or the URL the copy came from —
-        which is what a failed decode names on the status page rather than
-        the cache file nobody chose."""
-        on_open = (lambda: window.open_in_tab_editor(tab, path)) if can_edit else None
-        # The one place every `show_image` passes through, local and remote
-        # alike, and the only one that has the agent's own caption in hand.
-        # A remote image is written down under its URL, never under *path* —
-        # that is the cache copy, and the cache is pruned after a day.
-        tab.record_attachment(
-            origin if attachrecords.is_remote(origin) else path,
-            caption=caption,
-            origin=origin,
-        )
-        present_image_lightbox(
-            tab,
-            path,
-            can_open_in_editor=can_edit,
-            on_open_in_editor=on_open,
-            caption=caption,
-            origin=origin,
-        )
-        return True, "Image shown."
-
-    def _show_remote_image(
-        self, window, tab, url: str, caption: str | None
-    ) -> mcptools.ToolResult:
-        """`show_image` given an http(s) URL: fetch it, then show the copy.
-
-        The download runs on a worker thread and the session's reply waits
-        for it (mcptools.DeferredResult) — a blocking fetch on the main loop
-        would freeze the window for as long as the server felt like taking.
-        The thread only fetches; the widget half runs back on the main loop
-        (GLib.idle_add), where the tab may by then be gone.
-        """
-        error = remoteimages.url_error(url)
-        if error is not None:
-            return False, error
-        deferred = mcptools.DeferredResult()
-        directory = remoteimages.default_directory()
-
-        def fetched(path: str | None, failure: str | None) -> bool:
-            if failure is not None:
-                deferred.resolve(False, failure)
-            elif tab.get_root() is None:  # the tab closed while we fetched
-                deferred.resolve(
-                    False, "That session's tab closed before the image arrived"
-                )
-            else:
-                try:
-                    deferred.resolve(
-                        *self._present_image(window, tab, path, caption, url)
-                    )
-                except Exception:  # noqa: BLE001 - the reply must land regardless
-                    # An unresolved call is a connection that never speaks
-                    # again, so the session would hang on it until its own
-                    # timeout; answer, then let the log carry the details.
-                    logging.getLogger(__name__).exception("show_image lightbox failed")
-                    deferred.resolve(False, f"Collins couldn't show {url}")
-            return GLib.SOURCE_REMOVE
-
-        def download() -> None:
-            try:
-                path = remoteimages.fetch_to_file(url, directory)
-            except remoteimages.FetchError as failure:
-                GLib.idle_add(fetched, None, str(failure))
-            else:
-                GLib.idle_add(fetched, str(path), None)
-
-        threading.Thread(target=download, name="show-image-fetch", daemon=True).start()
+        if remote:
+            present(False)
+        else:
+            tab.ask_can_open_in_editor(raw, present)
         return deferred
 
     def notify_user(self, found, args: dict, sandboxed: bool = False) -> tuple[bool, str]:

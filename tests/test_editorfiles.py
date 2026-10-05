@@ -21,7 +21,6 @@ from collins.editorfiles import (
     format_copied_files,
     gallery_step,
     guess_language_id,
-    image_guard,
     image_stat_guard,
     is_image_path,
     lightbox_layout,
@@ -123,40 +122,6 @@ def test_is_image_path_non_images():
     assert not is_image_path("a.py")
     assert not is_image_path("png")  # no suffix at all
     assert not is_image_path("archive.png.gz")
-
-
-# -- image_guard ------------------------------------------------------------------
-
-
-def test_image_guard_ok(tmp_path):
-    f = tmp_path / "a.png"
-    f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)  # NUL bytes are fine here
-    assert image_guard(f) == LoadGuard.OK
-
-
-def test_image_guard_missing_and_directory(tmp_path):
-    assert image_guard(tmp_path / "missing.png") == LoadGuard.NOT_A_FILE
-    assert image_guard(tmp_path) == LoadGuard.NOT_A_FILE
-
-
-def test_image_guard_too_large(tmp_path):
-    f = tmp_path / "huge.png"
-    with f.open("wb") as fh:
-        fh.seek(_MAX_IMAGE_BYTES)
-        fh.write(b"x")
-    assert image_guard(f) == LoadGuard.TOO_LARGE
-
-
-def test_image_guard_unreadable(tmp_path):
-    f = tmp_path / "noperm.png"
-    f.write_bytes(b"x")
-    os.chmod(f, 0o000)
-    try:
-        if os.access(f, os.R_OK):  # root in the test environment: skip
-            return
-        assert image_guard(f) == LoadGuard.UNREADABLE
-    finally:
-        os.chmod(f, 0o644)
 
 
 # -- path_from_file_uri -------------------------------------------------------------

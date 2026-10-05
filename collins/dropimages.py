@@ -4,13 +4,15 @@
 its composer.
 
 An image dragged in as raw data (from a browser, a screenshot tool, an
-image viewer) has no path an @-mention could name, so a copy is written
-here and the mention points at the copy — and so is one pasted into the
-composer off the clipboard, under its own `paste-` prefix so the directory
-says which way each copy arrived. Dropped *files* are mentioned in place —
-only the text built for them (mention_text) lives here, along with how
-that text joins whatever is already typed (leading_space, which the
-attach-file button shares).
+image viewer) has no path an @-mention could name, so a copy is uploaded to
+the service (`remoteuploads`, `PUT /api/upload`: split-service spec §3.11,
+PR-2.7) under the name `png_name` gives it and the mention points at the
+copy — and so is one pasted into the composer off the clipboard, under its
+own `paste-` prefix so the directory says which way each copy arrived.
+Dropped *files* are mentioned in place by a `local` client and uploaded by
+any other — only the text built for them (mention_text) lives here, along
+with how that text joins whatever is already typed (leading_space, which
+the attach-file button shares).
 
 Kept GTK-free (like editorfiles.py/gitinfo.py) so this stays unit-testable
 headless; terminal.py and composer.py own the drop targets and turn Gdk
@@ -18,12 +20,13 @@ values into the paths and bytes handled here. The composer's preview strip
 also leans on this file: remove_mention is how a discarded thumbnail takes
 its mention with it.
 
-The copies live under the user's cache directory rather than /tmp: the
-mention only gets *read* when the user submits the prompt — maybe minutes
-later, maybe after a reboot in a resumed session — and /tmp doesn't
-survive that. Cache is the XDG spot for "regeneratable, fine to delete":
-stale copies are pruned after PRUNE_AFTER_SECONDS on the next drop, so
-the directory can't grow without bound.
+The copies live in the service's uploads directory (`uploads`) rather
+than /tmp: the mention only gets *read* when the user submits the prompt —
+maybe minutes later, maybe after a reboot in a resumed session — and /tmp
+doesn't survive that. They go with their session, and the ones made before
+a session had an id are swept after PRUNE_AFTER_SECONDS. (The pre-split
+``~/.cache/collins/dropped-images/`` is no longer written; it is left for
+the user, not deleted.)
 """
 
 from __future__ import annotations
@@ -161,26 +164,19 @@ def cache_directory() -> Path:
     return Path(base) / "collins"
 
 
-def default_directory() -> Path:
-    """Where dropped-image copies are kept."""
-    return cache_directory() / "dropped-images"
-
-
 # How a saved image copy arrived, as the first word of its file name.
 DROP_PREFIX = "drop"
 PASTE_PREFIX = "paste"
 
 
-def save_png(
-    data: bytes,
-    directory: Path,
-    timestamp: float | None = None,
-    prefix: str = DROP_PREFIX,
-) -> Path:
-    """Write *data* to a fresh ``<prefix>-YYYYMMDD-HHMMSS[-N].png`` under
-    *directory* — ``drop-…`` unless told otherwise (the composer's paste
-    path says `PASTE_PREFIX`); see `save_copy`."""
-    return save_copy(data, directory, prefix, ".png", timestamp)
+def png_name(prefix: str = DROP_PREFIX, timestamp: float | None = None) -> str:
+    """The name a texture's upload goes under: ``<prefix>-YYYYMMDD-HHMMSS.png``
+    — ``drop-…`` unless told otherwise (the composer's paste path says
+    `PASTE_PREFIX`). The service adds a ``-N`` when the second is taken
+    (`uploads.write`)."""
+    if timestamp is None:
+        timestamp = time.time()
+    return time.strftime(f"{prefix}-%Y%m%d-%H%M%S", time.localtime(timestamp)) + ".png"
 
 
 def save_copy(
@@ -196,7 +192,7 @@ def save_copy(
     The name is timestamped so a directory listing reads as a history, and
     opened with 'x' so two saves in the same second (or two app instances)
     get distinct files instead of one clobbering the other. `remoteimages`
-    saves its downloads through this too, under its own prefix and whatever
+    saves its downloads through this, under its own prefix and whatever
     suffix the fetched content type earned.
     """
     if timestamp is None:

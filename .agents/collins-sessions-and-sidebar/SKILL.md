@@ -512,6 +512,26 @@ agent's or a panel shell's) and by the `chats.trust` job given a
 root replaces the folder icon, gated by `usable_icon_bytes` (SVG only;
 `data:image/png` hrefs allowed, nothing else). Generated icons pass the
 stricter `usable_generated_icon_bytes`. Rasterized via `svgtexture.py`.
+**The file is the service's** (PR-2.7): `GET /api/blob?kind=icon&root=`
+(`service.blobs.read_icon`: `O_NOFOLLOW`, 256 KiB, the gate, tagged
+mtime-size; 403 for a root the service doesn't know, 404 for none), and the
+client's `remoteicons.icon_bytes(root, on_ready)` answers what it holds at
+once (None before the first fetch), re-checks it past `REFRESH_S` (10 s; a
+304 when nothing moved) and calls *on_ready* when the answer changed; the
+gate runs again on landing. The group header (`_on_icon_bytes`), the
+new-chat screen and the notifications (the sheet's refresh) re-draw on it;
+`remoteicons.forget()` after an `icon.save` makes the forced rebuild fetch
+the new one. `projecticons` keeps the gates and reads no file.
+
+**Uploads go with their session** (PR-2.7, D37): `store.trash_many`
+trashes `~/.local/share/collins/uploads/<id>/` with the transcript
+(`_trash_uploads`, unlinked when the trash refuses the mount) and `delete`
+unlinks it — the archive sweep runs through `trash_many` too; the pending
+uploads (`_pending/`, made with no id) are no session's and go after a week
+on the service's housekeeping tick (`ServiceCore.sweep_pending_uploads`, on
+a thread). An empty upload is refused (400), and one past 64 MiB is 413 on
+its headers with the body drained, never held (`set_accumulate(False)` in
+the early handler).
 
 **Adding and cloning projects.** The sidebar header's folder button is a
 `Gtk.MenuButton`: *Open folder…* (`win.add-project`, a `Gtk.FileDialog`)

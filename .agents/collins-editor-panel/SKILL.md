@@ -30,7 +30,9 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
 - **File column** (`self._editors`): an `Adw.TabBar` + `Adw.TabView` of open
   files (a `GtkSource.View` per file, `_OpenFile` bookkeeping: buffer, monitor,
   dirty state), a search bar, and an image page for pictures
-  (`editorfiles.image_guard`, shown through `animatedimage.load`).
+  (guarded by `editorfiles.image_stat_guard` over the service's `fs.stat`,
+  shown through `animatedimage.load` of the blob `pictures.fetch` lands:
+  `kind=file`, PR-2.7; the page opens on the landing).
 - `filetree.FileTree`: a `Gtk.ListView` over a `Gtk.TreeListModel`, lazily
   populated by the service's `fs.list` on first expansion (honours
   `editor_show_hidden_files`; the ignored names come in the same answer;
@@ -221,7 +223,8 @@ pathless walker reads as `Path` methods):
   latest paths kept), a fresh open (the load's worker refuses one outside
   the root; a reload is not confined, so a file a re-root left open
   outside goes on reloading), an image page (`editorfiles.
-  image_stat_guard`; the lightbox keeps `image_guard` until PR-2.7) and
+  image_stat_guard`; the on-disk `image_guard` went when PR-2.7 put the
+  lightbox on the blob GET) and
   the git page's file-row menu (`GitSidebar._file_on_disk`; the
   right-click asks off the main loop, the e2e probes block) all ask it.
 

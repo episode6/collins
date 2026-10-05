@@ -25,6 +25,13 @@ below), moving between the two by reparenting, so it announces
 whether the session could open a file in its editor, how to say something to
 the terminal, what forgetting a record means — as injected callbacks.
 
+A picture is a blob (split-service spec §3.23, PR-2.7): its preview is
+fetched from the service — `GET /api/blob?kind=file` for a path on its
+machine, `kind=remote` for a URL the service downloads — through
+`pictures.fetch` into this device's blob cache, and decoded from there; the
+lightbox fetches it the same way. *session_key* names the session asking
+(its id, or its handle), which the service confines a path by (D38).
+
 A row is a preview, and a preview is not a full-size decode: `pictures`
 scales while decoding so a hundred screenshots cost a column's worth of
 memory rather than a screenshot's worth each, and rows fill one at a time
@@ -71,9 +78,9 @@ _THUMB_HEIGHT = 200
 class AttachmentsView(Gtk.Box):
     """The panel widget itself (see module docstring).
 
-    *open_image(attachment, path, navigate)* shows one picture: the host has
-    the lightbox's editor gating in hand, and *path* is a local file — a
-    remote image is downloaded before it is ever passed on. *navigate* is the
+    *open_image(attachment, key, navigate)* shows one picture: the host has
+    the lightbox's editor gating in hand, and *key* is the record's (a path
+    on the service's machine or a URL), which the host's lightbox fetches. *navigate* is the
     arrow-key hook the lightbox drives with -1/+1 to walk this list's images
     (see `_navigate_from`). Only image rows go through it; a file row's
     activation stays in the panel, which launches the desktop's default
@@ -94,10 +101,12 @@ class AttachmentsView(Gtk.Box):
         open_image: Callable[[Attachment, str, Callable[[int], None]], None],
         forget: Callable[[str], None],
         notify: Callable[[str], None],
+        session_key: Callable[[], str] = lambda: "",
     ) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("attachments-panel")
         self._open_image = open_image
+        self.session_key = session_key
         self._forget = forget
         self._notify = notify
         self._records: dict[str, Attachment] = {}
@@ -332,12 +341,7 @@ class AttachmentsView(Gtk.Box):
         way to show a spreadsheet, and the default handler is what a
         double-click on the file anywhere else would do."""
         if one.kind == "image":
-            self._with_local_file(
-                one,
-                lambda path: self._open_image(
-                    one, path, lambda step: self._navigate_from(one, step)
-                ),
-            )
+            self._open_image(one, one.key, lambda step: self._navigate_from(one, step))
         else:
             self._with_local_file(one, self._launch_default)
 
@@ -568,16 +572,14 @@ class _Row(Gtk.Button):
     def load(self) -> None:
         """Decode the preview (see AttachmentsView._fill_next for the when).
 
-        A remote image is downloaded first, and both halves may take a
-        moment, so the row stands empty until one of them lands — its label
-        is up from the start, which is what the row is mostly read for.
+        The blob is fetched from the service first (a URL downloaded by the
+        service), and both halves may take a moment, so the row stands empty
+        until it lands — its label is up from the start, which is what the
+        row is mostly read for.
         """
-        if self._one.remote:
-            pictures.fetch(self._one.key, self._remote_landed)
-            return
-        self._show(pictures.thumbnail(self._one.key, PANEL_WIDTH, _THUMB_HEIGHT))
+        pictures.fetch(self._one.key, self._landed, session=self._view.session_key())
 
-    def _remote_landed(self, path: Path | None, error: str | None) -> None:
+    def _landed(self, path: Path | None, error: str | None) -> None:
         if self.get_parent() is None:
             return  # struck off the list while the download ran
         self._show(

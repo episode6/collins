@@ -45,10 +45,10 @@ try:
 except (ValueError, ImportError):
     Spelling = None
 
-from . import composerkeys, dropimages  # noqa: E402
+from . import animatedimage, composerkeys, dropimages, editorfiles, pictures, remoteuploads  # noqa: E402
 from .editor import GtkSource  # noqa: E402
 from .i18n import _, ngettext  # noqa: E402
-from .lightbox import present_image_lightbox  # noqa: E402
+from .lightbox import show_image  # noqa: E402
 
 # The prview composer's "grows with the text, then scrolls" bounds, a little
 # taller: prompts run longer than PR comments.
@@ -113,8 +113,15 @@ class ComposerView(Gtk.Box):
         model_tooltip: str | None = None,
         effort_popover: Gtk.Popover | None = None,
         effort_tooltip: str | None = None,
+        upload_session: Callable[[], str | None] = lambda: None,
+        image_session: Callable[[], str] = lambda: "",
     ) -> None:
-        """*chrome* is the close and dock/float pair at the row's left — the
+        """*upload_session* names the session a drop or paste is uploaded
+        for (None: no id yet, the service's pending directory, D37), and
+        *image_session* the one a preview's blob is asked for (D38): the
+        host's, read at each drop (PR-2.7).
+
+        *chrome* is the close and dock/float pair at the row's left — the
         stand-in's controls, for a composer raised over a terminal it can
         lower itself back into. False leaves them out: on the new-chat
         screen the composer *is* the page, with nothing to close into or
@@ -127,6 +134,8 @@ class ComposerView(Gtk.Box):
         self._font_provider: Gtk.CssProvider | None = None
         self._file_reference = file_reference
         self._notify = notify
+        self._upload_session = upload_session
+        self._image_session = image_session
 
         self._buffer = GtkSource.Buffer()
         self._buffer.connect("changed", lambda *_a: self.emit("text-changed"))
@@ -403,11 +412,13 @@ class ComposerView(Gtk.Box):
         return False
 
     def _mention_files(self, files: list[Gio.File]) -> bool:
-        """A file list, dropped or pasted: mention every local one. The
-        rest (a remote URI has no path) are counted, not echoed — the URIs
-        are untrusted bytes (the terminal's _drop_files says why)."""
-        paths = [p for f in files if (p := f.get_path()) is not None]
-        skipped = len(files) - len(paths)
+        """A file list, dropped or pasted: mention every local one — by its
+        own path when this client shares the service's machine (`local`),
+        else by the copy each is uploaded to (PR-2.7). The rest (a remote
+        URI has no path) are counted, not echoed — the URIs are untrusted
+        bytes (the terminal's _drop_files says why)."""
+        local = [f for f in files if f.get_path() is not None]
+        skipped = len(files) - len(local)
         if skipped:
             self._notify(
                 ngettext(
@@ -416,22 +427,39 @@ class ComposerView(Gtk.Box):
                     skipped,
                 ).format(n=skipped)
             )
-        return self._mention_dropped(paths)
+        if remoteuploads.is_local():
+            return self._mention_dropped([f.get_path() for f in local])
+        if not local:
+            return False
+
+        def uploaded(paths: list[str], errors: list[str]) -> None:
+            if errors:
+                self._notify(_("couldn't send a dropped file: {reason}").format(reason=errors[0]))
+            if paths:
+                self._mention_dropped(paths)
+
+        remoteuploads.upload_files(local, self._upload_session(), uploaded)
+        return True
 
     def _attach_texture(self, texture: Gdk.Texture, prefix: str, failure: str) -> bool:
-        """Raw image data, dropped or pasted: save a PNG copy under the
-        cache (dropimages says why there, and prunes the old ones on the
-        way) and mention the copy. *prefix* names how it arrived in the
-        file name; *failure* is what the host hears when the save fails."""
+        """Raw image data, dropped or pasted: upload a PNG copy to the
+        service (dropimages says why it is a copy) and mention the copy once
+        it is written. *prefix* names how it arrived in the file name;
+        *failure* is what the host hears when the copy can't be made."""
         try:
-            data = texture.save_to_png_bytes().get_data()
-            directory = dropimages.default_directory()
-            dropimages.prune_stale(directory)
-            path = dropimages.save_png(bytes(data), directory, prefix=prefix)
-        except (GLib.Error, OSError):
+            data = bytes(texture.save_to_png_bytes().get_data())
+        except GLib.Error:
             self._notify(failure)
             return False
-        return self._mention_dropped([str(path)])
+
+        def uploaded(path: str | None, error: str | None) -> None:
+            if path is None:
+                self._notify(f"{failure}: {error}" if error else failure)
+                return
+            self._mention_dropped([path])
+
+        remoteuploads.upload_png(data, prefix, self._upload_session(), uploaded)
+        return True
 
     def _mention_dropped(self, paths: list[str]) -> bool:
         """Mention every path the provider will name, and thumbnail the
@@ -461,12 +489,15 @@ class ComposerView(Gtk.Box):
         hover-revealed corner button discards the thumb and takes the
         mention with it when that's trivially safe (dropimages.
         remove_mention refuses to guess otherwise, and the thumb alone
-        goes)."""
-        try:
-            texture = Gdk.Texture.new_from_filename(path)
-        except GLib.Error:
+        goes).
+
+        The picture is the service's blob (`GET /api/blob?kind=file`,
+        PR-2.7): the thumb goes up empty in the drop's order and fills
+        when the blob lands, and goes again when it isn't an image after
+        all."""
+        if not editorfiles.is_image_path(path):
             return
-        picture = Gtk.Picture.new_for_paintable(texture)
+        picture = Gtk.Picture()
         picture.set_can_shrink(True)
         picture.set_content_fit(Gtk.ContentFit.COVER)
         picture.set_size_request(_THUMB_SIZE, _THUMB_SIZE)
@@ -475,7 +506,7 @@ class ComposerView(Gtk.Box):
         click = Gtk.GestureClick()
         click.connect(
             "pressed",
-            lambda _g, _n, _x, _y: present_image_lightbox(self, path),
+            lambda _g, _n, _x, _y: show_image(self, path, session=self._image_session()),
         )
         picture.add_controller(click)
         thumb = Gtk.Overlay(child=picture)
@@ -493,6 +524,19 @@ class ComposerView(Gtk.Box):
         thumb.add_overlay(remove)
         self._thumb_box.append(thumb)
         self._thumb_scroller.set_visible(True)
+
+        def landed(file, _error) -> None:
+            paintable = animatedimage.load(file) if file is not None else None
+            if thumb.get_parent() is None:
+                return  # discarded (or the strip cleared) while it was fetched
+            if paintable is None:
+                self._thumb_box.remove(thumb)
+                if self._thumb_box.get_first_child() is None:
+                    self._thumb_scroller.set_visible(False)
+                return
+            picture.set_paintable(paintable)
+
+        pictures.fetch(path, landed, session=self._image_session())
 
     def _remove_preview(self, thumb: Gtk.Overlay, reference: str) -> None:
         self._thumb_box.remove(thumb)
@@ -519,10 +563,11 @@ class ComposerView(Gtk.Box):
         The text view's own paste-clipboard handler reads text and nothing
         else, so an image on the clipboard — a screenshot tool's copy, a
         browser's "Copy image" — pasted nothing at all. Now it lands the
-        way the same image dropped does: saved as a PNG copy under the
-        cache (a ``paste-…`` file beside the drop copies), its mention
+        way the same image dropped does: uploaded as a PNG copy to the
+        service (a ``paste-…`` file beside the drop copies), its mention
         typed at the cursor, a thumbnail in the strip. Copied files (a
-        file manager's Copy) are mentioned in place, likewise as dropped.
+        file manager's Copy) are mentioned in place (uploaded for a client
+        that is not `local`), likewise as dropped.
         The image reading wins over a file list, and both win over text,
         in the order the drop target lists its formats and for the same
         reason: a browser's "Copy image" offers the pixels with an HTML

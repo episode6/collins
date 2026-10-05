@@ -57,8 +57,9 @@ the service and no path crosses),
 `invalidate` and `sweep` / `resync` (`pr.fetch`, `pr.sweep`) — called from
 worker threads as before; a refusal reads as the function's own failure.
 The Session's own transcript-driven fetches (`enrich`, `discover_pr`) are
-the Session's, which is service code. Avatars and public body images stay
-client fetches.
+the Session's, which is service code. Avatars stay client fetches; a body's
+images are the service's since PR-2.7 (`GET /api/blob?kind=remote`, the
+service downloading with `remoteimages`' gates into its own cache).
 
 ## Where a PR comes from
 
@@ -332,7 +333,8 @@ take the kind's color from app.py's CSS — the note the accent in `_CSS`,
 tip/warning/caution/important the passed green, pending yellow, failed red
 and merged purple of `_SCHEME_CSS`. Images render via `bodyimages` /
 `pictures` (`BoundedPicture` measures height-for-width in a `Gtk.Box`
-slot); changed images render before/after from `prblobs` (`gh api
+slot; the picture is `pictures.fetch`'s default, `kind=remote`, decoded
+from the blob cache through `blobcache.read`); changed images render before/after from `prblobs` (`gh api
 …/contents/{path}?ref=<sha>` with the raw media type, `prblobs.fetch_bytes`
 on the service, reached through `pr.blob`'s URL and the blobcache; a
 binary file *does* get a "Binary files differ" patch, so `patch is None`

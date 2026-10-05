@@ -3,18 +3,20 @@
 
 GTK's text view pastes text and nothing else, so an image on the clipboard —
 a screenshot tool's copy, a browser's "Copy image" — used to paste nothing.
-ComposerView._on_paste takes such a paste over: the image is saved as a PNG
-under the app's cache (a `paste-…` file beside the dropped-image copies) and
-its mention typed at the cursor with a thumbnail, files copied from a file
-manager are mentioned in place, and plain text is left to the view exactly
-as before. None of that is reachable from the unit tests: the decision is
+ComposerView._on_paste takes such a paste over: the image is uploaded as a
+PNG to the service (a `paste-…` file in its uploads directory; with no
+session behind this bare view, the pending one: PR-2.7, D37) and its mention
+typed at the cursor with a thumbnail fetched back as a blob, files copied
+from a file manager are mentioned in place (the harness's link is `local`),
+and plain text is left to the view exactly as before. None of that is reachable from the unit tests: the decision is
 made on a real Gdk.Clipboard's formats and the data comes back through its
 async reads, which need a display and a main loop.
 
 The clipboard is the display's own; every case sets it and then fires the
 view's paste-clipboard signal, the one every paste gesture arrives as.
-XDG_CACHE_HOME is pointed at a scratch tree first so the copies land there
-and nowhere near the user's cache.
+The XDG directories are pointed at a scratch tree first so the uploads and
+the blob cache land there and nowhere near the user's own, and a scratch
+service is started for the uploads (`e2e_service.harness_link`).
 
     python3 scripts/check_composer_paste.py
 """
@@ -22,12 +24,22 @@ and nowhere near the user's cache.
 import os
 import sys
 import tempfile
+import threading
 import time
 
 _SCRATCH = tempfile.mkdtemp(prefix="collins-e2e-paste-")
+_RUN = "r" + "".join(c for c in os.path.basename(_SCRATCH) if c.isalnum())
 os.environ["XDG_CACHE_HOME"] = os.path.join(_SCRATCH, "cache")
+os.environ["XDG_DATA_HOME"] = os.path.join(_SCRATCH, "data")
+os.environ["XDG_CONFIG_HOME"] = os.path.join(_SCRATCH, "config")
+os.environ["XDG_STATE_HOME"] = os.path.join(_SCRATCH, "state")
+os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{_RUN}"
+os.environ["COLLINS_PROJECTS_DIR"] = os.path.join(_SCRATCH, "projects")
+os.environ["COLLINS_CLAUDE_CONFIG"] = os.path.join(_SCRATCH, "claude.json")
+os.environ["COLLINS_CHATS_DIR"] = os.path.join(_SCRATCH, "chats")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
 
 import gi
 
@@ -36,8 +48,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
+import e2e_service  # noqa: E402
+
 import collins.composer as composer_mod  # noqa: E402
-from collins import dropimages, fileclipboard  # noqa: E402
+from collins import fileclipboard, uploads  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -125,15 +139,22 @@ def new_view(reference=lambda path: f"@{path}", notes=None):
 def paste(view) -> None:
     view._view.emit("paste-clipboard")
     pump(500)
+    # The upload and the preview's blob run on threads and land on the
+    # main loop: wait them out.
+    e2e_service.wait_until(
+        lambda: not any(t.name.startswith(("upload", "image-fetch")) for t in threading.enumerate()), 10
+    )
+    pump(200)
 
 
 def saved_copies() -> list[str]:
-    directory = dropimages.default_directory()
+    directory = uploads.directory(None)
     return sorted(os.listdir(directory)) if directory.is_dir() else []
 
 
 def main() -> int:
     Adw.init()
+    e2e_service.harness_link()
     clipboard = Gdk.Display.get_default().get_clipboard()
 
     # -- an image pastes as a saved copy, mentioned and thumbnailed ----------
@@ -142,10 +163,10 @@ def main() -> int:
     set_texture(clipboard, red_square())
     paste(view)
     copies = saved_copies()
-    check("one copy saved under the cache", len(copies) == 1)
+    check("one copy uploaded to the service's pending uploads", len(copies) == 1)
     name = copies[0] if copies else ""
     check("…named as a paste, as a PNG", name.startswith("paste-") and name.endswith(".png"))
-    path = str(dropimages.default_directory() / name)
+    path = str(uploads.directory(None) / name)
     check("the mention names the copy, with a trailing space", view.peek_text() == f"@{path} ")
     try:
         texture = Gdk.Texture.new_from_filename(path)

@@ -35,7 +35,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gtk, Pango  # noqa: E402
 
-from . import pictures, svgtexture  # noqa: E402
+from . import blobcache, pictures, svgtexture  # noqa: E402
 from .i18n import _  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
 
@@ -182,9 +182,8 @@ def _paintable(file: Path) -> Gdk.Paintable | None:
     `pictures`, animation and decode caps and all.
     """
     if file.suffix.lower() == ".svg":
-        try:
-            svg = file.read_bytes()
-        except OSError:
+        svg = blobcache.read(file)  # the cache's file: what the service sent
+        if svg is None:
             return None
         return svgtexture.svg_texture_fit(svg, _DECODE_WIDTH, MAX_HEIGHT, _SVG_MIN_PX)
     return pictures.thumbnail(file, _DECODE_WIDTH, MAX_HEIGHT)

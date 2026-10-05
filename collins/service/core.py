@@ -158,6 +158,7 @@ from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
 from . import bgagents, gitfeed, hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
+from . import blobs as blobs_mod
 from . import diffs as diffs_mod
 from . import files as files_mod
 from . import notifications as notifications_mod
@@ -282,6 +283,14 @@ class ServiceCore:
         # Files over the API (PR-2.3): the editor's reads, writes and
         # file watches, answered off the main loop.
         self.files = files_mod.Files(self)
+        # The image blobs and the uploads (PR-2.7): `kind=file`, `kind=remote`
+        # and `kind=icon` GETs and `PUT /api/upload`, each on a thread; the
+        # registry of the paths a session's own tool calls named (D38).
+        self.image_registry = blobs_mod.ImageRegistry()
+        self.file_blobs = blobs_mod.FileBlobs(self)
+        self.remote_blobs = blobs_mod.RemoteBlobs(self)
+        self.icon_blobs = blobs_mod.IconBlobs(self)
+        self.upload_blobs = blobs_mod.UploadBlobs(self)
         self.tools: tools_mod.SessionTools | None = None
         self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
         # The sandbox host and the live grants (start_sandbox_host), the
@@ -1561,6 +1570,8 @@ class ServiceCore:
             notifications=notifications or self.notifications,
             diffs=diffs or self.diffs,
             shell_spawner=self._spawn_tool_shell,
+            registry=self.image_registry,
+            fetch_remote=self.remote_blobs.download_then,
         )
         return self.tools
 
@@ -1796,7 +1807,8 @@ class ServiceCore:
     def start_housekeeping(self) -> None:
         """The service's own timers (PR-1.12d): the archive sweep at start
         and every `SWEEP_POLL_S` (autodelete makes it one sweep a day, none
-        until the setting is on), and gh asked about once. The first sweep
+        until the setting is on), the pending uploads' week (D37) on the
+        same tick, and gh asked about once. The first sweep
         waits for the store's first scan: before it the store knows no
         session, and a sweep then would stamp the day having trashed
         nothing."""
@@ -1810,13 +1822,29 @@ class ServiceCore:
             handler = self.store.connect("refreshed", first)
         else:
             self.sweep_archived()
+        self.sweep_pending_uploads()
         if not self._sweep_source:
             self._sweep_source = GLib.timeout_add_seconds(SWEEP_POLL_S, self._sweep_tick)
         self.check_gh()
 
     def _sweep_tick(self) -> bool:
         self.sweep_archived()
+        self.sweep_pending_uploads()
         return True
+
+    def sweep_pending_uploads(self) -> None:
+        """The uploads made with no session id (D37) that are older than a
+        week go (`uploads.sweep_pending`: a scandir and an unlink per
+        entry, so on a thread, never the main loop). Never raises."""
+        from .. import uploads
+
+        def sweep() -> None:
+            try:
+                uploads.sweep_pending()
+            except Exception:
+                log.warning("pending uploads sweep failed", exc_info=True)
+
+        gitfeed.spawn_default(sweep, "pending-sweep")
 
     def sweep_archived(self) -> list[str] | None:
         """Ask autodelete whether a sweep is due (the setting and the

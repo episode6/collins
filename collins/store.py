@@ -21,7 +21,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib, GObject
 
-from . import chats, panelhistory, remotearchive
+from . import chats, panelhistory, remotearchive, uploads
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .prattach import PromptAttacher
@@ -924,6 +924,7 @@ class SessionStore(GObject.Object):
                 s for s in self._last_sessions if s.session_id not in trashed
             ]
             self._trash_chat_dirs(doomed)
+            self._trash_uploads(trashed)
             self._archive_orphaned_forwards(trashed)
             self._apply()
         return errors
@@ -936,6 +937,17 @@ class SessionStore(GObject.Object):
         for cwd in {s.cwd for s in doomed if s.cwd and chats.is_chat_cwd(s.cwd)}:
             if cwd not in survivor_cwds:
                 chats.trash_chat_dir(cwd)
+
+    def _trash_uploads(self, gone: set[str]) -> None:
+        """A trashed session's uploads (what a client dropped or pasted into
+        it, split-service spec §3.11, PR-2.7) go to the trash with it —
+        unlinked when this machine's trash refuses the directory (a tmpfs).
+        The pending uploads (D37) are nobody's: the week's sweep takes
+        them. Failures are logged, never raised: the transcript is gone."""
+        for session_id in gone:
+            error = uploads.remove(session_id, trash=lambda path: _trash_file(Path(path)))
+            if error:
+                log.warning("store: the uploads of %s stayed: %s", session_id, error)
 
     def _archive_orphaned_forwards(self, gone: set[str]) -> None:
         """A row suppressed as "moved" (a legacy /bg fork took its place) comes
@@ -964,5 +976,9 @@ class SessionStore(GObject.Object):
             # The transcript is gone for good; so is the throwaway directory
             # (errors only logged implicitly — the deletion itself succeeded).
             chats.delete_chat_dir(session.cwd)
+        # Its uploads go for good with it (PR-2.7).
+        error = uploads.remove(session_id)
+        if error:
+            log.warning("store: the uploads of %s stayed: %s", session_id, error)
         self._apply()
         return None

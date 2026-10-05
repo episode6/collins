@@ -200,7 +200,7 @@ launch after all).
 that blocks freezes the window. Return `mcptools.DeferredResult` and resolve
 it later from the main loop; `mcpserver` holds that connection's reply
 (read → reply → read, stretched). Budget well under the shim's 15 s
-(`remoteimages` caps at 10 s / 25 MB), **always** resolve — even on an
+(`remoteimages` caps at 10 s / 25 MB, now on the service), **always** resolve — even on an
 unexpected exception — or the connection goes silent forever, and expect the
 late reply to land on a gone connection (`_send` no-ops). A reply larger than
 `MAX_LINE` doesn't degrade, it closes the connection; `terminal_reply` halves
@@ -275,11 +275,25 @@ tails until the JSON-encoded size fits with a 16 KiB margin.
   two `clear_marks` calls so the reply (`mcptools.clear_reply`) counts
   each. The switch labels are in
   `tokensettings._MCP_TOOL_LABELS`.
-- `show_image` — a local path or an `http(s)` URL: URLs are fetched on a
-  worker thread (`remoteimages.py`, stdlib urllib, redirects to http(s) only,
-  size and content-type gated, into the pruned cache dir; localhost is
-  deliberately allowed) behind a `DeferredResult`, then shown in the lightbox
-  with an optional caption, and recorded as an attachment.
+- `show_image` — a local path or an `http(s)` URL, **prepared on the
+  service** (PR-2.7, `SessionTools._ui_show_image`): a path is resolved
+  there (`resolve_file`, the agent's cwd then the launch dir), refused
+  when it is no image, and **admitted for the session** in
+  `service.blobs.ImageRegistry` (by id and by handle, 512 per session,
+  oldest dropped; D38) before the `tool` event carries it absolute; a URL
+  is downloaded there first (`RemoteBlobs.download_then`: `remoteimages.
+  fetch`, stdlib urllib, redirects to http(s) only, size and content-type
+  gated, 25 MiB, into the service's `remote-images` cache; localhost is
+  deliberately allowed) behind a `DeferredResult`, its failure the agent's
+  words, the download's time off the forwarded call's bound. The client
+  half (`ToolClient.show_image`) resolves nothing: for a path it asks the
+  service whether the file is inside the tab's project
+  (`ask_can_open_in_editor`, PR-2.4: only the lightbox's "Open in Editor"
+  button hangs on it; a URL is never asked), then records the
+  attachment and calls `lightbox.show_image(tab, key, session=…)`, which
+  fetches the blob (`kind=file` / `kind=remote`) and answers "Image shown."
+  once the lightbox decoded it, a failure when it didn't. With no client the
+  path is resolved and admitted the same way and recorded.
 - `notify_user` — routes through `MainWindow.notify_session` → the
   notification center's delivery table (card + sound in Collins, desktop
   notification away; a message to the selected tab is a read history row);
@@ -412,6 +426,52 @@ through `animatedimage.load` (GIFs animate via `GdkPixbuf.PixbufAnimation`,
 the only decoder in the stack; the frame clock stops itself when nothing
 draws the paintable).
 
+**Every picture is a blob** (PR-2.7, split-service spec §3.23). The client
+opens no image file of the project's: `lightbox.show_image(parent, key,
+session=…, on_shown=…)` takes a path on the service's machine or a URL,
+drops `pictures`' run cache for it (a rewritten file shows anew), fetches it
+(`pictures.fetch`, whose default fetcher is `blobcache.fetch_image`: `GET
+/api/blob?kind=file&path=&session=` or `kind=remote&url=`) and floats the
+lightbox on the landing — the newest call wins, an older landing is
+dropped — or its "Couldn't display image" page with the fetch's reason.
+`present_image_lightbox(parent, file)` floats a file already in the blob
+cache (a PR body's picture, a diff's side). The decoders read bytes through
+`blobcache.read`, which refuses any path outside the cache
+(`animatedimage.load_bytes`: `Gdk.Texture.new_from_bytes`, a GIF by its
+signature through a `PixbufLoader`; `pictures.thumbnail` sizes the decode
+in the loader's `size-prepared`). "Open With…" hands another app the
+cache's copy — the service's own file when the link is `local`.
+
+**`kind=file`'s confinement** (`service.blobs.FileBlobs`, D38): a path
+inside a root the service knows (`files.roots`), inside the asking
+session's upload directory or `_pending/` (`uploads.inside`), or one the
+**session's own agent** named — a show_image path in the registry, or an
+image the service's transcript scan of that live session found
+(`Session.transcript.attachments`) — or anything for a `local` client. The
+asking session is the URL's `session` (the tab's `image_session()`: its id,
+or its handle while unresolved). A client therefore reads only what a root
+or that session's agent exposed, never an arbitrary path: a remote client's
+show_image of a `/tmp` screenshot works because the call admitted it, while
+a clicked `/tmp` reference no tool call named is refused (403, the
+stand-in) — the click gate is PR-2.6's. The registry is the service's run;
+after a restart an old session's `/tmp` attachments are readable again once
+its transcript is scanned. Only image suffixes are served (400 otherwise),
+at most 50 MiB (413), tagged `"<mtime µs>-<size>"` (304 free).
+
+**`kind=remote`** (`RemoteBlobs`): the service's cache
+(`~/.cache/collins/remote-images/<sha1 of url><suffix>`, a day) answers a
+PR body's image or a gallery row, downloading on a miss (502 when the fetch
+fails); show_image's `download` replaces the copy first. The client's copy
+is named by the answer's content type (`blobcache.fetch(url, None)`). Any attached client can therefore have the service GET any http(s) URL,
+localhost included (a body image is enough): deliberate for show_image and
+acceptable for one user's service whose clients already have a shell
+(§3.16); only image content types are answered. A show_image download is
+bounded from the call's start (`TOOL_BOUND_S` armed before the fetch: a
+dripping server answers "Timed out…", its late landing dropped), and
+`remoteimages` reads with `read1` so its 10 s deadline is checked between
+drips. The registry holds resolved paths only, and the GET compares the
+resolved path: a link swapped in at an admitted path is refused.
+
 `attachrecords.py` (GTK-free) is the per-session log of every image the
 session put on screen — lightbox showings (with captions, which always win),
 transcript mentions (`scan`: text blocks of non-sidechain, non-`isMeta`
@@ -422,8 +482,14 @@ files of any kind) — persisted in `state.json` like `session_prs`, capped at
 back from the transcript otherwise. Sightings are dated by the message
 timestamp, not the poll. `attachpanel.py` shows them oldest-top in a column
 that can float over the terminal or dock as `page_kind="attachments"`;
-thumbnails decode at display size via `pictures.thumbnail`
-(`Pixbuf.new_from_file_at_scale`, never upscaling) one row per idle turn. The
+every row's picture — a path or a URL alike — is a blob (`pictures.fetch`
+with the view's `session_key()`, `kind=file` / `kind=remote`, PR-2.7), its
+thumbnail decoded at display size via `pictures.thumbnail` (a
+`PixbufLoader` sized on `size-prepared`, never upscaling) one row per idle
+turn; activating a picture hands the record's key to the host's lightbox
+(`TerminalTab._show_attachment` → `lightbox.show_image`). The file rows'
+Open / Open With / Show in Folder still read the local disk: local extras,
+PR-2.8's gate. The
 "new images" handle badge needs both an announced-set and a moving timestamp
 baseline; a lightbox showing suppresses its own echo by key
 (`_attachments_beheld`). The panel docks itself once per tab when a column is

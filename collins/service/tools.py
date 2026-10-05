@@ -46,8 +46,11 @@ read_terminal,        the active client (the                the session's shell 
 run_in_terminal       shells' pages)                        read through the model; one of its own spawned
                                                             when none is idle (one at most, reused; busy
                                                             is refused), closed when the agent exits
-show_image            the lightbox, recorded too            recorded as an attachment; the reply says
-                                                            nobody is looking
+show_image            the lightbox, recorded too: a path    recorded as an attachment; the reply says
+                      resolved here (the event carries      nobody is looking
+                      it absolute), a URL downloaded here
+                      first (the client shows it over
+                      `kind=remote`)
 notify_user           the client's delivery table; the      recorded in the history, the row unread and
                       row is the service's (notify.post)    the session flagged (the sink is PR-3.4's)
 open_in_editor        the editor                            "no client attached"
@@ -59,6 +62,17 @@ diff_context,         the git page (its loaded diff), the   the service's `diffn
 annotate_diff, ...    marks written through to the          own read of the session's diff
                       service's store
 ====================  ====================================  ===========================================
+
+**show_image is resolved on the service** (PR-2.7): a path names a file
+on this machine, so it is resolved here (`resolve_file`) and the event
+carries the absolute path the client's lightbox fetches as `GET
+/api/blob?kind=file` — the path recorded in the session's `ImageRegistry`
+first, which is what lets a client that is not `local` read a /tmp
+screenshot the agent showed (D38); a URL is downloaded here first
+(`fetch_remote`: `service.blobs.RemoteBlobs.download_then`, the 25 MiB cap
+and the agent's words for a failure) and the client shows it over
+`kind=remote` from the service's cache. The download's time comes off the
+forwarded call's bound, so the whole call stays under `TOOL_BOUND_S`.
 
 A call whose `tool` event the protocol refuses (an argument past one of
 its bounds) is refused (`ARGS_DONT_FIT`), whoever is attached: it is
@@ -74,6 +88,7 @@ from __future__ import annotations
 import itertools
 import logging
 import os
+import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -161,6 +176,9 @@ class SessionTools:
         shell_spawner: Callable[[Any, bool], int | None] | None = None,
         timeout_add: Callable[..., int] | None = None,
         source_remove: Callable[[int], Any] | None = None,
+        registry=None,
+        fetch_remote: Callable[[str, Callable[[str | None], None]], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._get_setting = get_setting
         self._sessions = sessions
@@ -172,6 +190,11 @@ class SessionTools:
         self.notifications = notifications
         self.diffs = diffs
         self._spawn_shell = shell_spawner
+        # The paths a session's show_image named (service.blobs.ImageRegistry,
+        # D38) and the service's download of a URL (PR-2.7).
+        self.registry = registry
+        self._fetch_remote = fetch_remote
+        self._clock = clock
         if timeout_add is None or source_remove is None:
             from gi.repository import GLib
 
@@ -253,6 +276,8 @@ class SessionTools:
         own = getattr(self, "_tool_" + name, None)
         if name in SERVICE_TOOLS and own is not None:
             return own
+        if name == "show_image":
+            return self._ui_show_image
 
         def ui(session, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
             forwarded = self._forward(session, name, args, sandboxed)
@@ -265,9 +290,70 @@ class SessionTools:
 
         return ui
 
+    def _ui_show_image(self, session, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
+        """show_image (see the module docstring): the path resolved and
+        registered, or the URL downloaded, before the call goes to the
+        active client; no client attached is the headless record."""
+        raw = args["path"]
+        if remoteimages.looks_remote(raw):
+            error = remoteimages.url_error(raw)
+            if error is not None:
+                return False, error
+            if self._fetch_remote is None:
+                return self._show_image_on(session, dict(args), sandboxed)
+            deferred = mcptools.DeferredResult()
+            started = self._clock()
+            # Bounded from the start: a download that outruns the bound (a
+            # server dripping bytes) answers the agent at TOOL_BOUND_S,
+            # under the shim's own timeout, and its landing is dropped.
+            timer = [0]
+
+            def timed_out() -> bool:
+                timer[0] = 0
+                deferred.resolve(False, f"Timed out after {TOOL_BOUND_S:g}s fetching {raw}")
+                return False
+
+            timer[0] = self._timeout_add(int(TOOL_BOUND_S * 1000), timed_out)
+
+            def fetched(failure: str | None) -> None:
+                if timer[0]:
+                    self._source_remove(timer[0])
+                    timer[0] = 0
+                if deferred.resolved:
+                    return  # the bound answered first
+                if failure is not None:
+                    deferred.resolve(False, failure)
+                    return
+                left = TOOL_BOUND_S - (self._clock() - started)
+                _settle_into(self._show_image_on(session, dict(args), sandboxed, bound=left), deferred)
+
+            self._fetch_remote(raw, fetched)
+            return deferred
+        key = resolve_file(session, raw)
+        if key is None:
+            return False, f"No such file: {raw}"
+        if not editorfiles.is_image_path(key):
+            return False, f"Not an image Collins can display: {raw}"
+        self.admit_image(session, key)
+        return self._show_image_on(session, {**args, "path": key}, sandboxed)
+
+    def admit_image(self, session, path: str) -> None:
+        """Record *path* as one the session's agent named (D38): its
+        resolved path, which is what a `kind=file` GET is compared by."""
+        if self.registry is not None:
+            self.registry.admit((session.session_id, getattr(session, "handle", None)), path)
+
+    def _show_image_on(self, session, args: dict, sandboxed: bool, bound: float | None = None):
+        forwarded = self._forward(session, "show_image", args, sandboxed, bound=bound)
+        if forwarded is not None:
+            return forwarded
+        return self._headless_show_image(session, args, sandboxed)
+
     # -- the active client ----------------------------------------------------
 
-    def _forward(self, session, name: str, args: dict, sandboxed: bool) -> mcptools.ToolResult | None:
+    def _forward(
+        self, session, name: str, args: dict, sandboxed: bool, bound: float | None = None
+    ) -> mcptools.ToolResult | None:
         """Hand the call to the session's active client as a `tool` event;
         None when no client is attached. An event the protocol refuses (an
         argument past one of its bounds) refuses the call, whoever is
@@ -296,7 +382,8 @@ class SessionTools:
         if deferred.resolved:
             return _settled(deferred)
         call.client = client
-        call.timer = self._timeout_add(int(TOOL_BOUND_S * 1000), self._on_bound, call_id)
+        wait = TOOL_BOUND_S if bound is None else max(0.5, min(TOOL_BOUND_S, bound))
+        call.timer = self._timeout_add(int(wait * 1000), self._on_bound, call_id)
         return deferred
 
     def reply(self, call_id: str, ok: bool, text: str, client=None) -> bool:
@@ -378,6 +465,7 @@ class SessionTools:
                 return False, f"No such file: {raw}"
             if not editorfiles.is_image_path(key):
                 return False, f"Not an image Collins can display: {raw}"
+            self.admit_image(session, key)
         if not session.session_id or self.state is None:
             return False, NO_CLIENT
         one = attachrecords.sighting(
@@ -606,6 +694,15 @@ class SessionTools:
         self.ptys.write(target[1].id, shell_command(args["command"].rstrip("\n") + "\n").encode())
         prefix = "Running in new" if opened else "Running in"
         return True, f"{prefix} {kind} {target[0]}."
+
+
+def _settle_into(result: mcptools.ToolResult, deferred: mcptools.DeferredResult) -> None:
+    """Resolve *deferred* with *result*: at once for an ``(ok, text)``,
+    when it resolves for another DeferredResult."""
+    if isinstance(result, mcptools.DeferredResult):
+        result.watch(deferred.resolve)
+    else:
+        deferred.resolve(*result)
 
 
 def resolve_file(session, raw: str) -> str | None:

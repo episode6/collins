@@ -7,6 +7,7 @@ connection kept, the ack accounting reported to the pty server, and the
 sync channel's requests answered on it while the subscription's events
 land on the primary."""
 
+import json
 import os
 import time
 
@@ -572,8 +573,9 @@ def test_the_blob_route_answers_bytes_with_a_tag_and_304_on_it(served, tmp_path)
     # client's: a temp repository is outside every root.
     status, _h, _b = _http_get(path, query, {})
     assert status == 403
+    # kind=file serves images only (PR-2.7): a text file is not one.
     status, _h, _b = _http_get(path, f"kind=file&path={repo}/a.txt", {"Collins-Client": "git-client"})
-    assert status == 404
+    assert status == 400
     client.close()
 
 
@@ -612,6 +614,131 @@ def test_the_pr_blob_is_named_by_url_and_served_by_kind_pr(served, monkeypatch):
     assert refused["ok"] and refused["error"].startswith("Not a commit") and "url" not in refused
     status, _h, _b = _http_get(path, f"kind=pr&repository=o/r&ref={sha}&path=../x.png", mine)
     assert status == 400 and len(calls) == 2
+
+
+# -- images and uploads (PR-2.7) ------------------------------------------------------------
+
+
+def _http_put(path: str, query: str, body: bytes, headers: dict) -> tuple[int, bytes]:
+    session = Soup.Session(remote_connectable=Gio.UnixSocketAddress.new(path))
+    message = Soup.Message.new("PUT", "http://collins/api/upload?" + query)
+    for name, value in headers.items():
+        message.get_request_headers().replace(name, value)
+    message.set_request_body_from_bytes("application/octet-stream", GLib.Bytes.new(body))
+    box = {}
+
+    def done(sess, result):
+        try:
+            box["body"] = bytes(sess.send_and_read_finish(result).get_data() or b"")
+        except GLib.Error as err:
+            box["error"] = err.message
+
+    session.send_and_read_async(message, GLib.PRIORITY_DEFAULT, None, done)
+    assert pump(10, lambda: "body" in box or "error" in box), "no answer"
+    return int(message.get_status()), box.get("body", b"")
+
+
+def test_the_file_blob_is_an_image_confined_to_the_roots_or_a_local_client(served, tmp_path):
+    """`kind=file`: a remote client is refused a path outside every root,
+    and served one the session's agent named (the registry, D38); a
+    `local` client may read any image; a 304 on the tag."""
+    server, path = served
+    picture = tmp_path / "shot.png"
+    picture.write_bytes(b"\x89PNG-shot")
+    query = f"kind=file&path={picture}&session=sid-1"
+    remote = Raw(path)
+    remote.hello(client_id="remote-client")
+    status, _h, _b = _http_get(path, query, {"Collins-Client": "remote-client"})
+    assert status == 403
+    server.core.image_registry.admit(["sid-1"], str(picture))
+    status, headers, body = _http_get(path, query, {"Collins-Client": "remote-client"})
+    assert status == 200 and body == b"\x89PNG-shot" and headers["Content-Type"] == "image/png"
+    other = f"kind=file&path={picture}&session=sid-2"
+    status, _h, _b = _http_get(path, other, {"Collins-Client": "remote-client"})
+    assert status == 403  # another session's agent named nothing
+    local = _local_client(server, path)
+    mine = {"Collins-Client": "git-client"}
+    status, headers, body = _http_get(path, f"kind=file&path={picture}", mine)
+    assert status == 200 and body == b"\x89PNG-shot"
+    tagged = {**mine, "If-None-Match": headers["ETag"]}
+    status, _h, body = _http_get(path, f"kind=file&path={picture}", tagged)
+    assert status == 304 and body == b""
+    status, _h, _b = _http_get(path, f"kind=file&path={tmp_path}/nope.png", mine)
+    assert status == 404
+    remote.close()
+    local.close()
+
+
+def test_the_upload_route_writes_a_pending_upload_and_refuses_past_the_cap(served, tmp_path, monkeypatch):
+    from collins import uploads
+
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    _server, path = served
+    status, body = _http_put(path, "name=..%2Fdrop.png", b"png-bytes", {})
+    assert status == 200
+    written = json.loads(body)["path"]
+    assert written == str(tmp_path / "uploads" / uploads.PENDING / "drop.png")
+    with open(written, "rb") as fh:
+        assert fh.read() == b"png-bytes"
+    status, _b = _http_put(path, "session=sid-unknown&name=a.png", b"x", {})
+    assert status == 403
+    monkeypatch.setattr(uploads, "MAX_BYTES", 4)
+    status, _b = _http_put(path, "name=big.png", b"12345", {})
+    assert status == 413
+    assert not (tmp_path / "uploads" / uploads.PENDING / "big.png").exists()
+
+
+def _rss_mib() -> int:
+    with open("/proc/self/status", encoding="ascii") as fh:
+        for line in fh:
+            if line.startswith("VmRSS"):
+                return int(line.split()[1]) // 1024
+    return 0
+
+
+def test_a_put_past_the_cap_is_refused_without_holding_its_body(served, tmp_path, monkeypatch):
+    """The real cap, a real body past it streamed over the socket (PR 612's
+    review): the 413 arrives and the service's memory never grows by the
+    body (the early handler turns accumulation off; libsoup drains it)."""
+    import socket
+    import threading
+
+    from collins import uploads
+
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    _server, path = served
+    length = uploads.MAX_BYTES + 1
+    answer = {}
+
+    def send() -> None:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(30)
+        conn.connect(path)
+        head = f"PUT /api/upload?name=big.png HTTP/1.1\r\nHost: x\r\nContent-Length: {length}\r\n\r\n"
+        conn.sendall(head.encode())
+        piece = b"\0" * (1024 * 1024)
+        sent = 0
+        try:
+            while sent < length:
+                sent += conn.send(piece[: length - sent])
+            answer["head"] = conn.recv(64)
+        except OSError as err:
+            answer["error"] = str(err)
+        conn.close()
+
+    before = _rss_mib()
+    peak = [before]
+    thread = threading.Thread(target=send, daemon=True)
+    thread.start()
+
+    def done() -> bool:
+        peak[0] = max(peak[0], _rss_mib())
+        return not thread.is_alive()
+
+    assert pump(30, done), "the PUT never finished"
+    assert answer.get("head", b"").startswith(b"HTTP/1.1 413"), answer
+    assert peak[0] - before < 32, f"RSS grew {peak[0] - before} MiB under a refused {length >> 20} MiB body"
+    assert not (tmp_path / "uploads" / uploads.PENDING / "big.png").exists()
 
 
 # -- files over the API (PR-2.3): a chunked request, a chunked reply -------------------------

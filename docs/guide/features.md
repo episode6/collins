@@ -383,10 +383,14 @@ belongs to its session, and it is there when you come back to it.
   prompt as mentions; images get a strip of preview thumbnails above the
   text (click one to inspect it full-size) and go to the agent with the
   prompt. Pasting works the same way: an image on the clipboard (a
-  screenshot tool's copy, a browser's *Copy image*) is saved as a PNG under
-  `~/.cache/collins/dropped-images/` — where dropped images go too, pruned
-  after a week — and that copy is what the prompt mentions; files copied in
-  a file manager are mentioned in place.
+  screenshot tool's copy, a browser's *Copy image*) is saved as a PNG on
+  the service's machine, under `~/.local/share/collins/uploads/<session>/`
+  — where dropped images go too, removed with the session (and, for a
+  prompt typed before the session has an id, under `uploads/_pending/`,
+  swept after a week) — and that copy is what the prompt mentions; files
+  copied or dropped from a file manager are mentioned in place, or sent
+  over as copies (64 MiB each at most) when Collins runs on another machine
+  than its service.
 - **Floating or docked.** The composer floats translucent over the
   terminal; its dock button turns it into a panel below the terminal
   instead, where it stays for that session's later visits.
@@ -1024,8 +1028,12 @@ is running in:
   one alone names the kind (`notes: false` is "the highlights only"), and
   both false is refused.
 - **`show_image(path)`** — show a screenshot, plot, or render in the in-app
-  lightbox. An `http(s)` URL works too: Collins downloads it and shows the
-  copy.
+  lightbox. An `http(s)` URL works too: Collins' service downloads it (25 MB
+  at most) and the window shows its copy. The picture always comes to the
+  window from the service, the way the attachments panel's and the
+  composer's previews do; a window on another machine can show a file
+  outside the project only when the session's agent named it (a
+  `show_image` path, or an image in its replies).
 - **`attach_pr(url)`** — put a pull request on the session's footer and
   sidebar row, live status and all — for a PR Collins can't spot on its
   own, like one opened by a subagent, or one the session is reviewing
