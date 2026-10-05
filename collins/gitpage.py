@@ -1314,8 +1314,16 @@ class GitPage(Adw.Bin):
         mirror.on_changed(cwd, self._on_git_changed)
         # The read's own sample seeds the service's compare, so an edit
         # between the read and the watch's first look is still a move.
-        mirror.watch(cwd, paths, state=self._tree_state)
+        # The handle is this page's: another page on the same tree keeps
+        # its own watch, and this page's unwatch takes down only this one.
+        mirror.watch(cwd, paths, state=self._tree_state, handle=self.watch_handle)
         self._watched_cwd = cwd
+
+    @property
+    def watch_handle(self) -> str:
+        """The page's name for its watch on the service (`git.watch`'s
+        `handle`): one per page object."""
+        return f"gitpage-{id(self):x}"
 
     @property
     def watching(self) -> bool:
@@ -1327,7 +1335,7 @@ class GitPage(Adw.Bin):
         if self._watched_cwd is not None:
             mirror = remotegit.mirror()
             mirror.off_changed(self._watched_cwd, self._on_git_changed)
-            mirror.unwatch(self._watched_cwd)
+            mirror.unwatch(self.watch_handle)
             self._watched_cwd = None
         self._watch_stale = None
 

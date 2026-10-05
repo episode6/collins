@@ -134,6 +134,11 @@ class GitInfo:
     changes: tuple[bool, bool] | None = None
     state: str | None = None
     fetched_at: float = 0.0
+    # The mirror's alone (never on the wire): True when the last ask of the
+    # service got no answer (the link down, a timeout) and this entry is
+    # the one before, kept so a hiccup reads as "unchanged", not as "not a
+    # repository" (the page leaves its view alone).
+    unreachable: bool = False
 
     @property
     def repository(self) -> bool:

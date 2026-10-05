@@ -362,9 +362,9 @@ def pump(seconds: float, until=None) -> bool:
 def test_watch_fires_on_an_index_write_and_not_on_a_git_basename_event(served):
     core, client, repo, events = served
     state = gitops.tree_state_signature(repo)
-    client.request({"t": "git.watch", "cwd": str(repo), "files": ["a.txt"], "state": state})
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state})
     assert core.git.watching(client, str(repo))
-    watch = core.git._watches[(id(client), str(repo))]
+    watch = core.git.watch_of(client, "p1")
     # A `.git` basename event schedules nothing.
     watch._on_event(None, Gio.File.new_for_path(str(repo / ".git")), None, None)
     assert watch._debounce == 0
@@ -381,7 +381,25 @@ def test_watch_fires_on_an_index_write_and_not_on_a_git_basename_event(served):
     watch.check()
     pump(0.3)
     assert len(events) == before
-    client.request({"t": "git.unwatch", "cwd": str(repo)})
+    client.request({"t": "git.unwatch", "handle": "p1"})
+    assert not core.git.watching(client, str(repo))
+
+
+def test_two_pages_on_one_tree_are_two_watches(served):
+    """Watches are the client's per handle, not per cwd: a second page's
+    watch of the same tree replaces nothing, and one page's unwatch
+    leaves the other's up; the same handle again replaces that one."""
+    core, client, repo, _events = served
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "page-a", "files": ["a.txt"]})
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "page-b", "files": []})
+    first_a = core.git.watch_of(client, "page-a")
+    assert first_a is not None and core.git.watch_of(client, "page-b") is not None
+    assert first_a.paths == ["a.txt"]
+    client.request({"t": "git.unwatch", "handle": "page-b"})
+    assert core.git.watching(client, str(repo)) and core.git.watch_of(client, "page-a") is first_a
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "page-a", "files": ["new.txt"]})
+    assert first_a._stopped and core.git.watch_of(client, "page-a").paths == ["new.txt"]
+    client.request({"t": "git.unwatch", "handle": "page-a"})
     assert not core.git.watching(client, str(repo))
 
 
@@ -390,16 +408,131 @@ def test_watch_seeded_by_the_clients_state_reports_an_edit_in_the_window(served)
     first compare is a move (the edit between the read and the watch)."""
     core, client, repo, events = served
     stale_seed = "0" * 40
-    client.request({"t": "git.watch", "cwd": str(repo), "files": [], "state": stale_seed})
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": [], "state": stale_seed})
     assert any(e.get("t") == "git-changed" for e in events)
 
 
 def test_a_client_going_away_drops_its_watches(served):
     core, client, repo, _events = served
-    client.request({"t": "git.watch", "cwd": str(repo), "files": []})
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": []})
     assert core.git.watching(client, str(repo))
     core.client_gone(client)
     assert not core.git.watching(client, str(repo))
+
+
+def test_a_compare_that_raises_leaves_the_watch_checking_again(served, monkeypatch):
+    core, client, repo, _events = served
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": []})
+    watch = core.git.watch_of(client, "p1")
+
+    def boom(cwd):
+        raise OSError("gone")
+
+    monkeypatch.setattr(gitfeed, "signatures", boom)
+    watch.check()
+    assert not watch._checking  # landed through the failure: the next event still compares
+
+
+# -- the builders hold the wire's text to their grammar (D33) -------------------------
+
+
+@pytest.mark.parametrize(
+    ("builder", "args"),
+    [
+        ("log_argv", {"range_args": ["--output=/x"], "limit": 5}),
+        ("log_argv", {"range_args": ["HEAD"], "limit": "5"}),
+        ("stack_walk_argv", {"lower": "--output=/x", "upper": "HEAD", "limit": 10}),
+        ("stack_walk_argv", {"lower": None, "upper": "--all", "limit": 10}),
+        ("rev_parse_argv", {"rev": "--show-toplevel"}),
+        ("resolve_commit_argv", {"ref": "--output=/x"}),
+        ("merge_base_argv", {"a": "--all", "b": "HEAD"}),
+        ("show_argv", {"ref": "--output=/x", "pathspecs": [], "excludes": []}),
+        ("show_argv", {"ref": "HEAD", "pathspecs": ["../../etc/passwd"], "excludes": []}),
+        ("diff_argv", {"load": "branch", "parent_target": "--output=/x", "untracked": True,
+                       "pathspecs": [], "excludes": []}),
+        ("diff_argv", {"load": "unstaged", "parent_target": None, "untracked": True,
+                       "pathspecs": ["/etc/passwd"], "excludes": []}),
+        ("diff_argv", {"load": {"show": "--output=/x"}, "parent_target": None, "untracked": True,
+                       "pathspecs": [], "excludes": []}),
+        ("numstat_argv", {"load": "branch", "parent_target": "--output=/x", "pathspecs": []}),
+        ("numstat_argv", {"load": {"range": "--a...b"}, "parent_target": None, "pathspecs": []}),
+        ("untracked_diff_argv", {"path": "/etc/passwd"}),
+        ("untracked_diff_argv", {"path": "../outside.txt"}),
+        ("conflict_diff_argv", {"paths": ["../x"]}),
+        ("file_at_argv", {"ref": "--output=/x", "path": "a.txt"}),
+        ("file_at_argv", {"ref": "HEAD", "path": "../a.txt"}),
+        ("unmerged_stages_argv", {"path": "/abs"}),
+        ("checkout_side_argv", {"side": "ours", "paths": ["../x"]}),
+        ("checkout_paths_argv", {"paths": ["/x"]}),
+        ("add_paths_argv", {"paths": ["a\nb"]}),
+        ("reset_paths_argv", {"paths": ["..", "a"]}),
+        ("remove_paths_argv", {"paths": [""]}),
+        ("fixup_argv", {"sha": "--amend"}),
+        ("revert_argv", {"sha": "--continue", "commit": True}),
+        ("commit_subject_argv", {"ref": "--output=/x"}),
+        ("commit_message_argv", {"ref": "a b"}),
+        ("checkout_branch_argv", {"branch": "--orphan"}),
+        ("continue_argv", {"kind": "gc"}),
+        ("abort_argv", {"kind": "--all"}),
+    ],
+)
+def test_an_option_shaped_argument_is_refused_invalid_by_every_builder(served, tmp_path, builder, args):
+    """The service runs what its own builder makes of a client's args, so
+    the builder is where free text is held to the grammar: a revision or
+    path that would read as an option (`--output=` writes a file anywhere)
+    or walk out of the tree is ValueError in the builder and `invalid` on
+    the wire — and nothing was written outside the repository."""
+    core, client, repo, _events = served
+    with pytest.raises(ValueError):
+        gitops.build(builder, args)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        run(client, builder, args, cwd=repo)
+    assert refused.value.error == protocol.ERROR_INVALID
+    assert not Path("/x").exists() and not (tmp_path / "x").exists()
+
+
+def test_the_untracked_read_cannot_name_a_file_outside_the_tree(served, tmp_path):
+    core, client, repo, _events = served
+    secret = tmp_path / "outside-secret.txt"
+    secret.write_text("s3cret\n")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        run(client, "untracked_diff_argv", {"path": str(secret)}, cwd=repo)
+    assert refused.value.error == protocol.ERROR_INVALID
+
+
+def test_a_run_whose_work_raises_still_answers(served, monkeypatch):
+    core, client, repo, _events = served
+
+    def boom(*a, **k):
+        raise RuntimeError("no")
+
+    monkeypatch.setattr(gitfeed, "run_git_raw", boom)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        run(client, "status_argv", {}, cwd=repo)
+    assert refused.value.error == protocol.ERROR_FAILED
+
+
+# -- symlinks out of the tree ------------------------------------------------------------
+
+
+def test_a_symlink_out_of_the_tree_is_neither_read_nor_sized(served, tmp_path):
+    core, client, repo, _events = served
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"outside bytes")
+    (repo / "link.txt").symlink_to(outside)
+    assert gitfeed.read_blob(str(repo), gitops.AT_WORKTREE, "", "link.txt", None)[0] == 404
+    assert gitfeed.blob_tag(str(repo), gitops.AT_WORKTREE, "", "link.txt") is None
+    reply = client.request({"t": "git.sizes", "cwd": str(repo), "paths": ["link.txt", "new.txt"]})
+    assert reply["sizes"] == {"link.txt": None, "new.txt": 6}
+
+
+def test_a_blob_over_the_cap_is_413_on_every_side(served, monkeypatch):
+    core, client, repo, _events = served
+    monkeypatch.setattr(gitops, "MAX_BLOB_BYTES", 4)
+    assert gitfeed.read_blob(str(repo), gitops.AT_WORKTREE, "", "a.txt", None)[0] == 413
+    assert gitfeed.read_blob(str(repo), gitops.AT_REF, "HEAD", "a.txt", None)[0] == 413
+    assert gitfeed.read_blob(str(repo), gitops.AT_INDEX, "", "a.txt", None)[0] == 413
+    assert gitfeed.read_blob(str(repo), gitops.AT_REF, "HEAD", "missing.txt", None)[0] == 404
 
 
 # -- the blob -------------------------------------------------------------------------------

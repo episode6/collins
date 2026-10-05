@@ -106,12 +106,15 @@ def trash_absolute(paths: Iterable[str]) -> tuple[list[str], str | None]:
     return done, None
 
 
-def handle_trash(core, client, message: protocol.Message) -> dict:
+def handle_trash(core, client, message: protocol.Message, later=None) -> dict | protocol.Deferred:
     """`fs.trash {paths}`: every path confined (`allowed`), then trashed;
     a path the machine's trash refuses (Gio refuses "system internal"
     mounts, a tmpfs /tmp included) is `failed` with Gio's words, and
     nothing is unlinked in its place in this PR (`removed` stays empty:
-    the unlink behind a confirmation is a later chunk's)."""
+    the unlink behind a confirmation is a later chunk's). The trash
+    itself (a copy across filesystems, a slow mount) runs off the main
+    loop through *later* (`gitfeed.GitFeed._later`: a thread and a
+    `Deferred`); with none it runs inline (a test's)."""
     paths = [str(p) for p in message.get("paths") or ()]
     for path in paths:
         if not os.path.isabs(path) or not allowed(core, client, path):
@@ -119,10 +122,15 @@ def handle_trash(core, client, message: protocol.Message) -> dict:
                 message.id, protocol.ERROR_REFUSED, "{path} is outside every root the service knows",
                 {"path": path[: protocol.ARG_TEXT_MAX]},
             )
-    trashed, failure = trash_absolute(paths)
-    if failure is not None:
-        return protocol.refuse(
-            message.id, protocol.ERROR_FAILED, "Could not move to the trash: {error}",
-            {"error": failure[: protocol.ARG_TEXT_MAX]},
-        )
-    return protocol.reply(message.id, trashed=trashed, removed=[])
+    re_id = message.id
+
+    def work() -> dict:
+        trashed, failure = trash_absolute(paths)
+        if failure is not None:
+            return protocol.refuse(
+                re_id, protocol.ERROR_FAILED, "Could not move to the trash: {error}",
+                {"error": failure[: protocol.ARG_TEXT_MAX]},
+            )
+        return protocol.reply(re_id, trashed=trashed, removed=[])
+
+    return later("fs-trash", work, re_id) if later is not None else work()

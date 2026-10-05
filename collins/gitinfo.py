@@ -121,9 +121,12 @@ def info(cwd: str | Path | None, max_age: float = MAX_AGE_S, changes: bool = Fal
 
 def refresh(cwd: str | Path | None) -> None:
     """Re-read *cwd*'s entry now (the git page's tick, before it compares
-    the signatures). No-op with no reader: the files are always fresh."""
+    the signatures; its open; a mutation it made, whose signatures it
+    re-seeds from the answer). The one read that waits on the main
+    thread, `remotegit.MAIN_THREAD_TIMEOUT_S` at most. No-op with no
+    reader: the files are always fresh."""
     if _reader is not None and cwd:
-        _reader(str(cwd), max_age=0.0)
+        _reader(str(cwd), max_age=0.0, wait=True)
 
 
 def _local(cwd: str | Path | None) -> bool:
@@ -266,7 +269,9 @@ def has_changes(cwd: str | Path | None) -> bool:
     not something to re-derive off `.git`. `--no-optional-locks` keeps it from
     taking the index lock or writing a refreshed index, so it can't collide
     with the agent's own git commands in the same repository. Over the API it
-    is `git.info`'s ``changes``, asked fresh (never the mirror's old answer).
+    is `git.info`'s ``changes``, asked fresh (never the mirror's old answer;
+    on the main thread for `remotegit.MAIN_THREAD_TIMEOUT_S` at most, past
+    which the answer is the mirror's last, or False).
 
     False for every question that can't be answered — no cwd, no git, not a
     repository, a git that took too long. What is built on the answer is a

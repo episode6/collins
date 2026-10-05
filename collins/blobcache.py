@@ -22,9 +22,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import tempfile
 from pathlib import Path
 
 from . import apilink
+from .i18n import _
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ def fetch(url: str, suffix: str = "", link: apilink.Link | None = None) -> Path:
     when the service refuses or does not answer. Worker thread."""
     link = link or apilink.current()
     if link is None or not hasattr(link, "http_get"):
-        raise ValueError("Not connected to the service")
+        raise ValueError(_("Not connected to the service"))
     folder = directory(str(getattr(link, "hello", {}).get("service_id") or "") or None)
     folder.mkdir(parents=True, exist_ok=True)
     key = key_for(url)
@@ -80,10 +82,20 @@ def fetch(url: str, suffix: str = "", link: apilink.Link | None = None) -> Path:
     if status != 200:
         raise ValueError(_reason(status))
     if len(data) > MAX_BYTES:
-        raise ValueError("That file is too large to show.")
-    tmp = target.with_name(target.name + ".part")
-    tmp.write_bytes(data)
-    tmp.replace(target)
+        raise ValueError(_("That file is too large to show."))
+    # A temporary of this fetch's own (two threads fetching one URL each
+    # write their own and the last rename wins whole), then one rename.
+    handle, tmp_name = tempfile.mkstemp(prefix=key[:12] + ".", suffix=".part", dir=str(folder))
+    try:
+        with os.fdopen(handle, "wb") as out:
+            out.write(data)
+        os.replace(tmp_name, target)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     new_tag = got.get("ETag")
     if new_tag:
         etag_file.write_text(new_tag, encoding="utf-8")
@@ -96,10 +108,12 @@ def fetch(url: str, suffix: str = "", link: apilink.Link | None = None) -> Path:
 
 
 def _reason(status: int) -> str:
+    """The stand-in's words for a GET that did not answer 200 (§3.14:
+    translated here, where they are shown)."""
     if status == 404:
-        return "No such file on this side."
+        return _("No such file on this side.")
     if status == 413:
-        return "That file is too large to show."
+        return _("That file is too large to show.")
     if status == 403:
-        return "The service refused to read that file."
-    return f"The service answered {status}."
+        return _("The service refused to read that file.")
+    return _("The service answered {status}.").format(status=status)

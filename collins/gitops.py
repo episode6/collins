@@ -419,14 +419,90 @@ class PlanContext:
 
 
 # -- argv builders -----------------------------------------------------------------
+#
+# Every builder validates what goes on its argv and raises ValueError for a
+# value that could be read as something else: a revision through
+# `gitloads.safe_ref` (no leading "-", so no option; no whitespace, no `..`),
+# a range as two safe refs around `..` / `...`, a path through `safe_path`
+# or the pathspec rule (`_check_pathspecs`), a count as an int. The service
+# calls the builders with a client's args (`build`, D33) and runs what they
+# make, so this is where the wire's free text is held to the builders'
+# grammar — on both sides, since the client builds the same argv first.
+
+
+def _check_ref(name: object, what: str = "ref") -> str:
+    if not gitloads.safe_ref(name):
+        raise ValueError(f"not a safe {what}: {name!r}")
+    return name  # type: ignore[return-value]
+
+
+def _check_limit(limit: object) -> int:
+    """*limit* as the count on a `-n`: an int (never a string git could
+    read as anything else), at least 1, at most MAX_LIMIT."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit > MAX_LIMIT:
+        raise ValueError(f"not a count: {limit!r}")
+    return max(1, limit)
+
+
+# The most commits one `-n` may ask for (a page, a stack walk).
+MAX_LIMIT = 1_000_000
+
+
+def _check_range_arg(token: object) -> str:
+    """A `git log` revision argument: a safe ref, `a..b` / `a...b` of safe
+    refs, or one of NOT_ON_ANY_REMOTE (the two options log_argv's callers
+    pass). Anything else is a ValueError."""
+    if isinstance(token, str) and token in NOT_ON_ANY_REMOTE:
+        return token
+    if gitloads.safe_ref(token):
+        return token  # type: ignore[return-value]
+    if isinstance(token, str):
+        for dots in ("...", ".."):
+            if dots in token:
+                left, _sep, right = token.partition(dots)
+                if gitloads.safe_ref(left) and gitloads.safe_ref(right):
+                    return token
+                break
+    raise ValueError(f"not a revision or range: {token!r}")
+
+
+def _check_pathspecs(paths: object) -> list[str]:
+    """The paths a `--` tail may name, each as `:(literal)path`: bounded
+    text, relative, no `..` component, no NUL or newline. A leading "-"
+    is allowed here (the literal magic and the `--` keep it a path) so a
+    file git itself named that way can still be staged."""
+    if isinstance(paths, str | bytes) or not isinstance(paths, Iterable):
+        raise ValueError("pathspecs must be a list of paths")
+    out: list[str] = []
+    for path in paths:
+        if not isinstance(path, str) or not path or len(path) > diffmodel.MAX_PATH_CHARS:
+            raise ValueError(f"not a repository path: {path!r}")
+        if path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+            raise ValueError(f"not a repository path: {path!r}")
+        if "\0" in path or "\n" in path or "\r" in path or ".." in path.split("/"):
+            raise ValueError(f"not a repository path: {path!r}")
+        out.append(path)
+    return out
+
+
+def _check_path(path: object) -> str:
+    if not safe_path(path):
+        raise ValueError(f"not a safe repository path: {path!r}")
+    return path  # type: ignore[return-value]
 
 
 def log_argv(range_args: Sequence[str], limit: int) -> list[str]:
     """["log", "--no-decorate", LOG_FORMAT, "-n", limit, *range_args, "--"]:
-    one page of commits, newest first, for a revision range passed through
-    verbatim (`main..HEAD`, `main`, nothing for HEAD); the trailing `--`
-    keeps a branch that shares a file's name from being read as a path."""
-    return ["log", "--no-decorate", LOG_FORMAT, "-n", str(max(1, int(limit))), *range_args, "--"]
+    one page of commits, newest first, for a revision range (`main..HEAD`,
+    `main`, nothing for HEAD; `--not --remotes` for the unpushed); the
+    trailing `--` keeps a branch that shares a file's name from being
+    read as a path. ValueError for a range argument that is not a safe
+    revision, range or one of NOT_ON_ANY_REMOTE, or a limit that is not
+    an int (_check_range_arg, _check_limit)."""
+    if isinstance(range_args, str | bytes) or not isinstance(range_args, Iterable):
+        raise ValueError("range_args must be a list")
+    revisions = [_check_range_arg(token) for token in range_args]
+    return ["log", "--no-decorate", LOG_FORMAT, "-n", str(_check_limit(limit)), *revisions, "--"]
 
 
 def unpushed_argv() -> list[str]:
@@ -462,9 +538,11 @@ def stack_walk_argv(lower: str | None, upper: str, limit: int) -> list[str]:
     """["rev-list", "--topo-order", "-n", limit, "<lower>..<upper>", "--"]:
     the commits *upper* has that *lower* hasn't, children before parents —
     so *upper*'s own commit comes first, and a branch tip nearer *upper*
-    comes before one further down. All of *upper* without a *lower*."""
-    rev = f"{lower}..{upper}" if lower else upper
-    return ["rev-list", "--topo-order", "-n", str(max(1, int(limit))), rev, "--"]
+    comes before one further down. All of *upper* without a *lower*.
+    ValueError for a ref that isn't safe or a limit that isn't an int."""
+    _check_ref(upper)
+    rev = f"{_check_ref(lower)}..{upper}" if lower else upper
+    return ["rev-list", "--topo-order", "-n", str(_check_limit(limit)), rev, "--"]
 
 
 def staged_paths_argv() -> list[str]:
@@ -498,15 +576,17 @@ def fixup_argv(sha: str) -> list[str]:
     """["commit", "-q", "-m", "fixup! <sha>"]: the index as a fixup of
     *sha* — the full sha rather than `--fixup=`'s copy of the target's
     title (titles repeat, hashes don't; `rebase --autosquash` matches
-    either form)."""
-    return ["commit", "-q", "-m", f"fixup! {sha}"]
+    either form). ValueError for a *sha* that isn't a safe ref."""
+    return ["commit", "-q", "-m", f"fixup! {_check_ref(sha, 'commit')}"]
 
 
 def revert_argv(sha: str, commit: bool) -> list[str]:
     """["revert", "--no-edit", sha] for a commit made on the spot (git's
     own "Revert …" message, no editor on a terminal nobody watches), or
     ["revert", "--no-commit", sha] for the revert applied to the working
-    tree and the index alone — `--no-commit` leaves nothing to edit."""
+    tree and the index alone — `--no-commit` leaves nothing to edit.
+    ValueError for a *sha* that isn't a safe ref."""
+    _check_ref(sha, "commit")
     if commit:
         return ["revert", "--no-edit", sha]
     return ["revert", "--no-commit", sha]
@@ -570,14 +650,15 @@ def no_editor_env(environ: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def rev_parse_argv(rev: str) -> list[str]:
-    """["rev-parse", "--verify", "--quiet", rev]"""
-    return ["rev-parse", "--verify", "--quiet", rev]
+    """["rev-parse", "--verify", "--quiet", rev]. ValueError for a *rev*
+    that isn't a safe ref (`--show-toplevel` is an option, not a rev)."""
+    return ["rev-parse", "--verify", "--quiet", _check_ref(rev, "revision")]
 
 
 def merge_base_argv(a: str, b: str) -> list[str]:
     """["merge-base", a, b]: the commit a symmetric range `a...b` is
-    measured from."""
-    return ["merge-base", a, b]
+    measured from. ValueError for a ref that isn't safe."""
+    return ["merge-base", _check_ref(a), _check_ref(b)]
 
 
 # -- argv builders: the diff view ------------------------------------------------------
@@ -600,8 +681,11 @@ def _exclude_pathspec(path: str) -> str:
 
 
 def _pathspecs(pathspecs: Sequence[str], excludes: Sequence[str] = ()) -> list[str]:
-    """The tail after `--`: every pathspec literal, then every exclude."""
-    return [*(literal_pathspec(path) for path in pathspecs), *(_exclude_pathspec(path) for path in excludes)]
+    """The tail after `--`: every pathspec literal, then every exclude.
+    ValueError for a path the pathspec rule refuses (_check_pathspecs)."""
+    paths = _check_pathspecs(pathspecs)
+    outs = _check_pathspecs(excludes)
+    return [*(literal_pathspec(path) for path in paths), *(_exclude_pathspec(path) for path in outs)]
 
 
 def _range_args(load: object, parent_target: str | None) -> list[str] | None:
@@ -609,13 +693,14 @@ def _range_args(load: object, parent_target: str | None) -> list[str] | None:
     working tree, ["--staged"] for the index, ["<parent_target>...HEAD"]
     for the branch (None without a parent: there is nothing to measure
     against), ["a...b"] for a range. None for a commit (that is a `show`)
-    and anything malformed."""
+    and anything malformed; ValueError for a *parent_target* that isn't a
+    safe ref (it goes on the argv)."""
     if load == "unstaged":
         return []
     if load == "staged":
         return ["--staged"]
     if load == "branch":
-        return [f"{parent_target}...HEAD"] if parent_target else None
+        return [f"{_check_ref(parent_target, 'parent')}...HEAD"] if parent_target else None
     if gitloads.is_range(load):
         return [gitloads.range_of(load)]
     return None
@@ -624,7 +709,9 @@ def _range_args(load: object, parent_target: str | None) -> list[str] | None:
 def show_argv(ref: str, pathspecs: Sequence[str] = (), excludes: Sequence[str] = ()) -> list[str]:
     """[*DIFF_PREFIX_ARGS, "show", "--format=", "--no-ext-diff",
     "--find-renames", "--no-color", ref, "--", *literal pathspecs,
-    *excludes]: one commit's diff with no message."""
+    *excludes]: one commit's diff with no message. ValueError for a *ref*
+    that isn't safe or a path the pathspec rule refuses."""
+    _check_ref(ref)
     return [*DIFF_PREFIX_ARGS, "show", "--format=", *DIFF_ARGS, ref, "--", *_pathspecs(pathspecs, excludes)]
 
 
@@ -677,7 +764,9 @@ def untracked_diff_argv(path: str) -> list[str]:
     "--no-index", "--", "/dev/null", path]: an untracked file as the
     new-file patch git itself writes — header, mode, `Binary files … differ`
     when it is one. Exits 1 (the two differ), which run_git_bytes is told
-    is fine."""
+    is fine. ValueError for a *path* that isn't a safe repository path
+    (relative, inside the tree: `--no-index` would read any file)."""
+    _check_path(path)
     return [*DIFF_PREFIX_ARGS, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", _DEV_NULL, path]
 
 
@@ -709,8 +798,12 @@ def file_at_argv(ref: str, path: str) -> list[str]:
     """["show", "<ref>:<path>"]: the blob *path* is at *ref* — INDEX_REF
     ("") for the index (`:path`), else a revision (`HEAD:path`,
     `<sha>^:path`, `<merge-base>:path`). *path* is repository-relative, as
-    the diff names it (`ref:./path` would be relative to the cwd)."""
-    return ["show", f"{ref}:{path}"]
+    the diff names it (`ref:./path` would be relative to the cwd).
+    ValueError for a *ref* that is neither INDEX_REF nor safe, or a *path*
+    that isn't a safe repository path."""
+    if ref != INDEX_REF:
+        _check_ref(ref)
+    return ["show", f"{ref}:{_check_path(path)}"]
 
 
 def side_ref(
@@ -829,8 +922,9 @@ _SIDE_STAGES: dict[str, int] = {"ours": STAGE_OURS, "theirs": STAGE_THEIRS}
 
 def unmerged_stages_argv(path: str) -> list[str]:
     """["ls-files", "-u", "-z", "--", literal path]: the index's stages
-    for *path* — nothing at all when it isn't unmerged."""
-    return ["ls-files", "-u", "-z", "--", literal_pathspec(path)]
+    for *path* — nothing at all when it isn't unmerged. ValueError for a
+    path the pathspec rule refuses."""
+    return ["ls-files", "-u", "-z", "--", *_pathspecs([path])]
 
 
 def checkout_side_argv(side: str, paths: Sequence[str]) -> list[str]:

@@ -34,8 +34,15 @@ it is one: `path`, `file`, `dir`, `target`, `folder`); and a
 `Gio.File.new_for_path(...)` chained into `load_*`, `replace*`,
 `monitor*`, `trash`, `delete`, `query_info*`, `read*`, `append_to*`,
 `create*`, `copy`, `move`, `make_directory*`, `enumerate_children*`,
-`set_contents*`. A site is named ``module:qualname:call`` — the module
-under `collins`, the enclosing function or method (`Class.method`, or
+`set_contents*`; and the image constructors that read a file
+(`Gdk.Texture.new_from_filename`, `GdkPixbuf.Pixbuf.new_from_file*`,
+`GdkPixbuf.PixbufAnimation.new_from_file*`, `IMAGE_FILE_CALLS`). A
+name bound to a `Path(...)`, a path expression (`root / name`, `.parent`,
+`.with_*`) or a `Gio.File.new_for_path(...)` inside a function is a path
+from then on (`candidate = Path(root, path); candidate.is_file()` is a
+site), so the hint rule is not the only way a receiver is known to be a
+path. A site is named ``module:qualname:call`` — the module under
+`collins`, the enclosing function or method (`Class.method`, or
 ``<module>``) and the dotted call — so a site keeps its name across
 line moves and repeats inside one function count once.
 """
@@ -94,6 +101,15 @@ GIO_FILE_METHODS = (
     "load_", "replace", "monitor", "trash", "delete", "query_info", "read", "append_to", "create", "copy",
     "move", "make_directory", "enumerate_children", "set_contents",
 )
+# Image constructors that open a file by path (a dotted call's tail).
+IMAGE_FILE_CALLS = frozenset(
+    {
+        "Texture.new_from_filename", "Texture.new_from_file", "Pixbuf.new_from_file",
+        "Pixbuf.new_from_file_at_scale", "Pixbuf.new_from_file_at_size", "PixbufAnimation.new_from_file",
+        "PixbufAnimation.new_from_file_at_scale",
+    }
+)
+PATH_CONSTRUCTORS = ("Path", "PurePath", "PurePosixPath", "PosixPath")
 
 
 def _is_gtk_module(tree: ast.Module) -> bool:
@@ -133,37 +149,66 @@ def _dotted(node: ast.AST) -> str | None:
     return None
 
 
-def _looks_like_path(node: ast.AST) -> bool:
+def _is_path_call(node: ast.AST) -> bool:
+    """A `Path(...)` / `PurePath` / `PurePosixPath` / `PosixPath` call."""
+    if not isinstance(node, ast.Call):
+        return False
+    name = _dotted(node.func) or ""
+    return name.split(".")[-1] in PATH_CONSTRUCTORS
+
+
+def _is_gio_file_call(node: ast.AST) -> bool:
+    """A `Gio.File.new_for_path(...)` call."""
+    if not isinstance(node, ast.Call):
+        return False
+    chain = _dotted(node.func) or ""
+    return chain.endswith("Gio.File.new_for_path") or chain.endswith("File.new_for_path")
+
+
+def _looks_like_path(node: ast.AST, path_names: frozenset[str] = frozenset()) -> bool:
     """Whether a method's receiver is a path: a `Path(...)` / `PurePath`
-    / `PurePosixPath` call, a chain ending in `.parent` or `.with_*`, or
-    a name carrying a path hint."""
-    if isinstance(node, ast.Call):
-        name = _dotted(node.func) or ""
-        return name.split(".")[-1] in ("Path", "PurePath", "PurePosixPath", "PosixPath")
+    / `PurePosixPath` call, a chain ending in `.parent` or `.with_*`, a
+    `/` expression whose left side is one, a name bound to one of those
+    in the enclosing function (*path_names*), or a name carrying a path
+    hint."""
+    if _is_path_call(node):
+        return True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return _looks_like_path(node.left, path_names)
     if isinstance(node, ast.Attribute) and (node.attr == "parent" or node.attr.startswith("with_")):
         return True
     dotted = _dotted(node)
     if dotted is None:
         return False
+    if dotted in path_names:
+        return True
     leaf = dotted.split(".")[-1].lower()
     return any(hint in leaf for hint in PATH_NAME_HINTS)
 
 
-def _gio_chain(node: ast.Call) -> str | None:
-    """`Gio.File.new_for_path(...).<method>` chained: the method's name."""
+def _gio_chain(node: ast.Call, gio_names: frozenset[str] = frozenset()) -> str | None:
+    """`Gio.File.new_for_path(...).<method>` chained, or `<name>.<method>`
+    on a name bound to one (*gio_names*): the method's name."""
     func = node.func
     if not isinstance(func, ast.Attribute):
         return None
+    receiver = _dotted(func.value)
+    if receiver is not None and receiver in gio_names:
+        return func.attr
     inner = func.value
     while isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute):
-        chain = _dotted(inner.func) or ""
-        if chain.endswith("Gio.File.new_for_path") or chain.endswith("File.new_for_path"):
+        if _is_gio_file_call(inner):
             return func.attr
         inner = inner.func.value
     return None
 
 
-def _site_name(node: ast.Call, aliases: dict[str, str]) -> str | None:
+def _site_name(
+    node: ast.Call,
+    aliases: dict[str, str],
+    path_names: frozenset[str] = frozenset(),
+    gio_names: frozenset[str] = frozenset(),
+) -> str | None:
     """The call's name when it is a filesystem or process site, else None."""
     func = node.func
     dotted = _dotted(func)
@@ -181,16 +226,17 @@ def _site_name(node: ast.Call, aliases: dict[str, str]) -> str | None:
             "subprocess."
         ):
             return aliases[dotted]
+        tail = ".".join(dotted.split(".")[-2:])
+        if tail in IMAGE_FILE_CALLS:
+            return tail
     if isinstance(func, ast.Attribute):
-        gio = _gio_chain(node)
+        gio = _gio_chain(node, gio_names)
         if gio is not None and gio.startswith(GIO_FILE_METHODS):
             return f"Gio.File.new_for_path.{gio}"
         method = func.attr
-        if method in PATH_METHODS and _looks_like_path(func.value):
+        if method in PATH_METHODS and _looks_like_path(func.value, path_names):
             return f"Path.{method}"
-        if method in PATH_METHODS and _dotted(func.value) is None and isinstance(func.value, ast.Call):
-            return f"Path.{method}" if _looks_like_path(func.value) else None
-        if method in PATH_METHODS_IF_PATH and _looks_like_path(func.value):
+        if method in PATH_METHODS_IF_PATH and _looks_like_path(func.value, path_names):
             return f"Path.{method}"
     return None
 
@@ -208,12 +254,56 @@ def _aliases(tree: ast.Module) -> dict[str, str]:
     return found
 
 
+def _bound_names(node: ast.AST) -> list[str]:
+    """The names a function binds to *node*'s value, before the body is
+    walked: every `name = <path-like>` / `name: T = <path-like>` in it
+    (nested functions included, so a worker closure's binding counts),
+    for `_looks_like_path` and `_gio_chain`."""
+    names: list[str] = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Assign):
+            targets, value = child.targets, child.value
+        elif isinstance(child, ast.AnnAssign) and child.value is not None:
+            targets, value = [child.target], child.value
+        else:
+            continue
+        if not _path_valued(value):
+            continue
+        names.extend(target.id for target in targets if isinstance(target, ast.Name))
+    return names
+
+
+def _path_valued(value: ast.AST) -> bool:
+    """Whether an assigned *value* is a path: a `Path(...)`, a `/` off a
+    path, a `.parent` or `.with_*`."""
+    if _is_path_call(value):
+        return True
+    if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Div):
+        return _looks_like_path(value.left)
+    return isinstance(value, ast.Attribute) and (value.attr == "parent" or value.attr.startswith("with_"))
+
+
+def _gio_bound_names(node: ast.AST) -> list[str]:
+    names: list[str] = []
+    for child in ast.walk(node):
+        if isinstance(child, ast.Assign) and _is_gio_file_call(child.value):
+            names.extend(t.id for t in child.targets if isinstance(t, ast.Name))
+        elif isinstance(child, ast.AnnAssign) and child.value is not None and _is_gio_file_call(child.value):
+            if isinstance(child.target, ast.Name):
+                names.append(child.target.id)
+    return names
+
+
 class _Walker(ast.NodeVisitor):
     def __init__(self, module: str, aliases: dict[str, str]) -> None:
         self.module = module
         self.aliases = aliases
         self.stack: list[str] = []
         self.sites: set[str] = set()
+        # The path-bound and Gio.File-bound names of the enclosing
+        # functions (outermost first; a nested function sees its own too).
+        self.path_names: list[frozenset[str]] = [frozenset()]
+        self.gio_names: list[frozenset[str]] = [frozenset()]
 
     def _qualname(self) -> str:
         return ".".join(self.stack) if self.stack else "<module>"
@@ -225,7 +315,11 @@ class _Walker(ast.NodeVisitor):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.stack.append(node.name)
+        self.path_names.append(self.path_names[-1] | frozenset(_bound_names(node)))
+        self.gio_names.append(self.gio_names[-1] | frozenset(_gio_bound_names(node)))
         self.generic_visit(node)
+        self.gio_names.pop()
+        self.path_names.pop()
         self.stack.pop()
 
     visit_AsyncFunctionDef = visit_FunctionDef
@@ -234,7 +328,7 @@ class _Walker(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        name = _site_name(node, self.aliases)
+        name = _site_name(node, self.aliases, self.path_names[-1], self.gio_names[-1])
         if name is not None:
             self.sites.add(f"{self.module}:{self._qualname()}:{name}")
         self.generic_visit(node)

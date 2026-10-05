@@ -29,11 +29,48 @@ def test_no_stale_entry_in_the_allowlist():
 
 def test_the_git_pages_sites_are_gone():
     found = pathless.walk()
-    for prefix in ("gitpage:", "gitinfo:", "gitsidebar:", "remotegit:", "gitloads:", "gitpatch:"):
+    for prefix in ("gitpage:", "gitinfo:", "remotegit:", "gitloads:", "gitpatch:"):
         left = sorted(s for s in found if s.startswith(prefix))
         assert not left, left
+    # The sidebar's one: the file row's "is there a file to open" check,
+    # which is `fs.stat`'s once PR-2.3 brings it (the allowlist says so).
+    assert sorted(s for s in found if s.startswith("gitsidebar:")) == [
+        "gitsidebar:GitSidebar._file_menu_items:Path.is_file"
+    ]
     assert not any(site.startswith("window:MainWindow._run_git") for site in found)
     assert not any(site.startswith("window:MainWindow._on_git_") for site in found)
+
+
+def test_the_walker_follows_a_name_bound_to_a_path_and_the_image_constructors():
+    """A `candidate = Path(root, p); candidate.is_file()` is a site (the
+    hint rule alone missed it), a name bound to `Gio.File.new_for_path`
+    too, and the texture / pixbuf constructors that open a file."""
+    import ast
+
+    source = (
+        "from pathlib import Path\n"
+        "from gi.repository import Gdk, GdkPixbuf, Gio\n"
+        "def f(root, p):\n"
+        "    candidate = Path(root, p)\n"
+        "    if candidate.is_file():\n"
+        "        pass\n"
+        "    other = root / p\n"
+        "    other.exists()\n"
+        "    gfile = Gio.File.new_for_path(p)\n"
+        "    gfile.load_contents(None)\n"
+        "    Gdk.Texture.new_from_filename(p)\n"
+        "    GdkPixbuf.Pixbuf.new_from_file_at_scale(p, 1, 1, True)\n"
+        "    plain = 'x'\n"
+        "    plain.exists()\n"
+    )
+    sites = pathless.sites_of("m", ast.parse(source))
+    assert sites == {
+        "m:f:Path.is_file",
+        "m:f:Path.exists",
+        "m:f:Gio.File.new_for_path.load_contents",
+        "m:f:Texture.new_from_filename",
+        "m:f:Pixbuf.new_from_file_at_scale",
+    }
 
 
 def test_the_walker_covers_the_gtk_modules_and_the_helpers():

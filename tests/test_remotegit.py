@@ -10,6 +10,8 @@ refusal is `ApplyResult.stale`, and a blob is the HTTP GET."""
 
 from __future__ import annotations
 
+import threading
+
 import pytest
 
 from collins import apilink, gitinfo, gitops, gitpatch, remotegit
@@ -104,13 +106,18 @@ def test_gitinfo_reads_come_off_the_mirror_and_one_fetch_serves_them_all(link):
     assert gitinfo.tree_signature("/srv/project", "main") == (1700000000000, SHA, "b" * 40, ())
     assert gitinfo.refs_signature("/srv/project") == "r1"
     assert gitinfo.operation_markers("/srv/project") == ()
+    # The first read of a cwd is the one call the main thread waits for
+    # (MAIN_THREAD_TIMEOUT_S at most); everything above came off it.
     assert [m["t"] for m, _t in link.calls] == ["git.info"], link.calls
     assert link.calls[0][0]["cwd"] == "/srv/project" and "changes" not in link.calls[0][0]
-    # The in-progress gate asks fresh (the markers as they are now).
+    assert link.calls[0][1] == remotegit.MAIN_THREAD_TIMEOUT_S
+    # The in-progress gate asks fresh: on the main thread that is the entry
+    # as it is plus a refresh by send (the fake's send answers at once).
     assert gitops.in_progress_at("/srv/project") is None
-    assert len(link.calls) == 2 and "changes" not in link.calls[1][0]
+    assert len(link.calls) == 1 and link.sent[-1]["t"] == "git.info" and "changes" not in link.sent[-1]
     link.answers["git.info"] = lambda m: {**INFO, "operation": "rebase", "markers": ["rebase-merge"]}
-    assert gitops.in_progress_at("/srv/project").kind == "rebase"
+    gitops.in_progress_at("/srv/project")  # serves the old entry, refreshes behind it...
+    assert gitops.in_progress_at("/srv/project").kind == "rebase"  # ...which the next read sees
     assert gitops.in_progress_operation_at("/srv/project") == "rebase"
 
 
@@ -119,7 +126,7 @@ def test_an_old_entry_is_refreshed_and_the_refs_digest_travels(link, monkeypatch
     entry = remotegit.mirror().entry("/srv/project")
     monkeypatch.setattr(remotegit.time, "monotonic", lambda: entry.fetched_at + 5.0)
     gitinfo.current_branch("/srv/project")
-    assert len(link.calls) == 2 and link.calls[1][0]["known_refs"] == "r1"
+    assert len(link.calls) == 1 and link.sent[-1]["t"] == "git.info" and link.sent[-1]["known_refs"] == "r1"
     # A reply without heads (the digest matched) keeps the heads it had.
     slim = {k: v for k, v in INFO.items() if k not in ("heads", "remote_heads", "remotes")}
     link.answers["git.info"] = lambda m: dict(slim)
@@ -128,11 +135,70 @@ def test_an_old_entry_is_refreshed_and_the_refs_digest_travels(link, monkeypatch
 
 
 def test_refresh_forces_a_fetch_and_a_fresh_entry_is_served(link):
+    """`gitinfo.refresh` is the one plain read that waits on the main
+    thread (the page re-seeds its signatures from the answer), and for
+    MAIN_THREAD_TIMEOUT_S at most."""
     gitinfo.current_branch("/srv/project")
     gitinfo.default_branch("/srv/project")
-    assert len(link.calls) == 1
+    assert len(link.calls) == 1 and not link.sent
+    link.answers["git.info"] = lambda m: {**INFO, "branch": "fresh"}
     gitinfo.refresh("/srv/project")
-    assert len(link.calls) == 2
+    assert len(link.calls) == 2 and link.calls[1][1] == remotegit.MAIN_THREAD_TIMEOUT_S and not link.sent
+    assert gitinfo.current_branch("/srv/project") == "fresh"
+
+
+def _in_thread(fn):
+    out: list = []
+    worker = threading.Thread(target=lambda: out.append(fn()))
+    worker.start()
+    worker.join(5.0)
+    return out[0]
+
+
+def test_a_worker_thread_blocks_for_a_fresh_answer_and_the_main_thread_never_does(link, monkeypatch):
+    """§3.23: nothing new runs on the main loop. Off it a stale entry is
+    one blocking call with the run's full wait; on it the entry there is
+    served as it is and refreshed by send, one in flight per cwd."""
+    gitinfo.current_branch("/srv/project")
+    entry = remotegit.mirror().entry("/srv/project")
+    monkeypatch.setattr(remotegit.time, "monotonic", lambda: entry.fetched_at + 5.0)
+    link.answers["git.info"] = lambda m: {**INFO, "branch": "worker"}
+    assert _in_thread(lambda: gitinfo.current_branch("/srv/project")) == "worker"
+    assert len(link.calls) == 2 and link.calls[1][1] == remotegit.CALL_MARGIN_S + gitops.GIT_TIMEOUT_S
+    # The main thread: the entry as it is, the refresh behind it. A send
+    # that has not answered yet is not sent twice.
+    held: list = []
+    link.send = lambda message, on_reply=None, on_refused=None: held.append((message, on_reply))
+    link.answers["git.info"] = lambda m: {**INFO, "branch": "later"}
+    monkeypatch.setattr(remotegit.time, "monotonic", lambda: entry.fetched_at + 10.0)  # stale again
+    assert gitinfo.current_branch("/srv/project") == "worker"
+    assert gitinfo.current_branch("/srv/project") == "worker"
+    assert len(held) == 1 and len(link.calls) == 2
+    held[0][1]({**INFO, "branch": "later"})
+    assert gitinfo.current_branch("/srv/project") == "later"
+    # has_changes on the main thread waits, but only MAIN_THREAD_TIMEOUT_S.
+    link.answers["git.info"] = lambda m: {**INFO, "changes": {"staged": True, "unstaged": False}}
+    assert gitinfo.has_changes("/srv/project") is True
+    assert link.calls[-1][0]["changes"] is True and link.calls[-1][1] == remotegit.MAIN_THREAD_TIMEOUT_S
+
+
+def test_a_service_that_did_not_answer_keeps_the_entry_before(link, monkeypatch):
+    """A hiccup (``gone``: the link down, a timeout) is not "not a
+    repository": the entry before is kept, marked unreachable and
+    re-stamped, so the page leaves its view alone; a real refusal (the
+    cwd not allowed) drops it."""
+    assert gitinfo.current_branch("/srv/project") == "feat"
+    entry = remotegit.mirror().entry("/srv/project")
+    monkeypatch.setattr(remotegit.time, "monotonic", lambda: entry.fetched_at + 5.0)
+    link.answers["git.info"] = RequestRefused(protocol.ERROR_GONE, "The service did not answer in time")
+    assert _in_thread(lambda: gitinfo.current_branch("/srv/project")) == "feat"
+    kept = remotegit.mirror().entry("/srv/project")
+    assert kept.unreachable and kept.fetched_at == entry.fetched_at + 5.0
+    assert str(gitinfo.repo_root("/srv/project")) == "/srv/project"
+    monkeypatch.setattr(remotegit.time, "monotonic", lambda: entry.fetched_at + 10.0)
+    link.answers["git.info"] = RequestRefused(protocol.ERROR_REFUSED, "not a directory the service may use")
+    assert _in_thread(lambda: gitinfo.current_branch("/srv/project")) is None
+    assert remotegit.mirror().entry("/srv/project") is None
 
 
 def test_has_changes_asks_fresh_with_changes(link):
@@ -167,13 +233,28 @@ def test_git_changed_refreshes_the_entry_without_blocking_and_reaches_the_listen
     assert len(heard) == 1
 
 
-def test_watch_and_unwatch_are_sends(link):
-    remotegit.mirror().watch("/srv/project", ["a.txt", "b/c.txt"], state="s1")
-    assert link.sent[-1] == {
-        "t": "git.watch", "cwd": "/srv/project", "files": ["a.txt", "b/c.txt"], "state": "s1"
+def test_watch_and_unwatch_are_sends_by_handle_and_a_reset_sends_the_live_watches_again(link):
+    mirror = remotegit.mirror()
+    mirror.watch("/srv/project", ["a.txt", "b/c.txt"], state="s1", handle="page-a")
+    installed = {
+        "t": "git.watch", "cwd": "/srv/project", "handle": "page-a", "files": ["a.txt", "b/c.txt"],
+        "state": "s1",
     }
-    remotegit.mirror().unwatch("/srv/project")
-    assert link.sent[-1] == {"t": "git.unwatch", "cwd": "/srv/project"}
+    assert link.sent[-1] == installed
+    mirror.watch("/srv/project", ["a.txt"], state="s2", handle="page-b")  # a second page on the same tree
+    assert set(mirror.watch_handles()) == {"page-a", "page-b"}
+    # A reconnect: the entries go, the live watches are installed again.
+    gitinfo.current_branch("/srv/project")
+    link.sent.clear()
+    remotegit.reset()
+    assert mirror.entry("/srv/project") is None
+    assert [m["handle"] for m in link.sent if m["t"] == "git.watch"] == ["page-a", "page-b"]
+    assert link.sent[0] == installed
+    mirror.unwatch("page-a")
+    assert link.sent[-1] == {"t": "git.unwatch", "handle": "page-a"}
+    assert mirror.watch_handles() == ("page-b",)
+    mirror.unwatch("page-b")
+    assert mirror.watch_handles() == ()
 
 
 def test_reset_forgets_every_entry(link):
@@ -211,7 +292,9 @@ def test_run_git_sends_the_builder_by_name_never_an_argv(link):
     assert message["t"] == "git.run" and message["builder"] == "log_argv"
     assert message["args"] == {"range_args": ["main..HEAD"], "limit": 7}
     assert "argv" not in message and message["env"] == "default" and message["timeout"] == 3.0
-    assert timeout == 3.0 + remotegit.CALL_MARGIN_S
+    assert timeout == 3.0 + 3.0  # the margin over git's timeout is at most the timeout itself
+    gitops.run_git("/srv/project", gitops.log_argv(["main..HEAD"], 7), timeout=30.0)
+    assert link.calls[-1][1] == 30.0 + remotegit.CALL_MARGIN_S
 
 
 def test_run_git_bytes_carries_stdin_and_ok_statuses(link):

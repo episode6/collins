@@ -86,9 +86,16 @@ class GitFeed:
         dispatch: Callable[[Callable[[], object]], None] | None = None,
         spawn: Callable[[Callable[[], None], str], None] | None = None,
     ) -> None:
+        if gitops.transport() is not None:
+            # The service runs git on this machine: with a transport
+            # installed in its process every builder run here would go
+            # back over the API (git.plan recursing into itself).
+            raise RuntimeError("gitfeed: a git transport is installed in the service's process")
         self.core = core
         self._dispatch = dispatch or _dispatch_default
         self._spawn = spawn or _spawn_default
+        # A watch per client and handle (a page's), not per cwd: two pages
+        # on one tree each have their own.
         self._watches: dict[tuple[int, str], _Watch] = {}
 
     # -- routing -------------------------------------------------------------------------
@@ -129,8 +136,11 @@ class GitFeed:
             )
         return cwd
 
-    def _later(self, name: str, work: Callable[[], dict]) -> protocol.Deferred:
-        """*work* on a thread, its reply dict settled on the main loop."""
+    def _later(self, name: str, work: Callable[[], dict], re_id: int | None = None) -> protocol.Deferred:
+        """*work* on a thread, its reply dict settled on the main loop. A
+        *work* that raises settles a ``failed`` refusal of *re_id* (the
+        request's id) rather than never settling: the peer gets exactly
+        one response either way."""
         deferred = protocol.Deferred()
 
         def run() -> None:
@@ -138,8 +148,11 @@ class GitFeed:
                 reply = work()
             except Exception:
                 log.exception("gitfeed: %s failed on its thread", name)
-                reply = None
-            self._dispatch(lambda: deferred.settle(reply) if reply is not None else None)
+                reply = protocol.refuse(
+                    re_id if re_id is not None else 0, protocol.ERROR_FAILED,
+                    "{name} failed on the service", {"name": name},
+                )
+            self._dispatch(lambda: deferred.settle(reply))
 
         self._spawn(run, name)
         return deferred
@@ -179,7 +192,7 @@ class GitFeed:
                 )
             return protocol.reply(re_id, status=status, stdout=stdout, stderr=stderr, unreachable=False)
 
-        return self._later("git-run", work)
+        return self._later("git-run", work, re_id)
 
     def _environment(self, name: str) -> dict[str, str] | None:
         if name == protocol.GIT_ENV_DEFAULT:
@@ -212,7 +225,7 @@ class GitFeed:
                 fields["state"] = gitops.tree_state_signature(cwd)
             return protocol.reply(re_id, **fields)
 
-        return self._later("git-info", work)
+        return self._later("git-info", work, re_id)
 
     # -- git.sizes -------------------------------------------------------------------------
 
@@ -226,17 +239,26 @@ class GitFeed:
         def work() -> dict:
             root = gitfiles.repo_root(cwd)
             base = str(root) if root is not None else cwd
-            return protocol.reply(re_id, sizes=gitops.file_sizes(base, paths))
+            # A symlink out of the tree is not sized (None, as a file that
+            # is gone): the size is as much a leak as the bytes would be.
+            inside = [p for p in paths if files.is_inside(base, os.path.join(base, p))]
+            sizes = dict.fromkeys(paths)
+            sizes.update(gitops.file_sizes(base, inside))
+            return protocol.reply(re_id, sizes=sizes)
 
-        return self._later("git-sizes", work)
+        return self._later("git-sizes", work, re_id)
 
     # -- the watch -------------------------------------------------------------------------
 
     def watch(self, message: protocol.Message, client) -> dict:
+        """`git.watch {cwd, handle, files, state}`: a watch of *cwd* under
+        the client's *handle* (the page's own name for it: two pages on
+        one tree keep two watches, and one page's unwatch never takes the
+        other's down). The same handle again replaces that watch."""
         cwd = self._cwd(message, client)
         if isinstance(cwd, dict):
             return cwd
-        key = (id(client), cwd)
+        key = (id(client), str(message.get("handle")))
         old = self._watches.pop(key, None)
         if old is not None:
             old.stop()
@@ -248,14 +270,18 @@ class GitFeed:
         return protocol.reply(message.id)
 
     def unwatch(self, message: protocol.Message, client) -> dict:
-        cwd = message.get("cwd")
-        watch = self._watches.pop((id(client), str(cwd)), None)
+        """`git.unwatch {handle}`: that one watch of the client's, gone."""
+        watch = self._watches.pop((id(client), str(message.get("handle"))), None)
         if watch is not None:
             watch.stop()
         return protocol.reply(message.id)
 
     def watching(self, client, cwd: str) -> bool:
-        return (id(client), cwd) in self._watches
+        """Whether any watch of *client* is on *cwd* (the tests' probe)."""
+        return any(key[0] == id(client) and watch.cwd == cwd for key, watch in self._watches.items())
+
+    def watch_of(self, client, handle: str) -> _Watch | None:
+        return self._watches.get((id(client), handle))
 
     # -- git.plan --------------------------------------------------------------------------
 
@@ -305,7 +331,7 @@ class GitFeed:
                 conflicts=bool(result.conflicts),
             )
 
-        return self._later("git-plan", work)
+        return self._later("git-plan", work, re_id)
 
     # -- the blob GET ----------------------------------------------------------------------
 
@@ -381,8 +407,11 @@ def blob_tag(cwd: str, at: str, ref: str, path: str) -> str | None:
     root = gitfiles.repo_root(cwd)
     base = str(root) if root is not None else cwd
     if at == gitops.AT_WORKTREE:
+        full = os.path.join(base, path)
+        if not files.is_inside(base, full):
+            return None  # a symlink out of the tree: nothing to tag (read_blob: 404)
         try:
-            stat = os.stat(os.path.join(base, path))
+            stat = os.stat(full)
         except OSError:
             return None
         return f'"{stat.st_mtime_ns}-{stat.st_size}"'
@@ -409,12 +438,26 @@ def read_blob(cwd: str, at: str, ref: str, path: str, if_none_match: str | None)
     root = gitfiles.repo_root(cwd)
     base = str(root) if root is not None else cwd
     if at == gitops.AT_WORKTREE:
+        full = os.path.join(base, path)
+        # The path resolved (symlinks followed) must still be in the tree:
+        # a link out of it reads as no such file, the size included.
+        if not files.is_inside(base, full):
+            return 404, {}, b""
         try:
-            if os.path.getsize(os.path.join(base, path)) > gitops.MAX_BLOB_BYTES:
+            if os.path.getsize(full) > gitops.MAX_BLOB_BYTES:
                 return 413, {}, b""
         except OSError:
             return 404, {}, b""
-    data = gitops.file_at(base, git_ref, path)
+        data = gitops.file_at(base, None, path)
+    else:
+        # The index or a revision: git's own read, the size checked here
+        # so a blob over the cap is 413 on every side, not 404.
+        result = gitops.run_git_blob(base, gitops.file_at_argv(git_ref, path))
+        if not result.ok:
+            return 404, {}, b""
+        if len(result.data) > gitops.MAX_BLOB_BYTES:
+            return 413, {}, b""
+        data = result.data
     if data is None:
         return 404, {}, b""
     headers = {"Content-Type": _OCTET_STREAM}
@@ -514,7 +557,13 @@ class _Watch:
         cwd = self.cwd
 
         def work() -> None:
-            found = signatures(cwd)
+            # A compare that raises still lands (the None triple, as
+            # outside a repository), so the watch is never stuck checking.
+            try:
+                found = signatures(cwd)
+            except Exception:
+                log.exception("gitfeed: the watch's compare of %s failed", cwd)
+                found = (None, None, None)
             self.feed._dispatch(lambda: self._checked(found))
 
         self.feed._spawn(work, "git-watch")
