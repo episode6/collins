@@ -108,13 +108,22 @@ class RemoteNotifications(NotificationCenter):
         )
         if existing is None:
             self._rows.insert(0, row)
-        elif existing.when != row.when:
-            # A bell coalesced into it: back to the top, as the center does.
-            self._rows.remove(existing)
-            self._copy(row, existing)
-            self._rows.insert(0, existing)
         else:
+            # The echo of a write made here (D16) says nothing new: the row
+            # is already shown, and a `changed` for it would rebuild the
+            # sheet under the keyboard. Only a row that moved announces.
+            moved = any(getattr(existing, f) != getattr(row, f) for f in _FIELDS if f != "when")
+            if existing.when != row.when:
+                # A bell coalesced into it: back to the top, as the center
+                # does; the service's own clock on a row minted here is
+                # adopted in place when it is at the top already.
+                if self._rows and self._rows[0] is not existing:
+                    self._rows.remove(existing)
+                    self._rows.insert(0, existing)
+                    moved = True
             self._copy(row, existing)
+            if not moved:
+                return
         self._moved_now()
 
     @staticmethod
