@@ -55,9 +55,10 @@ content).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable, Sequence
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 
 import gi
 
@@ -76,7 +77,9 @@ from . import (  # noqa: E402
     gitpatch,
     openwith,
     openwithrows,
+    remotefiles,
 )
+from .api.protocol import RequestRefused  # noqa: E402
 from .gitmodel import BranchRef, FileRow, FileSections, Row  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -1132,7 +1135,28 @@ class GitSidebar(Gtk.Box):
         if isinstance(widget, _FileRow):
             self.emit("navigate-requested", widget.file.path, widget.side)
 
-    def _file_menu_items(self, widget: _FileRow) -> list[list[_MenuItem]]:
+    def _file_candidate(self, widget: _FileRow) -> str:
+        """The row's file under the repository root (the path the editor and
+        the apps would open), or "" when there is no root or the path is
+        not a safe one. Whether it is a file there is `fs.stat`'s."""
+        if self._repo_root is None or not gitops.safe_path(widget.file.path):
+            return ""
+        return os.path.join(self._repo_root, widget.file.path)
+
+    def _file_on_disk(self, widget: _FileRow) -> str:
+        """`_file_candidate` when the service says it is a file, else "".
+        Blocking (`remotefiles.stat_path` on the sync channel): the e2e probes'
+        (`file_menu_labels`, `activate_file_menu`); a right-click asks off
+        the main loop (`_on_files_secondary_click`)."""
+        candidate = self._file_candidate(widget)
+        if not candidate:
+            return ""
+        try:
+            return candidate if remotefiles.stat_path(candidate).is_file else ""
+        except RequestRefused:
+            return ""
+
+    def _file_menu_items(self, widget: _FileRow, full_path: str) -> list[list[_MenuItem]]:
         """The sections of a file row's context menu, each a list of
         (label, action, target, apps) — *apps* the "Open In…" submenu's
         rows, (icon, name, target) per configured app that takes a file
@@ -1145,15 +1169,12 @@ class GitSidebar(Gtk.Box):
         button, nothing committed — and, for a path on disk, the editor
         and the apps. A flat list over the working tree (no status to
         split on) gets the opens alone: the view's file buttons are the
-        rows' actions there."""
+        rows' actions there. *full_path* is the row's file under the
+        repository root, "" when there is no such file to open
+        (`_file_on_disk`: the service's `fs.stat`, PR-2.4)."""
         file = widget.file
         side = widget.side
         path = file.path
-        full_path = ""  # under the repository root; "" when there is no such file to open
-        if self._repo_root is not None and gitops.safe_path(path):
-            candidate = Path(self._repo_root, path)
-            if candidate.is_file():
-                full_path = str(candidate)
         sections = list(gitmodel.file_menu_actions(side, file.code, bool(full_path)))
         if side == "" and gitpatch.working_side(self._loaded) is not None:
             sections = sections[1:]
@@ -1236,13 +1257,29 @@ class GitSidebar(Gtk.Box):
         return False
 
     def _on_files_secondary_click(self, gesture: Gtk.GestureClick, _n: int, x: float, y: float) -> None:
+        """The row's menu, once the service says whether its file is on
+        disk (`fs.stat`, off the main loop): the menu pops when that lands,
+        if the row is still the one under the click."""
         row = self._file_list.get_row_at_y(int(y))
         if not isinstance(row, _FileRow):
             return
-        sections = self._file_menu_items(row)
+        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        candidate = self._file_candidate(row)
+        if not candidate:
+            self._pop_file_menu(row, "", x, y)
+            return
+
+        def landed(kind: str, found) -> None:
+            if self._file_list.get_row_at_y(int(y)) is not row:
+                return  # the list was rebuilt while the service answered
+            self._pop_file_menu(row, candidate if kind == "ok" and found.is_file else "", x, y)
+
+        remotefiles.off_main(lambda: remotefiles.stat_path(candidate), landed, name="git-sidebar-stat")
+
+    def _pop_file_menu(self, row: _FileRow, full_path: str, x: float, y: float) -> None:
+        sections = self._file_menu_items(row, full_path)
         if not sections:
             return
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
         menu = Gio.Menu()
         rows: list[Gtk.Widget] = []
         for items in sections:
@@ -1270,7 +1307,8 @@ class GitSidebar(Gtk.Box):
         widget = self._file_widgets.get((side, path))
         if widget is None:
             return None
-        return [label for items in self._file_menu_items(widget) for label, _a, _t, _apps in items]
+        sections = self._file_menu_items(widget, self._file_on_disk(widget))
+        return [label for items in sections for label, _a, _t, _apps in items]
 
     def file_open_with_labels(self, path: str, side: str = "") -> list[str] | None:
         """The app names the row's "Open In…" submenu lists (for the e2e);
@@ -1278,7 +1316,7 @@ class GitSidebar(Gtk.Box):
         widget = self._file_widgets.get((side, path))
         if widget is None:
             return None
-        for items in self._file_menu_items(widget):
+        for items in self._file_menu_items(widget, self._file_on_disk(widget)):
             for _label, _action, _target, apps in items:
                 if apps is not None:
                     return [name for _icon, name, _t in apps]
@@ -1290,7 +1328,7 @@ class GitSidebar(Gtk.Box):
         widget = self._file_widgets.get((side, path))
         if widget is None:
             return False
-        for items in self._file_menu_items(widget):
+        for items in self._file_menu_items(widget, self._file_on_disk(widget)):
             for name, action, target, apps in items:
                 if name != label:
                     continue

@@ -43,6 +43,7 @@ from . import (  # noqa: E402
     prmenu,
     ptyclient,
     remotediffs,
+    remotefiles,
     remoteprs,
     sandboxchip,
     sandboxstatus,
@@ -682,14 +683,27 @@ def _open_file_reference(
             _present_image(terminal, path)
             return
         tab = terminal.get_ancestor(TerminalTab)
-        if tab is not None and tab.can_open_in_editor(path):
-            # The window's action, not the tab directly: it also presents a
-            # popped-out editor window and applies the pop-out-on-small-
-            # screen policy. Line/col travel 1-based; 0 means none.
-            terminal.activate_action(
-                "win.open-in-editor", GLib.Variant("(sii)", (path, line or 0, col or 0))
-            )
+        if tab is not None:
+
+            def landed(inside: bool) -> None:
+                if terminal.get_root() is None:
+                    return  # the terminal went while the service answered
+                if not inside:
+                    _launch_default(terminal, path)
+                    return
+                # The window's action, not the tab directly: it also presents a
+                # popped-out editor window and applies the pop-out-on-small-
+                # screen policy. Line/col travel 1-based; 0 means none.
+                terminal.activate_action(
+                    "win.open-in-editor", GLib.Variant("(sii)", (path, line or 0, col or 0))
+                )
+
+            tab.ask_can_open_in_editor(path, landed)
             return
+    _launch_default(terminal, path)
+
+
+def _launch_default(terminal: Vte.Terminal, path: str) -> None:
     launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(path))
     launcher.launch(terminal.get_root(), None, _on_link_launched)
 
@@ -700,26 +714,35 @@ def _present_image(terminal: Vte.Terminal, path: str) -> None:
     button only appears when the click's own tab could actually open the
     file (an editor exists and the path is inside its project) — routed
     through the window's `open-in-editor` action, which also handles a
-    popped-out editor window."""
+    popped-out editor window. Whether it could is the service's answer
+    (`TerminalTab.ask_can_open_in_editor`), so the lightbox comes up when
+    that lands."""
     tab = terminal.get_ancestor(TerminalTab)
-    can_edit = tab is not None and tab.can_open_in_editor(path)
-    on_open = None
-    if can_edit:
 
-        def on_open() -> None:
-            terminal.activate_action(
-                "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
-            )
+    def present(can_edit: bool) -> None:
+        if terminal.get_root() is None:
+            return
+        on_open = None
+        if can_edit:
 
-    if tab is not None:
-        # No caption to record: a clicked reference is a path, not something
-        # anyone described. The line it was printed on almost always says
-        # what it is, and the transcript's own snippet fills the label in
-        # later (attachrecords lets context land in an empty slot).
-        tab.record_attachment(path)
-    present_image_lightbox(
-        terminal, path, can_open_in_editor=can_edit, on_open_in_editor=on_open
-    )
+            def on_open() -> None:
+                terminal.activate_action(
+                    "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
+                )
+
+        present_image_lightbox(
+            terminal, path, can_open_in_editor=can_edit, on_open_in_editor=on_open
+        )
+
+    if tab is None:
+        present(False)
+        return
+    # No caption to record: a clicked reference is a path, not something
+    # anyone described. The line it was printed on almost always says
+    # what it is, and the transcript's own snippet fills the label in
+    # later (attachrecords lets context land in an empty slot).
+    tab.record_attachment(path)
+    tab.ask_can_open_in_editor(path, present)
 
 
 def _setup_smooth_scroll(terminal: Vte.Terminal) -> None:
@@ -1884,6 +1907,9 @@ class TerminalTab(Gtk.Box):
         # that goes dark.
         self.link_root: str = editor_root
         self._editor = editor.EditorPane(editor_root)
+        # A move the editor queued while its follow dialog was up is judged
+        # again by the service (`cwd.settle` with `judge`, PR-2.4).
+        self._editor.set_follow_judge(self.session.judge_cwd)
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._outer.set_wide_handle(True)
@@ -2893,7 +2919,7 @@ class TerminalTab(Gtk.Box):
         across polls, once (`Session.settle_cwd`, which says why). Where the
         agent went decides how far this goes: still inside the same project
         (a worktree, most often) and the editor simply follows; anywhere
-        else and it only offers. See `editorfiles.follow_scope`."""
+        else and it only offers. See `projectfiles.follow_scope`."""
         root = str(self._editor.root)
         scope = self.session.settle_cwd(cwd, root)
         if scope is None:
@@ -3781,25 +3807,36 @@ class TerminalTab(Gtk.Box):
         shown under. Same editor gating as every other image this tab opens:
         the button appears only for a file this session could edit — which a
         downloaded copy of a remote image never is. *navigate* is the panel's
-        arrow-key hook, walking its gallery to the previous/next picture."""
-        can_edit = self.can_open_in_editor(path)
-        on_open = None
-        if can_edit:
+        arrow-key hook, walking its gallery to the previous/next picture.
+        Whether the session could edit it is the service's answer
+        (`ask_can_open_in_editor`); a remote image's copy is this device's
+        cache, never the project's, so it is never asked."""
 
-            def on_open() -> None:
-                self.activate_action(
-                    "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
-                )
+        def present(can_edit: bool) -> None:
+            if self.get_root() is None:
+                return
+            on_open = None
+            if can_edit:
 
-        present_image_lightbox(
-            self,
-            path,
-            can_open_in_editor=can_edit,
-            on_open_in_editor=on_open,
-            caption=one.caption or one.context,
-            origin=one.origin if one.remote else None,
-            navigate=navigate,
-        )
+                def on_open() -> None:
+                    self.activate_action(
+                        "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
+                    )
+
+            present_image_lightbox(
+                self,
+                path,
+                can_open_in_editor=can_edit,
+                on_open_in_editor=on_open,
+                caption=one.caption or one.context,
+                origin=one.origin if one.remote else None,
+                navigate=navigate,
+            )
+
+        if one.remote:
+            present(False)
+        else:
+            self.ask_can_open_in_editor(path, present)
 
     def _toggle_attachments_dock(self) -> None:
         """The panel chrome's dock/float button."""
@@ -5497,11 +5534,19 @@ class TerminalTab(Gtk.Box):
         open's search root)."""
         return str(self._editor.root)
 
-    def can_open_in_editor(self, path: str | Path) -> bool:
+    def ask_can_open_in_editor(self, path: str | Path, then: Callable[[bool], None]) -> None:
         """Whether `open_in_editor(path)` would land: *path* resolves inside
         the editor's project root (the pane's own guard would refuse anything
-        outside; this lets the window pick a better tab)."""
-        return editorfiles.is_inside(self._editor.root, path)
+        outside; this lets the window pick a better tab). The answer is the
+        service's (`fs.stat`'s `inside` of the root, PR-2.4), asked off the
+        main loop; `then(inside)` lands at `GLib.PRIORITY_DEFAULT`, False
+        when the service could not say."""
+        root = str(self._editor.root)
+        remotefiles.off_main(
+            lambda: remotefiles.stat_path(str(path), root).inside,
+            lambda kind, value: then(kind == "ok" and bool(value)),
+            name="editor-inside",
+        )
 
     def open_in_editor(self, path: str | Path, cursor: list | None = None) -> None:
         """Open *path* in this tab's editor, revealing the panel if it is

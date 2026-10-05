@@ -178,3 +178,69 @@ def test_a_bound_method_listener_is_held_weakly_and_its_watch_dropped_when_it_di
     link.dispatch(event)
     assert not watcher.watching(handle)
     assert link.sent[-1] == {"t": "fs.unwatch", "handle": handle}
+
+
+# -- the tree, quick open and roots (PR-2.4) ------------------------------------------
+
+
+def test_stat_list_and_walk_are_their_requests(link):
+    link.answers["fs.stat"] = {"kind": "file", "size": 3, "mtime": 7, "inside": True}
+    found = remotefiles.stat_path("/srv/p/a.txt", "/srv/p")
+    assert found == remotefiles.Stat("file", 3, 7, True) and found.is_file and not found.is_dir
+    assert link.calls[-1][0] == {"t": "fs.stat", "path": "/srv/p/a.txt", "root": "/srv/p"}
+    link.answers["fs.stat"] = {"kind": "missing", "size": None, "mtime": None, "inside": False}
+    assert remotefiles.stat_path("/srv/p/nope") == remotefiles.Stat("missing", None, None, False)
+    assert "root" not in link.calls[-1][0]
+    link.answers["fs.list"] = {
+        "entries": [
+            {"name": "alias", "kind": "symlink", "ignored": False},
+            {"name": "src", "kind": "dir", "ignored": False},
+            {"name": "a.log", "kind": "file", "ignored": True},
+        ],
+        "truncated": True,
+    }
+    entries, truncated = remotefiles.list_dir("/srv/p", "/srv/p", hidden=True)
+    assert truncated is True
+    assert [(e.name, e.is_dir, e.expandable, e.ignored) for e in entries] == [
+        ("alias", True, False, False), ("src", True, True, False), ("a.log", False, False, True),
+    ]
+    assert link.calls[-1][0] == {"t": "fs.list", "path": "/srv/p", "hidden": True, "root": "/srv/p"}
+    link.answers["fs.walk"] = {"paths": ["a.txt", "src/b.py"], "truncated": False}
+    assert remotefiles.walk_root("/srv/p") == (["a.txt", "src/b.py"], False)
+    assert link.calls[-1][0] == {"t": "fs.walk", "root": "/srv/p", "hidden": False}
+
+
+def test_a_dir_watch_sends_its_kind_and_hears_dir_changed(link):
+    heard: list[dict] = []
+    handle = remotefiles.watcher().watch("/srv/p/src", heard.append, kind=protocol.WATCH_DIR)
+    assert link.sent[-1] == {"t": "fs.watch", "path": "/srv/p/src", "kind": "dir", "handle": handle}
+    link.dispatch({"t": "dir-changed", "handle": handle, "path": "/srv/p/src"})
+    link.dispatch({"t": "dir-changed", "handle": "other", "path": "/srv/p/src"})
+    assert heard == [{"t": "dir-changed", "handle": handle, "path": "/srv/p/src"}]
+    remotefiles.reset()
+    assert link.sent[-1] == {"t": "fs.watch", "path": "/srv/p/src", "kind": "dir", "handle": handle}
+    remotefiles.watcher().unwatch(handle)
+    assert link.sent[-1] == {"t": "fs.unwatch", "handle": handle}
+
+
+def test_reset_tells_its_listeners_after_resending(link):
+    heard: list[str] = []
+
+    class Tree:
+        def on_reconnect(self) -> None:
+            heard.append("tree")
+
+    tree = Tree()
+    watcher = remotefiles.watcher()
+    watcher.on_reset(tree.on_reconnect)
+    handle = watcher.watch("/srv/p", lambda _e: None, kind=protocol.WATCH_DIR)
+    link.sent.clear()
+    remotefiles.reset()
+    assert link.sent[-1]["handle"] == handle and heard == ["tree"]
+    watcher.off_reset(tree.on_reconnect)
+    remotefiles.reset()
+    assert heard == ["tree"]
+    watcher.on_reset(tree.on_reconnect)
+    del tree  # held weakly: a tree that is gone is not called
+    remotefiles.reset()
+    assert heard == ["tree"]

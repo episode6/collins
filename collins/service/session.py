@@ -88,7 +88,7 @@ from typing import Any, Protocol
 
 from gi.repository import Gio, GLib
 
-from .. import activity, composerkeys, dropimages, editorfiles, proctree, sandboxplan
+from .. import activity, composerkeys, dropimages, proctree, projectfiles, sandboxplan
 from ..formatting import display_path
 from ..gitinfo import current_branch
 from ..i18n import _
@@ -1836,7 +1836,7 @@ class Session:
         self.host.cwd_polled(self.current_agent_cwd())
         return GLib.SOURCE_CONTINUE
 
-    def settle_cwd(self, cwd: str | None, root: str) -> editorfiles.FollowScope | None:
+    def settle_cwd(self, cwd: str | None, root: str) -> projectfiles.FollowScope | None:
         """Whether the agent has *moved* to *cwd*, as the editor rooted at
         *root* should see it: the move's scope once it has settled, None
         while it hasn't (or when it is no move at all).
@@ -1853,7 +1853,7 @@ class Session:
 
         Where the agent went decides the scope: still inside the same
         project (a worktree, most often) and the editor simply follows;
-        anywhere else and it only offers. See `editorfiles.follow_scope`."""
+        anywhere else and it only offers. See `projectfiles.follow_scope`."""
         if cwd != self._follow_pending:
             self._follow_pending = cwd
             self._follow_ticks = 1
@@ -1861,14 +1861,22 @@ class Session:
         self._follow_ticks += 1
         if self._follow_ticks < EDITOR_FOLLOW_TICKS or cwd == self._follow_settled:
             return None
-        scope = editorfiles.follow_scope(root, cwd)
-        if scope is editorfiles.FollowScope.NONE:
+        scope = projectfiles.follow_scope(root, cwd)
+        if scope is projectfiles.FollowScope.NONE:
             # Back where it already was — including the fallback the tab
             # started at, which is how leaving a worktree usually reads.
             self._follow_settled = None
             return None
         self._follow_settled = cwd
         return scope
+
+    def judge_cwd(self, cwd: str | None, root: str) -> projectfiles.FollowScope | None:
+        """`settle_cwd`'s scope of *cwd* from *root* now, with none of its
+        settling: the editor's queued move (`cwd.settle` with `judge`),
+        judged again from wherever the pane ended up (PR-2.4). None for no
+        move at all."""
+        scope = projectfiles.follow_scope(root, cwd)
+        return None if scope is projectfiles.FollowScope.NONE else scope
 
     # -- launching ---------------------------------------------------------------
 

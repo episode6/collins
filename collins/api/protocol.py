@@ -315,6 +315,16 @@ each taken from the code the message replaces:
   chunk a request the way `split_reply` chunks a reply, on the first of
   CHUNKED_FIELDS the message holds (``stdout``, ``text``), the server
   joining a request's chunks before it validates the request.
+- The tree, quick open and roots (§3.23, PR-2.4; the same ``files`` cap).
+  `fs.stat` answers what is at a path (any path: a stat leaks nothing a
+  shell could not) and whether it resolves inside a root, the asking
+  editor's when it names one; `fs.list` a directory's entries in the
+  tree's order with the ignored names marked, at most FS_LIST_MAX and
+  ``truncated``; `fs.walk` a root's files, relative, at most FS_WALK_MAX;
+  `fs.watch` with ``kind: dir`` a directory's entries, `dir-changed` its
+  event (no stat: the client lists again). The walk's ``paths`` and the
+  listing's ``entries`` are CHUNKED_JSON_FIELDS: past a frame they travel
+  as their JSON in TAG_BLOB frames, as a file's text does.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -342,7 +352,10 @@ MIN_PROTOCOL = 1
 CAP_LOCAL = "local"  # the service offers the local-extras proof (§3.2)
 CAP_DEBUG = "debug"  # the service runs with COLLINS_DEBUG_API=1 and serves debug.* (D27)
 CAP_GIT = "git"  # git over the API: git.*, fs.trash, git-changed, GET /api/blob?kind=git (PR-2.1)
-CAP_FILES = "files"  # files over the API: fs.read, fs.write, fs.watch / fs.unwatch, file-changed (PR-2.3)
+# Files over the API: fs.read, fs.write, fs.watch / fs.unwatch, file-changed (PR-2.3); fs.stat,
+# fs.list, fs.walk, a directory's fs.watch and dir-changed (PR-2.4), on the same cap: no release
+# shipped PR-2.3's set alone.
+CAP_FILES = "files"
 CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG, CAP_GIT, CAP_FILES})
 
 # The client's second connection (D26): a hello carrying ``channel: "sync"``
@@ -429,21 +442,31 @@ ERRORS = frozenset(
 # The fields the transport may carry outside the text frame
 # (`split_reply` / `join_reply`, `split_request` / `join_request`):
 # `git.run`'s stdout, which a whole diff can take past MAX_FRAME (PR-2.1),
-# and `fs.read`'s / `fs.write`'s text, a file of up to FILE_TEXT_MAX
-# (PR-2.3). The field travels as TAG_BLOB frames whose `stream` is the
+# `fs.read`'s / `fs.write`'s text, a file of up to FILE_TEXT_MAX
+# (PR-2.3), and `fs.walk`'s paths / `fs.list`'s entries (PR-2.4), lists
+# that 20 000 deep paths take past a frame. The field travels as TAG_BLOB frames whose `stream` is the
 # request's id (masked to 32 bits, STREAM_MASK) ahead of the message,
 # which then says `<field>_chunked` and `<field>_bytes`; a request's
 # chunks go ahead of the request on the connection that carries it and
 # the service joins them before it validates. One field per message is
-# ever chunked: the first of CHUNKED_FIELDS the message holds as text.
+# ever chunked: the first of CHUNKED_FIELDS the message holds as text (or,
+# for CHUNKED_JSON_FIELDS, as a list).
 CHUNKED_FIELD = "stdout"
-CHUNKED_FIELDS = ("stdout", "text")
+CHUNKED_FIELDS = ("stdout", "text", "paths", "entries")
+# Of CHUNKED_FIELDS, the lists (PR-2.4: `fs.walk`'s paths, `fs.list`'s
+# entries): chunked as their compact JSON, decoded back on joining.
+CHUNKED_JSON_FIELDS = frozenset({"paths", "entries"})
 CHUNKED_MAX = 64 * 1024 * 1024  # the most bytes a chunked field runs to, either way
 STREAM_MASK = 0xFFFF_FFFF
 
 # A `spawn` refused because the service runs that session already (its
 # args name the running `pty`): the client attaches to it instead (D31).
 ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
+
+# `fs.list` / `fs.walk` refused ``gone`` because the folder is not there
+# (PR-2.4): the tree drops the folder's rows on it, and only on it — a
+# ``gone`` for a lost connection leaves them as they were.
+FOLDER_GONE_MSGID = "The folder is not there"
 
 # Which peer may send each binary tag.
 FRAME_SENDERS: Mapping[int, frozenset[str]] = {
@@ -664,6 +687,30 @@ _HANDLE = Field(K_STR, low=1, high=64, pattern=_ID_RE)
 _FILE_TEXT = _s(FILE_TEXT_MAX)
 _MTIME = _i(0, SIZE_MAX)
 _ENCODING = Field(K_STR, choices=FILE_ENCODINGS, high=SHORT_MAX)
+# The tree, quick open and roots (§3.23, PR-2.4). `fs.stat`'s kind follows
+# a symlink to what it names: a file, a directory, something else (a FIFO,
+# a device), ``symlink`` for a link that names nothing (dangling, or a
+# loop), ``missing`` for nothing there at all. An `fs.list` entry is a
+# file, a directory, or ``symlink``: a link to a directory inside the
+# root, shown as a folder and never expanded (a link to a file inside it
+# is a file; one leaving the root is not listed). A listing is cut at
+# FS_LIST_MAX entries (editorfiles' old cap), a walk at FS_WALK_MAX files;
+# both answer `truncated`. A name is one path component.
+FS_STAT_KINDS = frozenset({"file", "dir", "symlink", "missing", "other"})
+FS_ENTRY_KINDS = frozenset({"file", "dir", "symlink"})
+FS_LIST_MAX = 5000
+FS_WALK_MAX = 20_000
+FS_NAME_MAX = 1024
+_FS_ENTRY = Field(
+    K_OBJ,
+    fields={
+        "name": _req(_s(FS_NAME_MAX, low=1)),
+        "kind": _req(Field(K_STR, choices=FS_ENTRY_KINDS, high=SHORT_MAX)),
+        # Ignored by the repository (a check-ignore the service runs in the
+        # listing's directory): the tree dims the row.
+        "ignored": _req(_BOOL),
+    },
+)
 
 _TERM = Field(
     K_OBJ,
@@ -1244,7 +1291,15 @@ _TABLE: tuple[MessageType, ...] = (
         "cwd.settle",
         "Whether the agent has moved, as the editor rooted at `root` should see it.",
         request=_request(
-            {"pty": _req(_PTY), "cwd": _null(_PATH), "root": _req(_PATH)},
+            {
+                "pty": _req(_PTY),
+                "cwd": _null(_PATH),
+                "root": _req(_PATH),
+                # Judge the move now, with none of the settling (PR-2.4): a
+                # move the editor queued while its follow dialog was up,
+                # judged again from wherever the pane ended up.
+                "judge": _BOOL,
+            },
             reply={"scope": _SHORT},
         ),
     ),
@@ -2184,7 +2239,7 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "fs.watch",
-        "Watch a file for this client: a Gio.FileMonitor on the service (a directory's is PR-2.4's).",
+        "Watch a file (file-changed) or a directory's entries (dir-changed) for this client, on the service.",
         request=_request(
             {
                 "path": _req(_PATH),
@@ -2219,6 +2274,66 @@ _TABLE: tuple[MessageType, ...] = (
                 "mtime": _req(_null(_MTIME)),
                 "size": _req(_null(_i(0, SIZE_MAX))),
                 "gone": _req(_BOOL),
+            },
+        ),
+    ),
+    MessageType(
+        "dir-changed",
+        "Something changed in a watched directory, debounced 300 ms on the service: list it again.",
+        event=_event(SERVICE, {"handle": _req(_HANDLE), "path": _req(_PATH)}),
+    ),
+    # -- the tree, quick open and roots (§3.23, PR-2.4)
+    MessageType(
+        "fs.stat",
+        "What is at a path on the service's machine, and whether it is inside a root.",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                # `inside` is of this root (the asking editor's) when given,
+                # else of every root the service knows (`files.roots`).
+                "root": _PATH,
+            },
+            reply={
+                "kind": _req(Field(K_STR, choices=FS_STAT_KINDS, high=SHORT_MAX)),
+                "size": _req(_null(_i(0, SIZE_MAX))),  # a file's; null for anything else
+                "mtime": _req(_null(_MTIME)),  # null when nothing (or a dangling link) is there
+                # The path resolves (through its symlinks) inside the root.
+                "inside": _req(_BOOL),
+            },
+        ),
+    ),
+    MessageType(
+        "fs.list",
+        "A directory's entries in the tree's order, with the ignored names marked.",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                # Dotfiles listed too (the editor_show_hidden_files setting).
+                "hidden": _req(_BOOL),
+                # The tree's root: the path must resolve inside it, and a
+                # symlink resolving outside it is not listed.
+                "root": _req(_PATH),
+            },
+            reply={
+                "entries": _req(Field(K_LIST, high=FS_LIST_MAX, item=_FS_ENTRY)),
+                "truncated": _req(_BOOL),
+                # Set by the transport when the entries went ahead as
+                # TAG_BLOB frames (CHUNKED_JSON_FIELDS).
+                "entries_chunked": _BOOL,
+                "entries_bytes": _i(0, SIZE_MAX),
+            },
+        ),
+    ),
+    MessageType(
+        "fs.walk",
+        "Every file under a root, relative and breadth-first, for quick open.",
+        request=_request(
+            {"root": _req(_PATH), "hidden": _req(_BOOL)},
+            reply={
+                "paths": _req(Field(K_LIST, high=FS_WALK_MAX, item=_s(PATH_MAX, low=1))),
+                "truncated": _req(_BOOL),
+                "paths_chunked": _BOOL,
+                "paths_bytes": _i(0, SIZE_MAX),
             },
         ),
     ),
@@ -2741,9 +2856,11 @@ class Deferred:
 
 def chunked_field(message: dict) -> str | None:
     """The one field of *message* that may travel in TAG_BLOB frames: the
-    first of CHUNKED_FIELDS it holds as text."""
+    first of CHUNKED_FIELDS it holds as text (a list, for the
+    CHUNKED_JSON_FIELDS)."""
     for name in CHUNKED_FIELDS:
-        if isinstance(message.get(name), str):
+        value = message.get(name)
+        if isinstance(value, list) if name in CHUNKED_JSON_FIELDS else isinstance(value, str):
             return name
     return None
 
@@ -2770,7 +2887,10 @@ def split_message(message: dict, id_key: str) -> tuple[list[bytes], dict]:
     stream = chunk_stream(message.get(id_key))
     if field is None or stream is None:
         raise ValueError("message exceeds the frame limit")
-    data = message[field].encode("utf-8", "replace")
+    value = message[field]
+    if field in CHUNKED_JSON_FIELDS:
+        value = json.dumps(value, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+    data = value.encode("utf-8", "replace")
     if len(data) > CHUNKED_MAX:
         raise ValueError("message exceeds the chunked limit")
     frames = [
@@ -2798,7 +2918,17 @@ def join_message(message: dict, chunks: bytes | None) -> dict | None:
     data = chunks or b""
     if wanted is not None and len(data) != wanted:
         return None
-    joined[field] = data.decode("utf-8", "replace")
+    text = data.decode("utf-8", "replace")
+    if field in CHUNKED_JSON_FIELDS:
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return None
+        if not isinstance(value, list):
+            return None  # a CHUNKED_JSON_FIELD is a list, or the join is refused
+        joined[field] = value
+        return joined
+    joined[field] = text
     return joined
 
 

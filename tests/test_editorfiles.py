@@ -11,7 +11,6 @@ from collins.editorfiles import (
     LIGHTBOX_MIN_H,
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
-    FollowScope,
     LoadGuard,
     PaneLayout,
     PasteError,
@@ -19,17 +18,15 @@ from collins.editorfiles import (
     RerootAction,
     fence_language_id,
     first_line,
-    follow_scope,
     format_copied_files,
     gallery_step,
     guess_language_id,
     image_guard,
+    image_stat_guard,
     is_image_path,
-    is_inside,
     lightbox_layout,
     lightbox_zoom_slot,
     lightbox_zoombar_inside,
-    list_dir,
     pane_layout,
     parse_copied_files,
     paste_entries,
@@ -38,10 +35,19 @@ from collins.editorfiles import (
     plan_reroot,
     rename_target,
     renamed_path,
+    reroot_counterparts,
     should_highlight,
     unique_target,
-    walk_files,
 )
+from collins.projectfiles import FollowScope, follow_scope, is_inside, list_dir, list_entries, walk_files
+
+
+def _plan(old_root, new_root, open_paths, dirty_paths=frozenset()):
+    """`plan_reroot` with the counterparts the service's `fs.stat` would
+    call files: those that are files on this disk."""
+    files = {p for p in reroot_counterparts(old_root, new_root, open_paths) if os.path.isfile(p)}
+    return plan_reroot(old_root, new_root, open_paths, dirty_paths, files=files)
+
 
 # -- guess_language_id --------------------------------------------------------
 
@@ -953,7 +959,7 @@ def test_plan_reroot_reloads_a_clean_file_that_exists_over_there(tmp_path):
     (worktree / "src").mkdir(parents=True)
     (worktree / "src" / "a.py").write_text("new")
 
-    (entry,) = plan_reroot(repo, worktree, [str(repo / "src" / "a.py")])
+    (entry,) = _plan(repo, worktree, [str(repo / "src" / "a.py")])
     assert entry.target == str(worktree / "src" / "a.py")
     assert entry.default is RerootAction.RELOAD
     assert not entry.needs_asking
@@ -967,7 +973,7 @@ def test_plan_reroot_leaves_a_dirty_file_but_asks_about_it(tmp_path):
     (worktree / "a.py").write_text("new")
 
     path = str(repo / "a.py")
-    (entry,) = plan_reroot(repo, worktree, [path], {path})
+    (entry,) = _plan(repo, worktree, [path], {path})
     assert entry.default is RerootAction.LEAVE
     assert entry.needs_asking
 
@@ -979,7 +985,7 @@ def test_plan_reroot_never_asks_when_there_is_nothing_to_move_to(tmp_path):
     worktree = _worktree(repo)  # no a.py over there at all
 
     path = str(repo / "a.py")
-    (entry,) = plan_reroot(repo, worktree, [path], {path})
+    (entry,) = _plan(repo, worktree, [path], {path})
     assert entry.target is None
     assert entry.default is RerootAction.LEAVE
     assert not entry.needs_asking
@@ -991,7 +997,7 @@ def test_plan_reroot_leaves_a_file_that_was_never_inside_the_old_root(tmp_path):
     outside = tmp_path / "notes.md"
     outside.write_text("x")
 
-    (entry,) = plan_reroot(repo, _worktree(repo), [str(outside)])
+    (entry,) = _plan(repo, _worktree(repo), [str(outside)])
     assert entry.target is None
     assert entry.default is RerootAction.LEAVE
 
@@ -1004,7 +1010,7 @@ def test_plan_reroot_keeps_the_order_it_was_given(tmp_path):
         (repo / name).write_text("x")
         (worktree / name).write_text("y")
     paths = [str(repo / name) for name in ("c.py", "a.py", "b.py")]
-    assert [entry.path for entry in plan_reroot(repo, worktree, paths)] == paths
+    assert [entry.path for entry in _plan(repo, worktree, paths)] == paths
 
 
 def test_plan_reroot_leaves_a_directory_counterpart_alone(tmp_path):
@@ -1016,7 +1022,7 @@ def test_plan_reroot_leaves_a_directory_counterpart_alone(tmp_path):
     worktree = _worktree(repo)
     (worktree / "docs").mkdir()
 
-    (entry,) = plan_reroot(repo, worktree, [str(repo / "docs")])
+    (entry,) = _plan(repo, worktree, [str(repo / "docs")])
     assert entry.target is None
     assert entry.default is RerootAction.LEAVE
 
@@ -1098,3 +1104,35 @@ def test_fence_language_suggestion_unknown_and_empty_are_none():
     assert fence_language_id("kotlin") is None
     assert fence_language_id("") is None
     assert fence_language_id("   ") is None
+
+
+# -- the service's reads (projectfiles, PR-2.4) and the image pages' guard ----
+
+
+def test_list_entries_marks_a_symlinked_directory_and_says_when_it_cut(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    (root / "pkg").mkdir(parents=True)
+    (root / "a.txt").write_text("x")
+    (root / "alias").symlink_to(root / "pkg")
+    (root / "same.txt").symlink_to(root / "a.txt")
+    entries, truncated = list_entries(root, root=root)
+    assert entries == [("alias", "symlink"), ("pkg", "dir"), ("a.txt", "file"), ("same.txt", "file")]
+    assert truncated is False
+    monkeypatch.setattr("collins.projectfiles.MAX_DIR_ENTRIES", 2)
+    entries, truncated = list_entries(root, root=root)
+    assert [name for name, _kind in entries] == ["alias", "pkg"] and truncated is True
+
+
+def test_image_stat_guard():
+    assert image_stat_guard("file", 10) is LoadGuard.OK
+    assert image_stat_guard("dir", None) is LoadGuard.NOT_A_FILE
+    assert image_stat_guard("missing", None) is LoadGuard.NOT_A_FILE
+    assert image_stat_guard("file", _MAX_IMAGE_BYTES + 1) is LoadGuard.TOO_LARGE
+
+
+def test_walk_files_caps_the_folders_it_queues(tmp_path):
+    for index in range(5):
+        (tmp_path / f"d{index}").mkdir()
+        (tmp_path / f"d{index}" / "f.txt").write_text("x")
+    paths, truncated = walk_files(tmp_path, dirs_cap=3)
+    assert truncated is True and paths == ["d0/f.txt", "d1/f.txt"]

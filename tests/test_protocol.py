@@ -219,6 +219,11 @@ PHASE_ONE_TYPES = [
     "fs.watch",
     "fs.unwatch",
     "file-changed",
+    # PR-2.4: the tree, quick open and roots (the same `files` cap).
+    "dir-changed",
+    "fs.stat",
+    "fs.list",
+    "fs.walk",
     "service.restart",
     "service.status",
 ]
@@ -435,6 +440,7 @@ SAMPLES = {
         "pty": 7,
         "cwd": "/home/u/project/.claude/worktrees/x",
         "root": "/home/u/project",
+        "judge": True,
     },
     ("shells.follow", p.REQUEST): {"pty": 7, "armed": False},
     ("finish.witness", p.REQUEST): {"pty": 7},
@@ -712,6 +718,10 @@ SAMPLES = {
         "size": 4,
         "gone": False,
     },
+    ("dir-changed", p.EVENT): {"handle": "w2", "path": "/home/u/project/src"},
+    ("fs.stat", p.REQUEST): {"path": "/home/u/project/a.txt", "root": "/home/u/project"},
+    ("fs.list", p.REQUEST): {"path": "/home/u/project/src", "hidden": False, "root": "/home/u/project"},
+    ("fs.walk", p.REQUEST): {"root": "/home/u/project", "hidden": True},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -893,6 +903,14 @@ REPLIES = {
     "fs.write": {"mtime": 1700000000000000, "size": 4, "encoding": "latin-1"},
     "fs.watch": {},
     "fs.unwatch": {},
+    "fs.stat": {"kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True},
+    "fs.list": {
+        "entries": [{"name": "a.txt", "kind": "file", "ignored": False}],
+        "truncated": False,
+        "entries_chunked": False,
+        "entries_bytes": 2,
+    },
+    "fs.walk": {"paths": ["a.txt", "src/b.py"], "truncated": False, "paths_chunked": False, "paths_bytes": 2},
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
@@ -1656,3 +1674,21 @@ def test_importing_protocol_loads_no_gi():
         cwd=Path(__file__).resolve().parent.parent,
     )
     assert result.stdout.strip() == "False"
+
+
+def test_a_walks_paths_and_a_listings_entries_chunk_as_json():
+    """PR-2.4: 20 000 deep paths take a walk's reply past a frame; the
+    list travels as its JSON in TAG_BLOB frames and joins back as the
+    list."""
+    paths = [f"src/{'deep/' * 20}file{index:05d}.py" for index in range(p.FS_WALK_MAX)]
+    reply = {"re": 9, "ok": True, "paths": paths, "truncated": False}
+    frames, slim = p.split_reply(reply)
+    assert frames and "paths" not in slim and slim["paths_chunked"] is True
+    data = b"".join(p.unpack_frame(frame)[1] for frame in frames)
+    joined = p.join_reply(slim, data)
+    assert joined["paths"] == paths and "paths_chunked" not in joined
+    assert p.join_reply(slim, data[:-1]) is None
+    assert not isinstance(p.validate_response(joined, "fs.walk"), p.Refusal)
+    # A chunked list field whose JSON is not a list is refused at the join.
+    odd = b'{"a": 1}'
+    assert p.join_reply({**slim, "paths_bytes": len(odd)}, odd) is None

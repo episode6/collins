@@ -1,9 +1,11 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """GTK-free helpers for the editor panel: language guessing, open guards,
-directory listing, the rename/paste rules the file tree's context menus act
-on, and the rules for following the session's working directory when it moves
-(`follow_scope` / `plan_reroot`).
+the rename/paste rules the file tree's context menus act on, and the plan
+for following the session's working directory when it moves
+(`plan_reroot`). The directory reads behind the tree, quick open and the
+follow scope are the service's since PR-2.4 (`projectfiles.py`, served as
+`fs.list` / `fs.walk` / `fs.stat` / `cwd.settle`).
 
 Kept GTK-free (like gitinfo.py/projecticons.py) so this stays unit-testable
 headless; editor.py, filetree.py and fileclipboard.py own turning these into
@@ -13,19 +15,16 @@ widgets, clipboard payloads and GtkSource calls.
 from __future__ import annotations
 
 import enum
-import os
 import shutil
 import urllib.parse
-from collections import deque
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
-from .sessions import worktree_project_root
-
-# Skipped wherever a directory is listed or expanded: build output,
-# dependency trees, and VCS internals nobody wants cluttering a "look at
-# what the agent just wrote" file tree.
-SKIP_DIR_NAMES = {".git", "node_modules", "__pycache__", ".venv", "target", "dist", "build"}
+# The directory reads moved to the service's side in PR-2.4; the names stay
+# importable from here for what still calls them (the rename and paste
+# rules, PR-2.5's) and for the follow scope's enum.
+from .projectfiles import SKIP_DIR_NAMES, FollowScope, is_inside  # noqa: F401
 
 # Highlighted below this; still opened above it (the open cap itself is
 # the service's, protocol.FILE_TEXT_MAX).
@@ -54,10 +53,6 @@ IMAGE_SUFFIXES = {
 # How many "(copy N)" names a paste will try before giving up on finding a
 # free one (see `unique_target`).
 _MAX_COPY_SUFFIXES = 100
-# A directory this size is either a build artifact that slipped past
-# SKIP_DIR_NAMES or a mistake; either way the tree stops rather than stalling
-# on it. Sorted first, so what's dropped is always the tail, alphabetically.
-_MAX_DIR_ENTRIES = 5000
 
 
 class LoadGuard(enum.Enum):
@@ -83,15 +78,6 @@ class RenameError(enum.Enum):
     EXISTS = "exists"
     MISSING = "missing"  # what's being renamed is already gone
     OUTSIDE = "outside"
-
-
-class FollowScope(enum.Enum):
-    """How the editor should react to the session's working directory moving
-    somewhere new (see `follow_scope`)."""
-
-    NONE = "none"  # not a move: same place, or nowhere worth following
-    AUTO = "auto"  # still the same project — re-root without asking
-    OFFER = "offer"  # somewhere else entirely — offer it, don't take it
 
 
 class RerootAction(enum.Enum):
@@ -282,9 +268,12 @@ def is_image_path(path: str | Path) -> bool:
 
 
 def image_guard(path: str | Path) -> LoadGuard:
-    """The guard for the image viewers (the text files' is the service's
-    `fs.read`): images are binary by nature, so only existence,
-    readability and (a much larger) size cap are checked — never BINARY."""
+    """The lightbox's guard (the text files' is the service's `fs.read`,
+    the editor's image pages' `image_stat_guard` over `fs.stat`): images
+    are binary by nature, so only existence, readability and (a much
+    larger) size cap are checked — never BINARY. The lightbox shows the
+    service's files and this device's cached blobs alike, so it stays
+    until PR-2.7 moves the lightbox onto the blob GET."""
     p = Path(path)
     try:
         if not p.is_file():
@@ -431,17 +420,6 @@ def should_highlight(size: int | None) -> bool:
     return size is None or size <= _MAX_HIGHLIGHT_BYTES
 
 
-def is_inside(root: str | Path, path: str | Path) -> bool:
-    """Whether *path* resolves to somewhere inside *root* — the guard against
-    a symlink walking the file tree out of the project."""
-    try:
-        resolved_root = Path(root).resolve()
-        resolved_path = Path(path).resolve()
-    except OSError:
-        return False
-    return resolved_path == resolved_root or resolved_root in resolved_path.parents
-
-
 def rename_target(
     root: str | Path, path: str | Path, new_name: str
 ) -> tuple[Path | None, RenameError | None]:
@@ -500,55 +478,6 @@ def renamed_path(old: str | Path, new: str | Path, path: str | Path) -> str | No
 # -- following the session's working directory -----------------------------
 
 
-def repository_root(path: str | Path) -> str | None:
-    """The top of the git repository *path* sits in, or None when it is in
-    none. A couple of stat calls rather than a `git` process, and `.git` may
-    be a directory (a checkout) or a pointer file (a worktree, a submodule) —
-    either one tops the search out."""
-    try:
-        start = Path(path)
-        for directory in (start, *start.parents):
-            if (directory / ".git").exists():
-                return str(directory)
-    except OSError:
-        return None
-    return None
-
-
-def follow_scope(root: str | Path, cwd: str | None) -> FollowScope:
-    """Whether an editor rooted at *root* should move to *cwd*.
-
-    The session's agent moves on its own — into a Claude worktree under the
-    repository (`<repo>/.claude/worktrees/<name>`), back out of one, or down
-    into a subdirectory — and the editor is meant to be showing whatever the
-    agent is working on. Anywhere inside the same repository is that same
-    project seen from a different angle, so it is followed silently (AUTO);
-    `.claude` being a dotfile makes the worktree case the one that matters
-    most, since the file tree hides it outright from the repository root.
-
-    Anywhere *else* is a different project, and re-rooting there would
-    silently swap out every open file. That is offered, never taken (OFFER).
-    """
-    if not cwd:
-        return FollowScope.NONE
-    try:
-        if not Path(cwd).is_dir():
-            return FollowScope.NONE
-        if os.path.realpath(cwd) == os.path.realpath(root):
-            return FollowScope.NONE
-    except OSError:
-        return FollowScope.NONE
-    # The boundary is the repository, not wherever the pane happens to be
-    # rooted at this moment — an editor that already followed the agent down
-    # into a worktree or a subdirectory has to be able to follow it back out
-    # again, and comparing against its current root would read that as leaving
-    # the project. A Claude worktree names its repository outright; anything
-    # else walks up to the enclosing checkout, and a directory in no
-    # repository at all is its own boundary.
-    project = worktree_project_root(str(root)) or repository_root(root) or str(root)
-    return FollowScope.AUTO if is_inside(project, cwd) else FollowScope.OFFER
-
-
 @dataclass(frozen=True)
 class RerootEntry:
     """One open file's fate in a re-root. `target` is the counterpart the tab
@@ -572,9 +501,14 @@ def plan_reroot(
     new_root: str | Path,
     open_paths: list[str],
     dirty_paths: set[str] | frozenset[str] = frozenset(),
+    *,
+    files: Collection[str],
 ) -> list[RerootEntry]:
     """What should become of each open file when the editor moves from
-    *old_root* to *new_root*, in the order given.
+    *old_root* to *new_root*, in the order given. *files* are the
+    counterparts (`reroot_counterparts`) that are files under *new_root*:
+    the service's `fs.stat` answers, asked off the main loop (PR-2.4), so
+    this reads no disk itself.
 
     A file open from inside *old_root* has a counterpart at the same
     project-relative path under *new_root* — usually the same source file on a
@@ -595,7 +529,7 @@ def plan_reroot(
     for path in open_paths:
         dirty = path in dirty_paths
         moved = renamed_path(old_root, new_root, path)
-        if moved is None or moved == path or not _is_file(Path(moved)):
+        if moved is None or moved == path or moved not in files:
             entries.append(RerootEntry(path, None, dirty, RerootAction.LEAVE))
             continue
         entries.append(
@@ -609,11 +543,27 @@ def plan_reroot(
     return entries
 
 
-def _is_file(path: Path) -> bool:
-    try:
-        return path.is_file()
-    except OSError:
-        return False
+def reroot_counterparts(old_root: str | Path, new_root: str | Path, open_paths: list[str]) -> list[str]:
+    """The paths under *new_root* a re-root from *old_root* would move
+    *open_paths* to: the ones whose `fs.stat` decides `plan_reroot`'s
+    *files*."""
+    found: list[str] = []
+    for path in open_paths:
+        moved = renamed_path(Path(old_root), Path(new_root), path)
+        if moved is not None and moved != path:
+            found.append(moved)
+    return found
+
+
+def image_stat_guard(kind: str, size: int | None) -> LoadGuard:
+    """`image_guard`'s answer from a stat the service made (`fs.stat`'s
+    kind and size, PR-2.4): the editor's image pages. Whether the bytes
+    can be read is the decode's to find out."""
+    if kind != "file":
+        return LoadGuard.NOT_A_FILE
+    if size is not None and size > _MAX_IMAGE_BYTES:
+        return LoadGuard.TOO_LARGE
+    return LoadGuard.OK
 
 
 def _exists(path: Path) -> bool:
@@ -766,67 +716,3 @@ def parse_copied_files(text: str) -> tuple[list[str], bool]:
     paths = [path for uri in lines[1:] if (path := path_from_file_uri(uri)) is not None]
     return paths, cut
 
-
-def walk_files(
-    root: str | Path, show_hidden: bool = False, cap: int = 20_000
-) -> tuple[list[str], bool]:
-    """Every file under *root* as project-relative POSIX paths, breadth-first
-    (so shallow files land early and quick-open's ties favour them). Reuses
-    `list_dir`'s skip rules — hidden files, SKIP_DIR_NAMES, irregular nodes,
-    symlinks escaping *root* — and never descends into a symlinked directory
-    at all, exactly like the file tree's expansion rule, so a link cycle
-    can't wedge the walk. Returns `(paths, truncated)`; *truncated* is True
-    when the *cap* stopped the walk early."""
-    root = Path(root)
-    paths: list[str] = []
-    queue: deque[tuple[Path, str]] = deque([(root, "")])
-    while queue:
-        directory, prefix = queue.popleft()
-        for name, is_dir in list_dir(directory, show_hidden, root=root):
-            child = directory / name
-            if is_dir:
-                if not child.is_symlink():
-                    queue.append((child, f"{prefix}{name}/"))
-            else:
-                if len(paths) >= cap:
-                    return paths, True
-                paths.append(f"{prefix}{name}")
-    return paths, False
-
-
-def list_dir(
-    path: str | Path, show_hidden: bool = False, root: str | Path | None = None
-) -> list[tuple[str, bool]]:
-    """Sorted `(name, is_dir)` entries directly inside *path*: directories
-    first, then case-insensitive by name. Skips dotfiles unless
-    `show_hidden`, VCS/dependency directories (`SKIP_DIR_NAMES`), and
-    anything that is neither a regular file nor a directory (FIFOs, sockets,
-    devices — never worth showing, never worth opening). When *root* is
-    given, a symlink resolving outside it is skipped too — file symlinks
-    included, so an untrusted repo can't surface (and the editor can't write
-    through) `leak.txt -> ~/.ssh/id_rsa`. Truncated at `_MAX_DIR_ENTRIES` so
-    a pathological directory can't stall the tree."""
-    try:
-        entries = list(Path(path).iterdir())
-    except OSError:
-        return []
-    result: list[tuple[str, bool]] = []
-    for entry in entries:
-        name = entry.name
-        if not show_hidden and name.startswith("."):
-            continue
-        try:
-            is_dir = entry.is_dir()
-            is_file = entry.is_file()
-            is_symlink = entry.is_symlink()
-        except OSError:
-            continue
-        if not is_dir and not is_file:
-            continue
-        if root is not None and is_symlink and not is_inside(root, entry):
-            continue
-        if is_dir and name in SKIP_DIR_NAMES:
-            continue
-        result.append((name, is_dir))
-    result.sort(key=lambda item: (not item[1], item[0].casefold()))
-    return result[:_MAX_DIR_ENTRIES]

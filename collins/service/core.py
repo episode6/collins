@@ -858,7 +858,9 @@ class ServiceCore:
         return protocol.reply(message.id)
 
     def _req_cwd_settle(self, message: protocol.Message, client: Client) -> dict:
-        scope = self._record(message).session.settle_cwd(message.get("cwd"), message.get("root"))
+        session = self._record(message).session
+        judge = session.judge_cwd if message.get("judge") else session.settle_cwd
+        scope = judge(message.get("cwd"), message.get("root"))
         return protocol.reply(message.id, scope=scope.name.lower() if scope is not None else "")
 
     def _req_shells_follow(self, message: protocol.Message, client: Client) -> dict:
@@ -1241,6 +1243,9 @@ class ServiceCore:
     _req_fs_write = _files
     _req_fs_watch = _files
     _req_fs_unwatch = _files
+    _req_fs_stat = _files  # the tree, quick open and roots (PR-2.4)
+    _req_fs_list = _files
+    _req_fs_walk = _files
 
     # -- the diffs' marks (PR-1.11; service.diffs)
 

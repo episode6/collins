@@ -81,8 +81,9 @@ log = logging.getLogger(__name__)
 # subprocess, asked on demand only, with a budget that fits a large tree and
 # refuses a hung git.
 _STATUS_TIMEOUT_S = 2.0
-# `ignored_names` runs on the GTK main loop (the file tree's expand), so its
-# budget is short: past it the rows simply aren't dimmed.
+# `ignored_names` runs once per tree listing (on the service's `fs.list`
+# worker since PR-2.4; it ran on the GTK main loop before), so its budget is
+# short: past it the rows simply aren't dimmed.
 _IGNORE_TIMEOUT_S = 0.5
 
 # How old a mirror entry may be before a read refreshes it (the footer's
@@ -349,12 +350,13 @@ def _status_porcelain(cwd: str | Path | None) -> str | None:
 def ignored_names(directory: str | Path | None, names: list[str]) -> set[str]:
     """Which of *names* (entries directly inside *directory*) git ignores.
 
-    One batched `git check-ignore --stdin -z` per call — the file tree asks
-    once per directory listing (on expand and on the debounced refresh), never
-    per row, so this stays one short-lived process per user action. `-z` on
-    both ends keeps any filename byte-clean in transit.
+    One batched `git check-ignore --stdin -z` per call — the service's
+    `fs.list` asks once per directory listing for the file tree (on expand
+    and on each `dir-changed`), never per row, so this stays one short-lived
+    process per listing. `-z` on both ends keeps any filename byte-clean in
+    transit.
 
-    The caller is on the GTK main loop, so this is kept cheap: outside a
+    It ran on the GTK main loop until PR-2.4 and is still kept cheap: outside a
     repository no process is spawned at all (a pure-filesystem `.git` walk,
     like `current_branch`'s, answers first — over the API the mirror's
     answer), and inside one the subprocess gets only `_IGNORE_TIMEOUT_S`

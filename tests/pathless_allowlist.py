@@ -64,35 +64,23 @@ ALLOWLIST = frozenset(
         "window:MainWindow._on_open_ghostty:subprocess.Popen",
         "window:MainWindow._open_session_file:Path.is_dir",
         "window:MainWindow._visible_project_dir:Path.is_dir",
-        # -- the editor's files (PR-2.3): the monitor, the first-line read, the
-        # highlight stat and the load guard went to the service; the rest here
-        # are `fs.stat` reads (PR-2.4), left where the list first put them --------
-        "editor:EditorPane.request_root:Path.is_dir",
-        "editor:EditorPane.set_agent_files:Path.is_file",
-        "editorfiles:image_guard:Path.is_file",
-        "editorfiles:image_guard:Path.open",
-        "editorfiles:image_guard:Path.stat",
-        # The file row's "is there a file to open" check (the editor and the
-        # Open In… apps): `fs.stat` once PR-2.3 brings it; the one git-page
-        # site still on this machine's disk.
-        "gitsidebar:GitSidebar._file_menu_items:Path.is_file",
-        # -- the tree, quick open and roots (PR-2.4) -----------------------------------
-        "editorfiles:_exists:Path.exists",
-        "editorfiles:_exists:Path.is_symlink",
-        "editorfiles:_is_file:Path.is_file",
-        "editorfiles:follow_scope:Path.is_dir",
-        "editorfiles:is_inside:Path.resolve",
-        "editorfiles:list_dir:Path.iterdir",
-        "filetree:FileTree._create_children:Path.is_symlink",
-        "filetree:FileTree._watch:Gio.File.new_for_path.monitor_directory",
-        "quickopen:_watch_root:Gio.File.new_for_path.monitor_directory",
+        # -- the editor's files (PR-2.3) and the tree, quick open and roots (PR-2.4):
+        # the monitors, the first-line read, the highlight stat, the load guard,
+        # the listing, the walk, the follow scope, the reroot's and the Agent
+        # files' checks and the git page's file-row check went to the service
+        # (`fs.read` / `fs.stat` / `fs.list` / `fs.walk` / `cwd.settle`; the
+        # directory reads into `projectfiles.py`, which the service runs).
+        # Left: the tab's and the panel shells' cwd checks, which fall back to
+        # this device's home — the service's home is no request's answer yet
+        # (named in PR-2.4's report; PR-2.6 or PR-2.8 settles them) --------------
         "terminal:PanelTerminal._spawn:Path.is_dir",
         "terminal:PanelTerminal._sync_cwd:Path.is_dir",
         "terminal:PanelTerminal.follow_cwd:Path.is_dir",
         "terminal:TerminalTab.__init__:Path.is_dir",
-        "editorfiles:repository_root:Path.exists",
-        "editorfiles:walk_files:Path.is_symlink",
         # -- file operations and the clipboard (PR-2.5) --------------------------------
+        # `unique_target` / `paste_target`'s "is the name taken" check.
+        "editorfiles:_exists:Path.exists",
+        "editorfiles:_exists:Path.is_symlink",
         "editor:EditorPane._rename:Path.rename",
         "editorfiles:paste_entries:shutil.copy2",
         "editorfiles:paste_entries:shutil.copytree",
@@ -117,6 +105,12 @@ ALLOWLIST = frozenset(
         "window:MainWindow._refresh_alt_new_session_item:Path.exists",
         "window:MainWindow._worktree_for_new_session:Path.exists",
         # -- uploads, attachments, lightbox, icons (PR-2.7) ------------------------------
+        # The lightbox's guard: it shows the service's files and this device's
+        # cached blobs alike, so it stays until the lightbox is on the blob GET
+        # (the editor's image pages guard over `fs.stat` since PR-2.4).
+        "editorfiles:image_guard:Path.is_file",
+        "editorfiles:image_guard:Path.open",
+        "editorfiles:image_guard:Path.stat",
         "projecticons:project_icon_data:Path.read_bytes",
         "projecticons:project_icon_path:Path.is_file",
         "projecticons:project_icon_path:Path.stat",

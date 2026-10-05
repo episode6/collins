@@ -50,6 +50,7 @@ from . import (
     paneldnd,
     panelhistory,
     pkgrepos,
+    remotefiles,
     sandboxstatus,
     uistate,
     updatecheck,
@@ -4813,19 +4814,37 @@ class MainWindow(Adw.ApplicationWindow):
         editor when the file belongs to its project, else whichever tab's
         project it does belong to (chat tabs have no editor, but their tool
         chips fire this). Nowhere to open it → quietly nothing, like the
-        other editor actions."""
-        tab = self._current_terminal_tab()
-        if tab is None or not tab.can_open_in_editor(path):
-            tab = None
-            for i in range(self.tab_view.get_n_pages()):
-                candidate = self.tab_view.get_nth_page(i).get_child()
-                if isinstance(candidate, TerminalTab) and candidate.can_open_in_editor(path):
-                    tab = candidate
-                    break
-            if tab is None:
+        other editor actions. Which project the file belongs to is the
+        service's answer (`fs.stat`'s `inside` of each tab's editor root,
+        PR-2.4), asked off the main loop in order — the current tab first —
+        and acted on when it lands."""
+        current = self._current_terminal_tab()
+        candidates: list[TerminalTab] = [current] if current is not None else []
+        for i in range(self.tab_view.get_n_pages()):
+            candidate = self.tab_view.get_nth_page(i).get_child()
+            if isinstance(candidate, TerminalTab) and candidate is not current:
+                candidates.append(candidate)
+        if not candidates:
+            return
+        roots = [tab.editor_root for tab in candidates]
+
+        def work() -> int | None:
+            for index, root in enumerate(roots):
+                if remotefiles.stat_path(str(path), root).inside:
+                    return index
+            return None
+
+        def landed(kind: str, index) -> None:
+            if kind != "ok" or index is None:
                 return
-            self.tab_view.set_selected_page(self.tab_view.get_page(tab))
-        self.open_in_tab_editor(tab, path, cursor)
+            tab = candidates[index]
+            if tab.get_root() is not self:
+                return  # closed, or moved to another window, while the service answered
+            if tab is not self._current_terminal_tab():
+                self.tab_view.set_selected_page(self.tab_view.get_page(tab))
+            self.open_in_tab_editor(tab, path, cursor)
+
+        remotefiles.off_main(work, landed, name="window-open-in-editor")
 
     def open_in_tab_editor(self, tab: TerminalTab, path: str, cursor: list | None = None) -> None:
         """Open *path* in *tab*'s editor specifically, wherever that editor

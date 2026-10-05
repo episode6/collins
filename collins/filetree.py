@@ -3,13 +3,28 @@
 """The editor panel's project file tree.
 
 A `Gtk.ListView` over a `Gtk.TreeListModel`, lazily populated: a directory's
-children are only listed (via `editorfiles.list_dir`) the moment it is first
-expanded. Nothing else in the sidebar looks like this — its own two-level
-grouping is hand-rolled flat rows — so this is a new pattern, not a reuse.
+children are only listed the moment it is first expanded. Nothing else in
+the sidebar looks like this — its own two-level grouping is hand-rolled flat
+rows — so this is a new pattern, not a reuse.
+
+The directories are the service's (split-service spec §3.23, PR-2.4): a
+listing is `fs.list` (the entries in the tree's order with the ignored names
+marked, one request off the main loop, landed at `GLib.PRIORITY_DEFAULT`),
+and an expanded directory (the root too) is kept fresh by `fs.watch kind:
+dir` — the service's debounced `dir-changed`, which lists it again; a
+collapse drops the watch and a re-expansion lists again. A listing reuses
+the rows of the entries that are still there, so an expanded folder stays
+expanded through its parent's refresh. `Gtk.TreeListModel` calls the
+children function for every directory row it binds, to draw its expander,
+and drops what it gets; so a row's children store lives on the row's node
+(`_Node.children`) and is only listed and watched once the row is really
+expanded (`_open_dir`, from the row's `notify::expanded`).
 """
 
 from __future__ import annotations
 
+import logging
+import weakref
 from pathlib import Path
 
 import gi
@@ -17,14 +32,11 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import contextmenu, editorfiles, fileclipboard, filetypes, gitinfo, openwith, openwithrows
+from . import contextmenu, fileclipboard, filetypes, openwith, openwithrows, remotefiles
+from .api import protocol
 from .i18n import _
 
-# How long after the last change in an expanded directory its row list is
-# rebuilt — long enough that an agent mid-rewrite (many quick saves) coalesces
-# into one refresh, short enough that "the tree matches disk" still feels
-# immediate. Mirrors store.py's own filesystem-change debounce.
-_REFRESH_DEBOUNCE_MS = 500
+log = logging.getLogger(__name__)
 
 
 def _menu(*items: tuple[str, str]) -> Gio.Menu:
@@ -52,17 +64,38 @@ def _expander_in(widget: Gtk.Widget) -> Gtk.TreeExpander | None:
 
 
 class _Node(GObject.Object):
-    """One row: a file or directory, never re-created for the same path
-    while its parent directory is listed (see `_refresh_dir`'s splice)."""
+    """One row: a file or directory, never re-created for the same entry
+    while its parent directory is listed (see `_splice`). *kind* is the
+    listing's: ``file``, ``dir``, or ``symlink`` (a link to a folder
+    inside the project: shown as one, never expanded)."""
 
-    def __init__(self, name: str, path: Path, is_dir: bool, dim: bool = False) -> None:
+    def __init__(self, name: str, path: Path, kind: str, dim: bool = False) -> None:
         super().__init__()
         self.name = name
         self.path = path
-        self.is_dir = is_dir
+        self.kind = kind
+        self.is_dir = kind != "file"
+        self.expandable = kind == "dir"
         # Drawn at reduced opacity: a dotfile, or something git ignores —
         # still openable, but visibly not part of the project's real content.
         self.dim = dim
+        # The rows under this one, made the first time the tree model asks
+        # (`_create_children`) and kept: the model asks again at every bind
+        # and every expansion, and must get the same store each time.
+        self.children: Gio.ListStore | None = None
+        self.open = False  # the row is expanded (`_on_row_expanded`)
+        # The row box showing this node right now (`_on_bind`; rows are
+        # recycled, so `set_dim` checks the box still shows this node).
+        self.box: Gtk.Widget | None = None
+
+    def set_dim(self, dim: bool) -> None:
+        """The dimming changed (a name git now ignores, or no longer):
+        kept on this node, so an expanded folder keeps its row, its
+        expansion and its watch, and the row on screen is restyled."""
+        self.dim = dim
+        box = self.box
+        if box is not None and getattr(box, "node", None) is self:
+            box.set_css_classes(["filetree-dim"] if dim else [])
 
 
 class FileTree(Gtk.Box):
@@ -100,19 +133,48 @@ class FileTree(Gtk.Box):
         # The footer_apps setting, for the file rows' "Open In…" submenu
         # (set_footer_apps — the pane relays it from apply_settings).
         self._footer_apps: list[str] = []
-        # path -> monitor, for every directory this tree has ever expanded.
-        # Not torn down on collapse (a modest, tab-lifetime cost) — see
-        # module docstring; only ever grows across directories actually
-        # opened, never the whole project up front.
-        self._monitors: dict[str, Gio.FileMonitor] = {}
+        # path -> the handle of its `fs.watch kind: dir`, for every directory
+        # this tree has expanded (and handle -> path for the events). Not
+        # torn down on collapse (a modest, tab-lifetime cost); only ever grows
+        # across directories actually opened, never the whole project up
+        # front. The root has one too (it is the folder always open); a
+        # collapsed folder's is dropped (`_close_dir`).
+        self._watches: dict[str, str] = {}
+        self._watched: dict[str, str] = {}
         # path -> the store holding that directory's rows, for every listed
-        # directory (the root included, which no monitor covers). Lets a
-        # change this tree made itself show up at once instead of waiting out
-        # the monitor's debounce — see `refresh_dir`.
+        # directory (the root included). Lets a change this tree made itself
+        # show up at once instead of waiting out the watch — see
+        # `refresh_dir`.
         self._stores: dict[str, Gio.ListStore] = {}
+        # The listings: the directories with an `fs.list` in flight, those
+        # owed another once it lands (a change during the listing), and
+        # those whose store has had at least one answer (what `reveal`
+        # waits for). `_epoch` turns over with the root, so a listing of
+        # the old root lands nowhere.
+        self._listing: set[str] = set()
+        self._relist: set[str] = set()
+        self._filled: set[str] = set()
+        self._epoch = 0
+        # The path `reveal` is still walking towards, waiting on listings.
+        self._reveal_target: Path | None = None
+        # The rows whose `notify::expanded` is heard (`_on_bind`).
+        self._hooked: weakref.WeakSet = weakref.WeakSet()
+        # path -> the node whose folder it is, for every folder opened; and
+        # the folders whose watch a collapse dropped (their rows kept, so a
+        # re-expansion shows them at once and lists them again). A watch
+        # costs the service a monitor under a per-client bound, so only
+        # what is on screen holds one (review of PR 611).
+        self._owners: dict[str, _Node] = {}
+        self._parked: set[str] = set()
+        self._shut = False
+        # A reconnect re-sends the watches but the listings missed meanwhile
+        # are gone: every folder shown is listed again (`_on_reconnect`).
+        remotefiles.watcher().on_reset(self._on_reconnect)
 
         self._root_store = Gio.ListStore(item_type=_Node)
-        self._fill_store(self._root_store, self._root)
+        self._list(self._root, self._root_store)
+        # The root is the one folder always open: it is watched too.
+        self._watch(self._root)
         self._tree_model = Gtk.TreeListModel.new(
             self._root_store, False, False, self._create_children
         )
@@ -175,88 +237,223 @@ class FileTree(Gtk.Box):
 
     # -- population ----------------------------------------------------------
 
-    def _fill_store(self, store: Gio.ListStore, directory: Path) -> None:
-        self._stores[str(directory)] = store
-        entries = editorfiles.list_dir(directory, self._show_hidden, root=self._root)
-        ignored = gitinfo.ignored_names(directory, [name for name, _ in entries])
-        nodes = [
-            _Node(name, directory / name, is_dir, dim=name.startswith(".") or name in ignored)
-            for name, is_dir in entries
-        ]
-        store.splice(0, store.get_n_items(), nodes)
+    def _list(self, directory: Path, store: Gio.ListStore) -> None:
+        """(Re)list *directory* into *store*: `fs.list` off the main loop,
+        landed by `_listed`. One listing per directory at a time; asked
+        again meanwhile, it runs once more when the first lands."""
+        key = str(directory)
+        if self._stores.get(key) is not store:
+            self._filled.discard(key)  # a new store for the path: nothing in it yet
+        self._stores[key] = store
+        if key in self._listing:
+            self._relist.add(key)
+            return
+        self._listing.add(key)
+        root, hidden, epoch = str(self._root), self._show_hidden, self._epoch
+        remotefiles.off_main(
+            lambda: remotefiles.list_dir(key, root, hidden),
+            lambda kind, value: self._listed(key, store, epoch, kind, value),
+            name="filetree-list",
+        )
+
+    def _listed(self, key: str, store: Gio.ListStore, epoch: int, kind: str, value) -> None:
+        self._listing.discard(key)
+        again = key in self._relist
+        self._relist.discard(key)
+        if self._shut or epoch != self._epoch or self._stores.get(key) is not store:
+            # Re-rooted, forgotten or shut meanwhile: the rows are no one's.
+            # A listing asked for the path's current store while this one
+            # was in flight waited on it (`_relist`): it runs now.
+            current = self._stores.get(key)
+            if again and not self._shut and current is not None:
+                self._list(Path(key), current)
+            return
+        if kind == "ok":
+            entries, _truncated = value
+            self._splice(store, Path(key), entries)
+        elif value.error == protocol.ERROR_GONE and value.msgid == protocol.FOLDER_GONE_MSGID:
+            # The folder is not there any more: its rows go, and so does
+            # what the tree remembers under it (the root keeps its store and
+            # its watch: a folder that comes back is listed again).
+            self._splice(store, Path(key), [])
+            if key != str(self._root):
+                self.forget_dir(key)
+        else:
+            # Refused or failed (no `files` capability, the service
+            # unreachable): the rows stay as they were, and a reconnect
+            # lists again (`_on_reconnect`).
+            log.info("filetree: listing %s refused: %s", key, remotefiles.refusal_words(value))
+        self._filled.add(key)
+        if again:
+            self._list(Path(key), store)
+        self._continue_reveal()
+
+    def _splice(self, store: Gio.ListStore, directory: Path, entries: list) -> None:
+        """*store* made to hold *entries*, keeping the node (and with it the
+        row, its expansion and its children) of every entry that was there
+        already: a refresh of a folder must not collapse the folders open
+        inside it. Folders that left the listing are forgotten."""
+        old = [store.get_item(index) for index in range(store.get_n_items())]
+        by_key = {(node.name, node.kind): node for node in old}
+        target: list[_Node] = []
+        for entry in entries:
+            dim = entry.name.startswith(".") or entry.ignored
+            node = by_key.get((entry.name, entry.kind))
+            if node is None:
+                node = _Node(entry.name, directory / entry.name, entry.kind, dim=dim)
+            elif node.dim != dim:
+                node.set_dim(dim)
+            target.append(node)
+        keep = {id(node) for node in target}
+        for node in old:
+            if id(node) not in keep and node.expandable:
+                self.forget_dir(node.path)
+        old_ids = {id(node) for node in old}
+        kept_old = [node for node in old if id(node) in keep]
+        kept_new = [node for node in target if id(node) in old_ids]
+        if not kept_old or kept_old != kept_new:
+            # Nothing kept (a first listing), or reordered: one splice.
+            store.splice(0, store.get_n_items(), target)
+            return
+        for index in reversed(range(len(old))):
+            if id(old[index]) not in keep:
+                store.remove(index)
+        for index, node in enumerate(target):
+            if index >= store.get_n_items() or store.get_item(index) is not node:
+                store.insert(index, node)
 
     def _create_children(self, item: _Node) -> Gio.ListModel | None:
-        """Called by `Gtk.TreeListModel` the moment a row is first expanded —
-        this is the "lazily populated" part. A symlinked directory is left
+        """Called by `Gtk.TreeListModel` for every directory row it binds
+        (to draw its expander, the store then dropped) and again when one
+        is expanded: so the store is made once, on the node, and costs
+        nothing until `_open_dir` lists it. A symlinked directory is left
         with no expander at all: per the standing untrusted-repo-content
-        rule, the tree never follows one out of the project."""
-        if not item.is_dir or item.path.is_symlink():
+        rule, the tree never follows one (the service lists only links that
+        stay inside the project, and marks those to folders `symlink`)."""
+        if not item.expandable:
             return None
-        if not editorfiles.is_inside(self._root, item.path):
-            return None
-        store = Gio.ListStore(item_type=_Node)
-        self._fill_store(store, item.path)
-        self._watch(item.path, store)
-        return store
+        if item.children is None:
+            item.children = Gio.ListStore(item_type=_Node)
+        return item.children
+
+    def _open_dir(self, node: _Node) -> None:
+        """A directory row was expanded: its listing and its watch the
+        first time; after a collapse, its watch again with a listing that
+        catches up on what the collapse missed — the rows were kept, so
+        they show at once."""
+        if not node.expandable or node.children is None or self._shut:
+            return
+        node.open = True
+        key = str(node.path)
+        if self._stores.get(key) is not node.children:
+            self._owners[key] = node
+            self._list(node.path, node.children)
+            self._watch(node.path)
+            return
+        if key in self._parked:
+            self._parked.discard(key)
+            self._list(node.path, node.children)
+            self._watch(node.path)
+
+    def _close_dir(self, node: _Node) -> None:
+        """A directory row was collapsed: the watches of it and of every
+        folder under it are dropped (parked: the rows stay). GTK collapses
+        the rows under it too (a re-expansion shows them closed), so the
+        folders under it are closed here as well; each lists again when it
+        is next expanded."""
+        key = str(node.path)
+        for inner, owner in self._owners.items():
+            if inner == key or inner.startswith(key + "/"):
+                owner.open = False
+        node.open = False
+        for watched in [k for k in self._watches if k == key or k.startswith(key + "/")]:
+            if watched != str(self._root):
+                self._unwatch(watched)
+                self._parked.add(watched)
+
+    def _on_row_expanded(self, row: Gtk.TreeListRow, _pspec) -> None:
+        node = row.get_item()
+        if not isinstance(node, _Node):
+            return
+        if row.get_expanded():
+            self._open_dir(node)
+        else:
+            self._close_dir(node)
+
+    def _on_reconnect(self) -> None:
+        """The link came back (`remotefiles.reset`): the watches were sent
+        again, and every folder on screen is listed again — a pane made
+        while the service was unreachable fills in."""
+        if self._shut:
+            return
+        for key, store in list(self._stores.items()):
+            if key not in self._parked:
+                self._list(Path(key), store)
 
     # -- live refresh ----------------------------------------------------------
 
-    def _watch(self, path: Path, store: Gio.ListStore) -> None:
+    def _watch(self, path: Path) -> None:
         key = str(path)
-        if key in self._monitors:
+        if key in self._watches:
             return
-        try:
-            monitor = Gio.File.new_for_path(key).monitor_directory(Gio.FileMonitorFlags.NONE, None)
-        except GLib.Error:
-            return
-        pending = {"queued": False}
+        handle = remotefiles.watcher().watch(key, self._on_dir_changed, kind=protocol.WATCH_DIR)
+        self._watches[key] = handle
+        self._watched[handle] = key
 
-        def on_changed(_monitor, _file, _other, _event) -> None:
-            if pending["queued"]:
-                return
-            pending["queued"] = True
-            GLib.timeout_add(_REFRESH_DEBOUNCE_MS, self._debounced_refresh, path, store, pending)
+    def _unwatch(self, key: str) -> None:
+        handle = self._watches.pop(key, None)
+        if handle is not None:
+            self._watched.pop(handle, None)
+            remotefiles.watcher().unwatch(handle)
 
-        monitor.connect("changed", on_changed)
-        self._monitors[key] = monitor
-
-    def _debounced_refresh(self, path: Path, store: Gio.ListStore, pending: dict) -> bool:
-        pending["queued"] = False
-        # A store the tree has since dropped — the directory was renamed away,
-        # or the whole tree was re-rooted (`set_root`) — is no longer in the
-        # model, and re-listing it would only put its key back in `_stores`.
-        if self._stores.get(str(path)) is not store:
-            return GLib.SOURCE_REMOVE
-        self._fill_store(store, path)
-        return GLib.SOURCE_REMOVE
+    def _on_dir_changed(self, event: dict) -> None:
+        """The service's `dir-changed` (debounced there, 300 ms): list the
+        directory again, if this tree still shows it."""
+        key = self._watched.get(str(event.get("handle")))
+        store = self._stores.get(key) if key is not None else None
+        if store is not None and not self._shut:
+            self._list(Path(key), store)
 
     def forget_dir(self, path: str | Path) -> None:
         """Drop what this tree remembers about *path* and anything under it:
-        the row stores and the file monitors watching them. For a directory
-        that has just been renamed or removed — its monitor now watches a path
+        the row stores and the watches keeping them fresh. For a directory
+        that has just been renamed or removed — its watch now watches a path
         nothing will ever change again, and expanding the new name builds its
         store fresh. Without this the entries would sit there for the tab's
-        lifetime, which is the one cost this tree's monitors deliberately
+        lifetime, which is the one cost this tree's watches deliberately
         accept for directories that still exist (see `_watch`)."""
         prefix = str(path)
         gone = [
             key
-            for key in list(self._stores) + list(self._monitors)
+            for key in list(self._stores) + list(self._watches)
             if key == prefix or key.startswith(prefix + "/")
         ]
         for key in gone:
             self._stores.pop(key, None)
-            monitor = self._monitors.pop(key, None)
-            if monitor is not None:
-                monitor.cancel()
+            self._filled.discard(key)
+            self._owners.pop(key, None)
+            self._unwatch(key)
+        for key in [k for k in self._parked if k == prefix or k.startswith(prefix + "/")]:
+            self._parked.discard(key)
+            self._owners.pop(key, None)
 
     def refresh_dir(self, path: str | Path) -> None:
         """Re-list *path* now, if this tree is showing it. For changes the
-        app made itself (a rename): the directory monitors would get there on
-        their own, half a second later, and the root has no monitor at all."""
+        app made itself (a rename): the watches would get there on their
+        own, a debounce later."""
         store = self._stores.get(str(path))
         if store is not None:
-            self._fill_store(store, Path(path))
+            self._list(Path(path), store)
+
+    def shutdown(self) -> None:
+        """The pane is closing for good (`EditorPane.shutdown`): every
+        directory's watch on the service is dropped, and a listing still in
+        flight lands nowhere."""
+        self._shut = True
+        self._reveal_target = None
+        for key in list(self._watches):
+            self._unwatch(key)
+        remotefiles.watcher().off_reset(self._on_reconnect)
 
     @property
     def root(self) -> Path:
@@ -275,43 +472,75 @@ class FileTree(Gtk.Box):
         new_root = Path(root)
         if new_root == self._root:
             return
-        for monitor in self._monitors.values():
-            monitor.cancel()
-        self._monitors.clear()
+        for key in list(self._watches):
+            self._unwatch(key)
         self._stores.clear()
+        self._filled.clear()
+        self._relist.clear()
+        self._owners.clear()
+        self._parked.clear()
+        self._epoch += 1  # a listing of the old root lands nowhere
+        self._reveal_target = None
         self._root = new_root
         self._menu_dir = new_root
-        # Re-listing the root store empties the model of every old row, and a
-        # TreeListModel drops the child models built for them along with it.
-        self._fill_store(self._root_store, self._root)
+        # The old root's rows go at once (none of them is this root's), and a
+        # TreeListModel drops the child models built for them along with it;
+        # the new root's land with its listing.
+        self._root_store.remove_all()
+        self._list(self._root, self._root_store)
+        self._watch(self._root)
 
     def reveal(self, path: str | Path) -> None:
         """Expand the directories above *path* and select its row (without
         stealing focus). A path the tree can't show — outside the project,
         under a symlinked directory, or hidden while hidden files are off —
-        is a no-op."""
+        is a no-op. The listings are the service's, so the walk goes as far
+        as the rows already listed and waits on each listing it needs
+        (`_continue_reveal`, run again as each lands); a newer reveal, or a
+        re-root, replaces it."""
+        self._reveal_target = Path(path)
+        self._continue_reveal()
+
+    def _waiting_on(self, key: str) -> bool:
+        return key not in self._filled or key in self._listing
+
+    def _continue_reveal(self) -> None:
+        target = self._reveal_target
+        if target is None:
+            return
         try:
-            parts = Path(path).relative_to(self._root).parts
+            parts = target.relative_to(self._root).parts
         except ValueError:
-            return
+            parts = ()
         if not parts:
+            self._reveal_target = None
             return
+        if self._waiting_on(str(self._root)):
+            return  # the root's rows are still coming
         depth = 0
         position = 0
         while position < self._tree_model.get_n_items():
             row: Gtk.TreeListRow = self._tree_model.get_item(position)
             if row.get_depth() < depth:
-                return  # walked out of the expanded ancestor without a match
+                break  # walked out of the expanded ancestor without a match
             node: _Node = row.get_item()
             if row.get_depth() == depth and node.name == parts[depth]:
                 if depth == len(parts) - 1:
+                    self._reveal_target = None
                     self._list_view.scroll_to(position, Gtk.ListScrollFlags.SELECT, None)
                     return
+                if not node.expandable:
+                    break
                 # Children splice into the flat model right after this row,
-                # so the sequential scan walks straight into them.
+                # so the sequential scan walks straight into them — once
+                # they are listed.
                 row.set_expanded(True)
+                self._open_dir(node)
+                if self._waiting_on(str(node.path)):
+                    return
                 depth += 1
             position += 1
+        self._reveal_target = None
 
     def set_show_hidden(self, show_hidden: bool) -> None:
         """Applies immediately to the root and to any directory refreshed
@@ -320,7 +549,7 @@ class FileTree(Gtk.Box):
         if show_hidden == self._show_hidden:
             return
         self._show_hidden = show_hidden
-        self._fill_store(self._root_store, self._root)
+        self._list(self._root, self._root_store)
 
     # -- row widgets -------------------------------------------------------
 
@@ -339,6 +568,11 @@ class FileTree(Gtk.Box):
         node: _Node = row.get_item()
         expander: Gtk.TreeExpander = list_item.get_child()
         expander.set_list_row(row)
+        if node.expandable and row not in self._hooked:
+            # An expansion (a click, the keyboard, `reveal`) is when the
+            # directory is listed and watched (`_open_dir`).
+            self._hooked.add(row)
+            row.connect("notify::expanded", self._on_row_expanded)
         box = expander.get_child()
         icon: Gtk.Image = box.get_first_child()
         label: Gtk.Label = icon.get_next_sibling()
@@ -349,6 +583,8 @@ class FileTree(Gtk.Box):
         # dimming of whatever node it showed last.
         icon.set_css_classes([color_class] if color_class else [])
         box.set_css_classes(["filetree-dim"] if node.dim else [])
+        box.node = node  # what `_Node.set_dim` checks before restyling
+        node.box = box
         label.set_label(node.name)
 
     def _on_activate(self, _list_view: Gtk.ListView, position: int) -> None:
