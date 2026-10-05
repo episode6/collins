@@ -9,12 +9,12 @@ the API."""
 
 import json
 
+import inproc as loopback
 import pytest
+from inproc import LoopbackLink
 
 from collins import uistate
-from collins.api import loopback
-from collins.api.loopback import RequestRefused
-from collins.apilink import LoopbackLink
+from collins.api.protocol import RequestRefused
 from collins.remotestate import RemoteState
 from collins.remotestore import RemoteStore
 from collins.service.core import ServiceCore

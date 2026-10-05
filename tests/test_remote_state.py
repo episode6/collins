@@ -10,7 +10,7 @@ import json
 import pytest
 
 from collins import uistate
-from collins.api.loopback import RequestRefused
+from collins.api.protocol import RequestRefused
 from collins.apilink import Link
 from collins.remotestate import DRAFT_DEBOUNCE_MS, RemoteState
 from collins.state import device_defaults

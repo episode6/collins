@@ -11,10 +11,11 @@ import os
 import sys
 import time
 
+import inproc as loopback
 import pytest
 from gi.repository import GLib
 
-from collins.api import loopback, protocol
+from collins.api import protocol
 from collins.service.core import ServiceCore
 from collins.sessions import discover_sessions
 from collins.store import SessionStore

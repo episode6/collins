@@ -151,7 +151,7 @@ tool is **UI-bound**: a `tool` event (`call`, `session`, `handle`, `name`,
 `arguments`, and `sandboxed`: the service's reading of the caller) to the
 session's **active client** (`ServiceCore._tool_client`, D20) and a
 `DeferredResult` settled by the client's `tool-reply` or at
-`TOOL_BOUND_S` (14 s, under the shim's 15 s). On the loopback the client
+`TOOL_BOUND_S` (14 s, under the shim's 15 s). Over the socket the client
 answers inside the event, so a call that finishes at once still returns
 `(ok, text)` at once (`_settled`) — the e2e checks rely on it. The client
 half is `toolclient.ToolClient` (`app.tool_client`): it finds the tab by

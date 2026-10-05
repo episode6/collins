@@ -435,7 +435,22 @@ today off VTE will be made of it once PR-1.7 swaps the backend:
   `check_termscreen_parity.py --write` under the headless display to
   regenerate the goldens from VTE, and run the unit suite.
 
-## The tab on the pty server (ptyclient, loopback, core)
+## The tab on the pty server (ptyclient, the socket, core)
+
+**PR-1.12b: the service is its own process.** The "loopback" below is
+history: `terminal.SERVICE_LOOPBACK`, `service_loopback()` and
+`api/loopback.py` are gone (D21). A tab's (and a panel shell's) client is
+`api.client.PtyClient` from `terminal._pty_client` on the app's
+`SocketLink` (`apilink.current()`): the same `request` / `send_input` /
+`send_event` / `close` surface, fed the output frames and events of the
+ptys it spawned or attached. `request` blocks on the link's sync channel;
+the events a reply implies (`session`, `pty`) land on the main loop after
+it returns, so nothing reads a mirror for a fact the reply itself
+carries. `TerminalTab.reattach()` and `PanelTerminal.reattach()` are what
+the connection manager calls after a reconnect (a redraw from the
+service's model; a pty the service lost reads as the shell's exit).
+`save_panel_history` is the `panel.history` request. `App.do_shutdown`
+closes the link and ends nothing on the service.
 
 Since PR-1.9 of the split a session tab has one backend: the service's pty
 server (PR-1.7 added it beside the tab's own in-widget pty; PR-1.9 deleted

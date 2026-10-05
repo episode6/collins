@@ -799,6 +799,10 @@ SHARED_KEYS: dict[str, SharedKey] = {
         SharedKey("process_baselines", MAP, _map_of(lambda v: isinstance(v, list))),
         SharedKey("session_forwards", MAP, _map_of(_is_str)),
         SharedKey("pending_detaches", MAP, _map_of(lambda v: isinstance(v, dict))),
+        # The sessions a stopping service ended (§3.10 item 1, PR-1.12b):
+        # written by the service alone when it restarts or is stopped; a
+        # client reopening its tabs finds them resumable.
+        SharedKey("resume_on_start", LIST, _clean_set, writable=False),
         SharedKey("ptys", MAP, _clean_ptys, writable=False),
         SharedKey("pty_next_id", SCALAR, _clean_next_id, writable=False),
         # The service's own since PR-1.11: the history is written through
@@ -983,6 +987,9 @@ class AppState:
         # evidence needed to finish the pairing after a restart (see
         # MainWindow._replay_pending_detaches).
         self.pending_detaches: dict[str, dict] = {}
+        # The session ids the service ended on its last stop (resumable by
+        # a client reopening them; split-service spec §3.10, PR-1.12b).
+        self.resume_on_start: list[str] = []
         # The marks on each session's diff (split-service spec §3.8,
         # PR-1.11): session id -> {"notes": [...], "highlights": [...]},
         # diffnotes.mark_record each; written by the service's
@@ -1144,6 +1151,7 @@ class AppState:
         self.pending_detaches = {
             k: v for k, v in (data.get("pending_detaches") or {}).items() if isinstance(v, dict)
         }
+        self.resume_on_start = _clean_set(data.get("resume_on_start"))
         self.diff_notes = {
             k: v for k, v in (data.get("diff_notes") or {}).items() if isinstance(v, dict)
         }
@@ -1263,6 +1271,7 @@ class AppState:
             "process_baselines": self.process_baselines,
             "session_forwards": self.session_forwards,
             "pending_detaches": self.pending_detaches,
+            "resume_on_start": self.resume_on_start,
             "diff_notes": self.diff_notes,
             "pending_diffs": self.pending_diffs,
             "ptys": self.ptys,
@@ -1804,6 +1813,20 @@ class AppState:
 
     def get_pending_detaches(self) -> dict[str, dict]:
         return dict(self.pending_detaches)
+
+    # -- what a stopping service leaves behind (§3.10, PR-1.12b)
+
+    def set_resume_on_start(self, session_ids: list[str]) -> None:
+        """The sessions the service ended on its way out, for a client to
+        reopen: written by the service alone."""
+        ids = [s for s in dict.fromkeys(session_ids) if isinstance(s, str) and s]
+        if ids == self.resume_on_start:
+            return
+        self.resume_on_start = ids
+        self.save()
+
+    def get_resume_on_start(self) -> list[str]:
+        return list(self.resume_on_start)
 
     # -- the diffs' marks and pending loads (§3.8, PR-1.11)
 
