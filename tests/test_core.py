@@ -1257,16 +1257,31 @@ def test_a_worktree_check_reads_the_transcript_on_the_service(app_state, project
     record = {"worktreePath": str(worktree), "worktreeName": "oasis", "worktreeBranch": "worktree-oasis"}
     with transcript.open("a", encoding="utf-8") as fh:
         fh.write("\n" + json.dumps({"type": "worktree-state", "worktreeSession": record}) + "\n")
-    core, _store, poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    core, _store, poller, srv, client, ends = _store_core(app_state, tmp_path)
+
+    def check(session_id):
+        """The ``worktree.check`` job's result (the transcript read on the
+        job's thread, the sharing judged back on the main loop)."""
+        message = {"t": "job.start", "kind": "worktree.check", "args": {"session": session_id}}
+        job = client.request(message)["job"]
+
+        def done():
+            return [e for e in ends.of("job") if e["job"] == job and e["state"] != "running"]
+
+        assert pump(5, lambda: bool(done()))
+        assert done()[-1]["state"] == "done"
+        return done()[-1]["result"]
+
     try:
-        reply = client.request({"t": "store.worktree-check", "session": ids["alpha1"]})
+        reply = check(ids["alpha1"])
         assert reply["removable"]["worktreePath"] == str(worktree) and reply["shares"] is False
-        plain = client.request({"t": "store.worktree-check", "session": ids["beta1"]})
+        plain = check(ids["beta1"])
         assert plain["removable"] is None and plain["shares"] is False
+        assert check("not-a-session") == {"removable": None, "shares": False}
         # A background agent works in there: not the client's to take.
         poller.background_ids = {ids["alpha2"]}
         core.store.get_session(ids["alpha2"]).cwd = str(worktree)
-        shared = client.request({"t": "store.worktree-check", "session": ids["alpha1"]})
+        shared = check(ids["alpha1"])
         assert shared["shares"] is True
     finally:
         srv.shutdown()

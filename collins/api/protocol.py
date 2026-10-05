@@ -142,8 +142,8 @@ each taken from the code the message replaces:
   shape for an older client and are refused (the tracker and the
   background agents are the service's, PR-1.12a and PR-1.12d, whose
   verdicts arrive as `item` fields, `background` among them).
-  `store.worktree-check` reads the worktree a session's transcript still
-  records (the archive's ask) and `store.forget` lets go of what the
+  The ``worktree.check`` job reads the worktree a session's transcript
+  still records (the archive's ask) and `store.forget` lets go of what the
   service kept for a session whose transcript went; `forgotten` tells the
   clients the service did that by itself (the archive sweep).
   `trust.check` and `trust.grant` are the CLI's folder trust
@@ -449,8 +449,10 @@ JOB_KINDS = frozenset(
         "chats.trust",
         "icon",
         "login.repair",
-        # A row's link to its background agent, repaired (PR-1.12d).
+        # A row's link to its background agent, repaired, and the worktree
+        # an archive would trash, read off the transcript (PR-1.12d).
         "session.repair",
+        "worktree.check",
     }
 )
 JOB_RUNNING = "running"
@@ -1394,14 +1396,6 @@ _TABLE: tuple[MessageType, ...] = (
         "store.move-project",
         "Move a project in the sidebar order, before another or to the end.",
         request=_request({"project": _req(_PROJECT), "before": _null(_PROJECT)}),
-    ),
-    MessageType(
-        "store.worktree-check",
-        "The worktree a session still occupies, off its transcript; whether a background agent shares it.",
-        request=_request(
-            {"session": _req(_ID)},
-            reply={"removable": _null(_JSON), "shares": _req(_BOOL)},
-        ),
     ),
     MessageType(
         "store.forget",

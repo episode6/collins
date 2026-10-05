@@ -421,9 +421,11 @@ unlock`, then `Gio.File.trash`; git's registration and the branch stay,
 so the entry lists as prunable until gc forgets it), never while the
 session is detached or another tab / background agent works in it, and
 never for bulk archives. The transcript read is the service's
-(`store.worktree-check {session}` → `removable`, the worktree state or
-null, and `shares`, whether the session runs on as a background agent or
-one works in there), asked from a worker thread; the open tabs that may
+(the `worktree.check` job, `{session}` → a result of `removable`, the
+worktree state or null, and `shares`, whether the session runs on as a
+background agent or one works in there: the transcript read on the job's
+thread, the sharing judged on the service's main loop), awaited as a job
+event; the open tabs that may
 work in it are the window's to count (`_worktree_in_use`). The archive's
 Undo (`_undo_archive_now`) restores
 the worktree with the session: `_trashed_worktrees` holds the records while

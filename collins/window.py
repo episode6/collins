@@ -6365,27 +6365,29 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return GLib.SOURCE_REMOVE
 
-        def probe() -> None:
-            state, shares = self._worktree_check(session_id)
-            GLib.idle_add(land, state, shares, priority=GLib.PRIORITY_DEFAULT)
-
-        threading.Thread(target=probe, daemon=True).start()
+        self._worktree_check(session_id, land)
 
     @staticmethod
-    def _worktree_check(session_id: str) -> tuple[dict | None, bool]:
+    def _worktree_check(session_id: str, then) -> None:
         """The service's read of the worktree a session's transcript still
-        records (`store.worktree-check`, PR-1.12d: the transcript is its
-        machine's), and whether a background agent shares it there. Off the
-        main loop: the call blocks its thread on the reply."""
-        try:
-            reply = apilink.call({"t": "store.worktree-check", "session": session_id})
-        except RequestRefused as refusal:
-            log.info("worktree check of %s refused: %s", session_id, refusal.msgid)
-            return None, False
-        state = reply.get("removable")
-        if not isinstance(state, dict) or not isinstance(state.get("worktreePath"), str):
-            state = None
-        return state, bool(reply.get("shares"))
+        records (the ``worktree.check`` job, PR-1.12d: the transcript is its
+        machine's, read on the job's thread), and whether a background
+        agent shares it there: *then(state, shares)* on the main loop once
+        the job ends (``(None, False)`` when it failed)."""
+
+        def landed(event: jobclient.JobEvent) -> None:
+            if not event.finished:
+                return
+            if not event.ok:
+                log.info("worktree check of %s: %s", session_id, event.text)
+                then(None, False)
+                return
+            state = event.result.get("removable")
+            if not isinstance(state, dict) or not isinstance(state.get("worktreePath"), str):
+                state = None
+            then(state, bool(event.result.get("shares")))
+
+        jobclient.start("worktree.check", {"session": session_id}, landed)
 
     def _archive_now(self, session_id: str, archived: bool) -> None:
         page = self._page_for(session_id) if archived else None
@@ -6484,17 +6486,16 @@ class MainWindow(Adw.ApplicationWindow):
                 land(decided)
             return
 
-        def probe() -> None:
-            state, shares = self._worktree_check(session_id)
+        def checked(state: dict | None, shares: bool) -> None:
             if state is not None and not shares:
-                GLib.idle_add(land, state, priority=GLib.PRIORITY_DEFAULT)
+                land(state)
 
-        threading.Thread(target=probe, daemon=True).start()
+        self._worktree_check(session_id, checked)
 
     def _worktree_in_use(self, path: str, except_page: Adw.TabPage | None = None) -> bool:
         """Whether an open tab in any window is working in *path* or
         somewhere under it (a background agent working there is the
-        service's to say: `store.worktree-check`'s ``shares``).
+        service's to say: the ``worktree.check`` job's ``shares``).
         *except_page* is a tab not to count: the session being archived,
         asked about while its own tab is still open."""
         app = self.get_application()

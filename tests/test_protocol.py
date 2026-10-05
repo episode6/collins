@@ -153,7 +153,6 @@ PHASE_ONE_TYPES = [
     "store.keep-projects",
     "store.forget-project",
     "store.move-project",
-    "store.worktree-check",
     "store.forget",
     "store.flags",
     "trust.check",
@@ -502,7 +501,6 @@ SAMPLES = {
     ("store.keep-projects", p.REQUEST): {"projects": ["project"]},
     ("store.forget-project", p.REQUEST): {"project": "kept"},
     ("store.move-project", p.REQUEST): {"project": "project", "before": "kept"},
-    ("store.worktree-check", p.REQUEST): {"session": ID},
     ("store.forget", p.REQUEST): {"session": ID},
     ("store.flags", p.REQUEST): {
         "session": ID,
@@ -723,13 +721,6 @@ REPLIES = {
     "store.keep-projects": {},
     "store.forget-project": {},
     "store.move-project": {},
-    "store.worktree-check": {
-        "removable": {
-            "worktreePath": "/home/u/project/.claude/worktrees/oasis",
-            "worktreeBranch": "worktree-oasis",
-        },
-        "shares": False,
-    },
     "store.forget": {},
     "store.flags": {},
     "trust.check": {"trusted": False, "root": "/home/u/project"},

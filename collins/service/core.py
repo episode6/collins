@@ -67,7 +67,7 @@ tracker. `store.flags` refuses `backgrounding` and `can_background`. The
 rest of what the window did with the service's files moved with them: a
 transcript that moved under a session on worktree entry is followed here
 (`sync_transcript_paths`, on every refresh of the store), the archive's
-worktree ask reads the transcript here (`store.worktree-check`), a
+worktree ask reads the transcript here (the ``worktree.check`` job), a
 forgotten transcript's files and records go here (`store.forget`), the
 archive sweep runs on the service's own timer (`start_housekeeping`, over
 `autodelete`), a chat's throwaway folder is made again before a spawn in
@@ -1150,6 +1150,14 @@ class ServiceCore:
             if self.background is not None and isinstance(session_id, str):
                 inputs = self.background.repair_inputs(session_id)
             args = {"inputs": inputs}
+        elif message.get("kind") == "worktree.check":
+            # The session's transcript and directory, looked up here on the
+            # main loop; the job's thread reads the transcript.
+            session_id = args.get("session")
+            session = self.store.get_session(session_id) if isinstance(session_id, str) else None
+            args = {"session": session_id if session is not None else None}
+            if session is not None:
+                args.update(path=str(session.jsonl_path), cwd=session.cwd or "")
         job_id = self.jobs.start(message.get("kind"), args, client.deliver)
         return protocol.reply(message.id, job=job_id)
 
@@ -1432,24 +1440,6 @@ class ServiceCore:
             store.set_unread(session_id, unread)
         return protocol.reply(message.id)
 
-    def _req_store_worktree_check(self, message: protocol.Message, client: Client) -> dict:
-        """The archive's worktree ask (§3.22): the worktree the session's
-        transcript still records on disk (`sessions.removable_worktree`;
-        null when none), and whether it is not the client's to take — the
-        session runs on as a background agent, or one works in there. The
-        tabs that may work in it are the client's to count."""
-        session = self.store.get_session(message.get("session"))
-        if session is None:
-            return protocol.reply(message.id, removable=None, shares=False)
-        state = sessions.removable_worktree(session.jsonl_path, session.cwd or "")
-        shares = False
-        if self.background is not None:
-            if state is not None:
-                shares = self.background.worktree_shared(session.session_id, str(state["worktreePath"]))
-            else:
-                shares = self.background.is_detached(session.session_id)
-        return protocol.reply(message.id, removable=_jsonable(state), shares=bool(shares))
-
     def _req_store_forget(self, message: protocol.Message, client: Client) -> dict:
         self.forget_session(message.get("session"))
         return protocol.reply(message.id)
@@ -1652,6 +1642,7 @@ class ServiceCore:
         if self.activity is not None:
             self.activity.on_sessions_changed = background.sync_busy_poll
         self.jobs._workers["session.repair"] = self._repair_job
+        self.jobs._workers["worktree.check"] = self._worktree_check_job
         self.store.connect("refreshed", lambda *_a: self.sync_transcript_paths())
         background.start()
         return background
@@ -1678,6 +1669,37 @@ class ServiceCore:
         background._land(land)
         landed.wait(10)
         return {"found": found}
+
+    def _worktree_check_job(self, job: jobs.Job, args: dict) -> dict:
+        """The ``worktree.check`` job's worker (the archive's worktree ask,
+        §3.22): on its thread, the worktree the session's transcript still
+        records on disk (`sessions.removable_worktree`, a read of the whole
+        transcript, never on the main loop); then, back on the main loop,
+        whether it is not the client's to take — the session runs on as a
+        background agent, or one works in there. The result is
+        ``removable`` (the worktree state, or None) and ``shares``. The tabs
+        that may work in it are the client's to count."""
+        session_id = args.get("session")
+        if not session_id:
+            return {"removable": None, "shares": False}
+        state = sessions.removable_worktree(args.get("path") or None, args.get("cwd") or "")
+        shares = [False]
+        background = self.background
+        if background is not None:
+            landed = threading.Event()
+
+            def land() -> None:
+                try:
+                    if state is not None:
+                        shares[0] = background.worktree_shared(session_id, str(state["worktreePath"]))
+                    else:
+                        shares[0] = background.is_detached(session_id)
+                finally:
+                    landed.set()
+
+            background._land(land)
+            landed.wait(10)
+        return {"removable": _jsonable(state), "shares": bool(shares[0])}
 
     def sync_transcript_paths(self) -> None:
         """Follow a transcript that moved out from under a live session (what
