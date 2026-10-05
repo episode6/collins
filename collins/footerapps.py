@@ -6,6 +6,12 @@ they track app updates and icon-theme changes for free.
 
 GLib/Gio only — no GTK — so the logic here stays importable (and testable)
 headless; the widgets live in apppicker.py.
+
+Launching one is a **local extra** (split-service spec §3.12): the app is
+this device's and the folder or file the service's, so `launch_app` and
+`launch_app_file` do nothing for a client that is not on the service's
+machine (`apilink.is_local`, which is `app.local`). The surfaces that
+offer them hide the offer too.
 """
 
 from __future__ import annotations
@@ -15,6 +21,8 @@ import sys
 from pathlib import Path
 
 from gi.repository import Gio, GioUnix, GLib
+
+from . import apilink
 
 # Exec-line field codes (Desktop Entry spec). %f/%u/%F/%U carry the files
 # argument; the rest expand to metadata we don't supply.
@@ -74,7 +82,10 @@ def accepts_files(app_info: Gio.AppInfo) -> bool:
 def launch_app_file(app_info: Gio.AppInfo, path: str) -> bool:
     """Open the file at *path* with the app (accepts_files must hold;
     False without a launch otherwise). Failures are logged, never
-    raised; True when the launch was handed to GLib."""
+    raised; True when the launch was handed to GLib. A local extra: False,
+    and nothing read or launched, for a client that is not `local`."""
+    if not apilink.is_local():
+        return False
     if not accepts_files(app_info) or not path or not Path(path).is_file():
         return False
     try:
@@ -96,7 +107,12 @@ def launch_app(app_info: Gio.AppInfo, cwd: str | None, *, pass_directory: bool =
     ``pass_directory=False`` forces the spawn-in-place path: a terminal that
     does advertise %u would read the directory as a command to run, not as
     the place to start in.
+
+    A local extra: nothing is read or launched for a client that is not
+    `local` (the folder is a path on the service's machine).
     """
+    if not apilink.is_local():
+        return
     if not cwd or not Path(cwd).is_dir():
         cwd = str(Path.home())
     try:

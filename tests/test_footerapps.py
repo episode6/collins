@@ -2,7 +2,24 @@ import pytest
 
 gi = pytest.importorskip("gi")
 
-from collins import footerapps  # noqa: E402
+from collins import apilink, footerapps  # noqa: E402
+
+
+class _Link:
+    """The app's link as the local extras read it: only its `local` proof."""
+
+    def __init__(self, local: bool) -> None:
+        self.local = local
+
+
+@pytest.fixture(autouse=True)
+def local_link(monkeypatch):
+    """Launching an app is a local extra (split-service spec §3.12): these
+    tests run as a client on the service's machine, as the app did before
+    the split; the ones at the end of the file run as one that is not."""
+    link = _Link(True)
+    monkeypatch.setattr(apilink, "_current", link)
+    return link
 
 
 def test_strip_field_codes_drops_placeholders():
@@ -146,3 +163,20 @@ def test_launch_app_file_swallows_a_launch_failure(tmp_path, capsys):
     path.write_text("x\n")
     assert not footerapps.launch_app_file(_FileEditorAppInfo(fail=True), str(path))
     assert "footer app launch failed (fake.desktop)" in capsys.readouterr().err
+
+
+def test_a_client_that_is_not_local_launches_nothing(tmp_path, monkeypatch, local_link):
+    """Split-service spec §3.12 (PR-2.8): the app is this device's and the
+    folder or file the service's, so nothing is read and nothing started."""
+    local_link.local = False
+    calls = []
+    monkeypatch.setattr(footerapps.subprocess, "Popen", lambda *a, **kw: calls.append((a, kw)))
+    footerapps.launch_app(_FakeAppInfo("myapp %F --flag %u"), str(tmp_path))
+    path = tmp_path / "f.txt"
+    path.write_text("x\n")
+    app = _FileEditorAppInfo()
+    assert footerapps.launch_app_file(app, str(path)) is False
+    assert calls == [] and app.launched == []
+    monkeypatch.setattr(apilink, "_current", None)  # no link at all is not local either
+    footerapps.launch_app(_FakeAppInfo("myapp"), str(tmp_path))
+    assert calls == []

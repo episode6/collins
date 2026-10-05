@@ -38,7 +38,7 @@ from collections.abc import Callable
 from .api import protocol
 from .api.protocol import RequestRefused
 
-__all__ = ["Link", "RequestRefused", "call", "current", "set_current"]
+__all__ = ["Link", "RequestRefused", "call", "current", "is_local", "set_current"]
 
 log = logging.getLogger(__name__)
 
@@ -121,6 +121,17 @@ def set_current(link: Link | None) -> None:
 
 def current() -> Link | None:
     return _current
+
+
+def is_local() -> bool:
+    """Whether this client proved it runs on the service's machine (the
+    `local` proof, D11: `SocketLink.local`, set by `prove_local` on every
+    hello). The one reader of the proof (PR-2.8): `App.local` is this,
+    and so is every gate of the local extras (§3.12: an external app, a
+    `file:` URI on the clipboard, "Reveal" in the file manager, Open in
+    Ghostty, a dropped file mentioned by its own path), which are hidden,
+    not disabled, for a client that is not local. With no link, False."""
+    return bool(getattr(_current, "local", False))
 
 
 def call(message: dict, timeout: float | None = None) -> dict:
