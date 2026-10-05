@@ -37,7 +37,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 import collins.composer as composer_mod  # noqa: E402
-from collins import dropimages, fileclipboard  # noqa: E402
+from collins import dropimages, fileclipboard, remotefiles  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -97,14 +97,20 @@ def set_text(clipboard: Gdk.Clipboard, text: str) -> None:
     claim(clipboard, Gdk.ContentProvider.new_for_value(GObject.Value(str, text)))
 
 
+# A file manager's copy: this machine's files as file: URIs, no service
+# (the clipboard's scope since PR-2.5; with no link the writer would put
+# only the plain text on).
+_FILE_MANAGER = remotefiles.ClipboardScope(None, True)
+
+
 def set_files(clipboard: Gdk.Clipboard, paths: list[str]) -> None:
     """fileclipboard.set_files, with the same wait for the claim to take."""
-    fileclipboard.set_files(clipboard, paths)
+    fileclipboard.set_files(clipboard, paths, scope=_FILE_MANAGER)
     for _attempt in range(100):
         if clipboard.is_local():
             return
         pump(50)
-        fileclipboard.set_files(clipboard, paths)
+        fileclipboard.set_files(clipboard, paths, scope=_FILE_MANAGER)
     raise AssertionError("the display never let this process claim the clipboard")
 
 

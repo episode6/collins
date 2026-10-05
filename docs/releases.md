@@ -38,6 +38,19 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The editor tree's rename, copy, cut and paste go over the service's
+  socket.** A rename, a paste (a copy, or a move for a cut) and a new
+  folder are the service's doing now: the window names the entry, the
+  destination and the project it stays inside, and the service checks the
+  rules it used to check itself (a rename keeps its folder and never
+  lands on a taken name; a paste never overwrites, landing as "name
+  (copy)"; nothing leaves the project) before touching a file. An open
+  file still follows its rename or move with its unsaved edits. Copying
+  a file puts a `collins://` reference to it on the clipboard for a paste
+  within Collins, with the ordinary file URIs beside it when the service
+  is this machine, so files still round-trip with the file manager.
+  Otherwise nothing looks different (the fifth chunk of the split's
+  Phase 2).
 - **The editor's tree, quick open and roots go over the service's socket.**
   The file tree lists a folder by asking the service (the folder's entries
   and the names git ignores in one answer, off the window's main loop,

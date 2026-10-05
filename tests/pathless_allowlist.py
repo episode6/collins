@@ -77,19 +77,10 @@ ALLOWLIST = frozenset(
         "terminal:PanelTerminal._sync_cwd:Path.is_dir",
         "terminal:PanelTerminal.follow_cwd:Path.is_dir",
         "terminal:TerminalTab.__init__:Path.is_dir",
-        # -- file operations and the clipboard (PR-2.5) --------------------------------
-        # `unique_target` / `paste_target`'s "is the name taken" check.
-        "editorfiles:_exists:Path.exists",
-        "editorfiles:_exists:Path.is_symlink",
-        "editor:EditorPane._rename:Path.rename",
-        "editorfiles:paste_entries:shutil.copy2",
-        "editorfiles:paste_entries:shutil.copytree",
-        "editorfiles:paste_entries:shutil.move",
-        "editorfiles:paste_target:Path.is_dir",
-        "editorfiles:rename_target:Path.exists",
-        "editorfiles:rename_target:Path.is_symlink",
-        "editorfiles:paste_entries:Path.is_dir",
-        "editorfiles:paste_entries:Path.is_symlink",
+        # -- file operations and the clipboard (PR-2.5): the rename, the paste
+        # (and the "is the name taken" check) went to the service (`fs.rename`
+        # / `fs.paste` / `fs.mkdir`; the rules into `projectfiles.py`). Nothing
+        # left. ------------------------------------------------------------------------
         # -- links and root names (PR-2.6) ----------------------------------------------
         "linkpatterns:resolve_path:os.path.exists",
         "terminal:_RootNameLinks._file_names:os.scandir",

@@ -325,6 +325,17 @@ each taken from the code the message replaces:
   event (no stat: the client lists again). The walk's ``paths`` and the
   listing's ``entries`` are CHUNKED_JSON_FIELDS: past a frame they travel
   as their JSON in TAG_BLOB frames, as a file's text does.
+- File operations (§3.23, PR-2.5; the same ``files`` cap). `fs.rename`
+  renames an entry in place (``target`` is the same directory's; a
+  refusal carries the rule it broke as ``reason``, one of
+  FS_RENAME_REASONS) and answers the renamed file's ``mtime`` (null for a
+  folder) so an editor holding it open can take it; `fs.paste` copies
+  (or moves, when ``cut``) ``entries`` into the folder ``target``, never
+  over anything (``placed``, the paths it landed at, and ``results``, one
+  per entry with its ``error`` of FS_PASTE_ERRORS); `fs.mkdir` makes one
+  folder. Each names the ``root`` the operation is confined to (the
+  asking editor's), and the paste's sources must be inside a root the
+  service knows unless the client is ``local``.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -353,8 +364,8 @@ CAP_LOCAL = "local"  # the service offers the local-extras proof (§3.2)
 CAP_DEBUG = "debug"  # the service runs with COLLINS_DEBUG_API=1 and serves debug.* (D27)
 CAP_GIT = "git"  # git over the API: git.*, fs.trash, git-changed, GET /api/blob?kind=git (PR-2.1)
 # Files over the API: fs.read, fs.write, fs.watch / fs.unwatch, file-changed (PR-2.3); fs.stat,
-# fs.list, fs.walk, a directory's fs.watch and dir-changed (PR-2.4), on the same cap: no release
-# shipped PR-2.3's set alone.
+# fs.list, fs.walk, a directory's fs.watch and dir-changed (PR-2.4); fs.rename, fs.paste,
+# fs.mkdir (PR-2.5), on the same cap: no release shipped an earlier set alone.
 CAP_FILES = "files"
 CAPABILITIES = frozenset({CAP_LOCAL, CAP_DEBUG, CAP_GIT, CAP_FILES})
 
@@ -709,6 +720,29 @@ _FS_ENTRY = Field(
         # Ignored by the repository (a check-ignore the service runs in the
         # listing's directory): the tree dims the row.
         "ignored": _req(_BOOL),
+    },
+)
+# File operations (§3.23, PR-2.5): the rule a refused rename or mkdir
+# broke (`projectfiles.RenameError` / `MkdirError`), carried as the
+# refusal's ``reason``; the rule a paste entry broke
+# (`projectfiles.PasteError`), carried in its result's ``error``. A paste
+# takes at most FS_PASTE_MAX entries (a clipboard's worth).
+FS_RENAME_REASONS = frozenset({"empty", "not_a_name", "exists", "missing", "outside"})
+FS_MKDIR_REASONS = frozenset({"not_a_name", "exists", "outside", "no_parent"})
+FS_PASTE_ERRORS = frozenset(
+    {"missing", "outside", "source_outside", "not_a_dir", "into_itself", "no_room", "failed"}
+)
+FS_PASTE_MAX = 1000
+_FS_PASTE_RESULT = Field(
+    K_OBJ,
+    fields={
+        "source": _req(_PATH),
+        # Where it landed (the name it got, "(copy)" when the name was taken),
+        # or null with `error` saying why not.
+        "target": _req(_null(_PATH)),
+        "error": _req(_null(Field(K_STR, choices=FS_PASTE_ERRORS, high=SHORT_MAX))),
+        # The OS's words for a `failed` one.
+        "message": _s(ARG_TEXT_MAX),
     },
 )
 
@@ -2336,6 +2370,53 @@ _TABLE: tuple[MessageType, ...] = (
                 "paths_bytes": _i(0, SIZE_MAX),
             },
         ),
+    ),
+    # -- file operations (§3.23, PR-2.5)
+    MessageType(
+        "fs.rename",
+        "Rename a file or folder in place on the service's machine, never over anything.",
+        request=_request(
+            {
+                "path": _req(_PATH),
+                # The new path: the same directory's (a rename never moves
+                # things elsewhere; a paste of a cut does). A target that is
+                # there already is refused `refused` with reason `exists`.
+                "target": _req(_PATH),
+                # The editor's root both paths must resolve inside.
+                "root": _req(_PATH),
+            },
+            reply={
+                # The renamed file's mtime after the rename (a rename keeps
+                # the inode's, but an editor holding the file open takes
+                # what the service answers); null for a folder.
+                "mtime": _req(_null(_MTIME)),
+            },
+        ),
+    ),
+    MessageType(
+        "fs.paste",
+        "Copy (or move, for a cut) files into a folder on the service's machine, never over anything.",
+        request=_request(
+            {
+                "entries": _req(Field(K_LIST, low=1, high=FS_PASTE_MAX, item=_PATH)),
+                # The folder they land in: inside `root`.
+                "target": _req(_PATH),
+                # A cut: the entries are moved, not copied.
+                "cut": _req(_BOOL),
+                "root": _req(_PATH),
+            },
+            reply={
+                # The paths the entries landed at, in order, for those that did.
+                "placed": _req(Field(K_LIST, high=FS_PASTE_MAX, item=_PATH)),
+                # One per entry, in the request's order: where it landed, or why not.
+                "results": _req(Field(K_LIST, high=FS_PASTE_MAX, item=_FS_PASTE_RESULT)),
+            },
+        ),
+    ),
+    MessageType(
+        "fs.mkdir",
+        "Make one folder on the service's machine, inside a root, never over anything.",
+        request=_request({"path": _req(_PATH), "root": _req(_PATH)}),
     ),
     # -- the service itself (§3.10)
     MessageType(
