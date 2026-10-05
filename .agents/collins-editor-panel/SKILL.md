@@ -51,6 +51,10 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   (`openwithrows.file_open_with_menu` over the `footer_apps` setting the
   pane relays through `set_footer_apps`, plus *Default app* via xdg-open);
   the tree emits `open-with-request(path, app_id)` and
+  (a **local extra**, §3.12: `openwith.file_open_with_entries` answers no
+  rows for a client that is not on the service's machine, the tree and the
+  Agent files rows append the submenu only when it has items, and
+  `_open_file_with` returns early unless `apilink.is_local()`)
   `EditorPane._open_file_with` launches through `openwith.open_file_with`,
   a failure landing in the banner. Probes: `FileTree.open_with_labels`,
   `activate_open_with`, `EditorPane.agent_file_open_with_labels`.

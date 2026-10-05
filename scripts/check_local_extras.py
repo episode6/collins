@@ -7,9 +7,9 @@ the things that hand a path of the service's to something on this device:
 Open in Ghostty, "Open In…" and Reveal transcript in the sidebar's menus,
 the footer's file manager button, app launchers and the panel toggle's
 right-click, the file rows' "Open In…", the attachments panel's Open
-With… and Show in Folder, the lightbox's Open With…, a clicked folder in
-the terminal. A window that is not local has none of them: **hidden, not
-greyed out**, and the actions behind them do nothing.
+With… and Show in Folder, a clicked folder in the terminal. A window
+that is not local has none of them: **hidden, not greyed out**, and the
+actions behind them do nothing.
 
 The check runs one `App()` against a service of its own, reads every one
 of those surfaces while the link is `local`, then takes the proof away
@@ -162,7 +162,6 @@ import collins.terminal as terminal_mod  # noqa: E402
 from collins import apilink, footerapps, i18n, openwith, remotefiles, remotestore, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.attachrecords import Attachment  # noqa: E402
-from collins.lightbox import ImageLightbox  # noqa: E402
 from collins.sidebar import SessionRow  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -329,9 +328,8 @@ def surfaces(win, local: bool) -> None:
         made,
     )
 
-    # The lightbox's Open With… button.
-    box = ImageLightbox(None, False, None, None, None, None, open_with=readme, why="no picture in this check")
-    check(f"[{say}] the lightbox's Open With…", (len(box._buttons) == 1) is local, len(box._buttons))
+    # (The lightbox's Open With… is check_drop_upload.py's: the service's
+    # own file for a local client, this device's cached copy otherwise.)
 
     # The window's actions: what a stale menu or a binding would reach.
     before, before_apps, before_log = len(LAUNCHER_CALLS), len(APP_LAUNCHES), len(launched())
