@@ -57,7 +57,7 @@ BuildRequires:  systemd-rpm-macros
 # session reach it while it runs; without either the grant applies at the
 # session's next restart. bindfs is in EPEL on RHEL 10, fuse3 in its BaseOS.
 Requires:       python3-gobject
-Requires:       libsoup3
+Requires:       typelib(Soup) = 3.0
 Requires:       gtk4 >= 4.10
 Requires:       libadwaita >= 1.5
 Requires:       vte291-gtk4
