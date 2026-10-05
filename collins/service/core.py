@@ -157,7 +157,19 @@ from .. import autodelete, chats, panelhistory, providers, sandboxgrants, sandbo
 from ..api import protocol
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
-from . import bgagents, gitfeed, hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
+from . import (
+    bgagents,
+    gitfeed,
+    hosting,
+    jobs,
+    prfeed,
+    ptyserver,
+    storefeed,
+    termstream,
+    tokenuse,
+    tracking,
+    transcripttail,
+)
 from . import blobs as blobs_mod
 from . import diffs as diffs_mod
 from . import files as files_mod
@@ -1252,6 +1264,7 @@ class ServiceCore:
     _req_fs_write = _files
     _req_fs_watch = _files
     _req_fs_unwatch = _files
+    _req_fs_names = _files
     _req_fs_stat = _files  # the tree, quick open and roots (PR-2.4)
     _req_fs_list = _files
     _req_fs_walk = _files
@@ -1499,6 +1512,25 @@ class ServiceCore:
         if (unread := message.get("unread")) is not None:
             store.set_unread(session_id, unread)
         return protocol.reply(message.id)
+
+    def _req_store_transcript_tail(
+        self, message: protocol.Message, client: Client
+    ) -> dict | protocol.Deferred:
+        """The links in the tail of a session's transcript (§3.23, PR-2.6):
+        the transcript's own path off the store's row (never a client's),
+        a `.jsonl` under the CLI's projects directory or the chats'
+        (`transcript_path_allowed`, rule 5), read and parsed on a thread
+        (`transcripttail`). A session with no transcript here answers no
+        links."""
+        session = self.store.get_session(message.get("session"))
+        path = str(session.jsonl_path) if session is not None and session.jsonl_path else None
+        if path is None or not transcript_path_allowed(path):
+            return protocol.reply(message.id, links=[])
+        return self.files._later(
+            message,
+            "transcript-tail",
+            lambda: protocol.reply(message.id, links=transcripttail.read_links(path)),
+        )
 
     def _req_store_forget(self, message: protocol.Message, client: Client) -> dict:
         session_id = message.get("session")

@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import shlex
 import time
 from collections.abc import Callable
@@ -26,6 +25,7 @@ from . import (  # noqa: E402
     apppicker,
     attachpanel,
     attachrecords,
+    checkouts,
     clientsession,
     composerkeys,
     dialogs,
@@ -75,13 +75,14 @@ from .linkpatterns import (  # noqa: E402
     FILE_PATTERN,
     STITCH_URL_ROWS,
     URL_PATTERN,
+    Exists,
     bare_names_pattern,
     resolve_file_reference,
     resolve_wrapped_reference,
     resolve_wrapped_url,
     token_at_column,
 )
-from .newchatview import NewChatView, is_git_checkout  # noqa: E402
+from .newchatview import NewChatView  # noqa: E402
 from .panedsizer import PanedSizer  # noqa: E402
 from .paneldock import PanelDock  # noqa: E402
 from .panelstrip import PanelStrip  # noqa: E402
@@ -256,88 +257,28 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             if match is not None:
                 kind = tag_kinds.get(tag, "url")
             uri = match
+        # Everything the resolution reads off the widget is read here, on the
+        # main loop; the resolution itself (`_click_target`) asks the
+        # service whether a path is there and for the transcript's links
+        # (§3.23), so it runs on a worker and the open lands when it is done.
+        tab = terminal.get_ancestor(TerminalTab)
         roots = _reference_roots(terminal)
-
-        def from_transcript(cand: str | None) -> bool:
-            # The fallback behind both screen stitchers: the transcript's
-            # unwrapped text, corroborated against the screen. Nothing for a
-            # shell tab, or a link still streaming in — the stitchers' and
-            # the direct readings keep their say then.
-            hit = _resolve_from_transcript_at(terminal, cand, x, y, roots)
-            if hit is None:
-                return False
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            kind, value = hit
-            if kind == "file":
-                path, line, col = value
-                _open_file_reference(terminal, path, line, col)
-            else:
-                _launch_uri(terminal, value)
-            return True
-
-        if not uri:
-            # A wrapped reference's continuation fragment often contains no
-            # slash (`o.py:7)`) and so matches nothing — the half holding
-            # the file *name* offers no click candidate at all. Hand the
-            # stitcher the raw token under the pointer instead; its geometry
-            # gates and existence check keep prose clicks inert. A URL's
-            # continuation half (`03/files`) is just as matchless, so the URL
-            # stitcher gets the same token when no file comes of it.
-            resolved = _resolve_wrapped_at(terminal, None, x, y, roots)
-            if resolved is not None:
-                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-                path, line, col = resolved
-                _open_file_reference(terminal, path, line, col)
-                return
-            stitched = _resolve_wrapped_url_at(terminal, None, x, y)
-            if stitched is None:
-                from_transcript(None)
-                return
-            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            _launch_uri(terminal, stitched)
+        screen = _screen_at(terminal, x, y)
+        session_id = tab.session_id if tab is not None else None
+        if not uri and screen is None:
             return
-        if kind == "file":
-            # Stitching runs before direct resolution: a fragment of a
-            # reference the CLI hard-wrapped can resolve on its own (the
-            # leading fragment of a wrapped path is often an existing
-            # directory prefix), and the stitched whole is the truer
-            # reading. The stitcher only ever returns geometry-gated,
-            # existence-checked joins. Mid-row references fail its edge
-            # gates immediately; a reference alone on its row does probe
-            # its neighbours before the direct fallback wins.
-            resolved = _resolve_wrapped_at(terminal, uri, x, y, roots)
-            if resolved is None and from_transcript(uri):
-                # Before the direct reading, for the same reason the stitcher
-                # runs first: the head of a wrapped path can be an existing
-                # directory, and the transcript knows it was only the head.
-                return
-            if resolved is None:
-                resolved = resolve_file_reference(uri, roots)
-            if resolved is not None:
-                gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-                path, line, col = resolved
-                _open_file_reference(terminal, path, line, col)
-                return
-            # The path grammar takes the tail of a wrapped URL for a relative
-            # path (`303/files`), and it resolves nowhere; before the click
-            # falls through, ask whether the row above hands it a scheme.
-            stitched = _resolve_wrapped_url_at(terminal, None, x, y)
-            if stitched is None:
-                return  # over-matched prose: leave the click to the terminal
+        if uri:
+            # A candidate under the pointer is the click's, claimed before the
+            # service answers: whether a path resolves is no longer known
+            # here, so a candidate that resolves nowhere is swallowed instead
+            # of falling through to the terminal. A click on no candidate at
+            # all (the token under the pointer stands in) is left unclaimed.
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-            _launch_uri(terminal, stitched)
-            return
-        if from_screen:
-            # The visible match may be only as much of the URL as fit on its
-            # row; the rest is on the next one, past a newline no regex over
-            # screen text can see. A stitch that isn't clearly a wrap comes
-            # back None and the match opens as it stands.
-            stitched = _resolve_wrapped_url_at(terminal, uri, x, y)
-            if stitched is None and from_transcript(uri):
-                return
-            uri = stitched or uri
-        gesture.set_state(Gtk.EventSequenceState.CLAIMED)
-        _launch_uri(terminal, uri)
+        remotefiles.off_main(
+            lambda: _click_target(kind, uri, from_screen, screen, roots, session_id),
+            lambda status, target: _on_click_resolved(terminal, status, target),
+            name="link-click",
+        )
 
     # Capture phase, so Ctrl+click opens the link even when the running app
     # has turned on mouse reporting (same trick as the context menu).
@@ -434,18 +375,20 @@ def _row_reader(rows: list[str]) -> Callable[[int], str]:
 _ROW_SLOP = (0, -1, 1)
 
 
+Screen = tuple[list[str], int, int, int]
+
+
 def _resolve_wrapped_at(
-    terminal: Vte.Terminal,
+    screen: Screen | None,
     candidate: str | None,
-    x: float,
-    y: float,
     roots: list[str | None],
+    exists: Exists,
 ) -> tuple[str, int | None, int | None] | None:
     """Stitch a failed path candidate with its neighbour rows (see
-    linkpatterns.resolve_wrapped_reference). With *candidate* None (nothing
-    under the pointer matched at all), the whitespace-delimited token at the
-    clicked cell stands in as the candidate."""
-    screen = _screen_at(terminal, x, y)
+    linkpatterns.resolve_wrapped_reference), over the *screen* snapshot the
+    click took (`_screen_at`). With *candidate* None (nothing under the
+    pointer matched at all), the whitespace-delimited token at the clicked
+    cell stands in as the candidate."""
     if screen is None:
         return None
     rows, row, col, _cols = screen
@@ -461,15 +404,14 @@ def _resolve_wrapped_at(
             [row_text(r - 1), row_text(r - 2)],
             [row_text(r + 1), row_text(r + 2), row_text(r + 3)],
             roots,
+            exists,
         )
         if resolved is not None:
             return resolved
     return None
 
 
-def _resolve_wrapped_url_at(
-    terminal: Vte.Terminal, candidate: str | None, x: float, y: float
-) -> str | None:
+def _resolve_wrapped_url_at(screen: Screen | None, candidate: str | None) -> str | None:
     """Stitch a clicked URL fragment with its neighbour rows (see
     linkpatterns.resolve_wrapped_url), or None to open what was clicked.
 
@@ -478,7 +420,6 @@ def _resolve_wrapped_url_at(
     the row-full gate stricter, which costs a stitch and never buys a wrong
     one. Claude Code's own renderer stops a column or two short, which is
     what linkpatterns' slack is for."""
-    screen = _screen_at(terminal, x, y)
     if screen is None:
         return None
     rows, row, col, cols = screen
@@ -509,29 +450,26 @@ def _resolve_wrapped_url_at(
 
 
 def _resolve_from_transcript_at(
-    terminal: Vte.Terminal,
+    screen: Screen | None,
     candidate: str | None,
-    x: float,
-    y: float,
     roots: list[str | None],
+    exists: Exists,
+    links_of: Callable[[], list[str]],
 ) -> tuple[str, object] | None:
-    """Finish the clicked fragment off the tab's transcript (see
+    """Finish the clicked fragment off the session's transcript (see
     transcriptlinks): ``("url", uri)`` or ``("file", (path, line, col))``,
-    or None when the tab has no transcript, the transcript has no link the
-    fragment is part of, or the screen around the click doesn't spell that
-    link out. File completions are existence-checked like any other path
-    reference; a longer candidate that resolves nowhere yields to a shorter
-    one that does. Same row slop and same token-settles-the-row rule as the
-    URL stitcher."""
-    tab = terminal.get_ancestor(TerminalTab)
-    transcript = tab.transcript_path if tab is not None else None
-    if not transcript:
-        return None
-    screen = _screen_at(terminal, x, y)
+    or None when the session has no transcript, the transcript has no link
+    the fragment is part of, or the screen around the click doesn't spell
+    that link out. *links_of* is the service's answer
+    (`store.transcript-tail`, asked once per click, and only when a click
+    gets this far). File completions are existence-checked like any other
+    path reference; a longer candidate that resolves nowhere yields to a
+    shorter one that does. Same row slop and same token-settles-the-row rule
+    as the URL stitcher."""
     if screen is None:
         return None
     rows, row, col, _cols = screen
-    links = transcriptlinks.transcript_links(transcript)
+    links = links_of()
     if not links:
         return None
     row_text = _row_reader(rows)
@@ -542,12 +480,114 @@ def _resolve_from_transcript_at(
         for kind, text in transcriptlinks.completions(cand, rows, r, col, links):
             if kind == "url":
                 return "url", text
-            resolved = resolve_file_reference(text, roots)
+            resolved = resolve_file_reference(text, roots, exists)
             if resolved is not None:
                 return "file", resolved
         if candidate is None:
             break
     return None
+
+
+def _click_target(
+    kind: str,
+    uri: str | None,
+    from_screen: bool,
+    screen: Screen | None,
+    roots: list[str | None],
+    session_id: str | None,
+) -> tuple[str, object] | None:
+    """What a Ctrl+click opens: ``("url", uri)`` or ``("file", (path, line,
+    col))``, or None (a worker thread's: it asks the service). *kind* and
+    *uri* are the match under the pointer (*from_screen*: a regex match
+    read off the screen, as against an OSC 8 hyperlink, which is whole);
+    *screen* is the snapshot `_screen_at` took on the main loop.
+
+    The order is the click's: a stitched whole before the bare candidate (a
+    fragment of a reference the CLI hard-wrapped can resolve on its own,
+    the head of a wrapped path often being an existing directory), the
+    transcript's unwrapped text behind both screen stitchers, and the
+    direct reading last. Every path is checked by the service (`fs.stat`,
+    remembered for this click), every URL needs nothing but the screen."""
+    seen: dict[str, bool] = {}
+
+    def exists(path: str) -> bool:
+        if path not in seen:
+            seen[path] = remotefiles.present(path)
+        return seen[path]
+
+    fetched: list[list[str]] = []
+
+    def links_of() -> list[str]:
+        # Nothing for a click in no session (a fresh tab), or a link still
+        # streaming in: the stitchers' and the direct readings keep their say.
+        if not fetched:
+            fetched.append(transcriptlinks.fetch(session_id) if session_id else [])
+        return fetched[0]
+
+    def from_transcript(cand: str | None) -> tuple[str, object] | None:
+        return _resolve_from_transcript_at(screen, cand, roots, exists, links_of)
+
+    if not uri:
+        # A wrapped reference's continuation fragment often contains no
+        # slash (`o.py:7)`) and so matches nothing — the half holding the
+        # file *name* offers no click candidate at all. Hand the stitcher the
+        # raw token under the pointer instead; its geometry gates and
+        # existence check keep prose clicks inert. A URL's continuation half
+        # (`03/files`) is just as matchless, so the URL stitcher gets the same
+        # token when no file comes of it.
+        resolved = _resolve_wrapped_at(screen, None, roots, exists)
+        if resolved is not None:
+            return "file", resolved
+        stitched = _resolve_wrapped_url_at(screen, None)
+        if stitched is None:
+            return from_transcript(None)
+        return "url", stitched
+    if kind == "file":
+        # Stitching runs before direct resolution: the stitched whole is the
+        # truer reading. The stitcher only ever returns geometry-gated,
+        # existence-checked joins. Mid-row references fail its edge gates
+        # immediately; a reference alone on its row does probe its
+        # neighbours before the direct fallback wins.
+        resolved = _resolve_wrapped_at(screen, uri, roots, exists)
+        if resolved is None:
+            hit = from_transcript(uri)
+            if hit is not None:
+                return hit
+            resolved = resolve_file_reference(uri, roots, exists)
+        if resolved is not None:
+            return "file", resolved
+        # The path grammar takes the tail of a wrapped URL for a relative
+        # path (`303/files`), and it resolves nowhere; before the click gives
+        # up, ask whether the row above hands it a scheme.
+        stitched = _resolve_wrapped_url_at(screen, None)
+        if stitched is None:
+            return None  # over-matched prose
+        return "url", stitched
+    if from_screen:
+        # The visible match may be only as much of the URL as fit on its row;
+        # the rest is on the next one, past a newline no regex over screen
+        # text can see. A stitch that isn't clearly a wrap comes back None
+        # and the match opens as it stands.
+        stitched = _resolve_wrapped_url_at(screen, uri)
+        if stitched is None:
+            hit = from_transcript(uri)
+            if hit is not None:
+                return hit
+        uri = stitched or uri
+    return "url", uri
+
+
+def _on_click_resolved(terminal: Vte.Terminal, status: str, target: object) -> None:
+    """The click's answer landed on the main loop (`PRIORITY_DEFAULT`): open
+    it, unless the terminal went while the service answered."""
+    if status != "ok" or not target or terminal.get_root() is None:
+        return
+    kind, value = target
+    if kind == "file":
+        path, line, col = value
+        _open_file_reference(terminal, path, line, col)
+    else:
+        _launch_uri(terminal, value)
 
 
 class _RootNameLinks:
@@ -557,19 +597,27 @@ class _RootNameLinks:
     path grammar demands. Files only — root directory names (docs, tests)
     are everyday prose words, and `docs/` is already the path grammar's.
 
+    The root is a directory on the service's machine, so the names are the
+    service's answer (`fs.names`, asked off the main loop and landed at
+    `GLib.PRIORITY_DEFAULT`) and the watch that keeps them honest is a
+    `fs.watch {kind: dir}` held on the root, whose `dir-changed` asks again
+    (§3.23, PR-2.6).
+
     The root lives on the ancestor TerminalTab, which isn't an ancestor yet
     while either terminal kind is being constructed — so the tag is built on
     first map and not re-resolved on later ones (panel bottom↔right swaps
     re-map without reparenting tabs). The tab does push a new root in when
     its editor follows the session's working directory somewhere else, which
-    is the only way this moves (`set_root`). A directory monitor keeps the
-    alternation honest: on changes the names are re-listed and the tag
-    swapped only when the set really changed.
+    is the only way this moves (`set_root`). On a change the names are asked
+    for again and the tag swapped only when the set really changed.
     Change events coalesce on a 500ms timer armed by the first one — a
     leading-edge throttle, deliberately not a trailing-edge debounce, so an
     agent churning root files steadily can't starve the refresh; a rebuild
     that lands mid-burst is harmless (the next event re-arms the timer, and
-    most events are content writes that leave the set alone anyway).
+    most events are content writes that leave the set alone anyway). An
+    answer for a root this has since left, or one an asked-again has
+    overtaken, is dropped. A service that cannot answer leaves the names
+    as they were, and a reconnect asks again (`Watcher.on_reset`).
     Between snapshots the
     usual guarantees hold: a deleted file's click resolves nowhere and falls
     through unclaimed. The terminal's signal closures keep the instance
@@ -582,14 +630,24 @@ class _RootNameLinks:
         self._root: str | None = None
         self._names: frozenset[str] | None = None
         self._tag: int | None = None
-        self._monitor: Gio.FileMonitor | None = None
+        # The handle of the `fs.watch` on the root (`remotefiles.Watcher`);
+        # None when there is none.
+        self._monitor: str | None = None
         self._refresh_source: int | None = None
+        self._asked = 0  # the newest `fs.names` ask: older answers are dropped
+        self._destroyed = False
         terminal.connect("map", self._on_map)
         terminal.connect("destroy", self._on_destroy)
+        # A reconnect re-sends the watch but not what changed meanwhile.
+        remotefiles.watcher().on_reset(self._on_reconnect)
+
+    def _on_reconnect(self) -> None:
+        if self._root is not None and not self._destroyed:
+            self._apply()
 
     def _on_map(self, _terminal: Vte.Terminal) -> None:
         if self._root is not None:
-            return  # re-mapped (panel swap); the tag and monitor live on
+            return  # re-mapped (panel swap); the tag and watch live on
         tab = self._terminal.get_ancestor(TerminalTab)
         if tab is None:
             return
@@ -607,21 +665,20 @@ class _RootNameLinks:
         self._rebuild(root)
 
     def _rebuild(self, root: str) -> None:
-        if self._monitor is not None:
-            self._monitor.cancel()
-            self._monitor = None
+        self._unwatch()
         self._root = root
         self._apply()
-        try:
-            self._monitor = Gio.File.new_for_path(self._root).monitor_directory(
-                Gio.FileMonitorFlags.NONE, None
-            )
-        except GLib.Error:
-            return  # no monitor backend: the map-time snapshot still serves
-        self._monitor.connect("changed", self._on_root_changed)
+        self._monitor = remotefiles.watcher().watch(
+            root, self._on_root_changed, kind=protocol.WATCH_DIR
+        )
 
-    def _on_root_changed(self, *_args) -> None:
-        if self._refresh_source is None:
+    def _unwatch(self) -> None:
+        if self._monitor is not None:
+            remotefiles.watcher().unwatch(self._monitor)
+            self._monitor = None
+
+    def _on_root_changed(self, _event: dict) -> None:
+        if self._refresh_source is None and not self._destroyed:
             self._refresh_source = GLib.timeout_add(500, self._refresh)
 
     def _refresh(self) -> bool:
@@ -630,7 +687,30 @@ class _RootNameLinks:
         return GLib.SOURCE_REMOVE
 
     def _apply(self) -> None:
-        names = self._file_names()
+        """Ask the service for the root's names; `_landed` applies them."""
+        root = self._root
+        if root is None or self._destroyed:
+            return
+        self._asked += 1
+        asked = self._asked
+        remotefiles.off_main(
+            lambda: remotefiles.root_names(root),
+            lambda status, value: self._landed(asked, root, status, value),
+            name="root-names",
+        )
+
+    def _landed(self, asked: int, root: str, status: str, value: object) -> None:
+        if self._destroyed or asked != self._asked or root != self._root:
+            return
+        if status == "ok":
+            names = frozenset(value[0])
+        elif isinstance(value, RequestRefused) and value.error == protocol.ERROR_GONE:
+            names = frozenset()  # the root is not there (any more)
+        else:
+            return  # the service could not say: keep what was known
+        self._set_names(names)
+
+    def _set_names(self, names: frozenset[str]) -> None:
         if names == self._names:
             return
         self._names = names
@@ -649,22 +729,13 @@ class _RootNameLinks:
         self._terminal.match_set_cursor_name(self._tag, "pointer")
         self._tag_kinds[self._tag] = "file"
 
-    def _file_names(self) -> frozenset[str]:
-        try:
-            with os.scandir(self._root) as entries:
-                # is_dir follows symlinks, so a directory behind a link is
-                # excluded the same way a plain one is.
-                return frozenset(entry.name for entry in entries if not entry.is_dir())
-        except OSError:
-            return frozenset()
-
     def _on_destroy(self, _terminal: Vte.Terminal) -> None:
+        self._destroyed = True
+        remotefiles.watcher().off_reset(self._on_reconnect)
         if self._tab is not None:
             self._tab.unregister_root_name_links(self)
             self._tab = None
-        if self._monitor is not None:
-            self._monitor.cancel()
-            self._monitor = None
+        self._unwatch()
         if self._refresh_source is not None:
             GLib.source_remove(self._refresh_source)
             self._refresh_source = None
@@ -678,30 +749,36 @@ def _open_file_reference(
     "Open in Editor" button handles the editor handoff), files inside the
     clicking tab's project in that tab's editor at the referenced line, and
     everything else — directories, outside-project files, no editor — in the
-    default app, as `file:` URIs always opened."""
-    if os.path.isfile(path):
+    default app, as `file:` URIs always opened.
+
+    Which of those it is, is one `fs.stat` of the service's (§3.23): the
+    kind, and `inside` of the tab's editor root, asked off the main loop;
+    the open lands when it is answered (a service that cannot say is the
+    default app, as a path nothing is at always was)."""
+    tab = terminal.get_ancestor(TerminalTab)
+    root = tab.editor_root if tab is not None else None
+
+    def landed(status: str, found: object) -> None:
+        if terminal.get_root() is None:
+            return  # the terminal went while the service answered
+        if status != "ok" or not found.is_file:
+            _launch_default(terminal, path)
+            return
+        inside = tab is not None and found.inside
         if editorfiles.is_image_path(path):
-            _present_image(terminal, path)
+            _present_image(terminal, path, inside)
             return
-        tab = terminal.get_ancestor(TerminalTab)
-        if tab is not None:
-
-            def landed(inside: bool) -> None:
-                if terminal.get_root() is None:
-                    return  # the terminal went while the service answered
-                if not inside:
-                    _launch_default(terminal, path)
-                    return
-                # The window's action, not the tab directly: it also presents a
-                # popped-out editor window and applies the pop-out-on-small-
-                # screen policy. Line/col travel 1-based; 0 means none.
-                terminal.activate_action(
-                    "win.open-in-editor", GLib.Variant("(sii)", (path, line or 0, col or 0))
-                )
-
-            tab.ask_can_open_in_editor(path, landed)
+        if not inside:
+            _launch_default(terminal, path)
             return
-    _launch_default(terminal, path)
+        # The window's action, not the tab directly: it also presents a
+        # popped-out editor window and applies the pop-out-on-small-
+        # screen policy. Line/col travel 1-based; 0 means none.
+        terminal.activate_action(
+            "win.open-in-editor", GLib.Variant("(sii)", (path, line or 0, col or 0))
+        )
+
+    remotefiles.off_main(lambda: remotefiles.stat_path(path, root), landed, name="link-stat")
 
 
 def _launch_default(terminal: Vte.Terminal, path: str) -> None:
@@ -709,47 +786,38 @@ def _launch_default(terminal: Vte.Terminal, path: str) -> None:
     launcher.launch(terminal.get_root(), None, _on_link_launched)
 
 
-def _present_image(terminal: Vte.Terminal, path: str) -> None:
+def _present_image(terminal: Vte.Terminal, path: str, can_edit: bool) -> None:
     """A clicked file reference turned out to be an image: lightbox over the
     window instead of handing it to the default app. Its "Open in Editor"
     button only appears when the click's own tab could actually open the
-    file (an editor exists and the path is inside its project) — routed
+    file (*can_edit*: an editor exists and the path is inside its project,
+    the service's answer `_open_file_reference` already holds) — routed
     through the window's `open-in-editor` action, which also handles a
-    popped-out editor window. Whether it could is the service's answer
-    (`TerminalTab.ask_can_open_in_editor`), so the lightbox comes up when
-    that lands."""
+    popped-out editor window."""
     tab = terminal.get_ancestor(TerminalTab)
+    on_open = None
+    if can_edit:
 
-    def present(can_edit: bool) -> None:
-        if terminal.get_root() is None:
-            return
-        on_open = None
-        if can_edit:
+        def on_open() -> None:
+            terminal.activate_action(
+                "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
+            )
 
-            def on_open() -> None:
-                terminal.activate_action(
-                    "win.open-in-editor", GLib.Variant("(sii)", (path, 0, 0))
-                )
-
-        # The picture is the service's blob (`kind=file`, PR-2.7), fetched
-        # before the lightbox floats.
-        show_image(
-            terminal,
-            path,
-            session=tab.image_session() if tab is not None else "",
-            can_open_in_editor=can_edit,
-            on_open_in_editor=on_open,
-        )
-
-    if tab is None:
-        present(False)
-        return
-    # No caption to record: a clicked reference is a path, not something
-    # anyone described. The line it was printed on almost always says
-    # what it is, and the transcript's own snippet fills the label in
-    # later (attachrecords lets context land in an empty slot).
-    tab.record_attachment(path)
-    tab.ask_can_open_in_editor(path, present)
+    if tab is not None:
+        # No caption to record: a clicked reference is a path, not something
+        # anyone described. The line it was printed on almost always says
+        # what it is, and the transcript's own snippet fills the label in
+        # later (attachrecords lets context land in an empty slot).
+        tab.record_attachment(path)
+    # The picture is the service's blob (`kind=file`, PR-2.7), fetched
+    # before the lightbox floats.
+    show_image(
+        terminal,
+        path,
+        session=tab.image_session() if tab is not None else "",
+        can_open_in_editor=can_edit,
+        on_open_in_editor=on_open,
+    )
 
 
 def _setup_smooth_scroll(terminal: Vte.Terminal) -> None:
@@ -1623,6 +1691,10 @@ class TerminalTab(Gtk.Box):
         # filed under meanwhile (see _history_id). The prompt Send hands over
         # waits in the session (Session.hold_new_chat_prompt).
         self._new_chat: NewChatView | None = None
+        # Whether the new-chat screen's directory is a git checkout, as the
+        # service answered (None until it does), and what waits for it.
+        self._is_git_checkout: bool | None = None
+        self._checkout_waiters: list[Callable[[bool], None]] = []
         self._history_key: str | None = None
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
@@ -1852,7 +1924,9 @@ class TerminalTab(Gtk.Box):
                 file_reference=lambda name: self.provider.file_reference(name, cwd),
                 notify=self.feed_message,
                 worktree_default=worktree_default,
-                is_git=bool(cwd) and is_git_checkout(cwd),
+                # Whether `cwd` is a checkout is the service's answer, asked
+                # below; the checkbox stays out until it lands.
+                is_git=False,
                 model=(options.model if options else "") or "",
                 pick_model=bool(self.provider.session_models()),
                 effort=(options.effort if options else "") or "",
@@ -1863,6 +1937,7 @@ class TerminalTab(Gtk.Box):
                 sandbox_available=sandboxstatus.probe_reason() == "",
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
+            checkouts.ask(cwd or "", self._on_new_chat_checkout)
             self._new_chat.connect(
                 "send-requested",
                 lambda _v, text, worktree, sandbox, model, effort: self.emit(
@@ -2104,6 +2179,29 @@ class TerminalTab(Gtk.Box):
         filled without restoring a whole draft (restore_new_chat)."""
         if self._new_chat is not None:
             self._new_chat.set_text(text)
+
+    @property
+    def is_git_checkout(self) -> bool:
+        """Whether the new-chat screen's directory is a git checkout, the
+        service's answer (`checkouts.ask`); False until it lands."""
+        return bool(self._is_git_checkout)
+
+    def when_checkout_known(self, then: Callable[[bool], None]) -> None:
+        """`then(is_git)` once the service has answered whether the new-chat
+        screen's directory is a git checkout: at once when it has, else when
+        it lands (a Send in the milliseconds before it does waits for it)."""
+        if self._is_git_checkout is not None:
+            then(self._is_git_checkout)
+        else:
+            self._checkout_waiters.append(then)
+
+    def _on_new_chat_checkout(self, is_git: bool) -> None:
+        self._is_git_checkout = is_git
+        if self._new_chat is not None:
+            self._new_chat.set_is_git(is_git)
+        waiters, self._checkout_waiters = self._checkout_waiters, []
+        for then in waiters:
+            then(is_git)
 
     def new_chat_worktree_choice(self) -> bool | None:
         """The screen's worktree box as the user left it, None while it still

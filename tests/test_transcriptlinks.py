@@ -1,11 +1,15 @@
 """The transcript-backed link completion behind the screen stitchers
-(collins/transcriptlinks.py): what it harvests from a JSONL tail, and which
-harvested links the screen around a click is allowed to corroborate."""
+(collins/transcriptlinks.py): what it harvests from a JSONL tail, which
+harvested links the screen around a click is allowed to corroborate, and the
+request that asks the service for them (the file itself is read by
+service/transcripttail.py, tests/test_transcripttail.py)."""
 
 import json
 
 from collins import transcriptlinks
-from collins.transcriptlinks import completions, harvest_links, transcript_links
+from collins.api import protocol
+from collins.api.protocol import RequestRefused
+from collins.transcriptlinks import completions, harvest_links, message_strings
 
 URL = "https://github.com/episode6/collins/pull/303/files#diff-abc"
 PATH = "collins/linkpatterns.py:319"
@@ -23,58 +27,58 @@ def test_harvest_takes_urls_and_paths_once_each_in_first_seen_order():
     assert harvest_links(texts) == [URL, PATH]
 
 
-def _entry(kind: str, content) -> str:
-    return json.dumps({"type": kind, "message": {"role": kind, "content": content}})
+def test_message_strings_take_text_blocks_tool_inputs_and_results():
+    data = "\n".join(
+        [
+            json.dumps({"type": "user", "message": {"role": "user", "content": f"open {URL}"}}),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {"type": "text", "text": f"Edited {PATH}"},
+                            {"type": "tool_use", "name": "Bash", "input": {"command": "curl https://x.test/a"}},
+                        ]
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {"content": [{"type": "tool_result", "content": [{"text": "at /etc/hosts"}]}]},
+                }
+            ),
+            json.dumps({"type": "pr-link", "url": "https://github.com/not/from/a/message"}),
+            "not json at all",
+        ]
+    ).encode()
+    texts = message_strings(data)
+    assert harvest_links(texts) == [URL, PATH, "https://x.test/a", "/etc/hosts"]
 
 
-def test_transcript_links_reads_text_blocks_tool_inputs_and_results(tmp_path):
-    jsonl = tmp_path / "s.jsonl"
-    lines = [
-        _entry("user", f"open {URL}"),
-        _entry(
-            "assistant",
-            [
-                {"type": "text", "text": f"Edited {PATH}"},
-                {"type": "tool_use", "name": "Bash", "input": {"command": "curl https://x.test/a"}},
-            ],
-        ),
-        _entry("user", [{"type": "tool_result", "content": [{"type": "text", "text": "at /etc/hosts"}]}]),
-        json.dumps({"type": "pr-link", "url": "https://github.com/not/from/a/message"}),
-        "not json at all",
-    ]
-    jsonl.write_text("\n".join(lines) + "\n")
-    assert transcript_links(jsonl) == [URL, PATH, "https://x.test/a", "/etc/hosts"]
+def test_an_escaped_newline_does_not_extend_a_url():
+    data = json.dumps({"type": "assistant", "message": {"content": "https://a.test/b\nnext line"}}).encode()
+    assert harvest_links(message_strings(data)) == ["https://a.test/b"]
 
 
-def test_transcript_links_escaped_newline_does_not_extend_a_url(tmp_path):
-    jsonl = tmp_path / "s.jsonl"
-    jsonl.write_text(_entry("assistant", [{"type": "text", "text": "https://a.test/b\nnext line"}]) + "\n")
-    assert transcript_links(jsonl) == ["https://a.test/b"]
+def test_fetch_asks_the_service_for_the_sessions_links(monkeypatch):
+    asked: list[dict] = []
+
+    def call(message, timeout=None):
+        asked.append(message)
+        return {"links": [URL, 7, PATH]}
+
+    monkeypatch.setattr(transcriptlinks.apilink, "call", call)
+    assert transcriptlinks.fetch("abc") == [URL, PATH]
+    assert asked == [{"t": "store.transcript-tail", "session": "abc"}]
 
 
-def test_transcript_links_reads_only_the_tail_and_skips_its_partial_line(tmp_path, monkeypatch):
-    jsonl = tmp_path / "s.jsonl"
-    early = _entry("user", "https://early.test/gone")
-    late = _entry("user", "https://late.test/kept")
-    jsonl.write_text(early + "\n" + late + "\n")
-    monkeypatch.setattr(transcriptlinks, "TAIL_BYTES", len(late) + 1 + 10)  # cuts `early` mid-line
-    transcriptlinks._cache.clear()
-    assert transcript_links(jsonl) == ["https://late.test/kept"]
+def test_fetch_is_empty_when_the_service_refuses(monkeypatch):
+    def call(message, timeout=None):
+        raise RequestRefused(protocol.ERROR_GONE, "Not connected", {})
 
-
-def test_transcript_links_caches_per_size_and_mtime(tmp_path):
-    jsonl = tmp_path / "s.jsonl"
-    jsonl.write_text(_entry("user", "https://one.test/") + "\n")
-    transcriptlinks._cache.clear()
-    first = transcript_links(jsonl)
-    assert transcript_links(jsonl) is first
-    with jsonl.open("a") as fh:
-        fh.write(_entry("user", "https://two.test/") + "\n")
-    assert transcript_links(jsonl) == ["https://one.test/", "https://two.test/"]
-
-
-def test_transcript_links_missing_file_is_empty(tmp_path):
-    assert transcript_links(tmp_path / "nope.jsonl") == []
+    monkeypatch.setattr(transcriptlinks.apilink, "call", call)
+    assert transcriptlinks.fetch("abc") == []
 
 
 # -- completion -----------------------------------------------------------------

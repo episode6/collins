@@ -38,7 +38,6 @@ on this screen it is the page rather than a stand-in raised over one.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
 import gi
 
@@ -249,6 +248,12 @@ class NewChatView(Gtk.Box):
         """Seed the box with a kept draft, cursor at the end."""
         self.composer.set_text(text)
 
+    def set_is_git(self, is_git: bool) -> None:
+        """The service answered whether the directory is a git checkout
+        (`checkouts.ask`, a moment after the screen was built): the
+        checkbox shows only in one — the flag has no meaning elsewhere."""
+        self._worktree.set_visible(bool(is_git))
+
     def worktree_choice(self) -> bool | None:
         """The checkbox as the user left it, or None while it still follows
         the project's default (what the draft record keeps — see
@@ -421,8 +426,3 @@ class NewChatView(Gtk.Box):
             "send-requested", text, self.worktree(), self.sandbox(), self.model(), self.effort()
         )
 
-
-def is_git_checkout(cwd: str) -> bool:
-    """Whether the worktree flag means anything in *cwd* — `.git` is a file
-    in worktree checkouts, so either form counts (the window's own test)."""
-    return (Path(cwd) / ".git").exists()

@@ -18,24 +18,27 @@ It works for finished turns: the CLI appends a message to the transcript
 when the message completes, so a link still streaming onto the screen has
 no transcript line yet and the click falls back to the geometry stitchers.
 
-Kept free of GTK/VTE imports so it stays unit-testable on CI (see
+The transcript is the service's file: `fetch` asks it for the links of the
+tail (`store.transcript-tail`, parsed by service.transcripttail with
+`message_strings` and `harvest_links` below) and this module never opens
+it. Kept free of GTK/VTE imports so it stays unit-testable on CI (see
 tests/conftest.py); terminal.py supplies the screen rows.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import re
-from pathlib import Path
 
+from . import apilink
+from .api import protocol
 from .linkpatterns import FILE_PATTERN, URL_PATTERN
 
-# How much of the transcript's end to read on a click. The screen shows the
-# most recent output, and a couple of megabytes of JSONL is hundreds of turns
-# — while reading the whole of a long session's transcript on every click
-# would be felt. The tail starts mid-line; that line fails to parse and is
-# skipped.
+# How much of the transcript's end the service reads for a click
+# (service.transcripttail). The screen shows the most recent output, and a
+# couple of megabytes of JSONL is hundreds of turns — while reading the
+# whole of a long session's transcript on every click would be felt. The
+# tail starts mid-line; that line fails to parse and is skipped.
 TAIL_BYTES = 2 * 1024 * 1024
 
 # Rows on each side of the click that may hold the rest of the link: the URL
@@ -45,37 +48,21 @@ CONTEXT_ROWS = 4
 _URL_RX = re.compile(URL_PATTERN)
 _FILE_RX = re.compile(FILE_PATTERN)
 
-# One parse per transcript version: the (size, mtime) the links came from.
-_cache: dict[str, tuple[tuple[int, float], list[str]]] = {}
 
-
-def transcript_links(path: str | Path) -> list[str]:
-    """Every URL- or path-shaped token in the strings of the last TAIL_BYTES
-    of *path*'s transcript, deduplicated, in order of first appearance.
-    Empty when the file can't be read."""
-    path = str(path)
+def fetch(session_id: str) -> list[str]:
+    """The links in the tail of *session_id*'s transcript, asked of the
+    service (`store.transcript-tail`): blocking on the link's sync
+    channel, so a worker thread's call. Empty when the service has no
+    transcript for the session, or none that answers (rule 4: the click
+    falls back to what the screen alone says)."""
     try:
-        st = os.stat(path)
-    except OSError:
+        fields = apilink.call({"t": "store.transcript-tail", "session": session_id})
+    except protocol.RequestRefused:
         return []
-    stamp = (st.st_size, st.st_mtime)
-    cached = _cache.get(path)
-    if cached is not None and cached[0] == stamp:
-        return cached[1]
-    try:
-        with open(path, "rb") as fh:
-            if st.st_size > TAIL_BYTES:
-                fh.seek(st.st_size - TAIL_BYTES)
-            data = fh.read()
-    except OSError:
-        return []
-    links = harvest_links(_strings(data))
-    _cache.clear()  # one transcript's links at a time is all a click needs
-    _cache[path] = (stamp, links)
-    return links
+    return [link for link in fields.get("links") or () if isinstance(link, str)]
 
 
-def _strings(data: bytes) -> list[str]:
+def message_strings(data: bytes) -> list[str]:
     """The message strings of each JSONL entry in *data*: text blocks, tool
     inputs, tool results — whatever the CLI rendered came from one of them.
     Taken from the parsed JSON, never the raw bytes: an escaped ``\\n``

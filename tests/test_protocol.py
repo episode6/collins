@@ -156,6 +156,8 @@ PHASE_ONE_TYPES = [
     "store.move-project",
     "store.forget",
     "store.flags",
+    # PR-2.6: the transcript's links.
+    "store.transcript-tail",
     "trust.check",
     "trust.grant",
     "pty",
@@ -228,6 +230,8 @@ PHASE_ONE_TYPES = [
     "fs.rename",
     "fs.paste",
     "fs.mkdir",
+    # PR-2.6: the bare root-name links' read (the same `files` cap).
+    "fs.names",
     "service.restart",
     "service.status",
 ]
@@ -536,6 +540,7 @@ SAMPLES = {
         "backgrounding": False,
         "can_background": True,
     },
+    ("store.transcript-tail", p.REQUEST): {"session": ID},
     ("trust.check", p.REQUEST): {"path": "/home/u/project"},
     ("trust.grant", p.REQUEST): {"path": "/home/u/project", "scope": "launch"},
     ("pty", p.EVENT): {
@@ -738,6 +743,7 @@ SAMPLES = {
         "root": "/home/u/project",
     },
     ("fs.mkdir", p.REQUEST): {"path": "/home/u/project/new", "root": "/home/u/project"},
+    ("fs.names", p.REQUEST): {"root": "/home/u/project"},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -819,6 +825,7 @@ REPLIES = {
     "store.move-project": {},
     "store.forget": {},
     "store.flags": {},
+    "store.transcript-tail": {"links": ["https://example.test/a", "src/a.py:3"]},
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
     "panel.key": {},
@@ -949,6 +956,7 @@ REPLIES = {
         "results_bytes": 2,
     },
     "fs.mkdir": {},
+    "fs.names": {"names": ["README.md", "pyproject.toml"], "truncated": False},
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
