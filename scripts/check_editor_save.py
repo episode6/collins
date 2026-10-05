@@ -16,7 +16,8 @@ text and the new mtime; a save after it writes through `fs.write` and the
 file carries the edit; a clean buffer reloads silently, cursor kept; a
 save over a file that moved underneath is refused `stale` and asks before
 overwriting (the "changed on disk" dialog, stubbed), the file untouched
-until Overwrite; a deleted file is told and marked dirty; a closed tab's
+until Overwrite; a deleted file is told and marked dirty; a change that
+waited for a reload is judged even when the reload fails; a closed tab's
 watch is gone. The pane never opens a file itself.
 
 This is a script, not a pytest test, on purpose: tests/conftest.py blocks
@@ -64,6 +65,8 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 Adw.init()
 
 from collins import dialogs, remotefiles  # noqa: E402
+from collins.api import protocol  # noqa: E402
+from collins.api.protocol import RequestRefused  # noqa: E402
 from collins.editor import EditorPane  # noqa: E402
 
 PASSED = 0
@@ -268,6 +271,36 @@ def run(root: str) -> int:
     check("a deleted file is told", pane._banner.get_title() == "second.txt was deleted.", pane._banner.get_title())
     check("and its buffer is dirty, so nothing saves over nothing silently", other.buffer.get_modified())
     check("its mtime is forgotten", other.mtime is None)
+
+    # -- a change that waited for a reload is judged even when the reload fails ------
+    # Two external changes racing one reload: the second is queued while the
+    # read is in flight, and the read then fails (the file went away between
+    # the monitor and the read). The queued `gone` is still judged, so the
+    # buffer is told and marked dirty (the review of PR 609).
+    third = os.path.join(root, "third.txt")
+    with open(third, "w") as fh:
+        fh.write("third\n")
+    pane.open_file(third)
+    racing = pane._open[third]
+    if not wait_for(lambda: not racing.loading):
+        print("FAIL  the third read never landed")
+        return 1
+    pane._banner.set_revealed(False)
+    racing.loading = True  # a reload in flight...
+    racing.reloading = True
+    pane._check_external(
+        racing, {"handle": racing.watch_handle, "path": third, "mtime": None, "size": None, "gone": True}
+    )
+    check("a change during a reload waits for it", racing.pending_change is not None and not racing.buffer.get_modified())
+    pane._on_loaded(
+        racing, racing.load_id, "refused", RequestRefused(protocol.ERROR_GONE, "{name} is not there", {"name": "third.txt"})
+    )
+    check("the failed reload is told", pane._banner.get_revealed())
+    check(
+        "and the waiting change is judged after it",
+        racing.pending_change is None and racing.mtime is None and racing.buffer.get_modified(),
+        (racing.pending_change, racing.mtime, racing.buffer.get_modified()),
+    )
 
     # -- closing a tab drops its watch -----------------------------------------------
     handle = other.watch_handle
