@@ -409,6 +409,12 @@ class AttachmentsView(Gtk.Box):
                 return
             then(str(path))
 
+        # A fresh ask every time, as the lightbox and the editor's image page
+        # make: `pictures.fetch` answers from its table otherwise, so a file
+        # rewritten on the service would open as it was, and one refusal (a
+        # click before the service's scan had the record) would stand for
+        # the app's run. The blob's tag makes an unchanged file a 304.
+        pictures.forget(one.key)
         if one.kind == "image":
             pictures.fetch(one.key, landed, session=session)
         else:
