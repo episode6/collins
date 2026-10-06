@@ -154,9 +154,13 @@ Enter opens, Esc closes.
   the lightbox and the attachments panel, and a click on a file in that
   panel, are there either way: on the service's machine the app is handed
   the file itself, elsewhere the window's own cached copy of it. Only
-  what the session was sent or showed is fetched that way, and a copy
-  whose name would make the desktop *run* it, a launcher or a script,
-  goes to the app chooser instead of a default app.) A window that is **not** on the
+  what the session was sent or showed is fetched that way. As a
+  precaution, best effort and not a guarantee, a copy whose file suffix
+  is missing or is on Collins' list of ones a desktop commonly runs
+  (`.desktop`, `.sh`, `.py`, `.jar`, `.exe`, `.AppImage` and the like) is
+  renamed `.bin` and offered through the app chooser instead of opened
+  in a default app; any other suffix is kept and opens as that file type
+  would from your own disk.) A window that is **not** on the
   service's machine has none of them: the items are left out, not greyed
   out, because the app they would start is on one computer and the file
   on another. Everything else is the same there: the editor, the git
