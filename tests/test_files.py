@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import stat
+import threading
 import time
 
 import inproc
@@ -732,3 +733,455 @@ def test_list_and_walk_confine_on_the_worker(served, monkeypatch):
     assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
     client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
     assert core.files.watching(client, "d1")
+
+
+# -- fs.rename, fs.paste, fs.mkdir (PR-2.5) --------------------------------------------------
+
+
+def _knows(core, *dirs) -> None:
+    """The store knows a session in each of *dirs*: they are roots."""
+    sessions = [type("S", (), {"cwd": str(d)})() for d in dirs]
+    core.store = type("Store", (), {"all_sessions": lambda self: list(sessions)})()
+
+
+def _rename(client, project, path, target, root=None) -> dict:
+    return client.request(
+        {"t": "fs.rename", "path": str(path), "target": str(target), "root": str(root or project)}
+    )
+
+
+def _paste(client, project, entries, target, cut=False, root=None) -> dict:
+    return client.request(
+        {
+            "t": "fs.paste",
+            "entries": [str(e) for e in entries],
+            "target": str(target),
+            "cut": cut,
+            "root": str(root or project),
+        }
+    )
+
+
+def _placed(reply: dict) -> list[str]:
+    """The paths a paste landed at, in order: what the reply's `placed`
+    said before D42 dropped it (derivable from `results`)."""
+    return [r["target"] for r in reply["results"] if r["target"] is not None]
+
+
+def test_rename_renames_in_place_and_answers_the_files_mtime(served):
+    core, client, project, _events = served
+    before = mtime_of(project / "a.txt")
+    reply = _rename(client, project, project / "a.txt", project / "b.txt")
+    assert not (project / "a.txt").exists() and (project / "b.txt").read_text() == "one\ntwo\n"
+    assert reply["mtime"] == mtime_of(project / "b.txt") == before
+    (project / "pkg").mkdir()
+    reply = _rename(client, project, project / "pkg", project / "package")
+    assert (project / "package").is_dir() and reply["mtime"] is None
+    # The name unchanged: nothing to do, nothing to complain about.
+    reply = _rename(client, project, project / "b.txt", project / "b.txt")
+    assert reply["mtime"] is None and (project / "b.txt").exists()
+
+
+def test_rename_never_lands_on_something_that_is_there(served):
+    core, client, project, _events = served
+    (project / "b.txt").write_text("mine")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, project / "a.txt", project / "b.txt")
+    assert refused.value.error == protocol.ERROR_REFUSED and refused.value.details["reason"] == "exists"
+    assert (project / "b.txt").read_text() == "mine" and (project / "a.txt").exists()
+    # A broken symlink is taken too.
+    (project / "c.txt").symlink_to(project / "gone.txt")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, project / "a.txt", project / "c.txt")
+    assert refused.value.details["reason"] == "exists"
+
+
+def test_rename_refuses_a_move_a_missing_entry_and_a_bad_name(served):
+    core, client, project, _events = served
+    (project / "sub").mkdir()
+    # Another directory's: a rename keeps its folder (a paste of a cut moves).
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, project / "a.txt", project / "sub" / "a.txt")
+    assert refused.value.details["reason"] == "not_a_name" and (project / "a.txt").exists()
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, project / "gone.txt", project / "b.txt")
+    assert refused.value.error == protocol.ERROR_GONE and refused.value.details["reason"] == "missing"
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, project / "a.txt", project / "..")
+    assert refused.value.details["reason"] == "not_a_name"
+
+
+def test_rename_across_roots_is_refused(served, tmp_path):
+    """The root the request names confines both paths: an entry of another
+    root (or a target through a link out of this one) is `outside`, and a
+    client that is not local may name only a root the service knows."""
+    core, client, project, _events = served
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "x.txt").write_text("x")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, other / "x.txt", other / "y.txt")
+    assert refused.value.error == protocol.ERROR_REFUSED and refused.value.details["reason"] == "outside"
+    assert (other / "x.txt").exists()
+    # A rename inside a directory that is itself a symlink out of the root
+    # keeps the bare name and still lands outside it.
+    (project / "link").symlink_to(other)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, project / "link" / "x.txt", project / "link" / "y.txt")
+    assert refused.value.details["reason"] == "outside" and (other / "x.txt").exists()
+    # Not local: the root itself must be one the service knows.
+    client.local = False
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _rename(client, project, other / "x.txt", other / "y.txt", root=other)
+    assert refused.value.error == protocol.ERROR_REFUSED and "reason" not in refused.value.details
+    _knows(core, project)
+    reply = _rename(client, project, project / "a.txt", project / "b.txt")
+    assert reply["mtime"] == mtime_of(project / "b.txt")
+
+
+def test_rename_reports_the_os_error(served):
+    core, client, project, _events = served
+    if os.geteuid() == 0:
+        pytest.skip("root renames anywhere")
+    locked = project / "locked"
+    locked.mkdir()
+    (locked / "a.txt").write_text("x")
+    locked.chmod(0o500)
+    try:
+        with pytest.raises(inproc.RequestRefused) as refused:
+            _rename(client, project, locked / "a.txt", locked / "b.txt")
+    finally:
+        locked.chmod(0o700)
+    assert refused.value.error == protocol.ERROR_FAILED and "denied" in refused.value.details["error"]
+    assert (locked / "a.txt").exists()
+
+
+def test_paste_copies_and_never_overwrites(served):
+    core, client, project, _events = served
+    (project / "pkg").mkdir()
+    (project / "pkg" / "a.txt").write_text("mine")
+    reply = _paste(client, project, [project / "a.txt"], project / "pkg")
+    copy = project / "pkg" / "a (copy).txt"
+    assert _placed(reply) == [str(copy)]
+    assert reply["results"] == [
+        {
+            "source": str(project / "a.txt"),
+            "target": str(copy),
+            "mtime": mtime_of(copy),
+            "error": None,
+            "message": "",
+        }
+    ]
+    assert "placed" not in reply
+    assert (project / "pkg" / "a.txt").read_text() == "mine"
+    assert copy.read_text() == "one\ntwo\n"
+    assert (project / "a.txt").exists()  # a copy leaves the original
+
+
+def test_paste_of_a_cut_moves(served):
+    core, client, project, _events = served
+    (project / "pkg").mkdir()
+    (project / "folder" / "sub").mkdir(parents=True)
+    (project / "folder" / "sub" / "deep.txt").write_text("deep")
+    reply = _paste(client, project, [project / "a.txt", project / "folder"], project / "pkg", cut=True)
+    assert _placed(reply) == [str(project / "pkg" / "a.txt"), str(project / "pkg" / "folder")]
+    assert not (project / "a.txt").exists() and not (project / "folder").exists()
+    assert (project / "pkg" / "a.txt").read_text() == "one\ntwo\n"
+    assert (project / "pkg" / "folder" / "sub" / "deep.txt").read_text() == "deep"
+    # A cut pasted back where it came from: nothing to do, no error.
+    reply = _paste(client, project, [project / "pkg" / "a.txt"], project / "pkg", cut=True)
+    assert _placed(reply) == [] and reply["results"][0]["target"] is None
+    assert reply["results"][0]["error"] is None
+
+
+def test_paste_source_outside_every_root_is_refused_unless_local(served, tmp_path):
+    """Per entry: the rest of the clipboard still lands."""
+    core, client, project, _events = served
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    (project / "pkg").mkdir()
+    client.local = False
+    _knows(core, project)
+    reply = _paste(client, project, [outside, project / "a.txt"], project / "pkg")
+    assert _placed(reply) == [str(project / "pkg" / "a.txt")]
+    assert [r["error"] for r in reply["results"]] == ["source_outside", None]
+    assert not (project / "pkg" / "outside.txt").exists()
+    # A link inside to a file outside: the source is confined resolved.
+    (project / "link.txt").symlink_to(outside)
+    reply = _paste(client, project, [project / "link.txt"], project / "pkg")
+    assert reply["results"][0]["error"] == "source_outside"
+    # A local client (the same machine): a copy taken in a file manager is
+    # exactly what paste is for, and the service does the copy.
+    client.local = True
+    reply = _paste(client, project, [outside], project / "pkg")
+    assert _placed(reply) == [str(project / "pkg" / "outside.txt")]
+    assert (project / "pkg" / "outside.txt").read_text() == "secret"
+
+
+def test_paste_destination_is_confined_to_the_root(served, tmp_path):
+    core, client, project, _events = served
+    other = tmp_path / "other"
+    other.mkdir()
+    reply = _paste(client, project, [project / "a.txt"], other)
+    assert _placed(reply) == [] and reply["results"][0]["error"] == "outside"
+    assert not (other / "a.txt").exists()
+    # Not local: the root must be one the service knows.
+    client.local = False
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _paste(client, project, [other / "x"], other, root=other)
+    assert refused.value.error == protocol.ERROR_REFUSED
+
+
+def test_paste_reports_each_entrys_rule(served):
+    core, client, project, _events = served
+    (project / "pkg").mkdir()
+    sources = [project / "gone.txt", project / "pkg", project / "a.txt"]
+    reply = _paste(client, project, sources, project / "pkg")
+    assert [r["error"] for r in reply["results"]] == ["missing", "into_itself", None]
+    assert _placed(reply) == [str(project / "pkg" / "a.txt")]
+    reply = _paste(client, project, [project / "a.txt"], project / "nowhere")
+    assert reply["results"][0]["error"] == "not_a_dir"
+    if os.geteuid() != 0:
+        locked = project / "locked"
+        locked.mkdir()
+        locked.chmod(0o500)
+        try:
+            reply = _paste(client, project, [project / "a.txt"], locked)
+        finally:
+            locked.chmod(0o700)
+        assert reply["results"][0]["error"] == "failed" and "denied" in reply["results"][0]["message"]
+
+
+def test_mkdir_makes_one_folder_inside_the_root(served, tmp_path):
+    core, client, project, _events = served
+
+    def mkdir(path, root=project):
+        return client.request({"t": "fs.mkdir", "path": str(path), "root": str(root)})
+
+    assert mkdir(project / "new") == {}
+    assert (project / "new").is_dir()
+    with pytest.raises(inproc.RequestRefused) as refused:
+        mkdir(project / "new")
+    assert refused.value.details["reason"] == "exists"
+    with pytest.raises(inproc.RequestRefused) as refused:
+        mkdir(project / "a.txt")
+    assert refused.value.details["reason"] == "exists"  # never over a file either
+    with pytest.raises(inproc.RequestRefused) as refused:
+        mkdir(project / "no" / "parent")
+    assert refused.value.details["reason"] == "no_parent"
+    with pytest.raises(inproc.RequestRefused) as refused:
+        mkdir(tmp_path / "elsewhere")
+    assert refused.value.details["reason"] == "outside" and not (tmp_path / "elsewhere").exists()
+    other = tmp_path / "other"
+    other.mkdir()
+    (project / "link").symlink_to(other)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        mkdir(project / "link" / "made")
+    assert refused.value.details["reason"] == "outside" and not (other / "made").exists()
+    client.local = False
+    with pytest.raises(inproc.RequestRefused) as refused:
+        mkdir(other / "made", root=other)
+    assert "reason" not in refused.value.details
+
+
+def test_rename_paste_and_mkdir_are_deferreds_settled_later(served):
+    core, client, project, _events = served
+    (project / "pkg").mkdir()
+    root = str(project)
+    for frame in (
+        {
+            "t": "fs.rename",
+            "id": 11,
+            "path": str(project / "a.txt"),
+            "target": str(project / "b.txt"),
+            "root": root,
+        },
+        {
+            "t": "fs.paste",
+            "id": 12,
+            "entries": [str(project / "b.txt")],
+            "target": str(project / "pkg"),
+            "cut": False,
+            "root": root,
+        },
+        {"t": "fs.mkdir", "id": 13, "path": str(project / "made"), "root": root},
+    ):
+        landed: list = []
+        core.files = files.Files(core, dispatch=landed.append)
+        raw = core.handle(protocol.validate(frame, protocol.CLIENT), client)
+        assert isinstance(raw, protocol.Deferred) and not raw.settled
+        deadline = time.monotonic() + 5
+        while not landed and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert landed
+        landed[0]()
+        assert raw.settled and raw.reply["ok"], raw.reply
+    assert (project / "pkg" / "b.txt").exists() and (project / "made").is_dir()
+
+
+def test_a_paste_worker_that_raises_settles_failed(served, monkeypatch):
+    core, client, project, _events = served
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(files, "paste_entries", boom)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        _paste(client, project, [project / "a.txt"], project)
+    assert refused.value.error == protocol.ERROR_FAILED and refused.value.details["error"] == "disk on fire"
+
+
+def test_paste_results_carry_the_landed_files_mtime(served):
+    """Each result's `mtime` is the landed file's (null for a folder, or
+    nothing landed): what `_retarget_open` takes for a moved open file,
+    so a `gone` that beat the reply is taken back (D41, S1)."""
+    core, client, project, _events = served
+    (project / "pkg").mkdir()
+    (project / "folder").mkdir()
+    before = mtime_of(project / "a.txt")
+    entries = [project / "a.txt", project / "folder", project / "gone"]
+    reply = _paste(client, project, entries, project / "pkg", cut=True)
+    assert [r["mtime"] for r in reply["results"]] == [mtime_of(project / "pkg" / "a.txt"), None, None]
+    assert reply["results"][0]["mtime"] == before  # a move keeps the inode's
+
+
+def test_a_cut_from_another_known_root_lands_and_one_from_outside_every_root_is_refused(served, tmp_path):
+    """D43: the roots are what a client may reach, not walls between
+    projects: the one clipboard moves a cut from project B's tree into
+    project A's, for a client that is not local too; a source inside no
+    root the service knows is `source_outside`."""
+    core, client, project, _events = served
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "b.txt").write_text("from b")
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    (nowhere / "n.txt").write_text("n")
+    client.local = False
+    _knows(core, project, other)
+    reply = _paste(client, project, [other / "b.txt", nowhere / "n.txt"], project, cut=True)
+    assert [r["error"] for r in reply["results"]] == [None, "source_outside"]
+    assert (project / "b.txt").read_text() == "from b" and not (other / "b.txt").exists()
+    assert (nowhere / "n.txt").exists() and not (project / "n.txt").exists()
+
+
+def test_the_root_is_confined_on_the_worker_not_the_handler(served, monkeypatch):
+    """S3 of PR 613's review: `allowed` resolved every root on the main
+    loop for the three operations; now the handler computes the roots
+    and `_confine` runs on the thread, as `fs.list`'s does."""
+    core, client, project, _events = served
+    client.local = False
+    _knows(core, project)
+    resolved: list[str] = []
+    real_is_inside = files.is_inside
+
+    def spy(root, path):
+        resolved.append(threading.current_thread().name)
+        return real_is_inside(root, path)
+
+    monkeypatch.setattr(files, "is_inside", spy)
+    (project / "pkg").mkdir()
+    root = str(project)
+    frames = (
+        {
+            "t": "fs.rename",
+            "id": 21,
+            "path": str(project / "a.txt"),
+            "target": str(project / "b.txt"),
+            "root": root,
+        },
+        {
+            "t": "fs.paste",
+            "id": 22,
+            "entries": [str(project / "b.txt")],
+            "target": str(project / "pkg"),
+            "cut": False,
+            "root": root,
+        },
+        {"t": "fs.mkdir", "id": 23, "path": str(project / "made"), "root": root},
+    )
+    inline = core.files
+    for frame in frames:
+        work: list = []
+        resolved.clear()
+        collect = lambda fn, name, work=work: work.append(fn)  # noqa: E731
+        core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=collect)
+        raw = core.handle(protocol.validate(frame, protocol.CLIENT), client)
+        assert isinstance(raw, protocol.Deferred) and not raw.settled
+        assert resolved == [], f"{frame['t']} resolved a path on the handler"
+        work[0]()
+        assert raw.settled and raw.reply["ok"], raw.reply
+        assert resolved and all(name == threading.current_thread().name for name in resolved)
+    assert (project / "pkg" / "b.txt").exists() and (project / "made").is_dir()
+    # And a root the client may not name is refused by that worker check.
+    core.files = inline
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.mkdir", "path": str(project.parent / "x"), "root": str(project.parent)})
+    assert refused.value.error == protocol.ERROR_REFUSED and not (project.parent / "x").exists()
+
+
+def test_source_confinement_never_resolves_the_held_path_again(tmp_path, monkeypatch):
+    """The third verification's probe (H1, D48). A paste source's parent is
+    swapped for a link to a directory outside every root after the first
+    question; the paste holds that outside directory; then the outside
+    path the kernel printed for it is replaced by a link into the root
+    before the second question. Resolved again (`is_inside`), that path
+    reads as inside and the outside file lands in the root; compared as
+    it stands, it is `source_outside` and nothing lands."""
+    import shutil
+
+    from collins import projectfiles
+
+    root = tmp_path / "project"
+    (root / "d").mkdir(parents=True)
+    (root / "p").mkdir()
+    (root / "p" / "secret").write_text("inside, harmless")
+    outside = tmp_path / "outside"
+    (outside / "dir").mkdir(parents=True)
+    (outside / "dir" / "secret").write_text("OUTSIDE SECRET")
+    real_target, real_held = projectfiles.paste_target, projectfiles._held_path
+
+    def check_then_swap_the_parent(*args, **kwargs):
+        answer = real_target(*args, **kwargs)
+        if not (root / "p").is_symlink():
+            shutil.rmtree(root / "p")
+            os.symlink(outside / "dir", root / "p")
+        return answer
+
+    def read_then_swap_the_outside_path(fd):
+        held = real_held(fd)
+        if held == str(outside.resolve() / "dir") and not (outside / "dir").is_symlink():
+            os.rename(outside / "dir", outside / "dir-moved")
+            os.symlink(root / "d", outside / "dir")  # the kernel's path now resolves inside the root
+        return held
+
+    monkeypatch.setattr(projectfiles, "paste_target", check_then_swap_the_parent)
+    monkeypatch.setattr(projectfiles, "_held_path", read_then_swap_the_outside_path)
+    asked: list[str] = []
+    confine = files.source_confinement([str(root)])
+
+    def source_allowed(path: str) -> bool:
+        asked.append(path)
+        return confine(path)
+
+    sources = [str(root / "p" / "secret")]
+    (outcome,) = projectfiles.paste_entries(root, root / "d", sources, False, source_allowed)
+    assert asked == [str(root.resolve() / "p" / "secret"), str(outside.resolve() / "dir")]
+    assert files.is_inside(root, asked[1])  # the premise: resolving it again says inside
+    assert outcome.error is projectfiles.PasteError.SOURCE_OUTSIDE
+    assert os.listdir(root / "d") == []
+    assert (outside / "dir-moved" / "secret").read_text() == "OUTSIDE SECRET"
+
+
+def test_source_confinement_answers_the_roots_and_what_is_under_them(tmp_path):
+    root, other = tmp_path / "alpha", tmp_path / "beta"
+    (root / "sub").mkdir(parents=True)
+    other.mkdir()
+    (tmp_path / "alpha-evil").mkdir()
+    (tmp_path / "way-in").symlink_to(root)
+    confine = files.source_confinement([str(tmp_path / "way-in"), str(other)])  # a root named by a link
+    real = str(root.resolve())
+    assert confine(real) and confine(real + "/sub") and confine(str(other.resolve()) + "/x")
+    assert not confine(str(tmp_path.resolve())) and not confine(real + "-evil") and not confine("/")
+    assert files.source_confinement(None)("/anything/at/all")  # a `local` client
+    assert not files.source_confinement([])("/anything/at/all")

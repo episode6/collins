@@ -1,11 +1,13 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 
 """GTK-free helpers for the editor panel: language guessing, open guards,
-the rename/paste rules the file tree's context menus act on, and the plan
-for following the session's working directory when it moves
-(`plan_reroot`). The directory reads behind the tree, quick open and the
-follow scope are the service's since PR-2.4 (`projectfiles.py`, served as
-`fs.list` / `fs.walk` / `fs.stat` / `cwd.settle`).
+the clipboard payloads the file tree's Copy / Cut / Paste read and write
+(`format_copied_files`, `parse_copied_files`, the `collins://` URIs of
+D35), and the plan for following the session's working directory when it
+moves (`plan_reroot`). The directory reads behind the tree, quick open and
+the follow scope are the service's since PR-2.4, and the rename and paste
+rules since PR-2.5 (`projectfiles.py`, served as `fs.list` / `fs.walk` /
+`fs.stat` / `cwd.settle` / `fs.rename` / `fs.paste` / `fs.mkdir`).
 
 Kept GTK-free (like gitinfo.py/projecticons.py) so this stays unit-testable
 headless; editor.py, filetree.py and fileclipboard.py own turning these into
@@ -15,16 +17,23 @@ widgets, clipboard payloads and GtkSource calls.
 from __future__ import annotations
 
 import enum
-import shutil
 import urllib.parse
 from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
-# The directory reads moved to the service's side in PR-2.4; the names stay
-# importable from here for what still calls them (the rename and paste
-# rules, PR-2.5's) and for the follow scope's enum.
-from .projectfiles import SKIP_DIR_NAMES, FollowScope, is_inside  # noqa: F401
+# The directory reads moved to the service's side in PR-2.4 and the rename
+# and paste rules in PR-2.5 (`projectfiles.py`); the names stay importable
+# from here for the follow scope's enum, the error enums the editor's
+# messages switch on, and the pure name check a rename runs first.
+from .projectfiles import (  # noqa: F401
+    SKIP_DIR_NAMES,
+    FollowScope,
+    PasteError,
+    RenameError,
+    is_inside,
+    rename_name_error,
+)
 
 # Highlighted below this; still opened above it (the open cap itself is
 # the service's, protocol.FILE_TEXT_MAX).
@@ -50,11 +59,6 @@ IMAGE_SUFFIXES = {
     ".tif",
     ".avif",
 }
-# How many "(copy N)" names a paste will try before giving up on finding a
-# free one (see `unique_target`).
-_MAX_COPY_SUFFIXES = 100
-
-
 class LoadGuard(enum.Enum):
     """Why a file may not open: `image_stat_guard`'s answers, and the words
     the editor gives the service's `fs.read` refusals (the text guards — a
@@ -66,18 +70,6 @@ class LoadGuard(enum.Enum):
     BINARY = "binary"
     NOT_A_FILE = "not_a_file"
     UNREADABLE = "unreadable"
-
-
-class RenameError(enum.Enum):
-    """Why a rename asked for in the file tree can't happen. Each one gets
-    its own message in editor.py — "that didn't work" says nothing about
-    which of these it was."""
-
-    EMPTY = "empty"
-    NOT_A_NAME = "not_a_name"  # a path, not a name: separators, "." or ".."
-    EXISTS = "exists"
-    MISSING = "missing"  # what's being renamed is already gone
-    OUTSIDE = "outside"
 
 
 class RerootAction(enum.Enum):
@@ -106,19 +98,6 @@ def pane_layout(narrow: bool, n_pages: int, picker_requested: bool) -> PaneLayou
     if n_pages <= 0 or picker_requested:
         return PaneLayout.PICKER
     return PaneLayout.FILES
-
-
-class PasteError(enum.Enum):
-    """Why something on the clipboard can't be pasted where it was asked for.
-    One entry per rule, for the same reason `RenameError` has them: "that
-    didn't work" says nothing about which rule it broke."""
-
-    MISSING = "missing"  # what the clipboard names is no longer on disk
-    OUTSIDE = "outside"  # the destination isn't inside the project
-    NOT_A_DIR = "not_a_dir"  # the destination folder is gone
-    INTO_ITSELF = "into_itself"  # a folder pasted into itself or its contents
-    NO_ROOM = "no_room"  # every "(copy N)" name is taken
-    FAILED = "failed"  # the copy/move itself failed; `message` says why
 
 
 # Suffix -> GtkSource language id, for the common cases worth a fast, GTK-free
@@ -378,9 +357,13 @@ def gallery_step(
 
 def path_from_file_uri(uri: str) -> str | None:
     """The local filesystem path a `file:` URI points at, or None when it
-    isn't one (other scheme, or a remote host). Sheds any query/fragment —
-    agent CLIs tack `#L10`-style line fragments onto file references."""
-    parsed = urllib.parse.urlsplit(uri)
+    isn't one (other scheme, or a remote host, or no URI at all: a hostile
+    clipboard line `urlsplit` refuses). Sheds any query/fragment — agent
+    CLIs tack `#L10`-style line fragments onto file references."""
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+    except ValueError:
+        return None
     if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
         return None
     path = urllib.parse.unquote(parsed.path)
@@ -394,47 +377,6 @@ def should_highlight(size: int | None) -> bool:
     smaller. *size* is the one `fs.read` answered (PR-2.3); None (not
     known) highlights."""
     return size is None or size <= _MAX_HIGHLIGHT_BYTES
-
-
-def rename_target(
-    root: str | Path, path: str | Path, new_name: str
-) -> tuple[Path | None, RenameError | None]:
-    """Where renaming *path* to *new_name* would land: `(target, None)` for a
-    rename worth doing, `(None, None)` when the name is unchanged (nothing to
-    do, and nothing to complain about), `(None, error)` otherwise.
-
-    Only ever a rename *in place* — the entry keeps its directory, so this
-    takes a bare name and refuses anything with a path in it. Everything
-    else is checked here rather than left to `Path.rename`, whose own answer
-    to renaming onto an existing file is to silently replace it."""
-    path = Path(path)
-    name = new_name.strip()
-    if not name:
-        return None, RenameError.EMPTY
-    # The .name comparison catches separators (and "." on its own, whose name
-    # is empty); ".." survives it, and "\0" is the one character Path carries
-    # happily right up to the syscall that rejects it.
-    if name in (".", "..") or "\x00" in name or Path(name).name != name:
-        return None, RenameError.NOT_A_NAME
-    if name == path.name:
-        return None, None
-    try:
-        if not path.exists() and not path.is_symlink():
-            return None, RenameError.MISSING
-    except OSError:
-        return None, RenameError.MISSING
-    target = path.parent / name
-    # Belt and braces behind the bare-name check above: the same rule the
-    # tree and the editor apply to everything else they touch — nothing
-    # outside the project.
-    if not is_inside(root, target):
-        return None, RenameError.OUTSIDE
-    try:
-        if target.exists() or target.is_symlink():
-            return None, RenameError.EXISTS
-    except OSError:
-        return None, RenameError.EXISTS
-    return target, None
 
 
 def renamed_path(old: str | Path, new: str | Path, path: str | Path) -> str | None:
@@ -545,136 +487,6 @@ def image_stat_guard(kind: str, size: int | None) -> LoadGuard:
     return LoadGuard.OK
 
 
-def _exists(path: Path) -> bool:
-    """Whether *path* is taken — a broken symlink included, which `exists()`
-    alone says nothing about and which `rename`/`copy` would still clobber.
-    An unreadable answer counts as taken: nothing here should write over
-    something it couldn't look at."""
-    try:
-        return path.exists() or path.is_symlink()
-    except OSError:
-        return True
-
-
-def _copy_split(name: str) -> tuple[str, str]:
-    """*name* cut into the part "(copy)" goes after and the extension it goes
-    before. `Path.suffix` alone stops at the last dot, which makes
-    `archive.tar.gz` into `archive.tar (copy).gz`; the `.tar` of a compressed
-    tarball is part of the extension, and that pair is the one compound
-    suffix worth the exception — the same one GNOME's own file manager
-    makes. A leading dot is a name, not an extension: `.bashrc` splits whole,
-    so a dotfile's copy stays a dotfile."""
-    stem, suffix = Path(name).stem, Path(name).suffix
-    if suffix and Path(stem).suffix == ".tar":
-        stem, suffix = Path(stem).stem, ".tar" + suffix
-    return stem, suffix
-
-
-def unique_target(directory: str | Path, name: str) -> Path | None:
-    """Where an entry called *name* can land in *directory* without replacing
-    anything: `name` itself when it is free, then "name (copy).ext",
-    "name (copy 2).ext"… None once even those are taken (a directory holding
-    a hundred copies of one name is doing something else entirely).
-
-    Never handing back an existing path is the point: both `shutil.copy2` and
-    `shutil.move` overwrite what they land on without a word, and a paste is
-    nobody's idea of a way to delete a file."""
-    directory = Path(directory)
-    stem, suffix = _copy_split(name)
-    for attempt in range(_MAX_COPY_SUFFIXES + 1):
-        if attempt == 0:
-            candidate = name
-        elif attempt == 1:
-            candidate = f"{stem} (copy){suffix}"
-        else:
-            candidate = f"{stem} (copy {attempt}){suffix}"
-        target = directory / candidate
-        if not _exists(target):
-            return target
-    return None
-
-
-def paste_target(
-    root: str | Path, dest_dir: str | Path, source: str | Path, move: bool = False
-) -> tuple[Path | None, PasteError | None]:
-    """Where pasting *source* into *dest_dir* would land: `(target, None)` for
-    a paste worth doing, `(None, None)` when there is nothing to do (a cut
-    entry pasted back into the folder it came from), `(None, error)` otherwise.
-
-    *source* is deliberately allowed to live outside the project — a copy
-    taken in a file manager is exactly what paste is for — but the
-    destination never is, and a folder can't be pasted into itself or into
-    anything it contains, which would either fail halfway or recurse."""
-    dest = Path(dest_dir)
-    src = Path(source)
-    if not is_inside(root, dest):
-        return None, PasteError.OUTSIDE
-    if not dest.is_dir():
-        return None, PasteError.NOT_A_DIR
-    if not _exists(src):
-        return None, PasteError.MISSING
-    if src.is_dir() and is_inside(src, dest):
-        return None, PasteError.INTO_ITSELF
-    if move and _same_dir(src.parent, dest):
-        return None, None  # already where the paste would put it
-    target = unique_target(dest, src.name)
-    if target is None:
-        return None, PasteError.NO_ROOM
-    return target, None
-
-
-def _same_dir(one: Path, other: Path) -> bool:
-    try:
-        return one.resolve() == other.resolve()
-    except OSError:
-        return False
-
-
-@dataclass
-class PasteOutcome:
-    """What became of one clipboard entry. *target* is where it landed (None
-    when it didn't), *error* why not, and *message* the OS's own words for a
-    `FAILED` one."""
-
-    source: Path
-    target: Path | None = None
-    error: PasteError | None = None
-    message: str = ""
-
-
-def paste_entries(
-    root: str | Path, dest_dir: str | Path, sources: list[str], move: bool = False
-) -> list[PasteOutcome]:
-    """Paste every entry in *sources* into *dest_dir* — copying, or moving
-    when *move* (a cut). One outcome per source, in order: a clipboard holding
-    several files is normal (it came from a file manager), and one of them
-    being gone is no reason to drop the rest.
-
-    Symlinks are copied as symlinks rather than followed: the tree already
-    refuses to show one that leaves the project, and following one here would
-    quietly duplicate whatever it points at into the repo."""
-    outcomes: list[PasteOutcome] = []
-    for source in sources:
-        src = Path(source)
-        target, error = paste_target(root, dest_dir, src, move)
-        if target is None:
-            outcomes.append(PasteOutcome(src, None, error))
-            continue
-        try:
-            if move:
-                shutil.move(str(src), str(target))
-            elif src.is_dir() and not src.is_symlink():
-                shutil.copytree(src, target, symlinks=True)
-            else:
-                shutil.copy2(src, target, follow_symlinks=False)
-        except (OSError, shutil.Error) as err:
-            message = getattr(err, "strerror", None) or str(err)
-            outcomes.append(PasteOutcome(src, None, PasteError.FAILED, message))
-            continue
-        outcomes.append(PasteOutcome(src, target))
-    return outcomes
-
-
 def format_copied_files(uris: list[str], cut: bool) -> str:
     """The `x-special/gnome-copied-files` payload for *uris*: the operation on
     the first line, one URI per line after it. Every GNOME file manager reads
@@ -684,14 +496,58 @@ def format_copied_files(uris: list[str], cut: bool) -> str:
     return "\n".join([("cut" if cut else "copy"), *uris])
 
 
-def parse_copied_files(text: str) -> tuple[list[str], bool]:
-    """`format_copied_files` read back: `(paths, cut)`. Non-`file:` URIs are
-    dropped — a paste can only act on something local — and an unknown
+def parse_copied_files(
+    text: str, service_id: str | None = None, local: bool = True
+) -> tuple[list[str], bool]:
+    """`format_copied_files` read back: `(paths, cut)`. A `collins://`
+    URI names a path on the service *service_id* (one of another service
+    is dropped: its paths mean nothing here); a `file:` URI names a path
+    on this machine, which is the service's only when *local* (D35), so
+    it is dropped otherwise; any other URI is dropped. An unknown
     operation reads as a copy, which is the harmless half of the pair."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return [], False
     cut = lines[0] == "cut"
-    paths = [path for uri in lines[1:] if (path := path_from_file_uri(uri)) is not None]
+    paths: list[str] = []
+    for uri in lines[1:]:
+        path = path_from_collins_uri(uri, service_id)
+        if path is None and local:
+            path = path_from_file_uri(uri)
+        if path is not None:
+            paths.append(path)
     return paths, cut
+
+
+# The scheme the file clipboard carries the service's paths under within
+# Collins (split-service spec D35): `collins://<service id>/<path>`. A
+# `file:` URI would name a path on the client's machine, which is the
+# service's only for a `local` client.
+COLLINS_SCHEME = "collins"
+
+
+def collins_uri(service_id: str, path: str) -> str:
+    """`collins://<service id>/<path>` for *path* on the service *service_id*
+    (the path percent-encoded as a `file:` URI's would be; a name that is
+    not UTF-8, `os.fsdecode`'s surrogates, is encoded byte for byte and
+    read back the same way, never a raise)."""
+    quoted_path = urllib.parse.quote(path.encode("utf-8", "surrogateescape"))
+    return f"{COLLINS_SCHEME}://{urllib.parse.quote(service_id, safe='')}{quoted_path}"
+
+
+def path_from_collins_uri(uri: str, service_id: str | None) -> str | None:
+    """The path a `collins://` URI names on the service *service_id*, or
+    None when it is no such URI, names another service, *service_id*
+    is unknown (no service, no paths), or it is no URI at all (a hostile
+    line `urlsplit` refuses)."""
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+    except ValueError:
+        return None
+    if parsed.scheme != COLLINS_SCHEME or not service_id:
+        return None
+    if urllib.parse.unquote(parsed.netloc) != service_id:
+        return None
+    path = urllib.parse.unquote(parsed.path, errors="surrogateescape")
+    return path if path.startswith("/") else None
 

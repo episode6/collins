@@ -1255,6 +1255,9 @@ class ServiceCore:
     _req_fs_stat = _files  # the tree, quick open and roots (PR-2.4)
     _req_fs_list = _files
     _req_fs_walk = _files
+    _req_fs_rename = _files  # file operations (PR-2.5)
+    _req_fs_paste = _files
+    _req_fs_mkdir = _files
 
     # -- the diffs' marks (PR-1.11; service.diffs)
 

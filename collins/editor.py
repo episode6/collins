@@ -111,6 +111,19 @@ class _OpenFile:
         # A `file-changed` that arrived while a save or load of this buffer
         # was in flight: judged against the new mtime once that lands.
         self.pending_change: dict | None = None
+        # A `gone` marked a clean buffer modified ("was deleted."): a rename
+        # or a cut's paste that lands afterwards with the file's new place
+        # takes the mark back (`_retarget_open`). The claim "clean when the
+        # gone came" dies with the first change to the buffer's text
+        # (`_on_buffer_changed`: an edit the user typed while the move ran
+        # must never be shown as saved) and with any fill or save, which
+        # know the file again (`_fill`, `_on_saved`). `gone_mtime` is what
+        # the buffer expected before the `gone`: a file under a moved folder
+        # has no mtime of its own in the reply, and a move keeps the inode
+        # (or `copystat`s its times), so that one is restored — for a dirty
+        # buffer too, so its next save still has its stale check.
+        self.gone_marked = False
+        self.gone_mtime: int | None = None
         self.saving = False
         # A save asked for while one was in flight: sent from _on_saved
         # with the new mtime, its waiters answered with that save's.
@@ -493,27 +506,43 @@ class EditorPane(Gtk.Box):
         )
 
     def _rename(self, path: str, new_name: str) -> None:
-        target, error = editorfiles.rename_target(self._root, path, new_name)
-        if error is not None:
-            self._notify(self._rename_error_message(Path(path).name, new_name.strip(), error))
-            return
-        if target is None:
+        """The rename, on the service (`fs.rename`, §3.23): the name is
+        checked here first (`rename_name_error`, pure: an empty or
+        path-shaped name never makes a round trip), the rest — the entry
+        is there, the name is free, both inside the root — on the service,
+        which does the rename and answers the renamed file's mtime."""
+        name = new_name.strip()
+        verdict = editorfiles.rename_name_error(path, name)
+        if verdict is False:
             return  # the name came back unchanged
-        try:
-            Path(path).rename(target)
-        except OSError as err:
-            self._notify(
-                _("Couldn't rename {name}: {message}").format(
-                    name=Path(path).name, message=err.strerror or str(err)
-                )
-            )
+        if verdict is not None:
+            self._notify(self._rename_error_message(Path(path).name, name, verdict))
             return
-        self._retarget_open(Path(path), target)
-        # The old path is now nothing: a directory renamed out from under the
-        # tree leaves its rows and its monitor watching a name that's gone.
-        self._tree.forget_dir(path)
-        self._tree.refresh_dir(target.parent)
-        self._tree.reveal(target)
+        target = str(Path(path).parent / name)
+        root = str(self._root)
+
+        def land(kind: str, value) -> None:
+            if self._shut:
+                return
+            if kind != "ok":
+                reason = remotefiles.rename_reason(value)
+                if reason is not None:
+                    self._notify(self._rename_error_message(Path(path).name, name, reason))
+                else:
+                    self._notify(
+                        _("Couldn't rename {name}: {message}").format(
+                            name=Path(path).name, message=remotefiles.refusal_words(value)
+                        )
+                    )
+                return
+            self._retarget_open(Path(path), Path(target), mtime=value)
+            # The old path is now nothing: a directory renamed out from under the
+            # tree leaves its rows and its monitor watching a name that's gone.
+            self._tree.forget_dir(path)
+            self._tree.refresh_dir(Path(target).parent)
+            self._tree.reveal(Path(target))
+
+        self._off_main(lambda: remotefiles.rename_path(path, target, root), land)
 
     def _rename_error_message(self, name: str, new_name: str, error) -> str:
         RE = editorfiles.RenameError
@@ -542,31 +571,51 @@ class EditorPane(Gtk.Box):
     def _paste(self, dest_dir: str, paths: list[str], move: bool) -> None:
         """*paths* as the clipboard handed them over — possibly several, and
         possibly from outside the project (a copy taken in a file manager is
-        exactly what paste is for). Nothing is ever overwritten: a name
-        already taken lands as "name (copy)" instead."""
+        exactly what paste is for, on a local client; the service refuses a
+        source outside every root it knows for any other). Nothing is ever
+        overwritten: a name already taken lands as "name (copy)" instead.
+        The copies and moves are the service's (`fs.paste`, §3.23), the
+        clipboard sent in slices and waited for as long as the move takes
+        (`remotefiles.paste_files`)."""
         if not paths:
             self._notify(_("There's nothing on the clipboard to paste here."))
             return
-        outcomes = editorfiles.paste_entries(self._root, dest_dir, paths, move)
+        root = str(self._root)
+
+        def land(kind: str, value) -> None:
+            if self._shut:
+                return
+            if kind != "ok":
+                self._notify(_("Couldn't paste: {message}").format(message=remotefiles.refusal_words(value)))
+                return
+            self._pasted(dest_dir, value, move)
+
+        self._off_main(lambda: remotefiles.paste_files(paths, dest_dir, move, root), land)
+
+    def _pasted(self, dest_dir: str, outcomes: list[remotefiles.PasteOutcome], move: bool) -> None:
+        """What the service's paste did: the tree refreshed where things
+        landed and left, an open file that moved re-keyed, the cut spent."""
         pasted = [outcome for outcome in outcomes if outcome.target is not None]
         for outcome in pasted:
             if not move:
                 continue
-            self._retarget_open(outcome.source, outcome.target)
+            # The landed file's mtime, as a rename's: the open buffer takes
+            # it, and a `gone` that beat the reply is taken back.
+            self._retarget_open(Path(outcome.source), Path(outcome.target), mtime=outcome.mtime)
             # What moved is now nothing: a directory moved out from under the
             # tree leaves its rows and its monitor watching a path that's gone.
             self._tree.forget_dir(outcome.source)
-            self._tree.refresh_dir(outcome.source.parent)
+            self._tree.refresh_dir(Path(outcome.source).parent)
         self._tree.refresh_dir(dest_dir)
         if len(pasted) == 1:
-            self._tree.reveal(pasted[0].target)
+            self._tree.reveal(Path(pasted[0].target))
         if move and pasted:
             self._spend_cut(outcomes)
         failed = [outcome for outcome in outcomes if outcome.error is not None]
         if failed:
             self._notify(self._paste_error_message(failed))
 
-    def _spend_cut(self, outcomes: list[editorfiles.PasteOutcome]) -> None:
+    def _spend_cut(self, outcomes: list[remotefiles.PasteOutcome]) -> None:
         """What is left of a cut once a paste of it has moved what it could.
         A cut is spent the moment it lands — what it named isn't there any
         more, so a second paste could only report it missing — but only for
@@ -578,7 +627,7 @@ class EditorPane(Gtk.Box):
         if clipboard.get_content() is None:
             return  # someone else's cut — not ours to rewrite
         still_cut = [
-            str(outcome.source)
+            outcome.source
             for outcome in outcomes
             if outcome.target is None and outcome.error is not editorfiles.PasteError.MISSING
         ]
@@ -587,7 +636,7 @@ class EditorPane(Gtk.Box):
         else:
             clipboard.set_content(None)
 
-    def _paste_error_message(self, failed: list[editorfiles.PasteOutcome]) -> str:
+    def _paste_error_message(self, failed: list[remotefiles.PasteOutcome]) -> str:
         """Why a paste didn't happen — named, the way the rename errors are.
         Several at once (a clipboard full of files, half of them gone) is
         counted rather than listed: a banner is one line."""
@@ -598,7 +647,7 @@ class EditorPane(Gtk.Box):
                 len(failed),
             ).format(count=len(failed))
         outcome = failed[0]
-        name = outcome.source.name
+        name = Path(outcome.source).name
         PE = editorfiles.PasteError
         if outcome.error is PE.MISSING:
             return _("{name} is no longer there.").format(name=name)
@@ -610,16 +659,24 @@ class EditorPane(Gtk.Box):
             return _("That folder is no longer there.")
         if outcome.error is PE.OUTSIDE:
             return _("{name} can't be pasted outside this project.").format(name=name)
+        if outcome.error is PE.SOURCE_OUTSIDE:
+            return _("{name} is outside every project the service knows.").format(name=name)
         if outcome.error is PE.NO_ROOM:
             return _("There are already too many copies of {name} here.").format(name=name)
         return _("Couldn't paste {name}: {message}").format(name=name, message=outcome.message)
 
-    def _retarget_open(self, old: Path, new: Path) -> None:
+    def _retarget_open(self, old: Path, new: Path, mtime: int | None = None) -> None:
         """Follow a rename through the open tabs: the renamed file — or every
         open file inside a renamed folder — keeps its buffer, its unsaved
         changes and its place in the strip, now pointed at the new path.
         Reopening it as a fresh tab instead would throw away edits that
-        haven't been saved yet."""
+        haven't been saved yet. *mtime* is the renamed (or moved) file's as
+        the service answered it (`fs.rename`, `fs.paste`): the open file at
+        *new* takes it, so the next save expects the file as it is — and a
+        `gone` that beat the reply (the service's watch saw the file leave
+        its old path before the paste answered, S1 of PR 613's review) had
+        marked the buffer deleted; that mark is taken back, since the file
+        is right here under its new name."""
         for key in list(self._pages):
             moved = editorfiles.renamed_path(old, new, key)
             if moved is None or moved == key:
@@ -635,7 +692,31 @@ class EditorPane(Gtk.Box):
             opened.path = Path(moved)
             # A save writes to `opened.path`, so this is what keeps Ctrl+S
             # from recreating the old name; a rename keeps the file's mtime,
-            # so the one the next save expects stays.
+            # so the one the next save expects stays — unless the service
+            # answered another, which is then the truth.
+            if mtime is not None and Path(moved) == new and opened.mtime != mtime:
+                opened.mtime = mtime
+            if opened.gone_mtime is not None:
+                # A `gone` beat the reply and the file is right here under
+                # its new name: the banner goes. A file inside a moved folder
+                # has no mtime in the reply; the one it expected before the
+                # `gone` is restored (the move kept it), dirty or not, so the
+                # next save keeps its stale check, and the re-watch below
+                # seeds the service with it, so a file that really differs
+                # is one `file-changed` at once, never a silent save over it.
+                if opened.mtime is None:
+                    opened.mtime = opened.gone_mtime
+                opened.gone_mtime = None
+                deleted = _("{name} was deleted.").format(name=Path(key).name)
+                if self._banner.get_title() == deleted and self._banner.get_revealed():
+                    self._banner.set_revealed(False)
+            if opened.gone_marked:
+                # The buffer was clean when the `gone` came and nothing has
+                # changed its text since (`_on_buffer_changed` drops the
+                # claim): the mark is taken back. A buffer edited meanwhile
+                # keeps its own mark: what it holds is unsaved.
+                opened.gone_marked = False
+                opened.buffer.set_modified(False)
             if opened.loading:
                 # The load in flight is reading the old path, so it is
                 # already doomed: start it again from the new one, which
@@ -870,6 +951,7 @@ class EditorPane(Gtk.Box):
         # re-keys the page (see _retarget_open), and a handler holding the
         # old path would stop finding the tab it titles.
         buffer.connect("modified-changed", self._on_modified_changed, opened)
+        buffer.connect("changed", self._on_buffer_changed, opened)
         buffer.connect("notify::cursor-position", lambda *_a: self._sync_status())
 
         self._start_load(opened, restore_cursor)
@@ -1090,6 +1172,8 @@ class EditorPane(Gtk.Box):
         opened.buffer.set_text(text)
         opened.buffer.end_irreversible_action()
         opened.buffer.set_modified(False)
+        opened.gone_marked = False  # the file is known again: no `gone` to take back
+        opened.gone_mtime = None
         opened.newline = newline
         opened.mtime = read.mtime
         opened.size = read.size
@@ -1204,6 +1288,8 @@ class EditorPane(Gtk.Box):
         opened.mtime = written.mtime
         opened.size = written.size
         opened.encoding = written.encoding
+        opened.gone_marked = False  # written again: the file is known, no `gone` to take back
+        opened.gone_mtime = None
         remotefiles.watcher().update(opened.watch_handle, written.mtime)
         if waiters is not None:
             # Typed into while the save was in flight: saved again now, over
@@ -1305,7 +1391,9 @@ class EditorPane(Gtk.Box):
         if event.get("gone"):
             if opened.mtime is None:
                 return  # already told
+            opened.gone_mtime = opened.mtime
             opened.mtime = None
+            opened.gone_marked = not opened.buffer.get_modified()
             opened.buffer.set_modified(True)  # nothing on disk to save over silently
             self._notify(_("{name} was deleted.").format(name=opened.path.name))
         elif (event.get("mtime"), event.get("size")) != (opened.mtime, opened.size):
@@ -1749,6 +1837,15 @@ class EditorPane(Gtk.Box):
         it = opened.buffer.get_iter_at_mark(opened.buffer.get_insert())
         self._status_cursor.set_text(f"{it.get_line() + 1}:{it.get_line_offset() + 1}")
         self._save_btn.set_sensitive(opened.buffer.get_modified())
+
+    def _on_buffer_changed(self, buffer: GtkSource.Buffer, opened: _OpenFile) -> None:
+        """Any change to the buffer's text: the claim that it was clean when
+        a `gone` came is gone with it (`_retarget_open` must never show
+        text the user typed while a move ran as saved). A fill or a reload
+        changes the text too, and resets the mark itself along with the
+        file's facts (`_fill`); the `gone` branch sets only the modified
+        flag, which is not a change."""
+        opened.gone_marked = False
 
     def _on_modified_changed(self, buffer: GtkSource.Buffer, opened: _OpenFile) -> None:
         page = self._pages.get(str(opened.path))
