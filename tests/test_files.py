@@ -1118,3 +1118,70 @@ def test_the_root_is_confined_on_the_worker_not_the_handler(served, monkeypatch)
     with pytest.raises(inproc.RequestRefused) as refused:
         client.request({"t": "fs.mkdir", "path": str(project.parent / "x"), "root": str(project.parent)})
     assert refused.value.error == protocol.ERROR_REFUSED and not (project.parent / "x").exists()
+
+
+def test_source_confinement_never_resolves_the_held_path_again(tmp_path, monkeypatch):
+    """The third verification's probe (H1, D48). A paste source's parent is
+    swapped for a link to a directory outside every root after the first
+    question; the paste holds that outside directory; then the outside
+    path the kernel printed for it is replaced by a link into the root
+    before the second question. Resolved again (`is_inside`), that path
+    reads as inside and the outside file lands in the root; compared as
+    it stands, it is `source_outside` and nothing lands."""
+    import shutil
+
+    from collins import projectfiles
+
+    root = tmp_path / "project"
+    (root / "d").mkdir(parents=True)
+    (root / "p").mkdir()
+    (root / "p" / "secret").write_text("inside, harmless")
+    outside = tmp_path / "outside"
+    (outside / "dir").mkdir(parents=True)
+    (outside / "dir" / "secret").write_text("OUTSIDE SECRET")
+    real_target, real_held = projectfiles.paste_target, projectfiles._held_path
+
+    def check_then_swap_the_parent(*args, **kwargs):
+        answer = real_target(*args, **kwargs)
+        if not (root / "p").is_symlink():
+            shutil.rmtree(root / "p")
+            os.symlink(outside / "dir", root / "p")
+        return answer
+
+    def read_then_swap_the_outside_path(fd):
+        held = real_held(fd)
+        if held == str(outside.resolve() / "dir") and not (outside / "dir").is_symlink():
+            os.rename(outside / "dir", outside / "dir-moved")
+            os.symlink(root / "d", outside / "dir")  # the kernel's path now resolves inside the root
+        return held
+
+    monkeypatch.setattr(projectfiles, "paste_target", check_then_swap_the_parent)
+    monkeypatch.setattr(projectfiles, "_held_path", read_then_swap_the_outside_path)
+    asked: list[str] = []
+    confine = files.source_confinement([str(root)])
+
+    def source_allowed(path: str) -> bool:
+        asked.append(path)
+        return confine(path)
+
+    sources = [str(root / "p" / "secret")]
+    (outcome,) = projectfiles.paste_entries(root, root / "d", sources, False, source_allowed)
+    assert asked == [str(root.resolve() / "p" / "secret"), str(outside.resolve() / "dir")]
+    assert files.is_inside(root, asked[1])  # the premise: resolving it again says inside
+    assert outcome.error is projectfiles.PasteError.SOURCE_OUTSIDE
+    assert os.listdir(root / "d") == []
+    assert (outside / "dir-moved" / "secret").read_text() == "OUTSIDE SECRET"
+
+
+def test_source_confinement_answers_the_roots_and_what_is_under_them(tmp_path):
+    root, other = tmp_path / "alpha", tmp_path / "beta"
+    (root / "sub").mkdir(parents=True)
+    other.mkdir()
+    (tmp_path / "alpha-evil").mkdir()
+    (tmp_path / "way-in").symlink_to(root)
+    confine = files.source_confinement([str(tmp_path / "way-in"), str(other)])  # a root named by a link
+    real = str(root.resolve())
+    assert confine(real) and confine(real + "/sub") and confine(str(other.resolve()) + "/x")
+    assert not confine(str(tmp_path.resolve())) and not confine(real + "-evil") and not confine("/")
+    assert files.source_confinement(None)("/anything/at/all")  # a `local` client
+    assert not files.source_confinement([])("/anything/at/all")

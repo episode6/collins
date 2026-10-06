@@ -22,13 +22,19 @@ together is that **the service never names a path again once it has
 lost its hold on it (D47)**: a path is resolved once, to a directory
 descriptor, and every operation after that names an entry relative to
 a held descriptor (`dir_fd=`). `rename_entry`, `paste_entries` and
-`make_directory` each open the directory they work in (`_open_dir`;
-symlinks followed on the way in: a symlinked root is legitimate), read
+`make_directory` each open the directory they work in (`_open_dir`:
+`O_PATH|O_DIRECTORY`, which asks search permission only, so a folder
+that can be entered but not listed takes a rename, a mkdir and a paste
+as it did before the holds; symlinks followed on the way in: a
+symlinked root is legitimate), read
 the held directory's current canonical path from `/proc/self/fd/<fd>`
 (`_held_path`) and confine *that* — the destination and a rename's
-directory inside the request's root (`_held_inside`: the kernel's
+directory inside the request's root (`held_inside`: the kernel's
 answer compared as it stands, not resolved again), a paste source's
-parent inside a known root through `source_allowed` — then nothing
+parent inside a known root through `source_allowed` (the service's,
+which compares it the same way; a root itself, whose parent is inside
+no root, is therefore no source for a client that is not `local`) —
+then nothing
 re-resolves: the destination is `(dst_fd, name)`, the source
 `(src_fd, name)`. The path
 pre-checks (`rename_target`, `paste_target`, `_exists`) stay as the
@@ -40,9 +46,10 @@ The copy (`_copy_entry`): a link as a link (`os.symlink` under `dir_fd`,
 its source opened `O_NOFOLLOW` and read only when it is a regular file,
 the bytes by a `sendfile` loop with shutil's fallback rule
 (`_copy_bytes`), the metadata on the destination descriptor before it
-is closed and never by path (`_copy_metadata`: `fchmod`, the xattrs by
-descriptor with `shutil._copyxattr`'s swallow set, `utime(fd, ns=)`
-last: `copy2`'s parity); a tree by an fd-relative walk (`_copy_tree`,
+is closed and never by path (`_copy_metadata`: the xattrs by
+descriptor with `shutil._copyxattr`'s swallow set, then `fchmod` — a
+read-only file takes no xattr once it is read-only — then `utime(fd,
+ns=)`: `copy2`'s parity); a tree by an fd-relative walk (`_copy_tree`,
 `_walk`: `os.scandir(fd)`, kinds by `os.stat(name, dir_fd=…,
 follow_symlinks=False)`, `mkdir` / `open` / `symlink` under `dir_fd`,
 errors collected as `shutil.Error`), never `shutil.copytree`, which
@@ -434,7 +441,7 @@ def rename_entry(
         held = _held_path(fd)
         if held is None:
             return None, RenameError.MISSING
-        if not _held_inside(root, held):
+        if not held_inside(root, held):
             return None, RenameError.OUTSIDE
         try:
             _move_exclusive(fd, path.name, fd, landing.name)
@@ -552,18 +559,27 @@ class PasteOutcome:
 # `paste_target`) stay as the cheap refusals; the held descriptor is the
 # authority.
 
-_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOCTTY
-_DIR_NOFOLLOW_FLAGS = _DIR_FLAGS | os.O_NOFOLLOW
+# A directory the service only works *in* (the destination, a rename's
+# directory, a paste source's parent, a mkdir's parent): `O_PATH` needs
+# search permission on it and nothing more, as `os.rename`, `os.mkdir` and
+# `copy2` did before the holds (D48), `/proc/self/fd` names it all the
+# same, and every `dir_fd=` call takes it. It cannot be listed or
+# `fchmod`ed, which only a tree's own folders are.
+_HOLD_FLAGS = os.O_PATH | os.O_DIRECTORY
+# A tree's own folder, source or new: listed by the walk, its metadata set
+# on the descriptor, and never reached through a link.
+_DIR_NOFOLLOW_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOCTTY | os.O_NOFOLLOW
 # A file made exclusively at a name: a planted link is never followed.
 _EXCL_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NOCTTY
 _DELETED_SUFFIX = " (deleted)"
 
 
 def _open_dir(path: str | Path) -> int:
-    """The directory at *path* opened (symlinks followed on the way in: a
-    symlinked root or a linked subdirectory inside the project is
-    legitimate); the caller confines `_held_path` of it."""
-    return os.open(path, _DIR_FLAGS)
+    """The directory at *path* held to work in (`_HOLD_FLAGS`; symlinks
+    followed on the way in: a symlinked root or a linked subdirectory
+    inside the project is legitimate); the caller confines `_held_path`
+    of it."""
+    return os.open(path, _HOLD_FLAGS)
 
 
 def _held_path(fd: int) -> str | None:
@@ -586,13 +602,15 @@ def _held_path(fd: int) -> str | None:
     return path
 
 
-def _held_inside(root: str | Path, held: str) -> bool:
+def held_inside(root: str | Path, held: str) -> bool:
     """Whether the held directory's own path *held* (`_held_path`) is
     *root* or under it. *root* is resolved through its symlinks (a
     symlinked root is legitimate); *held* is the kernel's canonical
     answer and is compared as it stands, never resolved again (D47: a
     component of it turned into a link since would otherwise be
-    followed)."""
+    followed). The service's `source_allowed` answers with it too
+    (`service/files.py`, D48): the same holds for an already resolved
+    path, which is what its first question is about."""
     try:
         resolved = os.path.realpath(root)
     except OSError:
@@ -677,11 +695,13 @@ def _copy_bytes(src_fd: int, dst_fd: int) -> None:
 def _copy_metadata(src_fd: int, dst_fd: int, sst: os.stat_result) -> None:
     """`copy2`'s parity, on the destination descriptor before it is closed
     and never by path (a link swapped in at the name carries nothing):
-    the mode bits, the xattrs the kernel lets a user copy (the swallow set
-    per name and for the list, as `shutil._copyxattr`), and the atime and
-    mtime to the nanosecond, last. *sst* is `fstat(src_fd)`, the file that
-    was copied; no stat of the source path again."""
-    os.fchmod(dst_fd, stat_mod.S_IMODE(sst.st_mode))
+    the xattrs the kernel lets a user copy (the swallow set per name and
+    for the list, as `shutil._copyxattr`), then the mode bits, then the
+    atime and mtime to the nanosecond. The xattrs go before the mode for
+    `copystat`'s own reason: a `user.` xattr needs write permission on
+    the inode, so a file made read-only first would lose them, silently
+    (`EACCES` is in the swallow set). *sst* is `fstat(src_fd)`, the file
+    that was copied; no stat of the source path again."""
     try:
         names = os.listxattr(src_fd)
     except OSError as err:
@@ -694,6 +714,7 @@ def _copy_metadata(src_fd: int, dst_fd: int, sst: os.stat_result) -> None:
         except OSError as err:
             if err.errno not in _XATTR_ERRNOS:
                 raise
+    os.fchmod(dst_fd, stat_mod.S_IMODE(sst.st_mode))
     os.utime(dst_fd, ns=(sst.st_atime_ns, sst.st_mtime_ns))
 
 
@@ -1077,7 +1098,7 @@ def _hold_destination(root: str | Path, dest: Path) -> tuple[int | None, PasteEr
     if held is None:
         _close(fd)
         return None, PasteError.NOT_A_DIR, ""
-    if not _held_inside(root, held):
+    if not held_inside(root, held):
         _close(fd)
         return None, PasteError.OUTSIDE, ""
     return fd, None, ""
@@ -1167,7 +1188,7 @@ def make_directory(root: str | Path, path: str | Path) -> MkdirError | None:
         held = _held_path(fd)
         if held is None:
             return MkdirError.NO_PARENT
-        if not _held_inside(root, held):
+        if not held_inside(root, held):
             return MkdirError.OUTSIDE
         try:
             os.mkdir(path.name, dir_fd=fd)

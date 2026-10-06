@@ -84,12 +84,15 @@ PR-2.5 adds the tree's file operations, the rules in `projectfiles`
   is the next "(copy N)", D44). Each source is confined on the worker to
   `allowed` (a client that is not `local` may name a source only inside
   a root the service knows: `source_outside`, per entry; one inside
-  *another* known root is allowed, D43), asked twice: about the source
-  resolved through its links, then about the held path of the directory
-  it is read from (D47: `projectfiles` works under held directory
-  descriptors, so a parent swapped for a link out after the first
-  answer is refused by the second; a root itself, whose parent is
-  inside no root, is therefore no source); the `results`, one per entry,
+  *another* known root is allowed, D43), asked twice
+  (`source_confinement`): about the source resolved through its links,
+  then about the held path of the directory it is read from (D47:
+  `projectfiles` works under held directory descriptors, so a parent
+  swapped for a link out after the first answer is refused by the
+  second; neither path is resolved again, D48). The rule is therefore
+  "a source whose parent directory is inside a known root": a root
+  itself, whose parent is inside no root, is no source for a client
+  that is not `local` (no tree row names one). The `results`, one per entry,
   carry its landing with the landed file's `mtime` (null for a folder or
   a failure) or its `PasteError` (an open string: a client maps one it
   does not know to `failed`), and travel chunked past a frame. At most
@@ -129,6 +132,7 @@ from ..projectfiles import (
     MkdirError,
     PasteOutcome,
     RenameError,
+    held_inside,
     is_inside,
     list_entries,
     make_directory,
@@ -488,6 +492,24 @@ def stat_path(path: str) -> dict:
         return {"kind": "file", "size": st.st_size, "mtime": mtime_us(st)}
     kind = "dir" if stat_mod.S_ISDIR(st.st_mode) else "other"
     return {"kind": kind, "size": None, "mtime": mtime_us(st)}
+
+
+def source_confinement(roots: Sequence[str] | None) -> Callable[[str], bool]:
+    """`paste_entries`' *source_allowed* for a client whose known roots are
+    *roots* (None for a `local` one, which may name anything): whether a
+    path is one of them or under one. `paste_entries` asks twice per
+    source, about the source resolved through its links and then about
+    the held path of the directory it reads from, and both are canonical
+    already, so the answer compares the path as it stands against each
+    root's realpath (`projectfiles.held_inside`) and never resolves it
+    again: resolved again, a held directory outside every root whose old
+    path was meanwhile replaced by a link into one would read as inside
+    (D47, D48). Run on the worker."""
+
+    def source_allowed(path: str) -> bool:
+        return roots is None or any(held_inside(root, path) for root in roots)
+
+    return source_allowed
 
 
 def _confine(roots: Sequence[str] | None, *paths: str) -> None:
@@ -865,8 +887,7 @@ class Files:
         cut = bool(message.get("cut"))
         allowed_roots = self._roots(client)
 
-        def source_allowed(real: str) -> bool:
-            return allowed_roots is None or any(is_inside(r, real) for r in allowed_roots)
+        source_allowed = source_confinement(allowed_roots)
 
         def work() -> dict:
             try:

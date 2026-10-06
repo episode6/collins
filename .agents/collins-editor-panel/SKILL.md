@@ -305,17 +305,26 @@ touches the disk.
   it.** `rename_entry`, `paste_entries` and `make_directory` keep their
   path signatures and their path pre-checks (`rename_target`,
   `paste_target`, `_exists`: the cheap refusals), then each opens the
-  directory it works in (`_open_dir`: `O_RDONLY|O_DIRECTORY`, links
-  followed on the way in, since a symlinked root is legitimate), reads
+  directory it works in (`_open_dir`: `O_PATH|O_DIRECTORY`, which asks
+  search permission only, so a folder that can be entered but not
+  listed — `0300`, another user's `0711` home — takes a rename, a mkdir
+  and a paste from or into it as before the split; an `O_PATH`
+  descriptor takes every `dir_fd=` call but cannot be listed or
+  `fchmod`ed, which only a tree's own folders are, opened `O_RDONLY`;
+  links followed on the way in, since a symlinked root is legitimate),
+  reads
   where that descriptor really is from `/proc/self/fd/<fd>`
   (`_held_path`; None for a removed directory, and a folder really
   named "x (deleted)" is told apart by inode) and confines *that*: the
   destination and a rename's directory inside the request's root
-  (`_held_inside`, the kernel's answer compared as it stands, never
+  (`held_inside`, the kernel's answer compared as it stands, never
   resolved again), a paste source's parent through `source_allowed`
-  (which is therefore asked twice per source: the resolved source, then
-  the held parent; a root itself has no parent inside a root, so it is
-  no source for a client that is not `local`). From there every create,
+  (`service/files.py`'s `source_confinement`, asked twice per source:
+  the resolved source, then the held parent, each compared with
+  `held_inside` too and never through `is_inside`, which would resolve
+  it again; the rule is "a source whose parent directory is inside a
+  known root", so a root itself is no source for a client that is not
+  `local`, which no tree row or menu names). From there every create,
   open, stat, rename, unlink and `rmtree` is `(dir_fd, name)`, and every
   descriptor is closed in a `finally`, after any undo that needs it.
   **The copy** (`_copy_entry`): a link as a link (`os.symlink` under
@@ -325,10 +334,11 @@ touches the disk.
   the target `O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW`, the bytes by an
   `os.sendfile` loop with a read-write loop as shutil's fallback
   (`_copy_bytes`), then the metadata **on the destination descriptor
-  before it is closed, never by path** (`_copy_metadata`: `fchmod`, the
-  xattrs by descriptor with `shutil._copyxattr`'s swallow set, `utime(fd,
-  ns=)` last — `copy2`'s parity; `copystat` followed a link swapped in at
-  the target). A tree is an fd-relative walk (`_copy_tree`, `_walk`:
+  before it is closed, never by path** (`_copy_metadata`: the xattrs by
+  descriptor with `shutil._copyxattr`'s swallow set, then `fchmod`, then
+  `utime(fd, ns=)` — `copy2`'s parity, and that order because a file
+  made read-only first would silently lose its `user.` xattrs;
+  `copystat` followed a link swapped in at the target). A tree is an fd-relative walk (`_copy_tree`, `_walk`:
   `os.scandir(fd)`, each kind from `os.stat(name, dir_fd=…,
   follow_symlinks=False)`, a subdirectory by its own `mkdir` and two
   `O_DIRECTORY|O_NOFOLLOW` opens, each directory's metadata on its
@@ -357,6 +367,16 @@ touches the disk.
   replaces whatever was swapped over the placeholder between its
   creation and the rename (a window between two of the service's own
   calls, narrower than the check-then-rename of before the split).
+  Accepted the same way (D48): a copied link's pin is opened after its
+  `symlink()` (no call makes a link and returns a descriptor; two
+  syscalls, the class of the undo's own `lstat`-then-`unlink` gap), and
+  the walk holds two descriptors per level, so a tree hundreds of levels
+  deep meets `EMFILE` under a 1024 limit. Known and left: without
+  `/proc` every rename, mkdir and paste fails (the macOS port will want
+  `F_GETPATH`); a tree deeper than the interpreter's recursion limit
+  raises `RecursionError` out of `paste_entries`, as `copytree` did at a
+  lower depth; a destination renamed while held is reported by its old
+  path; a source replaced before its `unlink` is reported as moved.
   **What a failed operation leaves** (D46): only what the operation
   made, only while it still holds it, and only when it holds nothing of
   anyone else's. "Holds" is a descriptor kept open across the step that
