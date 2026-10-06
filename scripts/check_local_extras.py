@@ -176,7 +176,6 @@ from collins import (  # noqa: E402
     footerapps,
     i18n,
     openwith,
-    pictures,
     remotefiles,
     remotestore,
     trust,
@@ -186,6 +185,7 @@ from collins.api import server as api_server  # noqa: E402
 from collins.api.client import SocketLink  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.attachrecords import Attachment  # noqa: E402
+from collins.prefs import PreferencesDialog  # noqa: E402
 from collins.sidebar import SessionRow  # noqa: E402
 from collins.state import AppState  # noqa: E402
 
@@ -327,6 +327,20 @@ def surfaces(win, local: bool) -> None:
     kept = "New session here" in group_labels
     check(f"[{say}] the project menu keeps New session here", kept, group_labels)
 
+    # Preferences: the Footer apps group configures local extras only, so
+    # it is on the page, and offered by the search, only for a local client.
+    prefs = PreferencesDialog(win.state, lambda: None)
+    group = prefs._footer_apps_group
+    check(f"[{say}] Preferences has the Footer apps group", group.get_visible() is local)
+    prefs._search_entry.set_text("footer")
+    prefs._apply_filter()
+    check(f"[{say}] …and its search offers it", group.get_visible() is local)
+    prefs._search_entry.set_text("")
+    prefs._apply_filter()
+    check(f"[{say}] …and clearing the search keeps it that way", group.get_visible() is local)
+    others = [g for g in prefs._page.groups if g is not group and g.get_visible()]
+    check(f"[{say}] the other groups are all there", len(others) == len(prefs._page.groups) - 1, len(others))
+
     readme = f"{PROJECT}/README.md"
     entries = openwith.file_open_with_entries([APP_ID], readme)
     check(f"[{say}] a file's Open In… rows", bool(entries) is local, entries)
@@ -408,7 +422,8 @@ def _not_local_attachments(view, document: Attachment, notes: list[str]) -> None
     """The attachments panel of a client that is not local to either end."""
     if document is not None:
         cache = str(blobcache.cache_root())
-        pictures.forget(document.key)  # the refusal above is remembered per key
+        # The same row that was just refused: every open asks afresh, so a
+        # refusal does not stand for the app's run.
         before = len(LAUNCHER_CALLS)
         view.open(document)
         e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) > before, timeout_s=5.0)
@@ -426,6 +441,20 @@ def _not_local_attachments(view, document: Attachment, notes: list[str]) -> None
         except OSError:
             same = False
         check("[not local] …holding the file's bytes", same)
+        # The file rewritten on the service: the next open is the new file,
+        # not the copy this window already had.
+        with open(document.key, "wb") as fh:
+            fh.write(b"%PDF-1.4 e2e, second edition\n")
+        before = len(LAUNCHER_CALLS)
+        view.open(document)
+        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) > before, timeout_s=5.0)
+        try:
+            with open(copy, "rb") as fh:
+                fresh = fh.read() == b"%PDF-1.4 e2e, second edition\n"
+        except OSError:
+            fresh = False
+        check("[not local] a file rewritten on the service opens as it is now",
+              LAUNCHER_CALLS[before:] == [("launch", copy)] and fresh, LAUNCHER_CALLS[before:])
         before = len(LAUNCHER_CALLS)
         view._on_show_folder(None, GLib.Variant("s", document.key))
         view._on_open_with(None, GLib.Variant("s", document.key))
