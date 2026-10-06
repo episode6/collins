@@ -1190,7 +1190,7 @@ def forked() -> None:
 
 def narrowed() -> None:
     """A launch that asks the CLI for a worktree: narrowed to it."""
-    launch(narrowed_typed, CHECKOUT, worktree=True)
+    launch(narrowed_typed, CHECKOUT, worktree=True, is_git=True)  # the checkout the caller knows (PR-2.6)
 
 
 def in_checkout() -> list[list[str]]:

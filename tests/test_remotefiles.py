@@ -397,3 +397,24 @@ def test_clipboard_scope_is_the_links_service_and_local_proof(link, monkeypatch)
     assert remotefiles.clipboard_scope().service_id is None
     monkeypatch.setattr(apilink, "_current", None)
     assert remotefiles.clipboard_scope() == remotefiles.ClipboardScope(None, False)
+
+
+def test_present_is_what_the_click_gate_asks_and_fails_soft(link):
+    for kind, expected in (
+        ("file", True), ("dir", True), ("other", True), ("missing", False), ("symlink", False),
+    ):
+        link.answers["fs.stat"] = {"kind": kind, "size": None, "mtime": None, "inside": False}
+        assert remotefiles.present("/srv/p/x") is expected
+    assert link.calls[-1][0] == {"t": "fs.stat", "path": "/srv/p/x"}  # no root: any path
+    link.answers["fs.stat"] = RequestRefused(protocol.ERROR_FAILED, "boom", {})
+    assert remotefiles.present("/srv/p/x") is False  # a service that cannot say: nothing opens
+
+
+def test_root_names_is_fs_names(link):
+    link.answers["fs.names"] = {"names": ["README.md", "notes.txt"], "truncated": True}
+    assert remotefiles.root_names("/srv/p") == (["README.md", "notes.txt"], True)
+    assert link.calls[-1][0] == {"t": "fs.names", "root": "/srv/p"}
+    link.answers["fs.names"] = RequestRefused(protocol.ERROR_GONE, "The folder is not there", {})
+    with pytest.raises(RequestRefused) as refused:
+        remotefiles.root_names("/srv/p")
+    assert refused.value.error == protocol.ERROR_GONE

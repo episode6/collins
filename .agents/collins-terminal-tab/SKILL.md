@@ -365,6 +365,52 @@ doesn't show). Read the **visible screen** (`get_text_format`) indexed by
 screen row — the CLI's repaint renderer leaves VTE's ring a page away from
 the adjustment, so adjustment-derived rows read empty.
 
+**Links over the API (PR-2.6; every path is the service's, the click opens
+no file).** `on_pressed` reads what needs the widget on the main loop (the
+match under the pointer, `_screen_at`'s snapshot of the rows, the roots, the
+tab's session id), claims the gesture when there is a candidate under the
+pointer, and hands the rest to `remotefiles.off_main(_click_target ...)`: the
+resolution is a pure function over the snapshot (`_click_target`, with
+`_resolve_wrapped_at` / `_resolve_wrapped_url_at` / `_resolve_from_transcript_at`
+taking the snapshot, never the terminal), whose only side reads are an
+`exists` predicate (`linkpatterns.resolve_path` / `resolve_file_reference` /
+`resolve_wrapped_reference` take it as a required argument; the click passes
+`remotefiles.present`, an `fs.stat` remembered for the click, and the
+attachment log passes `os.path.exists`) and `links_of` (the transcript's
+links, asked once and only when a click gets that far). The answer lands at
+`PRIORITY_DEFAULT` in `_on_click_resolved`, which opens a URL or
+`_open_file_reference`: one `fs.stat` of the path with the tab's editor root
+(its `kind` says file or not, its `inside` says editor or default app, and an
+image goes to the lightbox with that `inside` as its Open-in-Editor
+decision). **Because the answer is asynchronous the gesture is claimed on a
+candidate, resolved or not**: a click on a match that resolves nowhere is
+swallowed where it used to fall through to the terminal; a click on no
+candidate (the token under the pointer stands in) is not claimed and opens
+on the reply. The transcript is the service's file:
+`transcriptlinks.fetch(session)` is `store.transcript-tail`, answered by
+`service/transcripttail.py` (the last 2 MiB parsed once per size and mtime,
+bounded by `protocol.TRANSCRIPT_LINKS_*`, the path off the store's row and
+checked by `transcript_path_allowed`); the client never opens it, and
+`transcriptlinks.completions` (pure) still decides what the screen
+corroborates. `_RootNameLinks` asks `fs.names {root}` (non-directory names,
+5000 at most, `names` a `protocol.CHUNKED_JSON_FIELDS` so a full bound of long
+names travels as blob frames, confined on the worker like `fs.walk`, off the
+main loop; the answer is dropped when the root moved or
+a newer ask overtook it, kept when the service cannot answer) and holds a
+`fs.watch {kind: dir}` on the root (`self._monitor` is its handle) whose
+`dir-changed` re-asks through the same 500 ms leading-edge throttle. A link
+check that needs the files transport must `remotefiles.install(link)` first
+(the app does on every connect; a widget check on a harness link does it
+itself, as `check_root_name_links.py` does). "Is this directory a git
+checkout" (the worktree box, the sidebar project menu, the header's one-off
+entry, a sibling's worktree launch) is `checkouts.ask` — an `fs.stat` of
+`.git` off the main loop, False on any failure: the new-chat screen builds its
+checkbox hidden and shows it when the answer lands (`NewChatView.set_is_git`;
+`TerminalTab.when_checkout_known` holds a Send that came first), the menus
+build when it lands (an ask a newer one overtook adds nothing), and
+`start_background_session(..., is_git=)` is handed the answer
+(`_BackgroundSpawn.begin` asks only when the launch would use a worktree).
+
 Easy copy & paste (`easy_copy_paste`): Ctrl+C copies when there is a
 selection else SIGINT, Ctrl+V pastes; these live in `_on_key_pressed`
 consulting `keymap.KeyMatcher`, not in `Gtk.Shortcut`s (a shortcut can't be

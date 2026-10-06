@@ -156,6 +156,8 @@ PHASE_ONE_TYPES = [
     "store.move-project",
     "store.forget",
     "store.flags",
+    # PR-2.6: the transcript's links.
+    "store.transcript-tail",
     "trust.check",
     "trust.grant",
     "pty",
@@ -228,6 +230,8 @@ PHASE_ONE_TYPES = [
     "fs.rename",
     "fs.paste",
     "fs.mkdir",
+    # PR-2.6: the bare root-name links' read (the same `files` cap).
+    "fs.names",
     "service.restart",
     "service.status",
 ]
@@ -536,6 +540,7 @@ SAMPLES = {
         "backgrounding": False,
         "can_background": True,
     },
+    ("store.transcript-tail", p.REQUEST): {"session": ID},
     ("trust.check", p.REQUEST): {"path": "/home/u/project"},
     ("trust.grant", p.REQUEST): {"path": "/home/u/project", "scope": "launch"},
     ("pty", p.EVENT): {
@@ -738,6 +743,7 @@ SAMPLES = {
         "root": "/home/u/project",
     },
     ("fs.mkdir", p.REQUEST): {"path": "/home/u/project/new", "root": "/home/u/project"},
+    ("fs.names", p.REQUEST): {"root": "/home/u/project"},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -819,6 +825,7 @@ REPLIES = {
     "store.move-project": {},
     "store.forget": {},
     "store.flags": {},
+    "store.transcript-tail": {"links": ["https://example.test/a", "src/a.py:3"]},
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
     "panel.key": {},
@@ -949,6 +956,12 @@ REPLIES = {
         "results_bytes": 2,
     },
     "fs.mkdir": {},
+    "fs.names": {
+        "names": ["README.md", "pyproject.toml"],
+        "truncated": False,
+        "names_chunked": False,
+        "names_bytes": 2,
+    },
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
@@ -1772,3 +1785,15 @@ def test_a_paste_results_error_is_an_open_string():
     too_long = {"re": 9, "ok": True, "results": [{**result, "error": "x" * (p.SHORT_MAX + 1)}]}
     assert isinstance(p.validate_response(too_long, "fs.paste"), p.Refusal)
     assert "placed" not in p.TYPES["fs.paste"].request.reply
+
+
+def test_fs_names_chunks_as_json_like_a_walks_paths():
+    """PR-2.6 review: 5000 names of 255 characters are past a frame."""
+    names = [f"{index:05d}-{'n' * 249}" for index in range(p.FS_NAMES_MAX)]
+    reply = {"re": 4, "ok": True, "names": names, "truncated": False}
+    assert not isinstance(p.validate_response(reply, "fs.names"), p.Refusal)
+    frames, slim = p.split_reply(reply)
+    assert frames and "names" not in slim and slim["names_chunked"] is True
+    data = b"".join(p.unpack_frame(frame)[1] for frame in frames)
+    assert p.join_reply(slim, data)["names"] == names
+    assert "names" in p.CHUNKED_JSON_FIELDS and "names" in p.CHUNKED_FIELDS

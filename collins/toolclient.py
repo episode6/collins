@@ -50,6 +50,7 @@ from gi.repository import GLib
 
 from . import (
     apilink,
+    checkouts,
     diffmodel,
     diffnotes,
     editorfiles,
@@ -305,8 +306,25 @@ class _BackgroundSpawn:
         self._finished = False
 
     def begin(self) -> None:
+        """Start the spawn. A worktree launch needs to know whether the
+        project is a git checkout, which is the service's answer
+        (`checkouts.ask`, off the main loop, so the tab opens when it
+        lands); a launch that will not use a worktree (said so, or left it
+        to a project default that is off) asks nothing and opens its tab
+        at once."""
+        wanted = self._worktree
+        if wanted is None:
+            wanted = self._window._worktree_for_new_session(self._cwd)
+        if wanted:
+            checkouts.ask(self._cwd, self._begin)
+        else:
+            self._begin(False)
+
+    def _begin(self, is_git: bool) -> None:
+        if self._finished:
+            return
         tab = self._window.start_background_session(
-            self._cwd, self._provider, self._options, self._worktree
+            self._cwd, self._provider, self._options, self._worktree, is_git=is_git
         )
         if tab is None:  # trust is a refusal here, never a dialog over the user
             # A plan derived for the sibling has no tab to adopt it, and

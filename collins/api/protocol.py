@@ -340,6 +340,14 @@ each taken from the code the message replaces:
   and the paste's sources must be inside a root the service knows unless
   the client is ``local``. A paste takes at most FS_PASTE_MAX entries, one
   request's wire bound: a longer clipboard goes in slices (D42).
+- Links and root names (§3.23, PR-2.6; the same ``files`` cap). `fs.names`
+  answers a root's non-directory names (at most FS_NAMES_MAX, and
+  ``truncated``; a root the client may not name is refused unless it is
+  `local`; ``names`` is a CHUNKED_JSON_FIELD, so 5000 long names travel
+  as TAG_BLOB frames past a frame), re-asked on the `dir-changed` of the
+  watch the client holds on the root. `store.transcript-tail` answers the links of a session's
+  transcript's last 2 MiB, bounded as TRANSCRIPT_LINKS_MAX says: the
+  client never opens the transcript.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -470,11 +478,11 @@ ERRORS = frozenset(
 # for CHUNKED_JSON_FIELDS, as a list: `pr.sweep`'s `results`, a map, is
 # never chunked).
 CHUNKED_FIELD = "stdout"
-CHUNKED_FIELDS = ("stdout", "text", "paths", "entries", "results")
+CHUNKED_FIELDS = ("stdout", "text", "paths", "entries", "results", "names")
 # Of CHUNKED_FIELDS, the lists (PR-2.4: `fs.walk`'s paths, `fs.list`'s
-# entries; PR-2.5: `fs.paste`'s results): chunked as their compact JSON,
-# decoded back on joining.
-CHUNKED_JSON_FIELDS = frozenset({"paths", "entries", "results"})
+# entries; PR-2.5: `fs.paste`'s results; PR-2.6: `fs.names`' names):
+# chunked as their compact JSON, decoded back on joining.
+CHUNKED_JSON_FIELDS = frozenset({"paths", "entries", "results", "names"})
 CHUNKED_MAX = 64 * 1024 * 1024  # the most bytes a chunked field runs to, either way
 STREAM_MASK = 0xFFFF_FFFF
 
@@ -720,6 +728,18 @@ FS_ENTRY_KINDS = frozenset({"file", "dir", "symlink"})
 FS_LIST_MAX = 5000
 FS_WALK_MAX = 20_000
 FS_NAME_MAX = 1024
+# The links' two reads (§3.23, PR-2.6). `fs.names` answers a root's
+# non-directory names for the bare root-name links (a name over
+# FS_NAME_MAX, or one that is not text, is left out; past FS_NAMES_MAX
+# names it is cut and says `truncated`). `store.transcript-tail` answers
+# the URL- and path-shaped tokens of the last 2 MiB of a session's
+# transcript: the most recent TRANSCRIPT_LINKS_MAX (and at most
+# TRANSCRIPT_LINKS_BYTES of them) in order of first appearance, each at
+# most TRANSCRIPT_LINK_MAX characters.
+FS_NAMES_MAX = 5000
+TRANSCRIPT_LINKS_MAX = 1000
+TRANSCRIPT_LINK_MAX = 1024
+TRANSCRIPT_LINKS_BYTES = 512 * 1024
 _FS_ENTRY = Field(
     K_OBJ,
     fields={
@@ -1633,6 +1653,18 @@ _TABLE: tuple[MessageType, ...] = (
         ),
     ),
     MessageType(
+        "store.transcript-tail",
+        "The links in the tail of a session's transcript, for finishing a wrapped link.",
+        request=_request(
+            {"session": _req(_ID)},
+            reply={
+                "links": _req(
+                    Field(K_LIST, high=TRANSCRIPT_LINKS_MAX, item=_s(TRANSCRIPT_LINK_MAX, low=1))
+                ),
+            },
+        ),
+    ),
+    MessageType(
         "trust.check",
         "Whether the CLI trusts a folder already, and the folder a trust is recorded on.",
         request=_request({"path": _req(_PATH)}, reply={"trusted": _req(_BOOL), "root": _PATH}),
@@ -2434,6 +2466,21 @@ _TABLE: tuple[MessageType, ...] = (
         "fs.mkdir",
         "Make one folder on the service's machine, inside a root, never over anything.",
         request=_request({"path": _req(_PATH), "root": _req(_PATH)}),
+    ),
+    MessageType(
+        "fs.names",
+        "The non-directory names in a root, for the bare root-name links.",
+        request=_request(
+            {"root": _req(_PATH)},
+            reply={
+                "names": _req(Field(K_LIST, high=FS_NAMES_MAX, item=_s(FS_NAME_MAX, low=1))),
+                "truncated": _req(_BOOL),
+                # Set by the transport when the names went ahead as
+                # TAG_BLOB frames (CHUNKED_JSON_FIELDS).
+                "names_chunked": _BOOL,
+                "names_bytes": _i(0, SIZE_MAX),
+            },
+        ),
     ),
     # -- the service itself (§3.10)
     MessageType(
