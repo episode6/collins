@@ -24,6 +24,8 @@ class Transcript:
 
             def __init__(self, key):
                 self.key = key
+                # A delivered file (SendUserFile) is a `file` row, a picture an `image`.
+                self.kind = "image" if str(key).lower().endswith((".png", ".jpg", ".gif")) else "file"
 
         return [One(key) for key in self.keys]
 
@@ -42,6 +44,7 @@ class Session:
 class Record:
     def __init__(self, session):
         self.session = session
+        self.handle = session.handle
 
 
 class Core:
@@ -49,6 +52,14 @@ class Core:
         self.sessions = {i: Record(s) for i, s in enumerate(sessions)}
         self.store = None
         self.image_registry = blobs.ImageRegistry()
+        self.delivered_files = blobs.DeliveredFiles(spawn=lambda fn, name: fn())
+
+    def landed(self):
+        """Every session's transcript landed: what `ServiceCore.
+        session_transcript_landed` does with its delivered files."""
+        for record in self.sessions.values():
+            blobs.note_delivered(self, record)
+        return self
 
 
 class Client:
@@ -310,3 +321,232 @@ def test_read_refuses_anything_outside_the_cache(tmp_path, monkeypatch):
     os.symlink(project_file, blobcache.directory("svc") / "link.png")
     assert blobcache.read(blobcache.directory("svc") / "link.png") is None  # a link out of it
     assert blobcache.read(blobcache.directory("svc") / ".." / ".." / ".." / "project" / "shot.png") is None
+
+
+# -- kind=file&as=file: a file that is no picture, for an app (D51, PR-2.8) -------------
+
+
+@pytest.fixture
+def report(tmp_path):
+    path = tmp_path / "handed-over" / "report.pdf"
+    path.parent.mkdir()
+    path.write_bytes(b"%PDF-1.4 report")
+    return path
+
+
+def test_a_named_file_that_is_no_picture_is_served_whole_to_a_client_that_is_not_local(report):
+    """The session's agent named it (a tool call's registered path, or its
+    transcript's attachment record): served as it is, with the pictures'
+    tag and 304, as an octet stream."""
+    core = Core([Session(seen=[str(report)])])
+    feed = _inline(blobs.FileBlobs, core)
+    # A record the service has not taken in yet admits nothing: the scan's
+    # landing is what names the file (`note_delivered`).
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 400
+    core.landed()
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 200  # by the handle too
+    status, headers, body = _get(feed, f"path={report}&session=sid-1&as=file")
+    assert status == 200 and body == b"%PDF-1.4 report"
+    assert headers["Content-Type"] == "application/octet-stream"
+    st = os.stat(report)
+    assert headers["ETag"] == f'"{st.st_mtime_ns // 1000}-{st.st_size}"'
+    assert _get(feed, f"path={report}&session=sid-1&as=file", inm=headers["ETag"])[0] == 304
+    # By the registry too, and only for the session that named it.
+    core = Core([Session()])
+    core.image_registry.admit(["sid-1"], str(report))
+    feed = _inline(blobs.FileBlobs, core)
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
+    assert _get(feed, f"path={report}&session=sid-2&as=file")[0] == 403
+    assert _get(feed, f"path={report}&as=file")[0] == 403
+
+
+def test_without_as_file_nothing_but_a_picture_is_served_named_or_not(report):
+    """What a decoder fetches (`fetch_image`'s URL) is a picture or a
+    refusal, exactly as before D51: a named file that is no picture is 400."""
+    feed = _inline(blobs.FileBlobs, Core([Session(seen=[str(report)])]).landed())
+    assert _get(feed, f"path={report}&session=sid-1")[0] == 400
+
+
+def test_a_file_inside_a_root_that_nobody_named_is_not_served_whole(report):
+    """A root is not an attachment: project text is `fs.read`'s, and
+    `as=file` does not turn the blob GET into a second reader of it."""
+    core = Core([Session(cwd=str(report.parent))])
+    feed = _inline(blobs.FileBlobs, core)
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 400
+    assert _get(feed, f"path={report}&as=file")[0] == 400
+    secret = report.parent / ".env"
+    secret.write_text("TOKEN=1")
+    assert _get(feed, f"path={secret}&session=sid-1&as=file")[0] == 400
+    # Outside every root and unnamed: 403, as a picture there is.
+    elsewhere = report.parent.parent / "elsewhere.pdf"
+    elsewhere.write_bytes(b"%PDF")
+    assert _get(feed, f"path={elsewhere}&session=sid-1&as=file")[0] == 403
+    # Named *and* inside a root: served.
+    core.image_registry.admit(["sid-1"], str(report))
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
+
+
+def test_an_upload_that_is_no_picture_is_served_whole_to_its_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    mine = uploads.write("sid-1", "a.csv", b"a,b\n")
+    other = uploads.write("sid-2", "c.csv", b"c,d\n")
+    feed = _inline(blobs.FileBlobs, Core())
+    assert _get(feed, f"path={mine}&session=sid-1&as=file")[:1] == (200,)
+    assert _get(feed, f"path={mine}&session=sid-1")[0] == 400  # not without as=file
+    assert _get(feed, f"path={other}&session=sid-1&as=file")[0] == 403
+
+
+def test_a_whole_file_keeps_the_cap(report, monkeypatch):
+    feed = _inline(blobs.FileBlobs, Core([Session(seen=[str(report)])]).landed())
+    monkeypatch.setattr(blobs, "FILE_MAX_BYTES", 4)
+    monkeypatch.setattr(blobs.serve_file, "__defaults__", (4,))
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 413
+
+
+def test_a_link_swapped_in_at_a_named_file_is_refused(report, tmp_path):
+    """The exact resolved path is what was named (D38's rule, kept): a
+    link put there afterwards resolves to a file nobody named."""
+    secret = tmp_path / "secret.key"
+    secret.write_text("private")
+    named = tmp_path / "named.pdf"
+    named.write_bytes(b"%PDF named")
+    core = Core([Session()])
+    core.image_registry.admit(["sid-1"], str(named))
+    feed = _inline(blobs.FileBlobs, core)
+    assert _get(feed, f"path={named}&session=sid-1&as=file")[0] == 200
+    named.unlink()
+    os.symlink(secret, named)
+    assert _get(feed, f"path={named}&session=sid-1&as=file")[0] == 403
+
+
+def test_a_link_swapped_in_at_a_delivered_file_is_refused(report, tmp_path):
+    """Review of PR 615 (S2): the transcript's road holds the exact
+    resolved path too. A `SendUserFile` call names `link.pdf`, a link to a
+    report; the service resolves it when the record lands. The link is
+    then pointed at a private key, and at a file inside the project: the
+    path the record resolves to now was never delivered, so it is not
+    served, however often the transcript lands again."""
+    secret = tmp_path / "id_ed25519"
+    secret.write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".env").write_text("TOKEN=1\n")
+    link = tmp_path / "link.pdf"
+    os.symlink(report, link)
+    core = Core([Session(cwd=str(project), seen=[str(link)])]).landed()
+    feed = _inline(blobs.FileBlobs, core)
+    assert _get(feed, f"path={link}&session=sid-1&as=file")[:1] == (200,)
+    assert core.delivered_files.paths("sid-1") == frozenset({str(report)})
+    for target in (secret, project / ".env"):
+        link.unlink()
+        os.symlink(target, link)
+        core.landed()  # a later scan sees the same record: nothing is resolved again
+        status, _headers, body = _get(feed, f"path={link}&session=sid-1&as=file")
+        assert status in (400, 403) and body == b"", (target, status)
+    assert core.delivered_files.paths("sid-1") == frozenset({str(report)})
+    # The file that was delivered is still served, by its own path.
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
+
+
+def test_delivered_files_resolve_once_off_the_callers_thread_and_are_bounded(tmp_path, monkeypatch):
+    ran: list[str] = []
+    held: list = []
+    delivered = blobs.DeliveredFiles(spawn=lambda fn, name: (ran.append(name), held.append(fn)))
+    a = tmp_path / "a.pdf"
+    a.write_text("a")
+    delivered.note(["sid-1", "", None, "s-1"], [str(a)])
+    assert ran == ["delivered-files"] and delivered.paths("sid-1") == frozenset()  # not yet resolved
+    held.pop()()
+    assert delivered.paths("sid-1") == delivered.paths("s-1") == frozenset({str(a)})
+    delivered.note(["sid-1", "s-1"], [str(a)])
+    assert ran == ["delivered-files"]  # seen before: no second resolve
+    assert delivered.paths("sid-2") == frozenset()
+    monkeypatch.setattr(blobs, "REGISTRY_PER_SESSION", 3)
+    inline = blobs.DeliveredFiles(spawn=lambda fn, name: fn())
+    inline.note(["sid-1"], [f"/p/{n}.pdf" for n in range(5)])
+    assert inline.paths("sid-1") == frozenset({"/p/2.pdf", "/p/3.pdf", "/p/4.pdf"})
+    # A picture record is not a delivered file: it is admitted as before (D38).
+    core = Core([Session(seen=[str(tmp_path / "shot.png")])]).landed()
+    assert core.delivered_files.paths("sid-1") == frozenset()
+
+
+def test_serve_file_follows_no_link_at_the_resolved_path(report, tmp_path):
+    """The swap between the confinement and the open: the path the worker
+    resolved is opened `O_NOFOLLOW`, so a link put at its last component
+    in between is a 404, never the link's target."""
+    secret = tmp_path / "secret.key"
+    secret.write_text("private")
+    assert blobs.serve_file(str(report), None)[0] == 200
+    report.unlink()
+    os.symlink(secret, report)
+    assert blobs.serve_file(str(report), None)[0] == 404
+
+
+def test_a_local_client_is_answered_as_before(report, picture):
+    """A local client opens the file itself and never asks for one whole:
+    `as=file` changes nothing for it."""
+    feed = _inline(blobs.FileBlobs, Core([Session(seen=[str(report)])]).landed())
+    local = Client(local=True)
+    assert _get(feed, f"path={report}&session=sid-1&as=file", local)[0] == 400
+    assert _get(feed, f"path={report}", local)[0] == 400
+    assert _get(feed, f"path={picture}&as=file", local)[0] == 200
+
+
+def test_the_cached_copys_suffix_is_never_one_a_desktop_would_run():
+    """The copy's name is the cache's (`<sha1><suffix>`); the suffix is the
+    service path's and untrusted: a document's is kept, a launcher's, a
+    script's, a program's, a missing or an odd one becomes `.bin`, and
+    then the app chooser is shown instead of a default app."""
+    for key, kept in (("/p/report.pdf", ".pdf"), ("/p/Data.CSV", ".csv"), ("/p/a.tar.gz", ".gz")):
+        assert blobcache.file_suffix(key) == kept and blobcache.opens_by_default(key)
+    for key in (
+        "/p/evil.desktop", "/p/run.sh", "/p/tool.AppImage", "/p/x.py", "/p/setup.exe", "/p/a.jar",
+        "/p/Makefile", "/p/.bashrc", "/p/odd.p-d-f", "/p/long." + "x" * 40, "/p/uni.pdф", "/p/dot.",
+        "/p/pkg.deb", "/p/blob.bin",
+    ):
+        assert blobcache.file_suffix(key) == ".bin", key
+        assert not blobcache.opens_by_default(key), key
+    url = blobcache.whole_file_url("/p/a b.pdf", "sid-1")
+    assert url == "/api/blob?kind=file&path=%2Fp%2Fa%20b.pdf&session=sid-1&as=file"
+
+
+def test_a_whole_file_is_cached_under_the_caches_name_without_an_exec_bit(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+    class Link:
+        hello = {"service_id": "svc1"}
+
+        def __init__(self):
+            self.asked = []
+
+        def http_get(self, url, headers):
+            self.asked.append(url)
+            headers = {"ETag": '"1-2"', "Content-Type": "application/octet-stream"}
+            return 200, headers, b"[Desktop Entry]\nExec=rm\n"
+
+    link = Link()
+    copy = blobcache.fetch_file("/srv/p/evil.desktop", "sid-1", link)
+    assert link.asked == [blobcache.whole_file_url("/srv/p/evil.desktop", "sid-1")]
+    assert copy.suffix == ".bin" and "evil" not in copy.name
+    assert copy.name == blobcache.key_for(link.asked[0]) + ".bin"
+    assert str(copy).startswith(str(blobcache.cache_root()))
+    assert os.stat(copy).st_mode & 0o111 == 0
+
+
+def test_the_cache_folder_is_this_users_alone_and_a_looser_one_is_tightened(tmp_path, monkeypatch):
+    """Review of PR 615 (N2): the copies are 0600; the folder holding
+    them (documents handed to apps among them, since D51) is 0700, also
+    when it was made under the umask by an earlier version."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+    class Link:
+        hello = {"service_id": "svc1"}
+
+        def http_get(self, url, headers):
+            return 200, {"ETag": '"1-2"'}, b"%PDF"
+
+    copy = blobcache.fetch_file("/srv/p/a.pdf", "sid-1", Link())
+    assert os.stat(copy.parent).st_mode & 0o777 == 0o700
+    os.chmod(copy.parent, 0o775)
+    blobcache.fetch_file("/srv/p/b.pdf", "sid-1", Link())
+    assert os.stat(copy.parent).st_mode & 0o777 == 0o700

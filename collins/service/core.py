@@ -299,6 +299,9 @@ class ServiceCore:
         # and `kind=icon` GETs and `PUT /api/upload`, each on a thread; the
         # registry of the paths a session's own tool calls named (D38).
         self.image_registry = blobs_mod.ImageRegistry()
+        # The files a session's transcript says were delivered, each by the
+        # path it resolved to when first seen (D51): what `as=file` admits.
+        self.delivered_files = blobs_mod.DeliveredFiles()
         self.file_blobs = blobs_mod.FileBlobs(self)
         self.remote_blobs = blobs_mod.RemoteBlobs(self)
         self.icon_blobs = blobs_mod.IconBlobs(self)
@@ -454,6 +457,9 @@ class ServiceCore:
         # A chat's throwaway folder may have been swept since (PR-1.12d: the
         # client never makes it).
         chats.ensure_chat_dir(cwd)
+        # D39: the client sends the cwd it has and never looks; a cwd that
+        # is no directory here starts the shell in this machine's home.
+        cwd = spawn_cwd(cwd)
         env = self._spawn_env()
         cols = message.get("cols") or ptyserver.termscreen.DEFAULT_COLS
         rows = message.get("rows") or ptyserver.termscreen.DEFAULT_ROWS
@@ -498,7 +504,7 @@ class ServiceCore:
         pty.handle = message.get("handle")
         if plan:
             self._enter_cwd_in_box(pty_id, plan, cwd)
-        return protocol.reply(message.id, pty=pty_id, cols=pty.cols, rows=pty.rows)
+        return protocol.reply(message.id, pty=pty_id, cols=pty.cols, rows=pty.rows, cwd=pty.cwd)
 
     # -- the sessions (§3.19)
 
@@ -610,8 +616,17 @@ class ServiceCore:
         self.publish_pty(record.pty_id)
         if self.background is not None:
             self.background.sessions_changed()
+        # `cwd` (D39): where the session's shell started, which is the
+        # request's unless that was no directory here (`Session.spawn`'s
+        # fallback: the repository of a worktree that is gone, else this
+        # machine's home). The pty's row carries the same.
         return protocol.reply(
-            message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
+            message.id,
+            pty=record.pty_id,
+            cols=pty.cols,
+            rows=pty.rows,
+            handle=record.handle,
+            cwd=session.cwd or pty.cwd,
         )
 
     @staticmethod
@@ -758,6 +773,7 @@ class ServiceCore:
                 pty.history = session_id
 
     def session_transcript_landed(self, record: hosting.SessionRecord) -> None:
+        blobs_mod.note_delivered(self, record)
         if self.activity is not None:
             self.activity.transcript_landed(record)
 
@@ -1119,6 +1135,7 @@ class ServiceCore:
             foreground_pgrp=pty.foreground_pgrp(),
             running_command=bool(pty.has_running_command()),
             process_cwd=pty.process_cwd(),
+            cwd=pty.cwd,
             plan=pty.plan,
             cols=pty.cols,
             rows=pty.rows,
@@ -1531,6 +1548,44 @@ class ServiceCore:
             "transcript-tail",
             lambda: protocol.reply(message.id, links=transcripttail.read_links(path)),
         )
+
+    def _req_store_transcript_export(
+        self, message: protocol.Message, client: Client
+    ) -> dict | protocol.Deferred:
+        """A session's transcript as Markdown (§3.23, PR-2.8): what the
+        window's *Export as Markdown…* wrote from the transcript itself
+        before the split. The session, its title and its transcript's path
+        are the store's (never a client's: the request names only the
+        session), the path a `.jsonl` under the CLI's projects directory
+        or the chats' (`transcript_path_allowed`, rule 5), read and
+        rendered on a thread (`sessions.export_markdown`, which reads a
+        transcript that has gone as one with no messages, as it always
+        did). A render over TRANSCRIPT_EXPORT_MAX is refused rather than
+        cut: half a conversation under the whole one's title is worse
+        than a refusal that says why."""
+        session = self.store.get_session(message.get("session"))
+        if session is None:
+            return protocol.refuse(message.id, protocol.ERROR_GONE, "This session is not here any more")
+        path = str(session.jsonl_path) if session.jsonl_path else None
+        if path is None or not transcript_path_allowed(path):
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "This session's transcript is not one Collins reads"
+            )
+        title = self.store.display_name(session)
+        session_id, cwd = session.session_id, session.cwd
+
+        def work() -> dict:
+            text = sessions.export_markdown(Path(path), title, session_id, cwd)
+            if len(text) > protocol.TRANSCRIPT_EXPORT_MAX:
+                return protocol.refuse(
+                    message.id,
+                    protocol.ERROR_REFUSED,
+                    "The transcript is too long to export ({size} characters; the most is {limit})",
+                    {"size": len(text), "limit": protocol.TRANSCRIPT_EXPORT_MAX},
+                )
+            return protocol.reply(message.id, text=text)
+
+        return self.files._later(message, "transcript-export", work)
 
     def _req_store_forget(self, message: protocol.Message, client: Client) -> dict:
         session_id = message.get("session")
@@ -2480,6 +2535,16 @@ def _spawn_refusal(message: protocol.Message, exc: ptyserver.SpawnError) -> dict
         "failed to start shell: {msg}",
         {"msg": f"{exc.strerror}: {exc.filename}"},
     )
+
+
+def spawn_cwd(cwd: object) -> str:
+    """Where a `spawn` starts its shell (D39): *cwd* when it is a directory
+    on this machine, else this machine's home. The service's check, in
+    place of the four `Path.is_dir` reads the client made of its own disk
+    before PR-2.8; the reply and the pty's row say which it was."""
+    if isinstance(cwd, str) and cwd and os.path.isdir(cwd):
+        return cwd
+    return str(Path.home())
 
 
 def transcript_path_allowed(path: object) -> bool:

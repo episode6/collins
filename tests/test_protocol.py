@@ -158,6 +158,8 @@ PHASE_ONE_TYPES = [
     "store.flags",
     # PR-2.6: the transcript's links.
     "store.transcript-tail",
+    # PR-2.8: the Markdown export's text.
+    "store.transcript-export",
     "trust.check",
     "trust.grant",
     "pty",
@@ -541,6 +543,7 @@ SAMPLES = {
         "can_background": True,
     },
     ("store.transcript-tail", p.REQUEST): {"session": ID},
+    ("store.transcript-export", p.REQUEST): {"session": ID},
     ("trust.check", p.REQUEST): {"path": "/home/u/project"},
     ("trust.grant", p.REQUEST): {"path": "/home/u/project", "scope": "launch"},
     ("pty", p.EVENT): {
@@ -762,7 +765,7 @@ REPLIES = {
     "subscribe": {"items": 12, "ptys": 2},
     "attach": {"cols": 120, "rows": 40, "active": False, "sized_for": "desktop", "modes": ["?1004h", ">5u"]},
     "detach": {},
-    "spawn": {"pty": 8, "cols": 120, "rows": 40, "handle": "s-4"},
+    "spawn": {"pty": 8, "cols": 120, "rows": 40, "handle": "s-4", "cwd": "/home/u/project"},
     "prompt": {},
     "switch": {},
     "mention": {},
@@ -773,6 +776,7 @@ REPLIES = {
         "foreground_pgrp": 4243,
         "running_command": False,
         "process_cwd": "/home/u/project",
+        "cwd": "/home/u/project",
         "plan": "/run/user/1000/plan.json",
         "cols": 120,
         "rows": 40,
@@ -826,6 +830,11 @@ REPLIES = {
     "store.forget": {},
     "store.flags": {},
     "store.transcript-tail": {"links": ["https://example.test/a", "src/a.py:3"]},
+    "store.transcript-export": {
+        "text": "# A session\n\n_No messages._\n",
+        "text_chunked": False,
+        "text_bytes": 0,
+    },
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
     "panel.key": {},

@@ -125,6 +125,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 from . import (  # noqa: E402
+    apilink,
     dialogs,
     diffmodel,
     diffnotes,
@@ -1914,8 +1915,8 @@ class GitPage(Adw.Bin):
         (openwith.open_file_with — only apps that take a file are
         listed); a refusal is toasted."""
         root = self._repo_root
-        if root is None or not gitops.safe_path(path):
-            return
+        if root is None or not gitops.safe_path(path) or not apilink.is_local():
+            return  # another app is a local extra (§3.12); the submenu is hidden too
         failure = openwith.open_file_with(app_id, os.path.join(str(root), path))
         if failure:
             self._toast(failure)

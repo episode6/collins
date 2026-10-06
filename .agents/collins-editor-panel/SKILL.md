@@ -51,6 +51,10 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
   (`openwithrows.file_open_with_menu` over the `footer_apps` setting the
   pane relays through `set_footer_apps`, plus *Default app* via xdg-open);
   the tree emits `open-with-request(path, app_id)` and
+  (a **local extra**, §3.12: `openwith.file_open_with_entries` answers no
+  rows for a client that is not on the service's machine, the tree and the
+  Agent files rows append the submenu only when it has items, and
+  `_open_file_with` returns early unless `apilink.is_local()`)
   `EditorPane._open_file_with` launches through `openwith.open_file_with`,
   a failure landing in the banner. Probes: `FileTree.open_with_labels`,
   `activate_open_with`, `EditorPane.agent_file_open_with_labels`.
@@ -214,8 +218,9 @@ pathless walker reads as `Path` methods):
   listing's landing (`_continue_reveal`); a newer reveal or a re-root
   replaces it.
 - `fs.walk {root, hidden}` answers at most 20 000 relative paths; the walk's
-  `paths` and the listing's `entries` are `protocol.CHUNKED_JSON_FIELDS`
-  (past a frame they travel as their JSON in `TAG_BLOB` frames).
+  `paths`, the listing's `entries` and `fs.names`' `names` are
+  `protocol.CHUNKED_JSON_FIELDS`, as `fs.paste`'s `results` is (past a
+  frame they travel as their JSON in `TAG_BLOB` frames).
 - `fs.stat {path, root}` answers the kind a symlink names (`symlink` only
   for a dangling one, `missing`), a file's size, the mtime and `inside`
   (of *root*, or of every root the service knows); it is unconfined.

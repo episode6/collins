@@ -81,7 +81,7 @@ from .flash import flash
 from .formatting import blast_radius_body
 from .ghwelcome import command_row
 from .gitinfo import github_url, has_changes
-from .i18n import _
+from .i18n import _, translate
 from .keybindingsdialog import KeyboardBindingsDialog
 from .licenses import legal_sections
 from .models import SessionItem
@@ -91,11 +91,10 @@ from .providers import SessionOptions, available_providers, default_provider, ge
 from .prstatus import newest_title
 from .quickopen import QuickOpenDialog
 from .remotestate import RemoteState
-from .remotestore import RemoteStore
+from .remotestore import RemoteStore, transcript_export
 from .replayview import ReplayTab
 from .sessions import (
     Session,
-    export_markdown,
     path_within,
     project_name_for_cwd,
     resume_cwd,
@@ -5909,6 +5908,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_session(session, fork=True)
 
     def _on_open_ghostty(self, _action, param: GLib.Variant) -> None:
+        if not apilink.is_local():
+            # A local extra (§3.12): Ghostty would open on this device, at a
+            # path of the service's. The sidebar hides the item too.
+            return
         session = self._session_for(param)
         if session is None or _GHOSTTY is None:
             return
@@ -5992,6 +5995,8 @@ class MainWindow(Adw.ApplicationWindow):
         """Show the folder in the desktop's file manager. FileLauncher is the
         fallback: it goes through the portal, which finds a handler even when
         nothing has registered for inode/directory."""
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         folder = param.get_string()
         info = openwith.default_file_manager()
         if info is not None:
@@ -6006,6 +6011,8 @@ class MainWindow(Adw.ApplicationWindow):
         terminal button offers it on every right-click, so a desktop with no
         terminal at all says so rather than swallowing the click.
         """
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         info = openwith.default_terminal()
         if info is None:
             dialogs.error_dialog(
@@ -6278,12 +6285,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.toast_overlay.add_toast(Adw.Toast(title=title))
 
     def _on_open_folder_app(self, _action, param: GLib.Variant) -> None:
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         app_id, folder = param.unpack()
         info = footerapps.resolve_app(app_id)
         if info is not None:
             footerapps.launch_app(info, folder)
 
     def _on_reveal_transcript(self, _action, param: GLib.Variant) -> None:
+        if not apilink.is_local():
+            return  # a local extra (§3.12): its menu items are hidden too
         session = self._session_for(param)
         if session is None:
             return
@@ -6297,26 +6308,38 @@ class MainWindow(Adw.ApplicationWindow):
         title = self.store.display_name(session)
         safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in title).strip() or "session"
         dialog = Gtk.FileDialog(title=_("Export session as Markdown"), initial_name=f"{safe}.md")
-        dialog.save(self, None, lambda d, r: self._on_export_save(d, r, session, title))
+        dialog.save(self, None, lambda d, r: self._on_export_save(d, r, session))
 
-    def _on_export_save(self, dialog: Gtk.FileDialog, result, session: Session, title: str) -> None:
+    def _on_export_save(self, dialog: Gtk.FileDialog, result, session: Session) -> None:
+        """Write the session as Markdown where the chooser said. The file
+        is this device's; the transcript is the service's, which reads and
+        renders it (`store.transcript-export`, §3.23): the window opens no
+        transcript. Off the main loop both ways; a refusal or a failed
+        write is the same dialog."""
         try:
             gfile = dialog.save_finish(result)
         except GLib.Error:
             return  # cancelled
         dest = gfile.get_path()
+        if not dest:
+            return  # a place with no path on this device: nothing to write to
+        session_id = session.session_id
 
         def work() -> None:
             error = None
             try:
-                text = export_markdown(session.jsonl_path, title, session.session_id, session.cwd)
+                text = transcript_export(session_id)
                 Path(dest).write_text(text, encoding="utf-8")
+            except RequestRefused as refused:
+                error = translate(refused.msgid, refused.details)
             except OSError as err:
                 error = str(err)
             if error:
-                GLib.idle_add(dialogs.error_dialog, self, _("Export failed"), error)
+                GLib.idle_add(
+                    dialogs.error_dialog, self, _("Export failed"), error, priority=GLib.PRIORITY_DEFAULT
+                )
 
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=work, daemon=True, name="transcript-export").start()
 
     def _on_session_details(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)
@@ -6938,7 +6961,9 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_filters(filters)
         dialog.set_default_filter(jsonl_filter)
         claude_dir = Path.home() / ".claude"
-        if claude_dir.is_dir():
+        # The native chooser is a `local` client's (§3.11): only then is
+        # this device's ~/.claude the service's.
+        if apilink.is_local() and claude_dir.is_dir():
             dialog.set_initial_folder(Gio.File.new_for_path(str(claude_dir)))
         dialog.open(self, None, self._on_session_file_chosen)
 

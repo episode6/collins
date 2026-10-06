@@ -143,6 +143,14 @@ import it. It holds:
 The module docstring's "Shapes the spec left to this module" records each
 field shape chosen beyond the spec's text; read it before adding a field.
 
+PR-2.8's additions: `store.transcript-export {session}` (reply `text`,
+at most `TRANSCRIPT_EXPORT_MAX` characters, which is `CHUNKED_MAX // 4`
+so the text always fits a chunked field in UTF-8; `text_chunked` /
+`text_bytes` set by the transport), and `cwd` in the replies of `spawn`
+and `pty.info`: where the service started the pty (D39), the request's
+cwd or the service's fallback. Both are optional reply fields, so an
+older service's reply still validates.
+
 ## Identity and dispatch (`service/tools.py`, `toolclient.py`)
 
 The dispatcher is the service's: `SessionTools` (built by
@@ -488,8 +496,34 @@ thumbnail decoded at display size via `pictures.thumbnail` (a
 `PixbufLoader` sized on `size-prepared`, never upscaling) one row per idle
 turn; activating a picture hands the record's key to the host's lightbox
 (`TerminalTab._show_attachment` → `lightbox.show_image`). The file rows'
-Open / Open With / Show in Folder still read the local disk: local extras,
-PR-2.8's gate. The
+Open and Open With are for every client (D51, PR-2.8): `_with_file` hands
+the launcher the file itself on the service's machine (`_with_local_file`,
+a local extra, with Show in Folder, which is hidden elsewhere) and this
+device's cached copy anywhere else (`_with_cached_copy`: a picture
+through `fetch_image`, any other file through `blobcache.fetch_file`,
+i.e. `GET /api/blob?kind=file&as=file`). The service answers `as=file`
+only for a client that is not `local` and only for a file the session's
+agent **named**: inside its uploads, a path a tool call registered
+(`ImageRegistry`), or a delivered file's record of its live transcript
+(`DeliveredFiles`, noted by `ServiceCore.session_transcript_landed` and
+resolved on a thread), each by the path it resolved to **when the service
+first saw it**, so a link swapped in afterwards is refused on both roads
+(a request that beats the resolve is refused, and the panel asks afresh
+on every open: `pictures.forget` before the fetch); a file merely inside
+a root is `400` (`fs.read`
+is the reader of project text), and without `as=file` the GET serves
+pictures only, as before, so no decoder is ever handed anything else. A
+delivered file stays admitted for the service's run once its record has
+landed (a closed session's too); a row whose record this run has not
+scanned yet (before the first landing, after a service restart or an
+eviction past the registry's bounds) answers "couldn't fetch that file"
+until it has. The cached copy is
+`<sha1 of the url><suffix>`, 0600, never executable; the suffix is the
+only part taken from the service's path and `blobcache.file_suffix`
+replaces a missing, odd or runnable one (`.desktop`, `.sh`, `.AppImage`,
+`.py`, `.exe`, …) with `.bin`, and then `opens_by_default` is False and
+the row's activation shows the app chooser (`set_always_ask`) instead of
+a default app. The
 "new images" handle badge needs both an announced-set and a moving timestamp
 baseline; a lightbox showing suppresses its own echo by key
 (`_attachments_beheld`). The panel docks itself once per tab when a column is

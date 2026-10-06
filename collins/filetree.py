@@ -665,10 +665,13 @@ class FileTree(Gtk.Box):
         if not node.is_dir:
             # The same submenu the diff page's files list offers: the footer
             # apps that take a file, then the desktop's default app.
+            # A local extra (§3.12): no rows, and so no submenu, for a client
+            # that is not on the service's machine.
             submenu = openwithrows.file_open_with_menu(
                 rows, self._footer_apps, str(node.path), "tree.open-with"
             )
-            menu.append_submenu(_("Open In…"), submenu)
+            if submenu.get_n_items():
+                menu.append_submenu(_("Open In…"), submenu)
         self._popup_menu(menu, x, y, rows)
 
     def _popup_menu(self, menu: Gio.Menu, x: float, y: float, rows: list[Gtk.Widget] | None = None) -> None:

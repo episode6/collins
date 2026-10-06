@@ -23,7 +23,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GLib
 
-from . import footerapps
+from . import apilink, footerapps
 from .footerapps import launch_app, resolve_app, strip_field_codes
 from .i18n import _
 
@@ -113,8 +113,14 @@ def file_open_with_entries(
     a file always has somewhere to go. A role label rather than the app's
     name for that last row, as the folder menu's *File Manager* and
     *Terminal*: the icon says which app it is, when one is known. Skipped
-    when the user has added that very app themselves."""
+    when the user has added that very app themselves.
+
+    Another app is a local extra (split-service spec §3.12): for a client
+    that is not on the service's machine (`apilink.is_local`) there are no
+    rows, and the menus leave the submenu out rather than show it empty."""
     entries: list[tuple[str, Gio.Icon | None, str]] = []
+    if not apilink.is_local():
+        return entries
     configured = set()
     for app_id, info in footerapps.resolve_apps(list(footer_app_ids)):
         if footerapps.accepts_files(info):
@@ -132,7 +138,10 @@ def open_file_default(path: str) -> bool:
     """Open the file at *path* with the desktop's default handler: xdg-open
     when it is installed (it reads the same mimeapps.list every file
     manager writes, and knows the desktop's own quirks), else GLib's own
-    resolution of the same tables. False when neither could take it."""
+    resolution of the same tables. False when neither could take it, and
+    for a client that is not `local` (a local extra: nothing is read)."""
+    if not apilink.is_local():
+        return False
     if not path or not Path(path).is_file():
         return False
     launcher = shutil.which("xdg-open")
@@ -229,7 +238,11 @@ def launch_terminal(info: Gio.AppInfo, folder: str | None) -> None:
     The directory goes on the command line whenever we know the flag for it,
     and is the spawn cwd either way: the only thing we can do for a terminal
     we don't know, and harmless for the ones we do.
+
+    A local extra: nothing happens for a client that is not `local`.
     """
+    if not apilink.is_local():
+        return
     if not folder or not Path(folder).is_dir():
         folder = str(Path.home())
     argv = terminal_argv(info, folder)

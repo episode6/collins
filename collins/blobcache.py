@@ -129,6 +129,56 @@ def image_suffix(key: str) -> str | None:
     return suffix if len(suffix) <= 16 else ""
 
 
+# D51 (PR-2.8): a file that is no picture, fetched whole for a client that
+# is not `local` to hand to an app of this device's (the attachments
+# panel's Open With… and a file row's default app). The copy's name is
+# this module's (`<sha1 of the url><suffix>`, created 0600 by `mkstemp`,
+# never executable); only the suffix comes from the service's path, and it
+# is untrusted: kept when it is a short alphanumeric one that names a
+# document, replaced by `.bin` when it is missing, odd, or one a desktop
+# may *run* rather than open (a launcher, a script, a program, a package).
+UNSAFE_SUFFIX = ".bin"
+_RUNNABLE_SUFFIXES = frozenset(
+    {
+        ".desktop", ".directory", ".service", ".appimage", ".run", ".sh", ".bash", ".zsh", ".fish", ".csh",
+        ".ksh", ".command", ".py", ".pyc", ".pyw", ".pl", ".rb", ".lua", ".php", ".js", ".mjs", ".jar",
+        ".class", ".exe", ".com", ".bat", ".cmd", ".msi", ".ps1", ".vbs", ".scr", ".lnk", ".url", ".deb",
+        ".rpm", ".flatpakref", ".flatpakrepo", ".snap", ".apk", ".bin", ".out", ".elf", ".so", ".ko",
+    }
+)
+
+
+def whole_file_url(path: str, session: str = "") -> str:
+    """`GET /api/blob?kind=file&as=file`: the file *path* as it is, which
+    the service serves a client that is not `local` only when *session*'s
+    agent named it (D51; `service.blobs.FileBlobs`)."""
+    return file_url(path, session) + "&as=file"
+
+
+def file_suffix(key: str) -> str:
+    """The suffix the cached copy of the file *key* is kept under: its own
+    when that is safe to hand an app by name, else `UNSAFE_SUFFIX`."""
+    suffix = os.path.splitext(key)[1].lower()
+    plain = 2 <= len(suffix) <= 11 and suffix[1:].isascii() and suffix[1:].isalnum()
+    return suffix if plain and suffix not in _RUNNABLE_SUFFIXES else UNSAFE_SUFFIX
+
+
+def opens_by_default(key: str) -> bool:
+    """Whether the cached copy of *key* may go straight to the desktop's
+    default app: its suffix survived `file_suffix`. Otherwise the app
+    chooser is shown (nothing is picked for a file whose kind this device
+    cannot tell from a name it trusts)."""
+    return file_suffix(key) != UNSAFE_SUFFIX
+
+
+def fetch_file(key: str, session: str = "", link: apilink.Link | None = None) -> Path:
+    """`fetch` of the file *key* names, whole (`whole_file_url`), for
+    handing to an app: never for a decoder (pictures go through
+    `fetch_image`, whose URL the service answers with pictures only).
+    Worker thread; raises `ValueError`."""
+    return fetch(whole_file_url(key, session), file_suffix(key), link)
+
+
 def fetch_image(key: str, session: str = "", link: apilink.Link | None = None) -> Path:
     """`fetch` of the image *key* names (`image_url`): the fetcher
     `pictures.fetch` uses by default. Worker thread; raises `ValueError`."""
@@ -165,7 +215,15 @@ def fetch(url: str, suffix: str | None = "", link: apilink.Link | None = None) -
     if link is None or not hasattr(link, "http_get"):
         raise ValueError(_("Not connected to the service"))
     folder = directory(str(getattr(link, "hello", {}).get("service_id") or "") or None)
-    folder.mkdir(parents=True, exist_ok=True)
+    # The cache folder is this user's alone (0700): the copies in it are
+    # 0600, and since D51 they include documents handed to apps, so their
+    # names and count are nobody else's either. One made under the umask
+    # before PR-2.8 is tightened here; one that cannot be is left.
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(folder, 0o700)
+    except OSError:
+        pass
     prune(folder)
     key = key_for(url)
     etag_file = folder / (key + ".etag")

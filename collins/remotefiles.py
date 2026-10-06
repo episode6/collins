@@ -399,9 +399,9 @@ class ClipboardScope:
 
 def clipboard_scope() -> ClipboardScope:
     """The current link's scope: its hello's `service_id` and its `local`
-    proof (`SocketLink.local`). With no link, no service and not local:
-    nothing is put on the clipboard but the plain text, and nothing is
-    read back. PR-2.8's `app.local` gate takes `local` over from here."""
+    proof (`apilink.is_local`, which is `App.local`: PR-2.8). With no
+    link, no service and not local: nothing is put on the clipboard but
+    the plain text, and nothing is read back."""
     link = apilink.current()
     if link is None:
         return ClipboardScope(None, False)
@@ -409,7 +409,7 @@ def clipboard_scope() -> ClipboardScope:
     service_id = hello.get("service_id") if isinstance(hello, dict) else None
     return ClipboardScope(
         str(service_id) if isinstance(service_id, str) and service_id else None,
-        bool(getattr(link, "local", False)),
+        apilink.is_local(),
     )
 
 

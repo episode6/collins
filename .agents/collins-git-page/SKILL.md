@@ -328,7 +328,9 @@ imports `gitpage`; the page feeds it and listens:
   that `footerapps.accepts_files`, then *Default app*
   (`openwith.DEFAULT_APP_ID`, the desktop's handler through xdg-open) so
   the submenu is never empty — `gitsb.open-with ((ss))`, target `(path,
-  app_id)`) → `openwith.open_file_with` under the repository root, its
+  app_id)`; a local extra, §3.12: no rows and so no submenu for a client
+  that is not `local`, and the handler returns early) →
+  `openwith.open_file_with` under the repository root, its
   failure string toasted. The editor's file tree and Agent files rows
   build the same submenu with `openwithrows.file_open_with_menu`.
   The two opens are offered only when the path exists on disk

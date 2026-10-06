@@ -348,6 +348,13 @@ each taken from the code the message replaces:
   watch the client holds on the root. `store.transcript-tail` answers the links of a session's
   transcript's last 2 MiB, bounded as TRANSCRIPT_LINKS_MAX says: the
   client never opens the transcript.
+- The Markdown export (§3.23, PR-2.8). `store.transcript-export` answers a
+  session's transcript rendered as Markdown (``text``, at most
+  TRANSCRIPT_EXPORT_MAX characters, a CHUNKED_FIELD: past a frame it
+  travels as TAG_BLOB frames, as a file's text does); the service reads
+  the transcript its own store names and renders it, and the client
+  writes the text to a file of its device's. A render over the bound is
+  refused `refused`.
 - Enumerations a client sends are closed (`choices`) and, where a request
   carries one, required: no choice has an unstated default. Strings the service
   sends that a later service may extend (a status, a notification kind, a
@@ -740,6 +747,9 @@ FS_NAMES_MAX = 5000
 TRANSCRIPT_LINKS_MAX = 1000
 TRANSCRIPT_LINK_MAX = 1024
 TRANSCRIPT_LINKS_BYTES = 512 * 1024
+# The Markdown export's text (§3.23, PR-2.8), in characters: a character
+# is at most four bytes of UTF-8, so the bound always fits CHUNKED_MAX.
+TRANSCRIPT_EXPORT_MAX = CHUNKED_MAX // 4
 _FS_ENTRY = Field(
     K_OBJ,
     fields={
@@ -1095,7 +1105,18 @@ _TABLE: tuple[MessageType, ...] = (
                 "ordinal": _i(0, 65535),
             },
             # `handle` is the service's name for an agent's session (`s-N`).
-            reply={"pty": _req(_PTY), "cols": _req(_COLS), "rows": _req(_ROWS), "handle": _ID},
+            # `cwd` is where the pty was started (D39): the request's, or,
+            # when that is no directory on the service's machine, what the
+            # service fell back to (its `$HOME`; for an agent whose worktree
+            # is gone, the repository first). The pty's row says the same,
+            # and the tab and its shells take it from here.
+            reply={
+                "pty": _req(_PTY),
+                "cols": _req(_COLS),
+                "rows": _req(_ROWS),
+                "handle": _ID,
+                "cwd": _PATH,
+            },
         ),
     ),
     MessageType(
@@ -1148,6 +1169,9 @@ _TABLE: tuple[MessageType, ...] = (
                 "foreground_pgrp": _null(_i(-1, PID_MAX)),
                 "running_command": _req(_BOOL),
                 "process_cwd": _null(_PATH),
+                # Where the service started the pty (its row's `cwd`, D39):
+                # the spawn's, or the fallback when that was no directory.
+                "cwd": _PATH,
                 "plan": _null(_PATH),
                 # Its grid now: what a tab that attaches to a running pty
                 # starts its terminal at, so the attach paints the screen
@@ -1661,6 +1685,20 @@ _TABLE: tuple[MessageType, ...] = (
                 "links": _req(
                     Field(K_LIST, high=TRANSCRIPT_LINKS_MAX, item=_s(TRANSCRIPT_LINK_MAX, low=1))
                 ),
+            },
+        ),
+    ),
+    MessageType(
+        "store.transcript-export",
+        "A session's transcript rendered as Markdown, for the client to save to a file of its own.",
+        request=_request(
+            {"session": _req(_ID)},
+            reply={
+                "text": _req(_s(TRANSCRIPT_EXPORT_MAX)),
+                # Set by the transport when the text went ahead as TAG_BLOB
+                # frames (CHUNKED_FIELDS): the client joins them back.
+                "text_chunked": _BOOL,
+                "text_bytes": _i(0, SIZE_MAX),
             },
         ),
     ),

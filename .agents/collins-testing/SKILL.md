@@ -27,6 +27,30 @@ convention, not a workaround. Modules whose pure half needs key constants
 spell keyvals and modifier bits as integers for the same reason
 (`composerkeys`, `panelkeys`).
 
+**The pathless test** (`tests/test_client_is_pathless.py`, required: it
+runs with the rest of the suite and needs only `ast`). `tests/pathless.py`
+walks every GTK module and the `CLIENT_HELPERS` for filesystem and
+subprocess calls; each site (``module:qualname:call``) must be in
+`tests/pathless_allowlist.py`, and each entry must still match a site.
+The list is final since PR-2.8: a new `os.path.isdir`,
+`Path.read_text`, `shutil.which` or `subprocess` call in a widget module
+fails the suite until it is filed, and each group is pinned by its size
+(`DEVICE` per module too), so filing one is an edit of the test that a
+reviewer sees; only this device's own files and gated local extras
+belong. Ask the service instead (`remotefiles.stat_path` and
+friends, off the main loop). The three groups have a rule each: `DEVICE`
+is this device's own files and programs; `LOCAL_EXTRAS` sites must sit in
+a function that calls `apilink.is_local()` (`pathless.function_asks_local`
+reads the source; a closure does not inherit its parent's ask);
+`UNRULED` is pinned to the three sites reported for a ruling and only
+shrinks. The walker does not follow calls into modules the service also
+runs (`sessions`, `providers`, `clonerepo`, `panelhistory`, …), so a
+widget calling one of their disk-reading functions is invisible to it:
+check by hand when adding such a call. The ones known today, and the
+three `UNRULED` sites, are recorded and not moved (spec D50): the list is
+the comment at `UNRULED` in `tests/pathless_allowlist.py`, and each
+needs a ruling before Phase 3 starts.
+
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
 `~/.claude/projects` with two projects, monkeypatched into `sessions` and
 forcing `ClaudeProvider.available()` True), `app_state` (an `AppState`
@@ -92,6 +116,24 @@ Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 `Callable` comes from `collections.abc`).
 
 ## Writing an e2e check
+
+**A client that is not local.** No transport makes one before Phase 3,
+so a check takes the proof away: `apilink.current().local = False` on
+the app's link (`check_local_extras.py`), or a second `SocketLink` that
+never calls `prove_local` (`check_drop_upload.py`,
+`check_filetree_ops.py`). `apilink.is_local()` is the one reader, so
+every gate follows at once; widgets that decided at build time (the
+footer) are read on a tab built afterwards. `check_local_extras.py` is
+the pattern for anything that would start a program or open the file
+manager: it replaces `Gtk.FileLauncher.new` and `Gtk.UriLauncher.new`
+with a recorder before importing `collins` (an assignment on the GI
+class; every module sees it), wraps `footerapps.launch_app`, stages its
+own `ghostty` and footer-app stubs on `PATH` and under a scratch
+`XDG_DATA_HOME`, and gives the service a scratch `$HOME` (`start_service
+({**os.environ, "HOME": ...})`), so nothing reaches the desktop even
+when a gate is broken. A window's actions are `win.lookup_action(name).
+activate(variant)`: `win.activate_action("name", …)` without the `win.`
+prefix does nothing and makes a "nothing happened" assertion vacuous.
 
 **The probe** (D27). A session's logic runs on the service, so a
 check never reads a tab's privates: `tab.probe(name)`,
