@@ -1193,7 +1193,7 @@ def test_a_rename_whose_directory_is_swapped_for_a_link_out_is_outside(tmp_path,
 def test_the_held_path_is_the_kernels_and_is_never_resolved_again(tmp_path):
     """`_held_path` answers where the descriptor is, whatever path it was
     opened by; a removed directory is None; one really named "x (deleted)"
-    is itself; and `_held_inside` compares that answer as it stands: a
+    is itself; and `held_inside` compares that answer as it stands: a
     component of it turned into a link into the root since is not
     followed back in."""
     root = tmp_path / "project"
@@ -1202,9 +1202,9 @@ def test_the_held_path_is_the_kernels_and_is_never_resolved_again(tmp_path):
     fd = os.open(tmp_path / "way-in" / "sub", os.O_RDONLY | os.O_DIRECTORY)
     try:
         assert projectfiles._held_path(fd) == str(root.resolve() / "sub")
-        assert projectfiles._held_inside(tmp_path / "way-in", projectfiles._held_path(fd))
-        assert projectfiles._held_inside(root / "sub", projectfiles._held_path(fd))
-        assert not projectfiles._held_inside(root / "su", projectfiles._held_path(fd))
+        assert projectfiles.held_inside(tmp_path / "way-in", projectfiles._held_path(fd))
+        assert projectfiles.held_inside(root / "sub", projectfiles._held_path(fd))
+        assert not projectfiles.held_inside(root / "su", projectfiles._held_path(fd))
         os.rmdir(root / "sub")
         assert projectfiles._held_path(fd) is None
         (root / "sub (deleted)").mkdir()  # a stranger at the very path the kernel prints
@@ -1225,7 +1225,7 @@ def test_the_held_path_is_the_kernels_and_is_never_resolved_again(tmp_path):
         outside.symlink_to(root)  # the old path now leads into the root
         (root / "x").mkdir()
         assert projectfiles.is_inside(root, path)  # what resolving it again would say
-        assert not projectfiles._held_inside(root, path)
+        assert not projectfiles.held_inside(root, path)
     finally:
         os.close(held)
 
@@ -1258,6 +1258,118 @@ def test_a_destination_removed_after_the_check_is_not_a_dir(tmp_path, monkeypatc
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt")])
     assert outcome.error is PasteError.NOT_A_DIR and _fds() == before
     assert (tmp_path / "a.txt").read_text() == "A"
+
+
+@pytest.mark.parametrize("primitive", ["renameat2", "placeholder", "copy"])
+def test_a_folder_that_can_be_searched_but_not_listed_is_worked_in_as_before(
+    tmp_path, monkeypatch, primitive
+):
+    """The holds are `O_PATH|O_DIRECTORY` (D48): search permission is all
+    they ask, as `os.rename`, `os.mkdir` and `copy2` asked before them. In
+    a `0300` folder a rename, a mkdir, a paste from it (a copy and a cut)
+    and a paste into it (a file, a link, a tree, copied and cut) all
+    work, on each of the move's three paths."""
+    if os.geteuid() == 0:
+        pytest.skip("root lists anything")
+    if primitive == "placeholder":
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
+    elif primitive == "copy":
+        _force_copy_path(monkeypatch)
+    elif projectfiles._RENAMEAT2 is None:
+        pytest.skip("no renameat2 in this libc")
+    blind = tmp_path / "blind"
+    (tmp_path / "dest").mkdir()
+    blind.mkdir()
+    for name in ("a.txt", "b.txt", "c.txt"):
+        (blind / name).write_text(name)
+    (tmp_path / "in.txt").write_text("in")
+    (tmp_path / "cut.txt").write_text("cut")
+    (tmp_path / "ln").symlink_to("in.txt")
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "f").write_text("f")
+    (tmp_path / "tree2").mkdir()
+    os.chmod(blind, 0o300)
+    before = _fds()
+    try:
+        with pytest.raises(PermissionError):
+            os.listdir(blind)  # the premise
+        assert rename_entry(tmp_path, blind / "a.txt", blind / "renamed.txt") == (blind / "renamed.txt", None)
+        assert rename_entry(tmp_path, blind / "b.txt", blind / "renamed.txt") == (None, RenameError.EXISTS)
+        assert make_directory(tmp_path, blind / "made") is None
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(blind / "renamed.txt")])
+        assert outcome.error is None and (tmp_path / "dest" / "renamed.txt").read_text() == "a.txt"
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(blind / "b.txt")], move=True)
+        assert outcome.error is None and (tmp_path / "dest" / "b.txt").read_text() == "b.txt"
+        into = [tmp_path / "in.txt", tmp_path / "ln", tmp_path / "tree", tmp_path / "in.txt"]
+        outcomes = paste_entries(tmp_path, blind, [str(source) for source in into])
+        assert [o.error for o in outcomes] == [None] * 4
+        assert outcomes[3].target == blind / "in (copy).txt"  # the next free name, found without a listing
+        cut = [str(tmp_path / "cut.txt"), str(tmp_path / "tree2")]
+        assert [o.error for o in paste_entries(tmp_path, blind, cut, move=True)] == [None, None]
+        assert _fds() == before
+    finally:
+        os.chmod(blind, 0o755)
+    assert sorted(os.listdir(blind)) == [
+        "c.txt", "cut.txt", "in (copy).txt", "in.txt", "ln", "made", "renamed.txt", "tree", "tree2",
+    ]
+    assert os.readlink(blind / "ln") == "in.txt" and (blind / "tree" / "sub" / "f").read_text() == "f"
+    assert (blind / "made").is_dir() and (blind / "cut.txt").read_text() == "cut"
+    assert not (tmp_path / "cut.txt").exists() and not (tmp_path / "tree2").exists()
+
+
+def test_the_holds_are_search_only_descriptors(tmp_path):
+    """What the service only works in is held `O_PATH`: it cannot be read
+    or listed through, and its path is the kernel's all the same."""
+    fd = projectfiles._open_dir(tmp_path)
+    try:
+        assert projectfiles._held_path(fd) == str(tmp_path.resolve())
+        with pytest.raises(OSError):
+            os.listdir(fd)
+        with pytest.raises(OSError):
+            os.fchmod(fd, 0o700)
+    finally:
+        os.close(fd)
+
+
+def test_a_read_only_file_keeps_its_user_xattr_in_a_copy(tmp_path, monkeypatch):
+    """`copystat`'s order: the xattrs before the mode. A `user.` xattr
+    needs write permission on the inode, so a copy made read-only first
+    lost it, silently (H3)."""
+    source = tmp_path / "ro.txt"
+    source.write_text("read only")
+    try:
+        os.setxattr(source, "user.probe", b"v")
+    except OSError:
+        pytest.skip("no user xattrs on this filesystem")
+    os.chmod(source, 0o444)
+    os.utime(source, ns=(1_600_000_000_123_456_789, 1_600_000_000_987_654_321))
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "tree").mkdir()
+    shutil.copy2(source, tmp_path / "tree" / "ro.txt")
+    os.setxattr(tmp_path / "tree", "user.probe", b"d")
+    os.chmod(tmp_path / "tree", 0o555)
+    try:
+        outcomes = paste_entries(tmp_path, tmp_path / "dest", [str(source), str(tmp_path / "tree")])
+        assert [o.error for o in outcomes] == [None, None]
+        for copy in (tmp_path / "dest" / "ro.txt", tmp_path / "dest" / "tree" / "ro.txt"):
+            st = os.stat(copy)
+            assert os.getxattr(copy, "user.probe") == b"v"
+            assert stat.S_IMODE(st.st_mode) == 0o444
+            assert st.st_mtime_ns == 1_600_000_000_987_654_321
+        assert os.getxattr(tmp_path / "dest" / "tree", "user.probe") == b"d"
+        assert stat.S_IMODE(os.stat(tmp_path / "dest" / "tree").st_mode) == 0o555
+        # And across filesystems, where a cut is a copy.
+        _force_copy_path(monkeypatch)
+        os.chmod(tmp_path / "dest", 0o755)
+        (tmp_path / "moved").mkdir()
+        (outcome,) = paste_entries(tmp_path, tmp_path / "moved", [str(source)], move=True)
+        assert outcome.error is None and not source.exists()
+        assert os.getxattr(tmp_path / "moved" / "ro.txt", "user.probe") == b"v"
+        assert stat.S_IMODE(os.stat(tmp_path / "moved" / "ro.txt").st_mode) == 0o444
+    finally:
+        for folder in (tmp_path / "tree", tmp_path / "dest" / "tree"):
+            if folder.is_dir():
+                os.chmod(folder, 0o755)
 
 
 def test_a_mkdir_whose_parent_is_swapped_for_a_link_out_is_outside(tmp_path, monkeypatch):
