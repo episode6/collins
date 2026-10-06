@@ -415,7 +415,8 @@ candidate (the token under the pointer stands in) is not claimed and opens
 on the reply. **The default app is a local extra** (§3.12, PR-2.8):
 `_launch_default` (a directory, a file outside the project) and
 `_launch_uri`'s `file:` URI with no path return at once unless
-`apilink.is_local()`; an http(s) link, the editor and the lightbox are
+`apilink.is_local()` (the branch goes by `linkpatterns.uri_scheme`, the
+scheme lower-cased, never a prefix test: `FILE:///x` is a file URI to GIO); an http(s) link, the editor and the lightbox are
 not local extras and open for every client. The transcript is the
 service's file:
 `transcriptlinks.fetch(session)` is `store.transcript-tail`, answered by

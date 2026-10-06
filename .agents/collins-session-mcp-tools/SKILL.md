@@ -504,8 +504,13 @@ through `fetch_image`, any other file through `blobcache.fetch_file`,
 i.e. `GET /api/blob?kind=file&as=file`). The service answers `as=file`
 only for a client that is not `local` and only for a file the session's
 agent **named**: inside its uploads, a path a tool call registered
-(`ImageRegistry`), or an attachment record of its live transcript, each
-by exact resolved path; a file merely inside a root is `400` (`fs.read`
+(`ImageRegistry`), or a delivered file's record of its live transcript
+(`DeliveredFiles`, noted by `ServiceCore.session_transcript_landed` and
+resolved on a thread), each by the path it resolved to **when the service
+first saw it**, so a link swapped in afterwards is refused on both roads
+(a request that beats the resolve is refused, and the panel asks afresh
+on every open: `pictures.forget` before the fetch); a file merely inside
+a root is `400` (`fs.read`
 is the reader of project text), and without `as=file` the GET serves
 pictures only, as before, so no decoder is ever handed anything else. A
 session with no live record on the service (its tab closed) has no

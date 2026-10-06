@@ -226,7 +226,10 @@ writes the file the native chooser named, which is this device's. The
 window opens no transcript for it.
 
 **`app.local` and the local extras** (§3.12, PR-2.8). `apilink.
-is_local()` is the one reader of the link's `local` proof (D11);
+is_local()` is the one reader of the link's `local` proof (D11), which
+`SocketLink.connect` clears and only that hello's `prove_local` sets;
+Preferences hides its Footer apps group, from the page and its search,
+when it is False (`local_only` on the group, `_apply_filter`);
 `App.local`, the file clipboard's scope and a dropped file's own path
 all go through it. In the sidebar it gates the session row's *Open in
 Ghostty*, *Open In…* and *Reveal transcript* and the project header's
