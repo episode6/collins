@@ -26,10 +26,19 @@ each to its rule:
   recorded, not moved; Phase 2 closes with them and each needs a ruling
   before Phase 3 starts. The test pins the group so it can only shrink.
 
-**The list never grows** (`tests/test_client_is_pathless.py`): a new
-site in a GTK module or a client helper is a failing test, and so is an
-entry nothing matches any more (a site that moved comes off the list in
-the same PR).
+**What the tests enforce** (`tests/test_client_is_pathless.py`). A new
+site in a GTK module or a client helper fails the suite until it is
+filed here, and so does an entry nothing matches any more (a site that
+moved comes off the list in the same PR). Filing is a deliberate,
+reviewed edit, not a way round the rule: each group is pinned by its
+exact size (`DEVICE` 51, `LOCAL_EXTRAS` 16, `UNRULED` at most its three),
+so a site cannot be added to any of them without that test changing in
+the same diff, where a reviewer sees it. The list is not frozen in
+number: it went from 45 to 69 in PR-2.8 when the walker took in four
+more modules (28 sites they already had) and the four `terminal` cwd
+sites came off, and to 70 with the cache folder's `chmod`. What does not
+change is what may be on it: this device's own files and programs, and
+local extras behind the proof.
 """
 
 DEVICE = frozenset(
@@ -39,6 +48,7 @@ DEVICE = frozenset(
         # -- ~/.cache/collins/blobs: the blob cache (PR-2.2, PR-2.7) -----------------
         "blobcache:fetch:Path.exists",
         "blobcache:fetch:Path.mkdir",
+        "blobcache:fetch:os.chmod",  # the cache folder kept 0700 (review of PR 615, N2)
         "blobcache:fetch:Path.read_text",  # a blob's saved tag
         "blobcache:fetch:Path.unlink",
         "blobcache:fetch:Path.write_text",
@@ -57,7 +67,7 @@ DEVICE = frozenset(
         # -- ui-state.json: this device's half of the state (§3.8) -------------------
         "uistate:UiState._load:Path.read_text",
         "uistate:UiState.save:Path.exists",
-        "uistate:UiState.save:shutil.copy2",  # the one-time `state.json.pre-split` backup
+        "uistate:UiState.save:shutil.copy2",  # a `ui-state.json` that would not parse, kept as `.corrupt`
         "uistate:write_json_atomic:Path.mkdir",
         # -- the Markdown export's destination: the file the chooser named. The
         # transcript is the service's (`store.transcript-export`, PR-2.8) ------------
