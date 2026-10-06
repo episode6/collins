@@ -136,6 +136,17 @@ class DeliveredFiles:
     refused. Per session key (its id, its handle), bounded as the
     registry is, kept for the service's run.
 
+    "First saw" is exact about its limits: the first time *this run* of
+    the service saw the record *under that key, while it still holds
+    it*. A record is resolved again when it is noted under a key that has
+    not held it (a session's id, once its handle resolves to one), when
+    its key was evicted past the bounds (`REGISTRY_SESSIONS`,
+    `REGISTRY_PER_SESSION`) and the transcript lands again, and after a
+    service restart; each of those reads what the path names then. And
+    it is not resolved again otherwise: a link the agent re-points on
+    purpose keeps admitting its old target, not its new one, and a
+    closed session's delivered files stay admitted for the run.
+
     `note` is the main loop's (the transcript's landing); the resolving
     runs on a thread (*spawn*), since a `realpath` is a disk read, and a
     record is admitted once that lands: a request that beats it is

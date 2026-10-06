@@ -210,7 +210,7 @@ LOCAL_EXTRAS = frozenset(
 #    process's `PATH`.
 # 8. `toolclient`'s `os.path.realpath` on service paths: toolclient.py:372
 #    and :996.
-# 9. Seven native choosers that start at a path of the service's with no
+# 9. Six native choosers that start at a path of the service's with no
 #    gate (`Gio.File.new_for_path` with no read, so the walker sees
 #    nothing): window.py:2269, 2284, 2899, 3498 (from
 #    `_visible_project_dir`), terminal.py:4938 (the composer's attach),

@@ -513,9 +513,11 @@ on every open: `pictures.forget` before the fetch); a file merely inside
 a root is `400` (`fs.read`
 is the reader of project text), and without `as=file` the GET serves
 pictures only, as before, so no decoder is ever handed anything else. A
-session with no live record on the service (its tab closed) has no
-transcript scan there, so its file rows answer "couldn't fetch that
-file", as its pictures outside a root already did. The cached copy is
+delivered file stays admitted for the service's run once its record has
+landed (a closed session's too); a row whose record this run has not
+scanned yet (before the first landing, after a service restart or an
+eviction past the registry's bounds) answers "couldn't fetch that file"
+until it has. The cached copy is
 `<sha1 of the url><suffix>`, 0600, never executable; the suffix is the
 only part taken from the service's path and `blobcache.file_suffix`
 replaces a missing, odd or runnable one (`.desktop`, `.sh`, `.AppImage`,
