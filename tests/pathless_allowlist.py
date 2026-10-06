@@ -19,11 +19,12 @@ each to its rule:
   chooser's starting folder). They exist only for a client on the
   service's machine: the function each sits in asks `apilink.is_local()`
   (which is `app.local`, the `local` proof of D11), and the test reads
-  the function to see that it does.
-- `UNRULED`: three sites that are neither, which PR-2.8's entry in the
-  spec does not assign and whose move needs a design the spec does not
-  give (§5: reported, not improvised). The test pins the group so it can
-  only shrink; it is empty once they are ruled.
+  the function to see that it does. **Ruled D49** (2026-10-05): the
+  group is part of the final list, and the acceptance's "only device
+  files" reads "device files and gated local extras".
+- `UNRULED`: three sites that are neither. **Ruled D50** (2026-10-05):
+  recorded, not moved; Phase 2 closes with them and each needs a ruling
+  before Phase 3 starts. The test pins the group so it can only shrink.
 
 **The list never grows** (`tests/test_client_is_pathless.py`): a new
 site in a GTK module or a client helper is a failing test, and so is an
@@ -136,8 +137,27 @@ LOCAL_EXTRAS = frozenset(
 )
 
 # Not this device's files and not local extras: a path of the service's
-# read on this device, in code no chunk of Phase 2 was given. Reported by
-# PR-2.8 for a ruling (its report's questions); nothing may be added.
+# read on this device, in code no chunk of Phase 2 was given.
+#
+# D50 (split-service spec §6; the PR-2.8 entry's "Rulings of 2026-10-05 on
+# the implementer's questions" has the full text): recorded, not moved.
+# Phase 2 closes with this list, and PR-3.1 must not start until each is
+# ruled. Nothing may be added here. The same ruling covers reads the
+# walker cannot see, because they sit in modules with no GTK import or go
+# through a helper the service runs too; they are NOT on this list and no
+# test pins them, so this comment is where they are written down:
+#
+# - `toolclient.resolve_file` (`os.path.isfile`) and
+#   `toolclient.start_session` (`os.path.isdir`, `expanduser`)
+# - `dialogs.details_dialog` through `provider.parse_details(jsonl_path)`
+# - the replay (`replaymodel.read_session_turns`) and
+#   `window._open_session_file` through `sessions.session_from_file`
+# - `clonerepo.destination_status` (disk reads per keystroke in the clone
+#   dialog)
+# - `panelhistory.load_all` / `delete`, called from `terminal` and `window`
+# - `clisetup.validate`; `pkgrepos`
+#
+# Whether the walker should cover such modules is part of the same ruling.
 UNRULED = frozenset(
     {
         # The clone dialog: whether the clone's folder is there once the job

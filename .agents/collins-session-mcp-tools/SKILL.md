@@ -496,8 +496,27 @@ thumbnail decoded at display size via `pictures.thumbnail` (a
 `PixbufLoader` sized on `size-prepared`, never upscaling) one row per idle
 turn; activating a picture hands the record's key to the host's lightbox
 (`TerminalTab._show_attachment` → `lightbox.show_image`). The file rows'
-Open / Open With / Show in Folder still read the local disk: local extras,
-PR-2.8's gate. The
+Open and Open With are for every client (D51, PR-2.8): `_with_file` hands
+the launcher the file itself on the service's machine (`_with_local_file`,
+a local extra, with Show in Folder, which is hidden elsewhere) and this
+device's cached copy anywhere else (`_with_cached_copy`: a picture
+through `fetch_image`, any other file through `blobcache.fetch_file`,
+i.e. `GET /api/blob?kind=file&as=file`). The service answers `as=file`
+only for a client that is not `local` and only for a file the session's
+agent **named**: inside its uploads, a path a tool call registered
+(`ImageRegistry`), or an attachment record of its live transcript, each
+by exact resolved path; a file merely inside a root is `400` (`fs.read`
+is the reader of project text), and without `as=file` the GET serves
+pictures only, as before, so no decoder is ever handed anything else. A
+session with no live record on the service (its tab closed) has no
+transcript scan there, so its file rows answer "couldn't fetch that
+file", as its pictures outside a root already did. The cached copy is
+`<sha1 of the url><suffix>`, 0600, never executable; the suffix is the
+only part taken from the service's path and `blobcache.file_suffix`
+replaces a missing, odd or runnable one (`.desktop`, `.sh`, `.AppImage`,
+`.py`, `.exe`, …) with `.bin`, and then `opens_by_default` is False and
+the row's activation shows the app chooser (`set_always_ask`) instead of
+a default app. The
 "new images" handle badge needs both an announced-set and a moving timestamp
 baseline; a lightbox showing suppresses its own echo by key
 (`_attachments_beheld`). The panel docks itself once per tab when a column is

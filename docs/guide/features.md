@@ -148,12 +148,15 @@ Enter opens, Esc closes.
   terminal, the default app) wherever it appears, the footer's app
   launchers, its file manager button and the panel toggle's right-click,
   **Open in Ghostty**, **Reveal transcript**, the attachments panel's
-  **Open With…** and **Show in Folder**, a Ctrl+click on a folder or on a
-  file outside the project (the default app), and real `file:` references
-  on the clipboard so a copied file round-trips with your file manager.
-  (The lightbox's **Open With…** is there either way: on the service's
-  machine it hands the app the file itself, elsewhere the window's own
-  copy of the picture.) A window that is **not** on the
+  **Show in Folder**, a Ctrl+click on a folder or on a file outside the
+  project (the default app), and real `file:` references on the clipboard
+  so a copied file round-trips with your file manager. (**Open With…** in
+  the lightbox and the attachments panel, and a click on a file in that
+  panel, are there either way: on the service's machine the app is handed
+  the file itself, elsewhere the window's own cached copy of it. Only
+  what the session was sent or showed is fetched that way, and a copy
+  whose name would make the desktop *run* it, a launcher or a script,
+  goes to the app chooser instead of a default app.) A window that is **not** on the
   service's machine has none of them: the items are left out, not greyed
   out, because the app they would start is on one computer and the file
   on another. Everything else is the same there: the editor, the git

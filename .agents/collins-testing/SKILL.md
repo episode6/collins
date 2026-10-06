@@ -43,7 +43,10 @@ reads the source; a closure does not inherit its parent's ask);
 shrinks. The walker does not follow calls into modules the service also
 runs (`sessions`, `providers`, `clonerepo`, `panelhistory`, …), so a
 widget calling one of their disk-reading functions is invisible to it:
-check by hand when adding such a call.
+check by hand when adding such a call. The ones known today, and the
+three `UNRULED` sites, are recorded and not moved (spec D50): the list is
+the comment at `UNRULED` in `tests/pathless_allowlist.py`, and each
+needs a ruling before Phase 3 starts.
 
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
 `~/.claude/projects` with two projects, monkeypatched into `sessions` and
