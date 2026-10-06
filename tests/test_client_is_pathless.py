@@ -5,9 +5,10 @@ walker and the allowlist, made the final list in PR-2.8).
 
 Every filesystem and subprocess site `tests/pathless.py` finds in the
 GTK modules and the client helpers must be in `tests/pathless_allowlist.
-ALLOWLIST`, and every entry there must still match a site: the list
-never grows, and a site that moved to the service comes off it in the
-same PR. The git page's, gitinfo's and window._run_git's sites are gone
+ALLOWLIST`, and every entry there must still match a site: nothing
+joins the list unseen, and a site that moved to the service comes off it in the
+same PR (each group is pinned by size, so filing one is an edit a
+reviewer sees). The git page's, gitinfo's and window._run_git's sites are gone
 since PR-2.1 (git goes over the API), and the walker covers the modules
 PR-2.1 added for it.
 
@@ -121,6 +122,43 @@ def test_the_walker_covers_the_gtk_modules_and_the_helpers():
 def test_the_list_is_three_groups_that_do_not_overlap():
     assert ALLOWLIST == DEVICE | LOCAL_EXTRAS | UNRULED
     assert not DEVICE & LOCAL_EXTRAS and not DEVICE & UNRULED and not LOCAL_EXTRAS & UNRULED
+
+
+def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
+    """Review of PR 615 (N5): the walker's "no site outside the list" is
+    satisfied by adding a line to any group, and `openwith` sits in two of
+    them. So each group's size is pinned, and `DEVICE`'s per module: a
+    new site means editing these numbers in the same diff, where the
+    question "is this really the device's own file" gets asked."""
+    assert len(LOCAL_EXTRAS) == 16
+    assert len(UNRULED) <= 3
+    per_module: dict[str, int] = {}
+    for site in DEVICE:
+        module = site.split(":", 1)[0]
+        per_module[module] = per_module.get(module, 0) + 1
+    assert per_module == {
+        "app": 1,
+        "blobcache": 10,
+        "remoteimages": 4,
+        "uistate": 4,
+        "window": 2,
+        "desktopentry": 13,
+        "updatecheck": 3,
+        "buildinfo": 3,
+        "connection": 5,
+        "prefs": 1,
+        "sidebar": 1,
+        "openwith": 4,
+    }
+    assert len(DEVICE) == 51
+    # `openwith`'s four device sites are lookups of this device's terminal
+    # preference; its launchers are local extras and nowhere else.
+    assert {s for s in DEVICE if s.startswith("openwith:")} == {
+        "openwith:_alternatives_terminal:os.access",
+        "openwith:_alternatives_terminal:shutil.which",
+        "openwith:_configured_terminal_ids:Path.read_text",
+        "openwith:_from_command:shutil.which",
+    }
 
 
 def test_every_local_extra_sits_behind_the_local_proof():
