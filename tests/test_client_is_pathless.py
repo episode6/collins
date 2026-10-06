@@ -13,7 +13,10 @@ PR-2.1 added for it.
 
 The final list (PR-2.8) is three groups with a rule each: `DEVICE` (this
 device's own files and programs), `LOCAL_EXTRAS` (each in a function that
-asks `apilink.is_local()`) and `UNRULED` (pinned, so it only shrinks).
+asks `apilink.is_local()`; kept on the list by ruling D49) and `UNRULED`
+(pinned, so it only shrinks; recorded and not moved by ruling D50, with
+the reads the walker cannot see listed beside the group in
+`tests/pathless_allowlist.py`).
 This file runs in CI's `test` job with the rest of the unit suite and
 skips nothing: it needs `ast` and the source tree, no GTK."""
 

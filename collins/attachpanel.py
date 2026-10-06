@@ -56,7 +56,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
-from . import apilink, contextmenu, editorfiles, pictures, scrolling  # noqa: E402
+from . import apilink, blobcache, contextmenu, editorfiles, pictures, scrolling  # noqa: E402
 from .attachrecords import Attachment  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -339,14 +339,17 @@ class AttachmentsView(Gtk.Box):
         """A row was activated: a picture goes to the lightbox; any other
         file goes to whatever the desktop opens it with — the panel has no
         way to show a spreadsheet, and the default handler is what a
-        double-click on the file anywhere else would do. That handler is
-        this device's and the file the service's: a local extra (§3.12),
-        so a window that is not on the service's machine opens nothing for
-        a row that is no picture (`apilink.is_local`, which is `app.local`)."""
+        double-click on the file anywhere else would do. On the service's
+        machine that is the file itself (a local extra, §3.12); anywhere
+        else it is this device's cached copy (`_with_file`, D51), through
+        the app chooser when the copy's name says nothing this device
+        trusts (`blobcache.opens_by_default`)."""
         if one.kind == "image":
             self._open_image(one, one.key, lambda step: self._navigate_from(one, step))
-        elif apilink.is_local():
-            self._with_local_file(one, self._launch_default)
+        elif apilink.is_local() or blobcache.opens_by_default(one.key):
+            self._with_file(one, self._launch_default)
+        else:
+            self._with_file(one, self._launch)
 
     def _navigate_from(self, one: Attachment, step: int) -> None:
         """Open the image *step* rows away from *one* (the lightbox's arrow
@@ -373,6 +376,45 @@ class AttachmentsView(Gtk.Box):
                 entries.append((row.attachment.kind, row.attachment.key))
             row = row.get_next_sibling()
         return entries
+
+    def _with_file(self, one: Attachment, then: Callable[[str], None]) -> None:
+        """Hand *then* a file of this device's for *one*: the file itself
+        on the service's machine (`_with_local_file`), this device's cached
+        copy anywhere else (`_with_cached_copy`, D51)."""
+        if apilink.is_local():
+            self._with_local_file(one, then)
+        else:
+            self._with_cached_copy(one, then)
+
+    def _with_cached_copy(self, one: Attachment, then: Callable[[str], None]) -> None:
+        """A client that is not `local` (D51): *one* fetched into the blob
+        cache and *then* handed the copy, which is this device's own file.
+        A picture is the blob the lightbox shows (`fetch_image`); any other
+        file is asked for whole (`blobcache.fetch_file`: the service
+        serves it only when this session's agent named it, and the copy
+        goes to an app, never to a decoder). A file the service will not
+        serve, or that is gone, is said out loud."""
+        session = self.session_key()
+
+        def landed(path: Path | None, error: str | None) -> None:
+            if self.get_root() is None:
+                return  # the panel went away while the fetch ran
+            if path is None:
+                words = (
+                    _("couldn't download that image: {reason}")
+                    if one.kind == "image"
+                    else _("couldn't fetch that file: {reason}")
+                )
+                self._notify(words.format(reason=error or one.key))
+                return
+            then(str(path))
+
+        if one.kind == "image":
+            pictures.fetch(one.key, landed, session=session)
+        else:
+            pictures.fetch(
+                one.key, landed, fetcher=lambda: blobcache.fetch_file(one.key, session), session=session
+            )
 
     def _with_local_file(self, one: Attachment, then: Callable[[str], None]) -> None:
         """Hand *then* a real file for *one*, downloading it if it is remote.
@@ -416,12 +458,12 @@ class AttachmentsView(Gtk.Box):
     def popup_menu(self, row: _Row, one: Attachment, x: float, y: float) -> None:
         """The right-click menu for *one*, pointing at where it was clicked."""
         menu = Gio.Menu()
-        # Another app and the file manager are local extras (§3.12): hidden,
-        # not greyed out, in a window that is not on the service's machine.
-        local = apilink.is_local()
-        if local:
-            menu.append_item(_item(_("Open With…"), "attachments.open-with", one.key))
-        if local and not one.remote:
+        # Open With… is there for every client: the file itself on the
+        # service's machine, this device's cached copy anywhere else (D51).
+        # The file manager is a local extra (§3.12): there is no folder on
+        # this device to show, so the item is left out, not greyed out.
+        menu.append_item(_item(_("Open With…"), "attachments.open-with", one.key))
+        if apilink.is_local() and not one.remote:
             # A remote image's own folder is the download cache, which is
             # nobody's idea of where that picture lives.
             menu.append_item(_item(_("Show in Folder"), "attachments.show-folder", one.key))
@@ -443,8 +485,8 @@ class AttachmentsView(Gtk.Box):
 
     def _on_open_with(self, _action, target: GLib.Variant) -> None:
         one = self._records.get(target.get_string())
-        if one is not None and apilink.is_local():
-            self._with_local_file(one, self._launch)
+        if one is not None:
+            self._with_file(one, self._launch)
 
     def _launch(self, path: str) -> None:
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_path(path))

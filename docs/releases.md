@@ -51,9 +51,12 @@ downloads of each version, see the
   tied to the window running on the service's machine: **Open In…**
   everywhere, the footer's app launchers, file manager button and the
   panel toggle's right-click, **Open in Ghostty**, **Reveal transcript**,
-  the attachments panel's **Open With…** and **Show in Folder**, and a
-  Ctrl+click on a folder or on a file outside the project. A window that is not on the service's machine
-  leaves them out rather than greying them out. Nothing changes today,
+  the attachments panel's **Show in Folder**, and a Ctrl+click on a
+  folder or on a file outside the project. A window that is not on the
+  service's machine leaves them out rather than greying them out; there,
+  the attachments panel's **Open With…** and a click on a file row hand
+  the app the window's own cached copy of the file, as the lightbox's
+  **Open With…** does. Nothing changes today,
   when the window and its service always share a machine; a remote window
   (Phase 3) is what will see the difference. One fix on the way: the
   names behind a bare `README.md` link are now the alphabetically first
