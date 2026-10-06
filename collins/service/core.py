@@ -299,6 +299,9 @@ class ServiceCore:
         # and `kind=icon` GETs and `PUT /api/upload`, each on a thread; the
         # registry of the paths a session's own tool calls named (D38).
         self.image_registry = blobs_mod.ImageRegistry()
+        # The files a session's transcript says were delivered, each by the
+        # path it resolved to when first seen (D51): what `as=file` admits.
+        self.delivered_files = blobs_mod.DeliveredFiles()
         self.file_blobs = blobs_mod.FileBlobs(self)
         self.remote_blobs = blobs_mod.RemoteBlobs(self)
         self.icon_blobs = blobs_mod.IconBlobs(self)
@@ -770,6 +773,7 @@ class ServiceCore:
                 pty.history = session_id
 
     def session_transcript_landed(self, record: hosting.SessionRecord) -> None:
+        blobs_mod.note_delivered(self, record)
         if self.activity is not None:
             self.activity.transcript_landed(record)
 

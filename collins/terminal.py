@@ -81,6 +81,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_wrapped_reference,
     resolve_wrapped_url,
     token_at_column,
+    uri_scheme,
 )
 from .newchatview import NewChatView  # noqa: E402
 from .panedsizer import PanedSizer  # noqa: E402
@@ -288,11 +289,19 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     terminal.add_controller(click)
 
 
+def _is_file_uri(uri: str) -> bool:
+    """Whether *uri*'s scheme is `file`, however it is cased: `FILE:///…`
+    is a file URI to GIO (and to `urlsplit`, which `path_from_file_uri`
+    parses with), so a prefix test would let one past the local extras'
+    gate and on to `Gtk.UriLauncher`."""
+    return uri_scheme(uri) == "file"
+
+
 def _launch_uri(terminal: Vte.Terminal, uri: str) -> None:
     """Open a clicked link the way its scheme deserves."""
     if uri.startswith("www."):
         uri = "http://" + uri  # the bare-host grammar's half of a URL
-    if uri.startswith("file:"):
+    if _is_file_uri(uri):
         # A file: URI (or OSC 8 file: hyperlink) behaves exactly like a
         # matched path reference — lightbox for images, editor inside the
         # project, default app otherwise — however the CLI happened to emit

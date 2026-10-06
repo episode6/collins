@@ -125,8 +125,10 @@ def current() -> Link | None:
 
 def is_local() -> bool:
     """Whether this client proved it runs on the service's machine (the
-    `local` proof, D11: `SocketLink.local`, set by `prove_local` on every
-    hello). The one reader of the proof (PR-2.8): `App.local` is this,
+    `local` proof, D11: `SocketLink.local`, which every `connect` clears
+    and only a `prove_local` the service took sets, so it is the last
+    hello's proof and never an earlier connection's). The one reader of
+    the proof (PR-2.8): `App.local` is this,
     and so is every gate of the local extras (§3.12: an external app, a
     `file:` URI on the clipboard, "Reveal" in the file manager, Open in
     Ghostty, a dropped file mentioned by its own path), which are hidden,

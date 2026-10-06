@@ -264,6 +264,10 @@ class SocketLink(apilink.Link):
         if self._on_io_thread():
             raise RuntimeError("connect() cannot run on the link's own thread")
         self.close()
+        # The `local` proof is a connection's: a reconnect starts without
+        # it, and only this hello's `prove_local` gives it back, so the
+        # flag never outlives the service's own view of this client.
+        self.local = False
         self._lost_reported = False
         deadline = time.monotonic() + timeout
         self._session_reset()
@@ -376,7 +380,8 @@ class SocketLink(apilink.Link):
         sent its first 4 KiB. The hello's `local_proof.length` must be the
         protocol's 32; the file must be a regular file, not a symlink
         (`O_NOFOLLOW`), mode 0600, owned by this user, of exactly 32 bytes.
-        Anything else sends no `local` at all."""
+        Anything else sends no `local` at all, and `self.local` stays as
+        `connect` left it: False."""
         proof = (self.hello or {}).get("local_proof") or {}
         if not self.app_id or proof.get("length") != protocol.LOCAL_PROOF_BYTES:
             return False

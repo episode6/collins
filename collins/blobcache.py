@@ -203,6 +203,20 @@ def read(path: str | Path) -> bytes | None:
         return None
 
 
+def _private_folder(folder: Path) -> None:
+    """Make the cache *folder*, for this user alone (0700): the copies in
+    it are 0600, and since D51 they include documents handed to apps, so
+    their names and count are nobody else's either. A folder already
+    there with a looser mode (made under the umask before PR-2.8) is
+    tightened; one that cannot be is left as it is."""
+    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        if folder.stat().st_mode & 0o077:
+            os.chmod(folder, 0o700)
+    except OSError:
+        pass
+
+
 def fetch(url: str, suffix: str | None = "", link: apilink.Link | None = None) -> Path:
     """The file *url* (a `/api/blob?…` path and query) was fetched into,
     fresh or confirmed by a ``304``. *suffix* is kept on the file's name
@@ -215,7 +229,7 @@ def fetch(url: str, suffix: str | None = "", link: apilink.Link | None = None) -
     if link is None or not hasattr(link, "http_get"):
         raise ValueError(_("Not connected to the service"))
     folder = directory(str(getattr(link, "hello", {}).get("service_id") or "") or None)
-    folder.mkdir(parents=True, exist_ok=True)
+    _private_folder(folder)
     prune(folder)
     key = key_for(url)
     etag_file = folder / (key + ".etag")

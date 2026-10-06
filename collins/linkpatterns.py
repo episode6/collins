@@ -30,6 +30,7 @@ them with PCRE2 at runtime, the tests exercise them with `re`.
 import os
 import re
 from collections.abc import Callable, Iterable
+from urllib.parse import urlsplit
 
 # One body-then-final-char pair per alternative: the greedy body backtracks
 # until the last character is something a URL can plausibly end on.
@@ -67,6 +68,16 @@ FILE_PATTERN = (
 # at all, `:` would collide with the line suffix, and `/` belongs to the
 # slashed grammar above.
 _BARE_UNBOUNDABLE = re.compile("[\\s:/]")
+
+
+def uri_scheme(uri: str) -> str:
+    """*uri*'s scheme, lower-cased ("" when it has none or cannot be
+    parsed): what a caller branches on instead of a prefix test, since
+    `FILE:///x` and `file:///x` are one scheme to GIO and to `urlsplit`."""
+    try:
+        return urlsplit(uri).scheme.lower()
+    except ValueError:
+        return ""
 
 
 def bare_names_pattern(names: Iterable[str]) -> str | None:
