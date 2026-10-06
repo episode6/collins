@@ -6,8 +6,8 @@ A window on the service's machine has proved it (`local`, D11) and keeps
 the things that hand a path of the service's to something on this device:
 Open in Ghostty, "Open In…" and Reveal transcript in the sidebar's menus,
 the footer's file manager button, app launchers and the panel toggle's
-right-click, the file rows' "Open In…", the attachments panel's Open
-With… and Show in Folder, a clicked folder in the terminal. A window
+right-click, the file rows' "Open In…", the attachments panel's Show in
+Folder, a clicked folder in the terminal. A window
 that is not local has none of them: **hidden, not greyed out**, and the
 actions behind them do nothing.
 
@@ -17,6 +17,16 @@ of those surfaces while the link is `local`, then takes the proof away
 produce before Phase 3) and reads them again. What is not a local extra
 is asserted to survive: New session here, Details, the Markdown export
 (asked of the service both times: `store.transcript-export`), Copy Path.
+
+The attachments panel's Open With… and a file row's default app are for
+every client (D51): the file itself for a local one, this device's cached
+copy otherwise, fetched whole from the service (`kind=file&as=file`), which
+serves it only when the session's agent named it. Those fetches are made
+over a second link that never proved `local`, since the service's own
+view of the app's link cannot be taken away from here: a file the session
+was sent opens from the cache, a `.desktop` among them is cached as
+`.bin` and goes to the app chooser, a project file nobody named is
+refused and said so.
 
 Then D39: a session whose project directory is gone is opened; the tab
 passes the cwd it has, the service's `spawn` falls back to its home and
@@ -150,8 +160,9 @@ class _Launcher:
     def open_containing_folder(self, *_args) -> None:
         LAUNCHER_CALLS.append(("reveal", self.what))
 
-    def set_always_ask(self, _ask: bool) -> None:
-        pass
+    def set_always_ask(self, ask: bool) -> None:
+        if ask:
+            LAUNCHER_CALLS.append(("ask", self.what))
 
 
 Gtk.FileLauncher.new = staticmethod(lambda gfile: _Launcher(gfile.get_path() or gfile.get_uri()))
@@ -159,7 +170,20 @@ Gtk.UriLauncher.new = staticmethod(lambda uri: _Launcher(uri))
 
 import collins.attachpanel as attachpanel_mod  # noqa: E402
 import collins.terminal as terminal_mod  # noqa: E402
-from collins import apilink, footerapps, i18n, openwith, remotefiles, remotestore, trust  # noqa: E402
+from collins import (  # noqa: E402
+    apilink,
+    blobcache,
+    footerapps,
+    i18n,
+    openwith,
+    pictures,
+    remotefiles,
+    remotestore,
+    trust,
+    uploads,
+)
+from collins.api import server as api_server  # noqa: E402
+from collins.api.client import SocketLink  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.attachrecords import Attachment  # noqa: E402
 from collins.sidebar import SessionRow  # noqa: E402
@@ -307,26 +331,53 @@ def surfaces(win, local: bool) -> None:
     entries = openwith.file_open_with_entries([APP_ID], readme)
     check(f"[{say}] a file's Open In… rows", bool(entries) is local, entries)
 
-    # The attachments panel: a bare view, its menu read off the popover.
+    # The attachments panel: a bare view on the session, its menu read off
+    # the popover. The file is one the session was sent (its uploads): a
+    # file the service will hand a client that is not local, whole (D51).
     notes: list[str] = []
-    view = attachpanel_mod.AttachmentsView(lambda *_a: None, lambda _key: None, notes.append)
-    document = Attachment(key=f"{PROJECT}/notes.pdf", kind="file")
+    view = attachpanel_mod.AttachmentsView(lambda *_a: None, lambda _key: None, notes.append, lambda: SID)
+    # In a window of its own (never shown): a fetch landing in a panel with
+    # no root is dropped, as one that outlived its tab is.
+    state.setdefault("views", []).append(Gtk.Window(child=view))
+    document = Attachment(key=state["document"], kind="file")
     labels = attachment_menu(view, document)
-    for label in ("Open With…", "Show in Folder"):
-        check(f"[{say}] the attachment menu's {label}", (label in labels) is local, labels)
+    check(f"[{say}] the attachment menu's Open With…", "Open With…" in labels, labels)
+    check(f"[{say}] the attachment menu's Show in Folder", ("Show in Folder" in labels) is local, labels)
     for label in ("Copy Path", "Remove From List"):
         check(f"[{say}] the attachment menu keeps {label}", label in labels, labels)
     before, key = len(LAUNCHER_CALLS), document.key
     view._records[document.key] = document
     view.open(document)  # a row that is no picture: the default app
-    view._on_show_folder(None, GLib.Variant("s", document.key))
-    view._on_open_with(None, GLib.Variant("s", document.key))
-    made = LAUNCHER_CALLS[before:]
-    check(
-        f"[{say}] its launches",
-        made == ([("launch", key), ("reveal", key), ("launch", key)] if local else []),
-        made,
-    )
+    if local:
+        view._on_show_folder(None, GLib.Variant("s", document.key))
+        view._on_open_with(None, GLib.Variant("s", document.key))
+        made = LAUNCHER_CALLS[before:]
+        check(
+            "[local] its launches are of the file itself",
+            made == [("launch", key), ("reveal", key), ("ask", key), ("launch", key)],
+            made,
+        )
+    else:
+        # Not local: this device's cached copy, fetched from the service.
+        # (The row activated above asked while the app's own link was
+        # current: the service knows that link as local whatever this side
+        # says, and serves a local client no file whole. So the fetches
+        # are made over a link that never proved it, as a client over ssh
+        # is to both ends; the app's link is put back after.)
+        e2e_service.wait_until(lambda: bool(notes), timeout_s=5.0)
+        check("[not local] a client the service knows as local is served no file whole",
+              LAUNCHER_CALLS[before:] == [] and len(notes) == 1, (LAUNCHER_CALLS[before:], notes))
+        del notes[:]
+        own = apilink.current()
+        if "remote" not in state:
+            app_id = os.environ["COLLINS_APP_ID"]
+            state["remote"] = SocketLink(api_server.socket_path(app_id), app_id="", device="remote")
+            state["remote"].connect()  # never proves `local`
+        apilink.set_current(state["remote"])
+        try:
+            _not_local_attachments(view, document, notes)
+        finally:
+            apilink.set_current(own)
 
     # (The lightbox's Open With… is check_drop_upload.py's: the service's
     # own file for a local client, this device's cached copy otherwise.)
@@ -351,6 +402,58 @@ def surfaces(win, local: bool) -> None:
         check("[not local] the window's actions reach no launcher", made == [], made)
         check("[not local] …no app", apps == [], apps)
         check("[not local] …and no program", log == [], log)
+
+
+def _not_local_attachments(view, document: Attachment, notes: list[str]) -> None:
+    """The attachments panel of a client that is not local to either end."""
+    if document is not None:
+        cache = str(blobcache.cache_root())
+        pictures.forget(document.key)  # the refusal above is remembered per key
+        before = len(LAUNCHER_CALLS)
+        view.open(document)
+        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) > before, timeout_s=5.0)
+        made = LAUNCHER_CALLS[before:]
+        opened = len(made) == 1 and made[0][0] == "launch"
+        check("[not local] a file row opens in the default app", opened, made)
+        copy = made[0][1] if made else ""
+        cached = copy.startswith(cache) and copy.endswith(".pdf")
+        check("[not local] …from this device's cached copy", cached, copy)
+        renamed = "notes" not in os.path.basename(copy)
+        check("[not local] …named by the cache, not by the service", renamed, copy)
+        try:
+            with open(copy, "rb") as fh:
+                same = fh.read() == b"%PDF-1.4 e2e\n"
+        except OSError:
+            same = False
+        check("[not local] …holding the file's bytes", same)
+        before = len(LAUNCHER_CALLS)
+        view._on_show_folder(None, GLib.Variant("s", document.key))
+        view._on_open_with(None, GLib.Variant("s", document.key))
+        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) >= before + 2, timeout_s=5.0)
+        made = LAUNCHER_CALLS[before:]
+        check("[not local] Open With… asks which app, for the cached copy",
+              made == [("ask", copy), ("launch", copy)], made)
+        # A file whose name would make a desktop run it: cached as `.bin`,
+        # and the chooser is shown instead of a default app.
+        launcher = Attachment(key=state["launcher"], kind="file")
+        view._records[launcher.key] = launcher
+        before = len(LAUNCHER_CALLS)
+        view.open(launcher)
+        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) >= before + 2, timeout_s=5.0)
+        made = LAUNCHER_CALLS[before:]
+        check("[not local] a .desktop file is never opened by its name",
+              len(made) == 2 and made[0][0] == "ask" and made[1][0] == "launch"
+              and made[1][1].startswith(cache) and made[1][1].endswith(".bin"), made)
+        # A file inside the project that the session's agent never named is
+        # not the blob GET's to hand over: said out loud, nothing launched.
+        unnamed = Attachment(key=f"{PROJECT}/notes.pdf", kind="file")
+        view._records[unnamed.key] = unnamed
+        before, said = len(LAUNCHER_CALLS), len(notes)
+        view.open(unnamed)
+        e2e_service.wait_until(lambda: len(notes) > said, timeout_s=5.0)
+        check("[not local] a file the agent never named is not fetched",
+              LAUNCHER_CALLS[before:] == [] and len(notes) == said + 1 and "couldn't fetch" in notes[-1],
+              (LAUNCHER_CALLS[before:], notes[said:]))
 
 
 def footer(tab, local: bool) -> None:
@@ -407,6 +510,11 @@ def stage() -> bool:
             return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
     state["win"] = win
+    # Two files the session was sent (its uploads directory, which the
+    # service shares with this check through the scratch XDG_DATA_HOME).
+    state["document"] = str(uploads.write(SID, "notes.pdf", b"%PDF-1.4 e2e\n"))
+    entry = b"[Desktop Entry]\nType=Application\nExec=false\n"
+    state["launcher"] = str(uploads.write(SID, "evil.desktop", entry))
     check("the footer app's desktop entry resolves", footerapps.resolve_app(APP_ID) is not None)
     check("the app's link proved it is local", apilink.is_local() is True)
 

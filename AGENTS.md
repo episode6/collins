@@ -309,20 +309,23 @@ helpers for filesystem and subprocess sites and holds them to
 grows: `DEVICE` (this device's own files and programs: `ui-state.json`,
 the blob cache, the Markdown export's destination, the desktop entry,
 the update check, `buildinfo`, the service's process), `LOCAL_EXTRAS`
-(below) and `UNRULED` (three sites awaiting a spec ruling, pinned).
+(below; D49) and `UNRULED` (three sites recorded and not moved, D50,
+pinned; the comment at the group lists the reads the walker cannot see).
 
 **The local extras.** `apilink.is_local()` is the one reader of the
 link's `local` proof (D11), and `App.local` is it. What hands a path of
 the service's to something on this device hangs on it: every "Open In…"
 and footer app, the file manager, Open in Ghostty, Reveal transcript,
-the attachments panel's Open With and Show in Folder, a clicked folder's
-default app, `file:` URIs on the clipboard, a dropped file mentioned by
+the attachments panel's Show in Folder, a clicked folder's default app, `file:` URIs on the clipboard, a dropped file mentioned by
 its own path, a native chooser's starting folder. For a client that is
 not on the service's machine they are **hidden, not disabled**, and the
 function that reads the disk or starts the program asks
 `apilink.is_local()` itself: the pathless test reads its source for the
-ask. The lightbox's Open With is not one (not local, it hands over this
-device's cached copy), nor is the Markdown export: the service renders the transcript
+ask. Open With in the lightbox and the attachments panel, and a file
+row's default app there, are not: not local, they hand over this device's
+cached copy (D51; `GET /api/blob?kind=file&as=file` serves a file that is
+no picture only when the session's agent named it, and the copy's suffix
+is made safe by `blobcache.file_suffix`). Nor is the Markdown export: the service renders the transcript
 (`store.transcript-export`) and the window writes its own file. Nor is
 where a session or a shell starts: the client sends the cwd it has and
 the service's `spawn` falls back and says where the pty landed (`cwd` in

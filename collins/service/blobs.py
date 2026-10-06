@@ -15,8 +15,10 @@ the main loop — and the `PUT /api/upload` the server hands its body to:
   own agent* named — a show_image path (`ImageRegistry`, recorded as the
   call lands in `service.tools`) or an image the service's transcript scan
   of that live session found (`Session.transcript.attachments`); anything
-  for a `local` client. Only an image suffix is served (`400` otherwise),
-  at most `editorfiles`' 50 MiB viewer cap (`413`), tagged
+  for a `local` client. Only an image suffix is served (`400` otherwise;
+  the one exception is `as=file`, D51, in `FileBlobs`' docstring: a file
+  the session's agent named, whole, for a client that is not `local` to
+  hand to an app), at most `editorfiles`' 50 MiB viewer cap (`413`), tagged
   ``"<mtime µs>-<size>"`` and answered `304` on a match.
 - **`kind=remote&url=…`** (`RemoteBlobs`): an http(s) image, fetched *by
   the service* through `remoteimages.fetch` (the 25 MiB cap, the redirect
@@ -221,7 +223,9 @@ def serve_file(
     """A regular file's bytes with its tag (*path* already confined): 404
     for none, 413 over *max_bytes*, 304 on a matching tag. Worker thread."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        # *path* is resolved already (the confinement was of its realpath):
+        # a link put at its last component since then is not followed.
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
     except OSError:
         return 404, {}, b""
     try:
@@ -245,16 +249,39 @@ def serve_file(
 
 
 class FileBlobs(_Feed):
-    """`kind=file` (see the module docstring)."""
+    """`kind=file` (see the module docstring).
+
+    A picture is served from a root, the session's uploads, or a path the
+    session's agent named (D38); anything for a `local` client. **A file
+    that is no picture** (D51, PR-2.8: the attachments panel's Open With…
+    and a file row's default app, on a client that is not `local`) is
+    served only to a request that says `as=file`, and only when the
+    session's agent *named* it — its uploads, the
+    exact resolved path a tool call registered (`ImageRegistry`) or its
+    transcript's attachment records hold — and never merely for being
+    inside a root: `fs.read` is the reader of a project's text, and a
+    root is not an attachment. A `local` client is never served one (it
+    opens the file itself), so its answers are what they were. The cap
+    (`FILE_MAX_BYTES`), the tag and the 304 are the pictures'; the type
+    of a file that is no picture is `application/octet-stream`."""
 
     def blob(self, client, query: str, if_none_match: str | None, respond: Respond) -> None:
         params = _params(query)
         path = params.get("path") or ""
         session = params.get("session") or ""
-        if not os.path.isabs(path) or "\x00" in path or not editorfiles.is_image_path(path):
+        local = bool(getattr(client, "local", False))
+        # `as=file`: the asker wants the file as it is, to hand to an app
+        # (D51), and takes no picture for granted. Without it only a
+        # picture is served, exactly as before PR-2.8, so nothing that
+        # decodes what it fetched (the lightbox, a thumbnail) is ever sent
+        # anything else.
+        whole = params.get("as") == "file" and not local
+        if not os.path.isabs(path) or "\x00" in path:
             self._answer(respond, 400)
             return
-        local = bool(getattr(client, "local", False))
+        if not whole and not editorfiles.is_image_path(path):
+            self._answer(respond, 400)
+            return
         # What the worker confines to, gathered here on the main loop where
         # the store, the records and the registry live.
         roots = None if local else files.roots(self.core)
@@ -262,14 +289,20 @@ class FileBlobs(_Feed):
 
         def work() -> tuple[int, dict, bytes]:
             real = os.path.realpath(path)
-            if roots is not None and not (
-                any(editorfiles.is_inside(root, real) for root in roots)
-                or uploads.inside(real, session or None)
+            picture = editorfiles.is_image_path(path) and editorfiles.is_image_path(real)
+            if roots is None:
+                return serve_file(real, if_none_match) if picture else (400, {}, b"")
+            # Named by the session's agent: the exact resolved path (D38).
+            named = (
+                uploads.inside(real, session or None)
                 or real in admitted
                 or real in {os.path.realpath(key) for key in seen}
-            ):
+            )
+            if not named and not any(editorfiles.is_inside(root, real) for root in roots):
                 return 403, {}, b""
-            if not editorfiles.is_image_path(real):
+            if not picture and not (whole and named):
+                # No picture, and not a file the session's agent named asked
+                # for whole: inside a root it is `fs.read`'s to read.
                 return 400, {}, b""
             return serve_file(real, if_none_match)
 
