@@ -531,3 +531,22 @@ def test_a_whole_file_is_cached_under_the_caches_name_without_an_exec_bit(tmp_pa
     assert copy.name == blobcache.key_for(link.asked[0]) + ".bin"
     assert str(copy).startswith(str(blobcache.cache_root()))
     assert os.stat(copy).st_mode & 0o111 == 0
+
+
+def test_the_cache_folder_is_this_users_alone_and_a_looser_one_is_tightened(tmp_path, monkeypatch):
+    """Review of PR 615 (N2): the copies are 0600; the folder holding
+    them (documents handed to apps among them, since D51) is 0700, also
+    when it was made under the umask by an earlier version."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+    class Link:
+        hello = {"service_id": "svc1"}
+
+        def http_get(self, url, headers):
+            return 200, {"ETag": '"1-2"'}, b"%PDF"
+
+    copy = blobcache.fetch_file("/srv/p/a.pdf", "sid-1", Link())
+    assert os.stat(copy.parent).st_mode & 0o777 == 0o700
+    os.chmod(copy.parent, 0o775)
+    blobcache.fetch_file("/srv/p/b.pdf", "sid-1", Link())
+    assert os.stat(copy.parent).st_mode & 0o777 == 0o700

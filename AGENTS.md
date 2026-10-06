@@ -305,8 +305,8 @@ budget (`MAIN_THREAD_STATUS_TIMEOUT_S`). The
 client opens no project file and runs no program of the project's:
 `tests/test_client_is_pathless.py` walks the GTK modules and the client
 helpers for filesystem and subprocess sites and holds them to
-`tests/pathless_allowlist.py`, the final list since PR-2.8, which never
-grows: `DEVICE` (this device's own files and programs: `ui-state.json`,
+`tests/pathless_allowlist.py`, the final list since PR-2.8, each group
+pinned by size so that nothing is filed on it unseen: `DEVICE` (this device's own files and programs: `ui-state.json`,
 the blob cache, the Markdown export's destination, the desktop entry,
 the update check, `buildinfo`, the service's process), `LOCAL_EXTRAS`
 (below; D49) and `UNRULED` (three sites recorded and not moved, D50,

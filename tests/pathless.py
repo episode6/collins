@@ -10,8 +10,9 @@ of the sites that are the device's own (`ui-state.json`, the caches, the
 Markdown export's destination, the desktop entry, the app's icons, the
 update check, `buildinfo`, the service's process) or a local extra behind
 `apilink.is_local()` (`function_asks_local` reads a site's function for
-the ask). The allowlist shrank per PR and never grows
-(`tests/test_client_is_pathless.py`).
+the ask). The allowlist shrank per PR through Phase 2; what
+`tests/test_client_is_pathless.py` enforces now is that no site is
+outside it, no entry is stale, and each group keeps its pinned size.
 
 **What is walked.** `walk()` reads every module of `collins/` (never
 `collins/service/` or `collins/api/`, which are the service's and the

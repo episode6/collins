@@ -32,9 +32,12 @@ runs with the rest of the suite and needs only `ast`). `tests/pathless.py`
 walks every GTK module and the `CLIENT_HELPERS` for filesystem and
 subprocess calls; each site (``module:qualname:call``) must be in
 `tests/pathless_allowlist.py`, and each entry must still match a site.
-The list is final since PR-2.8 and never grows: a new `os.path.isdir`,
+The list is final since PR-2.8: a new `os.path.isdir`,
 `Path.read_text`, `shutil.which` or `subprocess` call in a widget module
-fails the suite. Ask the service instead (`remotefiles.stat_path` and
+fails the suite until it is filed, and each group is pinned by its size
+(`DEVICE` per module too), so filing one is an edit of the test that a
+reviewer sees; only this device's own files and gated local extras
+belong. Ask the service instead (`remotefiles.stat_path` and
 friends, off the main loop). The three groups have a rule each: `DEVICE`
 is this device's own files and programs; `LOCAL_EXTRAS` sites must sit in
 a function that calls `apilink.is_local()` (`pathless.function_asks_local`
