@@ -54,22 +54,132 @@ an install hint (`editor.py` import guard) — `prview` imports GtkSource
 
 ## Behaviours
 
-**Opening** (`open_file(path, restore_cursor)`): guarded by
-`editorfiles.load_guard` (size, binary, image) and `is_inside(root)`;
-language from `guess_language_id` (extension, then the first line's shebang;
-its sibling `fence_language_id` maps a markdown fence's info word — `python`
-→ `python3`, `bash` → `sh` — for the PR page's code blocks in `mdwidgets`);
-style scheme from `editor.style_scheme(setting, dark)` (a bare
-`GtkSource.Buffer` defaults to the light `classic` scheme — never leave it
-unset). Cursor placement on a fresh buffer must re-issue `scroll_to_mark` from
-a `PRIORITY_LOW` idle (`_apply_cursor`): line heights are estimates until
+**Opening** (`open_file(path, restore_cursor)`): guarded by `is_inside(root)`
+and `editorfiles.is_image_path`; everything else about the file is the
+service's (below). Language from `guess_language_id` (extension, then the
+first line's shebang — `editorfiles.first_line` of the text the service
+read; its sibling `fence_language_id` maps a markdown fence's info word —
+`python` → `python3`, `bash` → `sh` — for the PR page's code blocks in
+`mdwidgets`), switched off above 512 KiB (`should_highlight(size)`); style
+scheme from `editor.style_scheme(setting, dark)` (a bare `GtkSource.Buffer`
+defaults to the light `classic` scheme — never leave it unset). Cursor
+placement on a fresh buffer must re-issue `scroll_to_mark` from a
+`PRIORITY_LOW` idle (`_apply_cursor`): line heights are estimates until
 validation idles run, so an immediate scroll lands ~line 44 for a target of
 602. `open_in_editor` (the MCP tool, the terminal's Ctrl+click on a path,
 "Add to chat" in reverse) all land in `MainWindow.open_in_tab_editor`.
 
-**External changes**: each open file has a `Gio.FileMonitor`; a clean buffer
-reloads silently, a dirty one is told. The agent rewrites these files
-constantly, so this path is exercised more than manual saves are.
+**The files are the service's** (split-service spec §3.23, PR-2.3). The
+pane opens no file and writes none: `GtkSource.File`, `FileLoader` and
+`FileSaver` are gone, and every path is a path on the service's machine.
+`collins/remotefiles.py` (GTK-free) is the client's end, `collins/service/
+files.py` the service's:
+
+- `_start_load` asks `fs.read` from a worker thread (`_off_main`: a daemon
+  thread, the answer landed at `GLib.PRIORITY_DEFAULT`) and `_on_loaded`
+  fills the buffer outside the undo history (`_fill`), keeping the reply's
+  `mtime` and `encoding` on the `_OpenFile`. The guards moved with the
+  read: the service refuses a path that is not a regular file, one over
+  5 MiB (`protocol.FILE_TEXT_MAX`) and one outside every root it knows
+  (`files.Confinement`, the roots' names on the main loop and the resolving
+  on the worker, for the read, the write and the watch alike: a live
+  session's cwd, a store session's cwd or project root, anything for a
+  `local` client), and flags `binary` (a NUL anywhere
+  in the bytes: `GtkSource.Buffer.set_text` stops at one, so a sniff of the
+  first 8 KiB let a later NUL cut the buffer short and a save write the
+  cut; `_on_loaded` refuses a NUL in the text too, `editorfiles.holds_nul`)
+  and `latin-1` (bytes that are not UTF-8, written back the
+  same way). A refusal's words come translated through
+  `remotefiles.refusal_words` into the banner; a fresh open closes its tab,
+  a reload keeps it. `load_id` still makes a superseded read (a rename's)
+  a no-op (`editorfiles.load_applies`: the generation gate, with `_shut`
+  and the page still open). `_retarget_open` re-watches the file under its
+  new path in every case, loading or not: `_on_loaded` re-watches only a
+  fresh open, so a rename during a *reload* once left the watch on the old
+  name, which reported the file deleted, dirtied the buffer and lost the
+  mtime (the Fable review of PR 609).
+- `_fill` holds the buffer's text as LF lines and keeps the file's own
+  line ending as `opened.newline` (`editorfiles.fill_text`; the rule is
+  Collins' own: the majority of CRLF, LF and CR, the first seen on a tie.
+  `GtkSource.File`'s newline type took the first line ending it met, so
+  the one difference is a mixed file whose majority is not its first
+  ending: the old saver wrote the first, this writes the majority),
+  stripping the final newline when the buffer's
+  implicit trailing newline is on (what `FileLoader` did); `_do_save`
+  writes every line ending as the file's and puts the final one back
+  (`editorfiles.save_text`, what `FileSaver` did: a CRLF file edited
+  stays CRLF throughout; the first split version left LF lines among its
+  CRLF ones), so a file shows no empty last line and a save adds a
+  missing final newline. `_fill` also marks
+  the buffer `filled` and makes the view editable: until then a save is
+  refused ("still loading") and nothing can be typed, so a Ctrl+S or a
+  close-flow Save during the first read never writes an empty buffer over
+  the file.
+- `_do_save` sends `fs.write` with the buffer's text and `expect_mtime`:
+  Ctrl+S (`_save`) expects the mtime of the last read or write, and a file
+  that moved underneath is refused `stale` by the service with **nothing
+  written** — `_on_saved` raises the "changed on disk" dialog, whose
+  Overwrite saves again with `expect_mtime` null. `save_all` and the close
+  flows' Save pass null from the start (the user's explicit consent, as
+  before). Saves are serialized: one asked for while one is in flight
+  waits (`save_again`) and goes from `_on_saved` expecting the mtime that
+  save answered, so two quick Ctrl+S never raise the dialog. The service
+  writes as `FileSaver` did (`service/files.write_file`): in place for a
+  hard link, a read-only directory or another owner's file, else by a temp
+  file beside it with the old mode and one `os.replace`, a new file under
+  the umask; a read-only file of the user's own is refused Permission
+  denied, never swapped out; the compare runs right before the write, and
+  the reply's mtime is the written descriptor's. A save whose encoding
+  differs from the read's (latin-1 that could not carry the text) is told
+  in the banner. A buffer past `protocol.FILE_TEXT_MAX` characters is
+  refused before the request with a banner naming the limit (the
+  validator's words were "text must be at most 5242880 characters"). The
+  stale dialog's Cancel settles the parked `pending_change`, so the change
+  that made the save stale still raises the Reload banner. Known gap: a
+  write whose reply lands after `remotefiles.CALL_TIMEOUT_S` (60 s) did
+  land on disk, but the client keeps the old mtime and the dirty flag, so
+  the service's `file-changed` for it reads as a change (a Reload banner
+  over the user's own saved text) and the next Ctrl+S asks before
+  overwriting; nothing is lost either way.
+- `_watch_external_changes` installs `fs.watch kind: file` under a handle
+  the client mints (`remotefiles.Watcher`), seeded with `opened.mtime`:
+  the service's first stat (on a thread) is compared against the seed, so
+  a write between the read and the watch is a `file-changed` at once;
+  `watcher.update(handle, mtime)` after each fill and save keeps the seed
+  a reconnect's `reset` re-sends. The listener is the bound method
+  `_on_file_changed` (held weakly by the watcher; `_watched` maps handle →
+  `_OpenFile`), so a pane dropped without `shutdown` is not kept alive by
+  its watches. `_teardown_page` unwatches one file; `EditorPane.shutdown`
+  every one (`TerminalTab.release_editor`, called where the window closes
+  a tab for good and when the window itself is destroyed) — without it
+  every watch, and through it the pane, outlived its tab; `shutdown` sets
+  `_shut`, so a read or write that lands after it fills nothing and
+  installs no watch (a restored tab closed soon after its files
+  reopened). The service's
+  `Gio.FileMonitor` debounces 300 ms, stats on a thread and pushes
+  `file-changed {handle, path, mtime, size, gone}` once per burst whose
+  stat moved. `_check_external` judges it against `opened.mtime` and
+  `size`: a clean buffer reloads silently (cursor kept), a dirty one is
+  told (Reload), `gone` marks the buffer dirty and says so. An event that
+  arrives while a save or load is in flight waits (`pending_change`) for
+  the reply's mtime, so the editor's own write never reads as a change.
+  The link is installed behind the `files` capability of the service's
+  hello (`App._install_file_transport`, decided on every connect like
+  git's); against a service without it nothing is sent and every open
+  lands in the banner. A reconnect (`remotefiles.reset()` in
+  `App._on_connected`) re-sends every live watch. The agent rewrites these
+  files constantly, so this path is exercised more than manual saves are.
+  Known gap: keystrokes typed during a silent reload's round trip are
+  replaced by the disk's text when the reload lands (`_on_loaded` with
+  `reload=True` fills without a `get_modified()` check, as the old
+  `FileLoader` reload did; the window is a socket round trip now).
+- A text over the 1 MiB frame cap crosses as `TAG_BLOB` chunks either way
+  (`protocol.split_request` / `split_reply`, the `text_chunked` /
+  `text_bytes` fields), so a 5 MiB file saves.
+- `check_editor_save.py` drives all of it against a scratch service through
+  `e2e_service.harness_link()` plus `remotefiles.install(link)`; a widget
+  check that opens files needs the same two lines, or every open lands in
+  the banner with "Not connected to the service".
 
 **Following the session** (`request_root` / `offer_root`): the tab's cwd tick
 calls `_maybe_follow_editor`; `editorfiles.follow_scope(root, cwd)` and
@@ -137,4 +247,6 @@ close state joins all three.
   the missing-typelib exit.
 
 Related: `collins-terminal-tab`, `collins-panel-dock`,
-`collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`).
+`collins-gtk-sharp-edges`, `collins-testing` (`check_editor_narrow.py`,
+`check_editor_save.py`), `collins-session-mcp-tools` (the API's message
+table in `api/protocol.py`: the `fs.*` types).

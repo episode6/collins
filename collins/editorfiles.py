@@ -27,9 +27,9 @@ from .sessions import worktree_project_root
 # what the agent just wrote" file tree.
 SKIP_DIR_NAMES = {".git", "node_modules", "__pycache__", ".venv", "target", "dist", "build"}
 
-_BINARY_SNIFF_BYTES = 8192
-_MAX_HIGHLIGHT_BYTES = 512 * 1024  # opened normally below this...
-_MAX_OPEN_BYTES = 5 * 1024 * 1024  # ...refused outright above this
+# Highlighted below this; still opened above it (the open cap itself is
+# the service's, protocol.FILE_TEXT_MAX).
+_MAX_HIGHLIGHT_BYTES = 512 * 1024
 # Images get their own, far larger cap (screenshots of 4K monitors are
 # routinely multi-MB): this only guards the image viewer against decoding
 # something absurd, not against ordinary photos.
@@ -61,6 +61,11 @@ _MAX_DIR_ENTRIES = 5000
 
 
 class LoadGuard(enum.Enum):
+    """Why a file may not open: `image_guard`'s answers, and the words the
+    editor gives the service's `fs.read` refusals (the text guards — a
+    regular file, the size cap, the NUL sniff — are the service's since
+    PR-2.3, `service.files.read_file`)."""
+
     OK = "ok"
     TOO_LARGE = "too_large"
     BINARY = "binary"
@@ -261,40 +266,83 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
     return None
 
 
-def read_first_line(path: str | Path, max_bytes: int = 512) -> str:
-    """The first line of *path* (line ending stripped), decoded leniently —
-    just enough for `guess_language_id`'s shebang sniff. Empty string when
-    the file can't be read."""
-    try:
-        with open(path, "rb") as fh:
-            raw = fh.readline(max_bytes)
-    except OSError:
-        return ""
-    return raw.decode("utf-8", "replace").rstrip("\r\n")
+def load_applies(load_id: int, live_id: int, shut: bool, still_open: bool) -> bool:
+    """Whether a read's landing may touch its buffer: the generation gate
+    of `EditorPane._on_loaded`. Each `_start_load` bumps the file's
+    `load_id`, so a landing carries the generation it was started under
+    and a superseded one (a rename restarted the load from the new path,
+    the Fable review of PR 609, should-fix 3) fills nothing, installs no
+    watch and judges no parked change; nor does one that lands after the
+    pane's `shutdown`, or for a page closed meanwhile."""
+    return not shut and load_id == live_id and still_open
 
 
-def load_guard(path: str | Path) -> LoadGuard:
-    """Whether *path* looks safe to load into the editor. Binary = a NUL byte
-    in the first 8 KB. Refuses outright above ~5 MB; a caller opening
-    anything past `should_highlight`'s threshold should turn highlighting
-    off rather than refuse it."""
-    p = Path(path)
-    try:
-        if not p.is_file():
-            return LoadGuard.NOT_A_FILE
-        size = p.stat().st_size
-    except OSError:
-        return LoadGuard.UNREADABLE
-    if size > _MAX_OPEN_BYTES:
-        return LoadGuard.TOO_LARGE
-    try:
-        with p.open("rb") as f:
-            head = f.read(_BINARY_SNIFF_BYTES)
-    except OSError:
-        return LoadGuard.UNREADABLE
-    if b"\x00" in head:
-        return LoadGuard.BINARY
-    return LoadGuard.OK
+def holds_nul(text: str) -> bool:
+    """Whether *text* (what `fs.read` answered) has a NUL in it: the
+    buffer's `set_text` stops at one, so a file shown through it would be
+    cut short and a save would write the cut (the Fable review of PR 609,
+    must-fix 1). The service answers such a file `binary`; this is the
+    client's own refusal, so no truncated buffer ever becomes saveable."""
+    return "\x00" in text
+
+
+NEWLINES = ("\r\n", "\n", "\r")
+
+
+def detect_newline(text: str) -> str:
+    """The line ending a file uses, as `GtkSource.File`'s newline type said
+    it: the most frequent of CRLF, bare LF and bare CR in *text*, the first
+    seen breaking a tie; LF for a text with none. The save writes every
+    line ending as this one (the Fable review of PR 609, should-fix 2: a
+    CRLF file edited once came back with LF lines among its CRLF ones)."""
+    crlf = text.count("\r\n")
+    lf = text.count("\n") - crlf
+    cr = text.count("\r") - crlf
+    counts = {"\r\n": crlf, "\n": lf, "\r": cr}
+    best = max(counts.values())
+    if best == 0:
+        return "\n"
+    tied = [ending for ending in NEWLINES if counts[ending] == best]
+    return min(tied, key=text.find)  # of a tie, the one that appears first
+
+
+def normalise_newlines(text: str) -> str:
+    """Every line ending in *text* as LF: what the buffer holds."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def fill_text(text: str, implicit_trailing_newline: bool) -> tuple[str, str]:
+    """What `fs.read`'s *text* becomes in the buffer, and the file's line
+    ending (`detect_newline`) a save puts back: the text with every line
+    ending as LF and, when the buffer's implicit trailing newline is on,
+    the final one stripped (what `FileLoader` did, so a file shows no empty
+    last line; `save_text` puts it back)."""
+    newline = detect_newline(text)
+    text = normalise_newlines(text)
+    if implicit_trailing_newline and text.endswith("\n"):
+        text = text[:-1]
+    return text, newline
+
+
+def save_text(text: str, newline: str, implicit_trailing_newline: bool) -> str:
+    """The buffer's *text* as `fs.write` sends it: every line ending (an
+    LF typed, a CRLF pasted) as the file's *newline*, plus one final
+    *newline* when the buffer's implicit trailing newline is on and the
+    text is not empty (what `FileSaver` wrote)."""
+    if newline not in NEWLINES:
+        newline = "\n"
+    out = normalise_newlines(text)
+    if out and implicit_trailing_newline:
+        out += "\n"
+    return out.replace("\n", newline) if newline != "\n" else out
+
+
+def first_line(text: str, max_chars: int = 512) -> str:
+    """The first line of *text* (line ending stripped, cut at *max_chars*)
+    — just enough for `guess_language_id`'s shebang sniff. The text is
+    what `fs.read` answered (PR-2.3): the client reads no file itself."""
+    head = text.split("\n", 1)[0][:max_chars]
+    return head.rstrip("\r\n")
 
 
 def is_image_path(path: str | Path) -> bool:
@@ -305,9 +353,9 @@ def is_image_path(path: str | Path) -> bool:
 
 
 def image_guard(path: str | Path) -> LoadGuard:
-    """`load_guard`'s sibling for the image viewers: images are binary by
-    nature, so only existence, readability and (a much larger) size cap are
-    checked — never BINARY."""
+    """The guard for the image viewers (the text files' is the service's
+    `fs.read`): images are binary by nature, so only existence,
+    readability and (a much larger) size cap are checked — never BINARY."""
     p = Path(path)
     try:
         if not p.is_file():
@@ -445,15 +493,13 @@ def path_from_file_uri(uri: str) -> str | None:
     return path or None
 
 
-def should_highlight(path: str | Path) -> bool:
-    """Above ~512 KB, a file is still opened (see `load_guard`) but with
+def should_highlight(size: int | None) -> bool:
+    """Above ~512 KB, a file is still opened (`fs.read` allows 5 MiB) but with
     syntax highlighting switched off — GtkSource re-highlights on every
     keystroke, and that cost is only worth paying for files this size or
-    smaller."""
-    try:
-        return Path(path).stat().st_size <= _MAX_HIGHLIGHT_BYTES
-    except OSError:
-        return True
+    smaller. *size* is the one `fs.read` answered (PR-2.3); None (not
+    known) highlights."""
+    return size is None or size <= _MAX_HIGHLIGHT_BYTES
 
 
 def is_inside(root: str | Path, path: str | Path) -> bool:
