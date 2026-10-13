@@ -68,8 +68,12 @@ class LiveService:
             stderr=subprocess.DEVNULL,
         )
         path = self.socket
+        proof = api_server.proof_path(self.app_id)
         deadline = time.monotonic() + wait_s
-        while api_server.probe_socket(path) != "live":
+        # The socket answers a beat before the proof file is renamed into
+        # place (`listen` writes it after the socket is up): wait for both,
+        # so a test may read the proof right after `start()` returns.
+        while api_server.probe_socket(path) != "live" or not os.path.exists(proof):
             if self.proc.poll() is not None:
                 raise RuntimeError(f"the service exited {self.proc.returncode} before listening")
             if time.monotonic() >= deadline:
