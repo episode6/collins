@@ -663,7 +663,11 @@ class EditorPane(Gtk.Box):
         if outcome.error is PE.SOURCE_OUTSIDE:
             return _("{name} is outside every project the service knows.").format(name=name)
         if outcome.error is PE.NO_ROOM:
-            return _("There are already too many copies of {name} here.").format(name=name)
+            # No free name in the sequence: a hundred copies, or a path so
+            # long the kernel refuses every "(copy N)" (`ENAMETOOLONG`).
+            return _("No free name for {name} here: too many copies, or the path is too long.").format(
+                name=name
+            )
         return _("Couldn't paste {name}: {message}").format(name=name, message=outcome.message)
 
     def _retarget_open(self, old: Path, new: Path, mtime: int | None = None) -> None:

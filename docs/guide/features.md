@@ -507,7 +507,8 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   that holds against the agent writing in the same folder at the same
   moment, not only against your own clicks; a cut moves, and an open file
   follows its rename or move with its unsaved edits; a big folder copy
-  takes as long as it takes, with the rest of the window live). Copies
+  takes as long as it takes, with the rest of the window live, and
+  appears whole or not at all). Copies
   travel through the system clipboard as Collins' own
   `collins://` references to the service's files — and, when the service is
   this machine, as ordinary file URIs too, so files round-trip with your

@@ -978,26 +978,32 @@ def test_a_link_planted_inside_the_new_tree_at_a_subdirectorys_name_is_an_error_
     outside = tmp_path / "outside"
     outside.mkdir()
     real_mkdir = projectfiles.os.mkdir
+    made: list[str] = []
 
     def plant(path, *args, **kwargs):
         real_mkdir(path, *args, **kwargs)
-        if os.fspath(path) == "sub":
-            dir_fd = kwargs.get("dir_fd")
-            os.rmdir(path, dir_fd=dir_fd)
-            os.symlink(str(outside), path, dir_fd=dir_fd)
+        made.append(os.fspath(path))
+        if len(made) == 2:
+            # The second mkdir is the subdirectory's temporary name under the
+            # new tree: a link planted at the name it is to land on, `sub`.
+            os.symlink(str(outside), "sub", dir_fd=kwargs.get("dir_fd"))
 
     monkeypatch.setattr(projectfiles.os, "mkdir", plant)
     before = _fds()
     (outcome,) = paste_entries(root, root / "dest", [str(root / "tree")])
-    # An error entry for the subdirectory, the tree landed short. (Linux
-    # answers `ENOTDIR` for a link opened `O_DIRECTORY|O_NOFOLLOW`, `ELOOP`
-    # without `O_DIRECTORY`: either way it is not followed.)
+    # Every directory is made under a temporary name (D53), never the one
+    # it lands on, so nothing can be swapped in between its mkdir and its
+    # open; the planted link makes the landing `EEXIST`, an error entry.
+    assert all(name.startswith(".collins-") for name in made) and len(made) == 2
     assert outcome.error is PasteError.FAILED and _fds() == before
     # `copytree`'s shape: the entry's two paths as the request named them, then the words.
     assert repr((str(root / "tree" / "sub"), str(root / "dest" / "tree" / "sub")))[:-1] in outcome.message
-    assert "Not a directory" in outcome.message or "symbolic link" in outcome.message
+    assert "exists" in outcome.message
     assert os.listdir(outside) == []  # nothing written through
-    assert (root / "dest" / "tree" / "sub").is_symlink()  # the planted link, left as it is
+    # A tree with an error entry lands nowhere: the built tree is removed
+    # through its descriptor, the planted link inside it with it, and no
+    # temporary name is left in the destination.
+    assert os.listdir(root / "dest") == []
 
 
 def test_a_source_swapped_before_the_unlink_leaves_the_stranger_and_counts_the_move_done(
@@ -1502,8 +1508,7 @@ def test_no_descriptor_is_left_open_on_any_refusal_or_failure(tmp_path, monkeypa
         assert _fds() == before and os.listdir(dest) == []
         (outcome,) = paste_entries(tmp_path, dest, [str(tmp_path / "tree")])
         assert outcome.error is failed and "Not a regular file" in outcome.message and _fds() == before
-        assert (dest / "tree" / "f").read_text() == "f"  # landed short, `copytree`'s own shape
-        shutil.rmtree(dest / "tree")
+        assert os.listdir(dest) == []  # nothing lands short (D53): the built tree removed, no temporary name
         # Into a folder that takes nothing: a file, a link, a tree, copied and cut.
         into = [str(tmp_path / "ok.txt"), str(tmp_path / "ln"), str(tmp_path / "tree")]
         for move in (False, True):
@@ -1671,10 +1676,10 @@ def test_a_tree_copied_across_whose_rmtree_fails_keeps_both_halves(tmp_path, mon
     (tmp_path / "tree" / "sub").mkdir(parents=True)
     (tmp_path / "tree" / "sub" / "a.txt").write_text("a")
 
-    def refuse_rmtree(path, *args, **kwargs):
-        raise OSError(13, "Permission denied", str(path))
+    def refuse_removal(*args, **kwargs):
+        raise OSError(13, "Permission denied")
 
-    monkeypatch.setattr(projectfiles.shutil, "rmtree", refuse_rmtree)
+    monkeypatch.setattr(projectfiles, "_remove_tree", refuse_removal)
     (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move=True)
     assert outcome.error is PasteError.FAILED and "denied" in outcome.message
     assert (tmp_path / "dest" / "tree" / "sub" / "a.txt").read_text() == "a"
@@ -1961,3 +1966,287 @@ def test_a_copied_tree_keeps_what_copytree_kept(tmp_path):
             if (folder / "pkg" / "deep").is_dir():
                 os.chmod(folder / "pkg" / "deep", 0o755)
 
+
+
+# -- D53: the tree copy under a temporary name, the source removed through its descriptor --
+
+
+def _tree_of(root: Path) -> list[str]:
+    return sorted(
+        str(p.relative_to(root)) + (":" + p.read_text() if p.is_file() and not p.is_symlink() else "")
+        for p in root.rglob("*")
+    )
+
+
+def test_a_tree_copy_is_built_under_a_temporary_name_and_landed_exclusively(tmp_path, monkeypatch):
+    """The Fable review of PR 613, S1 (D53): `os.mkdir(newname)` then
+    `os.open(newname, O_DIRECTORY|O_NOFOLLOW)` by name let a *directory*
+    swapped in between be opened, written into and `fchmod`ed. Now every
+    directory of the new tree is made under a name nothing can guess and
+    landed on its final name with `RENAME_NOREPLACE`: a stranger's
+    directory at the final name is never entered, keeps its mode, and the
+    paste lands beside it."""
+    root = tmp_path / "project"
+    (root / "d").mkdir(parents=True)
+    src = root / "t"
+    (src / "sub").mkdir(parents=True)
+    (src / "sub" / "f").write_text("f")
+    os.chmod(src, 0o700)
+    real_mkdir = projectfiles.os.mkdir
+    made: list[str] = []
+
+    def stranger_takes_the_name(path, *args, **kwargs):
+        real_mkdir(path, *args, **kwargs)
+        made.append(os.fspath(path))
+        if len(made) == 1:
+            # The agent makes `d/t` with a file of its own while the copy is being built.
+            dir_fd = kwargs.get("dir_fd")
+            real_mkdir("t", 0o755, dir_fd=dir_fd)
+            fd = os.open("t/stranger.txt", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644, dir_fd=dir_fd)
+            os.write(fd, b"theirs")
+            os.close(fd)
+
+    monkeypatch.setattr(projectfiles.os, "mkdir", stranger_takes_the_name)
+    before = _fds()
+    (outcome,) = paste_entries(root, root / "d", [str(src)])
+    monkeypatch.undo()
+    assert outcome.error is None and _fds() == before
+    # Never the final name: the top and the subdirectory each under a temporary one.
+    assert len(made) == 2 and all(name.startswith(".collins-") and name != "t" for name in made)
+    assert len(set(made)) == 2
+    stranger = root / "d" / "t"
+    assert _tree_of(stranger) == ["stranger.txt:theirs"]  # nothing written into it
+    assert stat.S_IMODE(stranger.stat().st_mode) == 0o755  # its mode untouched (the source's is 0o700)
+    assert outcome.target == root / "d" / "t (copy)"
+    assert _tree_of(outcome.target) == ["sub", "sub/f:f"]
+    assert stat.S_IMODE(outcome.target.stat().st_mode) == 0o700
+    assert sorted(os.listdir(root / "d")) == ["t", "t (copy)"]  # no temporary name left
+
+
+def test_a_temporary_name_is_hidden_random_and_short():
+    names = {projectfiles._temp_name() for _ in range(50)}
+    assert len(names) == 50
+    assert all(name.startswith(".collins-") and len(name) <= 40 for name in names)
+
+
+def test_a_tree_landing_on_a_taken_name_takes_the_next_without_a_second_copy(tmp_path, monkeypatch):
+    """`EEXIST` at the landing (the name taken while the tree was being
+    built) is the next "(copy N)", the built tree renamed there, never
+    walked again."""
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "f").write_text("f")
+    real_walk = projectfiles._walk
+    walks: list[str] = []
+
+    def counting_walk(sfd, dfd, src_label, dst_label, errors):
+        walks.append(dst_label)
+        return real_walk(sfd, dfd, src_label, dst_label, errors)
+
+    monkeypatch.setattr(projectfiles, "_walk", counting_walk)
+    real_land = projectfiles._land_in_place
+    taken: list[str] = []
+
+    def take_the_name_first(dir_fd, tmp, newname):
+        if newname == "tree" and not taken:
+            taken.append(newname)
+            os.mkdir(newname, dir_fd=dir_fd)  # the agent made `dest/tree` meanwhile
+        return real_land(dir_fd, tmp, newname)
+
+    monkeypatch.setattr(projectfiles, "_land_in_place", take_the_name_first)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")])
+    assert outcome.error is None and _fds() == before
+    assert outcome.target == tmp_path / "dest" / "tree (copy)"
+    assert _tree_of(outcome.target) == ["sub", "sub/f:f"]
+    assert walks == [str(tmp_path / "dest" / "tree"), str(tmp_path / "dest" / "tree" / "sub")]  # once
+    assert sorted(os.listdir(tmp_path / "dest")) == ["tree", "tree (copy)"]
+    assert os.listdir(tmp_path / "dest" / "tree") == []  # the agent's, untouched
+
+
+def test_a_tree_copy_that_fails_partway_leaves_no_temporary_name(tmp_path, monkeypatch):
+    """D53: a half-copied tree is never visible under its final name, and
+    the temporary one goes with the failure (a copy, and a cut across
+    filesystems, which copies too)."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "f").write_text("f")
+    os.mkfifo(tmp_path / "tree" / "sub" / "pipe")
+    before = _fds()
+    for move in (False, True):
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move)
+        assert outcome.error is PasteError.FAILED and "Not a regular file" in outcome.message
+        assert os.listdir(tmp_path / "dest") == [] and _fds() == before
+        assert (tmp_path / "tree" / "sub" / "f").read_text() == "f"  # a cut's source intact
+
+
+def test_a_tree_lands_whole_with_its_metadata(tmp_path):
+    """The normal case: the tree under its final name, every file and
+    link, each directory's mode and mtime as the source's."""
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "tree"
+    (src / "a" / "b").mkdir(parents=True)
+    (src / "a" / "b" / "deep.txt").write_text("deep")
+    (src / "top.txt").write_text("top")
+    (src / "ln").symlink_to("top.txt")
+    os.chmod(src / "a", 0o750)
+    os.utime(src / "a" / "b", ns=(1_000_000_000, 2_000_000_000))
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+    assert outcome.error is None and outcome.target == tmp_path / "dest" / "tree" and outcome.mtime is None
+    copied = outcome.target
+    assert _tree_of(copied) == ["a", "a/b", "a/b/deep.txt:deep", "ln", "top.txt:top"]
+    assert os.readlink(copied / "ln") == "top.txt"
+    assert stat.S_IMODE((copied / "a").stat().st_mode) == 0o750
+    assert (copied / "a" / "b").stat().st_mtime_ns == 2_000_000_000
+    assert sorted(os.listdir(tmp_path / "dest")) == ["tree"]
+
+
+def test_a_tree_moved_across_removes_exactly_its_source_through_the_held_descriptor(tmp_path, monkeypatch):
+    """The Fable review of PR 613, R1 (D53): `shutil.rmtree(name,
+    dir_fd=src_fd)` after `_holds` looked the name up again, so a
+    stranger's tree renamed onto the name between the two lookups was
+    removed and the move reported done. Now the contents go through the
+    descriptor held on the source and the emptied directory by `rmdir`
+    under `_holds`: the stranger's tree is neither entered nor removed."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "d").mkdir()
+    src = tmp_path / "tree"
+    (src / "in").mkdir(parents=True)
+    (src / "in" / "mine").write_text("mine")
+    stranger = tmp_path / "stranger"
+    (stranger / "theirs").mkdir(parents=True)
+    (stranger / "theirs" / "precious").write_text("PRECIOUS")
+    real_holds = projectfiles._holds
+    swapped: list[bool] = []
+
+    def swapping_holds(dir_fd, name, fd):
+        ok = real_holds(dir_fd, name, fd)
+        if ok and name == "tree" and not swapped:
+            swapped.append(True)
+            # Another writer, right after the check: our tree aside, theirs at the name.
+            os.rename(src, tmp_path / "tree-aside")
+            os.rename(stranger, src)
+        return ok
+
+    monkeypatch.setattr(projectfiles, "_holds", swapping_holds)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(src)], move=True)
+    monkeypatch.undo()
+    assert outcome.error is None and _fds() == before
+    assert _tree_of(tmp_path / "d") == ["tree", "tree/in", "tree/in/mine:mine"]
+    assert _tree_of(src) == ["theirs", "theirs/precious:PRECIOUS"]  # the stranger's, intact
+    # Ours, moved aside: its contents removed through the held descriptor,
+    # the directory itself left (its name no longer held what was copied).
+    assert (tmp_path / "tree-aside").is_dir() and os.listdir(tmp_path / "tree-aside") == []
+
+
+def test_a_tree_moved_across_removes_exactly_its_source(tmp_path, monkeypatch):
+    """The normal case of R1: the source tree gone, its siblings untouched."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "d").mkdir()
+    src = tmp_path / "tree"
+    (src / "in" / "deeper").mkdir(parents=True)
+    (src / "in" / "deeper" / "f").write_text("f")
+    (src / "ln").symlink_to("in")
+    (tmp_path / "sibling.txt").write_text("s")
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(src)], move=True)
+    assert outcome.error is None and _fds() == before
+    assert not os.path.lexists(src)
+    assert sorted(os.listdir(tmp_path)) == ["d", "sibling.txt"]
+    assert _tree_of(tmp_path / "d") == ["tree", "tree/in", "tree/in/deeper", "tree/in/deeper/f:f", "tree/ln"]
+    assert os.readlink(tmp_path / "d" / "tree" / "ln") == "in"
+
+
+def test_the_source_removal_never_names_the_source_path(tmp_path, monkeypatch):
+    """Every call of the removal is `(dir_fd, name)` under the held source
+    or `rmdir` of the top under its parent: `shutil.rmtree` is not called."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "d").mkdir()
+    (tmp_path / "tree" / "in").mkdir(parents=True)
+    (tmp_path / "tree" / "in" / "f").write_text("f")
+
+    def never(*args, **kwargs):
+        raise AssertionError("shutil.rmtree named a path")
+
+    monkeypatch.setattr(projectfiles.shutil, "rmtree", never)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(tmp_path / "tree")], move=True)
+    assert outcome.error is None and not (tmp_path / "tree").exists()
+
+
+# -- the reply's mtime comes from a held descriptor (the Fable review of PR 613, nit 1) ------
+
+
+@pytest.mark.parametrize("primitive", ["renameat2", "placeholder", "copy"])
+def test_the_landed_mtime_is_read_under_the_hold_on_every_path(tmp_path, monkeypatch, primitive):
+    if primitive == "placeholder":
+        monkeypatch.setattr(projectfiles, "_rename_noreplace", lambda *a: False)
+    elif primitive == "copy":
+        _force_copy_path(monkeypatch)
+    elif projectfiles._RENAMEAT2 is None:
+        pytest.skip("no renameat2 in this libc")
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("A")
+    os.utime(tmp_path / "a.txt", ns=(1_000_000_000, 1_000_000_123))
+    (tmp_path / "folder").mkdir()
+    (tmp_path / "ln").symlink_to("a.txt")
+    # A copy, a cut and a rename each answer the file's own mtime, None for a folder or a link.
+    outcomes = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "a.txt"), str(tmp_path / "folder")])
+    assert [o.mtime for o in outcomes] == [1_000_000_123, None]
+    outcomes = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "ln")], move=True)
+    assert outcomes[0].error is None and outcomes[0].mtime is None
+    landed, error, mtime = projectfiles.rename_entry_mtime(tmp_path, tmp_path / "a.txt", tmp_path / "b.txt")
+    assert (landed, error, mtime) == (tmp_path / "b.txt", None, 1_000_000_123)
+    landed, error, mtime = projectfiles.rename_entry_mtime(tmp_path, tmp_path / "folder", tmp_path / "f2")
+    assert (landed, error, mtime) == (tmp_path / "f2", None, None)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "b.txt")], move=True)
+    assert outcome.mtime == 1_000_000_123
+    assert rename_entry(tmp_path, tmp_path / "gone", tmp_path / "x") == (None, RenameError.MISSING)
+
+
+def test_a_file_written_over_the_landed_name_after_the_move_is_not_the_replys_mtime(tmp_path, monkeypatch):
+    """The review's F3 probe: the agent `os.replace`s over the renamed name
+    the moment the hold is gone; the mtime answered is the renamed file's,
+    read under the hold, never the stranger's by a later stat."""
+    (tmp_path / "a.txt").write_text("A")
+    os.utime(tmp_path / "a.txt", ns=(1_000_000_000, 1_000_000_000))
+    real_close = projectfiles._close
+
+    def replace_after_the_hold(*fds):
+        real_close(*fds)
+        if (tmp_path / "b.txt").exists() and (tmp_path / "b.txt").read_text() == "A":
+            (tmp_path / "tmp").write_text("the agent's")
+            os.utime(tmp_path / "tmp", ns=(2_000_000_000_000, 2_000_000_000_000))
+            os.replace(tmp_path / "tmp", tmp_path / "b.txt")
+
+    monkeypatch.setattr(projectfiles, "_close", replace_after_the_hold)
+    landed, error, mtime = projectfiles.rename_entry_mtime(tmp_path, tmp_path / "a.txt", tmp_path / "b.txt")
+    assert (landed, error) == (tmp_path / "b.txt", None)
+    assert mtime == 1_000_000_000  # not 2_000_000_000_000, the stranger's
+    assert (tmp_path / "b.txt").read_text() == "the agent's"
+
+
+# -- a tree too deep fails its own entry (the Fable review of PR 613, nit 4) ------------------
+
+
+def test_a_recursion_error_fails_one_entry_and_the_others_stand(tmp_path, monkeypatch):
+    (tmp_path / "dest").mkdir()
+    (tmp_path / "a.txt").write_text("a")
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "sub" / "f").write_text("f")
+    (tmp_path / "z.txt").write_text("z")
+    real_walk = projectfiles._walk
+
+    def too_deep(sfd, dfd, src_label, dst_label, errors):
+        if dst_label.endswith("sub"):
+            raise RecursionError("maximum recursion depth exceeded")
+        return real_walk(sfd, dfd, src_label, dst_label, errors)
+
+    monkeypatch.setattr(projectfiles, "_walk", too_deep)
+    sources = [str(tmp_path / "a.txt"), str(tmp_path / "tree"), str(tmp_path / "z.txt")]
+    before = _fds()
+    outcomes = paste_entries(tmp_path, tmp_path / "dest", sources)
+    assert [o.error for o in outcomes] == [None, PasteError.FAILED, None] and _fds() == before
+    assert "recursion" in outcomes[1].message
+    assert sorted(os.listdir(tmp_path / "dest")) == ["a.txt", "z.txt"]  # the tree's temporary name gone too

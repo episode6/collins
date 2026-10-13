@@ -1240,6 +1240,25 @@ def test_paste_results_carry_the_landed_files_mtime(served):
     assert reply["results"][0]["mtime"] == before  # a move keeps the inode's
 
 
+def test_the_replys_mtime_is_never_a_stat_by_path_after_the_holds_closed(served, monkeypatch):
+    """The Fable review of PR 613, nit 1: `fs.rename` and `fs.paste`
+    answered `mtime` with `file_stat(path)` after every hold was closed,
+    so a file the agent wrote over the landed name in between gave the
+    editor the stranger's mtime. The handlers now take the mtime
+    `projectfiles` read from the descriptors it held: `file_stat` is not
+    called on either path."""
+    core, client, project, _events = served
+    monkeypatch.setattr(files, "file_stat", lambda path: pytest.fail(f"file_stat({path!r}) after the hold"))
+    before = mtime_of(project / "a.txt")
+    reply = _rename(client, project, project / "a.txt", project / "b.txt")
+    assert reply["mtime"] == before
+    (project / "pkg").mkdir()
+    reply = _paste(client, project, [project / "b.txt"], project / "pkg", cut=True)
+    assert [r["mtime"] for r in reply["results"]] == [before]
+    reply = _paste(client, project, [project / "pkg" / "b.txt"], project)
+    assert reply["results"][0]["mtime"] == mtime_of(project / "b.txt")
+
+
 def test_a_cut_from_another_known_root_lands_and_one_from_outside_every_root_is_refused(served, tmp_path):
     """D43: the roots are what a client may reach, not walls between
     projects: the one clipboard moves a cut from project B's tree into

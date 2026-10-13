@@ -406,15 +406,29 @@ touches the disk.
   descriptor with `shutil._copyxattr`'s swallow set, then `fchmod`, then
   `utime(fd, ns=)` — `copy2`'s parity, and that order because a file
   made read-only first would silently lose its `user.` xattrs;
-  `copystat` followed a link swapped in at the target). A tree is an fd-relative walk (`_copy_tree`, `_walk`:
-  `os.scandir(fd)`, each kind from `os.stat(name, dir_fd=…,
-  follow_symlinks=False)`, a subdirectory by its own `mkdir` and two
-  `O_DIRECTORY|O_NOFOLLOW` opens, each directory's metadata on its
-  descriptor after its entries, errors collected per entry and raised as
-  `shutil.Error` with the tree landed short); `shutil.copytree` is gone,
-  since it walks and stats by path. (Linux answers `ENOTDIR`, not
-  `ELOOP`, for a link opened `O_DIRECTORY|O_NOFOLLOW`: an error entry
-  either way, nothing followed.) **A move** (a cut's paste, and a
+  `copystat` followed a link swapped in at the target). A tree is an
+  fd-relative walk (`_copy_tree`, `_walk`: `os.scandir(fd)`, each kind
+  from `os.stat(name, dir_fd=…, follow_symlinks=False)`, each
+  directory's metadata on its descriptor after its entries, errors
+  collected per entry and raised as `shutil.Error`); `shutil.copytree`
+  is gone, since it walks and stats by path. **Every directory of the
+  new tree, the top and each subdirectory, is built under a temporary
+  name nothing can guess and landed exclusively** (D53, the Fable
+  review's S1: `_temp_name` is `.collins-<24 hex>`, made and opened
+  under the held parent — a `mkdir` then an open *by the final name* let
+  a directory swapped in between be opened, written into and
+  `fchmod`ed, which `O_NOFOLLOW` only refuses for a link — then
+  `_land_in_place`: `renameat2(RENAME_NOREPLACE)` onto the final name,
+  the placeholder path where the flag is not supported). So a
+  half-copied tree is never visible under its final name, `EEXIST` at
+  the landing is the next "(copy N)" with the built tree renamed there
+  and never walked again (`_paste_one`'s `next_name`), and a tree copy
+  that fails partway (an error entry, a `RecursionError`, anything past
+  the `mkdir`) is removed through its own descriptor (`_remove_tree`),
+  nothing left at any name: the temporary name was the service's alone,
+  so whatever was put inside it meanwhile goes with it. (Linux answers
+  `ENOTDIR`, not `ELOOP`, for a link opened `O_DIRECTORY|O_NOFOLLOW`:
+  an error entry either way, nothing followed.) **A move** (a cut's paste, and a
   rename; `_move_exclusive`) is `renameat2(src_fd, name, dst_fd,
   newname, RENAME_NOREPLACE)` through `ctypes` (`_rename_noreplace`, the
   symbol looked up once at import, a NUL in either name `ValueError`
@@ -427,10 +441,25 @@ touches the disk.
   `os.mkdir` then `os.rename`, `ENOTEMPTY` meaning someone put something
   in it, so it stays and the name counts as taken), `EXDEV` from either
   takes the copy path (`_move_by_copy`: the exclusive copy with its
-  source and destination descriptors held, then `unlink` / `rmtree` of
-  the source as `shutil.move` does, only while the source name still
-  holds the inode that was copied — else the name is left and the move
-  counts as done). The placeholder path has one accepted limit: on a
+  source and destination descriptors held, then the source removed as
+  `shutil.move` does, only while the source name still holds the inode
+  that was copied — else the name is left and the move counts as done;
+  a file by `unlink` under the held parent, **a tree through the
+  descriptor held on it** — D53, the Fable review's R1: `_remove_tree`
+  is an fd-relative `rmtree`, `os.scandir(fd)`, `unlink` and recursive
+  `O_DIRECTORY|O_NOFOLLOW` opens under it, each emptied directory and
+  the top `rmdir`ed by name only under `_holds`, since `rmdir` removes
+  an empty directory and nothing else; `shutil.rmtree(name, dir_fd)`
+  looked the name up again, so a stranger's tree renamed onto it
+  between the check and its own lookup was removed and the move
+  reported done). The reply's `mtime` is read from a descriptor the
+  operation held (`_held_mtime` of the copy's `dfd`) or under the held
+  directory right after a `renameat2`, which hands back no descriptor
+  (`_landed_mtime`: a stat by name under the hold, two syscalls after
+  the rename), and never by path after the holds close (nit 1: a file
+  the agent wrote over the landed name in between gave the editor the
+  stranger's mtime); `rename_entry_mtime` and `PasteOutcome.mtime`
+  carry it in nanoseconds, `service/files.py` divides for the wire. The placeholder path has one accepted limit: on a
   filesystem without `RENAME_NOREPLACE`, a `rename` that succeeds
   replaces whatever was swapped over the placeholder between its
   creation and the rename (a window between two of the service's own
@@ -442,9 +471,16 @@ touches the disk.
   deep meets `EMFILE` under a 1024 limit. Known and left: without
   `/proc` every rename, mkdir and paste fails (the macOS port will want
   `F_GETPATH`); a tree deeper than the interpreter's recursion limit
-  raises `RecursionError` out of `paste_entries`, as `copytree` did at a
-  lower depth; a destination renamed while held is reported by its old
-  path; a source replaced before its `unlink` is reported as moved.
+  raises `RecursionError`, which fails that entry alone (`FAILED`, the
+  built tree removed) and leaves the request's other outcomes standing
+  (nit 4; `copytree` raised at a lower depth); a destination renamed
+  while held is reported by its old path; a source replaced before its
+  `unlink` is reported as moved; a destination so deep that every
+  "(copy N)" is `ENAMETOOLONG` is `no_room` (nit 2: the banner says
+  "too many copies, or the path is too long"); `rename(2)` answers
+  `EINVAL` for a directory moved into its own descendant too, which the
+  `INTO_ITSELF` pre-check refuses and, raced past, the placeholder path
+  fails cleanly (nit 3, the comment at `_NOT_HERE_ERRNOS`).
   **What a failed operation leaves** (D46): only what the operation
   made, only while it still holds it, and only when it holds nothing of
   anyone else's. "Holds" is a descriptor kept open across the step that
@@ -457,10 +493,11 @@ touches the disk.
   file under a "failed" banner), a file or link copied across whose
   source could not then be unlinked (`failed` with the `unlink`'s words,
   the source intact, nothing at the destination, a retry the same; a
-  source that vanished instead is the move done, the copy kept). Not
-  undone: a directory placeholder with something in it, a tree whose
-  `rmtree` fails (both halves kept), a tree copy that failed partway (a
-  retry lands as "tree (copy)", `message` is `shutil.Error`'s list).
+  source that vanished instead is the move done, the copy kept), a tree
+  copy that failed partway (through its descriptor, D53: nothing at any
+  name, `message` is `shutil.Error`'s list, a retry lands as "tree"
+  again). Not undone: a directory placeholder with something in it, a
+  tree whose source removal fails (both halves kept).
   `EEXIST` at a paste's target is the next name of `unique_target`'s
   sequence (`paste_entries`' loop; `no_room` after the hundredth), at a
   rename's it is `exists`. **No lock** serializes the operations: two
@@ -468,7 +505,8 @@ touches the disk.
   rename behind a long copy. The tests in `test_projectfiles.py` make
   each race deterministic by patching the step before it (`paste_target`,
   `rename_target`, `unique_target`, `os.scandir`, `os.mkdir`,
-  `os.fchmod`, `os.lstat`, `os.unlink`, `os.rename`) to swap or plant
+  `os.fchmod`, `os.lstat`, `os.unlink`, `os.rename`, `_holds`,
+  `_land_in_place`, `_walk`, `_close`) to swap or plant
   something, assert what is on disk afterwards and that the count of
   open descriptors is what it was, and run the move matrix on the real
   primitive, on the placeholder path (`_rename_noreplace` patched to

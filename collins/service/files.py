@@ -140,7 +140,7 @@ from ..projectfiles import (
     list_entries,
     make_directory,
     paste_entries,
-    rename_entry,
+    rename_entry_mtime,
     walk_files,
 )
 from ..sessions import worktree_project_root
@@ -662,13 +662,13 @@ MKDIR_MSGIDS = {
 def _paste_result(outcome: PasteOutcome) -> dict:
     """One `fs.paste` result (`protocol._FS_PASTE_RESULT`) from an outcome:
     where it landed, the landed file's mtime (null for a folder, a link
-    that names no file, or a failure: what an editor holding a moved file
-    open takes, `_retarget_open`), the rule it broke."""
-    mtime = None
-    if outcome.target is not None:
-        mtime, _size, gone = file_stat(str(outcome.target))
-        if gone:
-            mtime = None
+    or a failure: what an editor holding a moved file open takes,
+    `_retarget_open`), the rule it broke. The mtime is the one
+    `paste_entries` read from the descriptor it held on the landed file
+    (`PasteOutcome.mtime`, nanoseconds), never a stat by path after the
+    holds closed, which read whatever had been written over the name
+    since (the Fable review of PR 613, nit 1)."""
+    mtime = None if outcome.mtime is None else outcome.mtime // 1000
     return {
         "source": str(outcome.source),
         "target": None if outcome.target is None else str(outcome.target),
@@ -906,7 +906,7 @@ class Files:
     # -- fs.rename, fs.paste, fs.mkdir (PR-2.5) --------------------------------------------
 
     def rename(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        """`fs.rename {path, target, root}`: `rename_entry` on a thread
+        """`fs.rename {path, target, root}`: `rename_entry_mtime` on a thread
         (see the module docstring); the refusal's `reason` is the rule.
         The `root` is one the client may name: confined on the worker
         (`_confine`, as `fs.list`'s is) against the roots computed here."""
@@ -927,7 +927,7 @@ class Files:
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
             try:
-                landed, error = rename_entry(root, path, target)
+                landed, error, mtime_ns = rename_entry_mtime(root, path, target)
             except OSError as exc:
                 return protocol.refuse(
                     message.id, protocol.ERROR_FAILED, "Couldn't rename: {error}", {"error": _os_error(exc)}
@@ -941,8 +941,9 @@ class Files:
                 )
             if landed is None:
                 return protocol.reply(message.id, mtime=None)  # the name came back unchanged
-            mtime, _size, gone = file_stat(str(landed))
-            return protocol.reply(message.id, mtime=None if gone else mtime)
+            # The renamed file's mtime as `rename_entry_mtime` read it under
+            # the held directory, never a stat by path after the hold closed.
+            return protocol.reply(message.id, mtime=None if mtime_ns is None else mtime_ns // 1000)
 
         return self._later(message, "fs-rename", work)
 

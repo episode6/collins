@@ -51,8 +51,9 @@ downloads of each version, see the
   Each operation works from the folder it opened, not from its path, so
   a folder or a file swapped for a link in mid-operation carries nothing
   out of the project and nothing into it; a copy that fails partway
-  leaves no partial file behind, and a failed move removes only what it
-  put there itself.
+  leaves no partial file or folder behind (a folder is built under a
+  temporary name and appears whole, or not at all), and a failed move
+  removes only what it put there itself.
   An open file still follows its rename or move with its unsaved edits,
   even when the move took long enough for the editor to be told the old
   path was gone first (and anything typed meanwhile stays unsaved until

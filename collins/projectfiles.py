@@ -53,7 +53,18 @@ ns=)`: `copy2`'s parity); a tree by an fd-relative walk (`_copy_tree`,
 `_walk`: `os.scandir(fd)`, kinds by `os.stat(name, dir_fd=…,
 follow_symlinks=False)`, `mkdir` / `open` / `symlink` under `dir_fd`,
 errors collected as `shutil.Error`), never `shutil.copytree`, which
-walks and stats by path.
+walks and stats by path. Every directory of the new tree, the top and
+each subdirectory, is **built under a temporary name nothing can guess
+and landed exclusively** on its final name (D53: `_temp_name`,
+`_land_in_place` by `renameat2(RENAME_NOREPLACE)` or the placeholder
+path), so a directory swapped in at the name between the `mkdir` and
+the open by name — which `O_NOFOLLOW` cannot refuse, as it refuses a
+link — is never written into or `fchmod`ed, a half-copied tree is never
+visible under its final name, `EEXIST` at the landing is the next
+"(copy N)" without a second copy, and a tree copy that fails partway is
+removed through its own descriptor, nothing left at any name (the
+temporary name was the service's alone, so whatever was put inside it
+meanwhile goes with it).
 
 The move (a cut's paste, and a rename, which is a move within one held
 directory; `_move_exclusive`), in order: `renameat2(src_fd, name,
@@ -72,7 +83,15 @@ that a `rename` that succeeds replaces what is at the name at that
 instant); `EXDEV` from either, the copy path (`_move_by_copy`: the
 exclusive copy, its source and destination descriptors held, then the
 source removed, as `shutil.move` does, only while its name still holds
-what was copied: else the name is left and the move is done). What a
+what was copied: else the name is left and the move is done; a tree's
+contents go **through the descriptor held on it**, `_remove_tree`, and
+the emptied directory by `rmdir`, which removes an empty directory and
+nothing else, so a stranger's tree renamed onto the name meanwhile is
+neither entered nor removed: D53, never `shutil.rmtree(name, dir_fd)`,
+which looked the name up again). The reply's mtime is read from a
+descriptor the operation held, or under the held directory right after
+a rename (`_held_mtime`, `_landed_mtime`), never by path after the
+holds are closed. What a
 failed operation
 leaves (D46): the service removes only what it made in this operation,
 only while it still holds it (`_undo`: `(st_dev, st_ino)` of
@@ -82,9 +101,10 @@ holds nothing of anyone else's — a file placeholder whose rename
 failed, a file copy that failed after bytes went, a file copied across
 filesystems whose source then could not be unlinked (the entry `failed`
 with the `unlink`'s words, the source intact, nothing at the
-destination); not a directory placeholder with something in it, not a
-tree copied across whose `rmtree` failed (both halves kept, as
-`shutil.move` left them), not a tree copy that failed partway.
+destination), a tree copy that failed partway (through its descriptor,
+D53); not a directory placeholder with something in it, not a tree
+copied across whose removal failed (both halves kept, as `shutil.move`
+left them).
 `EEXIST` at a paste's target is the next name of `unique_target`'s
 sequence (`paste_entries`' loop: try, and on `EEXIST` the next;
 `no_room` after the hundredth); at a rename's it is `exists`;
@@ -111,6 +131,7 @@ import enum
 import errno
 import logging
 import os
+import secrets
 import shutil
 import stat as stat_mod
 from collections import deque
@@ -428,6 +449,14 @@ def rename_target(
 def rename_entry(
     root: str | Path, path: str | Path, target: str | Path
 ) -> tuple[Path | None, RenameError | None]:
+    """`rename_entry_mtime` without the mtime (the tests' form)."""
+    landing, error, _mtime = rename_entry_mtime(root, path, target)
+    return landing, error
+
+
+def rename_entry_mtime(
+    root: str | Path, path: str | Path, target: str | Path
+) -> tuple[Path | None, RenameError | None, int | None]:
     """`fs.rename`'s work: *path* renamed to *target*, which must be the
     same directory's (`rename_target` decides, from *target*'s name; a
     target in another directory is `NOT_A_NAME`: a rename never moves
@@ -439,34 +468,37 @@ def rename_entry(
     name was free at the check and taken by the time of the placement,
     which is exclusive (`_move_exclusive`, D44); an `OSError` from the
     rename itself is the caller's. Both paths are normalized first
-    (`sub/..` names its parent, not an entry called "..")."""
+    (`sub/..` names its parent, not an entry called ".."). The third
+    value is the renamed file's mtime (ns), read under the held directory
+    right after the rename and never by path once the hold is gone (the
+    reply's `mtime`); None for a folder, a link or a refusal."""
     path, target = Path(os.path.normpath(path)), Path(os.path.normpath(target))
     if target.parent != path.parent or target.name != target.name.strip():
-        return None, RenameError.NOT_A_NAME
+        return None, RenameError.NOT_A_NAME, None
     landing, error = rename_target(root, path, target.name)
     if landing is None:
-        return None, error
+        return None, error, None
     # The hold (D47): the directory opened once and confined by the
     # kernel's own path of it; the rename names the two entries under it.
     try:
         fd = _open_dir(path.parent)
     except FileNotFoundError:
-        return None, RenameError.MISSING
+        return None, RenameError.MISSING, None
     except NotADirectoryError:
-        return None, RenameError.MISSING
+        return None, RenameError.MISSING, None
     try:
         held = _held_path(fd)
         if held is None:
-            return None, RenameError.MISSING
+            return None, RenameError.MISSING, None
         if not held_inside(root, held):
-            return None, RenameError.OUTSIDE
+            return None, RenameError.OUTSIDE, None
         try:
-            _move_exclusive(fd, path.name, fd, landing.name)
+            mtime = _move_exclusive(fd, path.name, fd, landing.name)
         except FileExistsError:
-            return None, RenameError.EXISTS
+            return None, RenameError.EXISTS, None
     finally:
         _close(fd)
-    return landing, None
+    return landing, None, mtime
 
 
 def _exists(path: Path) -> bool:
@@ -565,6 +597,9 @@ class PasteOutcome:
     target: Path | None = None
     error: PasteError | None = None
     message: str = ""
+    # The landed file's mtime in nanoseconds, read from a descriptor the
+    # operation held (`_place`): None for a folder, a link or a failure.
+    mtime: int | None = None
 
 
 # -- the holds (D47) --------------------------------------------------------------------------
@@ -661,6 +696,51 @@ def _undo(dir_fd: int, name: str, fd: int) -> None:
             os.unlink(name, dir_fd=dir_fd)
     except OSError:
         pass
+
+
+def _remove_contents(fd: int) -> None:
+    """Everything inside the held directory *fd* removed through it (D53:
+    an fd-relative `rmtree`, never a path): the entries from
+    `os.scandir(fd)`, each kind from a stat relative to *fd*, a file or
+    a link `unlink`ed under it, a subdirectory opened
+    `O_DIRECTORY|O_NOFOLLOW` under it (a link swapped in is refused,
+    never followed), emptied the same way and then `rmdir`ed by name
+    only while the name still holds the emptied directory (`_holds`;
+    `rmdir` removes an empty directory and nothing else). The first
+    `OSError` is raised, as `shutil.rmtree` raises its first."""
+    with os.scandir(fd) as entries:
+        names = [entry.name for entry in entries]
+    for name in names:
+        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat_mod.S_ISDIR(st.st_mode):
+            cfd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=fd)
+            try:
+                _remove_contents(cfd)
+                if _holds(fd, name, cfd):
+                    os.rmdir(name, dir_fd=fd)
+            finally:
+                _close(cfd)
+        else:
+            os.unlink(name, dir_fd=fd)
+
+
+def _remove_tree(dir_fd: int, name: str, fd: int) -> None:
+    """The directory *name* of the held *dir_fd*, whose own descriptor
+    *fd* is held, removed: its contents through *fd* (`_remove_contents`),
+    then the emptied directory by name under `_holds`. The source's
+    removal after a cross-filesystem copy (D53) and a failed tree copy's
+    undo (`_copy_tree`) are both this; neither names the tree's path."""
+    _remove_contents(fd)
+    if _holds(dir_fd, name, fd):
+        os.rmdir(name, dir_fd=dir_fd)
+
+
+def _temp_name() -> str:
+    """A name nothing can guess, for a directory built in place and landed
+    exclusively afterwards (`_copy_tree`, D53): hidden, so a tree with
+    hidden files off never shows it, and short, so it fits beside any
+    name the destination takes."""
+    return f".collins-{secrets.token_hex(12)}"
 
 
 def _close(*fds: int | None) -> None:
@@ -795,53 +875,88 @@ def _copy_entry(src_fd: int, name: str, dst_fd: int, newname: str) -> tuple[int,
 
 
 def _copy_tree(
-    src_fd: int, name: str, dst_fd: int, newname: str, labels: tuple[str, str] | None = None
-) -> int:
+    src_fd: int,
+    name: str,
+    dst_fd: int,
+    newname: str,
+    labels: tuple[str, str] | None = None,
+    next_name: Callable[[], str | None] | None = None,
+) -> tuple[int, str]:
     """The directory *name* of the held *src_fd* copied to *newname* in the
     held *dst_fd*: the source opened `O_DIRECTORY|O_NOFOLLOW` (a link or
     a file swapped in is refused, never followed: Linux answers `ENOTDIR`
     for a link under that pair of flags, `ELOOP` only without
-    `O_DIRECTORY`), `os.mkdir` (`EEXIST` the name taken), the new
-    directory opened the same way (one emptied and replaced by a link in
-    between is refused the same, the entry `failed`), then the walk
-    (`_walk`), everything relative to descriptors; `shutil.copytree` is
-    not used, since it walks and stats by path. Errors are collected per
-    entry and raised together as `shutil.Error` after the walk, the tree
-    landed short (`copytree`'s own shape: `(source, target, words)` per
-    entry, the two paths spelled from *labels*, the tree's two paths as
-    the request named them — words for the banner, never opened).
-    Returns the top source directory's
-    descriptor, still open, for a move's check that the source name
-    still holds what was copied (the caller closes it); closed here on
-    any failure."""
+    `O_DIRECTORY`), the new tree **built under a temporary name nothing
+    can guess** (`_temp_name`: `os.mkdir` then the open by that name,
+    which nothing can have swapped in between, D53) and filled through
+    that descriptor by the walk (`_walk`, everything relative to
+    descriptors; `shutil.copytree` is not used, since it walks and stats
+    by path), then **landed exclusively** on *newname* with the move's
+    own primitive (`_move_exclusive`: `renameat2(RENAME_NOREPLACE)`, the
+    placeholder path where the flag is not supported), so a half-copied
+    tree is never visible under its final name and nothing swapped in at
+    the name is ever written into. `FileExistsError` at the landing is
+    the name taken: *next_name* is asked for the next one and the built
+    tree lands there without being copied again; None, or no
+    *next_name*, removes the built tree and raises it. Errors of the walk
+    are collected per entry and raised together as `shutil.Error` after
+    it (`copytree`'s shape: `(source, target, words)` per entry, the two
+    paths spelled from *labels*, the tree's two paths as the request
+    named them — words for the banner, never opened), and like any other
+    failure past the `mkdir` the built tree is removed first through its
+    descriptor (`_remove_tree`, D46: only what this operation made, only
+    while it holds it; the temporary name was the service's alone, so
+    whatever was put inside it goes with it), nothing left at any name.
+    Returns the top source directory's descriptor, still open, for a
+    move's check that the source name still holds what was copied (the
+    caller closes it), and the name the tree landed under; closed here
+    on any failure."""
     sfd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=src_fd)
     try:
-        os.mkdir(newname, 0o777, dir_fd=dst_fd)
-        dfd = os.open(newname, _DIR_NOFOLLOW_FLAGS, dir_fd=dst_fd)
+        tmp = _temp_name()
+        os.mkdir(tmp, 0o777, dir_fd=dst_fd)
+        dfd = os.open(tmp, _DIR_NOFOLLOW_FLAGS, dir_fd=dst_fd)
         try:
             errors: list[tuple[str, str, str]] = []
             _walk(sfd, dfd, *(labels or (name, newname)), errors)
+            if errors:
+                raise shutil.Error(errors)
+            landing: str | None = newname
+            while landing is not None:
+                try:
+                    _land_in_place(dst_fd, tmp, landing)
+                    break
+                except FileExistsError:
+                    landing = next_name() if next_name is not None else None
+            else:
+                raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), name, None, newname)
+        except BaseException:
+            try:
+                _remove_tree(dst_fd, tmp, dfd)
+            except OSError:
+                pass
+            raise
         finally:
             _close(dfd)
-        if errors:
-            raise shutil.Error(errors)
     except BaseException:
         _close(sfd)
         raise
-    return sfd
+    return sfd, landing
 
 
 def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: list) -> None:
     """One directory of the tree copy, *sfd* into *dfd*: each entry's kind
     from a stat relative to *sfd* (never `entry.is_dir()`, whose
     `DT_UNKNOWN` fallback stats by a relative name); a directory recurses
-    with its own `mkdir` and two `O_NOFOLLOW` opens under *sfd* / *dfd*
-    (the top's order: the source, the `mkdir`, the new directory), a link
-    and a regular file take `_copy_entry`, anything else is an error
-    entry; an entry's `OSError` (a name taken inside the new tree, a link
-    planted where a directory was just made: never followed) is collected in
-    *errors* and the walk goes on; the directory's own metadata goes on
-    *dfd* after its entries."""
+    the top's way (`_copy_tree`'s: its own `O_NOFOLLOW` open under *sfd*,
+    a temporary name made and opened under *dfd*, which nothing can swap
+    in between, then landed exclusively on the entry's name: a name
+    taken inside the new tree, a link planted where the directory is to
+    go, is `EEXIST`, never followed and never written into, the built
+    subtree removed), a link and a regular file take `_copy_entry`,
+    anything else is an error entry; an entry's `OSError` is collected
+    in *errors* and the walk goes on; the directory's own metadata goes
+    on *dfd* after its entries."""
     with os.scandir(sfd) as entries:
         names = [entry.name for entry in entries]
     for entry in names:
@@ -851,10 +966,18 @@ def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: list) -> N
             if stat_mod.S_ISDIR(st.st_mode):
                 csfd = os.open(entry, _DIR_NOFOLLOW_FLAGS, dir_fd=sfd)
                 try:
-                    os.mkdir(entry, 0o777, dir_fd=dfd)
-                    cdfd = os.open(entry, _DIR_NOFOLLOW_FLAGS, dir_fd=dfd)
+                    tmp = _temp_name()
+                    os.mkdir(tmp, 0o777, dir_fd=dfd)
+                    cdfd = os.open(tmp, _DIR_NOFOLLOW_FLAGS, dir_fd=dfd)
                     try:
                         _walk(csfd, cdfd, src_path, dst_path, errors)
+                        _land_in_place(dfd, tmp, entry)
+                    except BaseException:
+                        try:
+                            _remove_tree(dfd, tmp, cdfd)
+                        except OSError:
+                            pass
+                        raise
                     finally:
                         _close(cdfd)
                 finally:
@@ -887,6 +1010,11 @@ if _RENAMEAT2 is not None:
     _RENAMEAT2.restype = ctypes.c_int
 # What `renameat2` answers where the flag is not supported (an old kernel,
 # NFS, a FUSE mount without `rename2`, an old FAT): the placeholder path.
+# `EINVAL` is also `rename(2)`'s own answer for a directory moved into its
+# own descendant, which `paste_target`'s `INTO_ITSELF` pre-check refuses;
+# raced past it, the placeholder path makes an empty directory inside the
+# source tree, its `rename` fails `EINVAL` again, the placeholder is
+# removed and the entry is `failed` "Invalid argument" (nothing left).
 _NOT_HERE_ERRNOS = frozenset({errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP})
 
 
@@ -898,7 +1026,15 @@ def _rename_noreplace(src_fd: int, name: str | Path, dst_fd: int, newname: str |
     the caller takes the placeholder path; `FileExistsError` when the
     name is taken; `ValueError` for a name holding NUL, as `os.rename`
     raises (`c_char_p` would cut it there); any other failure (`EXDEV`
-    among them, the caller's copy path) its `OSError`."""
+    among them, the caller's copy path) its `OSError`. The move's
+    primitive; the tests force the move's other two paths by patching
+    this name, which is why a tree's in-place landing calls
+    `_renameat2_noreplace` underneath it instead."""
+    return _renameat2_noreplace(src_fd, name, dst_fd, newname)
+
+
+def _renameat2_noreplace(src_fd: int, name: str | Path, dst_fd: int, newname: str | Path) -> bool:
+    """The `renameat2` call itself (see `_rename_noreplace`)."""
     if _RENAMEAT2 is None:
         return False
     src_b, dst_b = os.fsencode(name), os.fsencode(newname)
@@ -929,16 +1065,56 @@ def _move_exclusive(
     placeholder path (`_move_by_placeholder`); `EXDEV` from either, the
     copy path (`_move_by_copy`). `FileExistsError` when the name is
     taken; any other `OSError` is the move's failure, which leaves
-    nothing of this operation's behind (D46)."""
+    nothing of this operation's behind (D46). Returns the landed file's
+    mtime (`_landed_mtime`, read under the held destination while it is
+    held; None for a folder or a link), what the reply carries."""
     try:
         if _rename_noreplace(src_fd, name, dst_fd, newname):
-            return
+            return _landed_mtime(dst_fd, newname)
         _move_by_placeholder(src_fd, name, dst_fd, newname)
-        return
+        return _landed_mtime(dst_fd, newname)
     except OSError as err:
         if err.errno != errno.EXDEV:
             raise
-    _move_by_copy(src_fd, name, dst_fd, newname, labels)
+    return _move_by_copy(src_fd, name, dst_fd, newname, labels)
+
+
+def _land_in_place(dir_fd: int, tmp: str, newname: str) -> None:
+    """A directory built under the temporary name *tmp* in the held
+    *dir_fd* landed on *newname* in the same directory (`_copy_tree`,
+    `_walk`, D53): `renameat2(RENAME_NOREPLACE)` (`_renameat2_noreplace`:
+    the call itself, under the name the move's harnesses patch), then the
+    placeholder path where the flag is not supported (an empty directory
+    made at the name, replaced by `rename` only while it is empty);
+    `FileExistsError` when the name is taken. Never the copy path: one
+    directory is one filesystem."""
+    if _renameat2_noreplace(dir_fd, tmp, dir_fd, newname):
+        return
+    _move_by_placeholder(dir_fd, tmp, dir_fd, newname)
+
+
+def _landed_mtime(dst_fd: int, newname: str) -> int | None:
+    """The mtime (ns) of the regular file just landed at *newname* in the
+    held *dst_fd*, for the reply; None for anything else or a name that
+    cannot be read. A `renameat2` hands back no descriptor, so this is
+    the one stat by name under the held directory, two syscalls after
+    the rename (the class of the undo's own gap) and never by path after
+    the hold is gone."""
+    try:
+        st = os.stat(newname, dir_fd=dst_fd, follow_symlinks=False)
+    except OSError:
+        return None
+    return st.st_mtime_ns if stat_mod.S_ISREG(st.st_mode) else None
+
+
+def _held_mtime(fd: int) -> int | None:
+    """The mtime (ns) of the regular file the held *fd* is, else None (a
+    link's pin, a directory)."""
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        return None
+    return st.st_mtime_ns if stat_mod.S_ISREG(st.st_mode) else None
 
 
 def _move_by_placeholder(src_fd: int, name: str, dst_fd: int, newname: str) -> None:
@@ -986,7 +1162,7 @@ def _move_by_placeholder(src_fd: int, name: str, dst_fd: int, newname: str) -> N
 
 def _move_by_copy(
     src_fd: int, name: str, dst_fd: int, newname: str, labels: tuple[str, str] | None = None
-) -> None:
+) -> int | None:
     """The move across filesystems: the exclusive copy of the file (both
     its descriptors held) or the tree (its top source descriptor held),
     then the source removed, as `shutil.move` does — only while the
@@ -999,17 +1175,24 @@ def _move_by_copy(
     `unlink` is all-or-nothing, nothing at the destination, a retry the
     same, D46) and the `unlink`'s error is the move's; an `unlink` that
     finds the source gone in the two calls since the check is the move
-    done, never an undo (the copy would be the only one left). A tree
-    whose `rmtree` fails is kept with both halves (`rmtree` removes what
-    it can before it raises, so the copy may be the one complete set)."""
+    done, never an undo (the copy would be the only one left). A tree's
+    source is removed **through the descriptor held on it** and never by
+    its name again (`_remove_tree`, D53: the contents fd-relative, then
+    the emptied directory `rmdir`ed by name only while the name still
+    holds it — a stranger's tree renamed onto the name meanwhile is
+    neither entered nor removed, since `rmdir` removes only an empty
+    directory); one whose removal fails is kept with both halves (part
+    of the source may be gone, so the copy may be the one complete set).
+    Returns the landed file's mtime from its held descriptor (None for a
+    tree or a link)."""
     if _is_dir_entry(src_fd, name):
-        sfd = _copy_tree(src_fd, name, dst_fd, newname, labels)
+        sfd, _landed = _copy_tree(src_fd, name, dst_fd, newname, labels)
         try:
             if _holds(src_fd, name, sfd):
-                shutil.rmtree(name, dir_fd=src_fd)
+                _remove_tree(src_fd, name, sfd)
         finally:
             _close(sfd)
-        return
+        return None
     dfd, sfd = _copy_entry(src_fd, name, dst_fd, newname)
     try:
         if _holds(src_fd, name, sfd):
@@ -1020,23 +1203,40 @@ def _move_by_copy(
             except OSError:
                 _undo(dst_fd, newname, dfd)
                 raise
+        return _held_mtime(dfd)
     finally:
         _close(dfd, sfd)
 
 
 def _place(
-    src_fd: int, name: str, dst_fd: int, newname: str, move: bool, labels: tuple[str, str] | None = None
-) -> None:
+    src_fd: int,
+    name: str,
+    dst_fd: int,
+    newname: str,
+    move: bool,
+    labels: tuple[str, str] | None = None,
+    next_name: Callable[[], str | None] | None = None,
+) -> tuple[str, int | None]:
     """One attempt at landing *name* of the held *src_fd* at *newname* in
     the held *dst_fd*, exclusively (see the module docstring):
     `FileExistsError` when the name is taken. *labels* are the two paths
-    as the request named them, for a tree copy's error entries."""
+    as the request named them, for a tree copy's error entries;
+    *next_name* is a tree copy's way to the next free name without a
+    second copy (`_copy_tree`). Returns the name landed under and the
+    landed file's mtime (ns) from a descriptor the operation held, None
+    for a folder or a link."""
     if move:
-        _move_exclusive(src_fd, name, dst_fd, newname, labels)
-    elif _is_dir_entry(src_fd, name):
-        _close(_copy_tree(src_fd, name, dst_fd, newname, labels))
-    else:
-        _close(*_copy_entry(src_fd, name, dst_fd, newname))
+        mtime = _move_exclusive(src_fd, name, dst_fd, newname, labels)
+        return newname, mtime
+    if _is_dir_entry(src_fd, name):
+        sfd, landed = _copy_tree(src_fd, name, dst_fd, newname, labels, next_name)
+        _close(sfd)
+        return landed, None
+    dfd, sfd = _copy_entry(src_fd, name, dst_fd, newname)
+    try:
+        return newname, _held_mtime(dfd)
+    finally:
+        _close(dfd, sfd)
 
 
 def paste_entries(
@@ -1142,30 +1342,40 @@ def _paste_one(
     except OSError as err:
         return PasteOutcome(src, None, PasteError.FAILED, err.strerror or str(err))
     landing: Path | None = target
+    attempts = [0]  # placements tried: the loop's and a tree copy's `next_name` together
+
+    def next_name() -> str | None:
+        nonlocal landing
+        attempts[0] += 1
+        landing = unique_target(dest, src.name) if attempts[0] <= _MAX_COPY_SUFFIXES else None
+        return None if landing is None else landing.name
+
+    mtime: int | None = None
     try:
         held = _held_path(src_fd)
         if held is None:
             return PasteOutcome(src, None, PasteError.MISSING)
         if source_allowed is not None and not source_allowed(held):
             return PasteOutcome(src, None, PasteError.SOURCE_OUTSIDE)
-        for _attempt in range(_MAX_COPY_SUFFIXES + 1):
+        while landing is not None:
             try:
-                _place(src_fd, src.name, dst_fd, landing.name, move, (str(src), str(landing)))
+                landed, mtime = _place(
+                    src_fd, src.name, dst_fd, landing.name, move, (str(src), str(landing)), next_name
+                )
+                landing = dest / landed
                 break
             except FileExistsError:
-                landing = unique_target(dest, src.name)
-                if landing is None:
-                    break
-        else:
-            landing = None
-    except (OSError, shutil.Error) as err:
+                next_name()
+    except (OSError, shutil.Error, RecursionError) as err:
+        # A `RecursionError` (a tree deeper than the interpreter's limit)
+        # fails this entry alone, so the request's other outcomes stand.
         message = getattr(err, "strerror", None) or str(err)
         return PasteOutcome(src, None, PasteError.FAILED, message)
     finally:
         _close(src_fd)
     if landing is None:
         return PasteOutcome(src, None, PasteError.NO_ROOM)
-    return PasteOutcome(src, landing)
+    return PasteOutcome(src, landing, mtime=mtime)
 
 
 class MkdirError(enum.Enum):
