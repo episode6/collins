@@ -1070,9 +1070,11 @@ The `Session` is the service's (spec §3.19). The pieces:
   chooser's starting folder, a `file:` URI. It is offered only when
   `apilink.is_local()` (hidden, never greyed out: §3.12), and the
   function that touches the disk or starts the program asks
-  `apilink.is_local()` itself, because `tests/test_client_is_pathless.py`
-  reads the function's source for the ask
-  (`pathless_allowlist.LOCAL_EXTRAS`). The launchers
+  `apilink.is_local()` itself and first, because
+  `tests/test_client_is_pathless.py` reads the function and wants every
+  such call behind the ask (`if not apilink.is_local(): return` at the
+  top of the function is the shape to write;
+  `pathless_allowlist.LOCAL_EXTRAS`). The launchers
   (`footerapps.launch_app` / `launch_app_file`, `openwith.
   open_file_default` / `launch_terminal`, `openwith.
   file_open_with_entries`) refuse by themselves, so a menu built on them

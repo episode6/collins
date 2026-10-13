@@ -9,7 +9,7 @@ it moved to the service (git in PR-2.1 and PR-2.2, the editor's files in
 PR-2.3, the tree, quick open and roots in PR-2.4, the file operations in
 PR-2.5, the links and the worktree checks in PR-2.6, the pictures in
 PR-2.7, the tab's and the shells' cwd checks in PR-2.8, D39). What is
-left is in three groups, and `tests/test_client_is_pathless.py` holds
+left is in four groups, and `tests/test_client_is_pathless.py` holds
 each to its rule:
 
 - `DEVICE`: this device's own files and programs. Nothing here names a
@@ -17,29 +17,41 @@ each to its rule:
 - `LOCAL_EXTRAS`: the sites that hand a path of the service's to
   something on this device (another app, the file manager, a native
   chooser's starting folder). They exist only for a client on the
-  service's machine: the function each sits in asks `apilink.is_local()`
-  (which is `app.local`, the `local` proof of D11), and the test reads
-  the function to see that it does. **Ruled D49** (2026-10-05): the
+  service's machine: in the function each sits in, every call of the
+  site runs only after `apilink.is_local()` (which is `app.local`, the
+  `local` proof of D11) answered yes, and the test reads the function to
+  see that it does (`pathless.function_asks_local` has the shapes it
+  accepts and what it does not prove). **Ruled D49** (2026-10-05): the
   group is part of the final list, and the acceptance's "only device
   files" reads "device files and gated local extras".
 - `UNRULED`: three sites that are neither. **Ruled D50** (2026-10-05):
-  recorded, not moved; Phase 2 closes with them and each needs a ruling
-  before Phase 3 starts. The test pins the group so it can only shrink.
+  recorded, not moved; Phase 2 closes with them. **D54** (2026-10-12)
+  rules what Phase 3 does with the list. The test pins the group so it
+  can only shrink.
+- `RECORDED`: four more that are neither, in `gitloads`, which the walker
+  could not see until it learned to read a function handed on without
+  being called (the 2026-10-13 round, below). Under D50 they are
+  recorded, not moved, and no ruling names them yet. Pinned the same way.
 
 **What the tests enforce** (`tests/test_client_is_pathless.py`). A new
 site in a GTK module or a client helper fails the suite until it is
 filed here, and so does an entry nothing matches any more (a site that
 moved comes off the list in the same PR). Filing is a deliberate,
 reviewed edit, not a way round the rule: each group is pinned by its
-exact size (`DEVICE` 53, `LOCAL_EXTRAS` 16, `UNRULED` at most its three),
-so a site cannot be added to any of them without that test changing in
-the same diff, where a reviewer sees it. The list is not frozen in
-number: it went from 45 to 69 in PR-2.8 when the walker took in four
-more modules (28 sites they already had) and the four `terminal` cwd
-sites came off, to 70 with the cache folder's `chmod`, and to 72 with
-the two `connection.unit_state` sites PR 604's fix round added below
-(the `systemctl show` of a timed-out wait: this device's unit). What does
-not change is what may be on it: this device's own files and programs, and
+exact size (`DEVICE` 65 and per module, `LOCAL_EXTRAS` 16, `UNRULED` at
+most its three, `RECORDED` at most its four), so a site cannot be added
+to any of them without that test changing in the same diff, where a
+reviewer sees it. The list is not frozen in number: it went from 45 to
+69 in PR-2.8 when the walker took in four more modules (28 sites they
+already had) and the four `terminal` cwd sites came off, to 70 with the
+cache folder's `chmod`, to 72 with the two `connection.unit_state` sites
+PR 604's fix round added (the `systemctl show` of a timed-out wait: this
+device's unit), and to 88 on 2026-10-13 when the walker's vocabulary
+grew (the Fable review of PR 615, should-fix 1): twelve `DEVICE` sites
+it had been blind to (a `tmp = path.with_suffix(...)` receiver, a
+generator's `p.is_dir()`, `realpath`, `mkstemp`) and the four of
+`RECORDED`. No code moved for any of the sixteen. What does not change
+is what may be on the list: this device's own files and programs, and
 local extras behind the proof.
 """
 
@@ -47,6 +59,7 @@ DEVICE = frozenset(
     {
         # -- the app's own icons: the bundled path beside the package ----------------
         "app:<module>:Path.resolve",
+        "app:_icon_root:Path.is_dir",  # which of the three places the icons are installed in
         # -- ~/.cache/collins/blobs: the blob cache (PR-2.2, PR-2.7) -----------------
         "blobcache:fetch:Path.exists",
         "blobcache:fetch:Path.mkdir",
@@ -57,10 +70,12 @@ DEVICE = frozenset(
         "blobcache:fetch:os.replace",  # the fetch's own temporary into place
         "blobcache:fetch:os.unlink",
         "blobcache:fetch:os.utime",  # a 304 marks the blob used: the prune clock
-        # The one read of a fetched blob's bytes, refused outside the cache:
-        # every decoder (animatedimage, pictures, imagediff, remoteicons)
-        # reads through it.
+        "blobcache:fetch:tempfile.mkstemp",  # that temporary, made in the cache folder
+        # The one read of a fetched blob's bytes, refused outside the cache
+        # (the `realpath` is that refusal): every decoder (animatedimage,
+        # pictures, imagediff, remoteicons) reads through it.
         "blobcache:read:Path.read_bytes",
+        "blobcache:read:os.path.realpath",
         # The cache's prune (`blobcache` calls it on its own folder).
         "remoteimages:prune_stale:Path.is_file",
         "remoteimages:prune_stale:Path.iterdir",
@@ -71,6 +86,8 @@ DEVICE = frozenset(
         "uistate:UiState.save:Path.exists",
         "uistate:UiState.save:shutil.copy2",  # a `ui-state.json` that would not parse, kept as `.corrupt`
         "uistate:write_json_atomic:Path.mkdir",
+        "uistate:write_json_atomic:Path.write_text",  # the temporary beside it
+        "uistate:write_json_atomic:Path.replace",  # into place
         # -- the Markdown export's destination: the file the chooser named. The
         # transcript is the service's (`store.transcript-export`, PR-2.8) ------------
         "window:MainWindow._on_export_save.work:Path.write_text",
@@ -81,12 +98,16 @@ DEVICE = frozenset(
         "desktopentry:_refresh:subprocess.run",
         "desktopentry:_reload_units:shutil.which",
         "desktopentry:_reload_units:subprocess.run",
+        "desktopentry:install:Path.is_file",  # the package's own unit and icon files
         "desktopentry:install:Path.mkdir",
+        "desktopentry:install:Path.read_text",
         "desktopentry:install:Path.write_text",
         "desktopentry:install:shutil.copyfile",
         "desktopentry:is_installed:Path.is_file",
+        "desktopentry:launcher_path:Path.is_file",
         "desktopentry:launcher_path:Path.resolve",
         "desktopentry:launcher_path:shutil.which",
+        "desktopentry:service_launcher_path:Path.is_file",
         "desktopentry:service_launcher_path:Path.resolve",
         "desktopentry:service_launcher_path:shutil.which",
         # -- the update check: its stamp under ~/.cache/collins, and whether this
@@ -94,6 +115,8 @@ DEVICE = frozenset(
         "updatecheck:gh_usable:shutil.which",
         "updatecheck:read_record:Path.read_text",
         "updatecheck:write_record:Path.mkdir",
+        "updatecheck:write_record:Path.write_text",  # the temporary beside the stamp
+        "updatecheck:write_record:Path.replace",  # into place
         # -- buildinfo: which build this is, read off the package's own checkout ------
         "buildinfo:<module>:Path.resolve",
         "buildinfo:_read:shutil.which",
@@ -115,14 +138,18 @@ DEVICE = frozenset(
         "sidebar:<module>:shutil.which",
         "window:<module>:shutil.which",
         "openwith:_alternatives_terminal:os.access",
+        "openwith:_alternatives_terminal:os.path.realpath",  # /etc/alternatives/… to the terminal
         "openwith:_alternatives_terminal:shutil.which",
         "openwith:_configured_terminal_ids:Path.read_text",
         "openwith:_from_command:shutil.which",
     }
 )
 
-# Each of these sits in a function that returns before the site unless
-# `apilink.is_local()` (the test reads the function's source for the ask).
+# In the function each of these sits in, every call of the site runs only
+# after `apilink.is_local()` answered yes: behind an earlier `if not
+# apilink.is_local(): return` in the function's own body, inside `if
+# apilink.is_local():`, or after the ask in the same `and`. The test reads
+# the function for that (`pathless.function_asks_local`).
 LOCAL_EXTRAS = frozenset(
     {
         # -- another app, the file manager, a terminal: a folder or a file of the
@@ -155,113 +182,205 @@ LOCAL_EXTRAS = frozenset(
 #
 # D50 (split-service spec §6; the PR-2.8 entry's "Rulings of 2026-10-05 on
 # the implementer's questions" has the full text): recorded, not moved.
-# Phase 2 closes with this list, and PR-3.1 must not start until each is
-# ruled. Nothing may be added here. The same ruling covers reads the
-# walker cannot see, because they sit in modules with no GTK import or go
-# through a helper the service runs too; they are NOT on this list and no
-# test pins them, so this comment is where they are written down:
+# Phase 2 closes with this list. D54 (2026-10-12) rules what Phase 3 does
+# with it, in order: `command_override` leaves the client's resume path
+# (item 2 below; PR-3.1), `resume_cwd` becomes a field of the `item` the
+# service computes (item 1, and `sidebar._abbreviate_path` with it;
+# PR-3.2), native chat is not ported (item 3), and a short allow-list of
+# document suffixes decides what a client that is not local hands to a
+# desktop app. Nothing may be added to `UNRULED`. The same record covers
+# the reads the walker cannot see, because they sit in modules it does
+# not walk or go through a helper the service runs too; they are NOT on
+# any list and no test pins them, so this comment is where they are
+# written down.
 #
-# Line numbers are as of the commit that wrote this (the fix round of PR
-# 615's Opus review, which completed the record: its nine families and
-# "lesser" ones, plus what the implementer's own sweep added, marked so).
-# Record only: under D50 nothing here was moved or gated.
+# Line numbers are as of 2026-10-13 (the round after the Fable review of
+# PR 615; the thirteen fix rounds below this PR moved most of them, and a
+# later rebase may move them again by a few lines). Record only: under
+# D50 nothing here was moved or gated.
 #
 # From the first report:
 # - `toolclient.resolve_file` (`os.path.isfile`, toolclient.py:514) and
 #   `toolclient.start_session` (`os.path.isdir`, `expanduser`,
-#   toolclient.py:868-869)
+#   toolclient.py:878-879)
 # - `dialogs.details_dialog` through `provider.parse_details(jsonl_path)`
 #   (dialogs.py:846)
 # - the replay (`replaymodel.read_session_turns`, replayview.py:32) and
 #   `window._open_session_file` through `sessions.session_from_file`
-#   (window.py:6975)
+#   (window.py:7035)
 # - `clonerepo.destination_status` (disk reads per keystroke in the clone
 #   dialog, clonedialog.py:337)
-# - `panelhistory.load_all` (terminal.py) and `panelhistory.delete`
-#   (terminal.py, window.py three sites)
+# - `panelhistory.load_all` (terminal.py:5574) and `panelhistory.delete`
+#   (terminal.py:5654, window.py:2761, 2835, 2916)
 # - `clisetup.validate` (prefs.py:1560, welcome.py:283, 325); `pkgrepos`
+#   (sidebar.py:2049, window.py:6238)
 #
-# From the review of PR 615:
+# From the Opus review of PR 615:
 # 1. `sessions.resume_cwd(session)` (sessions.py: the transcript's tail,
-#    then `Path(cwd).is_dir()`): window.py:2084 (every session open),
-#    window.py:3546, sidebar.py:1990, and sidebar.py:2979 (`_session_cwd`,
-#    called by `show_row_menu` before its `local` test, so on every row
-#    right-click). It decides the cwd every resume sends.
+#    then `Path(cwd).is_dir()`), five call sites: window.py:2124 (every
+#    session open), window.py:3595 (native chat), window.py:5977 (Open in
+#    Ghostty, behind the proof), sidebar.py:1990 (the PR sweep's worker),
+#    and sidebar.py:2979 (`_session_cwd`). **The gate order in
+#    `show_row_menu`**: it reads `local = apilink.is_local()` at
+#    sidebar.py:2673 and then calls `_session_cwd` at :2695 for every
+#    client, local or not, before the `if local and cwd` at :2696 that is
+#    the only use of the answer: the read (the transcript's tail and an
+#    `is_dir`, on every row right-click) is ahead of its gate. Asking it
+#    only when `local` would be a gate, not a move; D54 (2) takes the read
+#    off the client instead, so it is recorded and left.
 # 2. This device's `shutil.which("claude")` standing in for the service's
-#    CLI (providers.py): `Provider.available()` (window.py, sidebar.py),
-#    `chat_variants()` (window.py:520, 3524, 3541; sidebar.py:2678),
-#    `new_command()` (toolclient.py:989), and `continue_command()` at
-#    window.py:2921, whose result goes to the service as the spawn's
+#    CLI (providers.py:359 `Provider.available()`): through
+#    `available_providers()` (window.py:501, 517, 522) and
+#    `default_provider()` (window.py:2215, sidebar.py:633, 2279),
+#    `chat_variants()` (window.py:523, 3573, 3590; sidebar.py:2678),
+#    `new_command()` (toolclient.py:999), and `continue_command()` at
+#    window.py:2970, whose result goes to the service as the spawn's
 #    `command_override`: this device's `claude` path typed into the
 #    service's shell.
 # 3. Native chat runs the agent in the client process:
 #    `chatsession.py:193` (`subprocess.Popen(argv, cwd=self.cwd)`, with
-#    `chats.chat_cwd_or_fallback`), built from window.py:3527, 3545.
+#    `chats.chat_cwd_or_fallback`), built from window.py:3577, 3594.
 # 4. `~/.claude.json` read by the client: `sessions.read_mcp_config()`
 #    (dialogs.py:712) and `sessions.configured_mcp_servers(session.cwd)`
 #    (dialogs.py:848).
 # 5. `state.json` read directly, past the mirror: `AppState(migrate=True)`
-#    for the language (app.py:3002), `AppState().get_setting("icon_model")`
+#    for the language (app.py:3030), `AppState().get_setting("icon_model")`
 #    (dialogs.py:891, 1002), `updatecheck.py:308`.
 # 6. `chats.is_chat_cwd`: a service cwd compared with a chats root computed
 #    from this device's environment and `realpath`; about twenty call
-#    sites (window.py, sidebar.py, dialogs.py:770, newchatview.py:129,
+#    sites (window.py, sidebar.py, dialogs.py:770, newchatview.py:131,
 #    switcher.py:94, remotestore.py:551).
 # 7. `clisetup` beyond `validate`: `on_path()` (welcome.py:102 on every
-#    launch, welcomegate.py:37, prefs.py:1572, tokenrefresh.py:285, 308),
+#    launch, welcomegate.py:37, prefs.py:1572, tokenrefresh.py:285),
 #    `found_at()` (prefs.py:1575), `detect()` (welcome.py:248) and
 #    `apply()` (prefs.py:1567, welcome.py:336), which changes the client
 #    process's `PATH`.
 # 8. `toolclient`'s `os.path.realpath` on service paths: toolclient.py:372
-#    and :996.
+#    and :1006.
 # 9. Six native choosers that start at a path of the service's with no
 #    gate (`Gio.File.new_for_path` with no read, so the walker sees
-#    nothing): window.py:2269, 2284, 2899, 3498 (from
-#    `_visible_project_dir`), terminal.py:4938 (the composer's attach),
+#    nothing): window.py:2309, 2324, 2948, 3547 (from
+#    `_visible_project_dir`), terminal.py:4956 (the composer's attach),
 #    sandboxchip.py:449; and the composer's attach mentions the picked
 #    path of this device to the service's CLI, where a drop of the same
 #    file uploads. (The three whose starting folder IS read are gated and
-#    on `LOCAL_EXTRAS`: prefs.py:480, clonedialog.py:389, window.py:6967.)
+#    on `LOCAL_EXTRAS`: prefs.py:480, clonedialog.py:389, window.py:7027.)
 #    All of it is PR-3.2's path picker by the spec's 3.11.
 # Lesser: this device's `Path.home()` sent as a service cwd
-#    (terminal.py:1192, 1967, 2033, 2376; sidebar.py:2414; window.py:1966;
-#    D39's fallback absorbs it) and used to abbreviate service paths
-#    (`formatting.display_path`, formatting.py:405, twenty call sites;
-#    clonerepo.py:309).
+#    (terminal.py:1195, 1970, 2037, 2384; sidebar.py:2414; window.py:2006;
+#    D39's fallback absorbs it) and used to abbreviate service paths:
+#    `formatting.display_path` (formatting.py:405, some twenty call
+#    sites), clonerepo.py:309, and `sidebar._abbreviate_path`
+#    (sidebar.py:158-168: the "New session in {path}" labels at :301,
+#    :315 and :652, and every session row's path label at :878, the one
+#    every row shows; missed until the Fable review of PR 615, and D54
+#    sends it with item 1).
+# For the ruling, not a read: `footer_apps` is a `SERVICE_SETTINGS` key
+#    (state.py:330, :517) whose values are desktop-entry ids of the apps
+#    of the device that set them. Preferences hides the group from a
+#    client that is not local, which reads the setting as "apps on the
+#    service's machine"; the setting's comment does not say which.
 #
 # Added by the implementer's sweep (scratch script: every call from a
 # walked module into a function of an unwalked one that touches the disk
 # or a process, plus a grep of the walked modules for `realpath`,
 # `expanduser`, `abspath`, `tempfile`, `os.kill`; method calls on objects
-# were matched by name only, so this is not exhaustive either):
+# were matched by name only, so this is not exhaustive either; re-run on
+# 2026-10-13 against the tree the fix rounds left: the same calls, no new
+# one, and the two new unwalked modules, `gitfresh` and `quitrules`, read
+# nothing):
 # - `os.path.expanduser` with this device's home on a path of the
 #   service's: `linkpatterns.resolve_path` (linkpatterns.py:142: a `~/x`
 #   reference printed in the terminal), `gitloads.py:457` (show_diff's
 #   path argument), and `clonerepo.parent_directory` / `destination`
 #   (clonedialog.py:118, 331, 336, 338, 385; prefs.py:464, 477: the
 #   `clone_directory` setting, a service setting holding `~/…`).
-# - `gitinfo`'s `.git` reads (`gitfiles.*`, some twenty call sites in
+# - `gitinfo`'s `.git` reads (`gitfiles.*`, some thirty call sites in
 #   gitinfo.py) and `gitpage`'s `gitops.read_diff` / `side_bytes` /
-#   `tree_state_signature` (gitpage.py:1285, 1286, 1359) run on this
+#   `tree_state_signature` (gitpage.py:1315, 1316, 1389) run on this
 #   device when the service's hello lacks the `git` capability
 #   (`App` logs "git runs locally" and installs no transport). Every
 #   service since PR-2.1 has the capability, so this is a fallback for an
-#   older service, which the protocol window does not admit today.
+#   older service, which the protocol window does not admit today. The
+#   three `subprocess.run` sites of `RECORDED` below are the same
+#   fallback, seen by the walker.
 # - Seen and judged the device's own (not service facts): the update
 #   check's `prstatus.gh_succeeds` / `gh_json` (updatecheck.py:169, 191:
 #   this device's `gh` asking GitHub about Collins' releases),
 #   `licenses.legal_sections`, `notifycenter.sound_subtitle`
-#   (prefs.py:983: the notification sound's file), `connection.py:120`
-#   (`os.kill` of the service's pid), `blobcache`'s `realpath` and
-#   `mkstemp` (the cache), `desktopentry` / `buildinfo` / `app`
-#   `.resolve()` of the package's own path.
-# - The walker's vocabulary has no `realpath`, `expanduser`, `abspath`,
-#   `tempfile`, `os.kill` or launcher (`Gtk.FileLauncher`), and misses a
-#   receiver it has no hint for (`tmp.write_text` after `.with_suffix()`
-#   in uistate.py, `p.is_dir()` in app.py): all on device files today.
+#   (prefs.py:983: the notification sound's file), `connection.py:144`
+#   (`os.kill` of the service's pid).
 #
-# Whether the walker should cover such modules, and learn those calls, is
-# part of the same ruling.
+# **What the walker cannot see** (`tests/pathless.py`; every form, as of
+# the 2026-10-13 round, which closed the cheap ones: an `import … as`
+# alias, `from os import path as P`, `io.open` / `builtins.open`,
+# `glob.*`, `tempfile.*`, `os.path.realpath`, a chain through a path's
+# own methods (`Path(p).expanduser().resolve().is_dir()`), `Path.home()`,
+# a `Path`-annotated or `Path`-defaulted parameter, a tuple assignment, a
+# loop or comprehension over `map(Path, …)` / `.iterdir()`, a name bound
+# to a bound name, the method names only a path has on any receiver at
+# all (`is_dir`, `is_file`, `read_text`, `read_bytes`, `write_bytes`,
+# `iterdir`, `rglob`, `is_symlink`, …), `Gio.File`'s `query_exists` and
+# the rest of `query_*`, `Gio.File.new_for_uri` and
+# `new_for_commandline_arg`, `GLib.file_*` / `spawn_*` /
+# `find_program_in_path`, `Gio.Subprocess`, a site's function handed on
+# or bound without being called (`run=subprocess.run`, `map(os.path.isdir,
+# ps)`, `fn = os.path.isdir`), `getattr(os.path, …)`, and the GTK
+# constructors and setters that open a file by path). Still unseen, and a
+# reviewer's to catch:
+# - **A helper's read.** A call into a function of a module the walker
+#   does not walk (`sessions`, `providers`, `chats`, `clisetup`,
+#   `clonerepo`, `toolclient`, `panelhistory`, `gitops`, …) or into one
+#   of the walked module's own functions: the site is named by the
+#   function the read is written in, never by its callers. Everything
+#   above this paragraph is of this kind.
+# - **A receiver with no hint**, for the method names other objects use
+#   too: `exists`, `stat`, `rename`, `replace`, `resolve`, `unlink`,
+#   `mkdir`, `rmdir`, `open`, `glob`, `touch`, `chmod`, `walk`, `lstat`,
+#   `samefile` and `write_text` (which is also `Session.write_text`) on a
+#   bare parameter (`p.exists()`), an attribute (`self._thing.unlink()`),
+#   a call's result (`somewhere(p).exists()`), a subscript, or a name
+#   bound through a container or another function. Names carrying
+#   `path`, `file`, `dir`, `target`, `folder`, `root`, `dest` or `source`
+#   and names bound to a path in the same function are seen.
+# - **The launchers**: `Gtk.FileLauncher`, `Gtk.UriLauncher`,
+#   `Gio.AppInfo.launch` / `launch_uris` / `launch_default_for_uri`,
+#   `open_containing_folder`. They open nothing themselves; they hand a
+#   path to a program of this device's, which is what a local extra is.
+#   Every one today is gated by hand or works on this device's cached
+#   copy (D51): attachpanel.py:498-516, lightbox.py:339, 776,
+#   terminal.py:315-318, 806, window.py:6061, 6361, footerapps.py:92,
+#   120, openwith.py:163, copylabel.py:59 (GitHub, releases, the `gh`
+#   install page).
+# - **Not reads, but this device's facts applied to a service path**:
+#   `os.path.expanduser`, `os.path.abspath`, `os.getcwd`-relative joins,
+#   `os.environ`, `Path.home()` used as a value.
+# - `os.kill` and the other signals; `Gdk.FileList` and the clipboard's
+#   file formats (behind `clipboard_scope`, read by hand).
+# - A read through another library: `json.load` and the like on a handle
+#   are seen at the `open`; `zipfile`, `tarfile`, `sqlite3`,
+#   `configparser`, `mimetypes`, `importlib.resources`, `GLib.KeyFile`,
+#   `Gio.DesktopAppInfo` are not.
+# - A function fetched some other way: out of a dict or a list, through
+#   `functools.partial` of a bound name, `eval` / `exec` / `__import__`;
+#   a bare `open` handed on (`map(open, …)`); a name the module rebinds
+#   after importing it.
+# - The modules themselves: only the GTK modules and `CLIENT_HELPERS` are
+#   walked. A new GTK-free module the client calls for files is unseen
+#   until it is added to `CLIENT_HELPERS`.
+# And about `LOCAL_EXTRAS`' rule (`pathless.function_asks_local`): it
+# proves that every call of the site in its function runs after
+# `apilink.is_local()` answered yes, in three shapes (an earlier
+# returning refusal in the function's own body; inside `if <ask>:`; after
+# the ask in the same `and`). An ask after the read, in another branch,
+# inside a lambda that is never called, bound to a name first, the bare
+# attribute, or another object's `is_local()` does not count. It does not
+# prove that `apilink` was not rebound in the function, nor anything
+# about a helper the function calls before it asks, nor about a read of
+# the kinds above. All sixteen were read by hand as well.
+#
+# Whether the walker should cover the unwalked modules is part of the
+# same ruling.
 UNRULED = frozenset(
     {
         # The clone dialog: whether the clone's folder is there once the job
@@ -275,4 +394,31 @@ UNRULED = frozenset(
     }
 )
 
-ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED
+# Neither this device's files nor local extras, and seen by the walker
+# only since 2026-10-13: each is a site's function named as a default
+# argument, not called where it is written (`run=subprocess.run`,
+# `exists=os.path.exists`), which the walker did not read before. D50's
+# rule for what is neither: recorded, not moved. No ruling names these
+# four (D54 was made on the three above); they go with the next one.
+RECORDED = frozenset(
+    {
+        # The local runner `gitops.run_git` falls back to when no transport
+        # is installed (a service whose hello lacks the `git` capability:
+        # the fallback recorded above for `gitinfo` and `gitpage`). With the
+        # transport, which every service since PR-2.1 has, `run` is unused
+        # and git runs on the service. Callers: gitpage.py:1210, 1322
+        # (the breadcrumb's subject, the commit card), toolclient.py:160.
+        "gitloads:commit_message:subprocess.run",
+        "gitloads:commit_subject:subprocess.run",
+        "gitloads:resolve_commit:subprocess.run",
+        # show_diff's `file` argument: a relative path is taken against the
+        # agent's cwd when it is only there, and "there" is asked of this
+        # device's disk when the client's half runs it (toolclient.py:566,
+        # :620); the service's half asks its own (service/diffs.py:200). A
+        # client on another machine answers "not there" and keeps the path
+        # against the repository root, which is the common case anyway.
+        "gitloads:diff_file_path:os.path.exists",
+    }
+)
+
+ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED | RECORDED
