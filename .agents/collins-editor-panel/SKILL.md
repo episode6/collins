@@ -258,7 +258,12 @@ pathless walker reads as `Path` methods):
   `TerminalTab.ask_can_open_in_editor(path, then)` is `can_open_in_editor`
   over it (the window's `_open_in_editor` asks each tab's root in turn on
   one worker; `open_in_editor` and `show_image` defer their tool reply;
-  a clicked path or image and an attachment wait for the answer). The
+  a clicked path or image and an attachment wait for the answer). A
+  picture's ask goes through `TerminalTab.ask_image_open`: the lightbox
+  shows one at a time and two asks close together (the gallery's arrow
+  twice, two Ctrl+clicks) land in either order, so the tab numbers them
+  (`editorfiles.LatestAsk`) and an older landing presents nothing; a
+  remote attachment, never asked, takes a number too. The
   Agent files list (`set_agent_files`: one pass of stats in flight, the
   latest paths kept), a fresh open (the load's worker refuses one outside
   the root; a reload is not confined, so a file a re-root left open

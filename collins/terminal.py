@@ -742,7 +742,7 @@ def _present_image(terminal: Vte.Terminal, path: str) -> None:
     # what it is, and the transcript's own snippet fills the label in
     # later (attachrecords lets context land in an empty slot).
     tab.record_attachment(path)
-    tab.ask_can_open_in_editor(path, present)
+    tab.ask_image_open(path, present)
 
 
 def _setup_smooth_scroll(terminal: Vte.Terminal) -> None:
@@ -1911,6 +1911,7 @@ class TerminalTab(Gtk.Box):
         # again by the service (`cwd.settle` with `judge`, PR-2.4).
         self._editor.set_follow_judge(self.session.judge_cwd)
         self._editor_detached = False  # pane reparented into its own EditorWindow
+        self._image_asks = editorfiles.LatestAsk()  # the lightbox's opens, newest wins
         self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._outer.set_wide_handle(True)
         self._outer.set_resize_start_child(True)
@@ -3838,9 +3839,10 @@ class TerminalTab(Gtk.Box):
             )
 
         if one.remote:
+            self._image_asks.take()  # an older ask still out must not replace this
             present(False)
         else:
-            self.ask_can_open_in_editor(path, present)
+            self.ask_image_open(path, present)
 
     def _toggle_attachments_dock(self) -> None:
         """The panel chrome's dock/float button."""
@@ -5556,6 +5558,20 @@ class TerminalTab(Gtk.Box):
             lambda kind, value: then(kind == "ok" and bool(value)),
             name="editor-inside",
         )
+
+    def ask_image_open(self, path: str | Path, then: Callable[[bool], None]) -> None:
+        """`ask_can_open_in_editor` for a picture about to be shown in the
+        lightbox, which shows one at a time: the newest ask wins, and an
+        older ask's landing is dropped (`editorfiles.LatestAsk`), so two
+        opens close together (the gallery's arrow twice, two Ctrl+clicks)
+        never leave the older picture on top with its own `navigate`."""
+        token = self._image_asks.take()
+
+        def landed(inside: bool) -> None:
+            if self._image_asks.current(token):
+                then(inside)
+
+        self.ask_can_open_in_editor(path, landed)
 
     def open_in_editor(self, path: str | Path, cursor: list | None = None) -> None:
         """Open *path* in this tab's editor, revealing the panel if it is

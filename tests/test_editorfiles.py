@@ -12,6 +12,7 @@ from collins.editorfiles import (
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
     NEWLINES,
+    LatestAsk,
     LoadGuard,
     PaneLayout,
     PasteError,
@@ -1269,3 +1270,29 @@ def test_walk_files_skips_a_name_that_is_not_utf8_and_never_descends_one(tmp_pat
     for path in paths:
         path.encode("utf-8")
 
+
+# -- LatestAsk: the lightbox's newest ask wins (the Fable review of PR 611, should-fix 2) --
+
+
+def test_latest_ask_only_the_newest_token_is_current():
+    asks = LatestAsk()
+    first = asks.take()
+    assert asks.current(first)
+    second = asks.take()
+    assert asks.current(second) and not asks.current(first)
+    # Landings in either order: only the newest presents.
+    landed = [token for token in (second, first) if asks.current(token)]
+    assert landed == [second]
+    landed = [token for token in (first, second) if asks.current(token)]
+    assert landed == [second]
+    third = asks.take()
+    assert asks.current(third) and not asks.current(second)
+
+
+def test_latest_ask_a_take_with_no_landing_still_cancels_the_older():
+    """A remote attachment presents at once without asking; its take makes
+    an older ask's landing present nothing over it."""
+    asks = LatestAsk()
+    older = asks.take()
+    asks.take()
+    assert not asks.current(older)

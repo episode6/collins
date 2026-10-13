@@ -787,3 +787,27 @@ def parse_copied_files(text: str) -> tuple[list[str], bool]:
     paths = [path for uri in lines[1:] if (path := path_from_file_uri(uri)) is not None]
     return paths, cut
 
+
+
+class LatestAsk:
+    """The order rule for the lightbox, which shows one picture at a time
+    (the Fable review of PR 611, should-fix 2): every image open asks the
+    service whether the tab's editor could open the file and presents when
+    the answer lands, and two asks close together (the gallery's arrow
+    pressed twice, two Ctrl+clicks) may land in either order. `take()`
+    numbers an ask and `current(token)` says whether it is still the newest,
+    so an older landing presents nothing over a newer picture."""
+
+    __slots__ = ("_count",)
+
+    def __init__(self) -> None:
+        self._count = 0
+
+    def take(self) -> int:
+        """A new ask: its token. Every earlier token stops being current."""
+        self._count += 1
+        return self._count
+
+    def current(self, token: int) -> bool:
+        """Whether *token* is the newest ask's."""
+        return token == self._count
