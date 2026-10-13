@@ -447,7 +447,10 @@ never for bulk archives. The transcript read is the service's
 (the `worktree.check` job, `{session}` → a result of `removable`, the
 worktree state or null, and `shares`, whether the session runs on as a
 background agent or one works in there: the transcript read on the job's
-thread, the sharing judged on the service's main loop), awaited as a job
+thread, the sharing judged on the service's main loop; a verdict that
+does not land within `core.LANDING_WAIT_S` answers `shares: True`, the
+safe direction — a false "unshared" would trash a worktree an agent
+works in), awaited as a job
 event; the open tabs that may
 work in it are the window's to count (`_worktree_in_use`). The archive's
 Undo (`_undo_archive_now`) restores

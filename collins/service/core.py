@@ -191,6 +191,9 @@ ALREADY_RUNNING_MSGID = protocol.ALREADY_RUNNING_MSGID
 # How long stop_sessions waits for every close flow (the agent's exit
 # budget, the shell's, the SIGKILL grace) before shutting what is left.
 STOP_BOUND_S = 30.0
+# How long a job's thread waits for its main-loop landing (the repair's
+# forward, the worktree ask's sharing verdict) before reporting anyway.
+LANDING_WAIT_S = 10.0
 
 # How often the archive sweep asks autodelete whether a day has passed
 # (the hour the client's update check rode before PR-1.12d).
@@ -1725,10 +1728,11 @@ class ServiceCore:
                 landed.set()
 
         background._land(land)
-        if not landed.wait(10):
+        if not landed.wait(LANDING_WAIT_S):
             # The result is reported either way; the forward lands when the
             # loop frees up. Said, so a stuck loop is visible in the log.
-            log.warning("session.repair: the main loop took over 10 s to record the link; reporting anyway")
+            log.warning("session.repair: the main loop took over %s s to record the link; reporting anyway",
+                        LANDING_WAIT_S)
         return {"found": found}
 
     def _worktree_check_job(self, job: jobs.Job, args: dict) -> dict:
@@ -1739,7 +1743,10 @@ class ServiceCore:
         whether it is not the client's to take — the session runs on as a
         background agent, or one works in there. The result is
         ``removable`` (the worktree state, or None) and ``shares``. The tabs
-        that may work in it are the client's to count."""
+        that may work in it are the client's to count. A verdict that never
+        lands within `LANDING_WAIT_S` is ``shares: True``: the safe answer,
+        since a false "unshared" trashes a worktree an agent works in and a
+        false "shared" only keeps one."""
         session_id = args.get("session")
         if not session_id:
             return {"removable": None, "shares": False}
@@ -1759,8 +1766,10 @@ class ServiceCore:
                     landed.set()
 
             background._land(land)
-            if not landed.wait(10):
-                log.warning("worktree.check: the main loop took over 10 s to judge sharing; saying unshared")
+            if not landed.wait(LANDING_WAIT_S):
+                log.warning("worktree.check: the main loop took over %s s to judge sharing; saying shared",
+                            LANDING_WAIT_S)
+                shares[0] = True
         return {"removable": _jsonable(state), "shares": bool(shares[0])}
 
     def sync_transcript_paths(self) -> None:

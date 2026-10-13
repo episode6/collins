@@ -1858,6 +1858,27 @@ def test_a_worktree_check_reads_the_transcript_on_the_service(app_state, project
         pump(0.3)
 
 
+def test_a_worktree_check_that_never_lands_says_shared(app_state, projects_dir, tmp_path, monkeypatch):
+    """A main loop that does not land the sharing verdict within
+    `LANDING_WAIT_S` answers ``shares: True``: the safe direction (a false
+    "unshared" trashes a worktree an agent works in; a false "shared" keeps
+    one). PR 606's verification nit."""
+    from collins.service import core as core_mod
+
+    _root, ids = projects_dir
+    core, _store, _poller, srv, _client, _ends = _store_core(app_state, tmp_path)
+    try:
+        monkeypatch.setattr(core_mod, "LANDING_WAIT_S", 0.05)
+        core.background._land = lambda fn, *args: None  # the landing never runs
+        result = core._worktree_check_job(None, {"session": ids["alpha1"]})
+        assert result == {"removable": None, "shares": True}
+        # Nothing to judge without a session: no wait, no claim.
+        assert core._worktree_check_job(None, {}) == {"removable": None, "shares": False}
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
 def test_store_forget_removes_the_history_file_and_the_box(app_state, projects_dir, tmp_path):
     from collins import panelhistory
 
