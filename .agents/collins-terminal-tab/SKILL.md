@@ -430,8 +430,16 @@ candidate (the token under the pointer stands in) is not claimed and opens
 on the reply. The transcript is the service's file:
 `transcriptlinks.fetch(session)` is `store.transcript-tail`, answered by
 `service/transcripttail.py` (the last 2 MiB parsed once per size and mtime,
-bounded by `protocol.TRANSCRIPT_LINKS_*`, the path off the store's row and
-checked by `transcript_path_allowed`); the client never opens it, and
+bounded by `protocol.TRANSCRIPT_LINKS_*` in `bound`, the bytes measured as
+the frame writes them with `protocol.json_bytes`, the path off the store's
+row and checked by `transcript_path_allowed`); the client never opens it.
+**`bound` drops every link UTF-8 cannot encode**: the reply is validated
+whole, so one lone surrogate (the CLI cuts tool output by UTF-16 unit, and
+both link patterns take a surrogate as part of a token) would otherwise
+cost the session every link of its tail until the tail moved past it; a
+reply's list is fitted per item on the service, never left to the
+validator. `fs.names` holds the same rule for a name that is not UTF-8 on
+disk (`names_reply`, as `projectfiles.list_entries` for `fs.list`), and
 `transcriptlinks.completions` (pure) still decides what the screen
 corroborates. `_RootNameLinks` asks `fs.names {root}` (non-directory names,
 5000 at most, `names` a `protocol.CHUNKED_JSON_FIELDS` so a full bound of long
@@ -446,8 +454,16 @@ itself, as `check_root_name_links.py` does). "Is this directory a git
 checkout" (the worktree box, the sidebar project menu, the header's one-off
 entry, a sibling's worktree launch) is `checkouts.ask` — an `fs.stat` of
 `.git` off the main loop, False on any failure: the new-chat screen builds its
-checkbox hidden and shows it when the answer lands (`NewChatView.set_is_git`;
-`TerminalTab.when_checkout_known` holds a Send that came first), the menus
+checkbox hidden and shows it when the answer lands (`NewChatView.set_is_git`).
+A Send that beats the answer (nothing a person does against a local
+service, a line's typing against a remote one) must not read the hidden box
+as unticked, which would launch a default-on project plain: until the
+answer the screen sends the box's *wish* (`newchat.worktree_wish`, `is_git`
+None), `MainWindow._on_new_chat_send` holds the launch on
+`TerminalTab.when_checkout_known` and launches with the wish and the
+answer, one launch per page however often Send is pressed meanwhile
+(`_new_chat_sends_held`); a draft's restored choice is kept through the
+wait too (`newchat.worktree_draft_choice`). The menus
 build when it lands (an ask a newer one overtook adds nothing), and
 `start_background_session(..., is_git=)` is handed the answer
 (`_BackgroundSpawn.begin` asks only when the launch would use a worktree).
