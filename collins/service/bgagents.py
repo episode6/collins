@@ -156,9 +156,11 @@ class BackgroundAgents:
             fetch=fetch_ids, on_change=self._on_ids_changed
         )
         if poller is not None:
-            poller._on_change = self._on_ids_changed
+            poller.set_on_change(self._on_ids_changed)
         # A /bg fed and not yet listed: session id -> the safety timer.
         self.pending: dict[str, int] = {}
+        # A confirmed handoff's exit nudge not yet fed: session id -> timer.
+        self._nudges: dict[str, int] = {}
         # The subset whose detach isn't confirmed yet: their rows stay
         # disabled (`backgrounding`), and the gate is shut app-wide.
         self.detaching: set[str] = set()
@@ -180,11 +182,16 @@ class BackgroundAgents:
         self.refresh_affordances()
 
     def stop(self) -> None:
+        """Leave no timer, no listener and no landing behind: the safety
+        timers, a pending exit nudge, the busy poll, the store's handler."""
         self._stopped = True
         self.poller.stop()
         for source in self.pending.values():
             self._source_remove(source)
         self.pending.clear()
+        for source in self._nudges.values():
+            self._source_remove(source)
+        self._nudges.clear()
         if self._busy_poll is not None:
             self._source_remove(self._busy_poll)
             self._busy_poll = None
@@ -352,7 +359,13 @@ class BackgroundAgents:
         self.state.set_pending_detach(old_id, provider=provider.id, cwd=cwd or "", uuid=old_uuid or "")
         # Finished jobs included, to mirror the matcher's candidate pool. Read
         # here, before the /bg is typed, as the window read it: an agent the
-        # /bg itself makes must not be in it.
+        # /bg itself makes must not be in it. This read (the transcript's
+        # first uuid above and `claude agents --json`, up to its 2 s timeout)
+        # runs on the service's main loop inside `_req_close`, stalling every
+        # client's request and every pty's output for its duration: the
+        # price of a `known` set that predates the /bg. Once the service
+        # types the /bg itself from a landing, the read can move to the
+        # thread ahead of it.
         try:
             known = {a.session_id for a in provider.background_agents(include_finished=True)}
         except Exception:
@@ -389,12 +402,14 @@ class BackgroundAgents:
         # The agent list shows the detached session already: refresh now, so
         # the line lands even if the watch directory's monitor misses it.
         self.poller.refresh()
-        self._timeout_add(NUDGE_DELAY_MS, self._nudge, record)
+        self._nudges[old_id] = self._timeout_add(NUDGE_DELAY_MS, self._nudge, record, old_id)
 
-    def _nudge(self, record) -> bool:
+    def _nudge(self, record, old_id: str = "") -> bool:
         """The CLI was asked to leave by /bg yet may still own the terminal,
         parked on its agent-list screen: feed the exit keystroke (a no-op
-        once the CLI has exited)."""
+        once the CLI has exited). Kept in `_nudges` until it fires so
+        `stop()` can cancel it."""
+        self._nudges.pop(old_id, None)
         if not getattr(record, "exited", False):
             try:
                 record.session.nudge_exit()

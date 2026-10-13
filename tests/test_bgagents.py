@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 
 from collins.providers import BackgroundAgent
-from collins.service.bgagents import PENDING, RUNNING, WATCH_ATTEMPTS, BackgroundAgents
+from collins.service.bgagents import NUDGE_DELAY_MS, PENDING, RUNNING, WATCH_ATTEMPTS, BackgroundAgents
 from collins.sessions import discover_sessions
 from collins.store import SessionStore
 
@@ -48,6 +48,9 @@ class FakePoller:
         self.started = None
         self.polling = None
         self.refreshes = 0
+
+    def set_on_change(self, on_change):
+        self._on_change = on_change
 
     def start(self, dirs):
         self.started = list(dirs)
@@ -431,3 +434,28 @@ def test_stop_leaves_no_timer_and_no_listener_and_lands_nothing(world):
     bg.repair_landed({"session": old, "old": old}, "fork-0009")
     bg._on_backgrounded(attached, old, "fork-0009")
     assert state.resolve_forward(old) == old
+
+
+def test_stop_cancels_a_pending_exit_nudge(world):
+    """A confirmed handoff schedules the exit nudge `NUDGE_DELAY_MS` later;
+    a stop in between removes it (the review's nit 4: the nudge was the one
+    timer `stop()` left, firing on a record the pty server had closed)."""
+    store, state, ids = world
+    old = ids["alpha1"]
+    provider = FakeProvider([])
+    record = FakeRecord(FakeSession(old, provider))
+    bg, _poller, timers, _sleeps = make(world, provider, record)
+    bg.start()
+    bg.mark_backgrounding(old)
+    bg._on_backgrounded(record, old, "")
+    assert any(when == NUDGE_DELAY_MS for when, _fn, _args in timers.pending.values())
+    bg.stop()
+    assert not timers.pending and not bg._nudges
+    # Fired instead: it lets go of its own entry.
+    bg2, _poller, timers2, _sleeps = make(world, provider, record)
+    bg2.start()
+    bg2.mark_backgrounding(old)
+    bg2._on_backgrounded(record, old, "")
+    timers2.fire(NUDGE_DELAY_MS)
+    assert not bg2._nudges and record.session.nudged
+    bg2.stop()

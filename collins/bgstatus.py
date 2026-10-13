@@ -165,6 +165,11 @@ class BackgroundStatusPoller:
         self._poll_source: int | None = None
         self._stopped = False
 
+    def set_on_change(self, on_change: Callable[[set[str]], None]) -> None:
+        """Replace the listener a change in the ids runs (the service's
+        `BackgroundAgents` takes over a poller built for it)."""
+        self._on_change = on_change
+
     def start(self, watch_dirs: list[Path]) -> None:
         """Monitor the watch dirs as refresh triggers and do a first refresh.
         A dir that can't be monitored (e.g. doesn't exist yet) is skipped —

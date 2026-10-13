@@ -64,8 +64,10 @@ DISMISSED_SETTING = "gh_welcome_dismissed"
 # looking at a new window rather than mid-sentence in a session.
 _DELAY_MS = 1500
 # The service asks gh when this client subscribes and answers in
-# `service.status` once it knows: asked again this often, this many times,
-# before the launch says nothing.
+# `service.status` once it knows: asked again this often, this many times
+# (15 s in all, on `service_gh_status`'s worker thread, never the main loop)
+# before the launch says nothing — the bound an older service that never
+# sets `gh` runs into.
 _STATUS_POLL_S = 0.5
 _STATUS_TRIES = 30
 
