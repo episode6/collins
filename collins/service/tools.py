@@ -138,8 +138,8 @@ class SessionTools:
     """The dispatcher the socket service is handed. See the module docstring.
 
     *get_setting* reads the service's settings; *sessions* lists every
-    session the service holds (`service.session.Session`s; through Phase 1
-    the tabs' own, the app's lookup); *sandbox_host* is the SandboxHost or
+    session the service holds (`service.session.Session`s: the core's own
+    records, `ServiceCore._sessions_list`); *sandbox_host* is the SandboxHost or
     None; *send_tool(session, event)* hands a `tool` event to the session's
     active client and answers which client took it (None: no client is
     attached); *store* is the service's SessionStore, *state* its AppState,

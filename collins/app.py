@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-12. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -2123,9 +2123,9 @@ class App(Adw.Application):
     # offered, the tools a session's own data serves) and serves the socket
     # every session's MCP shim relays through (ServiceCore.start_mcp). The
     # app is a client of the UI-bound ones: toolclient.ToolClient answers the
-    # `tool` events with the tab their session lives in. Through Phase 1 the
-    # service's records of its sessions are the tabs' own Sessions, which is
-    # the sessions are its own (ServiceCore.sessions, PR-1.12a).
+    # `tool` events with the tab their session lives in. The sessions are
+    # the service's own (ServiceCore.sessions, PR-1.12a); a tab holds the
+    # mirror of its one (clientsession.ClientSession).
 
     def _start_session_tools(self) -> None:
         """The tools' dispatcher on the service, its socket and the

@@ -202,8 +202,9 @@ class ClientSession:
     def close_action(state: str | None) -> str | None:
         """What a `close` event asks of the window: `budget` (the graceful
         close's poll ran out on the service) is the forced close the
-        window's own budget always was ("force"); `exited` asks nothing —
-        the pty's exit reaches the tab on its own."""
+        window's own budget always was ("force"); any other word asks
+        nothing (the pty's exit is no `close` state: it reaches the tab as
+        `pty-exited`)."""
         return "force" if state == "budget" else None
 
     def exit(self) -> None:

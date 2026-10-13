@@ -136,10 +136,11 @@ each taken from the code the message replaces:
   by `store.lookup`, and a session once sent is kept current until it is
   `removed`. The store's mutations are `store.*` requests named after
   `SessionStore`'s methods, bulk ones carrying up to `ROWS_MAX` sessions;
-  `store.flags` carries the activity tracker's verdicts (busy, unread,
-  status, the background handoff) while the tracker still runs in the
-  client (Phase 1), and the service sets them and sends them back as
-  `item` fields. `trust.check` and `trust.grant` are the CLI's folder
+  `store.flags` carries the window's word for a session's row (status,
+  `unread`, the background handoff; the tracker runs on the service since
+  PR-1.12a, so `busy` from a client is refused), and the service sets them
+  and sends them back as `item` fields. `trust.check` and `trust.grant`
+  are the CLI's folder
   trust (`trust.py`), which only the service's machine can read and
   write.
 - `pr` carries a session's PR records in `prstatus.to_record`'s shape, as
@@ -325,8 +326,9 @@ U64_MAX = 0xFFFF_FFFF_FFFF_FFFF
 CLIENT = "client"
 SERVICE = "service"
 PEERS = frozenset({CLIENT, SERVICE})
-# An event form either peer may send (`focus`: the client's focus report,
-# and the service asking the active client to focus a terminal, PR-1.12a).
+# Every form has one sender: `focus` is the client's focus report and
+# `focus.terminal` the service asking the active client to focus a
+# terminal (PR-1.12a; an either-peer `focus` was overruled in review).
 
 REQUEST = "request"
 EVENT = "event"
@@ -1008,12 +1010,13 @@ _TABLE: tuple[MessageType, ...] = (
             }
         ),
         # The close poll's word: a budget ran out (the window answers with
-        # a forced close or a dialog), or the shell exited.
+        # a forced close or a dialog). The shell's exit is not a `close`
+        # state: it reaches a client as `pty-exited`.
         event=_event(
             SERVICE,
             {
                 "pty": _req(_PTY),
-                "state": _req(Field(K_STR, choices=frozenset({"budget", "exited"}), high=16)),
+                "state": _req(Field(K_STR, choices=frozenset({"budget"}), high=16)),
                 "phase": _SHORT,
             },
         ),
@@ -1337,7 +1340,7 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "store.flags",
-        "The activity tracker's verdicts for a session's row (Phase 1: it runs in the client).",
+        "The window's word for a session's row: status, unread, the handoff (busy is the service's).",
         request=_request(
             {
                 "session": _req(_ID),

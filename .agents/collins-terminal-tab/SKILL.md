@@ -501,8 +501,11 @@ swap 2 of §3.5:
   widget alone.
 - **The tab's end.** `TerminalTab.release_pty()` (from
   `MainWindow._on_close_page`, the final close) sends `close` (mode
-  `kill`: in Phase 1 every mode is SIGHUP plus the master closed, with
-  SIGKILL after the grace), detaches and closes the loopback client:
+  `kill`: SIGHUP plus the master closed, with SIGKILL after the grace;
+  `exit` and `background` are the session's graceful close on the service
+  — `Session.begin_close` — and a budget that runs out comes back as a
+  `close` event the window answers), detaches and closes the loopback
+  client:
   closing a tab ends the session (D12) until *Detach* in PR-1.12.
   `App.do_shutdown` shuts the loopback down, which finishes every pty on
   the spot, records its row gone and removes its model file (Phase 1:

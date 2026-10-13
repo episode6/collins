@@ -103,8 +103,8 @@ declarations (a panel shell never had them). A sandboxed one (``sandbox``
 with the session's ``sandbox_box``) runs `providers.sandboxed_shell_argv`
 around the shell, the launcher a sandboxed session's typed line starts
 with, on the plan the service's own records hold for that box (the
-*sandbox_plan* lookup: in Phase 1 the `Session` the box belongs to, still
-held by its tab), and is refused when there is none; the plan is the pty's
+*sandbox_plan* lookup: the `Session` the box belongs to, one of the core's
+own records, `session_for_box`), and is refused when there is none; the plan is the pty's
 (its row's ``plan``, read back as the shell's `sandbox_plan`), and a cwd
 inside the box's workspace other than where bwrap lands the shell is one
 queued ``cd`` away, typed before anything else. ``clear`` on a shell wipes

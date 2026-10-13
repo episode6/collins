@@ -57,10 +57,12 @@ The host. A Session tells its tab what happened, and asks it the few things
 only a widget knows, through a `SessionHost` — a plain listener object
 (`typing.Protocol`), chosen over GObject signals so a test can hand in a
 recorder and read back exactly what was asked and painted, in order, with no
-main loop. The tab implements it with a small private adapter
-(`terminal._TabHost`) so the tab's own namespace stays the tab's; it turns
-the session's reports into the tab's existing GObject signals
-("session-resolved", "fork-resolved", "process-exited", ...).
+main loop. The service implements it with the session's record
+(`hosting.SessionRecord`, PR-1.12a), which turns the session's reports into
+`session`, `cut`, `composer`, `focus.terminal`, `shells` and `close` events
+to the pty's attached clients; a tab's mirror (`clientsession.ClientSession`)
+raises them as the tab's existing GObject signals ("session-resolved",
+"fork-resolved", "process-exited", ...).
 
 The scheduler. Every timer, idle, thread and file monitor goes through a
 `Scheduler` (`GLibScheduler` by default: `GLib.timeout_add`,
@@ -1374,10 +1376,10 @@ class Session:
 
     def redraw_counts(self, startup_held: bool) -> bool:
         """Whether a redraw of the terminal reads as the agent working — the
-        verdict the window marks the session busy on (MainWindow.
-        _on_terminal_output). *startup_held* is the window's word that a
-        fresh spawn's ungated sources are still held (MainWindow.
-        _startup_held).
+        verdict the tracker marks the session busy on (`ServiceActivity.
+        on_settled`, once per output settle). *startup_held* is the
+        tracker's word that a fresh spawn's ungated sources are still held
+        (`ServiceActivity.startup_held`).
 
         It counts unless the terminal is merely answering the app — see
         EchoGate. Second opinion, gate or no gate: motion in the screen's
