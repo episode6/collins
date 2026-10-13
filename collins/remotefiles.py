@@ -200,14 +200,16 @@ def write(
     )
 
 
-def stat_path(path: str, root: str | None = None) -> Stat:
+def stat_path(path: str, root: str | None = None, timeout: float | None = None) -> Stat:
     """`fs.stat` of *path*: blocking, on the caller's thread (a worker's).
     *root* is what `inside` is of (every root the service knows when
-    None). Raises `RequestRefused`."""
+    None). *timeout* is for a caller something waits on (a held launch:
+    `checkouts.ask_answer`), CALL_TIMEOUT_S otherwise. Raises
+    `RequestRefused`."""
     message: dict = {"t": "fs.stat", "path": str(path)}
     if root is not None:
         message["root"] = str(root)
-    fields = apilink.call(message, timeout=CALL_TIMEOUT_S)
+    fields = apilink.call(message, timeout=CALL_TIMEOUT_S if timeout is None else timeout)
     size = fields.get("size")
     mtime = fields.get("mtime")
     return Stat(

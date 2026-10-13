@@ -274,9 +274,12 @@ def _setup_links(terminal: Vte.Terminal) -> None:
             # of falling through to the terminal. A click on no candidate at
             # all (the token under the pointer stands in) is left unclaimed.
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+        # The click's number, taken here in click order: its resolution and
+        # its stat land whenever they land (`_present_image`).
+        number = tab.link_clicks.take() if tab is not None else 0
         remotefiles.off_main(
             lambda: _click_target(kind, uri, from_screen, screen, roots, session_id),
-            lambda status, target: _on_click_resolved(terminal, status, target),
+            lambda status, target: _on_click_resolved(terminal, status, target, number),
             name="link-click",
         )
 
@@ -288,8 +291,9 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     terminal.add_controller(click)
 
 
-def _launch_uri(terminal: Vte.Terminal, uri: str) -> None:
-    """Open a clicked link the way its scheme deserves."""
+def _launch_uri(terminal: Vte.Terminal, uri: str, click: int = 0) -> None:
+    """Open a clicked link the way its scheme deserves (*click*: the
+    click's number, see `_present_image`)."""
     if uri.startswith("www."):
         uri = "http://" + uri  # the bare-host grammar's half of a URL
     if uri.startswith("file:"):
@@ -299,7 +303,7 @@ def _launch_uri(terminal: Vte.Terminal, uri: str) -> None:
         # it. path_from_file_uri sheds any #L10-style fragment.
         path = editorfiles.path_from_file_uri(uri)
         if path is not None:
-            _open_file_reference(terminal, path, None, None)
+            _open_file_reference(terminal, path, None, None, click)
             return
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
     else:
@@ -577,17 +581,20 @@ def _click_target(
     return "url", uri
 
 
-def _on_click_resolved(terminal: Vte.Terminal, status: str, target: object) -> None:
+def _on_click_resolved(
+    terminal: Vte.Terminal, status: str, target: object, click: int = 0
+) -> None:
     """The click's answer landed on the main loop (`PRIORITY_DEFAULT`): open
-    it, unless the terminal went while the service answered."""
+    it, unless the terminal went while the service answered. *click* is
+    the number the press took (`_present_image`)."""
     if status != "ok" or not target or terminal.get_root() is None:
         return
     kind, value = target
     if kind == "file":
         path, line, col = value
-        _open_file_reference(terminal, path, line, col)
+        _open_file_reference(terminal, path, line, col, click)
     else:
-        _launch_uri(terminal, value)
+        _launch_uri(terminal, value, click)
 
 
 class _RootNameLinks:
@@ -744,7 +751,7 @@ class _RootNameLinks:
 
 
 def _open_file_reference(
-    terminal: Vte.Terminal, path: str, line: int | None, col: int | None
+    terminal: Vte.Terminal, path: str, line: int | None, col: int | None, click: int = 0
 ) -> None:
     """Open a resolved file reference the way the reference deserves: images
     in the lightbox (any readable path, even outside the project — its own
@@ -768,7 +775,7 @@ def _open_file_reference(
             return
         inside = tab is not None and found.inside
         if editorfiles.is_image_path(path):
-            _present_image(terminal, path, inside)
+            _present_image(terminal, path, inside, click)
             return
         if not inside:
             _launch_default(terminal, path)
@@ -788,15 +795,23 @@ def _launch_default(terminal: Vte.Terminal, path: str) -> None:
     launcher.launch(terminal.get_root(), None, _on_link_launched)
 
 
-def _present_image(terminal: Vte.Terminal, path: str, can_edit: bool) -> None:
+def _present_image(terminal: Vte.Terminal, path: str, can_edit: bool, click: int = 0) -> None:
     """A clicked file reference turned out to be an image: lightbox over the
     window instead of handing it to the default app. Its "Open in Editor"
     button only appears when the click's own tab could actually open the
     file (*can_edit*: an editor exists and the path is inside its project,
     the service's answer `_open_file_reference` already holds) — routed
     through the window's `open-in-editor` action, which also handles a
-    popped-out editor window."""
+    popped-out editor window.
+
+    *click* is the number the press took on the main loop. A click is two
+    asynchronous steps before it gets here (its resolution, then the
+    stat), so two clicks close together land in either order: one older
+    than a click already presented presents nothing (`editorfiles.
+    ClickOrder`), and the newest click's picture is the one left up."""
     tab = terminal.get_ancestor(TerminalTab)
+    if tab is not None and not tab.link_clicks.presents(click):
+        return
     on_open = None
     if can_edit:
 
@@ -1699,7 +1714,8 @@ class TerminalTab(Gtk.Box):
         # Whether the new-chat screen's directory is a git checkout, as the
         # service answered (None until it does), and what waits for it.
         self._is_git_checkout: bool | None = None
-        self._checkout_waiters: list[Callable[[bool], None]] = []
+        self._checkout_waiters: list[Callable[[bool | None], None]] = []
+        self._checkout_asking = False  # an ask is out (`_ask_checkout`)
         self._history_key: str | None = None
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
@@ -1943,7 +1959,7 @@ class TerminalTab(Gtk.Box):
                 sandbox_available=sandboxstatus.probe_reason() == "",
             )
             self._new_chat.connect("changed", lambda *_a: self.emit("new-chat-changed"))
-            checkouts.ask(cwd or "", self._on_new_chat_checkout)
+            self._ask_checkout()
             self._new_chat.connect(
                 "send-requested",
                 lambda _v, text, worktree, sandbox, model, effort: self.emit(
@@ -2001,6 +2017,9 @@ class TerminalTab(Gtk.Box):
         self._editor.image_session = self.image_session
         self._editor_detached = False  # pane reparented into its own EditorWindow
         self._image_asks = editorfiles.LatestAsk()  # the lightbox's opens, newest wins
+        # Ctrl+clicks, numbered at the press: of two that end in the
+        # lightbox the newer click's picture stays (`ClickOrder`).
+        self.link_clicks = editorfiles.ClickOrder()
         self._outer = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, vexpand=True)
         self._outer.set_wide_handle(True)
         self._outer.set_resize_start_child(True)
@@ -2193,25 +2212,58 @@ class TerminalTab(Gtk.Box):
         service's answer (`checkouts.ask`); False until it lands."""
         return bool(self._is_git_checkout)
 
-    def when_checkout_known(self, then: Callable[[bool], None]) -> None:
-        """`then(is_git)` once the service has answered whether the new-chat
+    def when_checkout_known(self, then: Callable[[bool | None], None]) -> None:
+        """`then(answer)` once the service has answered whether the new-chat
         screen's directory is a git checkout: at once when it has, else when
         it lands. A Send that beats the answer (a round trip to a service
         on another machine is long enough to type a line in) waits here:
         the screen sends the hidden box's wish until then (`newchat.
-        worktree_wish`), so a default-on project is not launched plain."""
+        worktree_wish`), so a default-on project is not launched plain.
+
+        *answer* is True, False, or None when the service could not be
+        asked (`checkouts.ask_answer`: a refusal, no link, or nothing
+        within its ANSWER_TIMEOUT_S). None is not remembered: the box
+        stays out, the screen keeps its wish, and the next caller asks
+        again, so a Send after a failed answer is a fresh question."""
         if self._is_git_checkout is not None:
             then(self._is_git_checkout)
-        else:
-            self._checkout_waiters.append(then)
+            return
+        self._checkout_waiters.append(then)
+        self._ask_checkout()
 
-    def _on_new_chat_checkout(self, is_git: bool) -> None:
-        self._is_git_checkout = is_git
-        if self._new_chat is not None:
-            self._new_chat.set_is_git(is_git)
+    def _ask_checkout(self) -> None:
+        """Ask the service about the screen's directory, one ask at a time."""
+        if self._checkout_asking:
+            return
+        self._checkout_asking = True
+        checkouts.ask_answer(self.start_cwd or "", self._on_new_chat_checkout)
+
+    def _on_new_chat_checkout(self, answer: bool | None) -> None:
+        self._checkout_asking = False
+        if answer is not None:
+            self._is_git_checkout = bool(answer)
+            if self._new_chat is not None:
+                self._new_chat.set_is_git(bool(answer))
         waiters, self._checkout_waiters = self._checkout_waiters, []
         for then in waiters:
-            then(is_git)
+            then(answer)
+
+    def set_new_chat_held(self, held: bool) -> None:
+        """A Send is waiting for the checkout answer (`MainWindow.
+        _on_new_chat_send`): the whole screen (the box, the pickers, the
+        checkboxes, Send) is insensitive for the wait, so nothing typed or
+        picked after the Send is thrown away by the launch it is waiting
+        on, and a dead-looking Send is not pressed again. Undone when the
+        hold ends without a launch; a launch hides the screen for good."""
+        if self._new_chat is None:
+            return
+        self._new_chat.set_sensitive(not held)
+        if not held and self.get_mapped():
+            self._new_chat.focus()
+
+    @property
+    def new_chat_held(self) -> bool:
+        return self._new_chat is not None and not self._new_chat.get_sensitive()
 
     def new_chat_worktree_choice(self) -> bool | None:
         """The screen's worktree box as the user left it, None while it still
@@ -5728,9 +5780,12 @@ class TerminalTab(Gtk.Box):
         """`ask_can_open_in_editor` for a picture about to be shown in the
         lightbox, which shows one at a time: the newest ask wins, and an
         older ask's landing is dropped (`editorfiles.LatestAsk`), so two
-        opens close together (the gallery's arrow twice, two Ctrl+clicks,
-        an agent's `show_image` beside a user's gesture) never leave the
-        older picture on top with its own `navigate`. *dropped* hears a
+        opens close together (the gallery's arrow twice, an agent's
+        `show_image` beside a user's gesture) never leave the older picture
+        on top with its own `navigate`. A Ctrl+click on an image does not
+        come through here (its answer rides the click's own stat): clicks
+        are ordered among themselves by `editorfiles.ClickOrder`, and one
+        that presents takes a number here (`_present_image`). *dropped* hears a
         landing that was superseded (a tool reply must still land)."""
         token = self._image_asks.take()
 

@@ -49,8 +49,11 @@ downloads of each version, see the
   project menu's worktree entries and a sibling session's worktree launch
   ask the service whether the folder is a git checkout instead of looking at
   `.git` themselves, so those appear a moment after the screen or menu; a
-  Send that beats the answer waits for it, so a project whose new sessions
-  use a worktree by default still gets one. A link the transcript holds
+  Send that beats the answer waits for it (the screen greyed meanwhile),
+  so a project whose new sessions use a worktree by default still gets one,
+  and if the service cannot say within ten seconds nothing is started: the
+  screen comes back with its text and a note, rather than a session in the
+  main checkout when a worktree was asked for. A link the transcript holds
   with a broken character in it (tool output cut mid-emoji) is left out of
   the tail's answer instead of costing the session every other link.
   One visible difference: a Ctrl+click on text that looks like a path but is

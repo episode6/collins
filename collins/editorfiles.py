@@ -628,9 +628,14 @@ class LatestAsk:
     (the Fable review of PR 611, should-fix 2): every image open asks the
     service whether the tab's editor could open the file and presents when
     the answer lands, and two asks close together (the gallery's arrow
-    pressed twice, two Ctrl+clicks) may land in either order. `take()`
-    numbers an ask and `current(token)` says whether it is still the newest,
-    so an older landing presents nothing over a newer picture."""
+    pressed twice, an agent's `show_image` beside a user's gesture) may
+    land in either order. `take()` numbers an ask and `current(token)`
+    says whether it is still the newest, so an older landing presents
+    nothing over a newer picture. A Ctrl+click on an image reference is
+    not an ask of this kind (its answer comes with the click's own
+    resolution, several round trips after the press): clicks are ordered
+    by `ClickOrder`, and a click that presents takes a number here so an
+    older ask still out cannot land over it."""
 
     __slots__ = ("_count",)
 
@@ -645,3 +650,39 @@ class LatestAsk:
     def current(self, token: int) -> bool:
         """Whether *token* is the newest ask's."""
         return token == self._count
+
+
+class ClickOrder:
+    """The order rule for Ctrl+clicks that end in the lightbox (the
+    verification of PR 614): a click is resolved on a worker and then
+    statted, so two clicks close together land in either order, and the
+    lightbox keeps whichever was presented last. `take()` numbers a click
+    where it was made (the press, on the main loop) and `presents(number)`
+    is asked where it lands: False for a click older than one already
+    presented, so the newest click's picture is the one left up.
+
+    Not `LatestAsk`: most clicks are URLs and files for the editor, which
+    present nothing, and a number taken for each of those must not cancel
+    a picture an earlier click is still fetching."""
+
+    __slots__ = ("_count", "_presented")
+
+    def __init__(self) -> None:
+        self._count = 0
+        self._presented = 0
+
+    def take(self) -> int:
+        """A new click: its number."""
+        self._count += 1
+        return self._count
+
+    def presents(self, number: int) -> bool:
+        """Whether the click *number* may present now; records it when it
+        may. A click with no number (0: an open that was not a click) always
+        may, and orders nothing."""
+        if number <= 0:
+            return True
+        if number < self._presented:
+            return False
+        self._presented = number
+        return True

@@ -12,6 +12,7 @@ from collins.editorfiles import (
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
     NEWLINES,
+    ClickOrder,
     LatestAsk,
     LoadGuard,
     PaneLayout,
@@ -1022,6 +1023,35 @@ def test_latest_ask_a_take_with_no_landing_still_cancels_the_older():
     older = asks.take()
     asks.take()
     assert not asks.current(older)
+
+
+# -- ClickOrder: of two Ctrl+clicks on images the newer one's picture stays (PR 614) --
+
+
+def test_click_order_drops_an_older_click_landing_after_a_newer_one():
+    clicks = ClickOrder()
+    first, second = clicks.take(), clicks.take()
+    assert (first, second) == (1, 2)
+    # the first click's resolution is the slower: the second presents, the first does not
+    assert [n for n in (second, first) if clicks.presents(n)] == [second]
+    # in click order both present, the second over the first
+    clicks = ClickOrder()
+    first, second = clicks.take(), clicks.take()
+    assert [n for n in (first, second) if clicks.presents(n)] == [first, second]
+
+
+def test_click_order_is_not_disturbed_by_clicks_that_present_nothing():
+    """A URL or an editor file takes a number and never presents: an image
+    clicked before it still shows (what a `LatestAsk` per click would
+    drop)."""
+    clicks = ClickOrder()
+    image = clicks.take()
+    clicks.take()  # a URL, clicked after: opens in the browser, presents nothing
+    assert clicks.presents(image)
+    assert clicks.presents(image)  # the same click again is not older than itself
+    assert clicks.presents(0)  # an open that was no click orders nothing
+    later = clicks.take()
+    assert clicks.presents(later) and not clicks.presents(image)
 
 
 # -- the clipboard's hostile lines and odd names (review of PR 613) -----------------

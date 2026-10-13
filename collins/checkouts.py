@@ -10,9 +10,18 @@ checkbox, the sidebar's project menu, the header menu's one-off entry and a
 sibling session's launch all ask here instead of a `Path.exists` of their
 own.
 
-`is_checkout(stat)` is the pure rule (GTK-free, unit-tested); `ask` is the
-request. A refusal, no link, or any failure answers False: a worktree
-launch is then simply not offered, which is the safe direction.
+`is_checkout(stat)` is the pure rule (GTK-free, unit-tested). There are two
+requests, because a failure means two different things:
+
+- `ask` is for *offering* a worktree (a menu entry, a sibling's launch). A
+  refusal, no link, or any failure answers False: a worktree launch is then
+  simply not offered, which is the safe direction.
+- `ask_answer` is for a launch the user already asked to isolate (the
+  new-chat screen's Send). There False is not safe: launching plain would
+  put the session in the checkout the worktree was meant to protect. So a
+  failure is its own answer, None ("could not ask"), on which the caller
+  does not launch, and the ask has a short timeout of its own
+  (ANSWER_TIMEOUT_S) because a person is waiting on it.
 """
 
 from __future__ import annotations
@@ -35,15 +44,38 @@ def is_checkout(kind: str | None) -> bool:
     return kind in ("file", "dir")
 
 
-def ask(cwd: str, then: Callable[[bool], None]) -> None:
+# How long a held launch waits for its answer before "could not ask".
+ANSWER_TIMEOUT_S = 10.0
+
+
+def answer_of(kind: str, value: object) -> bool | None:
+    """`remotefiles.off_main`'s landing as an answer: True or False when
+    the service said what is at the marker, None when it could not be
+    asked (a refusal, a timeout, no link)."""
+    if kind != "ok":
+        return None
+    return is_checkout(getattr(value, "kind", None))
+
+
+def ask_answer(
+    cwd: str, then: Callable[[bool | None], None], timeout: float | None = ANSWER_TIMEOUT_S
+) -> None:
     """Whether *cwd* is a git checkout, asked of the service off the main
-    loop; `then(is_checkout)` lands at `GLib.PRIORITY_DEFAULT`."""
+    loop; `then(answer)` lands at `GLib.PRIORITY_DEFAULT`, exactly once,
+    with True, False, or None for "could not ask" (see the module
+    docstring). No directory is False: there is nothing to ask."""
     if not cwd:
         then(False)
         return
     marker = git_marker(cwd)
+    remotefiles.off_main(
+        lambda: remotefiles.stat_path(marker, timeout=timeout),
+        lambda kind, value: then(answer_of(kind, value)),
+        name="git-checkout",
+    )
 
-    def land(kind: str, value: object) -> None:
-        then(kind == "ok" and is_checkout(getattr(value, "kind", None)))
 
-    remotefiles.off_main(lambda: remotefiles.stat_path(marker), land, name="git-checkout")
+def ask(cwd: str, then: Callable[[bool], None]) -> None:
+    """`ask_answer` for an offer: `then(is_checkout)`, False on any
+    failure, with the files' ordinary timeout."""
+    ask_answer(cwd, lambda answer: then(bool(answer)), timeout=None)

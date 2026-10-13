@@ -69,7 +69,7 @@ CHECK_SECONDS = {
     "check_composer_paste_back.py": 18.1,
     "check_sandbox_policy.py": 29.0,
     "check_welcome.py": 16.9,
-    "check_new_chat.py": 16.7,
+    "check_new_chat.py": 29.0,
     "check_terminal_tools.py": 14.2,
     "check_git_page.py": 13.8,
     "check_start_session.py": 12.7,

@@ -452,18 +452,36 @@ check that needs the files transport must `remotefiles.install(link)` first
 (the app does on every connect; a widget check on a harness link does it
 itself, as `check_root_name_links.py` does). "Is this directory a git
 checkout" (the worktree box, the sidebar project menu, the header's one-off
-entry, a sibling's worktree launch) is `checkouts.ask` — an `fs.stat` of
-`.git` off the main loop, False on any failure: the new-chat screen builds its
+entry, a sibling's worktree launch) is `checkouts` — an `fs.stat` of
+`.git` off the main loop, in two forms because a failure means two things.
+`checkouts.ask` is for an *offer* (the menus, a sibling's launch): False on
+any failure, so a worktree is simply not offered. `checkouts.ask_answer` is
+for the new-chat screen, whose Send may already be waiting on it: True,
+False, or **None for "could not ask"** (a refusal, no link, nothing within
+`ANSWER_TIMEOUT_S`, 10 s, not the files' 60), and None is never remembered
+(the next caller asks again). The new-chat screen builds its
 checkbox hidden and shows it when the answer lands (`NewChatView.set_is_git`).
 A Send that beats the answer (nothing a person does against a local
 service, a line's typing against a remote one) must not read the hidden box
 as unticked, which would launch a default-on project plain: until the
 answer the screen sends the box's *wish* (`newchat.worktree_wish`, `is_git`
-None), `MainWindow._on_new_chat_send` holds the launch on
-`TerminalTab.when_checkout_known` and launches with the wish and the
-answer, one launch per page however often Send is pressed meanwhile
-(`_new_chat_sends_held`); a draft's restored choice is kept through the
-wait too (`newchat.worktree_draft_choice`). The menus
+None), and `MainWindow._on_new_chat_send` holds the launch on
+`TerminalTab.when_checkout_known`. While it is held the whole screen is
+insensitive (`TerminalTab.set_new_chat_held`: what is typed or picked after
+the Send would be thrown away by the launch), a second Send starts nothing
+(`_new_chat_sends_held`), and a page that leaves the window (closed, handed
+over) has its hold called off (`_call_off_new_chat_send`). What the answer
+does is `newchat.send_outcome`: a worktree in a checkout, plain in what is
+known to be none, and **no launch at all on None** — the screen comes back
+with its text, the draft stays, a toast says the folder could not be
+checked. Never launch outside the worktree the user asked for: the session
+would edit the checkout the worktree was to protect. A draft's restored
+choice is kept through the wait too (`newchat.worktree_draft_choice`).
+`check_new_chat.py` drives all of it with `checkouts.ask_answer` held back.
+Two Ctrl+clicks on images are ordered by the press, not the landing: the
+press takes a number (`tab.link_clicks`, `editorfiles.ClickOrder`), carried
+through `_on_click_resolved` and `_open_file_reference` to `_present_image`,
+which presents nothing for a click older than one already shown. The menus
 build when it lands (an ask a newer one overtook adds nothing), and
 `start_background_session(..., is_git=)` is handed the answer
 (`_BackgroundSpawn.begin` asks only when the launch would use a worktree).
