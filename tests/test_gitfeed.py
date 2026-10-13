@@ -544,6 +544,73 @@ def test_a_local_watch_is_the_pages_own_monitors_when_git_is_local(tmp_path):
     assert watch._monitors == [] and watch._tick == 0
 
 
+def test_a_local_watch_replaces_the_last_loads_by_the_services_rule(tmp_path):
+    """The verification of PR 610's fix pass: the page's fallback made a new
+    local watch on every same-cwd load without stopping the last one (N
+    reloads, N live watches: monitors, ticks and threads each, duplicate
+    deliveries), and carried nothing, so should-fix 1's window was open
+    there. `local_watch(previous=)` stops the predecessor and starts from
+    it by `replacement_seed`: one live watch after N loads, the digits
+    carried when it had them, the first compare delivered when it had none."""
+    repo = make_repo(tmp_path)
+    events: list[dict] = []
+    state = gitops.tree_state_signature(repo)
+    first = gitfeed.local_watch(str(repo), ["a.txt"], state, events.append)
+    watches = [first]
+    try:
+        assert pump(3.0, lambda: first.last[0] is not None)
+        for _ in range(3):  # three loads landing: each replaces the last
+            watches.append(
+                gitfeed.local_watch(str(repo), ["a.txt"], state, events.append, previous=watches[-1])
+            )
+        live = [w for w in watches if not w._stopped]
+        assert live == [watches[-1]]
+        assert all(w._monitors == [] and w._tick == 0 and w._refs_tick == 0 for w in watches[:-1])
+        # The landed predecessor's digests were carried: no first delivery.
+        assert watches[-1].last[:2] == first.last[:2] and not watches[-1]._deliver_first
+        assert pump(3.0, lambda: watches[-1]._monitors and not watches[-1]._checking)
+        assert events == []
+        # A replacement of one that had seen nothing yet (a first watch whose
+        # seed compare is still on its thread) delivers its first compare.
+        watches[-1].stop()
+        unlanded = gitfeed.local_watch(str(repo), ["a.txt"], state, events.append)
+        assert unlanded.last[0] is None and not unlanded._stopped
+        replacement = gitfeed.local_watch(str(repo), ["a.txt"], state, events.append, previous=unlanded)
+        watches += [unlanded, replacement]
+        assert unlanded._stopped and replacement._deliver_first
+        assert pump(3.0, lambda: bool(events))
+        assert [e["t"] for e in events] == ["git-changed"] and events[0]["cwd"] == str(repo)
+        # Another cwd carries nothing and is no first delivery; the refs-only form has no monitors.
+        other = gitfeed.local_watch(
+            str(tmp_path), [], None, events.append, previous=replacement, working_tree=False
+        )
+        watches.append(other)
+        assert replacement._stopped and not other._deliver_first and other.last == (None, None, None)
+        assert pump(3.0, lambda: other._refs_tick != 0 and not other._checking)
+        assert other._monitors == [] and other.working_tree is False
+    finally:
+        for watch in watches:
+            watch.stop()
+
+
+@pytest.mark.parametrize(
+    ("old", "expected"),
+    [
+        (None, (None, False)),
+        (("other", ("t", "r", "s")), (None, False)),
+        (("repo", ("t", "r", "s")), (("t", "r"), False)),
+        (("repo", (None, None, "s")), (None, True)),
+        (("repo", (None, None, None)), (None, True)),
+    ],
+)
+def test_replacement_seed_is_the_one_rule_for_both_watches(old, expected):
+    class Old:
+        def __init__(self, cwd, last):
+            self.cwd, self.last = cwd, last
+
+    assert gitfeed.replacement_seed(None if old is None else Old(*old), "repo") == expected
+
+
 def test_a_compare_that_raises_leaves_the_watch_checking_again(served, monkeypatch):
     core, client, repo, _events = served
     client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": []})

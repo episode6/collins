@@ -994,7 +994,13 @@ older service build serving this window until *Restart service*, which
 in a widget check — `_install_watch` runs the same `_Watch` in this
 process instead (`gitfeed.local_watch(cwd, paths, state, deliver)`:
 GLib's idle and a thread as the host, the page's `_on_git_changed` as
-the deliverer, `_drop_watch` stops it), and `_run_plan` /
+the deliverer, `_drop_watch` stops it; the next load on the same cwd
+passes the last watch as `previous=`, which `local_watch` stops and
+starts from by the service's own replacement rule,
+`gitfeed.replacement_seed` — digests carried, or `deliver_first` when it
+had seen none — so N loads leave one live watch; `working_tree=False`
+for a commit, range or branch load, and `page.watching` reads True
+under the fallback as on the service), and `_run_plan` /
 `_run_file_action` hand `run_plan` `servicefiles.trash_paths` as the
 `trash` mover (ignored over the API, the service's own trash there), so
 the fallback is what the page did before the split: monitors, debounce,

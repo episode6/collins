@@ -336,20 +336,10 @@ class GitFeed:
         files_ = [p for p in (message.get("files") or ()) if gitops.safe_path(p)]
         seed = message.get("state")
         working_tree = message.get("working_tree") is not False
-        # A replacement (the page's next load) carries the tree and refs
-        # digests its predecessor saw: a commit between the two watches is
-        # a move the new one reports, not a digest it adopts. A predecessor
-        # whose first compare never landed (two loads within one `git
-        # status`: the page's reread path) has none to hand over, and its
-        # in-flight result dies with it, so the replacement's first compare
-        # is delivered whatever it finds: the client compares once against
-        # a tree that may not have moved, rather than adopting a commit made
-        # in the window as its seed (should-fix 1 of PR 610's review).
-        replaced = old is not None and old.cwd == cwd
-        carried = old.last[:2] if replaced and old.last[0] is not None else None
+        carried, deliver_first = replacement_seed(old, cwd)
         watch = _Watch(
             self, cwd, client, files_, seed if isinstance(seed, str) else None,
-            working_tree=working_tree, carried=carried, deliver_first=replaced and carried is None,
+            working_tree=working_tree, carried=carried, deliver_first=deliver_first,
         )
         self._watches[key] = watch
         re_id = message.id
@@ -842,7 +832,34 @@ class _Deliverer:
         self.deliver = deliver
 
 
-def local_watch(cwd: str, paths: Sequence[str], state: str | None, deliver: Callable[[dict], None]) -> _Watch:
+def replacement_seed(old: _Watch | None, cwd: str) -> tuple[tuple[str | None, str | None] | None, bool]:
+    """What a watch replacing *old* for *cwd* starts from: `(carried,
+    deliver_first)`. A replacement (the page's next load) carries the
+    tree and refs digests its predecessor saw: a commit between the two
+    watches is a move the new one reports, not a digest it adopts. A
+    predecessor whose first compare never landed (two loads within one
+    `git status`: the page's reread path) has none to hand over, and its
+    in-flight result dies with it, so the replacement's first compare is
+    delivered whatever it finds: the client compares once against a tree
+    that may not have moved, rather than adopting a commit made in the
+    window as its seed (should-fix 1 of PR 610's review). A first watch,
+    or one of another cwd, carries nothing and adopts what it finds. The
+    one rule for the service's watches and the page's local one."""
+    if old is None or old.cwd != cwd:
+        return None, False
+    if old.last[0] is not None:
+        return old.last[:2], False
+    return None, True
+
+
+def local_watch(
+    cwd: str,
+    paths: Sequence[str],
+    state: str | None,
+    deliver: Callable[[dict], None],
+    previous: _Watch | None = None,
+    working_tree: bool = True,
+) -> _Watch:
     """The page's own watch of *cwd* when git is local — the service has
     no `git` capability (an older build serving a newer window until
     *Restart service*), so `git.watch` cannot be sent and the page keeps
@@ -850,8 +867,19 @@ def local_watch(cwd: str, paths: Sequence[str], state: str | None, deliver: Call
     service runs: the directories walked on a thread, the monitors,
     debounce and slow tick on this process's main loop, every move a
     `git-changed`-shaped event to *deliver* (should-fix 4 of PR 608's
-    review). Started; `stop()` ends it."""
-    watch = _Watch(_LocalHost(), cwd, _Deliverer(deliver), paths, state)
+    review). *previous* is the watch this one replaces (the page's last
+    load's): stopped here, and the replacement starts from it by the
+    service's rule (`replacement_seed`), so N loads leave one live watch
+    and a commit between two loads is still one event (the verification
+    of PR 610's fix pass). *working_tree* as `git.watch`'s: False for a
+    commit, range or branch load. Started; `stop()` ends it."""
+    if previous is not None:
+        previous.stop()
+    carried, deliver_first = replacement_seed(previous, cwd)
+    watch = _Watch(
+        _LocalHost(), cwd, _Deliverer(deliver), paths, state,
+        working_tree=working_tree, carried=carried, deliver_first=deliver_first,
+    )
     watch.start()
     return watch
 
