@@ -145,12 +145,12 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "desktopentry": 13,
         "updatecheck": 3,
         "buildinfo": 3,
-        "connection": 5,
+        "connection": 7,
         "prefs": 1,
         "sidebar": 1,
         "openwith": 4,
     }
-    assert len(DEVICE) == 51
+    assert len(DEVICE) == 53
     # `openwith`'s four device sites are lookups of this device's terminal
     # preference; its launchers are local extras and nowhere else.
     assert {s for s in DEVICE if s.startswith("openwith:")} == {

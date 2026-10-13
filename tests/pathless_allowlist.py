@@ -31,13 +31,15 @@ site in a GTK module or a client helper fails the suite until it is
 filed here, and so does an entry nothing matches any more (a site that
 moved comes off the list in the same PR). Filing is a deliberate,
 reviewed edit, not a way round the rule: each group is pinned by its
-exact size (`DEVICE` 51, `LOCAL_EXTRAS` 16, `UNRULED` at most its three),
+exact size (`DEVICE` 53, `LOCAL_EXTRAS` 16, `UNRULED` at most its three),
 so a site cannot be added to any of them without that test changing in
 the same diff, where a reviewer sees it. The list is not frozen in
 number: it went from 45 to 69 in PR-2.8 when the walker took in four
 more modules (28 sites they already had) and the four `terminal` cwd
-sites came off, and to 70 with the cache folder's `chmod`. What does not
-change is what may be on it: this device's own files and programs, and
+sites came off, to 70 with the cache folder's `chmod`, and to 72 with
+the two `connection.unit_state` sites PR 604's fix round added below
+(the `systemctl show` of a timed-out wait: this device's unit). What does
+not change is what may be on it: this device's own files and programs, and
 local extras behind the proof.
 """
 
