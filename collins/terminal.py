@@ -1432,11 +1432,16 @@ class PanelTerminal(Gtk.Box):
         return found.get("process_cwd") if found is not None else None
 
     def follow_cwd(self, cwd: str | None) -> bool:
-        """`cd` this shell to *cwd* if it is sitting idle at its prompt —
-        what the tab offers for the shells that were open beside a new-chat
-        screen when its session started in a worktree (see
-        TerminalTab._offer_shells_follow). False when the shell is busy and
-        was left alone, or already there."""
+        """Ask for this shell to be `cd`ed to *cwd* if it is sitting idle
+        at its prompt — what the tab offers for the shells that were open
+        beside a new-chat screen when its session started in a worktree
+        (see TerminalTab._offer_shells_follow). False when the shell is
+        busy and was left alone, or already there. True means the ask
+        went out, not that the `cd` was typed: since PR-2.8 `_sync_cwd`
+        types it only once the service's `fs.stat` says *cwd* is a
+        directory, and only if the shell is still idle and elsewhere
+        then (D39); `_follow_shells` counts the shells left alone, so
+        nothing reads True as "moved"."""
         shell_pid = self._shell_pid()
         if not cwd or shell_pid is None:
             return False
@@ -2501,11 +2506,9 @@ class TerminalTab(Gtk.Box):
         root moves: an editor already re-rooted elsewhere (a follow into a
         worktree) is left where it is. The tab's own cwd is the session
         mirror's, which takes the service's from the `session` event."""
-        if not isinstance(started, str) or not started or started == asked:
-            return
-        if self.editor_root != (asked or ""):
-            return
-        self._editor.request_root(started)
+        landing = editorfiles.service_landing(self.editor_root, asked, started)
+        if landing is not None:
+            self._editor.request_root(landing)
 
     def _land_where_the_pty_started(self, started: object) -> None:
         """The same for a pty the tab attaches to (D31): its row's `cwd`
