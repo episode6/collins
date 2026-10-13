@@ -85,8 +85,10 @@ via the base class, never `_SearchableGroup.add` (the filter calls
 labels, explanation in the subtitle (a two-line subtitle squeezes the value
 to ~40 px). `Adw.ComboRow` section headers need libadwaita 1.6 (floor is
 1.5) — lists stay flat. Behaviour settings (`archive_running_session`,
-`quit_with_running_sessions`) are enums `ask | exit | background` (+ `hide`
-for quit). The status-icon row watches host availability live
+`quit_with_running_sessions`) are enums `ask | exit | background` (quit
+adds `hide` and `detach`, its default since PR-1.12c; an install that had
+`ask` moves to `detach` once, `state.migrate_device_settings`, marked by
+the row-less `quit_detach_migrated`). The status-icon row watches host availability live
 (`_on_status_icon_host`).
 
 Group descriptions are rare on purpose: the audience is Linux developers, so

@@ -87,6 +87,9 @@ CHECK_SECONDS = {
     "check_termscreen_parity.py": 60.0,
     # Not yet timed on CI: about 12 s on a dev box under the headless shell.
     "check_attach_redraw.py": 12.0,
+    # Not yet timed on CI: 46 s on a dev box under the headless shell (two
+    # app launches on one service, a shim, the quit dialog, a relaunch).
+    "check_detach_reopen.py": 46.0,
     "check_composer_paste.py": 6.0,
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,

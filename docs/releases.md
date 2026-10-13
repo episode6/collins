@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-04. Full change history: git log for this file.
+fork. Last modified: 2026-10-12. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,28 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **Detach, Quit and reopening.** *Detach* (the tab menu and a session
+  row's menu) closes a tab and leaves its session running in the Collins
+  service; its row becomes a running row (yellow, poled while the agent
+  works), and opening it attaches to the running session instead of
+  resuming it twice. Quitting detaches every tab by default (the quit
+  preference's new *Leave Running*, which an install on *Ask* moves to
+  once) and the next launch reopens the tabs, attached where they still
+  run, resumed where not; the quit dialog offers *Quit*, *Stop Sessions
+  and Quit* and *Keep Running (Hide Window)*. *Restart service* in the
+  main menu restarts the service now or once no session is busy, and the
+  tabs resume on the new one; a service speaking another protocol is
+  offered the same restart. A session asked to stop stops even when its
+  window goes first: the service runs the graceful exit and ends a session
+  that ignores it, whether or not a window is watching. A New Thread whose
+  first prompt was never sent ends with the window instead of lingering in
+  the service as a "New session" row; a tab whose agent is still starting
+  when you quit is kept and comes back. A shell no window shows and no
+  agent runs in (a launch whose `claude` never started, a detached session
+  whose agent quit) is closed by the service instead of kept for good. The quit dialog counts agents, not
+  a tab busy only in its terminal panel, and says when a panel's command
+  ends with the quit.
+
 - **The service is its own process.** Collins is now two programs:
   `collins-service` runs the sessions (every agent's pty, the terminal
   panel's shells, the sandboxes, the shared state, the session tools' MCP
@@ -45,7 +67,8 @@ downloads of each version, see the
   window is a client of it over a Unix socket. The window starts the
   service when none is running (through its systemd user unit, shipped
   with the packages and written by `collins --install-desktop`, else by
-  spawning it) and reconnects with a banner if the link drops. Quitting
+  spawning it) and reconnects with a banner if the link drops (a reconnect
+  leaves the desktop notifications you have not read standing). Quitting
   the window ends nothing: the agents keep working, and the next window
   picks them up. Stopping or restarting the service ends the foreground
   sessions gracefully (resumable afterwards) and leaves the CLI's

@@ -8,7 +8,8 @@ against a `claude` stub and types into it, kills that Collins with SIGKILL
 (no shutdown of any kind), and then builds a second Collins in this
 process on the same service: the sidebar must list the session, the
 service's `ptys` table must still hold its pty with the agent alive, and
-opening the session must attach to that pty, the VTE's screen matching
+the relaunch must reopen its tab attached to that pty (open_tabs, PR-1.12c),
+the VTE's screen matching
 the service's screen model (`debug.screen`) text for text, the first
 Collins' typing included.
 
@@ -261,18 +262,23 @@ def steps():
         status.get("ptys", 0) >= 1 and status.get("clients") == 1,
         status,
     )
-    # Open it: a resume would ask the service for a second pty on the same
-    # session, which it refuses (PR-1.12b); the running pty is attached to
-    # directly here, the way PR-1.12c's attach-on-activate will (a tab is a
-    # view over a pty), and this check is re-pointed at that path then.
-    tab = win.start_background_session(TRUSTED)
+    # Open it: since PR-1.12c the relaunch reopens the tabs the first
+    # Collins had open (open_tabs, §3.21), attaching the one whose pty the
+    # service still runs (a tab is a view over a pty, D31); the tab is
+    # attached once more here for the reply's grid.
+    page = None
     for _ in range(30):
-        if tab._view.pty is not None:
+        page = win._page_for_pty(pty_id)
+        if page is not None:
             break
         yield 100
-    win.tab_view.set_selected_page(win.tab_view.get_page(tab))
+    if page is None:
+        check("the relaunch reopened the tab over the running pty", False, win.open_tab_entries())
+        app.quit()
+        return
+    tab = page.get_child()
+    win.tab_view.set_selected_page(page)
     yield 500
-    tab._view.detach()
     tab._client.claim(pty_id)
     reply = tab._view.attach(pty_id)
     check("attaching to the running pty answers its grid", bool(reply.get("cols")), reply)

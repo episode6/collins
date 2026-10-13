@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -246,6 +247,9 @@ class SessionRecord:
     def __init__(self, core, *, provider, **session_kwargs) -> None:
         self.core = core
         self.pty_id: int | None = None
+        # A fork's own conversation, once its resolver found it: the
+        # session its pty runs, as the pty table tells it (PR-1.12c).
+        self.forked: str | None = None
         # The grid the spawn request asked for (the client's VTE's).
         self.grid: tuple[int, int] = (80, 24)
         self.exited = False
@@ -258,6 +262,17 @@ class SessionRecord:
         self._sent: dict[str, Any] = {}  # the facts the clients were last sent
         self._landed = False  # a transcript read has landed since the last reset
         self._settle: int | None = None  # the output settle's timer, while one runs
+        # A close budget ran out and was told to a client, whose answer
+        # (the forced close) is awaited; cleared with that answer or the
+        # service's own force (`close_budget`, `client_detached`).
+        self.budget_spent = False
+        # Whether the CLI has ever been seen owning the terminal
+        # (`ServiceCore.cli_changed(True)`), and when the shell was spawned:
+        # a pty whose CLI never ran is held for ORPHAN_HOLD_S before it can
+        # be closed as a shell alone (`close_if_orphan_shell`).
+        self.cli_ever_ran = False
+        self.spawned_at = time.monotonic()
+        self._orphan_recheck: int | None = None  # the hold's one re-check, while scheduled
         self.on_settled: Callable[[SessionRecord], None] | None = None  # the tracker's hook
         self.session = Session(
             provider=provider,
@@ -376,6 +391,12 @@ class SessionRecord:
                 self._sent[name] = value
         if changed:
             self.send(changed)
+        if "running_command" in fields:
+            # The pty table's word on whether the session runs (PR-1.12c):
+            # told on every read, the core keeps only the flips.
+            cli_changed = getattr(self.core, "cli_changed", None)
+            if cli_changed is not None:
+                cli_changed(self, bool(fields["running_command"]))
 
     def snapshot(self) -> dict:
         """Every fact, for a client attaching. `landed` rides along once a
@@ -614,6 +635,7 @@ class SessionRecord:
         self._send_changed({"session": session_id, **self.box_facts(), **self.sandbox_facts()})
 
     def fork_resolved(self, session_id: str) -> None:
+        self.core.session_forked(self, session_id)
         self.send({"forked": session_id})
 
     def cwd_polled(self, cwd: str | None) -> None:
@@ -627,6 +649,7 @@ class SessionRecord:
         for line in self._pending_paints:
             self.core.ptys.paint(pty.id, line)
         self._pending_paints = []
+        self.spawned_at = time.monotonic()
         self.session.shell_spawned()
         self.session.start_cwd_poll()
         self.refresh_facts()
@@ -658,6 +681,7 @@ class SessionRecord:
 
     def process_exited(self, status: int) -> None:
         self.exited = True
+        self._cancel_orphan_recheck()
         if self._settle is not None:
             from gi.repository import GLib
 
@@ -667,12 +691,101 @@ class SessionRecord:
             cut.cancel()
 
     def close_budget(self) -> None:
-        """The close poll's budget ran out: the window decides (a forced
-        close, a dialog)."""
+        """The close poll's budget ran out (`Session.begin_close`'s force,
+        for the `exit` and `background` modes alike). With a client attached
+        the window decides, as its own budget always had it (a `close`
+        event, `state: budget`: the forced close, or a dialog). With none —
+        the tab detached mid-drain, a quit the user insisted on, a client
+        that crashed — nobody would answer, and the session the user asked
+        to stop would run on with nothing watching it (§3.10): the service
+        forces the close itself, as `ServiceCore.stop_sessions` does
+        (`end_close`, then the pty closed)."""
         pty = self.pty()
         if pty is None:
             return
+        if not pty.attachments:
+            self._force_close("no client is attached")
+            return
+        self.budget_spent = True
         self._event({"t": "close", "pty": pty.id, "state": "budget", "phase": self.session.close_phase()})
+
+    def client_detached(self) -> None:
+        """A client left this pty (a `detach`, or the client gone). A close
+        whose budget ran out while it was attached waits for its answer;
+        once no client is left to give one, the force is the service's.
+        And a pty nobody shows whose CLI is not running is a shell alone
+        (`close_if_orphan_shell`)."""
+        pty = self.pty()
+        if pty is None or pty.attachments:
+            return
+        if self.budget_spent and self.session.closing:
+            self._force_close("the client the budget was told to has gone")
+            return
+        self.close_if_orphan_shell("the last client detached")
+
+    def close_if_orphan_shell(self, why: str) -> bool:
+        """A shell alone with no client showing it is nothing the service
+        keeps: the CLI never came up (no `claude` on PATH, a bad
+        `claude_cli_path`, a sandbox launch that failed) and the tab was
+        detached or its window went, or the CLI left by itself after the
+        tab was detached. No running row stands for it, nothing attaches to
+        it, and only a resume of the same session would ever close it: it
+        is closed here instead (PR 605's verification). Not while a close
+        flow owns the pty (`closing`: the poll ends the shell itself).
+
+        A pty whose CLI has never been seen running (`cli_ever_ran`) is held
+        for ORPHAN_HOLD_S from its spawn: the shell is still running its rc
+        and has not forked the typed command, so "no CLI" says nothing yet.
+        One re-check is scheduled for the hold's end, with the same guards;
+        an attach in the meantime cancels it (`client_attached`). A CLI seen
+        running and then gone is closed at once. Returns whether it was
+        closed."""
+        pty = self.pty()
+        if pty is None or pty.attachments or self.session.closing or self.exited:
+            return False
+        if pty.master < 0:
+            return False  # already closing (the master is gone): no second force
+        if self.session.has_running_command():
+            return False
+        if not self.cli_ever_ran:
+            left = ORPHAN_HOLD_S - (time.monotonic() - self.spawned_at)
+            if left > 0:
+                self._schedule_orphan_recheck(left, why)
+                return False
+        self._cancel_orphan_recheck()
+        log.info("session %s: a shell alone with no client, %s: the pty is ended", self.handle, why)
+        self.core.force_close(pty.id)
+        return True
+
+    def _schedule_orphan_recheck(self, delay_s: float, why: str) -> None:
+        if self._orphan_recheck is not None:
+            return  # one re-check per hold
+
+        from gi.repository import GLib
+
+        def recheck() -> bool:
+            self._orphan_recheck = None
+            self.close_if_orphan_shell(f"{why}; the startup hold is over")
+            return GLib.SOURCE_REMOVE
+
+        self._orphan_recheck = GLib.timeout_add(int(delay_s * 1000) + 50, recheck)
+
+    def _cancel_orphan_recheck(self) -> None:
+        if self._orphan_recheck is None:
+            return
+
+        from gi.repository import GLib
+
+        GLib.source_remove(self._orphan_recheck)
+        self._orphan_recheck = None
+
+    def _force_close(self, why: str) -> None:
+        pty = self.pty()
+        if pty is None:
+            return
+        log.info("session %s: close budget ran out, %s: the pty is ended", self.handle, why)
+        self.budget_spent = False
+        self.core.force_close(pty.id)
 
     def _event(self, event: dict, active_only: bool = False) -> None:
         pty = self.pty()
@@ -731,7 +844,10 @@ class SessionRecord:
         """The facts whole to the one attaching — after what moved since
         the last send went to everyone already attached, so a second attach
         inside a settle starves no one (the snapshot records nothing). A
-        resolver paused for want of a client resumes (`mapped`)."""
+        resolver paused for want of a client resumes (`mapped`). A shell
+        alone's startup hold (`close_if_orphan_shell`) is off: somebody
+        shows it again."""
+        self._cancel_orphan_recheck()
         self.refresh_facts()
         self.send_to(sink, self.snapshot())
         self.session.arm_resolver()
@@ -743,6 +859,14 @@ class SessionRecord:
 
 
 _UNSENT = object()
+
+# How long a pty whose CLI has never been seen running is held before it can
+# be closed as a shell alone: the shell's rc runs first (bash or zsh with a
+# heavy one takes a second or more), and until it forks the typed command
+# `has_running_command` is the shell's own group, so a detach or a client
+# crash right after a new-chat Send must not read as "the CLI never came up"
+# and lose the first prompt riding on the command line.
+ORPHAN_HOLD_S = 30.0
 
 
 def sandbox_plan_of(records: Callable[[], list], box: str) -> str | None:

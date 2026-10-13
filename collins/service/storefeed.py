@@ -29,7 +29,10 @@ once sent stays known until it is removed, so the client's copy never goes
 stale. Busy, unread, status and the background handoff's two flags are
 properties of the store's `SessionItem`s set outside a refresh: the feed
 watches each row item's `notify` for them and sends the one field at once
-(rule 3 of §3.1: the service decides, the client shows).
+(rule 3 of §3.1: the service decides, the client shows). `running` (an
+agent pty on the service names the session, PR-1.12c) is the pty table's
+fact: worked out on every rebuild, and sent when a pty spawns, resolves or
+exits (`refresh_running`, from `ServiceCore`).
 
 **Rows.** After the items of a refresh, one `rows` event carries the
 projection: the row order, the groups with their counts, the empty
@@ -105,9 +108,13 @@ class StoreFeed:
     """The store and state half of the service's events. See the module
     docstring."""
 
-    def __init__(self, store, state) -> None:
+    def __init__(self, store, state, running: Callable[[], set[str]] | None = None) -> None:
+        """*running* answers the session ids an agent pty on the service
+        names right now (`ServiceCore.running_sessions`): each item's
+        `running` field (PR-1.12c, §3.21)."""
         self.store = store
         self.state = state
+        self._running = running or (lambda: set())
         self._subscribers: dict[int, Subscriber] = {}
         self._published: dict[str, Any] = {
             name: copy.deepcopy(state.export_key(name)) for name in SHARED_KEYS
@@ -234,6 +241,18 @@ class StoreFeed:
         for sub in list(self._subscribers.values()):
             self._send(sub, event)
 
+    def refresh_running(self, session_ids) -> None:
+        """An agent pty appeared, resolved or exited (PR-1.12c): every
+        subscriber that knows one of *session_ids* is sent what moved in
+        it (its `running`, the one field such a change moves)."""
+        for session_id in {s for s in session_ids if s}:
+            session = self.store.get_session(session_id)
+            if session is None:
+                continue
+            for sub in list(self._subscribers.values()):
+                if session_id in sub.known:
+                    self._sync_item(sub, session)
+
     def _on_archived(self, _store, session_id: str) -> None:
         event = protocol.event("put-away", session=session_id)
         for sub in list(self._subscribers.values()):
@@ -312,6 +331,13 @@ class StoreFeed:
         }
         for name, value in flags.items():
             fields[name] = _clamp(value, protocol.SHORT_MAX) if name == "status" else bool(value)
+        # Whether an agent pty on the service runs this session: a fact of
+        # the pty table, not of the item, so worked out on every rebuild.
+        try:
+            fields["running"] = session_id in self._running()
+        except Exception:
+            log.exception("store: the running sessions could not be read")
+            fields["running"] = False
         return fields
 
     def _sync_item(self, sub: Subscriber, session, force: bool = False) -> bool:

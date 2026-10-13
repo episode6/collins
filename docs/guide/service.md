@@ -81,6 +81,45 @@ If the connection drops while a window is open, the window shows a
 service with a growing backoff, and attaches every tab again from the
 service's screen model.
 
+## Quitting, detaching and reopening
+
+A tab is a view over a session's terminal on the service. **Detach**
+closes the view and leaves the session running; its sidebar row becomes a
+running row, and opening it attaches again. **Quit** detaches every tab
+(unless *When quitting with running sessions* says otherwise: *Stop
+Sessions* asks each agent to exit first, as quitting always did before the
+service). The window remembers the tabs it had open on this service
+(`open_tabs` in `ui-state.json`) and reopens them at the next launch, and
+after a reconnect: a session the service still runs is attached, one that
+ended meanwhile (a restart, a crash of the service) is resumed. A crash of
+the window ends nothing; the next launch finds the tabs where they were.
+A session you asked to stop (a tab's close, *Stop Sessions and Quit*)
+stops even if its window goes before the agent has left: the service runs
+the graceful exit and, when the agent ignores it, ends the session itself.
+A shell with no agent in it that no window shows — a launch whose `claude`
+never started, or a detached session whose agent has quit on its own — is
+closed by the service rather than kept: it is no running session, and
+nothing would ever attach to it.
+A finish or a message that arrives while no window is open is in the bell
+when the next window connects, unread, not on the desktop: nothing was
+there to announce it, and the window does not announce it late. A window
+reconnecting after a dropped link keeps its standing desktop
+notifications; only one read elsewhere meanwhile comes down.
+
+**Restart service** (the main menu) ends every session with the service:
+the dialog says how many, and how many are working. *Restart Now* sends
+`service.restart`; *Restart When Idle* asks the service to wait until no
+session is busy (it looks every 2 s), shown as "Restarting when idle" with
+a Cancel in the banner's place. The service closes its clients before it
+ends the sessions, so a window sees the link go, not each session end, and
+resumes every open tab once it has reconnected to the new service. A
+service that refuses this window's protocol gets a dialog naming both
+versions. When the service is the older one it offers *Restart Service*
+(the service is sent SIGTERM, since it answers nothing else) and *Quit*;
+a newer service is left running and the dialog asks for an upgrade of
+Collins. If the restarted service still speaks another protocol, the
+window says so and quits.
+
 ## `collins-service --check`
 
 On a desktop the user manager has the desktop's environment and the

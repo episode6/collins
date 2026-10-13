@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-08-06. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """GObject view-models. UI widgets bind to SessionItem properties, so
 renames, favorites and status changes propagate without list rebuilds."""
@@ -51,6 +51,12 @@ class SessionItem(GObject.Object):
     # an open tab whose session id is registered, and no other handoff still
     # waiting for its new id (see bgstatus.background_blocker).
     can_background = GObject.Property(type=bool, default=False)
+    # An agent pty on the Collins service runs this session right now (the
+    # service's word, an `item` field and the pty table's rows; split-service
+    # spec §3.21): with no tab on this device the row is a running row —
+    # the yellow line, the pole while busy — and opening it attaches to the
+    # pty instead of resuming the session in a second one.
+    running = GObject.Property(type=bool, default=False)
 
     def __init__(self, session: Session) -> None:
         super().__init__()
