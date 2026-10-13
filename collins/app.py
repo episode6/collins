@@ -2290,6 +2290,10 @@ class App(Adw.Application):
             if refusal.error == protocol.ERROR_GONE and self._connection is not None:
                 self._connection.lost("the resubscribe found the link gone")
             return
+        # The snapshot was drained inside the call: the notification mirror
+        # announces once, with the history whole, so no standing desktop
+        # notification comes down for a row the service still holds unread.
+        self.notification_center.resynced()
         self._refresh_service_status()
         for window in self.get_windows():
             if isinstance(window, MainWindow):

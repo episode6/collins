@@ -65,7 +65,8 @@ downloads of each version, see the
   window is a client of it over a Unix socket. The window starts the
   service when none is running (through its systemd user unit, shipped
   with the packages and written by `collins --install-desktop`, else by
-  spawning it) and reconnects with a banner if the link drops. Quitting
+  spawning it) and reconnects with a banner if the link drops (a reconnect
+  leaves the desktop notifications you have not read standing). Quitting
   the window ends nothing: the agents keep working, and the next window
   picks them up. Stopping or restarting the service ends the foreground
   sessions gracefully (resumable afterwards) and leaves the CLI's

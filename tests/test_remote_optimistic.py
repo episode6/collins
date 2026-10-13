@@ -131,3 +131,37 @@ def test_a_refused_client_flag_is_put_back(tmp_path, app_state):
     refused(RequestRefused("refused", "no", {}))
     assert item.unread is False
     assert heard == [("s1", True), ("s1", False)]
+
+
+def _notify_event(row_id, session, read=False):
+    return {
+        "t": "notify", "notification": row_id, "kind": notifycenter.KIND_MESSAGE, "session": session,
+        "title": "T", "project": "alpha", "msgid": "hello", "when": 1.0, "read": read, "count": 1,
+    }
+
+
+def test_a_reset_announces_nothing_until_the_snapshot_has_landed():
+    """Nit 7 of PR 605's review: `reset()` emptied the rows and announced,
+    so the app withdrew every standing desktop notification (no unread row
+    left for its session) and the snapshot's rows, re-inserted one by one,
+    never re-sent them. Held across the resync, the one `changed` at the
+    end sees the whole history; the unread set never dips in between."""
+    link = HeldLink()
+    center = RemoteNotifications(link)
+    link.dispatch(_notify_event("n-1", "s1"))
+    link.dispatch(_notify_event("n-2", "s2"))
+    seen = []
+    center.connect(lambda: seen.append(set(center.unread_sessions())))
+    center.reset()
+    assert seen == []  # nothing announced: no withdraw
+    center.reset()  # a second loss before the snapshot: still one hold
+    link.dispatch(_notify_event("n-1", "s1"))
+    link.dispatch(_notify_event("n-2", "s2", read=True))  # read elsewhere meanwhile
+    assert seen == []
+    center.resynced()
+    assert seen == [{"s1"}]  # s2's notification comes down, s1's stands
+    center.resynced()  # idempotent
+    assert seen == [{"s1"}]
+    # Live again: a row that moves announces as before.
+    link.dispatch(_notify_event("n-3", "s3"))
+    assert seen[-1] == {"s1", "s3"}

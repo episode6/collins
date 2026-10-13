@@ -96,6 +96,11 @@ the window ends nothing; the next launch finds the tabs where they were.
 A session you asked to stop (a tab's close, *Stop Sessions and Quit*)
 stops even if its window goes before the agent has left: the service runs
 the graceful exit and, when the agent ignores it, ends the session itself.
+A finish or a message that arrives while no window is open is in the bell
+when the next window connects, unread, not on the desktop: nothing was
+there to announce it, and the window does not announce it late. A window
+reconnecting after a dropped link keeps its standing desktop
+notifications; only one read elsewhere meanwhile comes down.
 
 **Restart service** (the main menu) ends every session with the service:
 the dialog says how many, and how many are working. *Restart Now* sends
