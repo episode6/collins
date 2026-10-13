@@ -121,6 +121,12 @@ class Mirror:
         self._installed_on: apilink.Link | None = None
         # The cwds with an asynchronous refresh in flight (one each).
         self._pending: set[str] = set()
+        # When the request behind each stored entry was sent: a `send`
+        # refresh and a blocking fetch for one cwd can be in flight
+        # together, and the earlier-sent one's reply may land later; it is
+        # dropped rather than overwrite the fresher fields (nit 7 of PR
+        # 608's review).
+        self._sent: dict[str, float] = {}
         # Every live watch by handle: the message that installed it, sent
         # again after a reconnect (reset).
         self._watches: dict[str, dict] = {}
@@ -142,6 +148,7 @@ class Mirror:
         with self._lock:
             self._entries.clear()
             self._pending.clear()
+            self._sent.clear()
             watches = list(self._watches.values())
         for message in watches:
             self._send_watch(message)
@@ -202,12 +209,13 @@ class Mirror:
         read within MAX_AGE_S serves it instead of asking again."""
         message = self._message(cwd, previous, changes, state)
         wait = CALL_MARGIN_S + gitops.GIT_TIMEOUT_S if timeout is None else timeout
+        asked = time.monotonic()
         try:
             fields = apilink.call(message, timeout=wait)
         except RequestRefused as refusal:
             log.debug("git.info %s refused: %s", cwd, refusal.msgid)
             return self._unreachable(cwd, previous, refusal)
-        return self._store(cwd, fields, previous)
+        return self._store(cwd, fields, self.entry(cwd), asked)
 
     def _refresh_async(self, cwd: str, changes: bool, state: bool) -> None:
         """A refresh by `send` (the main thread never waits): one in
@@ -220,11 +228,12 @@ class Mirror:
                 return
             self._pending.add(cwd)
             previous = self._entries.get(cwd)
+        asked = time.monotonic()
 
         def landed(fields: dict) -> None:
             with self._lock:
                 self._pending.discard(cwd)
-            self._store(cwd, fields, self.entry(cwd))
+            self._store(cwd, fields, self.entry(cwd), asked)
 
         def refused(refusal: RequestRefused) -> None:
             with self._lock:
@@ -241,6 +250,7 @@ class Mirror:
         if refusal.error != protocol.ERROR_GONE:
             with self._lock:
                 self._entries.pop(cwd, None)
+                self._sent.pop(cwd, None)
             return None
         if previous is None:
             return None
@@ -250,13 +260,23 @@ class Mirror:
             self._entries[cwd] = kept
         return kept
 
-    def _store(self, cwd: str, fields: dict, previous: GitInfo | None) -> GitInfo:
+    def _store(self, cwd: str, fields: dict, previous: GitInfo | None, asked: float | None = None) -> GitInfo:
+        """Store the reply to a request sent at *asked*; one sent before
+        the request behind the stored entry is older news and is dropped
+        (the entry stands and is the answer)."""
+        with self._lock:
+            if asked is not None and asked < self._sent.get(cwd, float("-inf")) and cwd in self._entries:
+                return self._entries[cwd]
         entry = GitInfo.from_fields(fields, previous)
         with self._lock:
             self._entries.pop(cwd, None)
             if len(self._entries) >= MAX_ENTRIES:
-                self._entries.pop(next(iter(self._entries)))  # the least recently read or stored
+                evicted = next(iter(self._entries))  # the least recently read or stored
+                self._entries.pop(evicted)
+                self._sent.pop(evicted, None)
             self._entries[cwd] = entry
+            if asked is not None:
+                self._sent[cwd] = asked
         return entry
 
     def entry(self, cwd: str) -> GitInfo | None:

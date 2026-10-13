@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import re
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -205,7 +206,13 @@ class GitInfo:
         if not isinstance(root, str) or not root:
             return cls(fetched_at=stamp)
         refs = fields.get("refs")
-        if "heads" in fields or previous is None or previous.refs != refs:
+        # The service leaves the heads out only when the asker's digest
+        # matched its own; a reply without them whose digest differs from
+        # *previous* means a fresher answer was stored in between (two
+        # refreshes in flight), and that one's heads stand — rebuilding
+        # them empty made resolve_branch answer None until the next tick
+        # (nit 7 of PR 608's review).
+        if "heads" in fields or previous is None:
             remotes = tuple(str(r) for r in (fields.get("remotes") or ())[:REFS_LIMIT])
             heads = {str(k): str(v) for k, v in (fields.get("heads") or {}).items() if _SHA_RE.match(str(v))}
             remote_heads = {
@@ -714,6 +721,10 @@ def status_porcelain(cwd: str | Path | None, timeout: float = STATUS_TIMEOUT_S) 
 
 _refs_cache: dict[str, tuple[str, tuple[str, ...], dict[str, str], dict[str, str]]] = {}
 _REFS_CACHE_MAX = 64
+# `read_info` runs on the feed's worker threads, several at once (a
+# `git.info` per tab per tick): the lookup and the store hold this lock, so
+# two evictions never race for the same first key (nit 6 of PR 608's review).
+_refs_lock = threading.Lock()
 
 
 def read_info(cwd: str | Path | None, now: float | None = None) -> GitInfo:
@@ -730,15 +741,17 @@ def read_info(cwd: str | Path | None, now: float | None = None) -> GitInfo:
     common = common_dir(git)
     refs_digest = digest(refs_signature(git))
     key = str(common)
-    cached = _refs_cache.get(key)
+    with _refs_lock:
+        cached = _refs_cache.get(key)
     if cached is not None and cached[0] == refs_digest:
         _d, remotes, heads, remote_heads = cached
     else:
         remotes = tuple(ranked_remotes(common))
         heads, remote_heads = list_refs(common)
-        if len(_refs_cache) >= _REFS_CACHE_MAX:
-            _refs_cache.pop(next(iter(_refs_cache)))
-        _refs_cache[key] = (refs_digest, remotes, heads, remote_heads)
+        with _refs_lock:
+            while len(_refs_cache) >= _REFS_CACHE_MAX:
+                _refs_cache.pop(next(iter(_refs_cache)))
+            _refs_cache[key] = (refs_digest, remotes, heads, remote_heads)
     return GitInfo(
         root=str(root),
         git_dir=str(git),

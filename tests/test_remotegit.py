@@ -387,6 +387,50 @@ def test_run_plan_is_git_plan_and_stale_comes_back_as_stale(link):
     assert gitops.run_plan("/srv/project", plan).stderr == "no plan context"
 
 
+def test_a_reply_from_an_earlier_request_never_overwrites_a_later_ones(link):
+    """Nit 7 of PR 608's review: a `send` refresh and a blocking fetch for
+    one cwd can be in flight together, and the earlier-sent reply may land
+    last — it then overwrote the fresher fields, and when it had omitted
+    the heads (its digest matched when sent) `from_fields` saw a changed
+    digest and rebuilt them empty, so `resolve_branch` answered None until
+    the next tick. Each request is stamped when sent; a reply to one sent
+    before the stored entry's request is dropped, and a reply without heads
+    keeps the stored entry's heads whatever the digests."""
+    mirror = remotegit.mirror()
+    cwd = "/srv/project"
+    first = mirror.read(cwd)  # the entry: refs r1, heads known
+    assert first is not None and first.resolve_branch("main")[1] == "b" * 40
+    # A `send` refresh, held: its reply is captured, not landed.
+    held: list = []
+    real_send = link.send
+
+    def holding_send(message, on_reply=None, on_refused=None):
+        held.append((message, on_reply))
+
+    link.send = holding_send
+    try:
+        mirror._refresh_async(cwd, False, False)
+        assert len(held) == 1
+        # A later blocking fetch lands first with a new digest and new heads.
+        fresh = {**INFO, "refs": "r2", "branch": "later", "heads": {"main": "d" * 40}}
+        link.answers["git.info"] = lambda m: dict(fresh)
+        later = mirror._fetch(cwd, mirror.entry(cwd), False, False)
+        assert later.branch == "later" and later.resolve_branch("main")[1] == "d" * 40
+        # The held reply lands now: older news, with no heads (its digest
+        # matched when it was sent). The later entry stands untouched.
+        stale_reply = {k: v for k, v in INFO.items() if k not in ("heads", "remote_heads", "remotes")}
+        held[0][1](dict(stale_reply, branch="earlier"))
+        kept = mirror.entry(cwd)
+        assert kept.branch == "later" and kept.refs == "r2" and kept.resolve_branch("main")[1] == "d" * 40
+    finally:
+        link.send = real_send
+    # And `from_fields` on its own: no heads in the reply keeps the previous
+    # entry's heads even when the digests differ.
+    previous = GitInfo.from_fields({**INFO, "refs": "r2", "heads": {"main": "c" * 40}})
+    rebuilt = GitInfo.from_fields({k: v for k, v in INFO.items() if k != "heads"}, previous=previous)
+    assert rebuilt.heads == {"main": "c" * 40}
+
+
 class EncodingLink(FakeLink):
     """A fake that frames every request with the real `protocol.encode`
     before answering, as `SocketLink._blocking` does."""

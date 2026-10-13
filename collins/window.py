@@ -6039,8 +6039,12 @@ class MainWindow(Adw.ApplicationWindow):
         project = project_name_for_cwd(cwd)
         try:
             argv = gitops.checkout_branch_argv(branch)
-        except ValueError:
-            return  # a name git would read as an option or a range: not a branch
+        except ValueError as err:
+            # A name git would read as an option or a range: the builder's
+            # refusal shown where git's own would be (nit 9 of PR 608's
+            # review: a silent return showed nothing).
+            dialogs.error_dialog(self, _("Git checkout failed"), str(err))
+            return
         self._run_git(
             cwd,
             argv,

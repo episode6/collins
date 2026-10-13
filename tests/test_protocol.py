@@ -1761,3 +1761,28 @@ def test_a_cut_event_at_its_bound_frames():
     # A plain text that frames is kept whole: the bound bites only when it must.
     plain = "a" * (p.EVENT_TEXT_BYTES - 2)
     assert p.fit_text_bytes(plain, p.EVENT_TEXT_BYTES) == plain
+
+
+def test_split_reply_does_not_serialise_a_field_that_alone_passes_the_frame(monkeypatch):
+    """Nit 10 of PR 608's review: `split_reply` dumped the whole reply to
+    measure it before chunking, a second serialisation of a 64 MiB stdout
+    on the service's main loop. A field longer than the frame is chunked
+    without the measure; a reply that might fit is still measured once."""
+    import json
+
+    dumps: list[int] = []
+    real = json.dumps
+
+    def counting(value, **kwargs):
+        dumps.append(len(str(value.get(p.CHUNKED_FIELD, ""))) if isinstance(value, dict) else -1)
+        return real(value, **kwargs)
+
+    monkeypatch.setattr(json, "dumps", counting)
+    big = {"re": 3, "ok": True, p.CHUNKED_FIELD: "x" * (p.MAX_FRAME + 1)}
+    frames, slim = p.split_reply(big)
+    assert frames and slim["stdout_chunked"] and slim["stdout_bytes"] == p.MAX_FRAME + 1
+    assert all(size <= 64 for size in dumps), dumps  # only the slim reply's encode measured the field
+    del dumps[:]
+    small = {"re": 3, "ok": True, p.CHUNKED_FIELD: "y" * 100}
+    assert p.split_reply(small) == ([], small)
+    assert len(dumps) == 1

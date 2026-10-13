@@ -2667,10 +2667,15 @@ def split_reply(reply: dict) -> tuple[list[bytes], dict]:
     offset: the byte offset) and the reply with the field replaced by
     ``stdout_chunked`` and ``stdout_bytes``. Raises ValueError when the
     reply fits no frame even so."""
-    text = json.dumps(reply, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    if len(text.encode("utf-8", "surrogatepass")) <= MAX_FRAME:
-        return [], reply
     field_text = reply.get(CHUNKED_FIELD)
+    # A field that alone passes the frame is chunked without measuring the
+    # whole reply first: for a 64 MiB stdout the dump would be a second
+    # serialisation of it on the service's main loop (nit 10 of PR 608's
+    # review); only a reply that might fit is measured.
+    if not isinstance(field_text, str) or len(field_text) <= MAX_FRAME:
+        text = json.dumps(reply, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        if len(text.encode("utf-8", "surrogatepass")) <= MAX_FRAME:
+            return [], reply
     re_id = reply.get("re")
     if not isinstance(field_text, str) or not _is_int(re_id):
         raise ValueError("message exceeds the frame limit")
