@@ -135,16 +135,27 @@ reload what is shown, and either that or a `refs_signature` move
 (`refs/heads` and `refs/remotes` directory mtimes, `packed-refs`: a
 branch made, deleted or committed to in another worktree, a push) →
 `_refresh_branch_stack` (below), which re-reads the commits list when it
-lands. A page that is not mapped keeps the compare, and the event's
-tree state, for its next map (`_compare_due`, `_deferred_state`,
+lands. **What an event, a retry, a map, a landed read or a confirmed
+state does is the freshness table's** — `gitfresh.Freshness`, GTK-free
+(`tests/test_gitfresh.py` walks the sequences; should-fix 2 of PR 610's
+review): the page asks it with a `gitfresh.Page` (mapped, a sidebar
+mutation in flight, a read in flight, a working-tree load up) and runs
+the `Actions` it answers (`_run_actions`: the compare, counted into
+`changes_heard` or not, the retry timer, a reload; `_diff_read` runs
+the `confirm`). The table keeps `tree_state` (the page's `_tree_state`
+property), `compare_due`, `deferred_state` (`gitfresh.NO_STATE` when
+none) and `watch_stale`. Its rules: a page that is not mapped keeps the
+compare, and the event's tree state, for its next map (`pending`,
 `check_now`: §3.15, only a visible page reloads); one whose sidebar has
 a mutation in flight retries every `_COMPARE_RETRY_MS` until it landed,
 since a native mutation from the sidebar or the view (`mutated`)
 re-seeds the signatures, re-reads the stack and reloads at once — its
 own move is never reloaded twice; a tree state kept from during the
-mutation is dropped by the mutation's own reload (`_read_diff` clears
-it when a read really starts with no mutation out) and compared on the
-retry when there was none. `check_now` goes through the same gate. A fresh watch (the first, or another cwd) is
+mutation is dropped by the mutation's own reload (`read_started`: a
+read that really starts with no mutation out) and compared on the
+retry when there was none (`retry`, then `take_deferred` with a fresh
+look, since the compare may have started a read). `check_now` goes
+through the same gate. A fresh watch (the first, or another cwd) is
 followed by one compare against a re-read mirror, for a move between
 the page's seed and the watch's first look. The tab footer's 2 s tick
 (`poll_tick`) keeps only what no git event says: the agent's cwd on
@@ -1007,10 +1018,11 @@ worker samples `tree_state_signature` **before** `read_diff` and sends it
 with the watch, so an edit between the read and the watch's first look
 is a move (the service adopts the tree and refs digests on that first
 compare without a push). On the page `_on_git_changed` compares the
-event's `state` with `_tree_state` and reloads by key; one landing beside
-a read in flight is kept (`_watch_stale`) and compared when the read
-lands (`_diff_read`) — and when it differs from what the read sampled,
-confirmed first (`_confirm_state`: `Mirror.state_then`, a `git.info`
+event's `state` with `_tree_state` and reloads by key (`Freshness.
+state_event`); one landing beside a read in flight is kept
+(`Freshness.watch_stale`) and compared when the read lands
+(`_diff_read` → `read_landed`) — and when it differs from what the read
+sampled, confirmed first (`_confirm_state`: `Mirror.state_then`, a `git.info`
 with `state` by `send`), since the event's sample may predate the
 read's own (a mutation half done, its reload already out); the load is
 re-read only when the fresh state differs too, or can't be had. The

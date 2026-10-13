@@ -67,7 +67,9 @@ moved one reloads what is shown), gitinfo.refs_signature a branch
 written anywhere or a push (the stack and the commits list are
 re-read). A page that is not mapped, or whose sidebar has a mutation in
 flight (the mutation re-seeds the signatures as it lands), keeps the
-compare for later: its next map, or the mutation's end. The tab
+compare for later: its next map, or the mutation's end — the rules are
+gitfresh.Freshness's (GTK-free, unit-tested), the page carries out its
+verdicts (_run_actions). The tab
 footer's 2 s tick (poll_tick) is left with what no git event says —
 the agent's cwd moving to another tree, the tree going away or turning
 up, the parent the host names (a PR's base, Preferences → Git) — read
@@ -129,6 +131,7 @@ from . import (  # noqa: E402
     diffmodel,
     diffnotes,
     diffview,
+    gitfresh,
     gitinfo,
     gitloads,
     gitmodel,
@@ -213,8 +216,6 @@ _NOT_A_REPO = "not-a-repo"
 # How often a `git-changed` compare waiting on a mutation in flight looks
 # again (the mutation re-seeds the signatures as it lands, PR-2.2).
 _COMPARE_RETRY_MS = 200
-# No tree state kept for after a mutation (a kept one may be None).
-_NO_STATE = object()
 
 
 class GitPage(Adw.Bin):
@@ -326,17 +327,18 @@ class GitPage(Adw.Bin):
         # saved commit's subject) is out.
         self._opened = False
         self._opening = False
-        # A read_diff in flight, the load asked while it was, and the tree
-        # state (gitops.tree_state_signature) the watch compares against —
-        # seeded by every working-tree load's own worker.
+        # A read_diff in flight and the load asked while it was.
         self._loading = False
         self._pending_load: gitloads.Loaded | None = None
-        self._tree_state: str | None = None
+        # The freshness table (gitfresh, GTK-free): the tree state
+        # (gitops.tree_state_signature) the watch compares against, seeded
+        # by every working-tree load's own worker (_tree_state), a compare
+        # owed, a tree state kept while the page was hidden or a mutation
+        # was in flight, one that landed beside a read in flight.
+        self._fresh = gitfresh.Freshness()
         # The watch is the service's (remotegit.Mirror.watch, PR-2.1): the
-        # cwd it is installed for, and the last tree state its git-changed
-        # event carried while a read was out (compared when the read lands).
+        # cwd it is installed for.
         self._watched_cwd: str | None = None
-        self._watch_stale: str | None = None
         # The page's own monitors when git is local (no `git` capability
         # on the service): a `gitfeed._Watch` run in this process.
         self._local_watch = None
@@ -344,14 +346,8 @@ class GitPage(Adw.Bin):
         # the state digest) or a commit / range / branch load's (the 2 s
         # tick of the index, HEAD and the refs alone).
         self._watch_tree = False
-        # A `git-changed` the page could not compare on yet (hidden, or a
-        # mutation in flight): compared on the next map or the mutation's
-        # end. The retry source while a mutation runs.
-        self._compare_due = False
+        # The retry source while a mutation runs (gitfresh's `retry`).
         self._compare_retry = 0
-        # The tree state a `git-changed` brought while a mutation was in
-        # flight (_NO_STATE: none kept).
-        self._deferred_state: object = _NO_STATE
         # How many `git-changed` events the page compared its signatures
         # on (the e2e's probe).
         self.changes_heard = 0
@@ -820,20 +816,43 @@ class GitPage(Adw.Bin):
         if self._opened and cwd and cwd == self._watched_cwd:
             self._compare_on_event(cwd, counted=False)
         else:
-            self._compare_due = False
+            self._fresh.compare_due = False
             if self._check_root(cwd):
                 self._compare_signatures(cwd)
-        self._take_deferred_state()
+        self._run_actions(self._fresh.take_deferred(self._page()), self._watched_cwd)
 
-    def _take_deferred_state(self) -> None:
-        """A tree state a `git-changed` brought while the page was hidden
-        or a mutation was in flight, compared now — unless a mutation is
-        still out (its retry takes it) or the page is hidden still."""
-        if self._deferred_state is _NO_STATE or self.sidebar.busy or not self.get_mapped():
-            return
-        state, self._deferred_state = self._deferred_state, _NO_STATE
-        if self._opened and self._loaded in ("unstaged", "staged"):
-            self._state_moved(state)
+    @property
+    def _tree_state(self) -> str | None:
+        """The tree state the page drew (the freshness table's)."""
+        return self._fresh.tree_state
+
+    @_tree_state.setter
+    def _tree_state(self, state: str | None) -> None:
+        self._fresh.tree_state = state
+
+    def _page(self) -> gitfresh.Page:
+        """The page as it is, for the freshness table."""
+        return gitfresh.Page(
+            mapped=self.get_mapped(),
+            busy=self.sidebar.busy,
+            loading=self._loading,
+            working=self._opened and self._loaded in ("unstaged", "staged"),
+        )
+
+    def _run_actions(self, actions: gitfresh.Actions, cwd: str | None) -> None:
+        """Carry out the freshness table's verdict: the retry timer, the
+        signatures' compare (counted by `changes_heard` when the table
+        says so), a reload of the load."""
+        if actions.retry:
+            self._schedule_retry()
+        if actions.compare:
+            if actions.counted:
+                self.changes_heard += 1
+            if cwd and self._check_root(cwd):
+                self._compare_signatures(cwd)
+        if actions.reload:
+            log.debug("gitpage: the working tree moved under the watch; reloading")
+            self._read_diff(self._loaded)
 
     def _check_root(self, cwd: str | None) -> bool:
         """The tree under the agent's cwd, off the mirror: True when the
@@ -1155,7 +1174,7 @@ class GitPage(Adw.Bin):
         """Shown: open on the first map; a compare or a tree state the
         page was told of while hidden runs now (check_now)."""
         self._ensure_open()
-        if self._opened and (self._compare_due or self._deferred_state is not _NO_STATE):
+        if self._opened and self._fresh.pending:
             self.check_now()
 
     def _ensure_open(self) -> None:
@@ -1279,8 +1298,7 @@ class GitPage(Adw.Bin):
         # flight samples it after any mutation, so a state kept from
         # while one was (or while the page was hidden) is old news; one
         # parked behind a read in flight (above) clears nothing.
-        if not self.sidebar.busy:
-            self._deferred_state = _NO_STATE
+        self._fresh.read_started(self.sidebar.busy)
         gen = self._gen
         cwd = self._cwd_provider()
         parent_target = self._parent_target
@@ -1379,11 +1397,10 @@ class GitPage(Adw.Bin):
         self._diffview.load(read.files, loaded, reader, repo=repo, image_locator=locator)
         self.sidebar.refresh_files(_file_summaries(read.files), loaded, self._options.untracked, read.status)
         working = loaded in ("unstaged", "staged")
-        self._tree_state = state
         # A git-changed that arrived while this read was out carried a
         # state this read may not have seen (its worker sampled before
-        # the read): compared now, after the watch is re-made.
-        stale, self._watch_stale = self._watch_stale, None
+        # the read): confirmed below, after the watch is re-made.
+        landed = self._fresh.read_landed(state, working, reread)
         self._install_watch(read.files if working else None)
         self._sync_context()
         self._sync_search_label()
@@ -1393,7 +1410,7 @@ class GitPage(Adw.Bin):
             self._read_diff(loaded)  # its worker samples the tree state anew: no compare needed
             return GLib.SOURCE_REMOVE
         self._run_pending_navigate()
-        if working and stale is not None and stale != self._tree_state:
+        if landed.confirm:
             self._confirm_state(loaded)
         return GLib.SOURCE_REMOVE
 
@@ -1413,10 +1430,7 @@ class GitPage(Adw.Bin):
         def answered(fresh: str | None) -> None:
             if gen != self._gen or self._closing or not self._opened or self._loaded != loaded:
                 return
-            if self._loading:
-                return  # another read is out: its worker samples the state anew
-            if fresh is None or fresh != self._tree_state:
-                self._tree_state = fresh
+            if self._fresh.confirmed(fresh, self._loading).reload:
                 log.debug("gitpage: the working tree moved during the read; reloading")
                 self._read_diff(loaded)
 
@@ -1476,7 +1490,7 @@ class GitPage(Adw.Bin):
         mirror = remotegit.mirror()
         if fresh:
             mirror.on_changed(cwd, self._on_git_changed)
-        self._watch_stale = None
+        self._fresh.watch_stale = None
         # The read's own sample seeds the service's compare, so an edit
         # between the read and the watch's first look is still a move.
         # The handle is this page's: another page on the same tree keeps
@@ -1524,9 +1538,7 @@ class GitPage(Adw.Bin):
             mirror.unwatch(self.watch_handle)
             self._watched_cwd = None
         self._watch_tree = False
-        self._watch_stale = None
-        self._compare_due = False
-        self._deferred_state = _NO_STATE
+        self._fresh.drop()
         if self._compare_retry:
             GLib.source_remove(self._compare_retry)
             self._compare_retry = 0
@@ -1551,49 +1563,18 @@ class GitPage(Adw.Bin):
         cwd = event.get("cwd")
         if cwd == self._watched_cwd:
             self._compare_on_event(cwd)
-        if self._loaded not in ("unstaged", "staged"):
-            return
-        state = event.get("state")
-        if self.sidebar.busy:
-            self._deferred_state = state
-            self._schedule_retry()
-            return
-        if not self.get_mapped():
-            # §3.15: only a visible page reloads; this one does on its map.
-            self._deferred_state = state
-            return
-        self._state_moved(state)
-
-    def _state_moved(self, state: str | None) -> None:
-        """A tree state the watch pushed, against the one the page drew."""
-        if self._loading:
-            self._watch_stale = state
-            return
-        if state != self._tree_state:
-            self._tree_state = state
-            log.debug("gitpage: the working tree moved under the watch; reloading")
-            self._read_diff(self._loaded)
+        self._run_actions(self._fresh.state_event(event.get("state"), self._page()), cwd)
 
     def _compare_on_event(self, cwd: str, counted: bool = True) -> None:
-        """The signatures' compare a `git-changed` (or a fresh watch) asks
-        for: now on a mapped page with no mutation in flight, else kept
-        (_compare_due) for the next map, or retried until the sidebar's
-        mutation landed (its _on_mutated re-seeds the signatures first,
-        so its own move is never reloaded twice)."""
+        """The signatures' compare a `git-changed` (or a fresh watch, or
+        check_now: *counted* False) asks for: now on a mapped page with
+        no mutation in flight, else kept (`Freshness.compare_due`) for
+        the next map, or retried until the sidebar's mutation landed
+        (its _on_mutated re-seeds the signatures first, so its own move
+        is never reloaded twice)."""
         if self._closing or not self._opened or cwd != self._watched_cwd:
             return
-        if not self.get_mapped():
-            self._compare_due = True
-            return
-        if self.sidebar.busy:
-            self._compare_due = True
-            self._schedule_retry()
-            return
-        self._compare_due = False
-        if counted:
-            self.changes_heard += 1
-        if self._check_root(cwd):
-            self._compare_signatures(cwd)
+        self._run_actions(self._fresh.compare(self._page(), counted), cwd)
 
     def _schedule_retry(self) -> None:
         if not self._compare_retry:
@@ -1606,12 +1587,11 @@ class GitPage(Adw.Bin):
         self._compare_retry = 0
         if self._closing or self._watched_cwd is None:
             return GLib.SOURCE_REMOVE
-        if self.sidebar.busy:
-            self._schedule_retry()
-            return GLib.SOURCE_REMOVE
-        if self._compare_due:
-            self._compare_on_event(self._watched_cwd)
-        self._take_deferred_state()  # a hidden page keeps it for its map
+        cwd = self._watched_cwd
+        self._run_actions(self._fresh.retry(self._page()), cwd)
+        # The kept state, looked at after the compare (which may have
+        # started a read): a hidden page keeps it for its map.
+        self._run_actions(self._fresh.take_deferred(self._page()), cwd)
         return GLib.SOURCE_REMOVE
 
     # -- the sidebar --------------------------------------------------------------------
