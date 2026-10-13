@@ -1210,6 +1210,21 @@ class MainWindow(Adw.ApplicationWindow):
                 count += 1
         return count
 
+    def _agent_busy_count(self) -> int:
+        """The sessions that keep running after a quit: tabs whose agent
+        owns its terminal (an unstarted New Thread aside) — the quit
+        dialog's heading, which a tab busy only in its panel must not
+        count (`quitrules.quit_heading`)."""
+        return sum(
+            1 for tab in self._terminal_tabs()
+            if tab.has_running_command() and not tab.unstarted_thread()
+        )
+
+    def _panel_busy(self) -> bool:
+        """Whether a command runs in any tab's terminal panel: the quit ends
+        the panel shells, so the dialog names it (`quitrules.quit_body`)."""
+        return any(tab.panel_has_running_command() for tab in self._terminal_tabs())
+
     def _editor_dirty_total(self) -> int:
         """Unsaved editor buffers across every tab — counted separately from
         `_busy_tab_count` (which is about running commands) so its number
@@ -1364,34 +1379,26 @@ class MainWindow(Adw.ApplicationWindow):
             do_detach()
             return
         # "ask" — or "hide" during an explicit app.quit, which never hides
-        # silently: the dialog offers all the answers instead.
-        heading = (
-            _("1 session keeps running in the Collins service")
-            if busy == 1
-            else _("{n} sessions keep running in the Collins service").format(n=busy)
-        )
+        # silently: the dialog offers all the answers instead. The words
+        # are quitrules' (GTK-free): the heading counts the agents alone
+        # (*busy* counts a tab busy only in its panel too), and the body
+        # names a panel's running command, which Quit and Stop Sessions
+        # both end with its tab.
         app = self.get_application()
         other_windows = any(
             isinstance(w, MainWindow) and w is not self and not w.closed_for_good
             for w in (app.get_windows() if app is not None else [])
         )
-        if other_windows:
-            body = _("This window closes and its agents keep working; their tabs come "
-                     "back the next time Collins opens. Stop Sessions and Quit asks "
-                     "each agent to exit first.")
-        else:
-            body = _("Quit closes Collins and leaves every agent working; the tabs "
-                     "come back the next time Collins opens. Stop Sessions and Quit "
-                     "asks each agent to exit first.")
-        body += " " + _("Keep Running hides the window and leaves every "
-                        "session exactly as it is.")
-        if not getattr(app, "tray_host_present", False):
-            body += " " + _("Without a status icon, a hidden window comes back by "
-                            "launching Collins again.")
-        if not self.state.get_setting("quit_notice_shown"):
+        first_notice = not self.state.get_setting("quit_notice_shown")
+        heading = quitrules.quit_heading(self._agent_busy_count(), self._panel_busy())
+        body = quitrules.quit_body(
+            other_windows=other_windows,
+            panel_busy=self._panel_busy(),
+            tray_present=bool(getattr(app, "tray_host_present", False)),
+            first_notice=first_notice,
+        )
+        if first_notice:
             # Once per device: the icon going is no sign the agents did.
-            body += " " + _("Collins's status icon leaves with the window; "
-                            "the sessions keep running.")
             self.state.set_setting("quit_notice_shown", True)
 
         def answered(response: str) -> None:

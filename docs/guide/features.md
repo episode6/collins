@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-05. Full change history: git log for this file.
+fork. Last modified: 2026-10-12. Full change history: git log for this file.
 -->
 
 # Features
@@ -314,7 +314,11 @@ Enter opens, Esc closes.
   first, as quitting did before the service) and **Keep Running (Hide
   Window)**; the first time, it also says the status icon goes with the
   window while the sessions keep running, and without a status icon it
-  says how a hidden window comes back. Closing one of several windows
+  says how a hidden window comes back. The count is of agents: a tab busy
+  only in its terminal panel is not a session that keeps running, and
+  since the panel shells end with their tabs on *Quit* and *Stop Sessions
+  and Quit* alike, the dialog says so when a command is running in one
+  (only *Keep Running* keeps it). Closing one of several windows
   says that window closes; its tabs are reopened at the next launch all
   the same. A tab already closing finishes its close; a tab whose agent
   has exited, and a New Thread whose first prompt was never sent, end

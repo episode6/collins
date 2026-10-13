@@ -310,7 +310,13 @@ status icon brings it back; `request_quit` bypasses hide) or **ask**: the
 dialog (`dialogs.answer_dialog`) "N sessions keep running in the Collins
 service" with *Quit*, *Stop Sessions and Quit*, *Keep Running (Hide
 Window)*; its first showing adds the status-icon sentence
-(`quit_notice_shown`). An install whose stored value was `ask` moves to
+(`quit_notice_shown`). The words are `quitrules.quit_heading` /
+`quit_body` (GTK-free, tested): N is `_agent_busy_count` (agents owning
+their terminals; `_busy_tab_count`, which gates the dialog, also counts a
+tab busy only in its panel), and with a command running in a terminal
+panel (`_panel_busy`) the body says Quit and Stop Sessions both end it
+with its tab, only Keep Running keeps it — the panel shells go through
+`release_panel_ptys` on every close but a hide. An install whose stored value was `ask` moves to
 `detach` once (`state.migrate_device_settings`, marked by
 `quit_detach_migrated`). `_close_for_good` writes `open_tabs` one last time
 (with this window's tabs when it is the last window) and freezes it.
