@@ -656,7 +656,7 @@ def names_reply(root: str) -> dict:
                     break
                 names.append(name)
     except OSError:
-        raise ReadRefused(protocol.ERROR_GONE, "The folder is not there") from None
+        raise ReadRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID) from None
     names.sort()
     return {"names": names, "truncated": truncated}
 
@@ -1053,17 +1053,17 @@ class Files:
     def names(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`fs.names {root}`: `names_reply` on a thread, for a root the
         client may name (a session's, or anything for a `local` client:
-        `_confine` on the worker against the roots computed here, as
-        `walk` does; review of PR 614: the resolving check does not
-        belong on the main loop)."""
+        its `Confinement` read here and resolved on the worker, as `walk`
+        does; review of PR 614: the resolving check does not belong on
+        the main loop)."""
         root = self._path(message, "root")
         if isinstance(root, dict):
             return root
-        allowed_roots = self._roots(client)
+        conf = confinement(self.core, client)
 
         def work() -> dict:
             try:
-                _confine(allowed_roots, root)
+                _confine(conf, root)
                 fields = names_reply(root)
             except ReadRefused as refused:
                 return protocol.refuse(message.id, refused.error, refused.msgid, refused.details)
