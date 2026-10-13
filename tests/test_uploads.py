@@ -293,3 +293,125 @@ def test_the_client_says_why_an_upload_failed():
         remoteuploads.upload(b"\0" * (uploads.MAX_BYTES + 1), "a.png", "sid-1", Link())
     with pytest.raises(ValueError):
         remoteuploads.upload(b"png", "a.png", "sid-1", object())  # no HTTP
+
+
+# -- upload_files: the dropped files' read and the errors joined per file -------------
+
+
+class Info:
+    def __init__(self, kind, size, name):
+        self.kind, self.size, self.name = kind, size, name
+
+    def get_file_type(self):
+        return self.kind
+
+    def get_size(self):
+        return self.size
+
+    def get_name(self):
+        return self.name
+
+
+class Bytes:
+    def __init__(self, data):
+        self.data = data
+
+    def get_data(self):
+        return self.data
+
+
+class File:
+    """A `Gio.File`-shaped drop: a regular file, a directory, or one past
+    the cap, each with the bytes it would load."""
+
+    def __init__(self, name, data=b"", kind=None, size=None):
+        from gi.repository import Gio
+
+        self.name, self.data = name, data
+        self.kind = Gio.FileType.REGULAR if kind is None else kind
+        self.size = len(data) if size is None else size
+
+    def query_info(self, attributes, flags, cancellable):
+        return Info(self.kind, self.size, self.name)
+
+    def load_bytes(self, cancellable):
+        return Bytes(self.data), None
+
+    def get_basename(self):
+        return self.name
+
+
+@pytest.fixture
+def inline_later(monkeypatch):
+    """`remoteuploads._later` with its thread and its idle landing run inline."""
+
+    def later(work, land, name):
+        try:
+            result = work()
+        except Exception as err:
+            result = err if isinstance(err, ValueError) else ValueError(str(err))
+        land(result)
+
+    monkeypatch.setattr(remoteuploads, "_later", later)
+
+
+def test_upload_files_sends_each_file_under_its_own_name_in_the_drops_order(inline_later, monkeypatch):
+    link = Link()
+
+    def http_put(query, body, headers=None):
+        link.puts.append((query, body))
+        name = query.split("name=")[1].split("&")[0]
+        return 200, {}, json.dumps({"path": "/srv/uploads/sid-1/" + name}).encode()
+
+    link.http_put = http_put
+    monkeypatch.setattr(remoteuploads.apilink, "current", lambda: link)
+    done = []
+    files = [File("a.png", b"A"), File("b c.txt", b"BC")]
+    remoteuploads.upload_files(files, "sid-1", lambda p, e: done.append((p, e)))
+    assert done == [(["/srv/uploads/sid-1/a.png", "/srv/uploads/sid-1/b%20c.txt"], [])]
+    assert link.puts == [
+        ("/api/upload?name=a.png&session=sid-1", b"A"),
+        ("/api/upload?name=b%20c.txt&session=sid-1", b"BC"),
+    ]
+
+
+def test_upload_files_refuses_a_directory_and_a_file_past_the_cap_and_keeps_going(inline_later, monkeypatch):
+    from gi.repository import Gio
+
+    link = Link()
+    monkeypatch.setattr(remoteuploads.apilink, "current", lambda: link)
+    done = []
+    files = [
+        File("folder", kind=Gio.FileType.DIRECTORY),
+        File("huge.bin", b"x", size=uploads.MAX_BYTES + 1),
+        Gio.File.new_for_path("/nonexistent/collins-test/missing.png"),  # a real GLib.Error
+        File("ok.png", b"ok"),
+    ]
+    remoteuploads.upload_files(files, None, lambda p, e: done.append((p, e)))
+    ((paths, errors),) = done
+    assert paths == ["/srv/uploads/sid-1/shot.png"]  # the stub's one path
+    assert link.puts == [("/api/upload?name=ok.png", b"ok")]  # the refused ones were never sent
+    assert len(errors) == 3
+    assert "folder isn't a file" in errors[0]
+    assert "too large" in errors[1]
+    assert errors[2]  # GLib's own words for the missing file
+
+
+def test_upload_files_with_a_dead_link_fails_the_drop_as_a_whole(inline_later, monkeypatch):
+    monkeypatch.setattr(remoteuploads.apilink, "current", lambda: None)
+    done = []
+    remoteuploads.upload_files([File("a.png", b"A")], "sid-1", lambda p, e: done.append((p, e)))
+    assert done == [([], ["Not connected to the service"])]
+
+
+def test_upload_png_names_the_texture_by_prefix_and_lands_the_path_or_the_error(inline_later, monkeypatch):
+    link = Link()
+    monkeypatch.setattr(remoteuploads.apilink, "current", lambda: link)
+    done = []
+    remoteuploads.upload_png(b"\x89PNG", "paste", "sid-1", lambda path, error: done.append((path, error)))
+    assert done == [("/srv/uploads/sid-1/shot.png", None)]
+    query = link.puts[0][0]
+    assert query.startswith("/api/upload?name=paste-") and query.endswith(".png&session=sid-1")
+    monkeypatch.setattr(remoteuploads.apilink, "current", lambda: Link(status=500))
+    remoteuploads.upload_png(b"\x89PNG", "drop", None, lambda path, error: done.append((path, error)))
+    assert done[-1] == (None, "The service refused the upload (500).")
