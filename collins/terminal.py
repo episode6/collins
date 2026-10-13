@@ -1930,8 +1930,9 @@ class TerminalTab(Gtk.Box):
                 notify=self.feed_message,
                 worktree_default=worktree_default,
                 # Whether `cwd` is a checkout is the service's answer, asked
-                # below; the checkbox stays out until it lands.
-                is_git=False,
+                # below; the checkbox stays out until it lands, and a Send
+                # before then carries the hidden box's wish (None).
+                is_git=None,
                 model=(options.model if options else "") or "",
                 pick_model=bool(self.provider.session_models()),
                 effort=(options.effort if options else "") or "",
@@ -2195,7 +2196,10 @@ class TerminalTab(Gtk.Box):
     def when_checkout_known(self, then: Callable[[bool], None]) -> None:
         """`then(is_git)` once the service has answered whether the new-chat
         screen's directory is a git checkout: at once when it has, else when
-        it lands (a Send in the milliseconds before it does waits for it)."""
+        it lands. A Send that beats the answer (a round trip to a service
+        on another machine is long enough to type a line in) waits here:
+        the screen sends the hidden box's wish until then (`newchat.
+        worktree_wish`), so a default-on project is not launched plain."""
         if self._is_git_checkout is not None:
             then(self._is_git_checkout)
         else:

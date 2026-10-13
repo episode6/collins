@@ -100,6 +100,31 @@ def test_effective_worktree_follows_choice_then_default_never_outside_git():
     assert not newchat.effective_worktree(True, True, False)
 
 
+def test_a_send_before_the_checkout_answer_carries_the_hidden_boxes_wish():
+    """Nit 3 of PR 614's Fable review: the box is hidden until the service
+    says the directory is a checkout, and a hidden box read as unticked
+    launched a default-on project without its worktree for a Send that
+    beat the answer. The wish crosses instead; the window holds it to the
+    answer (`TerminalTab.when_checkout_known`)."""
+    assert newchat.worktree_wish(True, None)  # not answered yet: the wish
+    assert not newchat.worktree_wish(False, None)
+    assert newchat.worktree_wish(True, True)
+    assert not newchat.worktree_wish(False, True)
+    assert not newchat.worktree_wish(True, False)  # known: no checkout, no box
+    # and the launch, once the answer is in, is the wish and the answer
+    for is_git in (True, False):
+        assert (newchat.worktree_wish(True, None) and is_git) is is_git
+
+
+def test_a_drafts_worktree_choice_survives_the_wait_for_the_answer():
+    assert newchat.worktree_draft_choice(True, True, None) is True
+    assert newchat.worktree_draft_choice(False, True, None) is False
+    assert newchat.worktree_draft_choice(True, False, None) is None  # the default, not a choice
+    assert newchat.worktree_draft_choice(True, True, True) is True
+    assert newchat.worktree_draft_choice(True, False, True) is None
+    assert newchat.worktree_draft_choice(True, True, False) is None  # no box at all
+
+
 def test_draft_record_keeps_a_model_pick_only():
     record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, model="")
     assert "model" not in record  # the default is re-read, not kept
