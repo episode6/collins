@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import threading
 import time
-import weakref
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -28,6 +27,7 @@ from . import (
     APP_ID,
     DEBUG_APP_ID,
     __version__,
+    apilink,
     buildinfo,
     chats,
     clonedialog,
@@ -41,7 +41,6 @@ from . import (
     jobclient,
     keybindings,
     keymap,
-    mcptools,
     newchat,
     notifycenter,
     notifyoverlay,
@@ -51,30 +50,17 @@ from . import (
     paneldnd,
     panelhistory,
     pkgrepos,
-    sandboxplan,
+    sandboxstatus,
     updatecheck,
     welcome,
 )
-from . import terminal as terminal_mod
-from .activity import (
-    BACKGROUND_IDLE_S,
-    BACKGROUND_POLL_MS,
-    FINISH,
-    FINISH_CONFIRM_S,
-    PROCESS_IDLE_S,
-    PROCESS_POLL_MS,
-    PROGRESS_FINISH_GRACE_S,
-    PROGRESS_IDLE_S,
-    ActivityTracker,
-    BackgroundBusyWatch,
-)
+from .api.loopback import RequestRefused
 from .bgstatus import (
     BLOCK_IN_FLIGHT,
     BLOCK_SANDBOXED,
     BLOCK_UNREGISTERED,
     BackgroundStatusPoller,
     background_blocker,
-    fetch_background_busy_ids,
     match_background_fork,
 )
 from .caffeine import (
@@ -106,7 +92,6 @@ from .quickopen import QuickOpenDialog
 from .remotestate import RemoteState
 from .remotestore import RemoteStore
 from .replayview import ReplayTab
-from .service import session as live_session
 from .sessions import (
     Session,
     export_markdown,
@@ -124,7 +109,7 @@ from .store import emptied_projects
 from .svgtexture import svg_texture
 from .switcher import QuickSwitcher
 from .taborder import neighbour_tab, tab_order
-from .terminal import PROGRESS_HINT_TERMPROP, TerminalTab
+from .terminal import TerminalTab
 from .traymodel import TraySession
 
 log = logging.getLogger(__name__)
@@ -228,18 +213,15 @@ class _TabWiring(NamedTuple):
 class _CarriedPage(NamedTuple):
     """A page's per-window bookkeeping, packed up for the window it is moving
     to (see MainWindow.hand_over_page). Everything here is keyed by page in the
-    window that holds it, so it has to travel by hand. (The activity watches
-    don't: they are the tab's session's own — Session.echo_gate, .spinner,
-    .progress — and ride along inside the tab, busy state and all.)"""
+    window that holds it, so it has to travel by hand. (Busy and the finish
+    verdict don't: they are the service's, on the session, and ride along
+    inside the tab: PR-1.12a.)"""
 
-    fresh_spawn: bool
-    baseline: set[str] | None
     base_title: str | None
     local_title: bool
     pending_resolved: tuple[str, str] | None
     archive_on_close: str | None
     worktree_deletion: dict | None
-    busy: bool
 
 
 # Tabs carry no status dot of their own: AdwTabView already marks a tab with
@@ -404,14 +386,6 @@ class MainWindow(Adw.ApplicationWindow):
         # mark and announces nothing; it still re-enters the center, so the
         # badge and the history keep meaning "waiting for you".
         self._announce_owed: set[str] = set()
-        # Finish edges the transcript called repaints, held for
-        # FINISH_CONFIRM_S while the tab re-reads its file: session id →
-        # the timeout that drops them (see _hold_finish).
-        self._held_finishes: dict[str, int] = {}
-        # Tabs whose finishes have been logged as passing ungated (no
-        # transcript read yet) — once each, so COLLINS_LOG explains the
-        # difference without repeating itself every turn.
-        self._ungated_logged: weakref.WeakSet = weakref.WeakSet()
         self._placeholder_seq = 0
         # Tabs renamed locally before their session was bound: never auto-sync
         # their titles from the store.
@@ -448,38 +422,11 @@ class MainWindow(Adw.ApplicationWindow):
         # the snap-back that a real drag schedules.
         self._sorting_tabs = False
         self._sort_tabs_source: int | None = None
-        # Which sessions are producing output right now. Only tabs feed this:
-        # a detached (/bg) session's row keeps its still yellow guide line
-        # rather than a pole, so there is nothing to track for it.
-        # on_finished fires only when a run's output stops on its own — the
-        # edge that flags a row unread; a clear() (tab closed, detach torn
-        # down) goes through on_change alone and flags nothing.
-        self._activity = ActivityTracker(
-            self._on_activity_changed, on_finished=self._on_session_finished
-        )
-        # A tab's terminal only sees output; it says nothing about a
-        # background process (a dev server, a long build) the agent started
-        # and left running with its own output going elsewhere. This poll
-        # walks each open tab's process tree for one; see _sync_process_poll.
-        self._process_poll: int | None = None
-        # The agent list's word on which background agents are working, for
-        # the sessions attached to one in a tab: their turns are announced by
-        # nothing on screen, so this is the only authoritative signal they
-        # have. See _sync_background_busy_poll and BackgroundBusyWatch.
-        self._bg_busy = BackgroundBusyWatch()
-        self._bg_busy_poll: int | None = None
-        self._bg_busy_fetching = False  # one CLI call in flight at a time
-        # Each tab's activity watches are its session's (_session_of): the
-        # echo gate that keeps a terminal's answers to the app (an echoed
-        # keystroke, a redraw after a tab switch or a resize) from reading as
-        # the agent working, the spinner-motion detector sampled alongside it
-        # in _on_terminal_output, and the progress-termprop interpreter fed
-        # by _on_progress_termprop — see activity.py.
-        # Tabs that spawned their CLI fresh instead of attaching to an
-        # existing session: no agent can be mid-turn in one before its first
-        # submit, so even the ungated pole starters hold through the startup
-        # paint. See _startup_held.
-        self._fresh_spawns: set[Adw.TabPage] = set()
+        # Which sessions are working right now is the service's to say
+        # (service.tracking.ServiceActivity, PR-1.12a): a row's pole is its
+        # item's `busy`, a placeholder's the tab's "activity-changed", and a
+        # finished run flags its rows on the service and reaches the tab as
+        # "run-finished" (see _on_tab_run_finished).
         # Per new-chat tab, the pending debounced write of its draft (see
         # _on_new_chat_changed): a keystroke's worth of typing shouldn't be a
         # state.json write each.
@@ -488,16 +435,6 @@ class MainWindow(Adw.ApplicationWindow):
         # drops the page's draft instead of filing it (see
         # _discard_new_chat_draft and _save_new_chat_draft).
         self._discarding_drafts: set[Adw.TabPage] = set()
-        # Per fresh-spawn tab, the cmdlines seen running under its agent
-        # before anything was submitted: the CLI's own plumbing (MCP servers),
-        # absorbed by the process poll until the tab's gate arms and ignored
-        # by it ever after — a permanent server child must not keep the busy
-        # pole up for the life of the session. Persisted per session id so a
-        # later re-attach to the same process still knows its plumbing; the
-        # servers Collins itself configures are additionally ignored always
-        # (see mcptools.infrastructure_cmdlines).
-        self._baseline_captures: dict[Adw.TabPage, set[str]] = {}
-        self._infra_cmdlines = mcptools.infrastructure_cmdlines()
         # What each open page's tab is connected to this window by: the
         # handlers and controllers _wire_tab put on it, kept so a page handed
         # to another window can be unwired from this one first.
@@ -695,6 +632,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar.connect("close-placeholder", self._on_sidebar_close_placeholder)
         self.sidebar.connect("rows-reordered", lambda *_: self._sort_tabs())
         self.store.connect("refreshed", self._on_store_refreshed)
+        # The service's busy verdicts land on the items; the header's pole
+        # and the tray follow them (PR-1.12a).
+        self.store.connect("busy-changed", self._on_row_busy_changed)
         if hasattr(self.state, "connect_changed"):
             # A name the service wrote (the set_session_title tool runs there
             # since PR-1.11): the session's open tab wears it, as a rename
@@ -1775,32 +1715,12 @@ class MainWindow(Adw.ApplicationWindow):
         # A chat's throwaway directory may have been swept or trashed since;
         # recreate it rather than letting the terminal fall back to $HOME.
         chats.ensure_chat_dir(cwd)
-        box = ""
-        host = terminal_mod.SANDBOX_HOST
-        if sandboxed and host is not None:
-            box = self.state.sandbox_box(session.session_id)
-            if fork:
-                # Another conversation: a box of its own, which starts with
-                # a copy of what its origin is allowed — taken once, here;
-                # the two lists are independent from now on. No project
-                # defaults: the origin's list is what the user left it as.
-                origin = box
-                box = host.mint_box(cwd, seed=False)
-                grants = self.state.get_sandbox_grants(origin) if origin else []
-                if grants:
-                    self.state.set_sandbox_grants(box, grants)
-                # And of the session tools it is offered, likewise.
-                host.copy_tools(origin, box)
-            elif not box:
-                # The session's own box is its $HOME, as it left it. One
-                # with none yet (recorded before the boxes, or its
-                # transcript back from the trash) gets its id here rather
-                # than from the tab — a resumed tab resolves nothing, so
-                # nothing else would record it, and the home would be a
-                # fresh one at every resume — and starts, like a new
-                # session, with its project's defaults.
-                box = host.mint_box(cwd)
-                self.state.set_sandboxed(session.session_id, True, box=box)
+        # The session's own box is its $HOME, as it left it; the service
+        # mints one where there is none yet (a session recorded before the
+        # boxes, a transcript back from the trash) and a fork's own, seeded
+        # with a copy of its origin's grants and tool switches
+        # (ServiceCore._box_for_launch, PR-1.12a).
+        box = "" if fork else self.state.sandbox_box(session.session_id) if sandboxed else ""
         # The tab is bound to the id the CLI actually runs, which for an
         # attached fork is the fork's — including its (still stubby) transcript.
         bound_id = attach_id or session.session_id
@@ -1827,8 +1747,6 @@ class MainWindow(Adw.ApplicationWindow):
         page = self._add_tab(tab, title, f"{project} — {bound_id}")
         if not fork:
             self._pages[bound_id] = page
-            self._sync_process_poll()
-            self._sync_background_busy_poll()
             self._sync_status(bound_id)
             saved_panel = self.state.get_panel_layout(bound_id)
             if saved_panel:  # rebuild the dock the way this session left it
@@ -2021,7 +1939,7 @@ class MainWindow(Adw.ApplicationWindow):
         return newchat.effective_sandbox(
             choice,
             self.state.sandbox_for_project(project_name_for_cwd(cwd)),
-            sandboxplan.probe_reason() == "",
+            sandboxstatus.probe_reason() == "",
         )
 
     def refresh_sandbox_availability(self) -> None:
@@ -2031,7 +1949,7 @@ class MainWindow(Adw.ApplicationWindow):
             tab = self.tab_view.get_nth_page(i).get_child()
             if isinstance(tab, TerminalTab) and tab.is_new_chat:
                 tab.set_sandbox_available(
-                    sandboxplan.probe_reason() == "", self._sandbox_for_new_session(tab.cwd)
+                    sandboxstatus.probe_reason() == "", self._sandbox_for_new_session(tab.cwd)
                 )
 
     def _sandboxed_options(self, options):
@@ -2216,9 +2134,6 @@ class MainWindow(Adw.ApplicationWindow):
     def _remove_placeholder(self, page: Adw.TabPage) -> None:
         placeholder_id = self._placeholder_pages.pop(page, None)
         if placeholder_id is not None:
-            # Drop it from the tracker too: the row it stood for is gone (the
-            # session's own row has taken over), so nothing is left to time out.
-            self._activity.clear(placeholder_id)
             self.sidebar.remove_placeholder(placeholder_id)
             # And its synthetic "finished" row goes with its flag: the row
             # the flag sat on no longer exists (see _sync_placeholder_green).
@@ -2575,17 +2490,6 @@ class MainWindow(Adw.ApplicationWindow):
         page = self.tab_view.append(tab)
         page.set_title(title)
         page.set_tooltip(tooltip)
-        if tab.session_id is None:
-            # A new session or a --continue: the CLI is being spawned right
-            # now, so nothing can be mid-turn behind it (unlike a tab bound
-            # to an existing id, which may be attaching to a live agent).
-            self._fresh_spawns.add(page)
-            # The poll must run before the session id resolves: this tab's
-            # pre-submit window is when its plumbing baseline is captured —
-            # and one snapshot lands right now, so even a submit inside the
-            # poll's first interval leaves a capture attempt behind it.
-            self._sync_process_poll()
-            self._absorb_baseline(page)
         self._wire_tab(tab, page)
         if not background:
             self.tab_view.set_selected_page(page)
@@ -2625,7 +2529,9 @@ class MainWindow(Adw.ApplicationWindow):
         watch(tab, "editor-pop-out-requested", self._pop_out_editor)
         watch(tab, "bell", self._on_bell)
         watch(tab, "attachments-changed", self._on_tab_attachments_changed)
-        watch(tab, "transcript-updated", self._on_tab_transcript_updated)
+        watch(tab, "activity-changed", self._on_tab_activity_changed, page)
+        watch(tab, "run-finished", self._on_tab_run_finished, page)
+        watch(tab, "close-budget", self._on_tab_close_budget, page)
         watch(tab, "draft-changed", self._on_tab_draft_changed)
         watch(tab, "new-chat-changed", self._on_new_chat_changed, page)
         watch(tab, "new-chat-send", self._on_new_chat_send, page)
@@ -2634,22 +2540,10 @@ class MainWindow(Adw.ApplicationWindow):
         tab.set_pr_store(self.store.pr_store)
         tab.set_panel_size_lookup(self._panel_size_seed)
         tab.set_editor_width_lookup(lambda: int(self.state.get_setting("editor_width") or 0))
-        # "commit" is what the VTE itself sends this terminal's child — the
-        # keystrokes the user types, and the focus and mouse reports it emits
-        # on a tab switch — so the redraw that answers one is not the agent
-        # working. The text goes along so a typed Enter arms the gate.
-        watch(tab.terminal, "commit", self._on_terminal_commit, page)
-        # The app's own writes (an injected prompt, a switch, a close flow's
-        # keys) take the service's road, not the VTE's, so they never arrive
-        # as a commit: the session pokes its own gate and announces them
-        # (see _on_input_sent).
-        watch(tab, "input-sent", self._on_input_sent, page)
+        # A redraw of an unselected tab is output the user hasn't seen:
+        # the page's attention mark (the busy verdict itself is the
+        # service's, off the pty's own output).
         watch(tab.terminal, "contents-changed", self._on_terminal_output, page)
-        # The agent's own busy signal, where the CLI and VTE both speak it —
-        # see ProgressWatch (and _agent_tab_environment for how it's coaxed
-        # out of the CLI). Skipped on a VTE too old for termprops.
-        if PROGRESS_HINT_TERMPROP is not None:
-            watch(tab.terminal, "termprop-changed", self._on_progress_termprop, page)
         # Capture phase so the keystroke is seen even though VTE consumes it;
         # EVENT_PROPAGATE below leaves it for VTE to deliver as usual.
         keys = Gtk.EventControllerKey()
@@ -2857,23 +2751,6 @@ class MainWindow(Adw.ApplicationWindow):
         or the app's (a write the service refused, see remotestate)."""
         self.sidebar.toast_overlay.add_toast(Adw.Toast(title=GLib.markup_escape_text(text)))
 
-    def _settle_sandbox_box(self, tab: TerminalTab, session_id: str) -> None:
-        """Record the box a sandboxed tab launched in against the session
-        it turned out to be, and settle what that box is allowed
-        (SandboxHost.settle_box: a `--continue` tab's box takes over the
-        grants of the box the session had, or gets its project's defaults
-        now). What it is owed is then delivered to the running box, or
-        waits for a restart."""
-        box = tab.sandbox_box
-        owed = tab.take_sandbox_defaults_owed()
-        host = terminal_mod.SANDBOX_HOST
-        if host is None:
-            self.state.set_sandboxed(session_id, True, box=box)
-            return
-        grants = terminal_mod.SANDBOX_GRANTS
-        if host.settle_box(session_id, box, tab.start_cwd, owed) and grants is not None:
-            grants.sync(box)
-
     def _on_session_resolved(self, tab: TerminalTab, session_id: str, page: Adw.TabPage) -> None:
         """A fresh tab (new / continue) discovered its session id: bind the tab
         to the session so the sidebar highlight, open-dedup, rename and status sync
@@ -2881,18 +2758,9 @@ class MainWindow(Adw.ApplicationWindow):
         if self._pages.get(session_id) not in (None, page):
             return  # another tab already owns this session
         self._pages[session_id] = page
-        if tab.sandboxed:
-            # Sticky from here: a resume rebuilds the box (open_session),
-            # around the home this launch ran in.
-            self._settle_sandbox_box(tab, session_id)
-        self._sync_process_poll()
-        self._sync_background_busy_poll()
-        # Anything absorbed into the plumbing baseline before the id was
-        # known has a home now. Usually a no-op: the id tends to resolve
-        # before the first submit, so ongoing captures persist themselves.
-        captured = self._baseline_captures.get(page)
-        if captured:
-            self.state.set_process_baseline(session_id, captured)
+        # The box a sandboxed launch ran in is recorded against the id, and
+        # settled, on the service (ServiceCore.session_resolved); so is the
+        # plumbing baseline absorbed before the id was known.
         # A `--continue` tab lands on a session that may already have PRs
         # saved; a brand-new one has none, and this is a no-op for it.
         tab.restore_prs(self.store.pr_store.records(session_id))
@@ -3089,13 +2957,9 @@ class MainWindow(Adw.ApplicationWindow):
                 self._local_titles.add(page)
             page.set_tooltip(f"{session.project_name} — {session.session_id}")
             self._sync_status(session_id)
-            # The busy flag needs the same handoff. Mid-first-turn the tracker
-            # marked this session busy while the store had no row for it, so
-            # that transition landed on nothing — and it won't fire again while
-            # the turn keeps the session continuously busy. Push it onto the
-            # row that exists now, or the pole dies with the placeholder and
-            # stays down for the rest of the turn.
-            self._sync_row_busy(session_id)
+            # The busy flag's handoff is the service's: a session marked busy
+            # while the store had no row for it gets its pole on the row
+            # that exists now (service.tracking, on the store's refresh).
             if unread:
                 self._reraise_green(session_id)
         self._update_active_row()  # hand the highlight from placeholder to real row
@@ -3311,13 +3175,9 @@ class MainWindow(Adw.ApplicationWindow):
         # copies of the ones the destination keeps, and unwired the tab —
         # this pop finds nothing left for it.)
         self._tab_wiring.pop(page, None)
-        self._fresh_spawns.discard(page)
         self._cancel_new_chat_save(page)
         self._discarding_drafts.discard(page)
-        self._baseline_captures.pop(page, None)
         self._notify_tray()
-        self._sync_process_poll()
-        self._sync_background_busy_poll()
 
     def _on_page_title_changed(self, page: Adw.TabPage, _pspec) -> None:
         if page is self.tab_view.get_selected_page():
@@ -3563,7 +3423,9 @@ class MainWindow(Adw.ApplicationWindow):
         so it is worth saying out loud: the click looked like it did something,
         and nothing was typed anywhere."""
         tab = self._session_tab(session_id)
-        if tab is None or not tab.takes_prompt():
+        # The mirror's word first (no round trip for the plain no), then the
+        # service's, off the live screen: the box must be empty right now.
+        if tab is None or not tab.takes_prompt() or not tab.inject_prompt(prompt, when_empty=True):
             dialogs.error_dialog(
                 self,
                 _("Couldn't send that to the session"),
@@ -3571,7 +3433,6 @@ class MainWindow(Adw.ApplicationWindow):
             )
             return
         self.tab_view.set_selected_page(self._page_for(session_id))
-        tab.inject_prompt(prompt)
 
     def view_pr(self, session_id: str, url: str, unresolved: bool) -> None:
         """A sidebar PR mark's "View in Collins": the PR's native page, docked
@@ -3774,10 +3635,17 @@ class MainWindow(Adw.ApplicationWindow):
         self._leave_closing_tab(page)
         # The keystrokes and the poll that follows them — nudges, the
         # worktree dialog's answer, the shell's exit, the force-close
-        # budgets — are the session's.
-        tab.session.begin_close(
-            exit_text, page in self._bg_closing, lambda: self._close_confirmed(page)
-        )
+        # budgets — are the session's, on the service; a budget running
+        # out comes back as the tab's "close-budget" (_on_tab_close_budget).
+        if not tab.session.begin_close(exit_text, page in self._bg_closing):
+            self._close_confirmed(page)
+
+    def _on_tab_close_budget(self, _tab: TerminalTab, _phase: str, page: Adw.TabPage) -> None:
+        """The service's close poll ran out of budget for this page: the CLI
+        (or its shell) never left. Force the close, as the window's budget
+        always did."""
+        if page in self._closing_pages:
+            self._close_confirmed(page)
 
     def _leave_closing_tab(self, page: Adw.TabPage) -> None:
         """Hand the screen to a neighbouring tab as *page* starts draining.
@@ -4090,9 +3958,6 @@ class MainWindow(Adw.ApplicationWindow):
                 self._clear_backgrounding(session_id, "detach confirmed by the agent list")
         for session_id in changed:
             self._sync_status(session_id)
-        # A tab whose session just became (or stopped being) a listed
-        # background agent is what decides whether the busy poll runs at all.
-        self._sync_background_busy_poll()
 
     # -- "the agent is working right now" ------------------------------------
 
@@ -4101,13 +3966,6 @@ class MainWindow(Adw.ApplicationWindow):
         the activity sweep, the process poll and the background-busy poll all
         hold callbacks into a window that is going away."""
         self._bg_status.stop()
-        self._activity.stop()
-        if self._process_poll is not None:
-            GLib.source_remove(self._process_poll)
-            self._process_poll = None
-        if self._bg_busy_poll is not None:
-            GLib.source_remove(self._bg_busy_poll)
-            self._bg_busy_poll = None
         if self._launch_sweep_source is not None:
             GLib.source_remove(self._launch_sweep_source)
             self._launch_sweep_source = None
@@ -4117,16 +3975,22 @@ class MainWindow(Adw.ApplicationWindow):
         what puts a barber pole on a row's guide line.
 
         Read live by Caffeine Mode's "while sessions are working" (see the
-        app's _follow_activity). Only open tabs feed the tracker, so this is
-        already blind to detached sessions, and a window being torn down has
-        stopped its tracker before it gets here.
+        app's _follow_activity). Only this window's open tabs count, so
+        this is blind to detached sessions.
 
         What counts as working is entirely the pole's business, which is what
-        keeps the two honest: the process poll's plumbing baseline (see
-        _process_ignores) means a session's own MCP servers don't hold the
-        machine awake, while a dev server it left running still does.
+        keeps the two honest: the service's tracker and its plumbing
+        baseline (service.tracking) mean a session's own MCP servers don't
+        hold the machine awake, while a dev server it left running still does.
         """
-        return bool(self._activity.busy())
+        return bool(self._busy_sessions())
+
+    def _busy_sessions(self) -> set[str]:
+        """The sessions this window's tabs run that the service calls busy:
+        the rows' items, and the placeholders' own flags."""
+        busy = {sid for sid in self._pages if (item := self.store.get_item(sid)) is not None and item.busy}
+        busy |= {pid for pid in self._placeholder_pages.values() if self.sidebar.placeholder_busy(pid)}
+        return busy
 
     def _sync_working_pole(self) -> None:
         """Run the sidebar header's barber pole while a session this window is
@@ -4140,25 +4004,26 @@ class MainWindow(Adw.ApplicationWindow):
         agent, whose turns the agent list reports (see _apply_background_busy).
         Its row still gets its pole; the header stays out of it.
         """
-        working = any(not self._is_detached(sid) for sid in self._activity.busy())
+        working = any(not self._is_detached(sid) for sid in self._busy_sessions())
         self.sidebar.set_sessions_working(working)
 
-    def _sync_row_busy(self, session_id: str) -> None:
-        """Push the busy flag onto every row this session shows up as.
+    def _on_row_busy_changed(self, _store, session_id: str, _busy: bool) -> None:
+        """A row's busy flag moved (the service's verdict, on its item):
+        the header's pole and the tray follow."""
+        self._announce_owed.discard(session_id)
+        self._sync_working_pole()
+        self._notify_tray()  # the item's menu marks a working session
 
-        A row is busy when *any* id along its chain is: a session handed to the
-        background runs on under its fork's id, and it is the same conversation
-        the row has always stood for."""
-        for row_id in self.store.rows_representing(session_id):
-            self.store.set_busy(row_id, bool(self._chain(row_id) & self._activity.busy()))
+    def _on_tab_activity_changed(self, _tab: TerminalTab, busy: bool, page: Adw.TabPage) -> None:
+        """The service's busy verdict for a tab's session, by its handle:
+        what a placeholder row (no item to carry a flag) shows."""
+        placeholder_id = self._placeholder_pages.get(page)
+        if placeholder_id is not None:
+            self._on_activity_changed(placeholder_id, busy)
 
     def _on_activity_changed(self, session_id: str, busy: bool) -> None:
+        """A placeholder's busy edge (a resolved session's is its item's)."""
         log.debug("activity: %s -> %s", session_id, "busy" if busy else "idle")
-        if busy:
-            # A real new turn: a finish held for the transcript's word is
-            # moot, and the new turn's own end will be judged on its own
-            # stamp.
-            self._drop_held_finish(session_id)
         self._sync_working_pole()
         self._notify_tray()  # the item's menu marks a working session
         if self.sidebar.has_placeholder(session_id):
@@ -4168,8 +4033,33 @@ class MainWindow(Adw.ApplicationWindow):
             # counts only while it isn't working (the store's busy-changed
             # does this for real rows; see App._sync_green).
             self._sync_placeholder_green(session_id)
-            return
-        self._sync_row_busy(session_id)
+
+    def _on_tab_run_finished(self, tab: TerminalTab, page: Adw.TabPage) -> None:
+        """The service counted a finish for a tab's session before it had a
+        row (its handle's edge): the placeholder's flag, as the window's own
+        verdict always set it. A resolved session's finish reaches the
+        window through the app (`run_finished`)."""
+        placeholder_id = self._placeholder_pages.get(page)
+        if placeholder_id is not None:
+            self._on_session_finished(placeholder_id)
+
+    def run_finished(self, session_id: str) -> bool:
+        """The service counted a finish for *session_id* (judged against its
+        transcript there: service.finish; App._on_run_finished): if this
+        window holds its tab, re-read the pull requests the run was working
+        on and mark the rows' greens as owed an announcement — the service
+        flags them unread next, and the announcement runs off that edge
+        (App._sync_green → _announce_finished), exactly as it did off the
+        window's own verdict. Returns whether this window had the tab."""
+        page = self._page_for(session_id)
+        if page is None:
+            return False
+        tab = page.get_child()
+        if isinstance(tab, TerminalTab):
+            tab.note_run_finished()
+        for row_id in self.store.rows_representing(session_id):
+            self._announce_owed.add(row_id)
+        return True
 
     def _on_session_finished(self, session_id: str) -> None:
         """A run's output stopped coming on its own: flag its rows unread, and
@@ -4197,87 +4087,10 @@ class MainWindow(Adw.ApplicationWindow):
         transcript's word (_hold_finish) and dropped when none comes.
         """
         if self.sidebar.has_placeholder(session_id):
-            # No bound transcript yet to judge by: the edge passes as it
+            # No bound transcript to judge by: the edge passes as it
             # always has.
             with self._owing_announcement(session_id):
                 self._set_placeholder_unread(session_id, True)
-            return
-        if session_id in self._held_finishes:
-            return  # one held edge per session; a second inside the window is absorbed
-        if self._judge_finish(session_id) == FINISH:
-            self._land_finish(session_id)
-        else:
-            self._hold_finish(session_id)
-
-    def _finish_tab(self, session_id: str) -> TerminalTab | None:
-        """The tab whose transcript judges *session_id*'s finishes, if any."""
-        page = self._page_for(session_id)
-        tab = page.get_child() if page is not None else None
-        return tab if isinstance(tab, TerminalTab) else None
-
-    def _judge_finish(self, session_id: str, *, final: bool = False) -> str:
-        """Ask the session's tab whether its transcript has moved since the
-        last finish that counted (activity.FinishLedger): `FINISH` or
-        `FINISH_DUPLICATE`. A session with no tab passes — a bare row never
-        gets a finish edge anyway; finishes come from tabs — and so does a
-        tab whose transcript hasn't been read yet (a fresh spawn before the
-        resolver binds it, an attach to a live background agent, a CLI with
-        transcript saving off), which keeps today's behaviour rather than
-        losing a real finish."""
-        tab = self._finish_tab(session_id)
-        if tab is None:
-            return FINISH
-        if not tab.finish_ledger.armed:
-            if tab not in self._ungated_logged:
-                self._ungated_logged.add(tab)
-                log.info("activity: %s finishes pass ungated (no transcript read yet)", session_id)
-            return FINISH
-        stamp, size = tab.finish_witness()
-        return tab.finish_ledger.decide(stamp, size, final=final)
-
-    def _hold_finish(self, session_id: str) -> None:
-        """The transcript hasn't moved since the last counted finish — but it
-        is parsed on a thread and lands on idle, so "unchanged at the edge"
-        can also mean "not ingested yet". Ask the tab to re-read it and hold
-        the edge for FINISH_CONFIRM_S: the read landing with the stamp
-        advanced delivers it (_on_tab_transcript_updated); the window running
-        out drops it (_on_hold_expired); the session going busy again
-        meanwhile drops it too (_on_activity_changed)."""
-        log.debug("activity: %s finish held (awaiting transcript)", session_id)
-        tab = self._finish_tab(session_id)
-        if tab is not None:
-            tab.request_transcript_update()
-        self._held_finishes[session_id] = GLib.timeout_add(
-            int(FINISH_CONFIRM_S * 1000), self._on_hold_expired, session_id
-        )
-
-    def _on_hold_expired(self, session_id: str) -> bool:
-        self._held_finishes.pop(session_id, None)
-        if self._finish_tab(session_id) is None:
-            return GLib.SOURCE_REMOVE  # the tab went away under the hold
-        if self._judge_finish(session_id, final=True) == FINISH:
-            log.debug("activity: %s finish confirmed", session_id)
-            self._land_finish(session_id)
-        else:
-            log.debug("activity: %s finish ignored (transcript unchanged)", session_id)
-        return GLib.SOURCE_REMOVE
-
-    def _on_tab_transcript_updated(self, tab: TerminalTab) -> None:
-        """A transcript read landed: any finish held for this tab's word is
-        judged again now, and delivered the moment the stamp has moved."""
-        for session_id in list(self._held_finishes):
-            if self._finish_tab(session_id) is not tab:
-                continue
-            if self._judge_finish(session_id) != FINISH:
-                continue
-            self._drop_held_finish(session_id)
-            log.debug("activity: %s finish confirmed", session_id)
-            self._land_finish(session_id)
-
-    def _drop_held_finish(self, session_id: str) -> None:
-        source = self._held_finishes.pop(session_id, None)
-        if source is not None:
-            GLib.source_remove(source)
 
     @contextlib.contextmanager
     def _owing_announcement(self, key: str):
@@ -4291,30 +4104,6 @@ class MainWindow(Adw.ApplicationWindow):
             yield
         finally:
             self._announce_owed.discard(key)
-
-    def _land_finish(self, session_id: str) -> None:
-        """A finish that counts: refresh the session's pull requests and flag
-        its rows, the way _on_session_finished always has."""
-        self._refresh_prs_after_run(session_id)
-        for row_id in self.store.rows_representing(session_id):
-            # A row whose conversation still runs under another of its ids —
-            # a /bg fork mid-turn, say — hasn't finished; its own edge comes.
-            if self._chain(row_id) & self._activity.busy():
-                continue
-            # A detaching session's CLI clears its progress hint on the way
-            # out, which lands here as a finish — but the run is being handed
-            # to the background, not completing.
-            if self._detaching_now(row_id):
-                continue
-            # A detached row with no tab: its line belongs to the yellow of
-            # its status (see _sync_status, which keeps the flag off rows
-            # with no tab). Only tabless rows, though — a tab *attached to*
-            # its background agent is still listed as a running job, and its
-            # finishes are as real as any spawned tab's.
-            if self._is_detached(row_id) and self._page_for(row_id) is None:
-                continue
-            with self._owing_announcement(row_id):
-                self.store.set_unread(row_id, True)
 
     def announce_finished(self, session_id: str) -> bool:
         """A synthetic row just came up under *session_id* (App._sync_green
@@ -4358,6 +4147,9 @@ class MainWindow(Adw.ApplicationWindow):
             # announced when it was counted; the row re-enters the center so
             # the badge and the history keep their meaning, and that is all.
             return
+        # A mark the service's finish put down (_on_tab_run_finished) is
+        # spent by the edge it was for.
+        self._announce_owed.discard(key)
         row = self.notify_center.get(notifycenter.green_id(key))
         if row is None:
             return
@@ -4372,24 +4164,6 @@ class MainWindow(Adw.ApplicationWindow):
                 deliveries = notifycenter.without_cards(deliveries)
             deliveries &= {notifycenter.DELIVER_DESKTOP}
         self._deliver(page, notifycenter.KIND_FINISHED, row.body, deliveries, notification=row)
-
-    def _refresh_prs_after_run(self, session_id: str) -> None:
-        """Hand the finish edge to the tab that just went quiet, so its pull
-        requests are re-read while the run's work is still landing on GitHub.
-
-        Same two exemptions the unread flag takes: a conversation still
-        running under another of its ids hasn't finished anything yet, and a
-        detach's parting progress-clear is a handoff rather than a turn. A
-        session with no tab in this window has nothing to ask with — its
-        chips, pages and poll all live where the tab is — and one with no
-        pull requests spends no `gh` call at all.
-        """
-        if self._chain(session_id) & self._activity.busy() or self._detaching_now(session_id):
-            return
-        page = self._page_for(session_id)
-        tab = page.get_child() if page is not None else None
-        if isinstance(tab, TerminalTab):
-            tab.note_run_finished()
 
     def _flag_unread(self, page: Adw.TabPage) -> None:
         """Flag every row standing for this tab unread, whatever its session is
@@ -4454,173 +4228,6 @@ class MainWindow(Adw.ApplicationWindow):
             self.notify_center.mark_session_read(key)
             for window in self._main_windows():
                 window.notify_cards.dismiss_session(key)
-
-    def _sync_process_poll(self) -> None:
-        """Run the process-tree poll only while some session has an open tab.
-
-        A session with no tab has no terminal's process tree to walk — a
-        detached agent's background jobs, if it has any, run under a process
-        this app was never the parent of and cannot see. Fresh spawns count
-        as open before their session id resolves: their pristine window is
-        when the plumbing baseline is captured."""
-        wanted = bool(self._pages or self._fresh_spawns)
-        if wanted and self._process_poll is None:
-            self._process_poll = GLib.timeout_add(PROCESS_POLL_MS, self._poll_process_activity)
-        elif not wanted and self._process_poll is not None:
-            GLib.source_remove(self._process_poll)
-            self._process_poll = None
-
-    def _poll_process_activity(self) -> bool:
-        if not self._pages and not self._fresh_spawns:
-            self._process_poll = None
-            return GLib.SOURCE_REMOVE
-        capturing = {page for page in list(self._fresh_spawns) if self._absorb_baseline(page)}
-        for session_id, page in list(self._pages.items()):
-            if page in capturing:
-                continue  # nothing ever submitted: children are plumbing, not work
-            tab = page.get_child()
-            if isinstance(tab, TerminalTab) and tab.has_background_descendant(
-                self._process_ignores(session_id, page)
-            ):
-                self._activity.mark(session_id, idle_s=PROCESS_IDLE_S)
-        return GLib.SOURCE_CONTINUE
-
-    def _sync_background_busy_poll(self) -> None:
-        """Ask the agent list what its background agents are doing only while
-        one of them has a tab open in this window.
-
-        That is the whole reach of the answer: a background session with no
-        tab keeps the still yellow guide line of its status whatever it is
-        doing (see the .detached CSS in app.py), and marking one would also
-        put it in front of Caffeine Mode's "while sessions are working" —
-        which has always meant the tabs this window is running. Cheap where it
-        buys nothing, then: no attached background agent, no CLI calls.
-        """
-        wanted = any(self._is_detached(session_id) for session_id in self._pages)
-        if wanted and self._bg_busy_poll is None:
-            self._bg_busy_poll = GLib.timeout_add(BACKGROUND_POLL_MS, self._poll_background_busy)
-            self._poll_background_busy()  # the first answer shouldn't wait a beat
-        elif not wanted and self._bg_busy_poll is not None:
-            GLib.source_remove(self._bg_busy_poll)
-            self._bg_busy_poll = None
-
-    def _poll_background_busy(self) -> bool:
-        """One tick: read the agent list off the main thread (it shells out to
-        the CLI), unless the last read is still in flight."""
-        if self._bg_busy_fetching:
-            return GLib.SOURCE_CONTINUE
-        self._bg_busy_fetching = True
-
-        def work() -> None:
-            try:
-                busy = fetch_background_busy_ids()
-            except Exception:  # noqa: BLE001 - a failed read is "no answer", not a crash
-                busy = None
-            GLib.idle_add(self._apply_background_busy, busy)
-
-        threading.Thread(target=work, daemon=True).start()
-        return GLib.SOURCE_CONTINUE
-
-    def _apply_background_busy(self, busy_ids: set[str] | None) -> bool:
-        """One tick's answer, back on the main thread.
-
-        Only agents with a tab here count, for the reasons _sync_background_
-        busy_poll gives — and dropping out of that set reads as the run
-        ending, which is right either way: the agent went idle, or its tab
-        closed and the pole went with it (a close clears the session first,
-        so the finish lands on nothing and flags nobody).
-        """
-        self._bg_busy_fetching = False
-        if busy_ids is None:
-            return GLib.SOURCE_REMOVE
-        watched = {sid for sid in busy_ids if self._page_for(sid) is not None}
-        marks, finishes = self._bg_busy.reading(watched)
-        for session_id in marks:
-            self._activity.resume(session_id)
-            self._activity.mark(session_id, idle_s=BACKGROUND_IDLE_S)
-        for session_id in finishes:
-            # The agent called the turn over, so this tab's trailing repaints
-            # are not a new one — the same quiet window a termprop clear
-            # opens, which an attached background agent never gets to send.
-            page = self._page_for(session_id)
-            session = self._session_of(page) if page is not None else None
-            if session is not None and session.progress is not None:
-                session.progress.turn_ended()
-            self._activity.finish(session_id, grace_s=PROGRESS_FINISH_GRACE_S)
-        return GLib.SOURCE_REMOVE
-
-    def _absorb_baseline(self, page: Adw.TabPage) -> bool:
-        """Fold what runs under a pristine fresh spawn's agent into its
-        plumbing baseline, reporting whether the capture window is still open.
-
-        The window is this tab's whole pre-submit life: the CLI starts its
-        stdio MCP servers asynchronously after launch, so a single early
-        snapshot could miss a slow one, but nothing the agent ever does can
-        be running before the first submit. The gate arming freezes the set
-        for good — from then on the servers persist for the CLI's lifetime,
-        and anything newly spawned really is work.
-
-        Only a fresh spawn has a pristine window at all: a tab bound to an
-        existing session may be attaching to an agent already mid-turn, and
-        absorbing there could bake real work into the persisted baseline.
-        """
-        if page not in self._fresh_spawns:
-            return False
-        session = self._session_of(page)
-        if session is None or session.echo_gate.armed:
-            return False
-        tab = page.get_child()
-        seen = tab.background_descendant_cmdlines()
-        captured = self._baseline_captures.setdefault(page, set())
-        if seen - captured:
-            captured |= seen
-            if tab.session_id:
-                self.state.set_process_baseline(tab.session_id, captured)
-        return True
-
-    def _process_ignores(self, session_id: str, page: Adw.TabPage) -> set[str]:
-        """The cmdlines under this session's agent that are plumbing, not
-        work: its captured baseline (persisted, plus anything this tab
-        absorbed before the id resolved) and the MCP servers Collins itself
-        configures — the latter unconditionally, which alone covers sessions
-        from before their baseline was ever captured."""
-        ignores = self.state.get_process_baseline(session_id)
-        ignores |= self._baseline_captures.get(page, set())
-        ignores |= self._infra_cmdlines
-        return ignores
-
-    def _on_terminal_commit(self, _terminal, text: str, _size: int, page: Adw.TabPage) -> None:
-        """What the VTE sends this terminal's child — the keystrokes typed
-        into it, its focus and mouse reports — on its way to the gate (see
-        EchoGate.poked).
-
-        A carriage return in it is the arming edge — the last pristine
-        instant of a fresh spawn — so the baseline takes one final snapshot
-        first: a submit inside the poll's first 2 seconds would otherwise
-        close the capture window empty, and a user-configured MCP server
-        already running would read as work for the session's whole life. The
-        agent can't have spawned anything for this turn yet; the text reaches
-        it after this handler returns.
-
-        The app's own writes (an injected prompt, a switch, a close flow's
-        keys) go to the service's pty without passing the VTE, so they do
-        not arrive here: the session announces them itself and pokes its
-        own gate (Session.write_text); the tab relays the announcement as
-        "input-sent", which _on_input_sent takes the baseline snapshot on.
-        """
-        text = text or ""
-        if "\r" in text:
-            self._absorb_baseline(page)  # no-op unless pristine (armed gates bail)
-        session = self._session_of(page)
-        if session is not None:
-            session.echo_gate.poked(text)
-
-    def _on_input_sent(self, _tab, text: str, page: Adw.TabPage) -> None:
-        """The session is about to type *text* into its pty (see
-        _on_terminal_commit): the baseline's last pristine snapshot rides a
-        "\\r" in it. The gate itself the session pokes, before the write."""
-        if "\r" in (text or ""):
-            self._absorb_baseline(page)
 
     # -- pre-emptive /bg status ----------------------------------------------
 
@@ -4711,44 +4318,17 @@ class MainWindow(Adw.ApplicationWindow):
             return tab.session_id
         return None
 
-    def _session_of(self, page: Adw.TabPage) -> live_session.Session | None:
-        """The session behind a page's tab — whose activity watches this
-        window feeds and reads — or None for a page that isn't a session tab."""
-        tab = page.get_child()
-        return tab.session if isinstance(tab, TerminalTab) else None
-
     def _on_terminal_key_pressed(
         self, _controller, keyval: int, _keycode: int, state: Gdk.ModifierType, page: Adw.TabPage
     ) -> bool:
-        """Start the pole on the Enter that sends a prompt, pre-emptively.
-
-        The turn's first output is the honest busy signal, but it arrives a
-        beat after the keystroke — model latency plus the echo gate's quiet
-        window — and that beat is exactly when the user glances at the sidebar
-        to see their prompt land. A bare Enter is read as "a turn just
-        started"; modified Enters are excluded because Shift/Alt+Enter insert
-        a newline into the agent's prompt rather than send it. A wrong guess
-        (Enter at an empty prompt, Enter inside a menu) costs nothing visible:
-        a pole no output follows goes back down when the idle window runs out.
-        """
-        # Any real keystroke first: the user is typing at this tab, so a
-        # finished run it was flagged with has been seen (see _clear_unread).
+        """A keystroke into the terminal is presence: whatever finished in
+        this tab has been seen (see _clear_unread). The pole's pre-emptive
+        start on the Enter that sends a prompt is the service's, off the
+        input frame the key becomes (service.tracking.on_input)."""
+        # Any real keystroke: the user is typing at this tab, so a finished
+        # run it was flagged with has been seen.
         if keyval not in _MODIFIER_KEYVALS:
             self._clear_unread(page)
-        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-            return Gdk.EVENT_PROPAGATE
-        if state & Gtk.accelerator_get_default_mod_mask():
-            return Gdk.EVENT_PROPAGATE
-        # Arm through the key itself, not just the "\r" the commit will carry:
-        # this stays right however VTE ends up encoding Enter for the child.
-        # The baseline's last-instant snapshot rides the same edge (see
-        # _on_terminal_commit; armed gates make it a no-op).
-        self._absorb_baseline(page)
-        if (session := self._session_of(page)) is not None:
-            session.echo_gate.arm()
-        for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
-            if tracked:
-                self._activity.mark(tracked)
         return Gdk.EVENT_PROPAGATE
 
     def _on_terminal_click(
@@ -4761,120 +4341,17 @@ class MainWindow(Adw.ApplicationWindow):
         user is looking at."""
         self._clear_unread(page)
 
-    def _startup_held(self, page: Adw.TabPage) -> bool:
-        """Whether this tab's ungated pole starters are still held.
-
-        SpinnerWatch and ProgressWatch skip the echo gate so that attaching
-        to a live background agent mid-turn can start a pole nothing was
-        ever typed at. A tab that spawned its CLI fresh has no such agent —
-        yet the spawning CLI animates its startup paint and blips its own
-        progress hint, which would put a pole (and, when it settles, an
-        unread flag) on a row the user has not said a word to. So on fresh
-        spawns those sources wait for the gate too; the first submit arms it
-        for the life of the tab, releasing them for good.
-        """
-        session = self._session_of(page)
-        return (
-            page in self._fresh_spawns
-            and session is not None
-            and not session.echo_gate.armed
-        )
-
-    def _on_progress_termprop(self, terminal, name: str, page: Adw.TabPage) -> None:
-        """The agent's own busy signal: VTE parsed an OSC 9;4 progress change.
-
-        A busy hint marks with the wide termprop window; a clear is the one
-        instant, honest turn-end — finish(), which also flags the row unread,
-        where the sweep would have taken IDLE_S to notice. Both of a tab's
-        tracked ids get the treatment, same as _on_terminal_output.
-
-        Checked against the experimental setting live, so switching it off
-        silences existing tabs at once — their shells still carry the spawn
-        env, but nothing acts on what the CLI announces.
-        """
-        if name != PROGRESS_HINT_TERMPROP:
-            return
-        if not self.state.get_setting("progress_termprop"):
-            return
-        session = self._session_of(page)
-        watch = session.progress if session is not None else None
-        if watch is None:
-            return
-        ok, hint = terminal.get_termprop_int(name)
-        action = watch.reading(hint if ok else None)
-        log.debug(
-            "progress: %s hint=%s -> %s%s",
-            self._session_id_of(page) or self._placeholder_pages.get(page),
-            hint if ok else None,
-            action,
-            " (startup hold)" if self._startup_held(page) else "",
-        )
-        if self._startup_held(page):
-            # A spawning CLI blips its progress hint with no turn in sight,
-            # so whatever action the blip asks for is dropped — its clear
-            # can't finish-and-flag the row. The watch still listens, though
-            # (mirroring how SpinnerWatch keeps sampling under the hold):
-            # the blip counts as the tab having _spoken_, so even if its
-            # hint were somehow still busy at the first submit, the real
-            # turn's clear lands as a finish instead of being dismissed as
-            # the first clear ever heard.
-            return
-        if action is None:
-            return
-        for tracked in (self._session_id_of(page), self._placeholder_pages.get(page)):
-            if not tracked:
-                continue
-            if action == "mark":
-                # A busy hint inside a clear's grace takes the clear back:
-                # that was a beat between tool calls, not the turn ending.
-                self._activity.resume(tracked)
-                self._activity.mark(tracked, idle_s=PROGRESS_IDLE_S)
-            else:
-                # Not finished yet: the clear arms a finish the sweep lands
-                # once PROGRESS_FINISH_GRACE_S passes with no busy hint.
-                self._activity.finish(tracked, grace_s=PROGRESS_FINISH_GRACE_S)
-
     def _on_terminal_output(self, terminal, page: Adw.TabPage) -> None:
-        # A redraw counts as the session working whether or not its tab is
-        # selected: the sidebar's pole is about what the agent is doing, not
-        # about which tab the user happens to be looking at. Unread output is
-        # the separate question below, and only an unselected tab can have any.
-        #
-        # It counts unless the terminal is merely answering the app — see
-        # EchoGate. A session already known to be working is marked regardless,
-        # so typing at an agent mid-turn never stalls its pole; the gate only
-        # decides whether one may start.
-        #
-        # Both of a tab's ids are marked, not the first one that fits: a new
-        # thread that just resolved its session id keeps its "New Thread"
-        # placeholder row until the store discovers the session, and marking
-        # only the session id would leave that row (the only one on screen)
-        # sitting still through the turn that is writing the transcript.
-        #
-        # The verdict itself is the session's (Session.redraw_counts): the
-        # echo gate, then the spinner's second opinion — sampled even while a
-        # fresh spawn's startup hold (_startup_held) discounts it — then the
-        # quiet the agent's own turn-end opens. See activity.py.
-        session = self._session_of(page)
-        agent_output = session is None or session.redraw_counts(self._startup_held(page))
-        progress = session.progress if session is not None else None
-        # While the agent's own hint reads busy, a redraw mark carries the
-        # termprop's window, not the terminal's short one. The latest mark
-        # decides the deadline, so redraws on IDLE_S would cut the agent's
-        # word down to two seconds of screen silence — and a main loop stalled
-        # that long (a sweep dispatched before the pending output) landed a
-        # finish, with no grace, unread flag and notification included, for a
-        # turn still going. The CLI's clear ends this turn (through the
-        # grace); silence only does after PROGRESS_IDLE_S, a killed CLI's case.
-        idle_s = PROGRESS_IDLE_S if progress is not None and progress.busy else None
-        session_id = self._session_id_of(page)
-        for tracked in (session_id, self._placeholder_pages.get(page)):
-            if tracked and (agent_output or self._activity.is_busy(tracked)):
-                self._activity.mark(tracked, idle_s=idle_s)
+        # Whether a redraw is the session working is the service's verdict
+        # (service.tracking, off the pty's output through the echo gate, the
+        # spinner's second opinion and the agent's own turn-end). Unread
+        # output is the question here, and only an unselected tab can have
+        # any: its page's attention mark, which its row's status shows.
         if self.tab_view.get_selected_page() is page:
             return
         if not page.get_needs_attention():
             page.set_needs_attention(True)
+            session_id = self._session_id_of(page)
             if session_id:
                 self._sync_status(session_id)
 
@@ -5757,14 +5234,11 @@ class MainWindow(Adw.ApplicationWindow):
         tab = page.get_child()
         session_id = self._session_id_of(page)
         carried = _CarriedPage(
-            fresh_spawn=page in self._fresh_spawns,
-            baseline=self._baseline_captures.get(page),
             base_title=self._base_titles.pop(page, None),
             local_title=page in self._local_titles,
             pending_resolved=self._pending_resolved.pop(page, None),
             archive_on_close=self._archive_on_close.pop(page, None),
             worktree_deletion=self._worktree_deletions.pop(session_id, None) if session_id else None,
-            busy=bool(session_id) and self._activity.is_busy(session_id),
         )
         # A popped-out editor window is held by *this* window, and docks back
         # through a callback that closes over it. Bring the pane home before
@@ -5783,9 +5257,6 @@ class MainWindow(Adw.ApplicationWindow):
             self._menu_page = None
         if session_id and self._pages.get(session_id) is page:
             self._pages.pop(session_id)
-            # The terminal feeding this session's pole is about to be another
-            # window's; stop reading its silence as a finished turn here.
-            self._activity.clear(session_id)
         self.tab_view.transfer_page(page, target.tab_view, target.tab_view.get_n_pages())
         # _on_page_detached ran on the way out: the per-page watches are gone
         # from here, the polls are resized, and the sidebar's own trackers are
@@ -5803,10 +5274,6 @@ class MainWindow(Adw.ApplicationWindow):
         hand_over_page): its watches carry on where they left off, and the tab
         is wired to this window as if it had been opened in it."""
         tab = page.get_child()
-        if carried.fresh_spawn:
-            self._fresh_spawns.add(page)
-        if carried.baseline is not None:
-            self._baseline_captures[page] = carried.baseline
         if carried.base_title is not None:
             self._base_titles[page] = carried.base_title
         if carried.local_title:
@@ -5821,14 +5288,6 @@ class MainWindow(Adw.ApplicationWindow):
         session_id = self._session_id_of(page)
         if session_id:
             self._pages[session_id] = page
-            if carried.busy:
-                # Mid-turn: the window it left had it marked busy, and its
-                # tracker let go of that on the way out. Re-mark it here or
-                # the row's pole would stop dead until the agent's next burst
-                # of output — which, mid-thought, can be a while.
-                self._activity.mark(session_id)
-        self._sync_process_poll()
-        self._sync_background_busy_poll()
         self.content_stack.set_visible_child_name("tabs")
         self.tab_view.set_selected_page(page)
         self._sort_tabs()
@@ -6012,8 +5471,6 @@ class MainWindow(Adw.ApplicationWindow):
             # closed, leaving a live tab its row could no longer reach.
             if self._pages.get(session_id) is page:
                 self._pages.pop(session_id)
-                self._sync_process_poll()
-                self._sync_background_busy_poll()
             self._sync_status(session_id)
             # That painted the row from the cached agent list, which may
             # predate this conversation's background job finishing — nothing
@@ -6023,10 +5480,6 @@ class MainWindow(Adw.ApplicationWindow):
             # has no reason to shell out to the CLI.
             if self._chain(session_id) & self._bg_status.background_ids:
                 self._bg_status.refresh()
-            # The terminal that was feeding this session's pole is gone; with
-            # no tab there is no activity source left, so stop it now rather
-            # than letting the idle window read the silence as a finish.
-            self._activity.clear(session_id)
         view.close_page_finish(page, True)
         self._refresh_background_affordances()  # a row without a tab can't be backgrounded
         if view.get_n_pages() == 0:
@@ -7069,9 +6522,14 @@ class MainWindow(Adw.ApplicationWindow):
             # that lets go.
             box = self.state.sandboxed_sessions[session_id]
             self.state.set_sandboxed(session_id, True, box="")
-            host = terminal_mod.SANDBOX_HOST
-            if box and host is not None:
-                host.forget_box(box)
+            if box:
+                # The service's host forgets it (sandbox.forget): a no-op
+                # for a box another session names, and otherwise the end of
+                # the box and of the grants recorded for it.
+                try:
+                    apilink.call({"t": "sandbox.forget", "box": box})
+                except RequestRefused as refusal:
+                    log.info("sandbox.forget %s refused: %s", box, refusal.msgid)
 
     def _on_trash_session(self, _action, param: GLib.Variant) -> None:
         session = self._session_for(param)

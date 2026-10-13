@@ -31,6 +31,7 @@ E2E = tempfile.mkdtemp(prefix="collins-draft-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -138,9 +139,10 @@ def stash_before_the_id() -> bool:
     check("an unresolved tab holds the draft", tab._composer_stash, tab._composer_stash)
     check("…and nothing is on disk for it yet", saved_drafts() == {}, saved_drafts())
 
-    # The resolver's own two lines, in the order it runs them.
-    tab.session_id = "sid-late"
-    tab.emit("session-resolved", "sid-late")
+    # The resolver's own two lines, in the order it runs them (on the
+    # service; the tab hears "session-resolved" off the session event).
+    tab.probe_set("session_id", "sid-late")
+    tab.probe_call("host.session_resolved", "sid-late")
     check(
         "resolving files the draft under the session",
         saved_drafts().get("sid-late") == "a draft written before the id landed",
@@ -163,8 +165,8 @@ def adopt_a_saved_draft() -> bool:
     run, taken back into the composer that opens on it."""
     win, tab = state["win"], state["saved"]
     win.state.set_session_draft("sid-saved", "what the last run was writing")
-    tab.session_id = "sid-saved"
-    tab.emit("session-resolved", "sid-saved")
+    tab.probe_set("session_id", "sid-saved")
+    tab.probe_call("host.session_resolved", "sid-saved")
     check("the tab adopts the saved draft", tab._composer_stash == "what the last run was writing")
 
     composer = tab._ensure_composer()
@@ -236,7 +238,8 @@ def save_on_the_way_out() -> bool:
     # its own. The panel shells die with their pty.
     for i in range(win.tab_view.get_n_pages()):
         page_tab = win.tab_view.get_nth_page(i).get_child()
-        pid = getattr(page_tab, "_child_pid", None)
+        probe = getattr(page_tab, "probe_call", None)
+        pid = probe("child_pid") if probe is not None else None
         if pid:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)

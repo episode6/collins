@@ -1981,7 +1981,7 @@ class SandboxHost:
     """The host side of sandboxing for one app instance: the plan for a
     launch, the grants a workspace's chip edits, and the questions a
     running sandboxed session asks about its own box. Bound to the app id
-    and the state; handed to the tabs as terminal.SANDBOX_HOST."""
+    and the state; the service's (`ServiceCore.sandbox_host`, PR-1.12a)."""
 
     def __init__(self, app_id: str, state, state_file: str = "") -> None:
         self.app_id = app_id

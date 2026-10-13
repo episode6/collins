@@ -38,6 +38,7 @@ import time
 E2E = tempfile.mkdtemp(prefix="collins-attach-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -226,12 +227,12 @@ def steps():
     pty = tab._view.pty
     loopback = terminal_mod.SERVICE_LOOPBACK
     check("the tab shows a pty of the app's service", pty is not None and loopback is not None)
-    screen = loopback.core.screen_of(pty)
+    screen = tab._client.request({"t": "debug.screen", "pty": pty})
     grid = (first.get_column_count(), first.get_row_count())
     check(
         "the service's pty has the tab's grid",
-        (screen.columns(), screen.row_count()) == grid,
-        ((screen.columns(), screen.row_count()), grid),
+        (screen["columns"], screen["row_count"]) == grid,
+        ((screen["columns"], screen["row_count"]), grid),
     )
     tab.feed_child_text("g")
     for _ in range(50):
@@ -246,7 +247,7 @@ def steps():
         and any("line 60 is red" in line for line in first_text),
         first_text[:3],
     )
-    model_text = lines(screen.capture_contents())
+    model_text = lines(tab._client.request({"t": "debug.screen", "pty": pty})["capture"])
     check(
         "the model and the first VTE agree on the text",
         model_text == first_text,
@@ -356,10 +357,11 @@ def steps():
         "abcde" in terminal_mod._capture_contents(second),
         terminal_mod._capture_contents(second)[-60:],
     )
-    check("…and the pty running", loopback.core.pty_of(pty).child_pid() is not None)
+    child_pid = client.request({"t": "debug.pty", "pty": pty})["child_pid"]
+    check("…and the pty running", child_pid is not None)
 
     try:
-        os.killpg(os.getpgid(loopback.core.pty_of(pty).child_pid()), signal.SIGKILL)
+        os.killpg(os.getpgid(child_pid), signal.SIGKILL)
     except (OSError, TypeError):
         pass
     for _ in range(30):

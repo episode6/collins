@@ -168,12 +168,14 @@ the glue, as the tab's.
   still checks `plan_lookup()` first, so "no plan" is the same message and
   the same retry on the next show.
 - **Reads go to the service.** `capture_contents()` is the screen model's
-  (`screen_of(pty).capture_contents()`), `has_running_command()` /
-  `_shell_pid()` / the cwd `follow_cwd` and `_sync_cwd` compare against are
-  the pty server's (`Pty.has_running_command`, `Pty.shell_pid` with the
-  box's inner shell, `Pty.process_cwd` from `/proc`), all through the
-  loopback's `pty_of` shortcut. Typing (`run_command`, the `cd`, Ctrl+L) is
-  input frames (`_write`); `note()` is a `paint`.
+  (the `pty.capture` request), `has_running_command()` / `_shell_pid()` /
+  the cwd `follow_cwd` and `_sync_cwd` compare against are the pty
+  server's (`Pty.has_running_command`, `Pty.shell_pid` with the box's
+  inner shell, `Pty.process_cwd` from `/proc`), all through the `pty.info`
+  request (PR-1.12a; the loopback's `pty_of` shortcut is gone). A shell's
+  `spawn` names its tab's session by `handle`, so the service re-files
+  its history when that session resolves. Typing (`run_command`, the
+  `cd`, Ctrl+L) is input frames (`_write`); `note()` is a `paint`.
 - **The history.** `TerminalTab.save_panel_history`
   hands the service the key and `{ordinal: shell.history_source()}` (the
   pty id, or the widget's text for a shell with no pty) and

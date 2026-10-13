@@ -90,6 +90,7 @@ RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 HOME = f"{E2E}/home"
 
 os.environ["HOME"] = HOME
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_SANDBOX_ROOT"] = f"{E2E}/sbx"
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"

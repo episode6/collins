@@ -14,6 +14,7 @@ from collins.providers import (
     BackgroundAgent,
     ClaudeProvider,
     Provider,
+    SessionOptions,
     available_providers,
     default_provider,
     get_provider,
@@ -1019,6 +1020,33 @@ def test_resume_keeps_the_permission_mode_of_a_sandboxed_session(monkeypatch):
     assert claude.session_flags(None) == ""
     assert claude.resume_command("abc") == "/usr/bin/claude --resume abc"
     assert claude.continue_command(opts) == "/usr/bin/claude --continue"
+
+
+def test_session_options_round_trip_through_their_record():
+    """The `session` event and the pty table carry a SessionOptions as a
+    dict (`options_record`); `options_from_record` takes it back."""
+    options = SessionOptions(
+        model="opus", effort="high", permission_mode="plan", add_dirs=("/a", "/b"),
+        worktree=True, worktree_name="feature-x", sandbox=True, sandbox_box="b" * 32,
+    )
+    record = providers.options_record(options)
+    assert record["add_dirs"] == ["/a", "/b"] and record["sandbox"] is True
+    assert providers.options_from_record(record) == options
+    assert providers.options_record(None) is None
+    assert providers.options_from_record(None) is None
+
+
+def test_a_foreign_options_record_is_taken_only_as_far_as_it_fits():
+    """Rule 5: the record is a peer's. Unknown keys are dropped, a wrong
+    type falls back to the field's empty value, and anything that isn't a
+    dict is no options at all."""
+    taken = providers.options_from_record(
+        {"model": "opus", "newer_field": 1, "add_dirs": "not-a-list", "effort": 7, "worktree": "yes"}
+    )
+    assert taken == SessionOptions(model="opus", add_dirs=(), effort="", worktree=True)
+    assert providers.options_from_record({"add_dirs": [1, "/x"]}).add_dirs == ("1", "/x")
+    assert providers.options_from_record("opus") is None
+    assert providers.options_from_record(["opus"]) is None
 
 
 def test_sandboxed_shell_argv_runs_the_shell_through_the_launcher():

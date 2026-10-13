@@ -33,7 +33,13 @@ sandboxed panel shell).
   refuses. What is offered at a call is still `service.tools`' question,
   asked of the same host: nothing here changes the policy.
 - `sandbox.restart`: the session in the box exits and resumes on a plan
-  rebuilt from the state (through Phase 1 its `Session`, held by its tab).
+  rebuilt from the state (its `Session`, the service's since PR-1.12a).
+- `sandbox.derive` (PR-1.12a): a `start_session` sibling's plan, derived
+  from the box's launched one for the sibling's directory, with the
+  directories the parent holds live refused (`SandboxHost.derive`);
+  `sandbox.drop` lets a derived plan and its box go when nothing will
+  launch from them; `sandbox.forget` is a forgotten transcript's box going
+  with it (`SandboxHost.forget_box`).
 
 GLib only; nothing here imports GTK.
 """
@@ -42,6 +48,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Callable
 
 from .. import mcptools, sandboxgrants, sandboxplan
@@ -50,6 +57,10 @@ from ..api import protocol
 log = logging.getLogger(__name__)
 
 _NOT_SET_UP = "Sandboxed sessions aren't set up here"
+
+
+_PLAN_NAME_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json")
+
 
 
 def delivery_record(delivery) -> dict:
@@ -79,12 +90,21 @@ class SandboxRequests:
         sessions: Callable,
         broadcast: Callable[[dict], None],
         dispatch: Callable | None = None,
+        app_id: Callable[[], str] | None = None,
+        session_for_box: Callable[[str], object] | None = None,
     ) -> None:
         self._host = host
         self._grants = grants
         self._plan_of = plan_of
         self._sessions = sessions
         self._broadcast = broadcast
+        self._app_id = app_id or (lambda: "")
+        self._session_for_box = session_for_box or (lambda box: None)
+        # The plans this service derived, by the box each describes: the
+        # only files `sandbox.drop` releases (rule 5: the client names a
+        # path; whether it is one of the service's own is the service's
+        # to say).
+        self._derived: dict[str, set[str]] = {}
         if dispatch is None:
             from gi.repository import GLib
 
@@ -108,6 +128,9 @@ class SandboxRequests:
             "sandbox.revoke": self._revoke,
             "sandbox.tools": self._tools,
             "sandbox.restart": self._restart,
+            "sandbox.derive": self._derive,
+            "sandbox.drop": self._drop,
+            "sandbox.forget": self._forget,
         }[message.type]
         return handler(message, box)
 
@@ -266,4 +289,67 @@ class SandboxRequests:
         session = self._session(box, message.get("handle"))
         if session is None or not session.restart_sandboxed():
             return protocol.refuse(message.id, protocol.ERROR_REFUSED, "This session can't restart from here")
+        return protocol.reply(message.id)
+
+    def _derive(self, message: protocol.Message, box: str) -> dict:
+        """A sibling's plan from the box's launched one (`SandboxHost.derive`):
+        the plan, the box minted for it and "" — or no plan and the reason.
+        What the parent holds mounted since its launch is not in the plan
+        the sibling inherits (`GrantMounts.live_paths`)."""
+        host = self._host()
+        plan_path, plan = self._plan(box)
+        if host is None or plan is None:
+            return protocol.reply(
+                message.id, reason="the parent session's sandbox plan isn't available"
+            )
+        mounts = self._grants()
+        live = mounts.live_paths(box) if mounts is not None else ()
+        derived, sibling_box, reason = host.derive(plan_path, message.get("cwd"), live=live)
+        fields: dict = {"reason": reason or ""}
+        if derived:
+            fields["plan"] = derived
+            self._derived.setdefault(sibling_box or box, set()).add(derived)
+        if sibling_box:
+            fields["box"] = sibling_box
+        return protocol.reply(message.id, **fields)
+
+    def _drop(self, message: protocol.Message, box: str) -> dict:
+        """A derived plan and its box let go of (toolclient's
+        `_drop_sibling_box`): the plan file released — only one this
+        service derived for that box, under its own plan directory — the
+        box's lease released and the box forgotten with the grants
+        recorded for it. A box a session runs in is not dropped."""
+        if self._session_for_box(box) is not None:
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "A session is running in this sandbox")
+        plan = message.get("plan")
+        if plan:
+            if plan not in self._derived.get(box, ()) or not self._own_plan_path(plan):
+                return protocol.refuse(
+                    message.id, protocol.ERROR_REFUSED, "Not a plan this service derived for the sandbox"
+                )
+            self._derived[box].discard(plan)
+            sandboxplan.release_plan(plan)
+        host = self._host()
+        if host is not None:
+            host.release(box)
+            host.forget_box(box)
+        return protocol.reply(message.id)
+
+    def _own_plan_path(self, plan: str) -> bool:
+        """Whether *plan* is a `<uuid>.json` right under this service's
+        plan directory (`sandboxplan.plan_dir`): the one shape of file
+        the service ever writes and may unlink."""
+        try:
+            own = os.path.realpath(sandboxplan.plan_dir(self._app_id()))
+            parent = os.path.realpath(os.path.dirname(plan))
+        except (OSError, ValueError):
+            return False
+        return parent == own and _PLAN_NAME_RE.fullmatch(os.path.basename(plan)) is not None
+
+    def _forget(self, message: protocol.Message, box: str) -> dict:
+        if self._session_for_box(box) is not None:
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "A session is running in this sandbox")
+        host = self._host()
+        if host is not None:
+            host.forget_box(box)
         return protocol.reply(message.id)
