@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-12. Full change history: git log for this file.
 
 """Persistent app state: custom names, favorites, archived sessions, settings.
 
@@ -23,8 +23,9 @@ The migration (AppState._load): the first start after the split copies
 crash between the two writes leaves a `state.json` that still migrates on
 the next start (and the merge below makes that retry harmless). The
 service id's presence is the marker, so a second start migrates nothing.
-Only the app's own instance migrates (`AppState(migrate=True)`: `main()`
-and `App.__init__`); the throwaway readers on worker threads see the
+Only the service's instance migrates (`AppState(migrate=True,
+device=False)` in `ServiceCore.with_state`) and the throwaway `main()`
+builds before it; the readers on worker threads see the
 merged view of an unsplit file and write nothing — unless one of them
 saves, in which case the migration is committed first, so a service-side
 write never strips device keys that have not reached `ui-state.json`.

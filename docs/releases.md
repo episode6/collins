@@ -47,7 +47,10 @@ downloads of each version, see the
   with the packages and written by `collins --install-desktop`, else by
   spawning it) and reconnects with a banner if the link drops. Quitting
   the window ends nothing: the agents keep working, and the next window
-  picks them up. `collins-service --check` says what a headless box
+  picks them up. Stopping or restarting the service ends the foreground
+  sessions gracefully (resumable afterwards) and leaves the CLI's
+  background daemon and its `/bg` agents running: the unit signals the
+  service alone (`KillMode=process`). `collins-service --check` says what a headless box
   needs. See the guide's new *The service* page. libsoup 3 is a new
   dependency (`gir1.2-soup-3.0`, `libsoup3`).
 - **The session runs on the service.** Everything a session tab did behind

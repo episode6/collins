@@ -7,6 +7,11 @@
 # first (lingering, $XDG_RUNTIME_DIR). `collins --install-desktop` installs
 # a copy under ~/.local/share/systemd/user/ with ExecStart resolved to the
 # installed command for a pip install.
+#
+# KillMode=process (spec D52): a stop or restart signals the service alone,
+# whose own stop sequence ends the foreground sessions gracefully; systemd
+# never signals the ptys' children or the CLI's background daemon, so /bg
+# agents outlive a service restart or a package upgrade.
 
 [Unit]
 Description=Collins session service
@@ -15,7 +20,7 @@ Description=Collins session service
 Type=notify
 ExecStart=/usr/bin/collins-service
 Restart=on-failure
-KillMode=control-group
+KillMode=process
 
 [Install]
 WantedBy=default.target

@@ -763,7 +763,10 @@ PR-1.5).
   never counted against the bound, and a redraw is bounded at attach time
   (`REDRAW_MAX`, half the queue): the oldest scrollback rows are left out
   of the redraw, not the model, until it fits. A sink that never reports
-  draining is redrawn every 4 MiB, logged once.
+  draining is redrawn every 4 MiB, logged once. A re-attach of an attached
+  sink keeps its count until `_redraw` drops it, so what the sink still
+  holds of the old stream (the socket sink's pending frames) goes with the
+  redraw instead of being released after it.
 - **`paint(pty, text)`** is rule 2's inserted text: fed to the model and
   sent to the sinks as if the child had written it, not through the
   responder.

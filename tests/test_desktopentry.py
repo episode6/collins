@@ -198,6 +198,28 @@ def test_package_carries_the_action_icons():
     assert (desktopentry._PACKAGE / "icons" / f"{APP_ID}.svg").is_file()
 
 
+def test_the_shipped_unit_is_the_specs_text():
+    """Spec §3.10's unit, decision D52: `KillMode=process`, so a stop or a
+    restart signals the service alone and the CLI's background daemon and
+    its /bg agents outlive it; `Type=notify` for READY=1; restarted on a
+    failure only, never enabled by the package."""
+    from pathlib import Path
+
+    unit = (Path(__file__).resolve().parent.parent / "data" / desktopentry.UNIT).read_text()
+    lines = [line for line in unit.splitlines() if line and not line.startswith("#")]
+    assert lines == [
+        "[Unit]",
+        "Description=Collins session service",
+        "[Service]",
+        "Type=notify",
+        "ExecStart=/usr/bin/collins-service",
+        "Restart=on-failure",
+        "KillMode=process",
+        "[Install]",
+        "WantedBy=default.target",
+    ]
+
+
 def test_the_service_unit_resolves_execstart_and_names_a_non_default_id():
     template = "[Unit]\nDescription=x\n\n[Service]\nType=notify\nExecStart=/usr/bin/collins-service\n"
     unit = desktopentry.service_unit(template, "/home/u/.local/bin/collins-service")

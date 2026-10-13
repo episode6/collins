@@ -42,19 +42,27 @@ systemctl --user stop collins-service.service   # the unit
 kill $(pgrep -f collins-service)                 # a spawned one
 ```
 
-Stopping ends every session the way *Stop sessions and quit* does: each
-agent is asked to exit (the CLI's own exit keystrokes, a worktree dialog
-answered, a bounded wait, then the process ended for good), its session
-id is recorded, and the next window finds them resumable. A second
-`collins-service` for the same app id finds the first's lock and exits
-at once.
+Stopping ends every foreground session the way *Stop sessions and quit*
+does: each agent is asked to exit (the CLI's own exit keystrokes, a
+worktree dialog answered, a bounded wait, then the process ended for
+good), its session id is recorded, and the next window finds them
+resumable. The unit is `KillMode=process`: systemd signals the service
+alone, never the agents or the CLI's background daemon, so the graceful
+sequence above is the service's own doing, and `/bg` agents and the
+daemon behind them outlive a stop, a restart or a package upgrade of the
+service. Foreground sessions do not, yet: their ptys close with the
+service that holds them, until a later release's keeper holds them
+across a restart. A second `collins-service` for the same app id finds
+the first's lock and exits at once.
 
 ::: warning Until the next release's session lifecycle lands
 A session that is still running in the service cannot be opened again
 from the sidebar yet: the service refuses to start a second copy of it
 ("This session is already running in the Collins service"). Attaching to
 the running one is the next piece of the split.
-::: A client's `service.restart` does the same and exits
+:::
+
+A client's `service.restart` runs the same stop sequence and exits
 cleanly, so the unit does not restart it by itself; the window that
 asked reconnects and starts it again.
 
