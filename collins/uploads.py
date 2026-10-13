@@ -23,6 +23,13 @@ mentions the path that comes back. The bytes land here:
   session" holds for removals Collins did not make too. The day is the
   guard for a session the store's scan has not caught up with yet.
 
+The orphan sweep judges the uploads by the sessions the service knows, so
+the two must come from the same world: a scratch instance reading staged
+sessions (``COLLINS_PROJECTS_DIR``) would read every real upload directory
+as an orphan. `sweep_refusal` is the gate: with the projects directory
+anything but the CLI's own, the sweep runs only when ``COLLINS_UPLOADS_DIR``
+names the uploads explicitly.
+
 The name is reduced to a basename (`safe_name`) and the file is written
 by file descriptor (`write`: the directory opened ``O_DIRECTORY |
 O_NOFOLLOW``, the file created ``O_EXCL | O_NOFOLLOW`` relative to it), so
@@ -73,6 +80,31 @@ def root() -> Path:
         return Path(override)
     base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
     return Path(base) / "collins" / "uploads"
+
+
+def sweep_refusal(projects_dir: str | os.PathLike, default_projects_dir: str | os.PathLike) -> str | None:
+    """Why the orphan sweep must not run against this `root()`, or None.
+
+    The sweep removes the upload directories of sessions the service does
+    not know, and what it knows comes from *projects_dir*. When that is
+    not the CLI's own directory (*default_projects_dir*: an env override,
+    a staged tree — a check, a capture, a demo, a test), the sessions are
+    not the user's, so the uploads must not be the user's either: the
+    sweep is refused unless ``COLLINS_UPLOADS_DIR`` names them. Only that
+    variable counts. ``XDG_DATA_HOME`` moves the uploads too, but a user
+    may export it for their real data, and a scratch run started from
+    such a shell would inherit it; an override that exists for nothing
+    but Collins' uploads cannot be there by accident. An instance on the
+    real projects directory (the user's, `start-debug`'s, which shares
+    the real data on purpose) is never refused."""
+    if os.environ.get("COLLINS_UPLOADS_DIR"):
+        return None
+    if Path(projects_dir) == Path(default_projects_dir):
+        return None
+    return (
+        f"the projects directory is overridden ({projects_dir}) and COLLINS_UPLOADS_DIR is not set, "
+        f"so {root()} may hold another instance's uploads"
+    )
 
 
 def valid_session(session_id: object) -> bool:

@@ -54,6 +54,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -195,6 +196,24 @@ def run_check(path, timeout, use_dbus, env=None):
     # the service serves only with this in its environment (D27); every
     # check sets it too, since the service is in-process.
     env = {**(env if env is not None else os.environ), "COLLINS_DEBUG_API": "1"}
+    # A check stages its own sessions (COLLINS_PROJECTS_DIR), and few of
+    # them move the uploads: a scratch directory here, so no check's service
+    # reads or sweeps the user's real ~/.local/share/collins/uploads. (The
+    # service refuses that sweep on its own, `uploads.sweep_refusal`; this
+    # keeps a check's uploads out of the real directory as well.) A check
+    # that sets its own in its preamble wins, the service being in-process.
+    uploads_scratch = None
+    if not env.get("COLLINS_UPLOADS_DIR"):
+        uploads_scratch = tempfile.mkdtemp(prefix="collins-e2e-uploads-")
+        env["COLLINS_UPLOADS_DIR"] = uploads_scratch
+    try:
+        return _run_check(cmd, timeout, env, start)
+    finally:
+        if uploads_scratch is not None:
+            shutil.rmtree(uploads_scratch, ignore_errors=True)
+
+
+def _run_check(cmd, timeout, env, start):
     # A check spawns real children (VTEs, shims); its own process group lets
     # a timeout take the whole tree down rather than orphaning them.
     proc = subprocess.Popen(cmd, start_new_session=True, env=env)

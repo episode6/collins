@@ -28,6 +28,9 @@ class LiveService:
             "COLLINS_PROJECTS_DIR": str(tmp_path / "projects"),
             "COLLINS_CLAUDE_CONFIG": str(tmp_path / "claude.json"),
             "COLLINS_CHATS_DIR": str(tmp_path / "chats"),
+            # The service judges upload directories by the sessions it knows:
+            # staged sessions, so staged uploads (`uploads.sweep_refusal`).
+            "COLLINS_UPLOADS_DIR": str(tmp_path / "uploads"),
             "COLLINS_PTY_STATE_DIR": str(tmp_path / "pty"),
             "XDG_CONFIG_HOME": str(self.config),
             "XDG_STATE_HOME": str(tmp_path / "state"),

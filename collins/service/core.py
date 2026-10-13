@@ -317,6 +317,7 @@ class ServiceCore:
         self._gh_checking = False
         self._gh_wanted = 0  # bumped by each drop of the answer (check_gh)
         self._sweep_source = 0
+        self._orphan_sweep_refused = False  # logged once (sweep_orphan_uploads)
         self.app_id = ""
         # The e2e probe (D27): served only when the service runs with the
         # flag in its environment.
@@ -1911,11 +1912,23 @@ class ServiceCore:
         unreadable directory — and the store applies it), and the thread
         checks the projects directory is a readable directory before it
         scans the uploads: every refusal is logged, nothing is removed.
+        And the sessions and the uploads must come from the same world
+        (`uploads.sweep_refusal`, the 612 follow-up of the PR 613
+        verification): a scratch service on staged sessions
+        (`COLLINS_PROJECTS_DIR`) with the uploads root not named by
+        `COLLINS_UPLOADS_DIR` would judge the user's real upload
+        directories orphans, so it does not sweep at all.
         Never raises."""
         from .. import uploads
 
         store = self.store
         if store is None or not store.applied:
+            return
+        refusal = uploads.sweep_refusal(sessions.CLAUDE_PROJECTS_DIR, sessions.DEFAULT_PROJECTS_DIR)
+        if refusal is not None:
+            if not self._orphan_sweep_refused:
+                self._orphan_sweep_refused = True
+                log.warning("orphan uploads sweep refused: %s", refusal)
             return
         known: set[str] = set()
         try:

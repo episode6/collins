@@ -343,7 +343,7 @@ grows.
 | Model catalog, update-check stamp | `~/.cache/collins/` |
 | Images the service fetched for `show_image` and PR bodies (`kind=remote`, a day; `service.blobs.RemoteBlobs`) | `~/.cache/collins/remote-images/<sha1 of the url><suffix>` (the service's machine) |
 | Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`; built in PR-2.1, the diff's images in PR-2.2, every picture and project icon in PR-2.7); the only image files the client decodes (`blobcache.read` refuses the rest) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
-| Drops and pastes sent over `PUT /api/upload` (`uploads.py`, PR-2.7): removed with the session, or a day after the service stopped knowing it (the orphan sweep on the housekeeping tick); one made with no session id waits in `_pending/` for a week (D37) | `~/.local/share/collins/uploads/<session id>/` (the service's machine; `COLLINS_UPLOADS_DIR` overrides) |
+| Drops and pastes sent over `PUT /api/upload` (`uploads.py`, PR-2.7): removed with the session, or a day after the service stopped knowing it (the orphan sweep on the housekeeping tick); one made with no session id waits in `_pending/` for a week (D37) | `~/.local/share/collins/uploads/<session id>/` (the service's machine; `COLLINS_UPLOADS_DIR` overrides, and an instance whose projects directory is overridden sweeps no orphans unless it is set: `uploads.sweep_refusal`) |
 | Everything of the CLI's | `~/.claude/` — read only |
 
 Every one of these has an environment override used by tests, captures and
@@ -353,7 +353,7 @@ e2e checks: `COLLINS_APP_ID`, `COLLINS_PROJECTS_DIR`, `COLLINS_CLAUDE_CONFIG`,
 bubblewrap, like the fake `claude`), `COLLINS_BINDFS` and
 `COLLINS_FUSERMOUNT` (the two tools a live grant is mounted with; a path
 that doesn't exist says "not installed"), `COLLINS_PTY_STATE_DIR` (where
-the service saves pty models), `COLLINS_UPLOADS_DIR` (the uploads), `COLLINS_DEBUG_API=1` (the service serves the
+the service saves pty models), `COLLINS_UPLOADS_DIR` (the uploads; the one override that lets an instance on a staged `COLLINS_PROJECTS_DIR` run the orphan sweep, and the e2e runner and the headless wrapper set a scratch one when the caller set none), `COLLINS_DEBUG_API=1` (the service serves the
 `debug.*` probe and applies `scripts/e2e_stubs.py`; never set it outside a
 check), plus `XDG_CONFIG_HOME` / `XDG_STATE_HOME` /
 `XDG_RUNTIME_DIR`.
