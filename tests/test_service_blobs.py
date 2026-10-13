@@ -401,8 +401,62 @@ def test_a_file_that_is_no_picture_is_never_served_without_a_session(tmp_path, m
     assert _get(feed, f"path={document}&session=&as=file")[0] == 400
     assert _get(feed, f"path={picture}&as=file")[0] == 200
     assert _get(feed, f"path={picture}")[0] == 200
-    # With its session named, a pending upload is the session's to fetch (D37).
+    # With a session the service knows named, a pending upload is served (D37).
     assert _get(feed, f"path={document}&session=sid-1&as=file")[0] == 200
+
+
+def test_a_session_nobody_knows_gets_no_file_that_is_no_picture(tmp_path, monkeypatch):
+    """The verification of PR 615, S1: the refusal above was by shape (an
+    empty `session`), and `uploads.inside` admits the pending folder
+    whatever the session, so `&session=x` was the same request served. A
+    non-picture counts as uploaded only for a session the service knows:
+    a live one's id, its handle only while it has no id, or an id the
+    store lists."""
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    document = uploads.write(None, "notes.pdf", b"%PDF pending")
+    picture = uploads.write(None, "shot.png", b"\x89PNG pending")
+    theirs = uploads.write("sid-9", "theirs.csv", b"a,b\n")
+    core = Core([Session()])
+    feed = _inline(blobs.FileBlobs, core)
+    for session in ("nobody-at-all", "x", "../..", "s-1", "sid-9"):
+        # Unknown, unknown, no valid name, a resolved session's handle, and
+        # a valid id nobody has: each named nobody.
+        assert _get(feed, f"path={document}&session={session}&as=file")[0] == 403, session
+    assert _get(feed, f"path={theirs}&session=sid-9&as=file")[0] == 403  # its own folder, an unknown session
+    assert _get(feed, f"path={document}&session=sid-1&as=file")[0] == 200  # a live session
+    # The picture preview is as it was, with any session or none.
+    for query in (f"path={picture}", f"path={picture}&as=file", f"path={picture}&session=x"):
+        assert _get(feed, query)[0] == 200, query
+    # A session with no id yet is named by its handle...
+    unresolved = Core([Session(session_id=None, handle="s-7")])
+    assert _get(_inline(blobs.FileBlobs, unresolved), f"path={document}&session=s-7&as=file")[0] == 200
+    # ...and one that is not live by the id the store lists.
+
+    class Store:
+        def get_session(self, session_id):
+            return object() if session_id == "sid-9" else None
+
+    core.store = Store()
+    assert _get(feed, f"path={theirs}&session=sid-9&as=file")[0] == 200
+    assert _get(feed, f"path={document}&session=nobody-at-all&as=file")[0] == 403
+
+
+def test_a_delivered_file_noted_under_a_handle_is_not_served_by_it_after_the_resolve(report):
+    """Nit 1 of the same verification: `DeliveredFiles` keeps the key a
+    record was noted under, so one noted while the session had no id
+    stayed admitted by the handle after the resolve. The request's
+    session is judged first (`names_a_session`), so the stale key is
+    never read; by the id it is served once the transcript lands again."""
+    session = Session(session_id=None, handle="s-1", seen=[str(report)])
+    core = Core([session])
+    feed = _inline(blobs.FileBlobs, core)
+    core.landed()
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 200
+    session.session_id = "sid-1"
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 403
+    core.landed()
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 403
 
 
 def test_without_as_file_nothing_but_a_picture_is_served_named_or_not(report):
@@ -435,7 +489,7 @@ def test_an_upload_that_is_no_picture_is_served_whole_to_its_session(tmp_path, m
     monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
     mine = uploads.write("sid-1", "a.csv", b"a,b\n")
     other = uploads.write("sid-2", "c.csv", b"c,d\n")
-    feed = _inline(blobs.FileBlobs, Core())
+    feed = _inline(blobs.FileBlobs, Core([Session()]))
     assert _get(feed, f"path={mine}&session=sid-1&as=file")[:1] == (200,)
     assert _get(feed, f"path={mine}&session=sid-1")[0] == 400  # not without as=file
     assert _get(feed, f"path={other}&session=sid-1&as=file")[0] == 403
