@@ -36,7 +36,10 @@ blob GET the API server hands it:
   ``working_tree: false`` (a commit, range or branch load) has no
   monitors and no state digest, only that tick. A watch replaced under
   the same handle keeps the digests the one before had seen, so a move
-  between the two is still one event), and `git.plan` (`gitops.run_plan` with the stale check: the stable
+  between the two is still one event; replaced before the one before
+  had seen any, its first compare is delivered whatever it finds, so
+  the move is one event rather than the new seed), and `git.plan`
+  (`gitops.run_plan` with the stale check: the stable
   keys the plan names must all be in the fresh `file_patch`, else
   ``stale`` and nothing is applied; the trash is `files.trash_paths`).
 - The blob GET (`blob`): `gitops.file_at` of the working tree, the index
@@ -335,11 +338,18 @@ class GitFeed:
         working_tree = message.get("working_tree") is not False
         # A replacement (the page's next load) carries the tree and refs
         # digests its predecessor saw: a commit between the two watches is
-        # a move the new one reports, not a digest it adopts.
-        carried = old.last[:2] if old is not None and old.cwd == cwd and old.last[0] is not None else None
+        # a move the new one reports, not a digest it adopts. A predecessor
+        # whose first compare never landed (two loads within one `git
+        # status`: the page's reread path) has none to hand over, and its
+        # in-flight result dies with it, so the replacement's first compare
+        # is delivered whatever it finds: the client compares once against
+        # a tree that may not have moved, rather than adopting a commit made
+        # in the window as its seed (should-fix 1 of PR 610's review).
+        replaced = old is not None and old.cwd == cwd
+        carried = old.last[:2] if replaced and old.last[0] is not None else None
         watch = _Watch(
             self, cwd, client, files_, seed if isinstance(seed, str) else None,
-            working_tree=working_tree, carried=carried,
+            working_tree=working_tree, carried=carried, deliver_first=replaced and carried is None,
         )
         self._watches[key] = watch
         re_id = message.id
@@ -613,7 +623,9 @@ class _Watch:
     and refs digests (PR-2.2). The first compare seeds the signatures
     without a push (unless a replaced watch's digests were carried over);
     every later move is one `git-changed`. *working_tree* False is a
-    watch of the index, HEAD and the refs alone: no monitors, no state."""
+    watch of the index, HEAD and the refs alone: no monitors, no state.
+    *deliver_first*: the first compare is delivered whatever it finds (a
+    replacement of a watch that had seen nothing yet)."""
 
     def __init__(
         self,
@@ -624,6 +636,7 @@ class _Watch:
         state: str | None = None,
         working_tree: bool = True,
         carried: tuple[str | None, str | None] | None = None,
+        deliver_first: bool = False,
     ) -> None:
         self.feed = feed
         self.cwd = cwd
@@ -638,6 +651,7 @@ class _Watch:
         self._checking = False
         self._stale = False
         self._stopped = False
+        self._deliver_first = bool(deliver_first)
         if not self.working_tree:
             state = None
         # The client's seed (the tree state its read sampled): the first
@@ -787,18 +801,18 @@ class _Watch:
         if self._stopped:
             return
         stale, self._stale = self._stale, False
+        unconditional, self._deliver_first = self._deliver_first, False
         if not self._seeded:
             self._seeded = True
-            self.last = found
+            moved = False
         elif self.last[0] is None:
             # Seeded by the client's state alone: the tree and refs digests
             # are adopted now, and only a moved state is a move.
             moved = found[2] != self.last[2]
-            self.last = found
-            if moved:
-                self._deliver(found)
-        elif found != self.last:
-            self.last = found
+        else:
+            moved = found != self.last
+        self.last = found
+        if moved or unconditional:
             self._deliver(found)
         if stale:
             self.check()

@@ -634,6 +634,92 @@ def test_a_replaced_watch_keeps_the_digests_so_a_commit_between_is_reported(serv
     assert len(_changed(events)) == before
 
 
+def _queued_core(tmp_path, monkeypatch):
+    """A core whose feed lands inline but runs its thread work from a queue
+    the test drains by hand: what a compare still out looks like."""
+    monkeypatch.setenv("SHELL", "/bin/cat")
+    queue: list = []
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    core.git = gitfeed.GitFeed(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: queue.append(fn))
+    server = inproc.LoopbackServer(core)
+    events: list[dict] = []
+    client = server.connect(lambda *a: None, events.append, device="laptop")
+    client.local = True
+    return core, client, events, queue, server
+
+
+def _watch_message(repo: Path, state: str) -> protocol.Message:
+    fields = {"cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state}
+    return protocol.Message("git.watch", protocol.REQUEST, 7, fields)
+
+
+def test_a_watch_replaced_before_its_first_compare_landed_reports_a_commit_between(tmp_path, monkeypatch):
+    """Should-fix 1 of PR 610's review (the reviewer's probe_replace.py):
+    the page re-sends its watch at every landing, and its reread path
+    lands two reads back to back, so a replacement within one `git
+    status` of its predecessor is a normal sequence. The predecessor has
+    no digests yet to carry (its compare is still out), so a commit from a
+    shell in that window was adopted as the new seed: no `git-changed`,
+    and the refs tick saw nothing after. Now the replacement's first
+    compare is delivered whatever it finds."""
+    core, client, events, queue, server = _queued_core(tmp_path, monkeypatch)
+    repo = make_repo(tmp_path)
+    try:
+        state = gitops.tree_state_signature(repo)
+        core.git.watch(_watch_message(repo, state), client)  # a Deferred: its thread work is queued
+        queue.pop(0)()  # the directories' walk lands: the watch installs and its seed compare is queued
+        first = core.git.watch_of(client, "p1")
+        assert first is not None and first._checking and first.last[0] is None
+        git(repo, "commit", "-q", "--allow-empty", "-m", "between")
+        core.git.watch(_watch_message(repo, gitops.tree_state_signature(repo)), client)
+        second = core.git.watch_of(client, "p1")
+        assert first._stopped and second is not first
+        queue.pop(1)()  # the replacement's walk lands, ahead of the predecessor's compare
+        assert len(queue) == 2
+        while queue:
+            queue.pop(0)()  # both compares land: the predecessor's into a stopped watch
+        changed = _changed(events)
+        assert len(changed) == 1 and changed[0]["cwd"] == str(repo)
+        tree, refs = gitfeed.cheap_signatures(str(repo))
+        assert changed[0]["tree"] == tree and changed[0]["refs"] == refs
+        # Seen now: the refs tick and the next compare are quiet.
+        second._on_refs_tick()
+        queue.pop(0)()
+        second.check()
+        queue.pop(0)()
+        assert len(_changed(events)) == 1
+        # A fresh handle on the same tree adopts what it finds: no event.
+        fields = {"cwd": str(repo), "handle": "p2", "files": [], "state": gitops.tree_state_signature(repo)}
+        core.git.watch(protocol.Message("git.watch", protocol.REQUEST, 8, fields), client)
+        while queue:
+            queue.pop(0)()
+        assert len(_changed(events)) == 1
+    finally:
+        server.shutdown()
+
+
+def test_a_replacement_whose_predecessor_landed_carries_digests_not_a_first_delivery(tmp_path, monkeypatch):
+    """The control: a predecessor that saw the tree hands its digests on,
+    and the replacement's first compare over an unmoved tree is silent."""
+    core, client, events, queue, server = _queued_core(tmp_path, monkeypatch)
+    repo = make_repo(tmp_path)
+    try:
+        state = gitops.tree_state_signature(repo)
+        core.git.watch(_watch_message(repo, state), client)
+        while queue:
+            queue.pop(0)()
+        first = core.git.watch_of(client, "p1")
+        assert first.last[0] is not None and not _changed(events)
+        core.git.watch(_watch_message(repo, state), client)
+        while queue:
+            queue.pop(0)()
+        second = core.git.watch_of(client, "p1")
+        assert second.last[:2] == first.last[:2] and not second._deliver_first
+        assert not _changed(events)
+    finally:
+        server.shutdown()
+
+
 # -- the builders hold the wire's text to their grammar (D33) -------------------------
 
 

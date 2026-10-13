@@ -121,7 +121,12 @@ tick (`WATCH_REFS_TICK_S`, the page's old cadence) and runs the full
 compare when one moved, so commits and staging done from a shell or by
 the agent push a `git-changed` within 2 s; a watch replaced under the
 same handle (every load re-sends it) keeps the digests its predecessor
-saw (a commit between the two is still an event). The mirror re-reads
+saw (a commit between the two is still an event), and one replaced
+before its predecessor's first compare landed (two loads within one
+`git status`: `_diff_read`'s reread path) is delivered on its own first
+compare whatever it finds (`_Watch(deliver_first=True)`: one compare
+the page runs over a tree that may not have moved, rather than a commit
+in the window adopted as the seed). The mirror re-reads
 the cwd **before** it hands the event over (`Mirror.refresh_then`), and
 the page compares its own signatures against it (`_compare_on_event` →
 `_check_root` + `_compare_signatures`, then `_tick`):
@@ -967,7 +972,8 @@ cwd's `git-changed` events (`Mirror.on_changed`); a commit, range or
 branch load sends `working_tree: false` (the 2 s tick of the tree and
 refs digests alone, PR-2.2). The next load on the same cwd re-sends the
 watch under the same handle, which replaces it on the service keeping
-the digests it had seen; `_drop_watch` (`_close_view`, another cwd)
+the digests it had seen (or, when it had seen none yet, delivering the
+new watch's first compare unconditionally); `_drop_watch` (`_close_view`, another cwd)
 sends `git.unwatch {handle}`. The mirror remembers every live watch and sends
 them again on `reset` (a reconnect: the service dropped them with the
 client). **When git is local** — the service's hello has no `git`
