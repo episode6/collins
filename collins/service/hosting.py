@@ -550,7 +550,14 @@ class SessionRecord:
         if text is not None:
             # The stash's belt: a text the frame can't carry loses its tail
             # here rather than the event (a cut's seed never comes this way).
-            event["text"] = protocol.fit_text_bytes(text[: protocol.TEXT_MAX], protocol.EVENT_TEXT_BYTES)
+            # Inside a try with the rest (rule 4): the fit must not take the
+            # event down on a text it can't measure.
+            try:
+                text = protocol.fit_text_bytes(text[: protocol.TEXT_MAX], protocol.EVENT_TEXT_BYTES)
+            except Exception:  # noqa: BLE001 - the measure failing is not the stash's loss
+                log.exception("session %s: the stash's text could not be fitted", self.handle)
+                text = text[: protocol.TEXT_MAX]
+            event["text"] = text
         self._event(event, active_only=True)
 
     def mapped(self) -> bool:

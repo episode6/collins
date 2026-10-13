@@ -635,6 +635,41 @@ def test_a_cut_whose_text_would_not_frame_is_refused_before_the_erase(server, tm
     assert writes, "the erase keystrokes went to the pty"
 
 
+def test_a_stale_cuts_cancel_by_handle_leaves_the_newer_cut_alive(server, tmp_path):
+    """The tab calls a stale seed's cut off by its handle (the unknown-
+    handle stash of `_on_cut_event`): a cancel naming a handle the record
+    has let go of ends nothing, least of all the chain a newer composer's
+    cut is running; a cancel naming the live cut ends that one."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    stale = client.request({"t": "cut", "pty": pty})["handle"]
+    newer = client.request({"t": "cut", "pty": pty})["handle"]  # supersedes: `stale` is over
+    assert stale not in record.cuts and record._chain.handle == newer
+    client.request({"t": "cut.cancel", "pty": pty, "handle": stale})
+    assert newer in record.cuts and record._chain is not None and record._chain.handle == newer
+    assert _cut_state(ends, newer) is None  # the newer cut was told nothing
+    client.request({"t": "cut.cancel", "pty": pty, "handle": newer})
+    assert newer not in record.cuts and record._chain is None
+    assert _cut_state(ends, newer) == "cancelled"
+
+
+def test_a_stash_with_a_lone_surrogate_still_reaches_the_client(server, tmp_path):
+    """The stash's byte fit runs inside the event's try: a text the measure
+    could once not take (a lone surrogate) is still told, as far as the
+    protocol carries it, rather than lost with an exception."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    record.stash_draft("kept \ud800 draft")  # must not raise
+    record.stash_draft("kept draft")
+    assert [e["text"] for e in ends.of("composer") if e.get("what") == "stash"][-1] == "kept draft"
+
+
 def test_a_cut_that_finds_nothing_ends_with_a_cancelled_word(server, tmp_path):
     """An empty box: the settle agrees with itself and cuts nothing; the
     client hears `cancelled` and the record lets the handle go."""

@@ -1536,6 +1536,19 @@ def test_fit_text_bytes_keeps_the_longest_prefix_that_frames():
     assert p.fit_text_bytes("abc", 1) == ""
 
 
+def test_the_byte_measures_do_not_raise_on_a_lone_surrogate():
+    """A stash text with a lone surrogate (a torn paste) is measured, not
+    raised on: the fit runs before the event's own validation, which is
+    where such text is refused. `encode` still refuses it."""
+    torn = "ab\ud800cd"
+    assert p.json_bytes(torn) == 3 + 3 + 3  # quote + "ab", the surrogate's three, "cd" + quote
+    assert p.fit_text_bytes(torn, 1000) == torn
+    assert p.fit_text_bytes(torn * 100, 20).startswith("ab")
+    assert p.fit_list_bytes([{"k": torn}], 1000) == [{"k": torn}]
+    with pytest.raises(ValueError):
+        p.encode({"text": torn})
+
+
 def test_fit_list_bytes_keeps_the_longest_prefix_that_frames():
     items = [{"k": _heavy(10)} for _ in range(10)]
     one = p.json_bytes(items[0])

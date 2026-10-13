@@ -1937,8 +1937,12 @@ _UNFIT = object()
 
 
 def json_bytes(value) -> int:
-    """How many bytes *value* takes in a frame, as `encode` writes it."""
-    return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    """How many bytes *value* takes in a frame, as `encode` writes it. A
+    lone surrogate (which `encode` refuses, and `validate` with it) is
+    counted as its three bytes rather than raised on: a measure never
+    fails, the frame's refusal is the sender's to meet later."""
+    text = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+    return len(text.encode("utf-8", "surrogatepass"))
 
 
 def fit_text_bytes(text: str, budget: int) -> str:

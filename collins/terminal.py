@@ -2279,7 +2279,8 @@ class TerminalTab(Gtk.Box):
         called off."""
         if event.get("pty") != self.session.pty:
             return
-        composer = self._cuts.pop(str(event.get("handle") or ""), None)
+        handle = str(event.get("handle") or "")
+        composer = self._cuts.pop(handle, None)
         text = str(event.get("text") or "")
         up = composer is not None and composer is self._composer and self.composer_open()
         action = self.session.cut_action(event.get("state"), up, known=composer is not None)
@@ -2289,9 +2290,10 @@ class TerminalTab(Gtk.Box):
             # The cut landed after the composer closed, or under a handle
             # this tab never learnt (its reply still in flight): the box was
             # erased, so what the cut took goes where a closing composer's
-            # text goes — after the service's chain is called off, or its
-            # verify rounds would erase the restored text as a leftover.
-            self.session.cancel_cut()
+            # text goes — after this cut's chain is called off (by handle: a
+            # stale seed must not end a newer composer's cut), or its verify
+            # rounds would erase the restored text as a leftover.
+            self.session.cancel_cut(handle or None)
             self._restore_or_stash(text)
         elif action == clientsession.CUT_REFUSE:
             self._stash_draft(composer.peek_text())
