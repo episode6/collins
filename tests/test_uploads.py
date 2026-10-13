@@ -461,6 +461,13 @@ def test_the_orphan_sweep_is_refused_on_staged_sessions_without_its_own_uploads(
     # The user's instance, and `start-debug`'s (the real projects directory): never refused.
     assert uploads.sweep_refusal(real, real) is None
     assert uploads.sweep_refusal(str(real) + "/", real) is None
+    # The real directory named another way is still the real one: through
+    # `..`, and through a symlinked home.
+    real.mkdir(parents=True)
+    assert uploads.sweep_refusal(real.parent / "x" / ".." / "projects", real) is None
+    (tmp_path / "link-home").symlink_to(tmp_path / "home")
+    assert uploads.sweep_refusal(tmp_path / "link-home" / ".claude" / "projects", real) is None
+    assert uploads.sweep_refusal(real, tmp_path / "link-home" / ".claude" / "projects") is None
     refusal = uploads.sweep_refusal(staged, real)
     assert refusal and "COLLINS_UPLOADS_DIR" in refusal and str(staged) in refusal
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))

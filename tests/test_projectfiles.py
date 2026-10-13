@@ -2411,20 +2411,42 @@ def test_a_directory_swapped_in_below_the_top_is_spared_by_the_undo(tmp_path, mo
     assert _tree_of(tmp_path / "d") == [top, f"{top}/{sub}", f"{top}/{sub}/precious:PRECIOUS"]
 
 
-def test_a_temporary_directory_of_another_owner_is_refused(tmp_path, monkeypatch):
-    """The owner half of the check: what was opened must be the service's
-    uid's."""
+def test_the_temporary_directory_is_judged_by_emptiness_and_never_by_its_owner(tmp_path, monkeypatch):
+    """The verification of bc88b2b: the check is emptiness alone. An empty
+    directory is accepted whatever owner the filesystem presents for it
+    (sshfs without `idmap`, a squashing NFS export: an owner check there
+    refused every tree copy and left an empty temporary directory each
+    time), and a non-empty one is refused. `_make_temp_dir` itself: the
+    service's own empty directory is handed back open, one with an entry
+    is `_NotOurs` with nothing written and nothing removed."""
     (tmp_path / "d").mkdir()
     (tmp_path / "t").mkdir()
     (tmp_path / "t" / "f").write_text("f")
+    # Any owner but the service's, as an id-mapped mount would present it.
     monkeypatch.setattr(projectfiles.os, "geteuid", lambda: os.getuid() + 1)
     before = _fds()
     (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(tmp_path / "t")])
     monkeypatch.undo()
-    assert outcome.error is PasteError.FAILED and "Not the folder this copy made" in outcome.message
+    assert outcome.error is None and _fds() == before
+    assert _tree_of(tmp_path / "d") == ["t", "t/f:f"]  # landed, no temporary name left
+
+    dir_fd = os.open(tmp_path / "d", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        name, fd = projectfiles._make_temp_dir(dir_fd)
+        os.close(fd)
+        assert name.startswith(".collins-") and os.listdir(tmp_path / "d" / name) == []
+        os.rmdir(tmp_path / "d" / name)
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        (victim / "precious").write_text("PRECIOUS")
+        made = _swap_onto_the_temporary_name(monkeypatch, victim)
+        with pytest.raises(projectfiles._NotOurs):
+            projectfiles._make_temp_dir(dir_fd)
+        monkeypatch.undo()
+        assert (tmp_path / "d" / made[0] / "precious").read_text() == "PRECIOUS"
+    finally:
+        os.close(dir_fd)
     assert _fds() == before
-    (left,) = os.listdir(tmp_path / "d")
-    assert left.startswith(".collins-") and os.listdir(tmp_path / "d" / left) == []  # never written into
 
 
 @pytest.mark.parametrize("depth", ["top", "sub"])

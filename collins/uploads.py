@@ -99,7 +99,9 @@ def sweep_refusal(projects_dir: str | os.PathLike, default_projects_dir: str | o
     the real data on purpose) is never refused."""
     if os.environ.get("COLLINS_UPLOADS_DIR"):
         return None
-    if Path(projects_dir) == Path(default_projects_dir):
+    # Resolved on both sides: the real directory named through `..` or a
+    # symlinked home is still the real directory, not a staged one.
+    if os.path.realpath(projects_dir) == os.path.realpath(default_projects_dir):
         return None
     return (
         f"the projects directory is overridden ({projects_dir}) and COLLINS_UPLOADS_DIR is not set, "

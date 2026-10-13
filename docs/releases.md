@@ -53,9 +53,11 @@ downloads of each version, see the
   out of the project and nothing into it; a copy that fails partway
   leaves no partial file or folder behind (a folder is built under a
   hidden temporary name, `.collins-…`, and appears whole, or not at
-  all; a read-only folder inside it does not stop the clean-up; only a
+  all; a read-only folder inside it does not stop the clean-up; a
   service stopped in the middle of a copy leaves that hidden folder,
-  which is safe to delete), and a failed move
+  which is safe to delete, and so does another program moving a folder
+  of its own into the copy while it is being built, in which case what
+  is left holds that folder), and a failed move
   removes only what it put there itself.
   An open file still follows its rename or move with its unsaved edits,
   even when the move took long enough for the editor to be told the old

@@ -512,7 +512,9 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   `.collins-…` name beside where it will land and renamed when it is
   complete. A failed copy removes that folder itself; if the service is
   stopped while a copy is still running, the hidden folder stays, and
-  it is an unfinished copy that is safe to delete). Copies
+  it is an unfinished copy that is safe to delete; it also stays, around
+  that folder, when another program moved a folder of its own into the
+  copy while it was being built). Copies
   travel through the system clipboard as Collins' own
   `collins://` references to the service's files — and, when the service is
   this machine, as ordinary file URIs too, so files round-trip with your

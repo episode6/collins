@@ -800,20 +800,26 @@ def _make_temp_dir(dir_fd: int) -> tuple[str, int]:
     source's mode), then the open by that name `O_DIRECTORY|O_NOFOLLOW`.
     These are two calls, and the name can be read by anyone watching the
     destination, so what the descriptor holds is **checked before a byte
-    is written through it**: it must be owned by the service's uid
-    (`fstat`) and empty (a `scandir` of the descriptor). Anything else is
-    not the directory this call made: the entry fails (`_NotOurs`,
+    is written through it**: it must be empty (a `scandir` of the
+    descriptor). Anything else is not the directory this call made: the entry fails (`_NotOurs`,
     `ESTALE`), nothing is written into it and nothing in it is removed;
     it is left where the swap put it (under the temporary name; for a
     subdirectory of a tree, inside what the failed copy's undo then
     leaves of the temporary tree, `_remove_contents`'s *spare*).
 
-    What that does and does not guarantee: a directory with contents, or
-    another user's, swapped onto the name between the two calls is never
-    filled, chmodded, landed or emptied. What remains is an **empty
-    directory of the same owner** swapped for the empty one just made,
-    which the copy then uses as its own (and, landed or removed, treats
-    as its own); and a link or a file swapped in is refused by the open.
+    What that does and does not guarantee: a directory with contents
+    swapped onto the name between the two calls is never filled,
+    chmodded, landed or emptied, and since a refused directory is by
+    definition not empty, a refusal leaves no litter of the service's
+    own. What remains is an **empty directory** swapped for the empty
+    one just made, which the copy then uses as its own (and, landed or
+    removed, treats as its own): the same user's, or another user's put
+    there by a deliberate race by someone who can write to the
+    destination. That is D46's accepted class. The owner is deliberately
+    not compared: a filesystem may present another owner for what the
+    service itself makes (sshfs without `idmap`, an NFS export that
+    squashes), and an owner check there refused every tree copy. A link
+    or a file swapped in is refused by the open.
     When the open itself fails (`EMFILE`, say) the directory just made
     is `rmdir`ed by name under the held parent, which removes it only if
     it is still empty."""
@@ -831,7 +837,7 @@ def _make_temp_dir(dir_fd: int) -> tuple[str, int]:
         st = os.fstat(fd)
         with os.scandir(fd) as entries:
             empty = next(entries, None) is None
-        if st.st_uid != os.geteuid() or not empty:
+        if not empty:
             error = _NotOurs(errno.ESTALE, f"Not the folder this copy made: {tmp}")
             error.inode = (st.st_dev, st.st_ino)
             raise error
@@ -987,10 +993,9 @@ def _copy_tree(
     `O_DIRECTORY`), the new tree **built under a temporary name nothing
     can guess** (`_make_temp_dir`, D53: `os.mkdir` of a `_temp_name`,
     the open by that name, and a check through the descriptor that what
-    was opened is the service's own empty directory; the name can be
-    observed, so a directory swapped in between the two calls is not
-    impossible, only refused unless it is an empty one of the same
-    owner) and filled through that descriptor by the walk (`_walk`, everything relative to
+    was opened is empty; the name can be observed, so a directory
+    swapped in between the two calls is not impossible, only refused
+    unless it is an empty one) and filled through that descriptor by the walk (`_walk`, everything relative to
     descriptors; `shutil.copytree` is not used, since it walks and stats
     by path), then **landed exclusively** on *newname* with the move's
     own primitive (`_move_exclusive`: `renameat2(RENAME_NOREPLACE)`, the

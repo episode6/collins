@@ -438,15 +438,21 @@ touches the disk.
   or an inotify watch of the destination reads it the moment it is
   made), and `mkdir` then the open by name are still two calls. So
   `_make_temp_dir` checks what the descriptor holds before a byte goes
-  through it: owned by the service's uid (`fstat`) and empty (a
-  `scandir` of the descriptor). Anything else fails the entry
+  through it: it must be empty (a `scandir` of the descriptor; the
+  owner is deliberately not compared, since sshfs without `idmap` or a
+  squashing NFS export presents another owner for what the service
+  itself makes, and a refused directory being non-empty by definition
+  means a refusal leaves no litter of the service's own). Anything else
+  fails the entry
   (`_NotOurs`, "Not the folder this copy made"), is never written into,
   chmodded or landed, and is never emptied either: it is left where the
   swap put it, and when that was a subdirectory's temporary name inside
   the tree, the undo spares it by inode (`_WalkErrors.spare`) and
   leaves the temporary directories around it standing. What is not
-  closed: an *empty directory of the same owner* swapped for the empty
-  one just made is used as the copy's own. When the open after the
+  closed: an *empty directory* swapped for the empty one just made is
+  used as the copy's own, the same user's or another user's put there
+  by a deliberate race by someone who can write to the destination
+  (D46's accepted class). When the open after the
   `mkdir` fails (`EMFILE`), the directory is `rmdir`ed by name under the
   held parent (only an empty one goes). **What can leave a
   `.collins-<hex>` folder behind:** a refused swap, as above, and a

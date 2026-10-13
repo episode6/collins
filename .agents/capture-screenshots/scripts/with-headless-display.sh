@@ -48,15 +48,15 @@ uploads_scratch=
 if [ -z "${COLLINS_UPLOADS_DIR:-}" ]; then
     uploads_scratch=$(mktemp -d -t collins-headless-uploads-XXXXXX)
     export COLLINS_UPLOADS_DIR="$uploads_scratch"
+    # Until the compositor's own cleanup trap replaces it below.
+    trap 'rm -rf "$uploads_scratch"' EXIT
 fi
 
 if ! command -v gnome-shell >/dev/null 2>&1 || ! command -v dbus-run-session >/dev/null 2>&1; then
     echo "with-headless-display: gnome-shell/dbus-run-session not found;" \
          "running on the current display (a window will appear)" >&2
     "$@"
-    status=$?
-    [ -n "$uploads_scratch" ] && rm -rf "$uploads_scratch"
-    exit $status
+    exit $?
 fi
 
 size=${HEADLESS_SIZE:-1920x1200}
