@@ -505,9 +505,13 @@ device's cached copy anywhere else (`_with_cached_copy`: a picture
 through `fetch_image`, any other file through `blobcache.fetch_file`,
 i.e. `GET /api/blob?kind=file&as=file`). The service answers `as=file`
 only for a client that is not `local`, only for a request that names
-its session (a file that is no picture with no `session` is `400`: the
-pending uploads folder is not a way round the rule; a session is named
-by its id, or by its handle only while it has none) and only for a file
+a session the service knows (`blobs.names_a_session`: a live session's
+id, its handle only while it has none, or an id the store lists; with
+no `session` a file that is no picture is `400`, with one that names
+nobody neither the uploads folders nor the delivered set count and it
+is `403`. A pending picture is still served to any request, and a
+pending non-picture to a request naming any known session: the pending
+folder is not per session) and only for a file
 the session's agent **named**: inside its uploads, a path a tool call registered
 (`ImageRegistry`), or a delivered file's record of its live transcript
 (`DeliveredFiles`, noted by `ServiceCore.session_transcript_landed` and

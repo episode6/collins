@@ -230,6 +230,17 @@ def note_delivered(core, record) -> None:
         delivered.note([key], keys)
 
 
+def names_a_session(core, key: str) -> bool:
+    """Whether *key* names a session the service knows, for a request
+    that asks for a file on a session's account (`as=file`): a live
+    session's id, its handle only while it has no id
+    (`_session_records`' rule), or an id the store lists
+    (`known_session`). Main loop."""
+    if not key:
+        return False
+    return any(_session_records(core, key)) or known_session(core, key)
+
+
 def _session_records(core, key: str, handles: bool = True):
     """The live sessions *key* names: by session id, or — with *handles*,
     and only while the session has no id yet — by the handle a client
@@ -375,14 +386,22 @@ class FileBlobs(_Feed):
     path a delivered file's transcript record resolved to when the service
     first saw it (`DeliveredFiles`) — and never merely for being
     inside a root: `fs.read` is the reader of a project's text, and a
-    root is not an attachment. Such a request **names its session**
-    (`uploads.inside(real, session)` with no session would admit the
-    pending uploads folder, D37's, to any client that is not local: a
-    whole file of any kind for a request that named nobody; refused 400
-    since the 2026-10-13 round, the Fable review of PR 615's nit 7. A
-    picture's request keeps the sessionless form PR-2.7 gave it, which
-    the composer's previews of a pending drop use). A `local` client is never served one (it
-    opens the file itself), so its answers are what they were. The cap
+    root is not an attachment. Such a request **names a session the
+    service knows** (`names_a_session`: a live session's id, its handle
+    only while it has no id, or an id the store lists). For any other
+    `session` — none, an empty one, a name the service never heard of,
+    one that is no valid session name, a resolved session's handle —
+    neither the uploads folders (`uploads.inside` admits the pending
+    one, D37's, whatever the session) nor the delivered set count, so a
+    file that is no picture is refused: `400` with no session at all,
+    `403` with one that names nobody. What stays open, as it has been
+    since PR-2.7: a **picture** in the pending folder is served to a
+    request with any session or none (the composer's preview of a drop
+    made before its session has an id), and a non-picture in the pending
+    folder is served to a request that names any *known* session, not
+    only the one the drop is for (the pending folder is not per session).
+    A `local` client is never served one (it opens the file itself), so
+    its answers are what they were. The cap
     (`FILE_MAX_BYTES`), the tag and the 304 are the pictures'; the type
     of a file that is no picture is `application/octet-stream`."""
 
@@ -414,7 +433,11 @@ class FileBlobs(_Feed):
         roots = None if local else files.roots(self.core)
         admitted, seen = (frozenset(), frozenset()) if local else agent_named(self.core, session)
         delivered = getattr(self.core, "delivered_files", None)
-        handed = frozenset() if local or delivered is None or not session else delivered.paths(session)
+        # Whose account the request is on: a non-picture is served only on
+        # a known session's (see the class docstring). A key `DeliveredFiles`
+        # still holds for a handle whose session has an id since is not read.
+        session_named = not local and names_a_session(self.core, session)
+        handed = delivered.paths(session) if delivered is not None and session_named else frozenset()
 
         def work() -> tuple[int, dict, bytes]:
             real = os.path.realpath(path)
@@ -425,7 +448,8 @@ class FileBlobs(_Feed):
             # when it was named (D38, D51): its uploads, a tool call's
             # registered path, a delivered file's as the service first saw
             # its record. A link swapped in since resolves elsewhere.
-            exact = uploads.inside(real, session or None) or real in admitted or real in handed
+            uploaded = uploads.inside(real, session or None) and (picture or session_named)
+            exact = uploaded or real in admitted or real in handed
             # A picture the transcript scan found is admitted as before
             # PR-2.8, by what its record's key resolves to now (D38).
             named = exact or real in {os.path.realpath(key) for key in seen}
