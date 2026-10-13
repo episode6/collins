@@ -944,19 +944,41 @@ def test_the_watch_bound_holds_a_tree_of_folders(served):
 
 
 def test_list_and_walk_confine_on_the_worker(served, monkeypatch):
-    """`allowed` (which resolves every root) is not called on the main
-    loop for a listing or a walk: the roots are, and `_confine` runs on the
-    worker."""
+    """The resolving half of the confinement (`Confinement.allows`, which
+    resolves every root and path through its links) never runs on the main
+    loop for a listing, a walk, the names or a directory watch: the roots'
+    names are read there, and every `allows` runs inside the worker. The
+    fixture's worker is inline, so it is marked here to tell the two apart
+    (the verification of PR 614: the test used to patch `files.allowed`,
+    which nothing has called since 609's `Confinement`)."""
     core, client, project, _events = served
     client.local = False
     core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
-    monkeypatch.setattr(files, "allowed", lambda *a: pytest.fail("allowed() on the main loop"))
+    where = {"worker": 0}
+    seen: list[bool] = []
+
+    def spawn(fn, name):
+        where["worker"] += 1
+        try:
+            fn()
+        finally:
+            where["worker"] -= 1
+
+    core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=spawn)
+    real_allows = files.Confinement.allows
+
+    def allows(self, path):
+        seen.append(where["worker"] > 0)
+        return real_allows(self, path)
+
+    monkeypatch.setattr(files.Confinement, "allows", allows)
     reply = client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)})
     assert [e["name"] for e in reply["entries"]] == ["a.txt"]
     assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
     assert client.request({"t": "fs.names", "root": str(project)})["names"] == ["a.txt"]
     client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
     assert core.files.watching(client, "d1")
+    assert len(seen) >= 4 and all(seen), seen  # each request confined, all on the worker
 
 
 # -- a name that is not UTF-8 (the Fable review of PR 611, should-fix 1) ----------------
