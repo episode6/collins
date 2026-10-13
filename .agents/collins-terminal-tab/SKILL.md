@@ -267,8 +267,9 @@ stop ends whether anyone watches or not). Once the CLI is gone `_poll_shell_exit
 because a shell inherits input the CLI never read (VTE mouse reports), and a
 bare kill-line at column 0 rings the bell — and force-closes if the shell
 ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close
-marks the row `backgrounding` (yellow, disabled) until the daemon lists the
-job or a timeout, and `_watch_background_fork` handles older CLIs that fork.
+(`close {mode: background}`) has the service mark the row `backgrounding`
+(yellow, disabled) until the daemon lists the job or a timeout, and its fork
+watch (`service/bgagents.py`, PR-1.12d) handles older CLIs that fork.
 
 **Detach** (PR-1.12c, spec §3.21, D12): `win.detach-session` (the tab
 menu's item targets "" = the menu's page; the row menu's names the
@@ -359,9 +360,11 @@ a session the store has not scanned yet waits for its first refresh. With
 `open_tabs` empty the launch falls back to `restore_last_session`.
 
 **Restart service** (`win.restart-service`, the main menu):
-`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`)
-and the mirror's agent ptys for the blast radius, then
-`App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
+`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`),
+the mirror's agent ptys and the rows whose `background` is set for the
+blast radius (`quitrules.restart_body`: the foreground sessions end, the
+`/bg` agents survive — the CLI's daemon is not the service's, D52's
+`KillMode=process`), then `App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
 `open_tabs` and tells the connection manager to wait for that pid to be
 gone (`ConnectionManager.expect_restart`) before it starts another
 service. *Idle* is `ServiceCore.restart_when_idle` (polls

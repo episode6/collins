@@ -85,6 +85,25 @@ def test_the_body_names_a_panels_command_only_when_one_runs():
                      first_notice=False).startswith("This window closes")
 
 
+def test_the_restart_body_counts_background_agents_as_surviving():
+    """D52 (`KillMode=process`): a service restart ends the foreground
+    sessions and leaves the CLI's /bg daemon and its agents running, so the
+    dialog's blast radius names them as surviving, never as ending."""
+    from collins.quitrules import restart_body
+
+    quiet = restart_body(sessions=0, busy=0, background=0)
+    assert quiet.startswith("No session is running.") and "/bg" not in quiet
+    assert quiet.endswith("stay while the service restarts.")
+    ending = restart_body(sessions=3, busy=1, background=0)
+    assert ending.startswith("3 sessions end with it, 1 of them working.") and "/bg" not in ending
+    one = restart_body(sessions=3, busy=1, background=1)
+    assert "The background (/bg) agent keeps running" in one
+    assert one.index("end with it") < one.index("keeps running") < one.index("status icon stay")
+    two = restart_body(sessions=0, busy=0, background=2)
+    assert "The 2 background (/bg) agents keep running" in two
+    assert "end with it" not in two
+
+
 def test_the_bodys_optional_sentences():
     from collins.quitrules import quit_body
 

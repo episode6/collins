@@ -366,16 +366,18 @@ changes no session that exists.
 | --- | --- | --- |
 | new (Send, the header button, a project row) | `mint_box(cwd)` by its tab | the project's defaults |
 | resumed | the one the state maps it to | that box's |
-| resumed with no box (`""`) | `mint_box(cwd)` by `open_session` | the project's defaults |
-| a fork | `mint_box(cwd, seed=False)` by `open_session` | a copy of its origin's, taken once |
+| resumed with no box (`""`) | `mint_box(cwd)` by the service at the spawn (`ServiceCore._box_for_launch`) | the project's defaults |
+| a fork | `mint_box(cwd, seed=False)` by the service at the spawn (`_box_for_launch`) | a copy of its origin's, taken once |
 | a `--continue` tab | `mint_box(cwd, seed=False)` by its tab | none until it resolves |
 | a sibling of a sandboxed parent | `mint_box(cwd, seed=False)` by `derive` | its parent's static grants as launched |
 | a sibling of an unsandboxed parent | `mint_box(cwd)` by its tab | the project's defaults |
 | the same conversation under a forwarded id | the same box | the same |
 
-`host.settle_box(session_id, box, workspace, owed)` is what
-`_on_session_resolved` calls (through `MainWindow._settle_sandbox_box`):
-for a `--continue` tab (`tab.take_sandbox_defaults_owed()`) whose session
+`host.settle_box(session_id, box, workspace, owed)` is what the
+service's `ServiceCore.session_resolved` calls when the resolver binds
+(what `MainWindow._settle_sandbox_box` did before PR-1.12a; the window
+mints and settles nothing since, verified for PR-1.12d): for a
+`--continue` tab (`tab.take_sandbox_defaults_owed()`) whose session
 already had a box, the tab's box takes over that box's grants and the
 old box is forgotten; one whose session had none is seeded with the
 defaults then. It answers whether `GrantMounts.sync(box)` is owed.
@@ -385,7 +387,8 @@ defaults then. It answers whether `GrantMounts.sync(box)` is owed.
 names and then asks `discard_box_async`; **every caller outside
 `sandboxplan.py` uses it, never `discard_box_async`** — the tab at its
 shell's exit (landed on the main loop first), a launch that couldn't be
-prepared, the `--continue` takeover, `_forget_transcript`, every
+prepared, the `--continue` takeover, a forgotten transcript (the
+service's `ServiceCore.forget_session`, behind `store.forget`), every
 `start_session` refusal that drops a sibling's box.
 `host.prune_grants()` at startup drops the entry of every box no session
 names and whose directory is gone.
@@ -439,10 +442,17 @@ did).
 
 **Also.** A restart keeps the tab's box. A sandboxed panel shell runs in
 the session's, since it runs the session's plan file. A trashed or
-deleted transcript (`_forget_transcript`): the entry's box is cleared and
-the box forgotten — unlinked, not trashed, its grants gone with it —
-while the sticky flag stays, so a transcript restored from the trash
-resumes boxed in a fresh home, as a new session would.
+deleted transcript: the window's `_forget_transcript` asks
+`store.forget {session}` and waits for the reply (PR-1.12d, spec §3.22),
+and the service's `ServiceCore.forget_session` clears the entry's box
+and forgets the box — unlinked, not trashed, its grants gone with it,
+kept while a live session runs in it — while the sticky flag stays, so a
+transcript restored from the trash resumes boxed in a fresh home, as a
+new session would. The archive sweep's trash (the service's own timer)
+takes the same path and tells the clients `forgotten`. The /bg handoff
+never reaches a box: the gate (`bgblock.background_blocker`, read by the
+service for each row's `can_background` and by the window for its
+reasons) refuses a sandboxed session first.
 
 **State.** `sandbox_new_sessions` + `project_sandbox` overrides
 (`sandbox_for_project`, the sidebar project menu's *New sessions are
@@ -966,7 +976,6 @@ switches go insensitive and its status row says why.
   credentials reaches the input box, spends nothing, and cuts the
   worktree on the way. Not measured against the real CLI: the resume
   half of a restart, which needs a conversation to resume.
->>>>>>> 564712b (Sandboxed sessions: a worktree launch is narrowed to its worktree)
 - `gh` keeps its token in the Secret Service keyring on a desktop, which the
   box can't reach, so a bind of `~/.config/gh` alone yields "token invalid";
   hence `GH_TOKEN` via `gh auth token` in sandboxrun. `git_protocol: ssh`

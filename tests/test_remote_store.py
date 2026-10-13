@@ -395,3 +395,30 @@ def test_a_kept_entry_goes_with_a_table_exit_and_a_reset(world):
     remote.keep_open_tabs(["pty:9"])
     remote.reset()
     assert remote.kept_open_tabs == []
+
+
+def test_the_background_agents_facts_land_and_announce(world):
+    """PR-1.12d: a row's `background`, `backgrounding` and `can_background`
+    are the service's; each lands on the mirror's item as the service sets
+    it, announced as `background-changed`, and the client sends none."""
+    store, remote, _state, ids, _link = world
+    seen = []
+    remote.connect("background-changed", lambda _s, sid: seen.append(sid))
+    store.set_backgrounding(ids["alpha2"], True)
+    store.set_background(ids["alpha2"], "pending")
+    store.set_can_background(ids["alpha1"], True)
+    item = remote.get_item(ids["alpha2"])
+    assert item.backgrounding is True and item.background == "pending"
+    assert remote.get_item(ids["alpha1"]).can_background is True
+    assert seen == [ids["alpha2"], ids["alpha2"], ids["alpha1"]]
+    store.set_background(ids["alpha2"], "running")
+    assert item.background == "running" and seen[-1] == ids["alpha2"]
+    assert not hasattr(remote, "set_backgrounding") and not hasattr(remote, "set_can_background")
+
+
+def test_a_forgotten_event_is_announced(world):
+    _store, remote, _state, ids, link = world
+    seen = []
+    remote.connect("forgotten", lambda _s, sid: seen.append(sid))
+    link.dispatch({"t": "forgotten", "session": ids["alpha1"]})
+    assert seen == [ids["alpha1"]]

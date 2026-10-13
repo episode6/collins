@@ -106,8 +106,10 @@ there to announce it, and the window does not announce it late. A window
 reconnecting after a dropped link keeps its standing desktop
 notifications; only one read elsewhere meanwhile comes down.
 
-**Restart service** (the main menu) ends every session with the service:
-the dialog says how many, and how many are working. *Restart Now* sends
+**Restart service** (the main menu) ends every foreground session with the
+service: the dialog says how many, how many are working, and that the
+`/bg` background agents keep running (they belong to the CLI's daemon, not
+to the service; see *Starting and stopping*). *Restart Now* sends
 `service.restart`; *Restart When Idle* asks the service to wait until no
 session is busy (it looks every 2 s), shown as "Restarting when idle" with
 a Cancel in the banner's place. The service closes its clients before it

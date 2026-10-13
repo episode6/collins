@@ -93,3 +93,27 @@ def quit_body(*, other_windows: bool, panel_busy: bool, tray_present: bool, firs
         parts.append(_("Collins's status icon leaves with the window; "
                        "the sessions keep running."))
     return " ".join(parts)
+
+
+# -- the *Restart service* dialog's body (`MainWindow._ask_restart_service`, §3.21) ---
+
+
+def restart_body(*, sessions: int, busy: int, background: int) -> str:
+    """The blast radius of a service restart. *sessions* are the agent ptys
+    the service runs and *busy* how many of them are working: they end with
+    the service (gracefully; each open tab resumes its own once it is back).
+    *background* are the rows running as `/bg` agents: the CLI's background
+    daemon is no child of the service's stop (the unit is `KillMode=process`,
+    D52), so they are counted as surviving, never as ending."""
+    if sessions:
+        parts = [_("{n} sessions end with it, {busy} of them working. Each open tab "
+                   "resumes its session once the service is back.").format(n=sessions, busy=busy)]
+    else:
+        parts = [_("No session is running.")]
+    if background == 1:
+        parts.append(_("The background (/bg) agent keeps running: it is not the service's."))
+    elif background:
+        parts.append(_("The {n} background (/bg) agents keep running: they are not "
+                       "the service's.").format(n=background))
+    parts.append(_("Collins and its status icon stay while the service restarts."))
+    return " ".join(parts)
