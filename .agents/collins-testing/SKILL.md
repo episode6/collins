@@ -50,7 +50,21 @@ another branch, inside a lambda or bound to a name first; a closure does
 not inherit its parent's ask); `UNRULED` is pinned to the three sites
 reported for a ruling and only shrinks; `RECORDED` is four `gitloads`
 default arguments (`run=subprocess.run`, `exists=os.path.exists`),
-pinned the same way.
+pinned the same way. Every function a qualname names is held to the ask
+(a property's getter and its setter), and a function that binds
+`apilink` itself has none.
+
+**When the test names a site that is no read.** The any-receiver words
+and the name hints match by name: `entry.is_dir()` on a service fact,
+`decoder.load_bytes(data)`, a `Gtk.Root` called `root` with
+`.resolve()`. Such a site has no truthful group. Rename a local variable
+that only looks like a path; otherwise add the site to
+`pathless_allowlist.NOT_A_SITE` with the number of calls it covers and
+a line saying what the receiver is, and edit
+`test_what_is_no_site_is_pinned_with_its_reason_and_its_count` in the
+same diff. The failing test prints the four answers (ask the service;
+gate and `LOCAL_EXTRAS`; `DEVICE`; `NOT_A_SITE`). `HONEST` in the test
+is the table of what the walker says of honest code.
 
 **What the walker reads, and what it does not.** It resolves import
 aliases (`import shutil as sh`, `from os import path as P`), follows a
@@ -61,7 +75,9 @@ method chains (`Path(p).expanduser().resolve().is_dir()`), takes
 `is_dir` / `is_file` / `read_text` / `iterdir` and the other names only
 a path has on any receiver at all, and counts a site's function that is
 handed on or bound without being called (`map(os.path.isdir, ps)`, a
-`run=subprocess.run` default). `test_the_walker_catches` and
+`run=subprocess.run` default), and takes the names only a `Gio.File`
+has (`load_contents`, `load_bytes`, `query_info`, `query_exists`, …)
+and `spawn_async` / `spawnv` on any receiver. `test_the_walker_catches` and
 `test_the_walker_is_known_to_miss` are tables of both: add a row when
 the vocabulary changes. It does **not** follow calls: a site is named by
 the function the read is written in, so a widget calling a disk-reading
@@ -69,8 +85,9 @@ function of `sessions`, `providers`, `clonerepo`, `panelhistory` or a
 helper of its own module is invisible to it. Nor does it see a hintless
 receiver for the method names other objects share (`p.exists()`,
 `self._thing.unlink()`, `write_text`), the launchers (`Gtk.FileLauncher`,
-`Gtk.UriLauncher`, `AppInfo.launch`), `expanduser` / `abspath`, or a
-read through another library. Check those by hand when adding one. The
+`Gtk.UriLauncher`, `AppInfo.launch`), `expanduser` / `abspath`, a star
+import, `asyncio` / `pty` / `multiprocessing`, or a read through
+another library. Check those by hand when adding one. The
 ones known today, with the `UNRULED` and `RECORDED` sites, are recorded
 and not moved (spec D50; D54 rules what Phase 3 does with the first
 list): the record is the comment at `UNRULED` in

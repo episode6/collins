@@ -26,7 +26,8 @@ launcher). Shared modules the service runs too (`gitops`, `sessions`,
 service's, and the client reaches them behind a transport
 (`gitops.set_transport`) or a mirror.
 
-**What is a site.** A call to `open` (also `io.open`, `builtins.open`);
+**What is a site.** A call to `open` (also `io.open`, `builtins.open`,
+`codecs.open`);
 to `os.path.exists / isfile / isdir / getsize / getmtime / islink /
 lexists / samefile / ismount / realpath`; `os.listdir / scandir / stat /
 lstat / walk / makedirs / mkdir / remove / unlink / rename / replace /
@@ -48,10 +49,31 @@ call, `Path.home()`, a chain through a path's own methods off one
 `load_*`, `replace*`, `monitor*`, `trash`, `delete`, `query_*`
 (`query_exists` and `query_info` among them), `read*`, `append_to*`,
 `create*`, `copy`, `move`, `make_directory*`, `enumerate_children*`,
-`set_contents*`; and the constructors and setters that open a file by
-path (`Gdk.Texture.new_from_filename`, `GdkPixbuf.Pixbuf.new_from_file*`,
-`Gtk.Picture.new_for_filename`, `.set_filename(...)`, ...:
-`IMAGE_FILE_CALLS`, `WIDGET_FILE_METHODS`).
+`set_contents*`, and the method names only a `Gio.File` has
+(`load_contents`, `load_bytes`, `query_info`, `query_exists`,
+`enumerate_children`, `monitor_file`, `replace_contents`, ...:
+`GIO_FILE_METHODS_ANY`) on **any** receiver; a process started through
+an object (`spawn_async`, `spawn_sync`, `spawnv` on any receiver: Vte's
+terminal, `Gio.SubprocessLauncher`), `Gio.Subprocess(...)`,
+`Gtk.show_uri`, anything of `webbrowser`; and the constructors and
+setters that open or write a file by path or by `Gio.File`
+(`Gdk.Texture.new_from_filename`, `GdkPixbuf.Pixbuf.new_from_file*`,
+`Gtk.Picture.new_for_filename` / `new_for_file`, `.set_filename(...)`,
+`.set_file(...)`, `.load_from_file(...)`, `.savev(...)`,
+`GtkSource.FileLoader.new`, ...: `IMAGE_FILE_CALLS`,
+`WIDGET_FILE_METHODS`).
+
+**What is no site, though it reads like one.** The lexical functions of
+the whole-module words (`glob.escape`, `tempfile.gettempdir`,
+`subprocess.list2cmdline`, `GLib.spawn_check_wait_status`, ...:
+`NOT_SITES`); `getattr` on a walked module with a constant name that is
+none of the functions above (`getattr(os, "O_NOFOLLOW", 0)`); a method
+called with more arguments than a path's takes (`stream.read_bytes(4096,
+None)`, `text.replace("a", "b")`); a `Gio.File` made from a constant
+`resource://` address. What the vocabulary still flags on an object that
+is no path at all (a service fact with an `is_dir()` of its own, a
+`Gtk.Root` named `root`) is answered in `pathless_allowlist.NOT_A_SITE`,
+one reviewed line each.
 
 **How a name is followed.** A module's import aliases are resolved first
 (`import shutil as sh`, `import os.path as osp`, `from os import path as
@@ -128,20 +150,37 @@ OS_CALLS = frozenset(
         "listdir", "scandir", "stat", "lstat", "walk", "makedirs", "mkdir", "remove", "unlink", "rename",
         "replace", "access", "readlink", "popen", "system", "fork", "forkpty", "chmod", "utime", "symlink",
         "link", "rmdir", "open", "truncate", "getcwd", "chdir", "removedirs", "renames", "startfile",
+        "fwalk", "statvfs", "chown", "lchown", "listxattr", "getxattr", "setxattr", "removexattr", "mkfifo",
+        "mknod",
     }
 )
 # `os.spawn*`, `os.exec*`, `os.posix_spawn*`: every spelling of them.
 OS_CALL_PREFIXES = ("spawn", "exec", "posix_spawn")
 # Modules whose every call is a site (a module's name after its aliases
 # are resolved: `import shutil as sh; sh.which(...)` is `shutil.which`).
-SITE_MODULES = ("shutil", "subprocess", "glob", "tempfile")
+SITE_MODULES = ("shutil", "subprocess", "glob", "tempfile", "webbrowser")
+# ...but for these, which touch no disk and start nothing: a pattern's or
+# an argv's text, a value read off the environment, a status decoded, an
+# exception or a result constructed.
+NOT_SITES = frozenset(
+    {
+        "glob.escape", "glob.has_magic", "glob.translate", "shutil.get_terminal_size", "shutil.Error",
+        "subprocess.list2cmdline", "subprocess.CompletedProcess", "subprocess.CalledProcessError",
+        "subprocess.TimeoutExpired", "subprocess.SubprocessError", "tempfile.gettempdir",
+        "tempfile.gettempdirb", "tempfile.gettempprefix", "tempfile.gettempprefixb",
+        "GLib.spawn_check_wait_status", "GLib.spawn_check_exit_status", "GLib.spawn_close_pid",
+        "GLib.spawn_error_quark", "GLib.spawn_exit_error_quark", "GLib.file_error_quark",
+        "GLib.file_error_from_errno",
+    }
+)
 # `open` however it is reached.
-OPEN_CALLS = frozenset({"open", "io.open", "builtins.open"})
+OPEN_CALLS = frozenset({"open", "io.open", "builtins.open", "codecs.open"})
 PATH_METHODS = frozenset(
     {
         "read_text", "read_bytes", "write_text", "write_bytes", "iterdir", "is_file", "is_dir", "unlink",
         "mkdir", "rmdir", "glob", "rglob", "touch", "open", "is_symlink", "lstat", "samefile", "symlink_to",
-        "hardlink_to", "chmod", "walk", "is_mount",
+        "hardlink_to", "chmod", "walk", "is_mount", "readlink", "owner", "group", "lchmod", "is_fifo",
+        "is_socket", "is_block_device", "is_char_device", "is_junction",
     }
 )
 PATH_METHODS_IF_PATH = frozenset({"exists", "stat", "rename", "replace", "resolve"})
@@ -154,9 +193,16 @@ PATH_METHODS_IF_PATH = frozenset({"exists", "stat", "rename", "replace", "resolv
 PATH_METHODS_ANY = frozenset(
     {
         "read_text", "read_bytes", "write_bytes", "iterdir", "is_file", "is_dir", "rglob", "is_symlink",
-        "symlink_to", "hardlink_to", "is_mount",
+        "symlink_to", "hardlink_to", "is_mount", "readlink", "is_fifo", "is_socket", "is_block_device",
+        "is_char_device", "is_junction",
     }
 )
+# ...unless the call's shape says it is another object's method of the
+# same name: `Path.read_bytes()` and `read_text()` take no positional
+# argument (a `Gio.InputStream.read_bytes(count, cancellable)` does), and
+# `Path.replace(target)` / `rename(target)` take one (`str.replace(old,
+# new)` takes two).
+PATH_METHODS_MAX_ARGS = {"read_bytes": 0, "read_text": 2, "replace": 1, "rename": 1}
 # Methods of a path that answer another path: a chain through them is
 # still a path (`Path(p).expanduser().resolve().is_dir()`).
 PATH_RETURNING = frozenset(
@@ -174,8 +220,38 @@ GIO_FILE_METHODS = (
     "move", "make_directory", "enumerate_children", "set_contents", "measure_disk_usage", "open_readwrite",
     "make_symbolic_link",
 )
-# The `Gio.File` constructors a chain or a bound name starts from.
-GIO_FILE_CONSTRUCTORS = ("new_for_path", "new_for_uri", "new_for_commandline_arg")
+# `Gio.File` method names nothing else has: a site on any receiver at all
+# (a `Gio.File` the function did not make: a parameter, an attribute, a
+# dropped file out of a `Gdk.FileList`). `trash`, `delete`, `copy`,
+# `move`, `read`, `replace`, `create` are words other objects use and
+# need a receiver the walker saw made.
+GIO_FILE_METHODS_ANY = frozenset(
+    {
+        "load_contents", "load_contents_async", "load_bytes", "load_bytes_async",
+        "load_partial_contents_async",
+        "query_info", "query_info_async", "query_exists", "query_file_type", "query_filesystem_info",
+        "enumerate_children", "enumerate_children_async", "monitor_file", "monitor_directory",
+        "replace_contents", "replace_contents_async", "replace_contents_bytes_async", "make_directory",
+        "make_directory_with_parents", "make_directory_async", "make_symbolic_link", "measure_disk_usage",
+        "open_readwrite", "append_to", "set_attributes_from_info",
+    }
+)
+# The `Gio.File` constructors a chain or a bound name starts from
+# (`Gio.File.<name>`, or GIO's function form `Gio.file_<name>`).
+GIO_FILE_CONSTRUCTORS = (
+    "new_for_path", "new_for_uri", "new_for_commandline_arg", "new_for_commandline_arg_and_cwd",
+    "parse_name", "new_build_filename", "new_build_filenamev", "new_tmp",
+)
+# A process started through an object: `Vte.Terminal.spawn_async` (how
+# the tab launched its child before the split), `Gio.SubprocessLauncher`'s
+# `spawnv`, on any receiver. (A bare `.spawn(...)` is a word the client's
+# own requests use; it is not followed.)
+# What `gio_file_call` answers for a `Gio.File` made from a constant
+# `resource://` address: a file object, and no site whatever is read off it.
+RESOURCE = "<resource>"
+PROCESS_METHODS_ANY = frozenset(
+    {"spawn_async", "spawn_sync", "spawnv", "spawn_with_fds", "spawn_with_callbacks"}
+)
 # `GLib`'s own file and process calls (a dotted call's last name, after
 # `GLib.`): every `file_*` and `spawn_*`, and these.
 GLIB_CALL_PREFIXES = ("file_", "spawn_")
@@ -183,26 +259,40 @@ GLIB_CALLS = frozenset(
     {"mkdir_with_parents", "mkdtemp", "mkstemp", "unlink", "rmdir", "remove", "rename", "access", "chmod",
      "find_program_in_path", "dir_make_tmp"}
 )
-# Gio's process spawns (a dotted call's tail).
-GIO_PROCESS_CALLS = frozenset(
-    {"Subprocess.new", "Subprocess.newv", "SubprocessLauncher.spawnv", "SubprocessLauncher.spawn"}
-)
+# Gio's process spawns and GTK's own launcher function (a dotted call's
+# tail): `Gio.Subprocess.new(...)`, the keyword constructor
+# `Gio.Subprocess(argv=...)`, `Gtk.show_uri(...)`.
+GIO_PROCESS_CALLS = frozenset({"Subprocess.new", "Subprocess.newv", "Gio.Subprocess", "Gtk.show_uri"})
 # Image constructors that open a file by path (a dotted call's tail).
 IMAGE_FILE_CALLS = frozenset(
     {
         "Texture.new_from_filename", "Texture.new_from_file", "Pixbuf.new_from_file",
         "Pixbuf.new_from_file_at_scale", "Pixbuf.new_from_file_at_size", "PixbufAnimation.new_from_file",
         "PixbufAnimation.new_from_file_at_scale", "Picture.new_for_filename", "Image.new_from_file",
-        "MediaFile.new_for_filename", "Video.new_for_filename",
+        "MediaFile.new_for_filename", "Video.new_for_filename", "Picture.new_for_file",
+        "MediaFile.new_for_file", "Video.new_for_file", "Builder.new_from_file", "Pixbuf.get_file_info",
+        "Pixbuf.get_file_info_async", "IOChannel.new_file", "FileLoader.new", "FileSaver.new",
+        "FileSaver.new_with_target",
     }
 )
 # A widget's or a provider's method that opens a file by path, on any
 # receiver (the names are GTK's own): `picture.set_filename(p)`,
 # `image.set_from_file(p)`, `css.load_from_path(p)`.
-WIDGET_FILE_METHODS = frozenset({"set_filename", "set_from_file", "load_from_path"})
+# And by `Gio.File`, or writing one: `picture.set_file(gfile)`,
+# `css.load_from_file(gfile)`, `builder.add_from_file(p)`,
+# `pixbuf.savev(p, ...)`, `texture.save_to_png(p)`.
+WIDGET_FILE_METHODS = frozenset(
+    {
+        "set_filename", "set_from_file", "load_from_path", "set_file", "load_from_file", "add_from_file",
+        "savev", "save_to_png", "save_to_tiff",
+    }
+)
 PATH_CONSTRUCTORS = ("Path", "PurePath", "PurePosixPath", "PosixPath")
 # The modules whose import aliases are resolved (`_aliases`).
-ALIAS_SOURCES = ("os", "os.path", "shutil", "subprocess", "io", "glob", "builtins", "pathlib", "tempfile")
+ALIAS_SOURCES = (
+    "os", "os.path", "shutil", "subprocess", "io", "glob", "builtins", "pathlib", "tempfile", "codecs",
+    "webbrowser",
+)
 
 _FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
 _SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -362,9 +452,21 @@ class _Reader:
         if not isinstance(node, ast.Call):
             return None
         parts = (self.name(node.func) or "").split(".")
+        constructor = None
         if len(parts) >= 2 and parts[-2] == "File" and parts[-1] in GIO_FILE_CONSTRUCTORS:
-            return parts[-1]
-        return None
+            constructor = parts[-1]
+        elif len(parts) >= 2 and parts[-2] == "Gio" and parts[-1].startswith("file_"):
+            if parts[-1][len("file_") :] in GIO_FILE_CONSTRUCTORS:
+                constructor = parts[-1][len("file_") :]
+        if constructor is None:
+            return None
+        # A constant `resource://` address is the package's own bundled
+        # data, compiled into the program: no file of anyone's is opened.
+        first = node.args[0] if node.args else None
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            if first.value.startswith("resource:"):
+                return RESOURCE
+        return constructor
 
     def looks_like_path(self, node: ast.AST, path_names: frozenset[str] = frozenset()) -> bool:
         """Whether a method's receiver is a path: a `Path(...)` call, a
@@ -528,11 +630,15 @@ class _Reader:
         module-level functions the walker knows (`os.path.isdir`,
         `shutil.which`, `GLib.file_test`, ...), else None."""
         name = self.name(node)
-        if name is None:
-            return None
+        return None if name is None else self.named_site(name)
+
+    def named_site(self, name: str) -> str | None:
+        """`function_site` for a dotted name already resolved."""
         if name in OPEN_CALLS:
             return name
         parts = name.split(".")
+        if ".".join(parts[-2:]) in NOT_SITES:
+            return None
         if len(parts) == 3 and name.startswith("os.path.") and parts[-1] in OS_PATH_CALLS:
             return name
         if len(parts) == 2 and parts[0] == "os":
@@ -565,14 +671,19 @@ class _Reader:
 
     def getattr_site(self, node: ast.Call) -> str | None:
         """`getattr(os.path, "isdir")` and the like: a function of one of
-        the modules the walker reads, fetched by name. A site whatever
-        the name, since the walker cannot tell which it is."""
-        if _dotted(node.func) != "getattr" or not node.args:
+        the modules the walker reads, fetched by name. With a constant
+        name it is the site that name is, or none (`getattr(os,
+        "O_NOFOLLOW", 0)` is a flag); with a name the walker cannot read
+        it is a site whatever it turns out to be."""
+        if _dotted(node.func) != "getattr" or len(node.args) < 2:
             return None
         module = self.name(node.args[0])
-        if module in ALIAS_SOURCES and module not in ("builtins", "pathlib", "io"):
-            return f"getattr.{module}"
-        return None
+        if module not in ALIAS_SOURCES or module in ("builtins", "pathlib", "io", "codecs"):
+            return None
+        fetched = node.args[1]
+        if isinstance(fetched, ast.Constant) and isinstance(fetched.value, str):
+            return self.named_site(f"{module}.{fetched.value}")
+        return f"getattr.{module}"
 
     def site_name(
         self,
@@ -587,9 +698,18 @@ class _Reader:
             return name
         if isinstance(func, ast.Attribute):
             constructor = self.gio_valued(func.value, gio_names or {})
+            if constructor == RESOURCE:
+                return None
             if constructor is not None and func.attr.startswith(GIO_FILE_METHODS):
                 return f"Gio.File.{constructor}.{func.attr}"
             method = func.attr
+            if method in GIO_FILE_METHODS_ANY:
+                return f"Gio.File.{method}"
+            if method in PROCESS_METHODS_ANY:
+                return f"Process.{method}"
+            most = PATH_METHODS_MAX_ARGS.get(method)
+            if most is not None and len(node.args) > most:
+                return None  # another object's method of the same name
             if method in PATH_METHODS_ANY:
                 return f"Path.{method}"
             if method in PATH_METHODS and self.looks_like_path(func.value, path_names):
@@ -608,8 +728,13 @@ class _Walker(ast.NodeVisitor):
         self.stack: list[str] = []
         self.sites: set[str] = set()
         # Every site with the call it is, for `function_asks_local`.
-        self.calls: list[tuple[str, ast.AST]] = []
+        # ...and with the function it is written in (None at a module's or
+        # a class's own level): two functions may share a qualname (a
+        # property's getter and setter, a redefinition), and each call is
+        # judged in its own.
+        self.calls: list[tuple[str, ast.AST, ast.AST | None]] = []
         self._called: set[int] = set()
+        self._functions: list[ast.AST | None] = [None]
         # The path-bound and Gio.File-bound names in sight: the module's
         # own first, then each enclosing function's (a nested function
         # sees its own too).
@@ -621,16 +746,20 @@ class _Walker(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.stack.append(node.name)
+        self._functions.append(None)
         self.generic_visit(node)
+        self._functions.pop()
         self.stack.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.stack.append(node.name)
+        self._functions.append(node)
         self.path_names.append(self.reader.bound_paths(node, self.path_names[-1]))
         self.gio_names.append(self.reader.bound_gio(node, self.gio_names[-1]))
         self.generic_visit(node)
         self.gio_names.pop()
         self.path_names.pop()
+        self._functions.pop()
         self.stack.pop()
 
     visit_AsyncFunctionDef = visit_FunctionDef
@@ -641,7 +770,7 @@ class _Walker(ast.NodeVisitor):
     def _found(self, name: str, node: ast.AST) -> None:
         site = f"{self.module}:{self._qualname()}:{name}"
         self.sites.add(site)
-        self.calls.append((site, node))
+        self.calls.append((site, node, self._functions[-1]))
 
     def visit_Call(self, node: ast.Call) -> None:
         name = self.reader.site_name(node, self.path_names[-1], self.gio_names[-1])
@@ -669,9 +798,19 @@ def sites_of(module: str, tree: ast.Module) -> set[str]:
 
 def walk() -> set[str]:
     """Every site in every walked module."""
-    found: set[str] = set()
+    return set(counts())
+
+
+def counts() -> dict[str, int]:
+    """Every site in every walked module, with the number of calls (or
+    uncalled references) that make it: what `NOT_A_SITE` pins an entry
+    to."""
+    found: dict[str, int] = {}
     for name, tree in modules().items():
-        found |= sites_of(name, tree)
+        walker = _Walker(name, tree)
+        walker.visit(tree)
+        for site, _node, _function in walker.calls:
+            found[site] = found.get(site, 0) + 1
     return found
 
 
@@ -718,7 +857,32 @@ def _ask_names(tree: ast.Module) -> tuple[frozenset[str], frozenset[str]]:
             for alias in node.names:
                 if alias.name == "collins.apilink":
                     modules_.add(alias.asname or alias.name)
-    return frozenset(modules_), frozenset(functions)
+    # A name the module itself defines or assigns at its top level is no
+    # longer the import (`from .apilink import is_local`, then `def
+    # is_local(): return True`).
+    rebound = _bound_in(tree, own_only=True)
+    return frozenset(modules_ - rebound), frozenset(functions - rebound)
+
+
+def _bound_in(scope: ast.AST, own_only: bool = False) -> set[str]:
+    """The names *scope* binds other than by import: assigned, a loop's
+    or a `with`'s target, a parameter, a function or class defined. For a
+    function, everything in it (nested functions too); *own_only* is a
+    module's top level."""
+    names: set[str] = set()
+    if own_only:
+        nodes = list(_own_nodes(scope))
+        nodes += [node for node in ast.iter_child_nodes(scope) if isinstance(node, _SCOPES)]
+    else:
+        nodes = [node for node in ast.walk(scope) if node is not scope]
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            names.add(node.id)
+        elif isinstance(node, _SCOPES):
+            names.add(node.name)
+    if not own_only:
+        names.update(node.arg for node in ast.walk(scope) if isinstance(node, ast.arg))
+    return names
 
 
 def _is_ask(node: ast.AST, asks: tuple[frozenset[str], frozenset[str]]) -> bool:
@@ -822,36 +986,47 @@ def _behind_the_ask(function: ast.AST, call: ast.AST, asks) -> bool:
 
 def function_asks_local(site: str, trees: dict[str, ast.Module] | None = None) -> bool:
     """Whether a ``module:qualname:call`` *site* is behind the local
-    proof: **every** call of that name in the function the site is named
-    by runs only after `apilink.is_local()` — the module's function,
-    called — answered yes (`_behind_the_ask` has the shapes). The static
-    half of "a local extra is behind `app.local`".
+    proof: **every** call of that name, in **every** function the
+    qualname names (a property's getter and its setter, a function
+    defined twice), runs only after `apilink.is_local()` — the module's
+    function, called — answered yes (`_behind_the_ask` has the shapes).
+    The static half of "a local extra is behind `app.local`".
 
-    A site at module level has no function to ask in and is False; so is
-    a site in a nested function that does not ask itself (the ask has to
-    be in the function the site is named by), and a function or module
-    that is not there. *trees* is `modules()` when the caller has it
-    already.
+    A site at a module's or a class's own level has no function to ask
+    in and is False; so is a site in a nested function that does not ask
+    itself (the ask has to be in the function the site is named by), and
+    a site or module that is not there. *trees* is `modules()` when the
+    caller has it already.
 
-    What this does not prove: that `apilink` (or an imported `is_local`)
-    was not rebound to something else in the function; that a helper the
-    function calls reads nothing before the ask; and anything about a
-    read the walker has no word for (the module docstring's list)."""
-    module, qualname, _call = site.split(":", 2)
+    A function that binds `apilink` (or the imported `is_local`) itself
+    — a parameter of that name, an assignment, a loop variable — or a
+    module that redefines it at its top level has no ask: the name is
+    not the import there.
+
+    What this does not prove: that the name was not rebound some way the
+    AST does not show (`globals()`, `setattr` on the module, a `global`
+    statement in another function); that a helper the function calls
+    reads nothing before the ask; and anything about a read the walker
+    has no word for (the module docstring's list)."""
+    module, _qualname, _call = site.split(":", 2)
     tree = (modules() if trees is None else trees).get(module)
-    if tree is None or qualname == "<module>":
-        return False
-    function = _function(tree, qualname)
-    if function is None:
+    if tree is None:
         return False
     walker = _Walker(module, tree)
     walker.visit(tree)
-    inside = {id(node) for node in ast.walk(function)}
-    calls = [node for name, node in walker.calls if name == site and id(node) in inside]
-    if not calls:
+    calls = [(node, function) for name, node, function in walker.calls if name == site]
+    if not calls or any(function is None for _node, function in calls):
         return False
-    asks = _ask_names(tree)
-    return all(_behind_the_ask(function, call, asks) for call in calls)
+    modules_, functions = _ask_names(tree)
+
+    def behind(node: ast.AST, function: ast.AST) -> bool:
+        # A name the function binds itself (a parameter called `apilink`, a
+        # loop variable, an assignment) is not the module's import there.
+        rebound = _bound_in(function)
+        asks = (modules_ - {name for name in modules_ if name.split(".")[0] in rebound}, functions - rebound)
+        return _behind_the_ask(function, node, asks)
+
+    return all(behind(node, function) for node, function in calls)
 
 
 if __name__ == "__main__":

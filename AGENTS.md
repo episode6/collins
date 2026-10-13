@@ -328,7 +328,12 @@ The comment at `UNRULED` is the D50 record: the reads of the service's
 facts the walker cannot see, and every form of a read it has no word for
 (a helper's read, a hintless receiver, the launchers, ...);
 `tests/test_client_is_pathless.py` keeps a table of the spellings it
-catches and of the ones it is known to miss.
+catches and of the ones it is known to miss. A match that is no read at
+all (the walker's any-receiver words on an object that is no path: a
+module's own `load_bytes(data)`, a service fact with an `is_dir()` of
+its own) is answered in `NOT_A_SITE`, a pinned table of site, count and
+reason; the failing test's message says which of the four answers a new
+site takes.
 
 **The local extras.** `apilink.is_local()` is the one reader of the
 link's `local` proof (D11), and `App.local` is it. What hands a path of
@@ -346,8 +351,8 @@ the ask in the same `and`; an ask after the read, in a lambda, bound to a
 name first, or some other object's `is_local()` does not count). Open With in the lightbox and the attachments panel, and a file
 row's default app there, are not: not local, they hand over this device's
 cached copy (D51; `GET /api/blob?kind=file&as=file` serves a file that is
-no picture only to a request that names its session and only when that
-session's agent named it, and the copy's suffix
+no picture only to a request that names a session the service knows
+(`blobs.names_a_session`) and only when that session's agent named it, and the copy's suffix
 is made safe by `blobcache.file_suffix`). Nor is the Markdown export: the service renders the transcript
 (`store.transcript-export`) and the window writes its own file. Nor is
 where a session or a shell starts: the client sends the cwd it has and

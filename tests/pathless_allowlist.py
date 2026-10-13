@@ -38,10 +38,15 @@ site in a GTK module or a client helper fails the suite until it is
 filed here, and so does an entry nothing matches any more (a site that
 moved comes off the list in the same PR). Filing is a deliberate,
 reviewed edit, not a way round the rule: each group is pinned by its
-exact size (`DEVICE` 65 and per module, `LOCAL_EXTRAS` 16, `UNRULED` at
+exact size (`DEVICE` 67 and per module, `LOCAL_EXTRAS` 16, `UNRULED` at
 most its three, `RECORDED` at most its four), so a site cannot be added
 to any of them without that test changing in the same diff, where a
-reviewer sees it. The list is not frozen in number: it went from 45 to
+reviewer sees it. And a match that is **no read at all** — the walker's
+any-receiver words landing on an object that is no path and no file (a
+module's own `load_bytes(data)`, a service fact with an `is_dir()` of
+its own) — goes in none of the groups, whose meanings it cannot
+satisfy: it is answered in `NOT_A_SITE`, one line saying what the
+receiver is, pinned by its exact contents the same way. The list is not frozen in number: it went from 45 to
 69 in PR-2.8 when the walker took in four more modules (28 sites they
 already had) and the four `terminal` cwd sites came off, to 70 with the
 cache folder's `chmod`, to 72 with the two `connection.unit_state` sites
@@ -50,7 +55,11 @@ device's unit), and to 88 on 2026-10-13 when the walker's vocabulary
 grew (the Fable review of PR 615, should-fix 1): twelve `DEVICE` sites
 it had been blind to (a `tmp = path.with_suffix(...)` receiver, a
 generator's `p.is_dir()`, `realpath`, `mkstemp`) and the four of
-`RECORDED`. No code moved for any of the sixteen. What does not change
+`RECORDED`; and to 90 in round two of the same day (the verification's
+S2) with `remoteuploads._read`'s two reads of the dropped file it is
+uploading, which the walker could not see while a `Gio.File` method
+needed a receiver it had watched being made. No code moved for any of
+the eighteen. What does not change
 is what may be on the list: this device's own files and programs, and
 local extras behind the proof.
 """
@@ -81,6 +90,11 @@ DEVICE = frozenset(
         "remoteimages:prune_stale:Path.iterdir",
         "remoteimages:prune_stale:Path.stat",
         "remoteimages:prune_stale:Path.unlink",
+        # -- a dropped or picked file of this device's, read to be uploaded to the
+        # service (D37): the `Gio.File` the drop handed over, its type and size
+        # checked and its bytes read on a worker ---------------------------------------
+        "remoteuploads:_read:Gio.File.query_info",
+        "remoteuploads:_read:Gio.File.load_bytes",
         # -- ui-state.json: this device's half of the state (§3.8) -------------------
         "uistate:UiState._load:Path.read_text",
         "uistate:UiState.save:Path.exists",
@@ -316,8 +330,10 @@ LOCAL_EXTRAS = frozenset(
 #   sound's file), `connection.py:144`
 #   (`os.kill` of the service's pid).
 #
-# **What the walker cannot see** (`tests/pathless.py`; every form, as of
-# the 2026-10-13 round, which closed the cheap ones: an `import … as`
+# **What the walker cannot see** (`tests/pathless.py`; every form its
+# author and two reviews have found, as of round two of 2026-10-13: not a
+# proof that there is no other. The rounds closed the cheap ones: an
+# `import … as`
 # alias, `from os import path as P`, `io.open` / `builtins.open`,
 # `glob.*`, `tempfile.*`, `os.path.realpath`, a chain through a path's
 # own methods (`Path(p).expanduser().resolve().is_dir()`), `Path.home()`,
@@ -330,9 +346,21 @@ LOCAL_EXTRAS = frozenset(
 # `new_for_commandline_arg`, `GLib.file_*` / `spawn_*` /
 # `find_program_in_path`, `Gio.Subprocess`, a site's function handed on
 # or bound without being called (`run=subprocess.run`, `map(os.path.isdir,
-# ps)`, `fn = os.path.isdir`), `getattr(os.path, …)`, and the GTK
-# constructors and setters that open a file by path). Still unseen, and a
-# reviewer's to catch:
+# ps)`, `fn = os.path.isdir`), `getattr(os.path, …)`, the GTK
+# constructors and setters that open or write a file by path or by
+# `Gio.File` (`Picture.new_for_file`, `set_file`, `load_from_file`,
+# `savev`, `save_to_png`, `Builder.new_from_file`,
+# `Pixbuf.get_file_info`, `GtkSource.FileLoader` / `FileSaver`,
+# `GLib.IOChannel.new_file`), the method names only a `Gio.File` has on
+# any receiver (`load_contents`, `load_bytes`, `query_info`,
+# `query_exists`, `enumerate_children`, `monitor_file`,
+# `replace_contents`, …: a parameter, an attribute), `Gio.File.parse_name`
+# / `new_build_filenamev` / the `Gio.file_new_for_path` form,
+# `spawn_async` / `spawn_sync` / `spawnv` on any receiver (Vte's
+# terminal, a `Gio.SubprocessLauncher`), `Gio.Subprocess(argv=…)`,
+# `Gtk.show_uri`, `webbrowser.*`, `codecs.open`, `os.fwalk` / `statvfs` /
+# `chown` / `listxattr` / `getxattr`, and `Path.readlink` / `owner` /
+# `is_fifo` / `is_socket`). Still unseen, and a reviewer's to catch:
 # - **A helper's read.** A call into a function of a module the walker
 #   does not walk (`sessions`, `providers`, `chats`, `clisetup`,
 #   `clonerepo`, `toolclient`, `panelhistory`, `gitops`, …) or into one
@@ -344,10 +372,23 @@ LOCAL_EXTRAS = frozenset(
 #   `mkdir`, `rmdir`, `open`, `glob`, `touch`, `chmod`, `walk`, `lstat`,
 #   `samefile` and `write_text` (which is also `Session.write_text`) on a
 #   bare parameter (`p.exists()`), an attribute (`self._thing.unlink()`),
-#   a call's result (`somewhere(p).exists()`), a subscript, or a name
-#   bound through a container or another function. Names carrying
-#   `path`, `file`, `dir`, `target`, `folder`, `root`, `dest` or `source`
-#   and names bound to a path in the same function are seen.
+#   a call's result (`somewhere(p).exists()`, `(cache_dir() / k)
+#   .exists()`), a subscript (`paths[0].exists()`), or a name bound
+#   through a container or another function. Names carrying `path`,
+#   `file`, `dir`, `target`, `folder`, `root`, `dest` or `source` and
+#   names bound to a path in the same function are seen; a path kept on
+#   `self` in one method and read in another is seen only when the
+#   attribute's name carries a hint. The same for a `Gio.File`'s shared
+#   words (`trash`, `delete`, `copy`, `move`, `read`, `replace`,
+#   `create`) on a receiver the walker did not watch being made.
+# - **A process started some other way**: `asyncio.create_subprocess_*`,
+#   `pty.spawn` / `pty.fork`, `multiprocessing`, `concurrent.futures`'
+#   process pool, a bare `.spawn(...)` on an object (a word the client's
+#   own `spawn` request uses), `Gio.AppInfo.create_from_commandline`,
+#   D-Bus activation.
+# - **A star import** (`from os.path import *`, then a bare `isdir(p)`),
+#   and a module or `os.path` itself bound to a name (`sp = subprocess;
+#   sp.run(a)`).
 # - **The launchers**: `Gtk.FileLauncher`, `Gtk.UriLauncher`,
 #   `Gio.AppInfo.launch` / `launch_uris` / `launch_default_for_uri`,
 #   `open_containing_folder`. They open nothing themselves; they hand a
@@ -364,8 +405,11 @@ LOCAL_EXTRAS = frozenset(
 #   file formats (behind `clipboard_scope`, read by hand).
 # - A read through another library: `json.load` and the like on a handle
 #   are seen at the `open`; `zipfile`, `tarfile`, `sqlite3`,
-#   `configparser`, `mimetypes`, `importlib.resources`, `GLib.KeyFile`,
-#   `Gio.DesktopAppInfo` are not.
+#   `configparser`, `mimetypes`, `importlib.resources`,
+#   `Gio.DesktopAppInfo.new_from_filename`, `Gio.Settings`, `GLib.Dir`,
+#   `GLib.MappedFile`, `Gio.Resource.load`, `Gio.FileEnumerator`'s own
+#   children are not (`GLib.KeyFile.load_from_file` is, by its method's
+#   name).
 # - A function fetched some other way: out of a dict or a list, through
 #   `functools.partial` of a bound name, `eval` / `exec` / `__import__`;
 #   a bare `open` handed on (`map(open, …)`); a name the module rebinds
@@ -379,10 +423,15 @@ LOCAL_EXTRAS = frozenset(
 # returning refusal in the function's own body; inside `if <ask>:`; after
 # the ask in the same `and`). An ask after the read, in another branch,
 # inside a lambda that is never called, bound to a name first, the bare
-# attribute, or another object's `is_local()` does not count. It does not
-# prove that `apilink` was not rebound in the function, nor anything
-# about a helper the function calls before it asks, nor about a read of
-# the kinds above. All sixteen were read by hand as well.
+# attribute, or another object's `is_local()` does not count; every
+# function a qualname names is held to it (a property's getter and its
+# setter, a function defined twice); and a function that binds `apilink`
+# itself (a parameter, an assignment, a loop variable), or a module that
+# redefines an imported `is_local`, has no ask. It does not prove
+# anything about a helper the function calls before it asks, about a
+# rebinding the AST does not show (`globals()`, `setattr` on the module),
+# nor about a read of the kinds above. All sixteen were read by hand as
+# well.
 #
 # Whether the walker should cover the unwalked modules is part of the
 # same ruling.
@@ -419,11 +468,44 @@ RECORDED = frozenset(
         # show_diff's `file` argument: a relative path is taken against the
         # agent's cwd when it is only there, and "there" is asked of this
         # device's disk when the client's half runs it (toolclient.py:566,
-        # :620); the service's half asks its own (service/diffs.py:200). A
-        # client on another machine answers "not there" and keeps the path
-        # against the repository root, which is the common case anyway.
+        # :620); the service's half asks its own (service/diffs.py:200).
+        # **What goes wrong for a client on another machine**: an agent that
+        # `cd`ed into `sub/` and names `foo.py` (meaning `sub/foo.py`) gets
+        # `foo.py`, which is not in the diff, so show_diff reveals nothing
+        # or refuses and annotate_diff / highlight_diff add nothing, where
+        # the same call with no client attached resolves right. If this
+        # device has a checkout at the same path, its disk decides instead.
+        # And `gitloads.py:457`'s `expanduser` puts this device's home into
+        # a `~/…` argument on the same path. It fails soft (a refusal, a
+        # mark not placed); read, not driven.
         "gitloads:diff_file_path:os.path.exists",
     }
 )
 
 ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED | RECORDED
+
+# What the walker names a site and is none: no file of anyone's is opened
+# and no program started, because the receiver is not a path, not a
+# `Gio.File` and not a widget loading a file. The walker's any-receiver
+# words (`is_dir`, `read_text`, `load_bytes`, `set_filename`, …) and its
+# name hints (`root`, `target`, `profile`, …) match by name, and a name
+# is sometimes another object's.
+#
+# **Not a way round the rule.** An entry says what the receiver *is*, in
+# words a reviewer can check against the line; the table is pinned by its
+# exact contents in `tests/test_client_is_pathless.py`, so adding one is
+# an edit of that test in the same diff; an entry nothing matches any
+# more fails the suite. Each entry carries the number of calls it
+# answers for, so another call of the same name in the same function is
+# not covered by it. If the receiver is a path or a file, of this
+# device or of the service, the site belongs in a group above or behind
+# the API, never here. Prefer renaming a local variable whose name only
+# looks like a path (`redirect`, `profile`) to adding an entry for it.
+NOT_A_SITE = {
+    # `animatedimage.load_bytes(data)`: a module function that decodes
+    # bytes already in memory (they came through `blobcache.read`, which is
+    # the site). Not `Gio.File.load_bytes`.
+    # (Two calls, both that function: the count is pinned with the entry,
+    # so a third `load_bytes` written into `thumbnail` is a new site.)
+    "pictures:thumbnail:Gio.File.load_bytes": (2, "animatedimage.load_bytes(data) decodes bytes in memory"),
+}
