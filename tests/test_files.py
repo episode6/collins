@@ -854,3 +854,26 @@ def test_list_and_walk_confine_on_the_worker(served, monkeypatch):
     assert client.request({"t": "fs.walk", "root": str(project), "hidden": False})["paths"] == ["a.txt"]
     client.request({"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "d1"})
     assert core.files.watching(client, "d1")
+
+
+# -- a name that is not UTF-8 (the Fable review of PR 611, should-fix 1) ----------------
+
+
+def test_list_and_walk_stay_valid_beside_a_name_that_is_not_utf8(served):
+    """One surrogate-escaped name made the whole `fs.list` reply fail the
+    protocol's text check (the folder blank for the tab's life) and every
+    `fs.walk` over it; now the name is not listed and the rest is."""
+    core, client, project, _events = served
+    (project / "sub").mkdir()
+    (project / "sub" / "ok.txt").write_text("")
+    for directory in (project, project / "sub"):
+        with open(os.path.join(os.fsencode(str(directory)), b"caf\xe9.txt"), "wb"):
+            pass
+    reply = client.request({"t": "fs.list", "path": str(project), "hidden": False, "root": str(project)})
+    assert [e["name"] for e in reply["entries"]] == ["sub", "a.txt"]
+    sub = {"t": "fs.list", "path": str(project / "sub"), "hidden": False, "root": str(project)}
+    reply = client.request(sub)
+    assert [e["name"] for e in reply["entries"]] == ["ok.txt"]
+    reply = client.request({"t": "fs.walk", "root": str(project), "hidden": False})
+    assert reply["paths"] == ["a.txt", "sub/ok.txt"] and reply["truncated"] is False
+

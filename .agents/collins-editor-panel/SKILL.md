@@ -198,7 +198,15 @@ pathless walker reads as `Path` methods):
   listed), each marked `ignored` by one check-ignore the service runs in
   the folder (`gitinfo.ignored_names`, which used to run on the main loop
   per listing), at most 5000 and `truncated`. Confined to a root the
-  service knows (`files.allowed`) and to the root it names.
+  service knows (`files.Confinement`, on the worker) and to the root it
+  names. A name that is not UTF-8 on disk (`Path.iterdir` surrogate-
+  escapes it) is not listed, and the walk inherits the rule: no `fs.*`
+  request can name it (`protocol._check_text` refuses a lone surrogate),
+  and one such name made the whole `fs.list` reply invalid, blanking the
+  folder for the tab's life and refusing every `fs.walk` over it (the
+  Fable review of PR 611). `list_entries` logs the count once per
+  directory; the check-ignore run only ever sees the names listed, so
+  its stdin crossing as text needs no bytes field (PR 608's nit 8).
 - **`Gtk.TreeListModel` calls the children function for every directory row
   it binds**, to draw the expander, and drops the model it gets (measured:
   one call per bound row, two more per expansion). So `_create_children`

@@ -1225,3 +1225,47 @@ def test_walk_files_caps_the_folders_it_queues(tmp_path):
         (tmp_path / f"d{index}" / "f.txt").write_text("x")
     paths, truncated = walk_files(tmp_path, dirs_cap=3)
     assert truncated is True and paths == ["d0/f.txt", "d1/f.txt"]
+
+
+# -- a name that is not UTF-8 (the Fable review of PR 611, should-fix 1) ----------------
+
+
+def _write_bytes_name(directory, name: bytes) -> None:
+    with open(os.path.join(os.fsencode(str(directory)), name), "wb"):
+        pass
+
+
+def test_list_entries_skips_a_name_that_is_not_utf8(tmp_path, caplog):
+    """`Path.iterdir` surrogate-escapes a name whose bytes are not UTF-8;
+    such a name cannot cross the wire as text, so it is not listed, and
+    the rest of the folder is. Logged once per directory."""
+    (tmp_path / "a.txt").write_text("")
+    (tmp_path / "sub").mkdir()
+    _write_bytes_name(tmp_path, b"caf\xe9.txt")
+    _write_bytes_name(tmp_path, b"n\xff.md")
+    os.mkdir(os.path.join(os.fsencode(str(tmp_path)), b"d\xff"))
+    with caplog.at_level("DEBUG", logger="collins.projectfiles"):
+        entries, truncated = list_entries(tmp_path)
+    assert entries == [("sub", "dir"), ("a.txt", "file")]
+    assert truncated is False
+    for name, _kind in entries:
+        name.encode("utf-8")  # every listed name is valid text
+    lines = [r.message for r in caplog.records if "not UTF-8" in r.message]
+    assert len(lines) == 1 and "3 name(s)" in lines[0]
+    assert list_dir(tmp_path) == [("sub", True), ("a.txt", False)]
+
+
+def test_walk_files_skips_a_name_that_is_not_utf8_and_never_descends_one(tmp_path):
+    (tmp_path / "a.txt").write_text("")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "ok.txt").write_text("")
+    _write_bytes_name(tmp_path / "sub", b"caf\xe9.txt")
+    bad_dir = os.path.join(os.fsencode(str(tmp_path)), b"d\xff")
+    os.mkdir(bad_dir)
+    with open(os.path.join(bad_dir, b"inside.txt"), "wb"):
+        pass
+    paths, truncated = walk_files(tmp_path)
+    assert paths == ["a.txt", "sub/ok.txt"] and truncated is False
+    for path in paths:
+        path.encode("utf-8")
+

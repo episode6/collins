@@ -522,7 +522,8 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   fresh by folder watches it runs: a folder open in the tree shows files
   appearing and going while you look, and the folders expanded inside it
   stay expanded. A folder lists up to 5,000 entries, quick open indexes up
-  to 20,000 files.
+  to 20,000 files. A file whose name is not UTF-8 on disk is left out of
+  both (nothing could ask the service for it by name).
 - Each session remembers which files were open, the cursor in each, and the
   panel's width — and the whole editor can **pop out** into a window of its
   own on a second monitor, then dock back with one click.

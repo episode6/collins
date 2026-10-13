@@ -55,8 +55,10 @@ PR-2.4 adds the tree's, quick open's and the roots' requests:
   directory (the tree's order and skip rules, at most FS_LIST_MAX and
   `truncated`), each entry marked `ignored` by one batched check-ignore
   in it (`gitinfo.ignored_names`, which the tree ran on the main loop
-  before). Confined to `allowed` and to *root* (`is_inside` on the
-  resolved directory, on the worker).
+  before). Confined, on the worker, by the client's `Confinement` and
+  to *root* (`is_inside` on the resolved directory). A name that is
+  not UTF-8 is not listed (`list_entries`), so the reply stays valid
+  text and check-ignore never sees one.
 - `fs.walk {root, hidden}`: `projectfiles.walk_files` of an allowed
   root, at most FS_WALK_MAX files and `truncated`.
 - `fs.watch {path, kind: dir, handle}`: `_DirWatch`, a
@@ -818,8 +820,8 @@ class Files:
         handle = str(message.get("handle"))
         seed = message.get("mtime")
         seed = seed if isinstance(seed, int) and not isinstance(seed, bool) else None
-        conf = confinement(self.core, client)
         key = (id(client), handle)
+        conf = confinement(self.core, client)
         token = object()
         self._installing[key] = token  # the same handle again supersedes
         deferred = protocol.Deferred()

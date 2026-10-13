@@ -48,8 +48,10 @@ downloads of each version, see the
   whether a new working directory is one to follow are the service's
   answers too. A folder that changes on disk now refreshes in the tree
   while it is open (an expanded subfolder used to stay as first listed),
-  and the folders expanded inside it stay expanded. Otherwise nothing
-  looks different (the fourth chunk of the split's Phase 2).
+  and the folders expanded inside it stay expanded. A file whose name is
+  not UTF-8 on disk is left out of the tree and of quick open, instead
+  of blanking its whole folder. Otherwise nothing looks different (the
+  fourth chunk of the split's Phase 2).
 - **The editor's files go over the service's socket.** Opening a file in
   the editor panel asks the service for its text, saving hands the text
   back, and the file monitor that reloads a buffer the agent rewrote runs

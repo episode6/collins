@@ -23,11 +23,14 @@ Stdlib only (plus `sessions.worktree_project_root`, a string rule)."""
 from __future__ import annotations
 
 import enum
+import logging
 import os
 from collections import deque
 from pathlib import Path
 
 from .sessions import worktree_project_root
+
+log = logging.getLogger(__name__)
 
 # Skipped wherever a directory is listed or expanded: build output,
 # dependency trees, and VCS internals nobody wants cluttering a "look at
@@ -86,15 +89,27 @@ def list_entries(
     skipped too — file symlinks included, so an untrusted repo can't
     surface (and the editor can't write through) `leak.txt ->
     ~/.ssh/id_rsa`. A symlink to a file inside it is a file; one to a
-    directory inside it is KIND_SYMLINK."""
+    directory inside it is KIND_SYMLINK. A name that is not UTF-8 on
+    disk (`iterdir` surrogate-escapes its bytes) is not listed: no
+    `fs.*` request could name it (the protocol refuses a lone surrogate
+    as text), and one such name made the whole `fs.list` reply invalid,
+    blanking the folder and every walk over it (the Fable review of PR
+    611, should-fix 1); the walk inherits the rule, so the check-ignore
+    run never sees one either. Logged once per directory."""
     try:
         entries = list(Path(path).iterdir())
     except OSError:
         return [], False
     result: list[tuple[str, str]] = []
+    unnamable = 0
     for entry in entries:
         name = entry.name
         if not show_hidden and name.startswith("."):
+            continue
+        try:
+            name.encode("utf-8")
+        except UnicodeEncodeError:
+            unnamable += 1
             continue
         try:
             is_dir = entry.is_dir()
@@ -110,6 +125,8 @@ def list_entries(
             continue
         kind = (KIND_SYMLINK if is_symlink else KIND_DIR) if is_dir else KIND_FILE
         result.append((name, kind))
+    if unnamable:
+        log.debug("projectfiles: %d name(s) in %s are not UTF-8 and are not listed", unnamable, path)
     result.sort(key=lambda item: (item[1] == KIND_FILE, item[0].casefold()))
     return result[:MAX_DIR_ENTRIES], len(result) > MAX_DIR_ENTRIES
 
