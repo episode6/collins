@@ -203,13 +203,19 @@ def test_systemctl_is_only_for_the_default_id(monkeypatch):
 
 class DeadUnitWorld(World):
     """systemd queues the start (`--no-block` reports success) and the unit
-    dies: no socket ever appears from a systemd start. Only the spawn
-    fallback makes one."""
+    dies: no socket ever appears from a systemd start, and `show` says the
+    unit is `failed`. Only the spawn fallback makes a socket."""
+
+    unit_states = ["failed"]  # what each `unit_state` ask answers, the last one repeating
 
     def __init__(self):
         super().__init__(live=False, appears_after=10_000)
         self.fallbacks = []
+        self.asked = []
+        self.notices = []
         self.manager._fallback = self.fallback
+        self.manager._unit_state = self.unit_state
+        self.manager.on_notice = self.notices.append
 
     def start(self, app_id):
         self.started.append(app_id)
@@ -219,6 +225,117 @@ class DeadUnitWorld(World):
         self.fallbacks.append(app_id)
         self.appears_after = 2  # the spawned service comes up after two polls
         return "spawned"
+
+    def unit_state(self, app_id):
+        index = min(len(self.asked), len(self.unit_states) - 1)
+        self.asked.append(app_id)
+        return self.unit_states[index]
+
+
+class SlowUnitWorld(DeadUnitWorld):
+    """A healthy unit that is slow: the old service is still `deactivating`
+    (a graceful stop the start job is queued behind) when the first wait
+    runs out, then `activating`, and the socket appears on systemd's own
+    start. The spawn fallback must never fire."""
+
+    unit_states = ["deactivating", "activating"]
+
+    def unit_state(self, app_id):
+        word = super().unit_state(app_id)
+        if word == "activating":
+            self.appears_after = 2  # systemd's service comes up after two more polls
+        return word
+
+
+def test_a_slow_unit_is_waited_for_and_never_replaced_by_a_spawn():
+    """Verification of 2edacbf: the flag was set on ANY wait timeout after a
+    systemd start, so a `service.restart` or `systemctl --user stop` with
+    sessions to close (socket unlinked at stop_accepting, the graceful
+    stop up to 30 s, the start job queued behind it, the 10 s poll out)
+    flipped the install to an unmanaged spawned service for the window's
+    life. The manager asks systemd and keeps waiting on a busy unit."""
+    world = SlowUnitWorld()
+    world.live = True
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("gone")
+    world.fire()  # backoff → _retry → systemd start → polling
+    for _ in range(400):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected"
+    assert world.asked == ["com.example.Test", "com.example.Test"]  # one ask per wait that ran out
+    assert world.fallbacks == [] and world.notices == []
+    assert world.manager.systemd_failed is False and world.manager.started_how == "systemd"
+    assert world.started == ["com.example.Test"]  # one systemd start for the whole reconnect
+
+
+def test_start_local_waits_on_a_slow_unit_too():
+    world = SlowUnitWorld()
+    world.manager.start_local(wait_s=1.0)
+    assert world.manager.state == "connected" and world.fallbacks == []
+    assert world.asked == ["com.example.Test"] * 2 and world.manager.systemd_failed is False
+
+
+def test_the_fallback_tells_the_user_once_and_systemd_earns_its_trust_back():
+    """The notice goes once, when the fallback first takes over; a later
+    connection to a service systemd started again clears the mark, and a
+    round that skips the start reads no stale `started_how`."""
+    world = DeadUnitWorld()
+    world.manager.start_local(wait_s=1.0)
+    assert world.manager.systemd_failed is True and world.manager.started_how == "spawned"
+    assert world.notices == [connection.FALLBACK_NOTICE]
+    # Lost; the spawned service is still there (found live): no start at
+    # all this round, and `started_how` says so rather than repeating "spawned".
+    world.link.on_lost("gone")
+    world.fire()
+    assert world.manager.state == "connected" and world.manager.started_how == ""
+    assert world.manager.systemd_failed is True  # nothing systemd started answered
+    # Lost again, nothing live: the fallback spawns, no second notice.
+    world.live = False
+    world.appears_after = 10_000  # nothing comes up until a start says so
+    world.link.on_lost("gone")
+    world.fire()
+    for _ in range(10):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.fallbacks == ["com.example.Test"] * 2 and world.notices == [connection.FALLBACK_NOTICE]
+    # The user repairs the unit and restarts it by hand: the next reconnect
+    # finds a live service this client did not start, systemd says the unit
+    # is `active`, and the mark clears (asked in the handshake, off the loop).
+    world.unit_states = ["active"]
+    asked_before = len(world.asked)
+    world.link.on_lost("gone")
+    world.fire()
+    assert world.manager.state == "connected" and world.manager.started_how == ""
+    assert len(world.asked) == asked_before + 1 and world.manager.systemd_failed is False
+    # Systemd is trusted again: the next start is systemd's.
+    world.live = False
+    world.link.on_lost("gone")
+    world.appears_after = 2
+    world.fire()
+    for _ in range(10):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.started_how == "systemd" and len(world.fallbacks) == 2
+
+
+def test_unit_state_reads_systemctl_show(tmp_path, monkeypatch):
+    import stat
+
+    fake = tmp_path / "systemctl"
+    fake.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\" > " + str(tmp_path / "argv") + "\necho deactivating\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+    assert connection.unit_state(APP_ID) == "deactivating"
+    argv = (tmp_path / "argv").read_text().split()
+    assert argv == ["--user", "show", "-p", "ActiveState", "--value", "collins-service.service"]
+    assert connection.unit_state("com.episode6.Collins.Debug") == ""
+    fake.write_text("#!/bin/sh\nexit 1\n")
+    assert connection.unit_state(APP_ID) == ""
 
 
 def test_a_systemd_start_with_no_socket_falls_back_to_a_spawn_on_reconnect():

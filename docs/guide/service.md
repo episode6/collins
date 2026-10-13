@@ -33,10 +33,14 @@ finding none, starts one: through `systemctl --user start
 collins-service.service` where the unit is installed, else by spawning
 `collins-service` itself. The unit ships with the packages and is written
 by `collins --install-desktop` for a pip install; it is never enabled by
-a package, so nothing runs until a window asks. A unit that starts and
-then dies (a stale `ExecStart` from an older install, a service exiting
-with an error) is not trusted again by that window: it spawns the
-service itself from then on, and `journalctl --user -u
+a package, so nothing runs until a window asks. When the socket takes
+longer than the window's wait, the window asks systemd: a unit still
+starting (a slow cold start) or still stopping (a graceful stop ahead of
+the start) is waited for; one that is `inactive` or `failed` (a stale
+`ExecStart` from an older install, a service exiting with an error) is
+not trusted again by that window, which spawns the service itself from
+then on, says so once in a toast, and trusts the unit again the next time
+a systemd-started service answers. `journalctl --user -u
 collins-service.service` says why the unit failed.
 
 The service keeps running after the window quits. To stop it:

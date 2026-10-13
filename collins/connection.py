@@ -27,8 +27,18 @@ effect injectable so `tests/test_connection.py` drives it with fakes:
   unit that starts and then dies (a stale `ExecStart` from an older
   `--install-desktop`, a service exiting 1): the start is "queued" and no
   socket ever appears. A **wait** that times out after a systemd start
-  marks systemd failed for the rest of this process (`systemd_failed`),
-  and every later start spawns `collins-service` itself (*fallback*).
+  asks systemd (`unit_state`: `systemctl --user show -p ActiveState`, off
+  the main loop): a unit still `activating` (a slow cold start) or
+  `deactivating` (a graceful stop of up to `STOP_BOUND_S` that the start
+  job is queued behind: `service.restart`, `systemctl --user stop` with
+  sessions to close) is trusted and waited for another `WAIT_S`; one
+  `inactive` or `failed` (or no answer) marks systemd failed
+  (`systemd_failed`), tells the owner once (`on_notice`: the service will
+  run unmanaged), and every later start spawns `collins-service` itself
+  (*fallback*) until a systemd-started service connects again, which
+  clears the mark. `started_how` is this round's word alone: cleared at
+  the top of every attempt, so a round that skipped the start never reads
+  an older one's.
 - **wait**: poll the socket every `POLL_MS` for up to `WAIT_S`.
 - **connect**: both channels and the hello (`SocketLink.connect`), the
   local proof from the client's own filesystem (`prove_local`), then the
@@ -130,6 +140,44 @@ def systemctl_start(app_id: str) -> bool:
     return True
 
 
+def unit_state(app_id: str) -> str:
+    """The unit's ``ActiveState`` (`systemctl --user show -p ActiveState
+    --value`): ``active``, ``activating``, ``deactivating``, ``reloading``,
+    ``inactive`` or ``failed``; ``""`` when systemctl is absent, errors or
+    the id is not the default. Asked after a wait ran out on a systemd
+    start, off the main loop."""
+    if app_id != APP_ID or shutil.which("systemctl") is None:
+        return ""
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show", "-p", "ActiveState", "--value", UNIT],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.info("systemctl --user show %s: %s", UNIT, exc)
+        return ""
+    if result.returncode != 0:
+        return ""
+    word = result.stdout.decode(errors="replace").strip().split("\n")[0]
+    return word if word.isalpha() else ""
+
+
+# What `unit_state` words mean after a wait ran out: still at it, or over.
+UNIT_BUSY = frozenset({"active", "activating", "deactivating", "reloading"})
+UNIT_OVER = frozenset({"inactive", "failed"})
+
+# The owner's one word to the user when the fallback takes over (a msgid;
+# the app translates it with `_()`).
+FALLBACK_NOTICE = (
+    "The Collins service is running unmanaged: its systemd unit failed. "
+    "See journalctl --user -u collins-service.service"
+)
+
+
 def default_starter(app_id: str) -> str:
     """Start a service for *app_id* and say how: ``"systemd"``,
     ``"spawned"``. Raises OSError when neither way works."""
@@ -163,6 +211,7 @@ class ConnectionManager:
         find: Callable[[str], tuple[str, str]] | None = None,
         start: Callable[[str], str] | None = None,
         fallback: Callable[[str], str] | None = None,
+        unit_state: Callable[[str], str] | None = None,
         schedule: Callable[[int, Callable[[], bool]], object] | None = None,
         run_async: Callable[[Callable[[], None]], None] | None = None,
         land: Callable[[Callable[[], None]], None] | None = None,
@@ -171,15 +220,22 @@ class ConnectionManager:
         on_state: Callable[[str], None] | None = None,
         on_connected: Callable[[bool], None] | None = None,
         on_lost: Callable[[str], None] | None = None,
+        on_notice: Callable[[str], None] | None = None,
     ) -> None:
         self.app_id = app_id
         self.link = link
         self._find = find or self._default_find
         self._start = start or default_starter
         self._fallback = fallback or spawn_starter
-        # Set when a systemd start was queued and the wait found no socket:
-        # the unit started and died (a stale ExecStart, an exit 1), which
-        # `--no-block` cannot report. Every later start is the fallback.
+        self._unit_state = unit_state or globals()["unit_state"]
+        self.on_notice = on_notice  # the owner's one-line word to the user (a toast)
+        # Set when a systemd start was queued, the wait found no socket and
+        # systemd says the unit is over (`inactive` / `failed`: a stale
+        # ExecStart, an exit 1), which `--no-block` cannot report. Every
+        # later start is the fallback, until a systemd-started service
+        # connects again. A unit still `activating` or `deactivating` (a
+        # slow cold start, a graceful stop ahead of the start job) is
+        # trusted and waited for.
         self.systemd_failed = False
         self._schedule = schedule
         # A reconnect's handshake (up to CONNECT_TIMEOUT_S of waiting) runs
@@ -218,17 +274,55 @@ class ConnectionManager:
 
     def _start_service(self) -> None:
         """Start the service the way this process still trusts: systemd (or
-        the injected starter) until a systemd start left no socket behind,
-        the spawn fallback from then on."""
+        the injected starter) until a systemd start was found over with no
+        socket behind it, the spawn fallback from then on."""
         starter = self._fallback if self.systemd_failed else self._start
         self.started_how = starter(self.app_id)
 
-    def _wait_failed(self) -> None:
-        """A wait ran out: a systemd start that produced no socket means the
-        unit is not to be trusted again in this process."""
-        if self.started_how == "systemd" and not self.systemd_failed:
-            log.warning("connection: %s started but no socket appeared; spawning from now on", UNIT)
-            self.systemd_failed = True
+    def _keep_waiting(self) -> bool:
+        """A wait ran out. True when the service is systemd's and systemd
+        says the unit is still at it (`activating`: a slow cold start;
+        `deactivating`: a graceful stop the start job is queued behind;
+        `active` / `reloading`), so the wait goes on. False otherwise; a
+        systemd start whose unit is over (`inactive`, `failed`, or no
+        answer) marks systemd failed and the fallback takes the next start.
+        Asks systemctl: callers keep it off the main loop."""
+        if self.started_how != "systemd" or self.systemd_failed:
+            return False
+        state = self._unit_state(self.app_id)
+        if state in UNIT_BUSY:
+            log.info("connection: %s is %s; waiting on", UNIT, state)
+            return True
+        self._mark_systemd_failed(state)
+        return False
+
+    def _mark_systemd_failed(self, state: str) -> None:
+        log.warning("connection: %s started but no socket appeared (unit %s); spawning from now on",
+                    UNIT, state or "unknown")
+        self.systemd_failed = True
+        if self.on_notice is not None:
+            try:
+                self.on_notice(FALLBACK_NOTICE)
+            except Exception:
+                log.exception("connection: on_notice failed")
+
+    def _systemd_regained(self) -> bool:
+        """Asked at a successful handshake, off the main loop: True when the
+        service answering is systemd's — one this round's own systemd start
+        brought up, or, while the mark is set, one found live that this
+        client did not start and whose unit systemd reports `active` (the
+        user repaired and restarted the unit by hand)."""
+        if self.started_how == "systemd":
+            return True
+        if self.systemd_failed and self.started_how == "":
+            return self._unit_state(self.app_id) == "active"
+        return False
+
+    def _connected_how(self, regained: bool) -> None:
+        """Connected: a service systemd started earns systemd its trust back."""
+        if regained and self.systemd_failed:
+            log.info("connection: %s answers again; systemd starts from now on", UNIT)
+            self.systemd_failed = False
 
     def _set_state(self, state: str) -> None:
         self.state = state
@@ -242,24 +336,29 @@ class ConnectionManager:
 
     def start_local(self, wait_s: float = WAIT_S) -> None:
         """find → start → wait → connect, synchronously. Raises
-        `api.client.ConnectionLost` (or OSError from the starter) when no
-        service can be reached."""
+        `api.client.ConnectionLost` when no service can be reached, or
+        OSError from the starter — the systemd-or-spawn one, or the spawn
+        fallback taken once the unit was found over with no socket
+        (`spawn_service` could not exec `collins-service`)."""
+        self.started_how = ""
         self.path, found = self._find(self.app_id)
         if found != "live":
             self._set_state(STARTING)
             self._start_service()
             self._set_state(WAITING)
-            if not self._wait_blocking(wait_s):
-                self._wait_failed()
-                if not self.systemd_failed:
+            while not self._wait_blocking(wait_s):
+                if self._keep_waiting():
+                    continue  # the unit is still starting or stopping: another wait
+                if self.started_how != "systemd" or not self.systemd_failed:
                     self._give_up(wait_s)
-                # The unit started and died: spawn once, here, before giving
-                # up (a stale unit must not block every launch).
+                # The unit is over with no socket: spawn once, here, before
+                # giving up (a stale unit must not block every launch).
                 self._set_state(STARTING)
                 self._start_service()
                 self._set_state(WAITING)
                 if not self._wait_blocking(wait_s):
                     self._give_up(wait_s)
+                break
         self._connect()
 
     def _give_up(self, wait_s: float) -> None:
@@ -280,6 +379,7 @@ class ConnectionManager:
         self._set_state(CONNECTING)
         self.link.connect()
         self.link.prove_local()
+        self._connected_how(self._systemd_regained())
         first = not self.connected_once
         self.connected_once = True
         self.attempts = 0
@@ -323,6 +423,7 @@ class ConnectionManager:
         self._pending = None
         if self.stopped or self.state == CONNECTED:
             return False
+        self.started_how = ""  # this round's own word, or none when the start is skipped
         try:
             self.path, found = self._find(self.app_id)
             if found != "live":
@@ -346,12 +447,32 @@ class ConnectionManager:
             self._try_connect()
             return False
         if self._now() >= deadline:
-            self._wait_failed()  # a systemd start with no socket: the fallback from here on
+            if self.started_how == "systemd" and not self.systemd_failed:
+                # Ask systemd off the main loop whether the unit is still at
+                # it; the verdict lands here and either extends the wait or
+                # marks the fallback and goes LOST.
+                generation = self._generation
+
+                def ask() -> None:
+                    keep = self._keep_waiting()
+                    self._land(lambda: self._timeout_verdict(keep, generation))
+
+                self._run_async(ask)
+                return False
             self._set_state(LOST)
             self._retry_later()
             return False
         self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline))
         return False
+
+    def _timeout_verdict(self, keep_waiting: bool, generation: int) -> None:
+        if self.stopped or self.state != WAITING or generation != self._generation:
+            return  # a loss or a newer attempt moved on meanwhile
+        if keep_waiting:
+            self._poll(self._now() + WAIT_S)
+            return
+        self._set_state(LOST)
+        self._retry_later()
 
     def _try_connect(self) -> None:
         """The handshake on the owner's thread, the outcome on its loop."""
@@ -363,15 +484,16 @@ class ConnectionManager:
             try:
                 self.link.connect()
                 self.link.prove_local()
+                regained = self._systemd_regained()  # may ask systemctl: here, off the loop
             except Exception as exc:
                 error = exc  # the except name is cleared before the landing runs
                 self._land(lambda: self._connect_failed(error, generation))
                 return
-            self._land(lambda: self._connect_landed(generation))
+            self._land(lambda: self._connect_landed(generation, regained))
 
         self._run_async(handshake)
 
-    def _connect_landed(self, generation: int | None = None) -> None:
+    def _connect_landed(self, generation: int | None = None, regained: bool = False) -> None:
         if self.stopped:
             return
         if generation is not None and generation != self._generation:
@@ -383,6 +505,7 @@ class ConnectionManager:
                 self._set_state(LOST)
                 self._retry_later()
             return
+        self._connected_how(regained)
         first = not self.connected_once
         self.connected_once = True
         self.attempts = 0

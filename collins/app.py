@@ -2156,6 +2156,7 @@ class App(Adw.Application):
             on_state=self._on_connection_state,
             on_connected=self._on_connected,
             on_lost=self._on_connection_lost,
+            on_notice=self._on_connection_notice,
         )
         self._connection.start_local()
 
@@ -2206,6 +2207,19 @@ class App(Adw.Application):
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.set_reconnecting(reconnecting)
+
+    def _on_connection_notice(self, msgid: str) -> None:
+        """The connection manager's one word to the user (the systemd unit
+        failed and the service was spawned unmanaged): a toast on every
+        window, translated here."""
+        text = _(msgid)
+        log.warning("%s", text)
+        for window in self.get_windows():
+            if isinstance(window, MainWindow):
+                try:
+                    window.show_toast(text)
+                except Exception:
+                    log.exception("the connection notice toast failed")
 
     def _on_connection_lost(self, reason: str) -> None:
         """The link is gone (the banner is `_on_connection_state`'s): a job
