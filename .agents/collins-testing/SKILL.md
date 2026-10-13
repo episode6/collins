@@ -38,18 +38,43 @@ fails the suite until it is filed, and each group is pinned by its size
 (`DEVICE` per module too), so filing one is an edit of the test that a
 reviewer sees; only this device's own files and gated local extras
 belong. Ask the service instead (`remotefiles.stat_path` and
-friends, off the main loop). The three groups have a rule each: `DEVICE`
-is this device's own files and programs; `LOCAL_EXTRAS` sites must sit in
-a function that calls `apilink.is_local()` (`pathless.function_asks_local`
-reads the source; a closure does not inherit its parent's ask);
-`UNRULED` is pinned to the three sites reported for a ruling and only
-shrinks. The walker does not follow calls into modules the service also
-runs (`sessions`, `providers`, `clonerepo`, `panelhistory`, …), so a
-widget calling one of their disk-reading functions is invisible to it:
-check by hand when adding such a call. The ones known today, and the
-three `UNRULED` sites, are recorded and not moved (spec D50): the list is
-the comment at `UNRULED` in `tests/pathless_allowlist.py`, and each
-needs a ruling before Phase 3 starts.
+friends, off the main loop). The four groups have a rule each: `DEVICE`
+is this device's own files and programs; a `LOCAL_EXTRAS` site must be
+**behind** `apilink.is_local()` in its own function
+(`pathless.function_asks_local` reads the AST: every call of the site
+after an earlier `if not apilink.is_local(): return` in the function's
+own body, or inside `if apilink.is_local():`, or after the ask in the
+same `and`. The ask is `apilink`'s function, called: not the bare
+attribute, not another object's `is_local()`, not one after the read, in
+another branch, inside a lambda or bound to a name first; a closure does
+not inherit its parent's ask); `UNRULED` is pinned to the three sites
+reported for a ruling and only shrinks; `RECORDED` is four `gitloads`
+default arguments (`run=subprocess.run`, `exists=os.path.exists`),
+pinned the same way.
+
+**What the walker reads, and what it does not.** It resolves import
+aliases (`import shutil as sh`, `from os import path as P`), follows a
+name bound to a path or a `Gio.File` inside a function (an assignment, a
+tuple, a walrus, a `Path` annotation or default, a loop over
+`.iterdir()`, a name bound to a bound name), looks through a path's own
+method chains (`Path(p).expanduser().resolve().is_dir()`), takes
+`is_dir` / `is_file` / `read_text` / `iterdir` and the other names only
+a path has on any receiver at all, and counts a site's function that is
+handed on or bound without being called (`map(os.path.isdir, ps)`, a
+`run=subprocess.run` default). `test_the_walker_catches` and
+`test_the_walker_is_known_to_miss` are tables of both: add a row when
+the vocabulary changes. It does **not** follow calls: a site is named by
+the function the read is written in, so a widget calling a disk-reading
+function of `sessions`, `providers`, `clonerepo`, `panelhistory` or a
+helper of its own module is invisible to it. Nor does it see a hintless
+receiver for the method names other objects share (`p.exists()`,
+`self._thing.unlink()`, `write_text`), the launchers (`Gtk.FileLauncher`,
+`Gtk.UriLauncher`, `AppInfo.launch`), `expanduser` / `abspath`, or a
+read through another library. Check those by hand when adding one. The
+ones known today, with the `UNRULED` and `RECORDED` sites, are recorded
+and not moved (spec D50; D54 rules what Phase 3 does with the first
+list): the record is the comment at `UNRULED` in
+`tests/pathless_allowlist.py`, which names every form the walker misses.
 
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
 `~/.claude/projects` with two projects, monkeypatched into `sessions` and

@@ -320,8 +320,15 @@ helpers for filesystem and subprocess sites and holds them to
 pinned by size so that nothing is filed on it unseen: `DEVICE` (this device's own files and programs: `ui-state.json`,
 the blob cache, the Markdown export's destination, the desktop entry,
 the update check, `buildinfo`, the service's process), `LOCAL_EXTRAS`
-(below; D49) and `UNRULED` (three sites recorded and not moved, D50,
-pinned; the comment at the group lists the reads the walker cannot see).
+(below; D49), `UNRULED` (three sites recorded and not moved, D50,
+pinned; D54 rules what Phase 3 does with them) and `RECORDED` (four
+`gitloads` default arguments the walker has seen since it reads a
+function handed on without being called; recorded the same way, pinned).
+The comment at `UNRULED` is the D50 record: the reads of the service's
+facts the walker cannot see, and every form of a read it has no word for
+(a helper's read, a hintless receiver, the launchers, ...);
+`tests/test_client_is_pathless.py` keeps a table of the spellings it
+catches and of the ones it is known to miss.
 
 **The local extras.** `apilink.is_local()` is the one reader of the
 link's `local` proof (D11), and `App.local` is it. What hands a path of
@@ -331,11 +338,16 @@ the attachments panel's Show in Folder, a clicked folder's default app, `file:` 
 its own path, a native chooser's starting folder. For a client that is
 not on the service's machine they are **hidden, not disabled**, and the
 function that reads the disk or starts the program asks
-`apilink.is_local()` itself: the pathless test reads its source for the
-ask. Open With in the lightbox and the attachments panel, and a file
+`apilink.is_local()` itself, **before** it does: the pathless test reads
+the function and passes only when every such call runs after the ask
+answered yes (an earlier `if not apilink.is_local(): return` in the
+function's own body, the call inside `if apilink.is_local():`, or after
+the ask in the same `and`; an ask after the read, in a lambda, bound to a
+name first, or some other object's `is_local()` does not count). Open With in the lightbox and the attachments panel, and a file
 row's default app there, are not: not local, they hand over this device's
 cached copy (D51; `GET /api/blob?kind=file&as=file` serves a file that is
-no picture only when the session's agent named it, and the copy's suffix
+no picture only to a request that names its session and only when that
+session's agent named it, and the copy's suffix
 is made safe by `blobcache.file_suffix`). Nor is the Markdown export: the service renders the transcript
 (`store.transcript-export`) and the window writes its own file. Nor is
 where a session or a shell starts: the client sends the cwd it has and
