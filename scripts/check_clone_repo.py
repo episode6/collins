@@ -118,6 +118,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
 from collins import clonedialog, i18n, prefslayout  # noqa: E402
@@ -140,6 +141,8 @@ def check(label: str, ok: bool, detail: object = "") -> None:
 
 
 def settle() -> None:
+    """Run what the main loop has ready, and no more: the box must still
+    be locked when it is read, before the (fast) fake clone finishes."""
     context = GLib.MainContext.default()
     for _ in range(50):
         if not context.pending():
@@ -186,6 +189,9 @@ def type_into(dialog, text: str) -> None:
 
 
 i18n.init(AppState().get_setting("language"))
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 exit_code = 1
 tries = 0
@@ -402,7 +408,7 @@ def step_preferences() -> None:
     check("its subtitle names the folder", CODE in row.get_subtitle(), row.get_subtitle())
     check("a picked folder offers the reset", dialog._clone_dir_reset.get_visible())
     dialog._clone_dir_reset.emit("clicked")
-    settle()
+    e2e_service.settle()  # the write's reply and the service's save, over the socket
     check("reset writes the home folder", AppState().get_setting("clone_directory") == "~")
     check("and says so", "starts in ~" in row.get_subtitle(), row.get_subtitle())
     check("with the reset gone", not dialog._clone_dir_reset.get_visible())

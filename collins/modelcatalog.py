@@ -27,7 +27,7 @@ what `claudemodels` would with no catalog at all. GTK-free.
 from __future__ import annotations
 
 from . import apilink, claudemodels
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .claudemodels import ClaudeModel
 
 

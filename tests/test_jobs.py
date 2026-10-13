@@ -6,10 +6,11 @@ translated text, events that arrive before the reply, a refused start."""
 
 import threading
 
+import inproc as loopback
 import pytest
 
-from collins import apilink, jobclient
-from collins.api import loopback, protocol
+from collins import jobclient
+from collins.api import protocol
 from collins.service import jobs
 from collins.service.core import ServiceCore
 
@@ -134,7 +135,7 @@ def test_login_repair_takes_a_mode(monkeypatch):
 # -- through the loopback and the client's end
 
 
-class _Link(apilink.LoopbackLink):
+class _Link(loopback.LoopbackLink):
     pass
 
 
@@ -183,6 +184,56 @@ def test_cancelling_a_finished_job_is_quiet(linked):
     seen = []
     job_id = jobclient.jobs_for(linked).start("clone", {}, seen.append)
     jobclient.jobs_for(linked).cancel(job_id)  # nothing raises
+
+
+class _HeldLink:
+    """A link whose jobs never report: `job.start` answers an id and no
+    `job` event follows (the service forgot the client at the loss)."""
+
+    def __init__(self):
+        self.handlers = {}
+        self.started = 0
+
+    def on(self, kind, handler):
+        self.handlers[kind] = handler
+
+    def call(self, message):
+        self.started += 1
+        return {"job": f"job-{self.started}"}
+
+    def deliver(self, event):
+        self.handlers["job"](event)
+
+
+def test_a_lost_link_settles_every_job_in_flight():
+    """The review of PR 604, should-fix 3: the watcher of a job running when
+    the link dropped was kept until a non-running `job` event, which never
+    came (`client_gone` forgets the client's jobs on the service; the
+    reconnect is a new client), so a clone dialog's spinner never stopped.
+    `reset` hands each watcher one final `failed`, the held-early events
+    go with their jobs, and a job started afterwards is heard as before."""
+    link = _HeldLink()
+    jobs = jobclient.jobs_for(link)
+    clone, icon = [], []
+    first = jobs.start("clone", {"source": "o/r"}, clone.append)
+    second = jobs.start("icon", {}, icon.append)
+    link.deliver({"t": "job", "job": first, "kind": "clone", "state": "running", "msgid": "Cloning…"})
+    link.deliver({"t": "job", "job": "job-9", "kind": "clone", "state": "done"})  # early, for a start to come
+    assert [e.state for e in clone] == ["running"] and icon == []
+    jobclient.reset(link)
+    assert [e.state for e in clone] == ["running", "failed"] and clone[-1].finished and not clone[-1].ok
+    assert clone[-1].job == first and clone[-1].kind == "clone" and "lost" in clone[-1].text
+    assert [(e.job, e.kind, e.state) for e in icon] == [(second, "icon", "failed")]
+    assert jobs._watchers == {} and jobs._early == {}
+    # Twice is quiet; a link with no jobs is quiet.
+    jobclient.reset(link)
+    jobclient.reset(_HeldLink())
+    assert len(clone) == 2 and len(icon) == 1
+    # After a reconnect the same Jobs serves new starts.
+    later = []
+    third = jobs.start("clone", {}, later.append)
+    link.deliver({"t": "job", "job": third, "kind": "clone", "state": "done", "result": {"path": "/r"}})
+    assert [e.state for e in later] == ["done"] and later[0].result == {"path": "/r"}
 
 
 def test_translate_formats_only_with_args():

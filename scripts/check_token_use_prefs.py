@@ -76,6 +76,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, GLib  # noqa: E402
 
 from collins import claudemodels, i18n, mcptools, prefslayout  # noqa: E402
@@ -148,6 +149,11 @@ HEADINGS = {
 }
 
 i18n.init(AppState().get_setting("language"))
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+# The model catalog the service answers with: the same canned list this
+# process patched over claudemodels (scripts/e2e_stubs.py).
+e2e_service.start_service(stubs={"models": claudemodels.model_records(CATALOG)})
 app = App()
 
 exit_code = 1
@@ -240,9 +246,11 @@ def step_catalog() -> bool:
     )
     # The switch writes its setting and tells the window.
     state["renew"].set_active(False)
+    e2e_service.settle()
     check("switching renew off writes the setting", AppState().get_setting("auto_renew_login") is False)
     check("and calls on_change", len(state.get("changes", [])) == 1, state.get("changes"))
     state["renew"].set_active(True)
+    e2e_service.settle()
     check("switching it back writes the setting", AppState().get_setting("auto_renew_login") is True)
     return later(step_search, 200)
 
@@ -303,9 +311,11 @@ def step_sandbox_tools() -> bool:
     every["show_diff"].set_active(True)
     check("switched back on, the row is live again", row.get_sensitive() and row.get_subtitle() == line, row.get_subtitle())
     boxed["run_in_terminal"].set_active(True)
+    e2e_service.settle()
     check("a Sandbox row writes its own setting", AppState().get_setting("sandbox_tool_run_in_terminal") is True)
     check("…and not the tool's", AppState().get_setting("mcp_tool_run_in_terminal") is True)
     boxed["run_in_terminal"].set_active(False)
+    e2e_service.settle()
     check("…both ways", AppState().get_setting("sandbox_tool_run_in_terminal") is False)
     return done()
 

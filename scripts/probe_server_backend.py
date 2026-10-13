@@ -39,7 +39,13 @@ from gi.repository import Gio, GLib, Gtk, Vte  # noqa: E402
 
 from collins import mouserate, ptyclient, redrawguard  # noqa: E402
 from collins.api import protocol  # noqa: E402
-from collins.api.loopback import LoopbackServer  # noqa: E402
+
+# The in-process harness of the unit suite (tests/inproc.py): this probe
+# drives the client glue against a core in one process, which is what it
+# is for; the product's transport is the socket (collins.api.server).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests"))
+from inproc import LoopbackServer  # noqa: E402
+
 from collins.service.core import ServiceCore  # noqa: E402
 
 PASSED = FAILED = 0

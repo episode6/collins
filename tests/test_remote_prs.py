@@ -8,7 +8,7 @@ import pytest
 
 from collins import prdetail, prstatus, remoteprs
 from collins.api import protocol
-from collins.api.loopback import RequestRefused
+from collins.api.protocol import RequestRefused
 from collins.apilink import Link
 from collins.prstore import PrStore
 from collins.remoteprs import RemotePrStore
@@ -92,6 +92,25 @@ def test_a_write_is_optimistic_and_its_echo_is_silent(hub):
     assert signals == [("changed", "s1"), ("attached", "s1", URL2)]  # once, here
     assert hub.records("s1") == [{"number": 2, "url": URL2}]  # and on the service
     assert wire.calls == ["pr.set"]
+
+
+def test_a_reset_clears_the_mirror_and_announces_each_session_once(hub):
+    """Nit 10 of PR 604's review: a session whose records were removed on
+    the service while the link was down kept them in the mirror (the
+    snapshot names only the sessions with records; the equality guard
+    hides the rest). `reset()` beside the other mirrors' clears them."""
+    _feed, _wire, mirror, signals = connect(hub)
+    mirror.set_records("s1", [{"number": 2, "url": URL2}])
+    signals.clear()
+    mirror.reset()
+    assert sorted(signals) == [("changed", "s0"), ("changed", "s1")]
+    assert mirror.records("s0") == [] and mirror.prs("s1") == []
+    mirror.reset()  # empty: quiet
+    assert len(signals) == 2
+    # The next snapshot fills it again, once per session.
+    hub2_feed = prfeed.PrFeed(hub)
+    hub2_feed.subscribe(_wire, _wire.deliver)
+    assert mirror.records("s0") == [{"number": 1, "url": URL1}]
 
 
 def test_the_equality_guard_holds_on_the_client(hub):

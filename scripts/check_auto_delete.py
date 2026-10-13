@@ -140,6 +140,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, GLib  # noqa: E402
 
 from collins import autodelete, i18n, prefslayout  # noqa: E402
@@ -173,14 +174,15 @@ def setting(key: str):
 
 
 def settle() -> None:
-    context = GLib.MainContext.default()
-    for _ in range(50):
-        if not context.pending():
-            break
-        context.iteration(False)
+    # A write's reply and the service's save land over the socket a
+    # moment later (PR-1.12b): pump until they have.
+    e2e_service.settle()
 
 
 i18n.init(AppState().get_setting("language"))
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 
 exit_code = 1

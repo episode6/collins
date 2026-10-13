@@ -59,7 +59,7 @@ from . import (
     notifycenter,
     remoteimages,
 )
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .lightbox import present_image_lightbox
 from .providers import SessionOptions
 from .sessions import worktree_project_root
@@ -444,14 +444,6 @@ class ToolClient:
                 if isinstance(tab, TerminalTab) and tab.session.handle == handle:
                     return window, tab
         return None
-
-    def found_for_pid(self, shim_pid: int):
-        """The window and tab of the session the service binds a call from
-        *shim_pid* to (`SessionTools.find`): who a call is from, as the
-        client sees it."""
-        tools = getattr(self._app, "session_tools", None)
-        session = tools.find(shim_pid) if tools is not None else None
-        return self.found_for(session) if session is not None else None
 
     # -- the events ------------------------------------------------------------
 

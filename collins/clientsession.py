@@ -40,7 +40,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import editorfiles
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import _
 from .providers import EnteredPrompt, Provider, SessionOptions, options_from_record
 

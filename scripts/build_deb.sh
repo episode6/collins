@@ -65,6 +65,19 @@ cp "$ROOT/data/icons/$APP_ID.svg" "$ROOT/data/icons/$APP_ID-panel.svg" \
 cp "$ROOT/data/icons/hicolor/scalable/actions/"*.svg \
     "$BUILD/usr/share/$PKG/icons/hicolor/scalable/actions/"
 cp "$ROOT/data/$APP_ID.metainfo.xml" "$BUILD/usr/share/metainfo/"
+# The session service: its command (the wheel's console script, written by
+# hand here like the launcher) and its systemd user unit, not enabled.
+cat > "$BUILD/usr/bin/$PKG-service" <<'EOF'
+#!/usr/bin/python3
+import sys
+
+from collins.service.main import main
+
+sys.exit(main())
+EOF
+chmod 755 "$BUILD/usr/bin/$PKG-service"
+mkdir -p "$BUILD/usr/lib/systemd/user"
+cp "$ROOT/data/collins-service.service" "$BUILD/usr/lib/systemd/user/"
 cp "$ROOT/LICENSE" "$BUILD/usr/share/doc/$PKG/copyright"
 
 # Validate the staged desktop entry and metainfo, mirroring the RPM spec's

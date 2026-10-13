@@ -41,6 +41,8 @@ def expected() -> set[str]:
         f"collins/{APP_ID}.desktop",
         f"collins/{APP_ID}.metainfo.xml",
         "collins/THIRD_PARTY_LICENSES.md",
+        # The systemd user unit `collins --install-desktop` writes out.
+        "collins/collins-service.service",
     }
     actions = sorted((icons / "hicolor" / "scalable" / "actions").glob("*.svg"))
     if not actions:

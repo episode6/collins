@@ -460,7 +460,8 @@ def test_a_tool_event_crosses_the_loopback_and_its_reply_settles_the_call(tmp_pa
     """The whole path: the core picks the active client, the event is
     validated on its way out, the client's tool-reply comes back as an
     event and settles the call the dispatcher returned."""
-    from collins.api import loopback
+    import inproc as loopback
+
     from collins.service.core import ServiceCore
 
     monkeypatch.setattr(proctree, "ancestor_pids", lambda pid: {pid, 1})
@@ -553,19 +554,14 @@ def test_a_headless_shell_of_a_session_no_longer_held_goes_too(world):
     assert shells.closed == [30]
 
 
-def test_the_harness_link_needs_an_opt_in(monkeypatch):
+def test_with_no_link_every_call_is_gone(monkeypatch):
+    """A widget with no app behind it and no harness link (PR-1.12b: the
+    Phase 1 fallback loopback is gone, D21) is refused ``gone``, visibly."""
     from collins import apilink
-    from collins.api.loopback import RequestRefused
+    from collins.api.protocol import RequestRefused
 
-    made = []
     monkeypatch.setattr(apilink, "_current", None)
-    monkeypatch.setattr(apilink, "_fallback_link", None)
-    monkeypatch.setattr(apilink, "_harness", False)
-    monkeypatch.setattr(apilink, "_fallback", lambda: made.append(1))
-    assert apilink.current() is None and made == []
+    assert apilink.current() is None
     with pytest.raises(RequestRefused) as refused:
         apilink.call({"t": "pr.detail", "url": "https://github.com/o/r/pull/1"})
     assert refused.value.error == protocol.ERROR_GONE
-    monkeypatch.setattr(apilink, "_fallback", None)
-    apilink.allow_harness()
-    assert apilink._harness is True
