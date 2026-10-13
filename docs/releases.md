@@ -46,8 +46,10 @@ downloads of each version, see the
   refused before a byte is written and the editor asks before overwriting
   (the same "changed on disk" question as before, now answered by the
   service's check rather than a stat in the window). Files that are not
-  UTF-8 are read as latin-1 and written back the same way; a file over
-  5 MiB is refused as before; a 5 MiB file crosses the socket in chunks.
+  UTF-8 are read as latin-1 and written back the same way; a file with
+  CRLF (or CR) line endings is written back with every line ending as it
+  had them; a file over 5 MiB, or one with a NUL anywhere in it, is
+  refused as before; a 5 MiB file crosses the socket in chunks.
   Nothing looks different; the window no longer opens a project file for
   the editor (the third chunk of the split's Phase 2).
 - **Git goes over the service's socket.** The git page, the footer's

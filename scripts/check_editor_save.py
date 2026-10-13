@@ -16,7 +16,8 @@ text and the new mtime; a save after it writes through `fs.write` and the
 file carries the edit; a clean buffer reloads silently, cursor kept; a
 save over a file that moved underneath is refused `stale` and asks before
 overwriting (the "changed on disk" dialog, stubbed), the file untouched
-until Overwrite; a deleted file is told and marked dirty; a change that
+until Overwrite; a CRLF file is written back CRLF on every line; a
+deleted file is told and marked dirty; a change that
 waited for a reload is judged even when the reload fails; a save before
 the first read lands writes nothing; a change between the read and the
 watch reaches the buffer (the watch's seed); a closed tab's watch is
@@ -369,6 +370,29 @@ def run(root: str) -> int:
         )
     finally:
         remotefiles.read = real_read
+
+    # -- a CRLF file keeps CRLF on every line (the Fable review of PR 609) -----------
+    # `FileSaver` converted every line ending to the file's type; the first
+    # split version appended CRLF once and left the typed line as LF.
+    crlf = os.path.join(root, "dos.txt")
+    with open(crlf, "wb") as fh:
+        fh.write(b"a\r\nb\r\n")
+    pane.open_file(crlf)
+    dos = pane._open[crlf]
+    if not wait_for(lambda: not dos.loading):
+        print("FAIL  the CRLF read never landed")
+        return 1
+    check("a CRLF file shows LF lines in the buffer", buffer_text(dos) == "a\nb", buffer_text(dos))
+    check("and remembers its line ending", dos.newline == "\r\n", repr(dos.newline))
+    dos.buffer.insert(dos.buffer.get_end_iter(), "\nnew")
+    pane._select_page(pane._pages[crlf])
+    pane.save_current()
+    if not wait_for(lambda: not dos.saving and not dos.buffer.get_modified()):
+        print("FAIL  the CRLF save never landed")
+        return 1
+    with open(crlf, "rb") as fh:
+        dos_bytes = fh.read()
+    check("every line ending is written as CRLF", dos_bytes == b"a\r\nb\r\nnew\r\n", dos_bytes)
 
     # -- closing a tab drops its watch -----------------------------------------------
     handle = other.watch_handle

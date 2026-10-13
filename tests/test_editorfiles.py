@@ -11,13 +11,16 @@ from collins.editorfiles import (
     LIGHTBOX_MIN_H,
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
+    NEWLINES,
     FollowScope,
     LoadGuard,
     PaneLayout,
     PasteError,
     RenameError,
     RerootAction,
+    detect_newline,
     fence_language_id,
+    fill_text,
     first_line,
     follow_scope,
     format_copied_files,
@@ -39,6 +42,7 @@ from collins.editorfiles import (
     plan_reroot,
     rename_target,
     renamed_path,
+    save_text,
     should_highlight,
     unique_target,
     walk_files,
@@ -377,6 +381,54 @@ def test_holds_nul_refuses_a_nul_anywhere():
 def test_holds_nul_passes_plain_text():
     assert holds_nul("") is False
     assert holds_nul("one\ntwo\r\n\t\x01\xff") is False
+
+
+# -- line endings (fill_text / save_text, the Fable review of PR 609, SF2) -------
+
+
+def test_detect_newline_majority_then_first():
+    assert detect_newline("a\r\nb\r\nc\n") == "\r\n"
+    assert detect_newline("a\nb\nc\r\n") == "\n"
+    assert detect_newline("a\rb\rc\r") == "\r"
+    assert detect_newline("a\r\nb\n") == "\r\n"  # a tie: the first seen
+    assert detect_newline("a\nb\r\n") == "\n"
+    assert detect_newline("no line ending") == "\n"
+    assert detect_newline("") == "\n"
+    assert set(NEWLINES) == {"\r\n", "\n", "\r"}
+
+
+def test_crlf_file_round_trips_with_every_line_ending_converted():
+    """The old `FileSaver` converted every line ending to the file's type:
+    `a\r\nb\r\n` loaded, `\nnew` typed, saved as `a\r\nb\r\nnew\r\n`. The
+    first version of the split wrote `a\r\nb\nnew\r\n`."""
+    text, newline = fill_text("a\r\nb\r\n", True)
+    assert (text, newline) == ("a\nb", "\r\n")
+    assert save_text(text + "\nnew", newline, True) == "a\r\nb\r\nnew\r\n"
+
+
+def test_mixed_input_is_normalised_to_the_detected_ending():
+    text, newline = fill_text("a\r\nb\nc\r\n", True)
+    assert (text, newline) == ("a\nb\nc", "\r\n")
+    # A CRLF pasted into the buffer and a CR are written as the file's ending.
+    assert save_text("a\nb\r\nc\rd", newline, True) == "a\r\nb\r\nc\r\nd\r\n"
+    assert save_text("a\nb\r\nc", "\n", True) == "a\nb\nc\n"
+
+
+def test_lf_file_is_untouched():
+    text, newline = fill_text("x\n\n", True)
+    assert (text, newline) == ("x\n", "\n")
+    assert save_text(text, newline, True) == "x\n\n"
+    assert fill_text("x", True) == ("x", "\n")
+    assert save_text("x\nnew", "\n", True) == "x\nnew\n"  # a missing final newline is added
+    assert save_text("", "\n", True) == ""  # an empty buffer stays an empty file
+    assert save_text("x", "\n", False) == "x"  # implicit newline off: nothing added
+
+
+def test_fill_text_keeps_a_bom_and_an_unknown_newline_is_lf():
+    text, newline = fill_text("\ufeffa\r\n", True)
+    assert (text, newline) == ("\ufeffa", "\r\n")
+    assert save_text(text, newline, True) == "\ufeffa\r\n"
+    assert save_text("a\nb", "??", True) == "a\nb\n"
 
 
 # -- should_highlight -----------------------------------------------------------

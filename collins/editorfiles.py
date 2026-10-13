@@ -275,6 +275,57 @@ def holds_nul(text: str) -> bool:
     return "\x00" in text
 
 
+NEWLINES = ("\r\n", "\n", "\r")
+
+
+def detect_newline(text: str) -> str:
+    """The line ending a file uses, as `GtkSource.File`'s newline type said
+    it: the most frequent of CRLF, bare LF and bare CR in *text*, the first
+    seen breaking a tie; LF for a text with none. The save writes every
+    line ending as this one (the Fable review of PR 609, should-fix 2: a
+    CRLF file edited once came back with LF lines among its CRLF ones)."""
+    crlf = text.count("\r\n")
+    lf = text.count("\n") - crlf
+    cr = text.count("\r") - crlf
+    counts = {"\r\n": crlf, "\n": lf, "\r": cr}
+    best = max(counts.values())
+    if best == 0:
+        return "\n"
+    tied = [ending for ending in NEWLINES if counts[ending] == best]
+    return min(tied, key=text.find)  # of a tie, the one that appears first
+
+
+def normalise_newlines(text: str) -> str:
+    """Every line ending in *text* as LF: what the buffer holds."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def fill_text(text: str, implicit_trailing_newline: bool) -> tuple[str, str]:
+    """What `fs.read`'s *text* becomes in the buffer, and the file's line
+    ending (`detect_newline`) a save puts back: the text with every line
+    ending as LF and, when the buffer's implicit trailing newline is on,
+    the final one stripped (what `FileLoader` did, so a file shows no empty
+    last line; `save_text` puts it back)."""
+    newline = detect_newline(text)
+    text = normalise_newlines(text)
+    if implicit_trailing_newline and text.endswith("\n"):
+        text = text[:-1]
+    return text, newline
+
+
+def save_text(text: str, newline: str, implicit_trailing_newline: bool) -> str:
+    """The buffer's *text* as `fs.write` sends it: every line ending (an
+    LF typed, a CRLF pasted) as the file's *newline*, plus one final
+    *newline* when the buffer's implicit trailing newline is on and the
+    text is not empty (what `FileSaver` wrote)."""
+    if newline not in NEWLINES:
+        newline = "\n"
+    out = normalise_newlines(text)
+    if out and implicit_trailing_newline:
+        out += "\n"
+    return out.replace("\n", newline) if newline != "\n" else out
+
+
 def first_line(text: str, max_chars: int = 512) -> str:
     """The first line of *text* (line ending stripped, cut at *max_chars*)
     — just enough for `guess_language_id`'s shebang sniff. The text is

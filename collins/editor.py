@@ -94,8 +94,9 @@ class _OpenFile:
         self.mtime: int | None = None
         self.size: int | None = None
         self.encoding = "utf-8"
-        # The line ending a save puts back when the buffer's implicit
-        # trailing newline is on (what `_fill` stripped).
+        # The file's line ending (`editorfiles.detect_newline` at the fill):
+        # every line ending the save writes, and the final one it puts back
+        # when the buffer's implicit trailing newline is on.
         self.newline = "\n"
         # Whether the buffer has ever held the file: a save before the
         # first fill would write an empty buffer over it (the view is not
@@ -959,19 +960,17 @@ class EditorPane(Gtk.Box):
     def _fill(self, opened: _OpenFile, read: remotefiles.FileText) -> None:
         """The buffer's text replaced by what the service read, outside the
         undo history (as the loader's load was), and the file's facts kept
-        for the save that follows. The file's final newline is stripped
-        when the buffer's implicit trailing newline is on (what the loader
-        did; `_do_save` puts it back), so a file does not show an empty
-        last line."""
-        text = read.text
-        if editorfiles.holds_nul(text):
+        for the save that follows. Line endings become LF in the buffer and
+        the file's own is kept as `opened.newline` for the save; the final
+        newline is stripped when the buffer's implicit trailing newline is
+        on (what the loader did; `_do_save` puts it back), so a file does
+        not show an empty last line."""
+        if editorfiles.holds_nul(read.text):
             return  # never a truncated buffer that a save could write back
-        newline = "\n"
-        if opened.buffer.get_implicit_trailing_newline():
-            if text.endswith("\r\n"):
-                text, newline = text[:-2], "\r\n"
-            elif text.endswith("\n"):
-                text = text[:-1]
+        # The buffer holds LF lines; the file's own line ending (CRLF, CR)
+        # is detected here and every line ending is written back as it
+        # (`editorfiles.save_text`), as `GtkSource.File`'s newline type did.
+        text, newline = editorfiles.fill_text(read.text, opened.buffer.get_implicit_trailing_newline())
         opened.buffer.begin_irreversible_action()
         opened.buffer.set_text(text)
         opened.buffer.end_irreversible_action()
@@ -1036,9 +1035,11 @@ class EditorPane(Gtk.Box):
                 on_done(True)
             return
         start, end = opened.buffer.get_bounds()
-        text = opened.buffer.get_text(start, end, True)
-        if text and opened.buffer.get_implicit_trailing_newline():
-            text += opened.newline  # what `_fill` stripped (the saver's implicit newline)
+        text = editorfiles.save_text(
+            opened.buffer.get_text(start, end, True),
+            opened.newline,  # the file's line ending, every line's; the final one `_fill` stripped
+            opened.buffer.get_implicit_trailing_newline(),
+        )
         path = str(opened.path)
         encoding = opened.encoding
         opened.saving = True

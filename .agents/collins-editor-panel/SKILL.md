@@ -91,10 +91,16 @@ files.py` the service's:
   `remotefiles.refusal_words` into the banner; a fresh open closes its tab,
   a reload keeps it. `load_id` still makes a superseded read (a rename's)
   a no-op.
-- `_fill` strips the file's final newline when the buffer's implicit
-  trailing newline is on (what `FileLoader` did; `opened.newline` keeps
-  `\n` or `\r\n`) and `_do_save` puts it back, so a file shows no empty
-  last line and a save adds a missing final newline. `_fill` also marks
+- `_fill` holds the buffer's text as LF lines and keeps the file's own
+  line ending as `opened.newline` (`editorfiles.fill_text`: the majority
+  of CRLF, LF and CR, the first seen on a tie, as `GtkSource.File`'s
+  newline type said it), stripping the final newline when the buffer's
+  implicit trailing newline is on (what `FileLoader` did); `_do_save`
+  writes every line ending as the file's and puts the final one back
+  (`editorfiles.save_text`, what `FileSaver` did: a CRLF file edited
+  stays CRLF throughout; the first split version left LF lines among its
+  CRLF ones), so a file shows no empty last line and a save adds a
+  missing final newline. `_fill` also marks
   the buffer `filled` and makes the view editable: until then a save is
   refused ("still loading") and nothing can be typed, so a Ctrl+S or a
   close-flow Save during the first read never writes an empty buffer over
