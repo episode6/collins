@@ -90,6 +90,19 @@ def test_read_flags_a_binary_file_with_no_text(served):
     assert reply["binary"] is True and reply["text"] == "" and reply["size"] == 9
 
 
+def test_read_flags_a_nul_past_eight_kib_as_binary(served):
+    """The Fable review of PR 609, must-fix 1: the sniff covered the first
+    8 KiB only, so a text file with a NUL at byte 9000 was answered as text
+    with the NUL in it; the client's `set_text` stopped there and a save
+    wrote the cut. A NUL anywhere is `binary`."""
+    core, client, project, _events = served
+    data = b"head\n" + b"x" * 9000 + b"\n\x00tail-after-nul\nmore\n"
+    assert data.index(b"\x00") > 8192
+    (project / "late-nul.log").write_bytes(data)
+    reply = client.request({"t": "fs.read", "path": str(project / "late-nul.log")})
+    assert reply["binary"] is True and reply["text"] == "" and reply["size"] == len(data)
+
+
 def test_read_over_five_mib_is_refused(served):
     core, client, project, _events = served
     big = project / "big.txt"

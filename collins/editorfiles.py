@@ -266,6 +266,15 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
     return None
 
 
+def holds_nul(text: str) -> bool:
+    """Whether *text* (what `fs.read` answered) has a NUL in it: the
+    buffer's `set_text` stops at one, so a file shown through it would be
+    cut short and a save would write the cut (the Fable review of PR 609,
+    must-fix 1). The service answers such a file `binary`; this is the
+    client's own refusal, so no truncated buffer ever becomes saveable."""
+    return "\x00" in text
+
+
 def first_line(text: str, max_chars: int = 512) -> str:
     """The first line of *text* (line ending stripped, cut at *max_chars*)
     — just enough for `guess_language_id`'s shebang sniff. The text is

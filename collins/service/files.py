@@ -16,7 +16,7 @@ PR-2.3 adds the editor's requests, served by `Files`:
 
 - `fs.read {path, max}`: the file's bytes, decoded as UTF-8 or, when they
   are not UTF-8, as latin-1 with the encoding flagged (so the save writes
-  them back the same way); `binary` (a NUL in the first 8 KiB) with an
+  them back the same way); `binary` (a NUL anywhere in the bytes) with an
   empty text; the `mtime` (microseconds) the save that follows expects
   and the `size`. Refused `refused` over `max` (FILE_TEXT_MAX at most),
   for a path that is not a regular file, and outside every root.
@@ -71,9 +71,11 @@ from ..sessions import worktree_project_root
 
 log = logging.getLogger(__name__)
 
-# A NUL in this many leading bytes makes a file binary (editorfiles'
-# sniff, now the service's).
-BINARY_SNIFF_BYTES = 8192
+# A NUL anywhere in the bytes makes a file binary: the client's buffer
+# `set_text` stops at a NUL, so a file with one past a leading sniff would
+# show cut short and a save would write the cut (the Fable review of PR
+# 609, must-fix 1: the sniff was 8 KiB). The bytes are in hand; a 5 MiB
+# scan is under a millisecond.
 # The editor's monitor debounce, now the service's: long enough that a
 # run of quick writes (an agent's edit tool) coalesces into one check.
 WATCH_DEBOUNCE_MS = 300
@@ -334,7 +336,7 @@ def read_file(path: str, max_bytes: int, roots: Sequence[str] | None = None) -> 
             protocol.ERROR_REFUSED, TOO_LARGE_MSGID, {"size": len(data), "max": max_bytes},
         )
     fields = {"mtime": mtime_us(st), "size": len(data), "binary": False}
-    if b"\x00" in data[:BINARY_SNIFF_BYTES]:
+    if b"\x00" in data:
         return {**fields, "text": "", "encoding": protocol.FILE_ENCODING_UTF8, "binary": True}
     try:
         text = data.decode("utf-8")

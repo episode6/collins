@@ -82,8 +82,11 @@ files.py` the service's:
   read: the service refuses a path that is not a regular file, one over
   5 MiB (`protocol.FILE_TEXT_MAX`) and one outside every root it knows
   (`files.allowed`: a live session's cwd, a store session's cwd or project
-  root, anything for a `local` client), and flags `binary` (a NUL in the
-  first 8 KiB) and `latin-1` (bytes that are not UTF-8, written back the
+  root, anything for a `local` client), and flags `binary` (a NUL anywhere
+  in the bytes: `GtkSource.Buffer.set_text` stops at one, so a sniff of the
+  first 8 KiB let a later NUL cut the buffer short and a save write the
+  cut; `_on_loaded` refuses a NUL in the text too, `editorfiles.holds_nul`)
+  and `latin-1` (bytes that are not UTF-8, written back the
   same way). A refusal's words come translated through
   `remotefiles.refusal_words` into the banner; a fresh open closes its tab,
   a reload keeps it. `load_id` still makes a superseded read (a rename's)

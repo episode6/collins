@@ -912,7 +912,9 @@ class EditorPane(Gtk.Box):
         failure: str | None = None
         if kind != "ok":
             failure = remotefiles.refusal_words(value)
-        elif value.binary:
+        elif value.binary or editorfiles.holds_nul(value.text):
+            # The service answers a NUL as `binary`; the client refuses one
+            # too, since `set_text` would stop at it and a save write the cut.
             failure = self._guard_message(opened.path, editorfiles.LoadGuard.BINARY)
         if failure is not None:
             if reload:
@@ -962,6 +964,8 @@ class EditorPane(Gtk.Box):
         did; `_do_save` puts it back), so a file does not show an empty
         last line."""
         text = read.text
+        if editorfiles.holds_nul(text):
+            return  # never a truncated buffer that a save could write back
         newline = "\n"
         if opened.buffer.get_implicit_trailing_newline():
             if text.endswith("\r\n"):

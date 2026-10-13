@@ -23,6 +23,7 @@ from collins.editorfiles import (
     format_copied_files,
     gallery_step,
     guess_language_id,
+    holds_nul,
     image_guard,
     is_image_path,
     is_inside,
@@ -359,6 +360,23 @@ def test_lightbox_layout_unrealized_window_uses_fallback():
 def test_lightbox_layout_zero_size_image_does_not_divide_by_zero():
     side, w, h = lightbox_layout(0, 0, 1920, 1080)
     assert (w, h) == (LIGHTBOX_MIN_W, LIGHTBOX_MIN_H)
+
+
+# -- holds_nul (the client's own refusal of a NUL in fs.read's text) -------------
+
+
+def test_holds_nul_refuses_a_nul_anywhere():
+    """The Fable review of PR 609, must-fix 1: `GtkSource.Buffer.set_text`
+    stops at a NUL, so a text with one would show cut short and a save
+    would write the cut. The service answers such a file `binary`; the
+    client refuses it too, wherever the NUL is."""
+    assert holds_nul("head\n" + "x" * 9000 + "\n\x00tail\n") is True
+    assert holds_nul("\x00") is True
+
+
+def test_holds_nul_passes_plain_text():
+    assert holds_nul("") is False
+    assert holds_nul("one\ntwo\r\n\t\x01\xff") is False
 
 
 # -- should_highlight -----------------------------------------------------------
