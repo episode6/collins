@@ -18,7 +18,6 @@ session reads the file once. GTK-free; the read runs on a worker thread
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 
@@ -71,19 +70,29 @@ def read_links(path: str) -> list[str]:
 def bound(links: list[str]) -> list[str]:
     """*links* cut to what `store.transcript-tail`'s reply may carry: a link
     over TRANSCRIPT_LINK_MAX characters is left out (a longer one is not a
-    link the screen could show whole), and of the rest the most recent ones
-    are kept, at most TRANSCRIPT_LINKS_MAX and TRANSCRIPT_LINKS_BYTES of
-    their JSON, in their original order. The screen shows the transcript's
-    end, so what the cut drops is the oldest."""
+    link the screen could show whole), and so is one UTF-8 cannot encode;
+    of the rest the most recent ones are kept, at most
+    TRANSCRIPT_LINKS_MAX and TRANSCRIPT_LINKS_BYTES of their JSON as the
+    frame writes it (`protocol.json_bytes`: UTF-8, not ASCII escapes), in
+    their original order. The screen shows the transcript's end, so what
+    the cut drops is the oldest.
+
+    The encode check is per link because the reply is validated whole: a
+    lone surrogate (the CLI cuts tool output by UTF-16 unit, so a result
+    cut inside an astral character ends in one, and both link patterns
+    take it as part of a token) fails the protocol's text check, and one
+    such link would lose the session every link of its tail until the
+    tail moved past it (the Fable review of PR 614)."""
     kept: list[str] = []
-    total = 0
+    total = 2  # the list's brackets
     for link in reversed(links):
-        if len(link) > protocol.TRANSCRIPT_LINK_MAX:
+        if not isinstance(link, str) or not 0 < len(link) <= protocol.TRANSCRIPT_LINK_MAX:
             continue
         try:
-            size = len(json.dumps(link))
-        except (TypeError, ValueError):
+            link.encode("utf-8")
+        except UnicodeEncodeError:
             continue  # not text a frame can carry
+        size = protocol.json_bytes(link) + (1 if kept else 0)  # and its comma
         if len(kept) >= protocol.TRANSCRIPT_LINKS_MAX or total + size > protocol.TRANSCRIPT_LINKS_BYTES:
             break
         kept.append(link)
