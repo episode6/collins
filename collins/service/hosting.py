@@ -261,6 +261,10 @@ class SessionRecord:
         self._sent: dict[str, Any] = {}  # the facts the clients were last sent
         self._landed = False  # a transcript read has landed since the last reset
         self._settle: int | None = None  # the output settle's timer, while one runs
+        # A close budget ran out and was told to a client, whose answer
+        # (the forced close) is awaited; cleared with that answer or the
+        # service's own force (`close_budget`, `client_detached`).
+        self.budget_spent = False
         self.on_settled: Callable[[SessionRecord], None] | None = None  # the tracker's hook
         self.session = Session(
             provider=provider,
@@ -677,12 +681,40 @@ class SessionRecord:
             cut.cancel()
 
     def close_budget(self) -> None:
-        """The close poll's budget ran out: the window decides (a forced
-        close, a dialog)."""
+        """The close poll's budget ran out (`Session.begin_close`'s force,
+        for the `exit` and `background` modes alike). With a client attached
+        the window decides, as its own budget always had it (a `close`
+        event, `state: budget`: the forced close, or a dialog). With none —
+        the tab detached mid-drain, a quit the user insisted on, a client
+        that crashed — nobody would answer, and the session the user asked
+        to stop would run on with nothing watching it (§3.10): the service
+        forces the close itself, as `ServiceCore.stop_sessions` does
+        (`end_close`, then the pty closed)."""
         pty = self.pty()
         if pty is None:
             return
+        if not pty.attachments:
+            self._force_close("no client is attached")
+            return
+        self.budget_spent = True
         self._event({"t": "close", "pty": pty.id, "state": "budget", "phase": self.session.close_phase()})
+
+    def client_detached(self) -> None:
+        """A client left this pty (a `detach`, or the client gone). A close
+        whose budget ran out while it was attached waits for its answer;
+        once no client is left to give one, the force is the service's."""
+        pty = self.pty()
+        if pty is None or pty.attachments or not self.budget_spent or not self.session.closing:
+            return
+        self._force_close("the client the budget was told to has gone")
+
+    def _force_close(self, why: str) -> None:
+        pty = self.pty()
+        if pty is None:
+            return
+        log.info("session %s: close budget ran out, %s: the pty is ended", self.handle, why)
+        self.budget_spent = False
+        self.core.force_close(pty.id)
 
     def _event(self, event: dict, active_only: bool = False) -> None:
         pty = self.pty()

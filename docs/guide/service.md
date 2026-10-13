@@ -93,6 +93,9 @@ service). The window remembers the tabs it had open on this service
 after a reconnect: a session the service still runs is attached, one that
 ended meanwhile (a restart, a crash of the service) is resumed. A crash of
 the window ends nothing; the next launch finds the tabs where they were.
+A session you asked to stop (a tab's close, *Stop Sessions and Quit*)
+stops even if its window goes before the agent has left: the service runs
+the graceful exit and, when the agent ignores it, ends the session itself.
 
 **Restart service** (the main menu) ends every session with the service:
 the dialog says how many, and how many are working. *Restart Now* sends

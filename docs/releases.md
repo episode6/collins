@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-05. Full change history: git log for this file.
+fork. Last modified: 2026-10-12. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -49,7 +49,9 @@ downloads of each version, see the
   and Quit* and *Keep Running (Hide Window)*. *Restart service* in the
   main menu restarts the service now or once no session is busy, and the
   tabs resume on the new one; a service speaking another protocol is
-  offered the same restart.
+  offered the same restart. A session asked to stop stops even when its
+  window goes first: the service runs the graceful exit and ends a session
+  that ignores it, whether or not a window is watching.
 
 - **The service is its own process.** Collins is now two programs:
   `collins-service` runs the sessions (every agent's pty, the terminal

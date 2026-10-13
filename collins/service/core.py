@@ -347,9 +347,13 @@ class ServiceCore:
             record = self.sessions.get(pty_id)
             if record is not None:
                 # A cut whose composer went with the client is called off;
-                # nothing else about the session changes.
+                # nothing else about the session changes — but a close
+                # whose budget this client was told of is forced once no
+                # client is left to answer (`client_detached`).
                 record.client_gone(sink)
             self.ptys.detach(pty_id, sink)
+            if record is not None:
+                record.client_detached()
 
     # -- requests
 
@@ -1008,6 +1012,9 @@ class ServiceCore:
         self.ptys.get(pty_id)
         self.ptys.detach(pty_id, client.sink_for(pty_id))
         client.forget(pty_id)
+        record = self.sessions.get(pty_id)
+        if record is not None:
+            record.client_detached()
         return protocol.reply(message.id)
 
     def _req_paint(self, message: protocol.Message, client: Client) -> dict:
@@ -1024,10 +1031,12 @@ class ServiceCore:
                 return protocol.refuse(
                     message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"
                 )
+            record.budget_spent = False
             record.session.begin_close(text, mode == "background", record.close_budget)
             return protocol.reply(message.id)
         if record is not None:
             record.session.end_close()
+            record.budget_spent = False
         self.ptys.close(pty_id)
         return protocol.reply(message.id)
 
@@ -2008,17 +2017,23 @@ class ServiceCore:
         GLib.timeout_add(100, settled)
         return ids
 
-    def _force_close_for(self, pty_id: int) -> Callable[[], None]:
-        def force() -> None:
-            record = self.sessions.get(pty_id)
-            if record is not None:
-                record.session.end_close()
-            try:
-                self.ptys.close(pty_id)
-            except KeyError:
-                pass
+    def force_close(self, pty_id: int) -> None:
+        """End agent pty *pty_id* now: its session's close poll stopped and
+        the pty closed (SIGHUP, the master closed, SIGKILL after the grace).
+        What a graceful close whose budget ran out comes to — `stop_sessions`'
+        force, and `SessionRecord.close_budget`'s when no client is attached
+        to answer the `close` event."""
+        record = self.sessions.get(pty_id)
+        if record is not None:
+            record.session.end_close()
+            record.budget_spent = False
+        try:
+            self.ptys.close(pty_id)
+        except KeyError:
+            pass
 
-        return force
+    def _force_close_for(self, pty_id: int) -> Callable[[], None]:
+        return lambda: self.force_close(pty_id)
 
     def shutdown(self) -> None:
         self.cancel_restart()

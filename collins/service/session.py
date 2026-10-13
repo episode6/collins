@@ -2525,7 +2525,10 @@ class Session:
         """The shell is gone, and the box with it (--die-with-parent). What
         was mounted into it goes on the grants' worker, and the rest
         follows from there: the main loop waits for none of it. Then the
-        tab hears the exit (`SessionHost.process_exited`)."""
+        tab hears the exit (`SessionHost.process_exited`). A close in
+        flight is over with the shell: `closing` is not left True on a
+        record the exit has dropped."""
+        self.end_close()
         box, host = self.sandbox_box, self._sandbox_host()
         held = self.sandbox_plan_path is not None and bool(box)
         sandboxplan.release_plan(self.sandbox_plan_path)

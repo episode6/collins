@@ -1349,6 +1349,100 @@ def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup
     pump(0.3)
 
 
+def _closing_server(tmp_path, monkeypatch):
+    """A core on /bin/sh with the force budgets cut to two ticks and a
+    short kill grace, and an attached agent whose typed command ignores
+    Ctrl+C in a group of its own: the graceful close can only run out."""
+    from collins.service import ptyserver
+    from collins.service import session as session_mod
+
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(session_mod, "EXIT_FORCE_TICKS", 2)
+    monkeypatch.setattr(session_mod, "BG_FORCE_TICKS", 2)
+    monkeypatch.setattr(session_mod, "EXIT_NUDGE_TICKS", ())
+    monkeypatch.setattr(session_mod, "BG_NUDGE_TICKS", ())
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    reply = client.request({
+        "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
+        "command_override": "sh -c 'trap \"\" INT; exec sleep 300'",
+    })
+    pty = reply["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+    return srv, core, client, ends, pty
+
+
+@pytest.mark.parametrize("mode", ["exit", "background"])
+@pytest.mark.parametrize("leave", ["client_gone", "detach"])
+def test_a_close_budget_with_no_client_attached_ends_the_pty(tmp_path, monkeypatch, mode, leave):
+    """PR 605's review, must-fix 1 (the reviewer's probe): a graceful close
+    whose client went away mid-drain — the tab detached, the quit insisted
+    on, the client crashed. The budget used to be told to the attachments
+    alone, so with none the poll ended and the CLI the user asked to stop
+    ran on for good. The service now forces the close itself: the pty and
+    its child are gone after the budget, the record's `closing` is False.
+    For the exit flow and the /bg handoff's alike."""
+    srv, core, client, ends, pty = _closing_server(tmp_path, monkeypatch)
+    try:
+        child = core.ptys.get(pty).child_pid()
+        job = core.ptys.get(pty).foreground_pgrp()
+        record = core.sessions[pty]
+        client.request({"t": "close", "pty": pty, "mode": mode, "text": "\x03\x03"})
+        assert record.session.closing
+        if leave == "client_gone":
+            client.close()
+        else:
+            client.request({"t": "detach", "pty": pty})
+        assert not core.ptys.get(pty).attachments
+        assert pump(10, lambda: pty not in core.ptys.ptys), "the pty outlived the budget"
+        assert record.session.closing is False
+        assert pump(5, lambda: not _live_in_group(job)), _live_in_group(job)
+        assert not os.path.exists(f"/proc/{child}") or open(f"/proc/{child}/stat").read().split()[2] == "Z"
+        assert not any(e.get("state") == "budget" for e in ends.of("close"))
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_close_budget_told_to_a_client_that_then_leaves_is_forced(tmp_path, monkeypatch):
+    """The budget ran out with the client attached (the `close` event went
+    to it, the window would force the close) and the client detached
+    before answering: the last detach is what forces it."""
+    srv, core, client, ends, pty = _closing_server(tmp_path, monkeypatch)
+    try:
+        record = core.sessions[pty]
+        client.request({"t": "close", "pty": pty, "mode": "exit", "text": "\x03\x03"})
+        assert pump(5, lambda: any(e.get("state") == "budget" for e in ends.of("close")))
+        pump(0.5)
+        assert pty in core.ptys.ptys and record.session.closing and record.budget_spent
+        client.request({"t": "detach", "pty": pty})
+        assert pump(5, lambda: pty not in core.ptys.ptys)
+        assert record.session.closing is False and record.budget_spent is False
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_shells_exit_ends_a_close_in_flight(tmp_path, monkeypatch):
+    """Nit 11: `closing` stayed True on a record whose shell had exited
+    mid-close (harmless, misleading in a dump); `shell_exited` ends it."""
+    srv, core, client, ends, pty = _closing_server(tmp_path, monkeypatch)
+    try:
+        record = core.sessions[pty]
+        client.request({"t": "close", "pty": pty, "mode": "exit", "text": "\x03\x03"})
+        assert record.session.closing
+        core.ptys.close(pty)  # the pty ends under the close, as a kill would
+        assert pump(5, lambda: pty not in core.ptys.ptys)
+        assert record.session.closing is False
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
 def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):
     """The CLI exited and the shell sits on the pty (a quit before
     1.12c's attach): the resume is not refused; the old pty is closed and

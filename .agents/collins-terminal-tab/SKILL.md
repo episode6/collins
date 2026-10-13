@@ -257,8 +257,13 @@ the window's final close calls `end_close`): it re-nudges at
 `EXIT_NUDGE_TICKS`/`BG_NUDGE_TICKS` (a mid-turn agent spends the first
 Ctrl+C Ctrl+C interrupting itself), answers the CLI's "keep or remove this
 worktree?" dialog with keep (`worktree_exit_prompt_keystrokes`), and
-force-closes at the tick budget (the window's `_close_confirmed`, handed
-in). Once the CLI is gone `_poll_shell_exit` feeds `shellinput.shell_command("exit\r")` — the `" \x15"` line reset first,
+force-closes at the tick budget (`SessionRecord.close_budget`: a `close`
+event, `state: budget`, to the attached clients, which the window answers
+with `_close_confirmed`; with no client attached — the tab detached
+mid-drain, a quit insisted on, a client crash — the service forces it
+itself, `ServiceCore.force_close`, and a last detach after the event went
+out does the same (`client_detached`), so a session the user asked to
+stop ends whether anyone watches or not). Once the CLI is gone `_poll_shell_exit` feeds `shellinput.shell_command("exit\r")` — the `" \x15"` line reset first,
 because a shell inherits input the CLI never read (VTE mouse reports), and a
 bare kill-line at column 0 rings the bell — and force-closes if the shell
 ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close
@@ -681,7 +686,9 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   `refocus_composer`, `resend_composed`, `stash_draft` and
   `mark_stale_shells` are `focus.terminal`, `composer` and `shells`
   events; a close budget running out is a `close` event (`state: budget`)
-  the window answers by forcing the close.
+  the window answers by forcing the close — sent only while a client is
+  attached; with none the service forces the close itself
+  (`ServiceCore.force_close`).
 - **The requests** (`ServiceCore._req_*`, each routed to the session by
   its pty): `prompt {text, focus, when_empty}` (with `when_empty` the
   service re-reads `takes_prompt` off the live screen and refuses with
