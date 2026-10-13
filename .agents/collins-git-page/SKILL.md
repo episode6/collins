@@ -492,7 +492,15 @@ client's link joining them). The `env` a runner is handed crosses as a
 name (`default`, `no_editor`, `no_prompt`; the service builds the
 environment), and a `cwd` must be a directory the service can see inside
 a session's roots or a project root the store knows — or anything for a
-client that proved it is `local` (`service/files.py`'s `allowed`).
+client that proved it is `local` (`service/files.py`'s `Confinement`:
+the `local` flag and the roots' names read on the main loop,
+`files.confinement`, and the symlink-resolving compare run on the
+request's thread, `allows`, each root resolved once per request —
+`files.allowed` at the top of every handler had resolved every root on
+the service's loop, 45 ms a call at 1200 roots; every `git.*` handler,
+the blob GET and `fs.trash` check on their worker now, and `git.watch`
+is a `Deferred` too, its directory walk on the thread and its monitors
+installed on the loop when that lands).
 `file_at` of any side is `GET /api/blob?kind=git&cwd=…&at=worktree|
 index|ref&ref=…&path=…` on the same socket (`SocketLink.http_get`, the
 `Collins-Client` header naming the client for the confinement; an ETag

@@ -26,7 +26,7 @@ from gi.repository import Gio, GLib
 
 from .. import gitops
 from ..api import protocol
-from ..editorfiles import is_inside
+from ..editorfiles import is_inside  # noqa: F401  (gitfeed reads it as files.is_inside)
 from ..sessions import worktree_project_root
 
 log = logging.getLogger(__name__)
@@ -65,19 +65,73 @@ def _agent_cwd(session) -> str | None:
         return None
 
 
-def allowed(core, client, path: str | Path) -> bool:
-    """Whether *client* may name *path* (see the module docstring)."""
+class Confinement:
+    """What one client may name, in two halves (PR 608's Fable review,
+    should-fix 2): `confinement(core, client)` on the main loop reads the
+    `local` flag and the roots' names (attribute reads: cheap at any
+    store size), and `allows(path)` on the request's worker does the
+    resolving — `editorfiles.is_inside`'s rule, a symlink-resolving
+    compare, each root resolved once per request and kept — so a
+    thousand-root store costs the main loop nothing per `git.*` or
+    `fs.*` request (the resolves were 45 ms a call at 1200 roots)."""
+
+    __slots__ = ("local", "roots", "_resolved")
+
+    def __init__(self, local: bool, roots: Sequence[str]) -> None:
+        self.local = bool(local)
+        self.roots = tuple(roots)
+        self._resolved: dict[str, Path | None] = {}
+
+    def allows(self, path: str | Path) -> bool:
+        """Whether the client may name *path* (worker thread: resolves)."""
+        if self.local:
+            return True
+        try:
+            resolved = Path(path).resolve()
+        except OSError:
+            return False
+        for root in self.roots:
+            resolved_root = self._root(root)
+            if resolved_root is not None and (resolved == resolved_root or resolved_root in resolved.parents):
+                return True
+        return False
+
+    def _root(self, root: str) -> Path | None:
+        if root not in self._resolved:
+            try:
+                self._resolved[root] = Path(root).resolve()
+            except OSError:
+                self._resolved[root] = None
+        return self._resolved[root]
+
+
+def confinement(core, client) -> Confinement:
+    """The client's `Confinement` for one request: decided on the main
+    loop without a resolve (a `local` client's names no root)."""
     if getattr(client, "local", False):
-        return True
-    return any(is_inside(root, path) for root in roots(core))
+        return Confinement(True, ())
+    return Confinement(False, roots(core))
+
+
+def allowed(core, client, path: str | Path) -> bool:
+    """Whether *client* may name *path* (see the module docstring): both
+    halves at once, for a caller already off the main loop or a test."""
+    return confinement(core, client).allows(path)
+
+
+def cwd_text(cwd: object) -> str | None:
+    """*cwd* as the directory a request runs in, or None when it is not
+    text or not a directory the service can see (one stat; the
+    confinement is the worker's, `Confinement.allows`)."""
+    if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
+        return None
+    return cwd
 
 
 def allowed_cwd(core, client, cwd: object) -> str | None:
-    """*cwd* as the directory a request runs in, or None when it is not
-    text, not a directory the service can see, or not an allowed one."""
-    if not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
-        return None
-    return cwd if allowed(core, client, cwd) else None
+    """`cwd_text` and `allowed` at once (a caller off the main loop)."""
+    text = cwd_text(cwd)
+    return text if text is not None and allowed(core, client, text) else None
 
 
 def trash_paths(root: str, paths: Sequence[str]) -> gitops.GitResult:
@@ -116,15 +170,23 @@ def handle_trash(core, client, message: protocol.Message, later=None) -> dict | 
     loop through *later* (`gitfeed.GitFeed._later`: a thread and a
     `Deferred`); with none it runs inline (a test's)."""
     paths = [str(p) for p in message.get("paths") or ()]
-    for path in paths:
-        if not os.path.isabs(path) or not allowed(core, client, path):
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "{path} is outside every root the service knows",
-                {"path": path[: protocol.ARG_TEXT_MAX]},
-            )
     re_id = message.id
+    conf = confinement(core, client)
+
+    def outside(path: str) -> dict:
+        return protocol.refuse(
+            re_id, protocol.ERROR_REFUSED, "{path} is outside every root the service knows",
+            {"path": path[: protocol.ARG_TEXT_MAX]},
+        )
+
+    for path in paths:
+        if not os.path.isabs(path):
+            return outside(path)
 
     def work() -> dict:
+        for path in paths:  # the resolves, on the worker
+            if not conf.allows(path):
+                return outside(path)
         trashed, failure = trash_absolute(paths)
         if failure is not None:
             return protocol.refuse(

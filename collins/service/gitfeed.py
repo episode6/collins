@@ -12,10 +12,14 @@ blob GET the API server hands it:
   ``unknown``, args the builder refuses or an argv that isn't bounded
   text ``invalid``) and the result runs on this machine's git, in the
   `cwd` the client named — a directory the service can see, inside a
-  root it knows or anything for a `local` client (`files.allowed_cwd`;
-  refused otherwise). The reply is git's exit status (null when git
-  couldn't be run) and both streams as text. **The wire never carries an
-  argv**, and the service never runs one it did not build.
+  root it knows or anything for a `local` client (`files.confinement`,
+  the roots read on the main loop and resolved on the worker; refused
+  otherwise) — after every argument the builder flags as a path on disk
+  (`gitops.Builder.disk_paths`) is resolved inside the repository
+  (`_outside_tree`; ``invalid`` otherwise). The reply is git's exit
+  status (null when git couldn't be run) and both streams as text.
+  **The wire never carries an argv**, and the service never runs one it
+  did not build.
 - `git.info {cwd, changes, state, known_refs}`: `gitfiles.read_info` — every
   read gitinfo makes at once, the heads only when the client's refs digest
   differs — plus, when asked, the `git status` behind has_changes /
@@ -36,7 +40,10 @@ blob GET the API server hands it:
 the tree does so on a daemon thread and answers through a
 `protocol.Deferred` settled on the main loop (`GLib.idle_add` at
 `PRIORITY_DEFAULT`); the transport sends the reply when it settles. The
-watch's compares run the same way.
+watch's compares run the same way, and so does the confinement of every
+request's cwd (the resolve per root: `files.Confinement.allows` in the
+thread, the roots' names read on the main loop) and the watch's walk for
+its directories.
 
 GLib and Gio only; nothing here imports GTK.
 """
@@ -127,25 +134,49 @@ class GitFeed:
             watch.stop()
         self._watches.clear()
 
-    def _cwd(self, message: protocol.Message, client) -> str | dict:
-        cwd = files.allowed_cwd(self.core, client, message.get("cwd"))
+    def _cwd(self, message: protocol.Message, client) -> tuple[str, Callable[[], dict | None]] | dict:
+        """The request's cwd and its confinement check, or the refusal of
+        a cwd that is not a directory. The main-loop half is one stat and
+        the roots' names (`files.confinement`); the check — the resolves
+        — is the worker's: every handler's work calls it first and
+        answers its refusal (should-fix 2 of PR 608's review)."""
+        cwd = files.cwd_text(message.get("cwd"))
         if cwd is None:
-            return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "{cwd} is not a directory the service may run git in",
-                {"cwd": str(message.get("cwd"))[: protocol.ARG_TEXT_MAX]},
-            )
-        return cwd
+            return self._cwd_refusal(message)
+        conf = files.confinement(self.core, client)
+        refusal = self._cwd_refusal(message)
 
-    def _later(self, name: str, work: Callable[[], dict], re_id: int | None = None) -> protocol.Deferred:
+        def check() -> dict | None:
+            return None if conf.allows(cwd) else refusal
+
+        return cwd, check
+
+    @staticmethod
+    def _cwd_refusal(message: protocol.Message) -> dict:
+        return protocol.refuse(
+            message.id, protocol.ERROR_REFUSED, "{cwd} is not a directory the service may run git in",
+            {"cwd": str(message.get("cwd"))[: protocol.ARG_TEXT_MAX]},
+        )
+
+    def _later(
+        self,
+        name: str,
+        work: Callable[[], dict],
+        re_id: int | None = None,
+        check: Callable[[], dict | None] | None = None,
+    ) -> protocol.Deferred:
         """*work* on a thread, its reply dict settled on the main loop. A
         *work* that raises settles a ``failed`` refusal of *re_id* (the
         request's id) rather than never settling: the peer gets exactly
-        one response either way."""
+        one response either way. *check* (the cwd's confinement) runs on
+        the thread first; its refusal is the reply and *work* never runs."""
         deferred = protocol.Deferred()
 
         def run() -> None:
             try:
-                reply = work()
+                reply = check() if check is not None else None
+                if reply is None:
+                    reply = work()
             except Exception:
                 log.exception("gitfeed: %s failed on its thread", name)
                 reply = protocol.refuse(
@@ -160,9 +191,10 @@ class GitFeed:
     # -- git.run ---------------------------------------------------------------------------
 
     def run(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        cwd = self._cwd(message, client)
-        if isinstance(cwd, dict):
-            return cwd
+        found = self._cwd(message, client)
+        if isinstance(found, dict):
+            return found
+        cwd, check = found
         name = str(message.get("builder"))
         try:
             argv = gitops.build(name, message.get("args") or {})
@@ -205,7 +237,7 @@ class GitFeed:
                 )
             return protocol.reply(re_id, status=status, stdout=stdout, stderr=stderr, unreachable=False)
 
-        return self._later("git-run", work, re_id)
+        return self._later("git-run", work, re_id, check)
 
     def _environment(self, name: str) -> dict[str, str] | None:
         if name == protocol.GIT_ENV_DEFAULT:
@@ -220,9 +252,10 @@ class GitFeed:
     # -- git.info --------------------------------------------------------------------------
 
     def info(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        cwd = self._cwd(message, client)
-        if isinstance(cwd, dict):
-            return cwd
+        found = self._cwd(message, client)
+        if isinstance(found, dict):
+            return found
+        cwd, check = found
         wants_changes = bool(message.get("changes"))
         wants_state = bool(message.get("state"))
         known = message.get("known_refs")
@@ -238,14 +271,15 @@ class GitFeed:
                 fields["state"] = gitops.tree_state_signature(cwd)
             return protocol.reply(re_id, **fields)
 
-        return self._later("git-info", work, re_id)
+        return self._later("git-info", work, re_id, check)
 
     # -- git.sizes -------------------------------------------------------------------------
 
     def sizes(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        cwd = self._cwd(message, client)
-        if isinstance(cwd, dict):
-            return cwd
+        found = self._cwd(message, client)
+        if isinstance(found, dict):
+            return found
+        cwd, check = found
         paths = [p for p in (message.get("paths") or ()) if gitops.safe_path(p)]
         re_id = message.id
 
@@ -259,18 +293,24 @@ class GitFeed:
             sizes.update(gitops.file_sizes(base, inside))
             return protocol.reply(re_id, sizes=sizes)
 
-        return self._later("git-sizes", work, re_id)
+        return self._later("git-sizes", work, re_id, check)
 
     # -- the watch -------------------------------------------------------------------------
 
-    def watch(self, message: protocol.Message, client) -> dict:
+    def watch(self, message: protocol.Message, client) -> dict | protocol.Deferred:
         """`git.watch {cwd, handle, files, state}`: a watch of *cwd* under
         the client's *handle* (the page's own name for it: two pages on
         one tree keep two watches, and one page's unwatch never takes the
-        other's down). The same handle again replaces that watch."""
-        cwd = self._cwd(message, client)
-        if isinstance(cwd, dict):
-            return cwd
+        other's down). The same handle again replaces that watch. The
+        watch is registered now (an unwatch or a replacement in between
+        still finds it) and installed when its thread has confined the
+        cwd and walked the tree for the directories to monitor
+        (`_Watch.directories`; nit 11 of PR 608's review: no stat walk on
+        the main loop); the reply settles with the install."""
+        found = self._cwd(message, client)
+        if isinstance(found, dict):
+            return found
+        cwd, check = found
         key = (id(client), str(message.get("handle")))
         old = self._watches.pop(key, None)
         if old is not None:
@@ -279,8 +319,31 @@ class GitFeed:
         seed = message.get("state")
         watch = _Watch(self, cwd, client, files_, seed if isinstance(seed, str) else None)
         self._watches[key] = watch
-        watch.start()
-        return protocol.reply(message.id)
+        re_id = message.id
+        deferred = protocol.Deferred()
+
+        def run() -> None:
+            try:
+                refusal = check()
+                dirs = watch.directories() if refusal is None else []
+            except Exception:
+                log.exception("gitfeed: git-watch failed on its thread")
+                refusal = protocol.refuse(re_id, protocol.ERROR_FAILED, "git-watch failed on the service")
+                dirs = []
+            self._dispatch(lambda: landed(refusal, dirs))
+
+        def landed(refusal: dict | None, dirs: list[str]) -> None:
+            if refusal is not None:
+                if self._watches.get(key) is watch:
+                    del self._watches[key]
+                watch.stop()
+                deferred.settle(refusal)
+                return
+            watch.install(dirs)  # a no-op for one stopped or replaced meanwhile
+            deferred.settle(protocol.reply(re_id))
+
+        self._spawn(run, "git-watch")
+        return deferred
 
     def unwatch(self, message: protocol.Message, client) -> dict:
         """`git.unwatch {handle}`: that one watch of the client's, gone."""
@@ -299,9 +362,10 @@ class GitFeed:
     # -- git.plan --------------------------------------------------------------------------
 
     def plan(self, message: protocol.Message, client) -> dict | protocol.Deferred:
-        cwd = self._cwd(message, client)
-        if isinstance(cwd, dict):
-            return cwd
+        found = self._cwd(message, client)
+        if isinstance(found, dict):
+            return found
+        cwd, check = found
         load = message.get("load")
         path = message.get("path")
         previous = message.get("previous_path")
@@ -353,7 +417,7 @@ class GitFeed:
                 conflicts=bool(result.conflicts),
             )
 
-        return self._later("git-plan", work, re_id)
+        return self._later("git-plan", work, re_id, check)
 
     # -- the blob GET ----------------------------------------------------------------------
 
@@ -364,7 +428,7 @@ class GitFeed:
         SocketClient the request named, or None): *respond(status,
         headers, body)* is called on the main loop once the read lands."""
         params = {key: values[-1] for key, values in parse_qs(query or "", keep_blank_values=True).items()}
-        cwd = files.allowed_cwd(self.core, client, params.get("cwd"))
+        cwd = files.cwd_text(params.get("cwd"))
         at = params.get("at") or gitops.AT_REF
         ref = params.get("ref") or ""
         path = params.get("path") or ""
@@ -377,8 +441,12 @@ class GitFeed:
         if at == gitops.AT_REF and not gitloads.safe_ref(ref):
             self._dispatch(lambda: respond(400, {}, b""))
             return
+        conf = files.confinement(self.core, client)
 
         def work() -> None:
+            if not conf.allows(cwd):  # the resolves, on the thread
+                self._dispatch(lambda: respond(403, {}, b""))
+                return
             status, headers, body = read_blob(cwd, at, ref, path, if_none_match)
             self._dispatch(lambda: respond(status, headers, body))
 
@@ -539,15 +607,29 @@ class _Watch:
         self._seeded = state is not None
         self.last: tuple[str | None, str | None, str | None] = (None, None, state)
 
-    def start(self) -> None:
-        root = gitfiles.repo_root(self.cwd)
-        base = str(root) if root is not None else self.cwd
+    def directories(self) -> list[str]:
+        """The directories to monitor (worker thread: the repository root
+        walk and a resolve per directory): each loaded file's, the old
+        path of a rename too; the root alone past MAX_DIR_MONITORS or
+        with no file; and never one outside the tree — a path under a
+        symlink out of the repository would watch a stranger's directory
+        (the disk-path rule of PR 608's must-fix 1)."""
+        base = _tree_base(self.cwd)
         dirs: set[str] = set()
         for path in self.paths:
-            dirs.add(os.path.dirname(os.path.join(base, path)))
+            directory = os.path.dirname(os.path.join(base, path))
+            if files.is_inside(base, directory):
+                dirs.add(directory)
         if not dirs or len(dirs) > MAX_DIR_MONITORS:
             dirs = {base}
-        for directory in sorted(dirs):
+        return sorted(dirs)
+
+    def install(self, dirs: Sequence[str]) -> None:
+        """Main loop: the monitors on *dirs*, the slow tick, the seeding
+        compare. Nothing for a watch stopped meanwhile."""
+        if self._stopped:
+            return
+        for directory in dirs:
             try:
                 monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.NONE, None)
             except GLib.Error as exc:
@@ -557,6 +639,12 @@ class _Watch:
             self._monitors.append(monitor)
         self._tick = GLib.timeout_add_seconds(WATCH_SLOW_TICK_S, self._on_tick)
         self.check()  # the seed
+
+    def start(self) -> None:
+        """`directories` on the host's thread, then `install` on its main
+        loop: the whole start for a watch nobody has to confine (the git
+        page's own, when git is local)."""
+        self.feed._spawn(lambda: self.feed._dispatch(lambda: self.install(self.directories())), "git-watch")
 
     def stop(self) -> None:
         self._stopped = True

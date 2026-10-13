@@ -190,6 +190,87 @@ def test_run_confines_the_cwd(served, tmp_path):
     assert run(client, "status_argv", cwd=sub)["status"] == 0
 
 
+def _message(raw: dict) -> protocol.Message:
+    checked = protocol.validate({"id": 7, **raw}, protocol.CLIENT)
+    assert not isinstance(checked, protocol.Refusal), checked
+    return checked
+
+
+def test_the_confinement_resolves_no_root_on_the_main_loop(tmp_path, monkeypatch):
+    """Should-fix 2 of PR 608's Fable review, measured at 45 ms per call
+    with 1200 roots: `files.allowed` resolved every known root at the top
+    of every `git.*` handler, on the service's main loop. The main-loop
+    half now reads the roots' names only; the resolves run on the
+    request's thread (`files.Confinement.allows`), each root once per
+    request. Counted with a feed whose thread is queued, not run."""
+    monkeypatch.setenv("SHELL", "/bin/cat")
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    queued: list = []
+    core.git = gitfeed.GitFeed(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: queued.append(fn))
+
+    def drain() -> None:  # every queued thread, the ones a landing queues included
+        while queued:
+            queued.pop(0)()
+
+    repo = make_repo(tmp_path)
+    roots = [tmp_path / f"root{i}" for i in range(50)]
+    for root in roots:
+        root.mkdir()
+    sessions = [type("S", (), {"cwd": str(root)})() for root in roots] + [type("S", (), {"cwd": str(repo)})()]
+    core.store = type("Store", (), {"all_sessions": lambda self: sessions})()
+    client = type("Client", (), {"local": False, "deliver": lambda self, event: None})()
+    resolves: list[str] = []
+    real_resolve = Path.resolve
+
+    def counted(self, *args, **kwargs):
+        resolves.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", counted)
+    try:
+        for raw in (
+            {"t": "git.run", "cwd": str(repo), "builder": "status_argv", "args": {}},
+            {"t": "git.info", "cwd": str(repo)},
+            {"t": "git.sizes", "cwd": str(repo), "paths": ["a.txt"]},
+            {"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"]},
+            {
+                "t": "git.plan", "cwd": str(repo), "load": "unstaged", "path": "new.txt",
+                "op": gitpatch.OP_ADD, "paths": ["new.txt"],
+            },
+            {"t": "fs.trash", "paths": [str(repo / "new.txt")]},
+        ):
+            del resolves[:]
+            message = _message(raw)
+            if raw["t"] == "fs.trash":
+                answer = files.handle_trash(core, client, message, later=core.git._later)
+            else:
+                answer = core.git.handle(message, client)
+            assert isinstance(answer, protocol.Deferred), raw["t"]
+            assert resolves == [], (raw["t"], resolves)  # the main-loop half resolved nothing
+            assert queued
+            drain()  # the thread's half: the resolves, each root once
+            assert resolves, raw["t"]
+            assert len([r for r in resolves if r in {str(root) for root in roots}]) <= len(roots)
+            settled = answer.reply
+            assert settled is not None and settled.get("error") != protocol.ERROR_REFUSED, (raw["t"], settled)
+        # A cwd under no root: refused from the thread, the same way.
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        del resolves[:]
+        answer = core.git.handle(_message({"t": "git.info", "cwd": str(elsewhere)}), client)
+        assert resolves == [] and queued
+        drain()
+        assert answer.reply.get("error") == protocol.ERROR_REFUSED
+        # A `local` client's confinement resolves nothing at all.
+        client.local = True
+        del resolves[:]
+        answer = core.git.handle(_message({"t": "git.info", "cwd": str(elsewhere)}), client)
+        drain()
+        assert resolves == [] and answer.reply.get("ok")
+    finally:
+        core.git.shutdown()
+
+
 def test_run_is_a_deferred_the_server_settles_later(served):
     """The core answers a run with a Deferred (never a blocking reply);
     the harness pumps until it settles — here inline, so at once."""
