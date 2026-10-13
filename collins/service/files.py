@@ -60,7 +60,6 @@ import os
 import stat as stat_mod
 import tempfile
 import threading
-import weakref
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
@@ -502,10 +501,12 @@ class Files:
         self._dispatch = dispatch or _dispatch_default
         self._spawn = spawn or _spawn_default
         self._watches: dict[tuple[int, str], _FileWatch] = {}
-        # Clients gone while a watch's confinement was on its worker: the
-        # install that lands after must not create their monitor (the
-        # worker's closure keeps the client alive exactly that long).
-        self._gone: weakref.WeakSet = weakref.WeakSet()
+        # The watches whose confinement is on a worker, by (client, handle)
+        # with a token per request: `unwatch` and `client_gone` drop the
+        # entry, and `_install_watch` installs only while its own token is
+        # still there (the verification of PR 609: an unwatch in that
+        # window was lost and the monitor leaked until the client left).
+        self._installing: dict[tuple[int, str], object] = {}
 
     # -- routing -------------------------------------------------------------------------
 
@@ -522,10 +523,8 @@ class Files:
         return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
 
     def client_gone(self, client) -> None:
-        try:
-            self._gone.add(client)
-        except TypeError:
-            pass  # not weak-referenceable: a test's stand-in
+        for key in [k for k in self._installing if k[0] == id(client)]:
+            del self._installing[key]
         for key, watch in list(self._watches.items()):
             if key[0] == id(client):
                 watch.stop()
@@ -652,6 +651,8 @@ class Files:
         seed = seed if isinstance(seed, int) and not isinstance(seed, bool) else None
         conf = confinement(self.core, client)
         deferred = protocol.Deferred()
+        token = object()
+        self._installing[(id(client), handle)] = token  # the same handle again supersedes
 
         def run() -> None:
             try:
@@ -660,7 +661,9 @@ class Files:
                 log.exception("files: fs.watch confinement failed on its thread")
                 inside = False
             re_id = message.id
-            self._dispatch(lambda: self._install_watch(deferred, re_id, client, path, handle, seed, inside))
+            self._dispatch(
+                lambda: self._install_watch(deferred, re_id, client, path, handle, seed, inside, token)
+            )
 
         self._spawn(run, "fs-watch")
         return deferred
@@ -674,12 +677,18 @@ class Files:
         handle: str,
         seed: int | None,
         inside: bool,
+        token: object,
     ) -> None:
         """The main-loop half of `watch`, once the worker said whether the
-        path is inside a root: the monitor, or the refusal."""
-        if client in self._gone:
-            deferred.settle(protocol.refuse(re_id, protocol.ERROR_GONE, "The client is gone"))
+        path is inside a root: the monitor, or the refusal. Installs only
+        while *token* is still the handle's in-flight entry: an `unwatch`
+        or the client's departure meanwhile dropped it, and so would a
+        newer `watch` of the same handle."""
+        key = (id(client), handle)
+        if self._installing.get(key) is not token:
+            deferred.settle(protocol.refuse(re_id, protocol.ERROR_GONE, "The watch was dropped"))
             return
+        del self._installing[key]
         if not inside:
             deferred.settle(
                 protocol.refuse(
@@ -687,7 +696,6 @@ class Files:
                 )
             )
             return
-        key = (id(client), handle)
         old = self._watches.pop(key, None)
         if old is not None:
             old.stop()
@@ -705,7 +713,9 @@ class Files:
         deferred.settle(protocol.reply(re_id))
 
     def unwatch(self, message: protocol.Message, client) -> dict:
-        watch = self._watches.pop((id(client), str(message.get("handle"))), None)
+        key = (id(client), str(message.get("handle")))
+        self._installing.pop(key, None)  # a watch still on its worker is not installed
+        watch = self._watches.pop(key, None)
         if watch is not None:
             watch.stop()
         return protocol.reply(message.id)

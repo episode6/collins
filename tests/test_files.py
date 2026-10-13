@@ -410,11 +410,45 @@ def test_a_watch_whose_client_left_during_confinement_is_not_installed(served):
     core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: workers.append(fn))
     inside = {"t": "fs.watch", "path": str(project / "a.txt"), "kind": "file", "handle": "w1"}
     deferred = _ask(core, client, inside)
+    assert core.files._installing
     core.client_gone(client)
+    assert not core.files._installing
     workers.pop()()
     assert deferred.settled and deferred.reply["ok"] is False
     assert deferred.reply["error"] == protocol.ERROR_GONE
-    assert not core.files._watches
+    assert not core.files._watches and not core.files._installing
+
+
+def test_an_unwatch_during_confinement_installs_no_monitor(served):
+    """The verification of PR 609: an `fs.unwatch` while the watch's
+    confinement was on its worker popped nothing, the install landed after
+    and the monitor leaked until the client left (past 512 leaks every new
+    watch of that client was refused). The in-flight registry is what the
+    unwatch clears and the install checks; a normal install still works."""
+    core, client, project, _events = served
+    workers: list = []
+    core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: workers.append(fn))
+    inside = {"t": "fs.watch", "path": str(project / "a.txt"), "kind": "file", "handle": "w1"}
+    deferred = _ask(core, client, inside)
+    assert client.request({"t": "fs.unwatch", "handle": "w1"}) == {}
+    assert not core.files._installing
+    workers.pop()()
+    assert deferred.settled and deferred.reply["ok"] is False
+    assert deferred.reply["error"] == protocol.ERROR_GONE
+    assert not core.files._watches and not core.files.watching(client, "w1")
+    deferred = _ask(core, client, inside)
+    workers.pop()()
+    assert deferred.reply.get("ok") is True and core.files.watching(client, "w1")
+    assert not core.files._installing
+    del workers[:]  # the installed watch's own first stat
+    # A second watch of the same handle while the first is on its worker
+    # supersedes it: only the newer one installs.
+    first = _ask(core, client, {**inside, "handle": "w2"})
+    second = _ask(core, client, {**inside, "handle": "w2"})
+    workers.pop(0)()
+    assert first.reply["ok"] is False and not core.files.watching(client, "w2")
+    workers.pop()()
+    assert second.reply["ok"] is True and core.files.watching(client, "w2")
 
 
 def test_file_stat_of_a_directory_is_gone(tmp_path):

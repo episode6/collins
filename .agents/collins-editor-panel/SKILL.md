@@ -99,9 +99,12 @@ files.py` the service's:
   name, which reported the file deleted, dirtied the buffer and lost the
   mtime (the Fable review of PR 609).
 - `_fill` holds the buffer's text as LF lines and keeps the file's own
-  line ending as `opened.newline` (`editorfiles.fill_text`: the majority
-  of CRLF, LF and CR, the first seen on a tie, as `GtkSource.File`'s
-  newline type said it), stripping the final newline when the buffer's
+  line ending as `opened.newline` (`editorfiles.fill_text`; the rule is
+  Collins' own: the majority of CRLF, LF and CR, the first seen on a tie.
+  `GtkSource.File`'s newline type took the first line ending it met, so
+  the one difference is a mixed file whose majority is not its first
+  ending: the old saver wrote the first, this writes the majority),
+  stripping the final newline when the buffer's
   implicit trailing newline is on (what `FileLoader` did); `_do_save`
   writes every line ending as the file's and puts the final one back
   (`editorfiles.save_text`, what `FileSaver` did: a CRLF file edited
