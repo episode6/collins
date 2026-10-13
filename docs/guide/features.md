@@ -329,7 +329,12 @@ Enter opens, Esc closes.
   once), *Ask*, *Stop Sessions*, *Background Session* and *Hide Window*.
 - **Restart service** (the main menu) restarts the Collins service after
   saying what it costs: how many sessions end, how many of them are
-  working. **Restart Now** ends them, the window reconnects to the new
+  working, and that the sessions running as `/bg` background agents keep
+  running — the CLI's background daemon is not the service's to stop
+  (the unit signals the service alone), so a stop, a restart or a package
+  upgrade of the service leaves every `/bg` agent where it was, and only
+  the foreground sessions end, gracefully and resumable. **Restart Now**
+  ends them, the window reconnects to the new
   service and every open tab resumes its session — what quitting and
   relaunching did before the service. **Restart When Idle** waits on the
   service until no session is busy; meanwhile "Restarting when idle"

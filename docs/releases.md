@@ -70,7 +70,12 @@ downloads of each version, see the
   scrollback and sandbox, remaking a chat's folder, checking whether `gh`
   is set up and the daily automatic delete of old archived sessions. The
   window keeps its dialogs and its quit-time *Background* queue, and
-  shows what the service says. Nothing looks different, by design.
+  shows what the service says. Nothing looks different, by design. The
+  `/bg` agents themselves are the CLI's daemon's, not the service's: a
+  stop or restart of the service (its unit signals the service alone)
+  leaves them running, and *Restart service* counts them as surviving
+  while the foreground sessions end gracefully. The automatic delete
+  skips any session a live tab shows, its agent running or not.
 
 - **The service is its own process.** Collins is now two programs:
   `collins-service` runs the sessions (every agent's pty, the terminal

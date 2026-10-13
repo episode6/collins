@@ -4666,7 +4666,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_detach_settled(self) -> None:
         """A /bg handoff stopped being in flight — confirmed, abandoned or
-        timed out. The gate reopens, and a quit-time queue can send the next."""
+        timed out, on any client (`_sync_detach_in_flight` reads every row's
+        `backgrounding`, so a handoff settling elsewhere lands here too). The
+        gate that reopens is the service's, app-wide (`bgagents`' `blocker`
+        re-checks it at the next close); a quit-time queue here can send the
+        next."""
         self._refresh_background_affordances()
         if self._bg_queue or self._bg_queue_dialog is not None:
             self._advance_bg_queue()
@@ -5671,10 +5675,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _ask_restart_service(self) -> None:
         """*Restart service* (§3.21): the blast radius first — the sessions
-        the service runs, how many of them are working — then a restart
-        now, or once none is busy. Every session ends with the service and
-        each open tab resumes its own once it is back, as a quit and a
-        relaunch did before the service."""
+        the service runs, how many of them are working, and the /bg agents
+        that outlive it — then a restart now, or once none is busy. Every
+        foreground session ends with the service and each open tab resumes
+        its own once it is back, as a quit and a relaunch did before the
+        service; the CLI's background daemon and its agents run on (D52)."""
         app = self.get_application()
         link = getattr(app, "_service_link", None)
         try:
@@ -5685,12 +5690,14 @@ class MainWindow(Adw.ApplicationWindow):
         sessions = len(self.store.agent_ptys())
         busy = int(status.get("busy") or 0)
         pid = status.get("pid")
-        if sessions:
-            body = _("{n} sessions end with it, {busy} of them working. Each open tab "
-                     "resumes its session once the service is back.").format(n=sessions, busy=busy)
-        else:
-            body = _("No session is running.")
-        body += " " + _("Collins and its status icon stay while the service restarts.")
+        # The rows running as /bg agents survive the restart (D52): the
+        # CLI's daemon is no child of the service's stop. Counted by row,
+        # as the sidebar shows them (a fork's stub is its old row).
+        model = self.store.model
+        background = sum(
+            1 for i in range(model.get_n_items()) if (model.get_item(i).background or "")
+        )
+        body = quitrules.restart_body(sessions=sessions, busy=busy, background=background)
         choices = []
         if busy:
             choices.append(("idle", _("Restart When Idle"), ""))

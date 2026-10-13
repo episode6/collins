@@ -410,7 +410,16 @@ lists a finished job indefinitely and refuses a plain `--resume` for any
 listed id, so resume checks use `include_finished=True`; a job left listed
 also means `_is_detached()` stays true for an attached tab — pair "detached"
 checks with "has no tab". Stopping stray duplicate `/bg` jobs can delete a
-worktree other jobs share.
+worktree other jobs share. The daemon is spawned by the first `/bg` on the
+box, so under Collins it is a grandchild of the service's pty, but it is
+**not the service's**: the unit ships `KillMode=process` (spec D52), so a
+stop or restart of the service — *Restart service*, a package upgrade,
+`systemctl --user restart` — signals the service alone, which ends the
+foreground sessions itself (gracefully, resumable until PR-3.6's keeper)
+and leaves the daemon and every `/bg` agent running; the restart dialog's
+blast radius (`quitrules.restart_body`) counts them as surviving, by row.
+A service *crash* also leaves them (the daemon holds no pty of the
+service's); only the foreground ptys die of SIGHUP.
 
 **Archive** is the user's "done with this" gesture and holds most of their
 data (100+ sessions is normal). `win.archive-session` is a **toggle** (the
@@ -460,8 +469,10 @@ which the service runs on its own timer since PR-1.12d
 hourly; the e2e probe's door is `debug.sandbox` → `sweep_archived`); a
 cache file (`archive-sweep.json`, the service machine's) holds it to one
 sweep a day. The trash goes through `ServiceCore.trash_expired_archives` —
-the manual bulk delete's path minus the dialog: running sessions (an agent
-pty on the service, or a background agent) are skipped, an emptied project
+the manual bulk delete's path minus the dialog: running sessions (any live
+agent pty on the service — `agent_pty_sessions(include_finished=True)`, so
+a tab left at its shell or a spawn not yet resolved counts, as "a tab is
+open" did — or a background agent) are skipped, an emptied project
 is kept as a header, and each trashed session is forgotten on the service
 (`forget_session`) with a `forgotten` event so every window drops its tab,
 layout and Undo for it. A forgotten transcript's files and records

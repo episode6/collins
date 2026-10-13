@@ -360,9 +360,11 @@ a session the store has not scanned yet waits for its first refresh. With
 `open_tabs` empty the launch falls back to `restore_last_session`.
 
 **Restart service** (`win.restart-service`, the main menu):
-`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`)
-and the mirror's agent ptys for the blast radius, then
-`App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
+`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`),
+the mirror's agent ptys and the rows whose `background` is set for the
+blast radius (`quitrules.restart_body`: the foreground sessions end, the
+`/bg` agents survive — the CLI's daemon is not the service's, D52's
+`KillMode=process`), then `App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
 `open_tabs` and tells the connection manager to wait for that pid to be
 gone (`ConnectionManager.expect_restart`) before it starts another
 service. *Idle* is `ServiceCore.restart_when_idle` (polls
