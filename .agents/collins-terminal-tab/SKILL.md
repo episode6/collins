@@ -854,7 +854,9 @@ The `Session` is the service's (spec §3.19). The pieces:
   for the saves in flight, then finishes each on the spot (status
   unknown: the reap no longer lands on a stopping service), its row
   recorded gone and its model file removed with it (stopping the
-  service ends every agent; so does a crash of it). A `Pty` implements the `PtyPort` (`write`,
+  service ends every foreground agent, and so does a crash of it; the
+  CLI's `/bg` daemon and its agents hold no pty of the service's and run
+  on, D52's `KillMode=process`). A `Pty` implements the `PtyPort` (`write`,
   `resize`, `child_pid`, `foreground_pgrp`) for its `Session`,
   and for a panel shell `shell_pid` (a sandboxed one's shell inside the
   box), `has_running_command` and `process_cwd`; `clear(pty)` swaps in a

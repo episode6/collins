@@ -63,10 +63,14 @@ systemd-started service answers. `journalctl --user -u
 collins-service.service` says why the unit failed.
 
 A service spawned without the unit has no restart policy; one the unit
-runs is restarted on failure. The debug instance (`./start-debug`, app id
-`com.episode6.Collins.Debug`) always spawns its own, with no unit, beside
-your real one. It shares your config directory and so your `state.json`:
-run the debug instance and the real one one at a time.
+runs is restarted on failure. A source checkout (`data/install.sh`
+installs the launcher and icons, no unit) spawns the service too: with no
+`collins-service` on `PATH`, the window runs `python3 -m
+collins.service.main` from its own checkout. The debug instance
+(`./start-debug`, app id `com.episode6.Collins.Debug`) always spawns its
+own, with no unit, beside your real one. It shares your config directory
+and so your `state.json`: run the debug instance and the real one one at a
+time.
 
 A second `collins-service` for the same app id finds the first's lock and
 exits 0.
@@ -152,7 +156,7 @@ To stop the service outright:
 
 ```bash
 systemctl --user stop collins-service.service   # the unit
-kill $(pgrep -f collins-service)                 # a spawned one
+kill $(pgrep -f 'bin/collins-service')           # a spawned one
 ```
 
 Either is SIGTERM. Stopping ends every foreground session the way *Stop
@@ -178,8 +182,8 @@ until a later release's keeper holds them across a restart.
 | The API socket | `$XDG_RUNTIME_DIR/collins/<app id>/api.sock` (0600, directory 0700) |
 | Single-instance lock | `service.lock` beside it, held for the service's life |
 | The local proof | `local-proof` beside it: 32 random bytes, 0600, minted at each start |
-| The session tools' socket | `mcp.sock` beside it |
-| With no `$XDG_RUNTIME_DIR` | `~/.local/state/collins/<app id>/` for all of the above; a path too long for a Unix socket falls back to a 0700 directory under the temp directory |
+| With no `$XDG_RUNTIME_DIR` | `~/.local/state/collins/<app id>/` for the three above; a path too long for a Unix socket falls back to a 0700 directory under the temp directory |
+| The session tools' socket | `mcp.sock` beside `api.sock` when `$XDG_RUNTIME_DIR` is set; under the temp directory (`/tmp/collins/<app id>/`) otherwise |
 | Service state | `~/.config/collins/state.json` |
 | This device's state, `open_tabs` | `~/.config/collins/ui-state.json` |
 

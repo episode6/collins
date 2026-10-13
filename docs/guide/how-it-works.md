@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-05. Full change history: git log for this file.
+fork. Last modified: 2026-10-13. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -41,8 +41,9 @@ Collins is a window and a service. `collins-service` is a plain Python program
 on a GLib main loop that imports no GTK: it owns the agents' ptys, the screen
 model of each, the session store and `state.json`, the `gh` and `git` calls,
 the session tools' MCP socket, the sandboxes and everything that spends
-tokens. The window connects to it over a Unix socket (one WebSocket per
-window, JSON frames for requests and events, binary frames for terminal bytes)
+tokens. The window connects to it over a Unix socket (two WebSockets per
+window: one for events and terminal bytes, one for blocking calls; JSON
+frames for requests and events, binary frames for terminal bytes)
 and keeps mirrors of the service's store and settings; every write is a
 request and every change comes back as an event. A window that goes away,
 however it goes, changes nothing on the service except "no client is attached".
