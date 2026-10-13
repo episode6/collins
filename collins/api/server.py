@@ -75,6 +75,11 @@ from . import protocol
 log = logging.getLogger(__name__)
 
 WS_PATH = "/api/ws"
+# Plain HTTP on the same listener (§3.2): a blob's bytes, never a path.
+BLOB_PATH = "/api/blob"
+# The header a blob GET names its client by (the hello's client_id), so
+# the `local` capability's confinement applies to it (gitfeed.blob).
+CLIENT_HEADER = "Collins-Client"
 SOCKET_NAME = "api.sock"
 PROOF_NAME = "local-proof"
 HELLO_TIMEOUT_S = 5  # a connection with no hello by then is closed
@@ -419,22 +424,37 @@ class Connection:
                 self.send_text(reply)
             return
         if checked.kind == protocol.REQUEST:
-            reply = self._answer(checked)
-            try:
-                text = protocol.encode(reply)
-            except ValueError as exc:
-                # A reply the frame cannot carry: the asker hears `failed`
-                # now rather than `gone` at its timeout (nit 8 of the review).
-                log.error("api: the reply to %s does not frame: %s", checked.type, exc)
-                text = protocol.encode(protocol.refuse(
-                    checked.id, protocol.ERROR_FAILED, "{type}: the reply exceeds the frame",
-                    {"type": checked.type},
-                ))
-            self.send_encoded(text)
+            answer = self._answer(checked)
+            if isinstance(answer, protocol.Deferred):
+                # A handler that answers off the main loop (PR-2.1): the
+                # reply is sent when it settles, on this connection, as
+                # any other. `then` runs at once for one already settled.
+                answer.then(lambda raw: self.send_reply(self._checked(checked, raw), checked.type))
+            else:
+                self.send_reply(answer, checked.type)
         else:
             self._event(checked)
 
-    def _answer(self, message: protocol.Message) -> dict:
+    def send_reply(self, reply: dict, type_: str = "") -> None:
+        """A response, split into TAG_BLOB frames and a slim reply when it
+        would not fit a frame (`protocol.split_reply`: git's stdout). One
+        that does not fit even so: the asker hears `failed` now rather than
+        `gone` at its timeout (nit 8 of PR 604's review)."""
+        try:
+            frames, slim = protocol.split_reply(reply)
+        except ValueError as exc:
+            log.error("api: the reply to %s does not frame: %s", type_ or reply.get("re"), exc)
+            re_id = reply.get("re")
+            if isinstance(re_id, int):
+                self.send_text(protocol.refuse(
+                    re_id, protocol.ERROR_FAILED, "{type}: the reply exceeds the frame", {"type": type_},
+                ))
+            return
+        for frame in frames:
+            self.send_binary(frame)
+        self.send_text(slim)
+
+    def _answer(self, message: protocol.Message) -> dict | protocol.Deferred:
         who = self.client.client_id if self.client else "?"
         log.debug("api: %s on %s from %s", message.type, self.channel, who)
         if message.type == "hello":
@@ -448,6 +468,14 @@ class Connection:
         if message.type == "service.restart":
             return self.server.restart(self.client, message)
         raw = self.server.core.handle(message, self.client)
+        if isinstance(raw, protocol.Deferred):
+            return raw
+        return self._checked(message, raw)
+
+    def _checked(self, message: protocol.Message, raw: dict) -> dict:
+        """*raw*, the core's reply to *message*, validated against the
+        type's reply shape (a reply that does not fit is the service's bug,
+        answered `failed` and logged)."""
         answer = protocol.validate_response(raw, message.type)
         if isinstance(answer, protocol.Refusal):
             log.error("api: the reply to %s does not validate: %s", message.type, answer.msgid)
@@ -543,6 +571,7 @@ class ApiServer:
             os.unlink(self.path)
         self.server = Soup.Server()
         self.server.add_websocket_handler(WS_PATH, None, None, self._on_websocket)
+        self.server.add_handler(BLOB_PATH, self._on_blob)
         self.server.listen(Gio.UnixSocketAddress.new(self.path), Soup.ServerListenOptions(0))
         os.chmod(self.path, 0o600)  # F7: created 0775 under the default umask
         self.proof = secrets.token_bytes(protocol.LOCAL_PROOF_BYTES)
@@ -584,6 +613,54 @@ class ApiServer:
         self.server = None
 
     # -- connections
+
+    def _on_blob(self, _server, msg: Soup.ServerMessage, _path, query, *_rest) -> None:
+        """`GET /api/blob?kind=git&…` (§3.11, §3.23): the blob's bytes with
+        its ETag, answered off the main loop — the message is paused while
+        the service's thread reads it, and unpaused with the answer. The
+        request names its client with the ``Collins-Client`` header (the
+        hello's client_id, for the `local` capability's confinement); a
+        request with none, or one of a client the server does not know,
+        is confined like a remote client's. ``kind`` other than ``git``
+        is 404 until the later chunks serve it."""
+        if not self.accepting or msg.get_method() != "GET":
+            msg.set_status(405, None)
+            return
+        params = dict(query or {})
+        # The header is taken at its word, like the hello's client_id: an
+        # id is a grouping key, not a credential (§3.16 — whoever reaches
+        # this 0600 socket is the service's own uid and already trusted
+        # with a shell). Naming a `local` client's id widens a GET to any
+        # path that client could read itself; it proves nothing to a peer
+        # who could not already reach the socket. Phase 4's token, when a
+        # listener is not a Unix socket, is what makes this a credential.
+        client_id = msg.get_request_headers().get_one(CLIENT_HEADER) or ""
+        client = self.clients.get(client_id)
+        if params.get("kind") != "git":
+            msg.set_status(404, None)
+            return
+        feed = getattr(self.core, "git", None)
+        if feed is None:
+            msg.set_status(404, None)
+            return
+        if_none_match = msg.get_request_headers().get_one("If-None-Match")
+        uri = msg.get_uri()
+        raw_query = uri.get_query() if uri is not None else ""
+        msg.pause()
+
+        def respond(status: int, headers: dict, body: bytes) -> None:
+            try:
+                response = msg.get_response_headers()
+                for name, value in headers.items():
+                    response.replace(name, value)
+                if body:
+                    msg.set_response(headers.get("Content-Type") or "application/octet-stream",
+                                     Soup.MemoryUse.COPY, body)
+                msg.set_status(status, None)
+            finally:
+                msg.unpause()
+
+        feed.blob(client, raw_query or "", if_none_match, respond)
 
     def _on_websocket(self, _server, _msg, _path, ws, *_rest) -> None:
         if not self.accepting:
@@ -648,7 +725,10 @@ class ApiServer:
             self.core.client_connected(client)
         connection.client = client
         connection.channel = channel
-        caps = [protocol.CAP_LOCAL]
+        # `git`: this service serves git.*, fs.trash, git-changed and the
+        # blob GET (PR-2.1); a client installs its git transport only on
+        # seeing it, and runs git locally against an older service.
+        caps = [protocol.CAP_LOCAL, protocol.CAP_GIT]
         if self.debug:
             caps.append(protocol.CAP_DEBUG)
         state = getattr(self.core, "state", None)

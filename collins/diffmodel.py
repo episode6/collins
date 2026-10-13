@@ -40,19 +40,33 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 # The large-file caps: a file whose patch changes more lines than this, or
-# weighs more than this, is a placeholder with no hunks (`too_large`).
+# weighs more than this, is a placeholder with no hunks (`too_large`). The
+# weight is `patch_weight`: the bytes the stanza costs in the API frame
+# that carries it whole as a plan (`git.plan`'s `patch`, JSON-escaped
+# UTF-8: a newline or a quote is two bytes there, a control character six),
+# so a file the view shows is one the service can be asked to revert or
+# stage whole. The cap sits PLAN_HEADROOM_BYTES under the frame
+# (`protocol.MAX_FRAME`, spelled here: this module depends on nothing of
+# the API's; `tests/test_diffmodel.py` pins the two agree) to leave the
+# plan's other fields room — the cwd, the paths, the parent target and
+# the hunks' stable keys. A plan that still does not fit (a file of very
+# many hunks) is refused by the client with its words, never sent
+# (`remotegit.Transport.plan`; PR 608's review, should-fix 3).
 TOO_LARGE_LINES = 20_000
-TOO_LARGE_BYTES = 1_048_576
+FRAME_BYTES = 1_048_576
+PLAN_HEADROOM_BYTES = 64 * 1024
+TOO_LARGE_BYTES = FRAME_BYTES - PLAN_HEADROOM_BYTES
 # Bounds on the stream itself. `git show` of a squash that touched every
 # file in a large repository is still one load; past these the tail is
 # dropped, not guessed at. The stream arrives decoded, so its cap counts
-# characters (a byte at least each); a stanza's own weight is measured on
-# its UTF-8 bytes (TOO_LARGE_BYTES).
+# characters (a byte at least each); a stanza's own weight is its frame
+# bytes (`patch_weight`, against TOO_LARGE_BYTES).
 MAX_FILES = 2000
 MAX_PATCH_CHARS = 64 * 1024 * 1024
 # A path longer than this drops its file (gitloads.MAX_PATH_CHARS's value,
@@ -314,7 +328,7 @@ def _parse_stanza(lines: list[str], untracked: bool, conflict: bool = False) -> 
     if patch and not patch.endswith("\n"):
         patch += "\n"
     kind = _resolve_kind(header, hunks, previous_path)
-    if kind != KIND_BINARY and too_large(additions, deletions, len(patch.encode("utf-8", "replace"))):
+    if kind != KIND_BINARY and too_large(additions, deletions, patch_weight(patch)):
         kind = KIND_TOO_LARGE
     if kind in (KIND_BINARY, KIND_TOO_LARGE):
         hunks = ()
@@ -643,8 +657,17 @@ def parse_numstat(text: object) -> dict[str, tuple[int, int]]:
 
 def too_large(additions: int, deletions: int, size: int) -> bool:
     """The large-file rule: over TOO_LARGE_LINES changed lines, or a patch
-    over TOO_LARGE_BYTES, is shown as a placeholder."""
+    over TOO_LARGE_BYTES (*size*: `patch_weight` of the stanza, or a
+    file's bytes on disk for the readers that gate before a read), is
+    shown as a placeholder."""
     return additions + deletions > TOO_LARGE_LINES or size > TOO_LARGE_BYTES
+
+
+def patch_weight(patch: str) -> int:
+    """The bytes *patch* costs in an API frame as one JSON string field
+    (the `git.plan` request's `patch`): its UTF-8 once escaped, the
+    quotes included. The measure of a stanza against TOO_LARGE_BYTES."""
+    return len(json.dumps(patch, ensure_ascii=False).encode("utf-8", "surrogatepass"))
 
 
 # -- gaps ---------------------------------------------------------------------
