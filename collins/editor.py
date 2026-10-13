@@ -1403,10 +1403,15 @@ class EditorPane(Gtk.Box):
         seq, old_root = self._reroot_seq, self._root
         counterparts = editorfiles.reroot_counterparts(old_root, new_root, list(self._pages))
 
+        root = str(new_root)
+
         def work() -> set[str] | None:
-            if not remotefiles.stat_path(str(new_root)).is_dir:
+            # `root` named on every stat: only the kinds are read here, and
+            # a stat with no root makes the service compute `inside` of
+            # every root it knows (the Fable review of PR 611, nit 5).
+            if not remotefiles.stat_path(root, root).is_dir:
                 return None
-            return {path for path in counterparts if remotefiles.stat_path(path).is_file}
+            return {path for path in counterparts if remotefiles.stat_path(path, root).is_file}
 
         self._off_main(work, lambda kind, value: self._reroot_checked(seq, old_root, new_root, kind, value))
 

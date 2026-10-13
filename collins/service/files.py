@@ -821,6 +821,17 @@ class Files:
         seed = message.get("mtime")
         seed = seed if isinstance(seed, int) and not isinstance(seed, bool) else None
         key = (id(client), handle)
+        # The bound, against what is installed and what is still out on a
+        # worker (a reconnect re-sends every live watch at once; the same
+        # handle again is a replacement, not one more): refused here, before
+        # a thread is spent on it (the Fable review of PR 611, nit 6).
+        held = {k for k in (*self._watches, *self._pending) if k[0] == id(client)}
+        held.discard(key)
+        if len(held) >= MAX_WATCHES_PER_CLIENT:
+            return protocol.refuse(
+                message.id, protocol.ERROR_REFUSED, "Too many watches for one client ({max})",
+                {"max": MAX_WATCHES_PER_CLIENT},
+            )
         conf = confinement(self.core, client)
         token = object()
         self._installing[key] = token  # the same handle again supersedes

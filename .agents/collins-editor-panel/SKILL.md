@@ -232,19 +232,35 @@ pathless walker reads as `Path` methods):
   place), so a folder expanded inside a refreshed one stays expanded; a
   folder that left the listing is forgotten (its store and watch). A
   listing refused `gone` with `protocol.FOLDER_GONE_MSGID` empties the
-  folder's rows and forgets it (the root keeps its store and watch); one
+  folder's rows and forgets it (the root keeps its store and watch: GLib
+  polls a monitored path that went missing every 4 s, so a root removed
+  and made again is reported `created` within that, listed again, and
+  its monitor goes on reporting writes — probed 2026-10-12); one
   refused any other way (no service, no `files` cap) leaves the rows, and
   the reconnect lists every folder shown again (`_on_reconnect`, through
   `remotefiles.Watcher.on_reset`), so a pane made while the service was
   unreachable fills in. `forget_dir`, `set_root` and `shutdown` (from
   `EditorPane.shutdown`) unwatch.
 - On the service, `fs.list`, `fs.walk` and every `fs.watch` are confined
-  on the worker (`files._confine` against `_roots(client)`, computed on the
-  main loop, as `fs.read` / `fs.write` do); `fs.list`'s client-named
-  `root` is held to the known roots too. A watch is installed when its
-  confinement lands (`Files._pending`: an `fs.unwatch` first wins), and one
-  Gio cannot make a monitor for is refused `failed`. A walk also stops
-  queueing folders at `projectfiles.WALK_DIRS_CAP` (50 000).
+  on the worker (`files.Confinement`: the roots' names read on the main
+  loop, `allows` resolving on the worker, as `fs.read` / `fs.write` and
+  PR 609's file watch do); `fs.list`'s client-named `root` is held to the
+  known roots too. A watch is installed when its confinement lands
+  (`Files._pending`: an `fs.unwatch` first, a newer watch of the handle
+  or the client going away wins, the older landing answers ok and
+  installs nothing; pinned in both landing orders), the per-client bound
+  is checked before the worker is spent, against the installed and the
+  pending (a reconnect re-sends every live watch at once; the same handle
+  again is a replacement), and one Gio cannot make a monitor for is
+  refused `failed`. A walk also stops queueing folders at
+  `projectfiles.WALK_DIRS_CAP` (50 000). Recorded, not fixed (the Fable
+  review of PR 611, nits 4 and 6): `_open_dir` sends the listing before
+  the watch, on two connections, so a file created between the listing's
+  `iterdir` and the monitor is missed until the folder's next change
+  (the close is to list from the watch's ok, or relist once when the
+  watch lands after the listing); and every pending watch is its own
+  thread, so a reconnect's re-send of thousands starts thousands at once
+  (a small pool or a batched confinement would be kinder).
 - `reveal(path)` is a walk that waits: it goes as far as the rows already
   listed, expands and opens the next folder, and resumes from each
   listing's landing (`_continue_reveal`); a newer reveal or a re-root

@@ -877,3 +877,52 @@ def test_list_and_walk_stay_valid_beside_a_name_that_is_not_utf8(served):
     reply = client.request({"t": "fs.walk", "root": str(project), "hidden": False})
     assert reply["paths"] == ["a.txt", "sub/ok.txt"] and reply["truncated"] is False
 
+
+# -- the watch bound counts what is in flight (the Fable review of PR 611, nit 6) ---------
+
+
+def test_the_watch_bound_counts_pending_watches(served, monkeypatch):
+    """A reconnect re-sends every live watch at once; the bound is checked
+    before a worker is spent on one, against the installed and the pending,
+    and the same handle again (a replacement) is not one more."""
+    core, client, project, _events = served
+    workers: list = []
+    core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: workers.append(fn))
+    monkeypatch.setattr(files, "MAX_WATCHES_PER_CLIENT", 2)
+    path = str(project / "a.txt")
+    first = _ask(core, client, {"t": "fs.watch", "path": path, "kind": "file", "handle": "w1"})
+    second = _ask(core, client, {"t": "fs.watch", "path": path, "kind": "file", "handle": "w2"})
+    assert isinstance(first, protocol.Deferred) and isinstance(second, protocol.Deferred)
+    third = _ask(core, client, {"t": "fs.watch", "path": path, "kind": "file", "handle": "w3"})
+    assert isinstance(third, dict) and third["ok"] is False
+    assert third["error"] == protocol.ERROR_REFUSED and "Too many watches" in third["msgid"]
+    again = _ask(core, client, {"t": "fs.watch", "path": str(project), "kind": "dir", "handle": "w1"})
+    assert isinstance(again, protocol.Deferred)  # the same handle: a replacement
+    assert len(workers) == 3
+    for run in workers:
+        run()
+    assert core.files.watching(client, "w1") and core.files.watching(client, "w2")
+    assert not core.files.watching(client, "w3") and not core.files._pending
+    assert core.files._watches[(id(client), "w1")].path == str(project)
+
+
+# -- a newer watch of the same handle while one is pending (nit 7: probes B) -------------
+
+
+@pytest.mark.parametrize("order", ["older first", "newer first"])
+def test_a_newer_watch_of_a_pending_handle_wins_in_either_landing_order(served, order):
+    core, client, project, _events = served
+    workers: list = []
+    core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: workers.append(fn))
+    (project / "b.txt").write_text("")
+    watch = {"t": "fs.watch", "kind": "file", "handle": "w1"}
+    older = _ask(core, client, {**watch, "path": str(project / "a.txt")})
+    newer = _ask(core, client, {**watch, "path": str(project / "b.txt")})
+    run_older, run_newer = workers
+    for run in ((run_older, run_newer) if order == "older first" else (run_newer, run_older)):
+        run()
+    assert older.settled and older.reply.get("ok") is True
+    assert newer.settled and newer.reply.get("ok") is True
+    assert core.files._watches[(id(client), "w1")].path == str(project / "b.txt")
+    assert sum(1 for k in core.files._watches if k[0] == id(client)) == 1
+    assert not core.files._pending

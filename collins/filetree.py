@@ -83,7 +83,6 @@ class _Node(GObject.Object):
         # (`_create_children`) and kept: the model asks again at every bind
         # and every expansion, and must get the same store each time.
         self.children: Gio.ListStore | None = None
-        self.open = False  # the row is expanded (`_on_row_expanded`)
         # The row box showing this node right now (`_on_bind`; rows are
         # recycled, so `set_dim` checks the box still shows this node).
         self.box: Gtk.Widget | None = None
@@ -273,8 +272,11 @@ class FileTree(Gtk.Box):
             self._splice(store, Path(key), entries)
         elif value.error == protocol.ERROR_GONE and value.msgid == protocol.FOLDER_GONE_MSGID:
             # The folder is not there any more: its rows go, and so does
-            # what the tree remembers under it (the root keeps its store and
-            # its watch: a folder that comes back is listed again).
+            # what the tree remembers under it. The root keeps its store and
+            # its watch: GLib polls a monitored path that went missing every
+            # 4 s, so a root removed and made again is reported `created`
+            # within that (probed, 2026-10-12), the `dir-changed` lists it
+            # again and the monitor goes on reporting what is written in it.
             self._splice(store, Path(key), [])
             if key != str(self._root):
                 self.forget_dir(key)
@@ -343,7 +345,6 @@ class FileTree(Gtk.Box):
         they show at once."""
         if not node.expandable or node.children is None or self._shut:
             return
-        node.open = True
         key = str(node.path)
         if self._stores.get(key) is not node.children:
             self._owners[key] = node
@@ -358,14 +359,9 @@ class FileTree(Gtk.Box):
     def _close_dir(self, node: _Node) -> None:
         """A directory row was collapsed: the watches of it and of every
         folder under it are dropped (parked: the rows stay). GTK collapses
-        the rows under it too (a re-expansion shows them closed), so the
-        folders under it are closed here as well; each lists again when it
-        is next expanded."""
+        the rows under it too (a re-expansion shows them closed); each
+        lists again when it is next expanded."""
         key = str(node.path)
-        for inner, owner in self._owners.items():
-            if inner == key or inner.startswith(key + "/"):
-                owner.open = False
-        node.open = False
         for watched in [k for k in self._watches if k == key or k.startswith(key + "/")]:
             if watched != str(self._root):
                 self._unwatch(watched)
