@@ -2223,6 +2223,8 @@ class App(Adw.Application):
             return
         self.state.reset()
         self.store.reset()
+        if self.store.pr_store is not None:
+            self.store.pr_store.reset()
         self.notification_center.reset()
         mirror = remotediffs.mirror_for(self._service_link)
         if mirror is not None:

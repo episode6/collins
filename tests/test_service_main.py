@@ -65,6 +65,23 @@ def test_sd_notify_sends_a_datagram(tmp_path, monkeypatch):
         assert sock.recv(64) == b"READY=1"
 
 
+def test_sd_notify_takes_the_address_the_service_kept(tmp_path, monkeypatch):
+    """Nit 7 of PR 604's review: `start` pops NOTIFY_SOCKET right after
+    READY=1, so STOPPING=1 read from the environment never went. The
+    `Service` keeps the address and hands it to both."""
+    import socket
+
+    path = str(tmp_path / "n.sock")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+        sock.bind(path)
+        sock.settimeout(2)
+        monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
+        assert service_main.sd_notify("STOPPING=1", path) is True
+        assert sock.recv(64) == b"STOPPING=1"
+        assert service_main.sd_notify("STOPPING=1", "") is False
+        assert service_main.sd_notify("STOPPING=1") is False  # None: the environment, which has none
+
+
 def test_sd_notify_without_a_socket_is_false(monkeypatch):
     monkeypatch.delenv("NOTIFY_SOCKET", raising=False)
     assert service_main.sd_notify() is False

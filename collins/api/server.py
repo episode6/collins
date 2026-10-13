@@ -356,12 +356,20 @@ class Connection:
     # -- sending
 
     def send_text(self, message: dict) -> None:
+        try:
+            text = protocol.encode(message)
+        except ValueError as exc:
+            log.error("api: could not send %s: %s", message.get("t") or message.get("re"), exc)
+            return
+        self.send_encoded(text)
+
+    def send_encoded(self, text: str) -> None:
         if self.closed or self.ws.get_state() != Soup.WebsocketState.OPEN:
             return
         try:
-            self.ws.send_text(protocol.encode(message))
-        except (ValueError, GLib.Error) as exc:
-            log.error("api: could not send %s: %s", message.get("t") or message.get("re"), exc)
+            self.ws.send_text(text)
+        except GLib.Error as exc:
+            log.error("api: could not send a text frame: %s", exc)
 
     def send_binary(self, frame: bytes) -> None:
         if self.closed or self.ws.get_state() != Soup.WebsocketState.OPEN:
@@ -409,7 +417,18 @@ class Connection:
                 self.send_text(reply)
             return
         if checked.kind == protocol.REQUEST:
-            self.send_text(self._answer(checked))
+            reply = self._answer(checked)
+            try:
+                text = protocol.encode(reply)
+            except ValueError as exc:
+                # A reply the frame cannot carry: the asker hears `failed`
+                # now rather than `gone` at its timeout (nit 8 of the review).
+                log.error("api: the reply to %s does not frame: %s", checked.type, exc)
+                text = protocol.encode(protocol.refuse(
+                    checked.id, protocol.ERROR_FAILED, "{type}: the reply exceeds the frame",
+                    {"type": checked.type},
+                ))
+            self.send_encoded(text)
         else:
             self._event(checked)
 

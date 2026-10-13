@@ -387,7 +387,13 @@ class SocketLink(apilink.Link):
             self._post(do_close)
         self._fail_pending(self._primary, "the connection was closed")
         self._fail_pending(self._sync, "the connection was closed")
-        self._cancel_ack_timer()
+        # The ack timer and its counters are the main loop's (`_count_fed`,
+        # `_ack_all`); a close from the I/O thread (`_lost`) lands their
+        # cancel there, ahead of the `on_lost` it lands next (nit 9).
+        if threading.current_thread() is threading.main_thread():
+            self._cancel_ack_timer()
+        else:
+            self._land(self._cancel_ack_timer)
 
     def shutdown(self) -> None:
         """Close and stop the I/O thread (the link is finished with)."""

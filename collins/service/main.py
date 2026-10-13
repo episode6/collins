@@ -146,10 +146,13 @@ def merge_environment(service_env: dict[str, str], captured: dict[str, str]) -> 
     return merged
 
 
-def sd_notify(state: str = "READY=1") -> bool:
-    """One datagram to ``$NOTIFY_SOCKET`` (D32). False when there is none
-    or it could not be sent."""
-    target = os.environ.get("NOTIFY_SOCKET")
+def sd_notify(state: str = "READY=1", target: str | None = None) -> bool:
+    """One datagram to *target* (``$NOTIFY_SOCKET`` when None; D32). False
+    when there is none or it could not be sent. The `Service` keeps the
+    address itself, since the environment's copy is popped right after
+    READY=1 so no spawned shell inherits it."""
+    if target is None:
+        target = os.environ.get("NOTIFY_SOCKET", "")
     if not target:
         return False
     if target.startswith("@"):
@@ -281,6 +284,9 @@ class Service:
         self.loop = GLib.MainLoop()
         self.stopping = False
         self.exit_code = 0
+        # systemd's notify address, kept here: `start` pops it from the
+        # environment after READY=1, and `stop` still owes STOPPING=1.
+        self.notify_socket = os.environ.get("NOTIFY_SOCKET", "")
 
     def _load_stubs(self) -> None:
         """The e2e checks' stubs (scripts/e2e_stubs.py), only under the
@@ -318,7 +324,7 @@ class Service:
         path = self.server.listen()
         for number in (signal.SIGTERM, signal.SIGINT):
             GLib.unix_signal_add(GLib.PRIORITY_HIGH, number, self._on_signal, number)
-        sd_notify("READY=1")
+        sd_notify("READY=1", self.notify_socket)
         # As systemd's NotifyAccess/unset_environment would: a spawned shell
         # must not inherit the manager's socket (the core strips it too).
         os.environ.pop("NOTIFY_SOCKET", None)
@@ -346,7 +352,7 @@ class Service:
         if self.stopping:
             return
         self.stopping = True
-        sd_notify("STOPPING=1")
+        sd_notify("STOPPING=1", self.notify_socket)
         try:
             self.server.stop_accepting()
             self.core.stop_mcp()

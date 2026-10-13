@@ -462,6 +462,42 @@ def test_a_re_attach_with_pending_bytes_replays_nothing_after_its_redraw(served,
     client.close()
 
 
+def test_a_reply_the_frame_cannot_carry_is_a_prompt_failed(served, monkeypatch):
+    """Nit 8 of PR 604's review: `send_text` swallowed the ValueError of an
+    oversized reply, so the asker waited its 10 s and heard `gone`. The
+    reply is encoded first and a refusal `failed` goes in its place."""
+    server, path = served
+    monkeypatch.setattr(
+        api_server.Connection, "_answer",
+        lambda self, message: {"re": message.id, "ok": True, "pad": "x" * (protocol.MAX_FRAME + 1)},
+    )
+    client = Raw(path)
+    started = time.monotonic()
+    hello = {"t": "hello", "protocol": protocol.PROTOCOL, "min_protocol": protocol.MIN_PROTOCOL,
+             "version": "0.0.0", "client_id": "c", "device": "laptop"}
+    reply = client.request(hello, timeout=3)
+    assert time.monotonic() - started < 3
+    assert reply["error"] == protocol.ERROR_FAILED and "frame" in reply["msgid"]
+    assert not client.closed  # the connection is kept
+    client.close()
+
+
+def test_a_libsoup_without_a_pong_timeout_still_serves(served, monkeypatch):
+    """Nit 14: the AttributeError fallback for libsoup before 3.6 is taken
+    only by whatever CI has; here it is forced, and the connection serves."""
+    server, path = served
+
+    def missing(self, seconds):
+        raise AttributeError("'WebsocketConnection' object has no attribute 'set_keepalive_pong_timeout'")
+
+    monkeypatch.setattr(Soup.WebsocketConnection, "set_keepalive_pong_timeout", missing)
+    client = Raw(path)
+    reply = client.hello()
+    assert reply["ok"] is True and reply["protocol"] == protocol.PROTOCOL
+    assert client.request({"t": "service.status"})["clients"] == 1
+    client.close()
+
+
 def test_service_restart_now_is_served_and_idle_refused(tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", CAT)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
