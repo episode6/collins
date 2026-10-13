@@ -20,12 +20,13 @@ center's order), then each row that changed or appeared, and each that
 left (``removed``). A `seen` request reads rows (by id, by session, or
 all) and is told to every other subscriber as a `seen` event.
 
-What a client asks for (Phase 1: the app's window and bell): a row
+What a client asks for (a window's bell and `notify_user`): a row
 (`notify.post`, minted here: its id, its time; a bell coalesced into the
 unread bell of its session; an update replacing every other), a row's
 removal, the history cleared, a finished run's synthetic row raised or
-taken down (`notify.green`: the window decides green in Phase 1, where the
-activity tracker runs, as `store.flags` carries its verdicts), a
+taken down (`notify.green`: the window decides green — unread and not
+working, `traymodel.session_marker` — from the row's `unread` and `busy`,
+which are the service's verdicts), a
 placeholder's rows filed under the session it resolved to
 (`notify.rekey`). A producer on this side (`post`) is the `notify_user`
 tool with no client attached. The command sink for when no client is

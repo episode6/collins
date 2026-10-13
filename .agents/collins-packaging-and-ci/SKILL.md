@@ -7,7 +7,9 @@ description: >-
   the Ubuntu PPA source builds (packaging/build-ppa-source.sh), the AUR recipe,
   the prebuilt CI images (.github/docker/ci.Dockerfile, ci-image.yml), the
   ci.yml jobs, verify_versions.py / verify_wheel_data.py, the version scheme
-  and the four changelogs, and release.yml. Use when adding a data file,
+  and the four changelogs, release.yml, and how every channel ships
+  collins-service and its never-enabled systemd user unit (KillMode=process,
+  libsoup 3). Use when adding a data file,
   icon, sound or dependency, changing a workflow or Dockerfile, touching
   version numbers or changelogs, or debugging a packaging/CI job. For cutting
   or shipping a release use release-branch-skill / ship-release-skill.
@@ -53,6 +55,59 @@ package-data glob (or an explicit entry), `verify_wheel_data.py`,
 `%files` if not covered — action icons are globbed everywhere already;
 sounds also need license notices in `THIRD_PARTY_LICENSES.md`,
 `debian/copyright`, the spec `License:` and the PKGBUILD `license` array.
+
+## The service: `collins-service` and its unit
+
+Collins is two programs (split-service spec §3.10), and every channel ships
+both. The second entry point is `[project.scripts]` `collins-service =
+"collins.service.main:main"` in `pyproject.toml`, so a wheel install has
+it beside `collins`; the systemd user unit `data/collins-service.service`
+is package data through the `collins/collins-service.service` symlink
+(listed in `pyproject.toml`'s package-data and in `verify_wheel_data.py`'s
+expected set) because `collins --install-desktop` (`desktopentry.py`)
+writes it to `$XDG_DATA_HOME/systemd/user/` with `ExecStart=` resolved to
+the installed script and runs `systemctl --user daemon-reload`, for a pip
+install. Each recipe installs the unit itself, **never enabled and never
+started by the package** — the window starts it on demand and the user
+enables it for login (`service.md`):
+
+| Channel | The command | The unit |
+| --- | --- | --- |
+| `.deb` (`scripts/build_deb.sh`) | a hand-written `usr/bin/collins-service` (`from collins.service.main import main`, like the `collins` launcher beside it) | `cp` to `usr/lib/systemd/user/` |
+| PPA (`debian/rules`) | pybuild's console script | `install -Dm644` to `usr/lib/systemd/user/`; `dh_installsystemduser --no-enable` and `dh_installsystemd --no-enable --no-start` overridden so the maintainer scripts neither enable nor (re)start it |
+| RPM (`collins.spec`) | `%{_bindir}/collins-service` in `%files` | `%{_userunitdir}` (`BuildRequires: systemd-rpm-macros`), in `%files` |
+| AUR (`PKGBUILD`) | python-installer's console script | `install -Dm644` to `/usr/lib/systemd/user/` |
+| pip / pipx | the console script | `collins --install-desktop` |
+| checkout (`data/install.sh`) | none: `connection.service_argv` falls back to `python3 -m collins.service.main` | none |
+
+The `packaging` job extracts the built `.deb` and asserts `test -x
+usr/bin/collins-service` and `test -f usr/lib/systemd/user/collins-service.service`;
+the `rpm` job asserts the same pair after `dnf install`. A renamed entry
+point or a unit that fell out of a recipe fails there.
+
+**libsoup 3** is a hard dependency since the split (the WebSocket between
+the window and the service: `collins/api/client.py`, `service/main.py`;
+without the typelib the window cannot start its service): `gir1.2-soup-3.0`
+in `debian/control` and `build_deb.sh`'s control (with `gir1.2-glib-2.0`,
+both Depends lists kept equal), `Requires: libsoup3` in the spec,
+`libsoup3` in the PKGBUILD *and* `.SRCINFO` (the AUR indexes `.SRCINFO`;
+regenerate it with `makepkg --printsrcinfo` on every PKGBUILD edit, not
+only at a version bump), `gir1.2-soup-3.0` in the CI Dockerfile for the
+e2e stack, and the install lines in `docs/guide/getting-started.md`.
+
+**`KillMode=process`** (spec D52) is what makes an upgrade safe: systemd
+signals the service alone on a stop or restart, never the ptys' children
+or the CLI's `/bg` daemon, so the service's own stop sequence ends the
+foreground sessions gracefully (resumable) and the daemon and its agents
+run on. A package upgrade restarts nothing anyway (the `--no-enable`
+overrides, and no `%systemd_user_post` / `%systemd_user_postun` scriptlets
+in the spec), so the old service keeps serving the new window through the
+protocol window until *Restart service*; changing the unit's `ExecStart`
+or `KillMode` reaches a running install only at that restart (and the
+`--install-desktop` copy only when it is run again). Keep
+`data/collins-service.service`, the `--install-desktop` writer and the
+spec's `%changelog` / `debian/changelog` wording ("never enabled, never
+restarted by the package") in step.
 
 ## Versions and changelogs
 

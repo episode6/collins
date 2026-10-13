@@ -22,7 +22,7 @@ through `titles.headless_argv` from the scratch dir, in the modules this
 calls.
 
 The requests are made from a client's worker thread (a fetch blocks for
-up to the network's timeout), so on the loopback these handlers run on
+up to the network's timeout), so these handlers run on
 that thread; each touches only its module, whose caches are locked.
 GTK-free.
 """

@@ -22,8 +22,8 @@ With no client attached the diff tools work on this store (§3.7):
 `diff_context` answers, from the service's own read of the session's diff
 (`gitops.read_diff` of the load a pending show_diff names, else the
 working tree's unstaged changes), on a thread, the reply deferred until
-it lands. Through Phase 1 a session's marks live as long as its tab does,
-as they always did: the tab writes them empty when its page goes, so what
+it lands. A session's marks live as long as its tab does:
+the tab writes them empty when its page goes, so what
 state.json keeps across a restart is only what a crash left.
 
 GLib only; nothing here imports GTK.

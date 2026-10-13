@@ -132,7 +132,12 @@ appstreamcli validate --no-net --override releases-not-in-order=info \
 # debian/changelog's.
 %changelog
 * Sun Sep 27 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.5-1
-- Next release, in development.
+- New requires libsoup3: the socket between the window and its session
+  service. The service is its own process (collins-service, with a systemd
+  user unit installed under %%{_userunitdir} and never enabled or started
+  by the package): quitting or crashing the window ends no session, Detach
+  leaves a session running, and Restart service runs new service code
+  after an upgrade. App state is split into state.json and ui-state.json.
 
 * Sun Sep 27 2026 Geoff Hackett <ghackett@episode6.com> - 0.1.4-1
 - Sandboxed sessions in a bubblewrap box (a home per session, settings and

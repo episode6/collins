@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-19. Full change history: git log for this file.
+fork. Last modified: 2026-10-13. Full change history: git log for this file.
 -->
 # AUR packaging
 
@@ -22,6 +22,10 @@ hash refresh below can only happen after the release ships and the tag exists.
    Put the hash in `sha256sums=(...)`.
 2. Regenerate `.SRCINFO` (on an Arch system): `makepkg --printsrcinfo > .SRCINFO`
    — or edit the `pkgver`/`source`/`sha256sums` lines by hand to match.
+   The same goes for any other edit to `PKGBUILD` (a new `depends` or
+   `optdepends` entry): the AUR indexes `.SRCINFO`, not `PKGBUILD`, so a
+   dependency added to one file alone is a dependency the AUR never
+   resolves. `scripts/verify_versions.py` checks only the version lines.
 3. (Recommended) test the build on Arch: `makepkg -si`.
 
 ## Publishing to the AUR

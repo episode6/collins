@@ -3,6 +3,6 @@
 
 `protocol` is the GTK-free message table, validation and framing (the twin
 of `mcptools` for the session MCP tools). The transports that carry it
-(`server`, `client`, `loopback`) arrive with the PRs of the split that need
-them; see ~/specs/collins/split-service-and-client.md.
+(`server` for the service, `client` for the window) are in this package; see
+~/specs/collins/split-service-and-client.md.
 """
