@@ -41,8 +41,9 @@ downloads of each version, see the
 - **Drops, pastes and pictures go over the service's socket.** An image
   dropped or pasted into the composer or onto the terminal is sent to the
   service and saved under `~/.local/share/collins/uploads/<session>/`,
-  which goes when the session is trashed or deleted (one dropped before the
-  session has an id waits in `uploads/_pending/` for a week); a dropped
+  which goes when the session is trashed or deleted, or a day after its
+  transcript went by other means (one dropped before the session has an id
+  waits in `uploads/_pending/` for a week); a dropped
   file is mentioned by its own path as before, and sent over as a copy only
   when the window runs on another machine. The lightbox, the attachments
   panel, the composer's previews, the editor's image tabs, PR body images

@@ -15,7 +15,13 @@ mentions the path that comes back. The bytes land here:
   none (D37: the new-chat screen, a tab whose id has not resolved yet),
   never moved — the typed mention already names the path — and swept once
   older than `dropimages.PRUNE_AFTER_SECONDS` (`sweep_pending`, the
-  service's housekeeping tick).
+  service's housekeeping tick);
+- a session's directory whose session the service no longer knows (not a
+  live agent pty's, not in the store: the CLI's own ``cleanupPeriodDays``
+  took the transcript, or the user removed it outside Collins) goes on the
+  same tick once it is a day old (`sweep_orphans`): "removed with the
+  session" holds for removals Collins did not make too. The day is the
+  guard for a session the store's scan has not caught up with yet.
 
 The name is reduced to a basename (`safe_name`) and the file is written
 by file descriptor (`write`: the directory opened ``O_DIRECTORY |
@@ -43,6 +49,10 @@ from .dropimages import PRUNE_AFTER_SECONDS
 MAX_BYTES = 64 * 1024 * 1024
 # The directory an upload with no session id lands in (D37).
 PENDING = "_pending"
+# How old a session's upload directory must be before the sweep treats a
+# session the service does not know as gone for good (`sweep_orphans`): a
+# day, well past any scan's lag behind a freshly resolved session.
+ORPHAN_AFTER_SECONDS = 24 * 60 * 60
 # The longest name kept (bytes, UTF-8): a filesystem's NAME_MAX less the
 # room a "-NNN" uniquifier takes.
 NAME_MAX = 200
@@ -231,4 +241,36 @@ def sweep_pending(now: float | None = None, max_age: float = PRUNE_AFTER_SECONDS
                 os.unlink(entry.path)  # nothing writes a link here
         except OSError:
             continue
+    return gone
+
+
+def sweep_orphans(
+    known: Callable[[], set[str]] | set[str],
+    now: float | None = None,
+    max_age: float = ORPHAN_AFTER_SECONDS,
+) -> list[str]:
+    """Remove every session's upload directory whose id is not in *known*
+    (the live sessions' and the store's, gathered on the main loop; a
+    callable is asked once, on this thread) and whose directory is older
+    than *max_age*. The pending directory, a name that is no session id,
+    and anything that is not a directory (a planted link is never
+    followed) are left alone. Never raises; returns the ids that went."""
+    now = time.time() if now is None else now
+    gone: list[str] = []
+    try:
+        entries = list(os.scandir(root()))
+    except OSError:
+        return gone
+    ids = set(known()) if callable(known) else set(known)
+    for entry in entries:
+        if not valid_session(entry.name) or entry.name in ids:
+            continue
+        try:
+            info = entry.stat(follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode) or now - info.st_mtime <= max_age:
+                continue
+            shutil.rmtree(entry.path)
+        except OSError:
+            continue
+        gone.append(entry.name)
     return gone

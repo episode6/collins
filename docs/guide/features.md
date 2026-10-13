@@ -397,9 +397,11 @@ belongs to its session, and it is there when you come back to it.
   prompt. Pasting works the same way: an image on the clipboard (a
   screenshot tool's copy, a browser's *Copy image*) is saved as a PNG on
   the service's machine, under `~/.local/share/collins/uploads/<session>/`
-  — where dropped images go too, removed with the session (and, for a
-  prompt typed before the session has an id, under `uploads/_pending/`,
-  swept after a week) — and that copy is what the prompt mentions; files
+  — where dropped images go too, removed with the session, or a day after
+  the session's transcript went by other means (the CLI's own cleanup, a
+  delete outside Collins) (and, for a prompt typed before the session has
+  an id, under `uploads/_pending/`, swept after a week) — and that copy is
+  what the prompt mentions; files
   copied or dropped from a file manager are mentioned in place, or sent
   over as copies (64 MiB each at most) when Collins runs on another machine
   than its service.

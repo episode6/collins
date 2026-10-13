@@ -153,6 +153,37 @@ def test_the_pending_sweep_takes_only_what_is_a_week_old(uploads_root):
     assert uploads.sweep_pending(now=time.time() + week + 60) == ["fresh.png"]
 
 
+def test_the_orphan_sweep_takes_a_forgotten_sessions_uploads_once_a_day_old(uploads_root, tmp_path):
+    """A session the store no longer lists (the CLI's cleanupPeriodDays took
+    the transcript, or it went outside Collins) never reaches trash_many or
+    delete: the sweep removes its directory, but only once it is a day old
+    (a freshly resolved session the scan has not caught up with is kept),
+    and never the pending directory, a known session's, or a planted link."""
+    forgotten = uploads.write("gone-1", "a.png", b"x").parent
+    fresh = uploads.write("gone-2", "b.png", b"x").parent
+    kept = uploads.write("kept-1", "c.png", b"x").parent
+    pending = uploads.write(None, "d.png", b"x").parent
+    day = uploads.ORPHAN_AFTER_SECONDS
+    for folder in (forgotten, kept, pending):
+        os.utime(folder, (time.time() - day - 60,) * 2)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "x.png").write_bytes(b"x")
+    (uploads_root / "gone-3").symlink_to(elsewhere)
+    os.utime(uploads_root / "gone-3", (time.time() - day - 60,) * 2, follow_symlinks=False)
+    assert uploads.sweep_orphans({"kept-1"}) == ["gone-1"]
+    assert not forgotten.exists() and fresh.exists() and kept.exists() and pending.exists()
+    assert (elsewhere / "x.png").exists() and (uploads_root / "gone-3").is_symlink()
+    # The known set may be a callable, asked once on the sweep's thread.
+    asked = []
+    later = time.time() + day + 60
+    assert uploads.sweep_orphans(lambda: asked.append(1) or {"kept-1"}, now=later) == ["gone-2"]
+    assert asked == [1] and not fresh.exists() and kept.exists()
+    os.utime(kept, None)  # touched today: unknown now, but under a day old
+    assert uploads.sweep_orphans(set()) == []
+    assert uploads.sweep_orphans(set(), now=time.time() + 2 * day) == ["kept-1"]
+
+
 def test_the_store_takes_the_uploads_with_a_trashed_or_deleted_session(uploads_root, tmp_path, monkeypatch):
     from collins import store as store_mod
 

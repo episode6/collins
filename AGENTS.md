@@ -343,7 +343,7 @@ grows.
 | Model catalog, update-check stamp | `~/.cache/collins/` |
 | Images the service fetched for `show_image` and PR bodies (`kind=remote`, a day; `service.blobs.RemoteBlobs`) | `~/.cache/collins/remote-images/<sha1 of the url><suffix>` (the service's machine) |
 | Blobs fetched over the API (`GET /api/blob`), with the ETag kept beside each (`blobcache.py`; built in PR-2.1, the diff's images in PR-2.2, every picture and project icon in PR-2.7); the only image files the client decodes (`blobcache.read` refuses the rest) | `~/.cache/collins/blobs/<service id>/<sha1 of the url>` |
-| Drops and pastes sent over `PUT /api/upload` (`uploads.py`, PR-2.7): removed with the session; one made with no session id waits in `_pending/` for a week (D37) | `~/.local/share/collins/uploads/<session id>/` (the service's machine; `COLLINS_UPLOADS_DIR` overrides) |
+| Drops and pastes sent over `PUT /api/upload` (`uploads.py`, PR-2.7): removed with the session, or a day after the service stopped knowing it (the orphan sweep on the housekeeping tick); one made with no session id waits in `_pending/` for a week (D37) | `~/.local/share/collins/uploads/<session id>/` (the service's machine; `COLLINS_UPLOADS_DIR` overrides) |
 | Everything of the CLI's | `~/.claude/` — read only |
 
 Every one of these has an environment override used by tests, captures and

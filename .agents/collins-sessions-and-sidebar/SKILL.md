@@ -547,7 +547,14 @@ trashes `~/.local/share/collins/uploads/<id>/` with the transcript
 unlinks it — the archive sweep runs through `trash_many` too; the pending
 uploads (`_pending/`, made with no id) are no session's and go after a week
 on the service's housekeeping tick (`ServiceCore.sweep_pending_uploads`, on
-a thread). An empty upload is refused (400), and one past 64 MiB is 413 on
+a thread). A session the service no longer knows — not an agent pty's, not
+in the store's last scan: the CLI's own `cleanupPeriodDays` took the
+transcript, or it went outside Collins — never reaches `trash_many` or
+`delete`, so the same tick removes its `uploads/<id>/` once the directory
+is a day old (`ServiceCore.sweep_orphan_uploads` → `uploads.sweep_orphans`:
+the known ids gathered on the main loop, the removes on a thread, nothing
+before the store's first scan, a planted link never followed). An empty
+upload is refused (400), and one past 64 MiB is 413 on
 its headers with the body drained, never held (`set_accumulate(False)` in
 the early handler).
 

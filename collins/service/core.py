@@ -1862,8 +1862,9 @@ class ServiceCore:
     def start_housekeeping(self) -> None:
         """The service's own timers (PR-1.12d): the archive sweep at start
         and every `SWEEP_POLL_S` (autodelete makes it one sweep a day, none
-        until the setting is on), the pending uploads' week (D37) on the
-        same tick, and gh asked about once. The first sweep
+        until the setting is on), the pending uploads' week (D37) and the
+        uploads of sessions the service no longer knows
+        (`sweep_orphan_uploads`) on the same tick, and gh asked about once. The first sweep
         waits for the store's first scan: before it the store knows no
         session, and a sweep then would stamp the day having trashed
         nothing."""
@@ -1873,10 +1874,12 @@ class ServiceCore:
             def first(*_args) -> None:
                 self.store.disconnect(handler)
                 self.sweep_archived()
+                self.sweep_orphan_uploads()
 
             handler = self.store.connect("refreshed", first)
         else:
             self.sweep_archived()
+            self.sweep_orphan_uploads()
         self.sweep_pending_uploads()
         if not self._sweep_source:
             self._sweep_source = GLib.timeout_add_seconds(SWEEP_POLL_S, self._sweep_tick)
@@ -1885,7 +1888,48 @@ class ServiceCore:
     def _sweep_tick(self) -> bool:
         self.sweep_archived()
         self.sweep_pending_uploads()
+        self.sweep_orphan_uploads()
         return True
+
+    def sweep_orphan_uploads(self) -> None:
+        """The uploads of a session the service no longer knows go
+        (`uploads.sweep_orphans`): a transcript the CLI's own
+        `cleanupPeriodDays` took, or one removed outside Collins, never
+        reaches `store.trash_many` / `delete`, so nothing else would remove
+        its `uploads/<id>/`. The known ids are gathered here, on the main
+        loop (every agent pty's session, resolved or finished, and every
+        session the store's last scan listed); the scandir and the removes
+        run on a thread, and a directory under a day old is left for the
+        next tick (a session the scan has not caught up with). Nothing runs
+        before the store's first scan: with no sessions known, every upload
+        would read as an orphan. Never raises."""
+        from .. import uploads
+
+        store = self.store
+        if store is None or not store.applied:
+            return
+        known: set[str] = set()
+        try:
+            known.update(sid for sid in self.agent_pty_sessions(include_finished=True).values() if sid)
+            for record in list(self.sessions.values()):
+                sid = getattr(record.session, "session_id", None)
+                if sid:
+                    known.add(sid)
+            known.update(s.session_id for s in store.all_sessions() if s.session_id)
+        except Exception:
+            log.warning("orphan uploads sweep: the known sessions could not be read", exc_info=True)
+            return
+
+        def sweep() -> None:
+            try:
+                gone = uploads.sweep_orphans(known)
+            except Exception:
+                log.warning("orphan uploads sweep failed", exc_info=True)
+                return
+            if gone:
+                log.info("orphan uploads sweep: removed the uploads of %d gone session(s)", len(gone))
+
+        gitfeed.spawn_default(sweep, "orphan-sweep")
 
     def sweep_pending_uploads(self) -> None:
         """The uploads made with no session id (D37) that are older than a
