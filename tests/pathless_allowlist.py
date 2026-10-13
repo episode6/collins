@@ -195,8 +195,9 @@ LOCAL_EXTRAS = frozenset(
 # written down.
 #
 # Line numbers are as of 2026-10-13 (the round after the Fable review of
-# PR 615; the thirteen fix rounds below this PR moved most of them, and a
-# later rebase may move them again by a few lines). Record only: under
+# PR 615, on PR 614's `66dac3c`; the thirteen fix rounds below this PR
+# moved most of them, and a later rebase may move them again by a few
+# lines). Record only: under
 # D50 nothing here was moved or gated.
 #
 # From the first report:
@@ -210,8 +211,8 @@ LOCAL_EXTRAS = frozenset(
 #   (window.py:7035)
 # - `clonerepo.destination_status` (disk reads per keystroke in the clone
 #   dialog, clonedialog.py:337)
-# - `panelhistory.load_all` (terminal.py:5574) and `panelhistory.delete`
-#   (terminal.py:5654, window.py:2761, 2835, 2916)
+# - `panelhistory.load_all` (terminal.py:5577) and `panelhistory.delete`
+#   (terminal.py:5657, window.py:2761, 2835, 2916)
 # - `clisetup.validate` (prefs.py:1560, welcome.py:283, 325); `pkgrepos`
 #   (sidebar.py:2049, window.py:6238)
 #
@@ -260,14 +261,14 @@ LOCAL_EXTRAS = frozenset(
 # 9. Six native choosers that start at a path of the service's with no
 #    gate (`Gio.File.new_for_path` with no read, so the walker sees
 #    nothing): window.py:2309, 2324, 2948, 3547 (from
-#    `_visible_project_dir`), terminal.py:4956 (the composer's attach),
+#    `_visible_project_dir`), terminal.py:4959 (the composer's attach),
 #    sandboxchip.py:449; and the composer's attach mentions the picked
 #    path of this device to the service's CLI, where a drop of the same
 #    file uploads. (The three whose starting folder IS read are gated and
 #    on `LOCAL_EXTRAS`: prefs.py:480, clonedialog.py:389, window.py:7027.)
 #    All of it is PR-3.2's path picker by the spec's 3.11.
 # Lesser: this device's `Path.home()` sent as a service cwd
-#    (terminal.py:1195, 1970, 2037, 2384; sidebar.py:2414; window.py:2006;
+#    (terminal.py:1195, 1975, 2042, 2389; sidebar.py:2414; window.py:2006;
 #    D39's fallback absorbs it) and used to abbreviate service paths:
 #    `formatting.display_path` (formatting.py:405, some twenty call
 #    sites), clonerepo.py:309, and `sidebar._abbreviate_path`
@@ -296,8 +297,11 @@ LOCAL_EXTRAS = frozenset(
 #   (clonedialog.py:118, 331, 336, 338, 385; prefs.py:464, 477: the
 #   `clone_directory` setting, a service setting holding `~/…`).
 # - `gitinfo`'s `.git` reads (`gitfiles.*`, some thirty call sites in
-#   gitinfo.py) and `gitpage`'s `gitops.read_diff` / `side_bytes` /
-#   `tree_state_signature` (gitpage.py:1315, 1316, 1389) run on this
+#   gitinfo.py) and every `gitops.*` call of `gitpage`, `gitsidebar`,
+#   `gitinfo` and `window` (some fifty: `read_diff`, `side_bytes` and
+#   `tree_state_signature` at gitpage.py:1315, 1316, 1389, `read_status`,
+#   `run_plan`, `commit`, …; each takes the transport when one is
+#   installed) run on this
 #   device when the service's hello lacks the `git` capability
 #   (`App` logs "git runs locally" and installs no transport). Every
 #   service since PR-2.1 has the capability, so this is a fallback for an
@@ -308,7 +312,8 @@ LOCAL_EXTRAS = frozenset(
 #   check's `prstatus.gh_succeeds` / `gh_json` (updatecheck.py:169, 191:
 #   this device's `gh` asking GitHub about Collins' releases),
 #   `licenses.legal_sections`, `notifycenter.sound_subtitle`
-#   (prefs.py:983: the notification sound's file), `connection.py:144`
+#   (prefs.py:983) and `sound_file` (notifysound.py: the notification
+#   sound's file), `connection.py:144`
 #   (`os.kill` of the service's pid).
 #
 # **What the walker cannot see** (`tests/pathless.py`; every form, as of
