@@ -188,3 +188,17 @@ def test_a_request_the_frame_cannot_carry_is_refused_and_leaves_no_pending(link)
     assert link._primary.pending == {}
     # The link is still good for a request that fits.
     assert link.call({"t": "service.status"})["clients"] == 1
+
+
+def test_an_event_the_frame_cannot_carry_is_dropped_not_raised(link, caplog):
+    """NEW-2 of the 604 fix pass's verification: `send_event` encoded with
+    no guard, so an oversized event raised ValueError into its caller (a
+    resize, an ack). It is logged and dropped; the link keeps serving."""
+    link.connect()
+    # TEXT_MAX characters, 1.5 MB once escaped.
+    too_big = {"t": "tool-reply", "call": "call-1", "ok": True, "text": "y\n" * 500_000}
+    assert isinstance(protocol.validate(dict(too_big), protocol.CLIENT), protocol.Message)
+    with caplog.at_level("ERROR", logger="collins.api.client"):
+        link.send_event(too_big)  # nothing raises
+    assert any("tool-reply event not sent" in r.message for r in caplog.records)
+    assert link.call({"t": "service.status"})["clients"] == 1

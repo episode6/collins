@@ -23,7 +23,12 @@ effect injectable so `tests/test_connection.py` drives it with fakes:
   `service.restart` queues behind the deactivating unit's stop sequence
   (up to `STOP_BOUND_S`) — on a reconnect that is the window's main loop
   frozen with the banner unpainted. The wait that follows polls the
-  socket anyway, so nothing is lost.
+  socket anyway, so nothing is lost. What `--no-block` cannot report is a
+  unit that starts and then dies (a stale `ExecStart` from an older
+  `--install-desktop`, a service exiting 1): the start is "queued" and no
+  socket ever appears. A **wait** that times out after a systemd start
+  marks systemd failed for the rest of this process (`systemd_failed`),
+  and every later start spawns `collins-service` itself (*fallback*).
 - **wait**: poll the socket every `POLL_MS` for up to `WAIT_S`.
 - **connect**: both channels and the hello (`SocketLink.connect`), the
   local proof from the client's own filesystem (`prove_local`), then the
@@ -130,6 +135,12 @@ def default_starter(app_id: str) -> str:
     ``"spawned"``. Raises OSError when neither way works."""
     if systemctl_start(app_id):
         return "systemd"
+    return spawn_starter(app_id)
+
+
+def spawn_starter(app_id: str) -> str:
+    """Start a service for *app_id* by spawning it: the fallback once a
+    systemd start was queued and no socket followed."""
     spawn_service(app_id)
     return "spawned"
 
@@ -151,6 +162,7 @@ class ConnectionManager:
         *,
         find: Callable[[str], tuple[str, str]] | None = None,
         start: Callable[[str], str] | None = None,
+        fallback: Callable[[str], str] | None = None,
         schedule: Callable[[int, Callable[[], bool]], object] | None = None,
         run_async: Callable[[Callable[[], None]], None] | None = None,
         land: Callable[[Callable[[], None]], None] | None = None,
@@ -164,6 +176,11 @@ class ConnectionManager:
         self.link = link
         self._find = find or self._default_find
         self._start = start or default_starter
+        self._fallback = fallback or spawn_starter
+        # Set when a systemd start was queued and the wait found no socket:
+        # the unit started and died (a stale ExecStart, an exit 1), which
+        # `--no-block` cannot report. Every later start is the fallback.
+        self.systemd_failed = False
         self._schedule = schedule
         # A reconnect's handshake (up to CONNECT_TIMEOUT_S of waiting) runs
         # on a thread the owner provides and lands on its loop, so the
@@ -199,6 +216,20 @@ class ConnectionManager:
         path = api_server.socket_path(app_id)
         return path, api_server.probe_socket(path)
 
+    def _start_service(self) -> None:
+        """Start the service the way this process still trusts: systemd (or
+        the injected starter) until a systemd start left no socket behind,
+        the spawn fallback from then on."""
+        starter = self._fallback if self.systemd_failed else self._start
+        self.started_how = starter(self.app_id)
+
+    def _wait_failed(self) -> None:
+        """A wait ran out: a systemd start that produced no socket means the
+        unit is not to be trusted again in this process."""
+        if self.started_how == "systemd" and not self.systemd_failed:
+            log.warning("connection: %s started but no socket appeared; spawning from now on", UNIT)
+            self.systemd_failed = True
+
     def _set_state(self, state: str) -> None:
         self.state = state
         if self.on_state is not None:
@@ -216,13 +247,25 @@ class ConnectionManager:
         self.path, found = self._find(self.app_id)
         if found != "live":
             self._set_state(STARTING)
-            self.started_how = self._start(self.app_id)
+            self._start_service()
             self._set_state(WAITING)
             if not self._wait_blocking(wait_s):
-                from .api.client import ConnectionLost
-
-                raise ConnectionLost(f"no service answered on {self.path} within {wait_s:.0f} s")
+                self._wait_failed()
+                if not self.systemd_failed:
+                    self._give_up(wait_s)
+                # The unit started and died: spawn once, here, before giving
+                # up (a stale unit must not block every launch).
+                self._set_state(STARTING)
+                self._start_service()
+                self._set_state(WAITING)
+                if not self._wait_blocking(wait_s):
+                    self._give_up(wait_s)
         self._connect()
+
+    def _give_up(self, wait_s: float) -> None:
+        from .api.client import ConnectionLost
+
+        raise ConnectionLost(f"no service answered on {self.path} within {wait_s:.0f} s")
 
     def _wait_blocking(self, wait_s: float) -> bool:
         deadline = self._now() + wait_s
@@ -284,7 +327,7 @@ class ConnectionManager:
             self.path, found = self._find(self.app_id)
             if found != "live":
                 self._set_state(STARTING)
-                self.started_how = self._start(self.app_id)
+                self._start_service()
         except Exception as exc:
             log.warning("connection: could not start the service: %s", exc)
             self._set_state(LOST)
@@ -303,6 +346,7 @@ class ConnectionManager:
             self._try_connect()
             return False
         if self._now() >= deadline:
+            self._wait_failed()  # a systemd start with no socket: the fallback from here on
             self._set_state(LOST)
             self._retry_later()
             return False

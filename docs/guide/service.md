@@ -33,7 +33,11 @@ finding none, starts one: through `systemctl --user start
 collins-service.service` where the unit is installed, else by spawning
 `collins-service` itself. The unit ships with the packages and is written
 by `collins --install-desktop` for a pip install; it is never enabled by
-a package, so nothing runs until a window asks.
+a package, so nothing runs until a window asks. A unit that starts and
+then dies (a stale `ExecStart` from an older install, a service exiting
+with an error) is not trusted again by that window: it spawns the
+service itself from then on, and `journalctl --user -u
+collins-service.service` says why the unit failed.
 
 The service keeps running after the window quits. To stop it:
 

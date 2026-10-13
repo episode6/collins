@@ -534,10 +534,17 @@ class SocketLink(apilink.Link):
         if not self.connected:
             return
         try:
-            self._check(message)
+            checked = self._check(message)
         except RequestRefused:
             return
-        self._send_text(self._primary, dict(message))
+        try:
+            text = protocol.encode(dict(message))
+        except ValueError as exc:
+            # An event the frame cannot carry is dropped here, logged, not
+            # raised into a resize or an ack (the verification of 604's fix pass).
+            log.error("api client: %s event not sent: %s", checked.type, exc)
+            return
+        self._send_text(self._primary, dict(message), text)
 
     def send_input(self, pty: int, data: bytes) -> None:
         """A `0x02` frame on the primary."""

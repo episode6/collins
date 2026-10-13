@@ -201,6 +201,70 @@ def test_systemctl_is_only_for_the_default_id(monkeypatch):
     assert calls == [["systemctl", "--user", "start", "--no-block", "collins-service.service"]]
 
 
+class DeadUnitWorld(World):
+    """systemd queues the start (`--no-block` reports success) and the unit
+    dies: no socket ever appears from a systemd start. Only the spawn
+    fallback makes one."""
+
+    def __init__(self):
+        super().__init__(live=False, appears_after=10_000)
+        self.fallbacks = []
+        self.manager._fallback = self.fallback
+
+    def start(self, app_id):
+        self.started.append(app_id)
+        return "systemd"
+
+    def fallback(self, app_id):
+        self.fallbacks.append(app_id)
+        self.appears_after = 2  # the spawned service comes up after two polls
+        return "spawned"
+
+
+def test_a_systemd_start_with_no_socket_falls_back_to_a_spawn_on_reconnect():
+    """Verification of the 604 fix pass, NEW-1: with `--no-block` a unit
+    that starts and dies (a stale ExecStart, an exit 1) reports success, so
+    the manager looped systemd-start → WAITING → LOST → backoff for ever
+    and never spawned the service itself. A wait that runs out after a
+    systemd start marks systemd failed; the next attempt spawns."""
+    world = DeadUnitWorld()
+    world.live = True
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("gone")
+    # Attempt 1: systemd start, the wait polls out to WAIT_S, LOST again.
+    world.fire()  # the backoff timer → _retry → systemd, then _poll
+    assert world.started == ["com.example.Test"] and world.manager.started_how == "systemd"
+    assert world.manager.systemd_failed is False
+    polls = 0
+    while world.manager.state == "waiting" and polls < 200:
+        world.fire()
+        polls += 1
+    assert world.manager.state == "lost" and world.manager.systemd_failed is True
+    assert world.fallbacks == []
+    # Attempt 2: the fallback spawns, the socket appears, connected.
+    world.fire()  # the backoff timer → _retry → the fallback
+    assert world.fallbacks == ["com.example.Test"] and world.manager.started_how == "spawned"
+    assert world.started == ["com.example.Test"]  # systemd not asked again
+    for _ in range(10):
+        if world.manager.state == "connected":
+            break
+        world.fire()
+    assert world.manager.state == "connected" and world.connected == [True, False]
+
+
+def test_start_local_spawns_once_when_the_systemd_start_leaves_no_socket():
+    """The same at startup: the first wait runs out after a systemd start,
+    the fallback spawns and a second wait finds the socket, instead of a
+    ConnectionLost every launch while the stale unit stands."""
+    world = DeadUnitWorld()
+    world.manager.start_local(wait_s=1.0)
+    assert world.started == ["com.example.Test"] and world.fallbacks == ["com.example.Test"]
+    assert world.manager.systemd_failed is True and world.manager.started_how == "spawned"
+    assert world.states[:4] == ["starting", "waiting", "starting", "waiting"]
+    assert world.manager.state == "connected"
+
+
 def test_systemctl_start_does_not_wait_for_the_start_job(tmp_path, monkeypatch):
     """The review of PR 604, should-fix 2: `systemctl start` waits for the
     start job (a `Type=notify` unit's whole startup; after a stop, the
