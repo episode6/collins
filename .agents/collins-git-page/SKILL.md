@@ -1114,9 +1114,11 @@ are `git.info` with `changes` (one `git status` on the service, asked
 fresh and on demand, never on a tick), `ignored_names` is `git.run` with
 `check_ignore_argv`, and `gitops.in_progress_at(cwd)` /
 `in_progress_operation_at` (the page's bar and the sidebar's gates) read
-the mirror's `operation` kind. A service that cannot be asked reads as
-"not a repository" — never this machine's `.git`, which is not the
-service's. With no reader (the service's own code, the unit tests over a
+the mirror's `operation` kind. With a reader installed nothing ever
+falls back to this machine's `.git`, which is not the service's: a
+service that cannot be asked keeps the entry before (above), and a cwd
+the mirror has never seen on an unreachable service is None. With no
+reader (the service's own code, the unit tests over a
 temp repository) every function reads the files through `gitfiles`, as
 before. `gitloads`' three git calls go through `gitops.run_git` with
 their builders (`commit_subject_argv`, `commit_message_argv`,

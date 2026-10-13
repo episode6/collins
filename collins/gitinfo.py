@@ -90,9 +90,12 @@ _IGNORE_TIMEOUT_S = 0.5
 MAX_AGE_S = 1.0
 
 # The client's reader (remotegit): `reader(cwd, max_age=, changes=, state=)`
-# -> GitInfo, or None when the service could not be asked at all (then the
-# answer is "not a repository" rather than the files of this machine, which
-# are not the service's). None: the local files are read.
+# -> GitInfo. A service that could not be asked (`gone`: the link down, a
+# timeout) answers the entry it had before, marked `GitInfo.unreachable`,
+# so a hiccup reads as "nothing moved"; None only with no entry before, or
+# for a real refusal (the cwd not allowed), which reads as "not a
+# repository" — never the files of this machine, which are not the
+# service's. A reader of None: the local files are read.
 Reader = Callable[..., "GitInfo | None"]
 _reader: Reader | None = None
 
