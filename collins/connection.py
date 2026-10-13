@@ -27,19 +27,19 @@ effect injectable so `tests/test_connection.py` drives it with fakes:
   unit that starts and then dies (a stale `ExecStart` from an older
   `--install-desktop`, a service exiting 1): the start is "queued" and no
   socket ever appears. A **wait** that times out after a systemd start
-  asks systemd (`unit_state`: `systemctl --user show -p ActiveState`, off
-  the main loop): a unit still `activating` (a slow cold start) or
-  `deactivating` (a graceful stop of up to `STOP_BOUND_S` that the start
-  job is queued behind: `service.restart`, `systemctl --user stop` with
-  sessions to close) is trusted and waited for another `WAIT_S`; one
-  `inactive` or `failed` (or no answer) marks systemd failed
-  (`systemd_failed`), tells the owner once (`on_notice`: the service will
-  run unmanaged), and every later start spawns `collins-service` itself
-  (*fallback*) until a systemd-started service connects again, which
-  clears the mark. `started_how` is this round's word alone: cleared at
-  the top of every attempt, so a round that skipped the start never reads
-  an older one's.
-- **wait**: poll the socket every `POLL_MS` for up to `WAIT_S`.
+  asks systemd for the unit's `ActiveState` and obeys the one rule in
+  `ConnectionManager._timeout_ask`'s docstring: every wait is bounded,
+  a unit still starting or stopping buys more time (at most
+  `WAIT_EXTENSIONS_MAX` extensions in all), a unit that is up but
+  unreachable or over marks systemd failed (`systemd_failed`), tells the
+  owner once (`on_notice`: the service will run unmanaged), and every
+  later start spawns `collins-service` itself (*fallback*) until a
+  systemd-started service connects again, which clears the mark.
+  `started_how` is this round's word alone: cleared at the top of every
+  attempt, so a round that skipped the start never reads an older one's.
+- **wait**: poll the socket every `POLL_MS` for up to `WAIT_S`, extended
+  by the rule above; never longer than `WAIT_S * (WAIT_EXTENSIONS_MAX + 1)`
+  plus one spawn's `WAIT_S`.
 - **connect**: both channels and the hello (`SocketLink.connect`), the
   local proof from the client's own filesystem (`prove_local`), then the
   owner's `on_connected(first)` (the app binds the mirrors on the first,
@@ -64,9 +64,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from . import APP_ID
 from .api import server as api_server
+from .i18n import N_
 
 log = logging.getLogger(__name__)
 
@@ -166,13 +168,29 @@ def unit_state(app_id: str) -> str:
     return word if word.isalpha() else ""
 
 
-# What `unit_state` words mean after a wait ran out: still at it, or over.
-UNIT_BUSY = frozenset({"active", "activating", "deactivating", "reloading"})
-UNIT_OVER = frozenset({"inactive", "failed"})
+# The rule a timed-out wait obeys (`ConnectionManager._timeout_ask`): how
+# many extensions of WAIT_S one round may buy in all — about 90 s with
+# WAIT_S 10, systemd's own default start and stop timeouts — and the
+# three verdicts.
+WAIT_EXTENSIONS_MAX = 9
+EXTEND = "extend"  # the unit is still at it: another WAIT_S of polling
+OVER = "over"  # this round is over, systemd still trusted: LOST / ConnectionLost
+FAILED = "failed"  # the unit is over or unreachable: mark systemd failed, spawn from now on
+UNIT_IN_PROGRESS = frozenset({"activating", "deactivating", "reloading"})
+
+
+@dataclass
+class _Wait:
+    """One round's wait: what the rule in `_timeout_ask` has already
+    granted it."""
+
+    extensions: int = 0  # WAIT_S extensions granted so far, every kind together
+    active_seen: bool = False  # `active` has bought its one extension
+    inactive_seen: bool = False  # `inactive` has had its grace round
 
 # The owner's one word to the user when the fallback takes over (a msgid;
 # the app translates it with `_()`).
-FALLBACK_NOTICE = (
+FALLBACK_NOTICE = N_(
     "The Collins service is running unmanaged: its systemd unit failed. "
     "See journalctl --user -u collins-service.service"
 )
@@ -279,24 +297,69 @@ class ConnectionManager:
         starter = self._fallback if self.systemd_failed else self._start
         self.started_how = starter(self.app_id)
 
-    def _keep_waiting(self) -> bool:
-        """A wait ran out. True when the service is systemd's and systemd
-        says the unit is still at it (`activating`: a slow cold start;
-        `deactivating`: a graceful stop the start job is queued behind;
-        `active` / `reloading`), so the wait goes on. False otherwise; a
-        systemd start whose unit is over (`inactive`, `failed`, or no
-        answer) marks systemd failed and the fallback takes the next start.
-        Asks systemctl: callers keep it off the main loop."""
+    def _timeout_ask(self, wait: _Wait) -> tuple[str, str]:
+        """**The rule every wait obeys.** A wait is `WAIT_S` of polling the
+        socket. When it runs out:
+
+        - A start that was not systemd's (a spawn, or none this round), or
+          systemd already marked failed: the round is OVER.
+        - Otherwise ask systemd for the unit's ActiveState (`unit_state`,
+          one `systemctl show`; callers keep this off the main loop):
+          - `activating` / `deactivating` / `reloading`: the unit is still
+            at it (a slow cold start; a graceful stop of up to STOP_BOUND_S
+            the start job is queued behind): EXTEND by one more WAIT_S —
+            but at most `WAIT_EXTENSIONS_MAX` extensions in one round, of
+            every kind together; past that the round is OVER (systemd is
+            not blamed: LOST and the backoff on a reconnect, ConnectionLost
+            at startup, never a hang).
+          - `active`: EXTEND once (the socket may be a beat behind
+            READY=1); a second `active` means the unit is up but
+            unreachable at this client's path (its XDG_RUNTIME_DIR differs
+            from the window's, its socket was removed): FAILED.
+          - `inactive`: EXTEND once as a grace round (a restart's
+            deactivating → inactive → activating moment); a second
+            `inactive` is FAILED.
+          - `failed`, or no answer (``""``): FAILED at once.
+        - FAILED marks systemd failed for this process (`systemd_failed`,
+          the owner told once): every later start is the spawn fallback,
+          and the flock in the service settles any collision with a unit
+          that comes up after all. The mark clears when a systemd-started
+          service connects again.
+
+        Returns ``(verdict, state)``; the caller applies the verdict on its
+        own thread (`_mark_systemd_failed` runs the owner's notice, so on
+        the main loop)."""
         if self.started_how != "systemd" or self.systemd_failed:
-            return False
+            return OVER, ""
         state = self._unit_state(self.app_id)
-        if state in UNIT_BUSY:
-            log.info("connection: %s is %s; waiting on", UNIT, state)
-            return True
-        self._mark_systemd_failed(state)
-        return False
+        if wait.extensions >= WAIT_EXTENSIONS_MAX:
+            log.warning("connection: %s is %s after %d extensions; this round is over",
+                        UNIT, state or "unknown", wait.extensions)
+            return OVER, state
+        if state in UNIT_IN_PROGRESS:
+            wait.extensions += 1
+            log.info("connection: %s is %s; waiting on (%d/%d)", UNIT, state, wait.extensions,
+                     WAIT_EXTENSIONS_MAX)
+            return EXTEND, state
+        if state == "active":
+            if not wait.active_seen:
+                wait.active_seen = True
+                wait.extensions += 1
+                log.info("connection: %s is active with no socket at %s yet; one more wait", UNIT, self.path)
+                return EXTEND, state
+            log.warning("connection: %s is active but no socket at %s: up but unreachable", UNIT, self.path)
+            return FAILED, state
+        if state == "inactive" and not wait.inactive_seen:
+            wait.inactive_seen = True
+            wait.extensions += 1
+            log.info("connection: %s is inactive; one grace wait for a restart's gap", UNIT)
+            return EXTEND, state
+        return FAILED, state
 
     def _mark_systemd_failed(self, state: str) -> None:
+        """FAILED: the fallback from now on, the owner told once."""
+        if self.systemd_failed:
+            return
         log.warning("connection: %s started but no socket appeared (unit %s); spawning from now on",
                     UNIT, state or "unknown")
         self.systemd_failed = True
@@ -346,13 +409,17 @@ class ConnectionManager:
             self._set_state(STARTING)
             self._start_service()
             self._set_state(WAITING)
+            wait = _Wait()
             while not self._wait_blocking(wait_s):
-                if self._keep_waiting():
-                    continue  # the unit is still starting or stopping: another wait
-                if self.started_how != "systemd" or not self.systemd_failed:
+                verdict, state = self._timeout_ask(wait)  # bounded: see the rule
+                if verdict == EXTEND:
+                    continue
+                if verdict == OVER:
                     self._give_up(wait_s)
-                # The unit is over with no socket: spawn once, here, before
-                # giving up (a stale unit must not block every launch).
+                # FAILED: the unit is over or unreachable. Spawn once, here,
+                # and wait once more before giving up (a stale unit must not
+                # block every launch; a hang never happens).
+                self._mark_systemd_failed(state)
                 self._set_state(STARTING)
                 self._start_service()
                 self._set_state(WAITING)
@@ -435,11 +502,13 @@ class ConnectionManager:
             self._retry_later()
             return False
         self._set_state(WAITING)
-        deadline = self._now() + WAIT_S
-        self._poll(deadline)
+        self._poll(self._now() + WAIT_S, _Wait())
         return False
 
-    def _poll(self, deadline: float) -> bool:
+    def _poll(self, deadline: float, wait: _Wait) -> bool:
+        """One poll of the socket; at *deadline* the rule of `_timeout_ask`
+        decides, asked off the main loop, and its verdict lands in
+        `_timeout_verdict`."""
         if self.stopped:
             return False
         self.path, found = self._find(self.app_id)
@@ -447,30 +516,25 @@ class ConnectionManager:
             self._try_connect()
             return False
         if self._now() >= deadline:
-            if self.started_how == "systemd" and not self.systemd_failed:
-                # Ask systemd off the main loop whether the unit is still at
-                # it; the verdict lands here and either extends the wait or
-                # marks the fallback and goes LOST.
-                generation = self._generation
+            generation = self._generation
 
-                def ask() -> None:
-                    keep = self._keep_waiting()
-                    self._land(lambda: self._timeout_verdict(keep, generation))
+            def ask() -> None:
+                verdict, state = self._timeout_ask(wait)
+                self._land(lambda: self._timeout_verdict(verdict, state, wait, generation))
 
-                self._run_async(ask)
-                return False
-            self._set_state(LOST)
-            self._retry_later()
+            self._run_async(ask)
             return False
-        self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline))
+        self._pending = self._schedule(POLL_MS, lambda: self._poll(deadline, wait))
         return False
 
-    def _timeout_verdict(self, keep_waiting: bool, generation: int) -> None:
+    def _timeout_verdict(self, verdict: str, state: str, wait: _Wait, generation: int) -> None:
         if self.stopped or self.state != WAITING or generation != self._generation:
             return  # a loss or a newer attempt moved on meanwhile
-        if keep_waiting:
-            self._poll(self._now() + WAIT_S)
+        if verdict == EXTEND:
+            self._poll(self._now() + WAIT_S, wait)
             return
+        if verdict == FAILED:
+            self._mark_systemd_failed(state)  # the next attempt's start is the spawn fallback
         self._set_state(LOST)
         self._retry_later()
 

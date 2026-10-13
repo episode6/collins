@@ -36,11 +36,13 @@ by `collins --install-desktop` for a pip install; it is never enabled by
 a package, so nothing runs until a window asks. When the socket takes
 longer than the window's wait, the window asks systemd: a unit still
 starting (a slow cold start) or still stopping (a graceful stop ahead of
-the start) is waited for; one that is `inactive` or `failed` (a stale
-`ExecStart` from an older install, a service exiting with an error) is
-not trusted again by that window, which spawns the service itself from
-then on, says so once in a toast, and trusts the unit again the next time
-a systemd-started service answers. `journalctl --user -u
+the start) is waited for, up to about 90 s in all; one that is `failed`
+or stays `inactive` (a stale `ExecStart` from an older install, a service
+exiting with an error), or is `active` with no socket where the window
+looks (a unit running under another `XDG_RUNTIME_DIR`), is not trusted
+again by that window, which spawns the service itself from then on, says
+so once in a toast, and trusts the unit again the next time a
+systemd-started service answers. `journalctl --user -u
 collins-service.service` says why the unit failed.
 
 The service keeps running after the window quits. To stop it:

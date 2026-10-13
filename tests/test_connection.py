@@ -278,6 +278,132 @@ def test_start_local_waits_on_a_slow_unit_too():
     assert world.asked == ["com.example.Test"] * 2 and world.manager.systemd_failed is False
 
 
+def _run_round(world, limit=2000):
+    """Fire timers until the manager leaves WAITING for good (connected, or
+    LOST with a retry scheduled); returns the number of timers fired."""
+    fired = 0
+    world.fire()  # the backoff timer → _retry
+    while world.manager.state in ("waiting", "starting", "connecting") and fired < limit:
+        world.fire()
+        fired += 1
+    return fired
+
+
+class ActiveUnitWorld(DeadUnitWorld):
+    """systemd says the unit is `active` for ever, and no socket is ever at
+    the client's path (the unit runs under another XDG_RUNTIME_DIR, or its
+    socket was removed after READY=1)."""
+
+    unit_states = ["active"]
+
+
+class StuckActivatingWorld(DeadUnitWorld):
+    unit_states = ["activating"]
+
+
+class RestartGapWorld(DeadUnitWorld):
+    """A restart's gap: `inactive` when the first wait runs out, then
+    `activating`, then the socket on systemd's own start."""
+
+    unit_states = ["inactive", "activating"]
+
+    def unit_state(self, app_id):
+        word = super().unit_state(app_id)
+        if word == "activating":
+            self.appears_after = 2
+        return word
+
+
+def test_an_active_unit_with_no_socket_is_bounded_and_marked_unreachable():
+    """Verification of 5c24ab3: `active` extended without bound, so a unit
+    up under another runtime dir kept the reconnect in WAITING for ever
+    (a `systemctl show` every 10 s) and hung `start_local` before any
+    window existed. `active` extends once, then is up-but-unreachable:
+    FAILED, the fallback spawns, the round ends."""
+    world = ActiveUnitWorld()
+    world.live = True
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("gone")
+    _run_round(world)
+    assert world.asked == ["com.example.Test"] * 2  # one extension, then the verdict
+    assert world.manager.systemd_failed is True and world.notices == [connection.FALLBACK_NOTICE]
+    assert world.manager.state == "lost" and world.fallbacks == []  # the fallback is the next attempt's
+    _run_round(world)
+    assert world.fallbacks == ["com.example.Test"] and world.manager.state == "connected"
+
+
+def test_start_local_with_an_active_unreachable_unit_never_hangs():
+    from collins.api.client import ConnectionLost
+
+    world = ActiveUnitWorld()
+    world.appears_after = 10_000
+    world.fallback = lambda app_id: (world.fallbacks.append(app_id), "spawned")[1]  # the spawn fails too
+    world.manager._fallback = world.fallback
+    started = world.clock
+    try:
+        world.manager.start_local(wait_s=1.0)
+    except ConnectionLost:
+        pass
+    else:
+        raise AssertionError("expected ConnectionLost")
+    assert world.asked == ["com.example.Test"] * 2 and world.fallbacks == ["com.example.Test"]
+    assert world.clock - started < 1.0 * 4  # two waits on systemd, one on the spawn: bounded
+
+
+def test_a_unit_stuck_activating_ends_the_round_after_the_bound():
+    world = StuckActivatingWorld()
+    world.live = True
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("gone")
+    _run_round(world)
+    # WAIT_EXTENSIONS_MAX extensions granted, then one more ask says OVER.
+    assert len(world.asked) == connection.WAIT_EXTENSIONS_MAX + 1
+    assert world.manager.state == "lost" and world.manager.systemd_failed is False  # systemd not blamed
+    assert world.notices == [] and world.fallbacks == []
+    assert world.manager._pending is not None  # the backoff retry is scheduled
+
+
+def test_start_local_with_a_unit_stuck_activating_raises_within_the_bound():
+    from collins.api.client import ConnectionLost
+
+    world = StuckActivatingWorld()
+    world.appears_after = 10_000
+    started = world.clock
+    try:
+        world.manager.start_local(wait_s=1.0)
+    except ConnectionLost:
+        pass
+    else:
+        raise AssertionError("expected ConnectionLost")
+    assert len(world.asked) == connection.WAIT_EXTENSIONS_MAX + 1
+    assert world.fallbacks == [] and world.manager.systemd_failed is False
+    assert world.clock - started < 1.0 * (connection.WAIT_EXTENSIONS_MAX + 2)
+
+
+def test_an_inactive_unit_gets_one_grace_round():
+    """The deactivating → inactive → activating moment of a restart: one
+    grace wait, then systemd's own start brings the socket; no spawn."""
+    world = RestartGapWorld()
+    world.live = True
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("gone")
+    _run_round(world)
+    assert world.manager.state == "connected" and world.fallbacks == [] and world.notices == []
+    assert world.asked == ["com.example.Test"] * 2 and world.manager.systemd_failed is False
+    # Twice `inactive` is over: the dead-unit road.
+    stuck = DeadUnitWorld()
+    stuck.unit_states = ["inactive"]
+    stuck.live = True
+    stuck.manager.start_local()
+    stuck.live = False
+    stuck.link.on_lost("gone")
+    _run_round(stuck)
+    assert stuck.asked == ["com.example.Test"] * 2 and stuck.manager.systemd_failed is True
+
+
 def test_the_fallback_tells_the_user_once_and_systemd_earns_its_trust_back():
     """The notice goes once, when the fallback first takes over; a later
     connection to a service systemd started again clears the mark, and a
