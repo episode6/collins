@@ -23,6 +23,7 @@ export COLLINS_APP_ID=com.episode6.Collins.E2E.$RUN
 export COLLINS_PROJECTS_DIR="$E2E/projects"
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json"
 export COLLINS_CHATS_DIR="$E2E/chats"
+export COLLINS_UPLOADS_DIR="$E2E/uploads"
 export COLLINS_USAGE_FIXTURE="$E2E/usage-fixture.json"
 export XDG_CONFIG_HOME="$E2E/config"
 export XDG_STATE_HOME="$E2E/state"

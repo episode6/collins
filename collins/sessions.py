@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-13. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
@@ -22,9 +22,11 @@ from pathlib import Path
 # How many recent messages the details dialog peeks at.
 PEEK_MESSAGES = 12
 
+# The CLI's own projects directory: the user's real sessions.
+DEFAULT_PROJECTS_DIR = Path.home() / ".claude" / "projects"
 # Override with COLLINS_PROJECTS_DIR for demos and development.
 CLAUDE_PROJECTS_DIR = Path(
-    os.environ.get("COLLINS_PROJECTS_DIR") or Path.home() / ".claude" / "projects"
+    os.environ.get("COLLINS_PROJECTS_DIR") or DEFAULT_PROJECTS_DIR
 )
 CLAUDE_CONFIG = Path(os.environ.get("COLLINS_CLAUDE_CONFIG") or Path.home() / ".claude.json")
 

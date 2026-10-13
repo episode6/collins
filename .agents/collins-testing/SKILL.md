@@ -171,6 +171,7 @@ os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"  # unique; 'r' 
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"        # write "{}" to it
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"                  # NOT optional: else the app reaps the user's chats
+os.environ["COLLINS_UPLOADS_DIR"] = f"{E2E}/uploads"              # the service sweeps uploads by the sessions it knows
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 ```

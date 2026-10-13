@@ -2222,6 +2222,7 @@ def test_the_orphan_uploads_sweep_knows_the_live_and_listed_sessions(
     from collins.service import gitfeed
 
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
     service_state = app_state.AppState(migrate=True, device=False)
     core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
     store = SessionStore(service_state)
@@ -2290,6 +2291,56 @@ def test_the_orphan_uploads_sweep_distrusts_an_empty_scan_and_a_missing_projects
         assert stale.exists()
         # Both in order: the sweep runs and the orphan goes.
         monkeypatch.setattr(sessions, "CLAUDE_PROJECTS_DIR", mounted)
+        core.sweep_orphan_uploads()
+        assert not stale.exists()
+    finally:
+        core.shutdown()
+
+
+def test_the_orphan_uploads_sweep_is_refused_on_staged_sessions_over_an_unnamed_uploads_root(
+    app_state, projects_dir, tmp_path, monkeypatch, caplog
+):
+    """The 612 follow-up of the PR 613 verification: a scratch service
+    (staged sessions, as every check, capture and this fixture has) with
+    no `COLLINS_UPLOADS_DIR` would have judged the uploads under the
+    default root, the user's real ones, by sessions that are not the
+    user's. It does not sweep at all, says so once, and sweeps again the
+    moment the uploads are named for it; on the real projects directory
+    (the user's instance, `start-debug`) it is never refused."""
+    from collins import sessions, uploads
+    from collins.service import gitfeed
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    # The "real" uploads: the default root, reached through XDG_DATA_HOME alone.
+    monkeypatch.delenv("COLLINS_UPLOADS_DIR", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    monkeypatch.setattr(core, "agent_pty_sessions", lambda include_finished=False: {})
+    monkeypatch.setattr(gitfeed, "spawn_default", lambda fn, name: fn())
+    stale = uploads.write("the-users-own", "a.png", b"x").parent
+    assert stale == tmp_path / "data" / "collins" / "uploads" / "the-users-own"
+    os.utime(stale, (time.time() - 2 * uploads.ORPHAN_AFTER_SECONDS,) * 2)
+    try:
+        store._last_sessions = discover_sessions()
+        store._apply()
+        assert store.all_sessions() and sessions.CLAUDE_PROJECTS_DIR != sessions.DEFAULT_PROJECTS_DIR
+        with caplog.at_level("WARNING", logger="collins.service.core"):
+            core.sweep_orphan_uploads()
+            core.sweep_orphan_uploads()
+        assert stale.exists()
+        assert len([r for r in caplog.records if "orphan uploads sweep refused" in r.getMessage()]) == 1
+        # The real projects directory (here: the default made to be the staged one): swept.
+        monkeypatch.setattr(sessions, "DEFAULT_PROJECTS_DIR", sessions.CLAUDE_PROJECTS_DIR)
+        core.sweep_orphan_uploads()
+        assert not stale.exists()
+        # Staged sessions with the uploads named for them: swept too.
+        monkeypatch.setattr(sessions, "DEFAULT_PROJECTS_DIR", tmp_path / "the-clis-own")
+        monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+        stale = uploads.write("gone-1", "a.png", b"x").parent
+        os.utime(stale, (time.time() - 2 * uploads.ORPHAN_AFTER_SECONDS,) * 2)
         core.sweep_orphan_uploads()
         assert not stale.exists()
     finally:

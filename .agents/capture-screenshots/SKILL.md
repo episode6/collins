@@ -49,6 +49,7 @@ fight over) so the run neither reads nor writes the user's real state:
 export COLLINS_PROJECTS_DIR="$E2E/projects"     # session transcripts
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json" # echo '{}' > it
 export COLLINS_CHATS_DIR="$E2E/chats"           # throwaway chat working dirs
+export COLLINS_UPLOADS_DIR="$E2E/uploads"       # drops and pastes; swept by the sessions the service knows
 export XDG_CONFIG_HOME="$E2E/config"            # app state lives in config/collins/state.json
 export XDG_STATE_HOME="$E2E/state"              # saved panel-terminal history
 ```
@@ -65,6 +66,19 @@ user's entire real chats root as orphaned — and "only empty ones" is no
 safety net, because a live chat that hasn't written a file yet has an empty
 directory. Omitting this override deletes the working directory out from
 under the user's running chats.
+
+**`COLLINS_UPLOADS_DIR` has the same shape of hazard.** The service removes
+the upload directory of any session it does not know once it is a day old
+(`uploads.sweep_orphans`), and an instance on staged transcripts knows none
+of the user's sessions, so on the default root it would judge every real
+`~/.local/share/collins/uploads/<id>/` an orphan. Three things stand in the
+way, and none is a reason to drop the others: the service refuses the sweep
+when the projects directory is overridden and `COLLINS_UPLOADS_DIR` is not
+set (`uploads.sweep_refusal`, logged once; `XDG_DATA_HOME` does not count,
+since a user may export it for real), `with-headless-display.sh` and
+`scripts/run_e2e.py` export a scratch one when the caller set none, and the
+recipe above sets it. A check that wants the sweep to run (none does yet)
+must set `COLLINS_UPLOADS_DIR` itself.
 
 ## Rule 3: capture headlessly
 
@@ -165,6 +179,7 @@ export COLLINS_APP_ID=com.episode6.Collins.E2E.$RUN
 export COLLINS_PROJECTS_DIR="$E2E/projects"
 export COLLINS_CLAUDE_CONFIG="$E2E/claude.json"
 export COLLINS_CHATS_DIR="$E2E/chats"
+export COLLINS_UPLOADS_DIR="$E2E/uploads"
 export XDG_CONFIG_HOME="$E2E/config"
 export XDG_STATE_HOME="$E2E/state"
 

@@ -91,3 +91,26 @@ def test_parse_shard_rejects(bad):
 
 def test_parse_shard():
     assert run_e2e.parse_shard("3/4") == (3, 4)
+
+
+def test_a_check_gets_a_scratch_uploads_directory_unless_it_has_one(tmp_path, monkeypatch):
+    """A check's service judges upload directories by its staged sessions,
+    so the runner never leaves it on the user's real uploads root: a
+    scratch `COLLINS_UPLOADS_DIR`, removed afterwards, unless the
+    environment already names one."""
+    out = tmp_path / "seen"
+    script = tmp_path / "check_env.py"
+    script.write_text(
+        "import os, sys\n"
+        "d = os.environ.get('COLLINS_UPLOADS_DIR', '')\n"
+        f"open({str(out)!r}, 'w').write(d + '\\n' + str(os.path.isdir(d)))\n"
+    )
+    monkeypatch.delenv("COLLINS_UPLOADS_DIR", raising=False)
+    assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "pass"
+    scratch, existed = out.read_text().split("\n")
+    assert scratch and existed == "True" and not os.path.exists(scratch)
+    mine = tmp_path / "mine"
+    mine.mkdir()
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(mine))
+    assert run_e2e.run_check(str(script), timeout=60, use_dbus=False)[0] == "pass"
+    assert out.read_text().split("\n")[0] == str(mine) and mine.is_dir()
