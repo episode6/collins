@@ -166,9 +166,41 @@ def worktree_wish(ticked: bool, is_git: bool | None) -> bool:
     but it starts on the project's default (or a restored draft's choice),
     and reading a hidden box as unticked would launch a default-on project
     without its worktree for a Send that beat the answer. The wish is
-    held to the answer by the window (`TerminalTab.when_checkout_known`),
-    so a wish in what turns out to be no checkout still launches plain."""
+    held to the answer by the window (`TerminalTab.when_checkout_known`,
+    `send_outcome`), so a wish in what turns out to be no checkout still
+    launches plain."""
     return bool(ticked) and is_git is not False
+
+
+# What a Send does once the checkout question is settled (`send_outcome`).
+SEND_WORKTREE = "worktree"
+SEND_PLAIN = "plain"
+SEND_REFUSED = "refused"
+
+
+def send_outcome(wish: bool, answer: bool | None) -> str:
+    """What the window does with a Send: *wish* is the screen's worktree
+    flag (`worktree_wish`) and *answer* the service's word on the
+    directory (`checkouts.ask_answer`: True, False, or None for "could
+    not ask"). No wish launches plain and needs no answer. A wish in a
+    checkout launches in a worktree; a wish in what is known to be no
+    checkout launches plain (the flag has no meaning there); a wish the
+    service could not answer is **refused**: nothing launches, the screen
+    and the draft stay, because a session started outside the worktree
+    the user asked for edits the checkout it was meant to protect."""
+    if not wish:
+        return SEND_PLAIN
+    if answer is None:
+        return SEND_REFUSED
+    return SEND_WORKTREE if answer else SEND_PLAIN
+
+
+def send_goes_on(held: bool, tab_alive: bool) -> bool:
+    """Whether a held Send's answer still launches anything: only while
+    the page is still held by this window (a detach, a close or a
+    hand-over to another window calls the hold off) and its tab is still
+    in a window."""
+    return bool(held) and bool(tab_alive)
 
 
 def worktree_draft_choice(ticked: bool, touched: bool, is_git: bool | None) -> bool | None:

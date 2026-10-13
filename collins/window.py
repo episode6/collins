@@ -2786,22 +2786,58 @@ class MainWindow(Adw.ApplicationWindow):
         id from here."""
         if page in self._new_chat_sends_held:
             return  # a second Send while the first waits below: one launch
-        if worktree:
-            # The checkbox is shown only in a checkout, and the tab holds the
-            # service's answer it asked for it (`checkouts.ask`). A Send
-            # before the answer carries the box's wish (the project's
-            # default, a draft's choice: `newchat.worktree_wish`) and waits
-            # here for it, so the launch never falls back to plain just
-            # because the answer was slow.
-            self._new_chat_sends_held.add(page)
-
-            def answered(is_git: bool) -> None:
-                self._new_chat_sends_held.discard(page)
-                self._send_new_chat(tab, text, is_git, sandbox, model, effort, page)
-
-            tab.when_checkout_known(answered)
-        else:
+        if not worktree:
             self._send_new_chat(tab, text, False, sandbox, model, effort, page)
+            return
+        # The checkbox is shown only in a checkout, and whether this is one
+        # is the service's answer, which the tab asked for
+        # (`checkouts.ask_answer`). A Send before the answer carries the
+        # box's wish (the project's default, a draft's choice:
+        # `newchat.worktree_wish`) and waits here for it. What the answer
+        # then does is `newchat.send_outcome`: a worktree in a checkout,
+        # plain in what is known to be none, and **no launch at all** when
+        # the service could not be asked (a refusal, no link, nothing
+        # within `checkouts.ANSWER_TIMEOUT_S`): a session started outside
+        # the worktree the user asked for would edit the checkout it was
+        # meant to protect, so the screen and its draft stay and a toast
+        # says why.
+        self._new_chat_sends_held.add(page)
+
+        def answered(answer: bool | None) -> None:
+            held = page in self._new_chat_sends_held
+            self._new_chat_sends_held.discard(page)
+            if not newchat.send_goes_on(held, tab.get_root() is not None):
+                return  # called off (the page left this window), or the tab went
+            outcome = newchat.send_outcome(True, answer)
+            if outcome == newchat.SEND_REFUSED:
+                tab.set_new_chat_held(False)
+                self.show_toast(
+                    _("Couldn't check whether this folder is a git checkout. Nothing was started.")
+                )
+                return
+            self._send_new_chat(
+                tab, text, outcome == newchat.SEND_WORKTREE, sandbox, model, effort, page
+            )
+            if tab.is_new_chat:
+                tab.set_new_chat_held(False)  # the launch declined: the screen is back
+
+        tab.when_checkout_known(answered)
+        if page in self._new_chat_sends_held:
+            # The answer is still out: the screen waits with the Send, so
+            # nothing typed or picked meanwhile is lost to the launch.
+            tab.set_new_chat_held(True)
+
+    def _call_off_new_chat_send(self, page: Adw.TabPage) -> None:
+        """*page* is leaving this window (closed, or handed to another)
+        with its Send still held: the hold is this window's, so it ends
+        here without a launch, and the screen (should it live on in
+        another window) is usable again."""
+        if page not in self._new_chat_sends_held:
+            return
+        self._new_chat_sends_held.discard(page)
+        tab = page.get_child()
+        if isinstance(tab, TerminalTab):
+            tab.set_new_chat_held(False)
 
     def _send_new_chat(
         self,
@@ -3657,6 +3693,7 @@ class MainWindow(Adw.ApplicationWindow):
         # this pop finds nothing left for it.)
         self._tab_wiring.pop(page, None)
         self._cancel_new_chat_save(page)
+        self._call_off_new_chat_send(page)
         self._discarding_drafts.discard(page)
         self._notify_tray()
         self._open_tabs_changed()

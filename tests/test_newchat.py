@@ -111,9 +111,27 @@ def test_a_send_before_the_checkout_answer_carries_the_hidden_boxes_wish():
     assert newchat.worktree_wish(True, True)
     assert not newchat.worktree_wish(False, True)
     assert not newchat.worktree_wish(True, False)  # known: no checkout, no box
-    # and the launch, once the answer is in, is the wish and the answer
-    for is_git in (True, False):
-        assert (newchat.worktree_wish(True, None) and is_git) is is_git
+
+
+def test_a_sends_outcome_is_the_wish_and_the_answer_and_never_plain_on_no_answer():
+    """The window's launch rule (`MainWindow._on_new_chat_send`). The
+    verification of PR 614, S2: a wish the service could not answer used to
+    launch plain, in the checkout the worktree was meant to protect."""
+    assert newchat.send_outcome(True, True) == newchat.SEND_WORKTREE
+    assert newchat.send_outcome(True, False) == newchat.SEND_PLAIN  # no checkout: the flag means nothing
+    assert newchat.send_outcome(True, None) == newchat.SEND_REFUSED  # could not ask: no launch
+    # no wish needs no answer, whatever it would have been
+    for answer in (True, False, None):
+        assert newchat.send_outcome(False, answer) == newchat.SEND_PLAIN
+    # and a wish before the answer is still a wish at the outcome
+    assert newchat.send_outcome(newchat.worktree_wish(True, None), True) == newchat.SEND_WORKTREE
+
+
+def test_a_held_sends_answer_launches_only_while_the_hold_and_the_tab_stand():
+    assert newchat.send_goes_on(True, True)
+    assert not newchat.send_goes_on(False, True)  # called off: the page left the window
+    assert not newchat.send_goes_on(True, False)  # the tab went
+    assert not newchat.send_goes_on(False, False)
 
 
 def test_a_drafts_worktree_choice_survives_the_wait_for_the_answer():

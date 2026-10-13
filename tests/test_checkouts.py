@@ -4,7 +4,8 @@
 directory is a clone, a file a worktree's pointer; nothing there or a
 dangling link is neither), and `ask` as the request: the marker's path,
 the answer landing through `remotefiles.off_main`, and False for every
-failure."""
+failure; and `ask_answer`, the same question for a launch that waits on it,
+where a failure is its own answer (None) and the wait is short."""
 
 from __future__ import annotations
 
@@ -28,6 +29,9 @@ def test_the_marker_is_the_dot_git_under_the_directory():
     assert checkouts.git_marker("/") == "/.git"
 
 
+TIMEOUTS: list[float | None] = []
+
+
 def _run_inline(monkeypatch, stat):
     """`off_main` with the worker and the landing run inline; *stat* answers
     `remotefiles.stat_path`."""
@@ -40,8 +44,9 @@ def _run_inline(monkeypatch, stat):
             result = ("refused", refusal)
         land(*result)
 
-    def stat_path(path, root=None):
+    def stat_path(path, root=None, timeout=None):
         asked.append(path)
+        TIMEOUTS.append(timeout)
         if isinstance(stat, Exception):
             raise stat
         return remotefiles.Stat(stat, None, None, False)
@@ -67,3 +72,44 @@ def test_ask_is_false_for_a_missing_marker_a_refusal_and_no_directory(monkeypatc
     asked = _run_inline(monkeypatch, "dir")
     checkouts.ask("", answers.append)  # no directory: nothing to ask
     assert answers == [False, False, False] and asked == []
+
+
+def test_ask_answer_tells_no_checkout_from_could_not_ask(monkeypatch):
+    """The verification of PR 614 (S2): for a launch the user asked to
+    isolate, "the service could not say" must not read as "no checkout",
+    or the session starts in the checkout the worktree was to protect."""
+    answers: list[bool | None] = []
+    _run_inline(monkeypatch, "dir")
+    checkouts.ask_answer("/srv/p", answers.append)
+    _run_inline(monkeypatch, "missing")
+    checkouts.ask_answer("/srv/p", answers.append)
+    _run_inline(monkeypatch, protocol.RequestRefused(protocol.ERROR_FAILED, "timed out", {}))
+    checkouts.ask_answer("/srv/p", answers.append)
+    _run_inline(monkeypatch, protocol.RequestRefused(protocol.ERROR_GONE, "Not connected", {}))
+    checkouts.ask_answer("/srv/p", answers.append)
+    asked = _run_inline(monkeypatch, "dir")
+    checkouts.ask_answer("", answers.append)  # no directory: nothing to ask, and no checkout
+    assert answers == [True, False, None, None, False] and asked == []
+    assert checkouts.answer_of("refused", object()) is None
+    assert checkouts.answer_of("ok", remotefiles.Stat("file", None, None, False)) is True
+
+
+def test_a_held_launchs_ask_waits_ten_seconds_and_an_offers_the_files_minute(monkeypatch):
+    _run_inline(monkeypatch, "dir")
+    del TIMEOUTS[:]
+    checkouts.ask_answer("/srv/p", lambda _answer: None)
+    checkouts.ask("/srv/p", lambda _answer: None)
+    assert TIMEOUTS == [checkouts.ANSWER_TIMEOUT_S, None] and checkouts.ANSWER_TIMEOUT_S == 10.0
+
+
+def test_stat_path_passes_a_callers_timeout_and_defaults_to_the_files(monkeypatch):
+    calls: list[float] = []
+
+    def call(message, timeout=None):
+        calls.append(timeout)
+        return {"kind": "dir"}
+
+    monkeypatch.setattr(remotefiles.apilink, "call", call)
+    remotefiles.stat_path("/srv/p/.git", timeout=10.0)
+    remotefiles.stat_path("/srv/p/.git")
+    assert calls == [10.0, remotefiles.CALL_TIMEOUT_S]
