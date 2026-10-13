@@ -652,6 +652,21 @@ def test_url_stitch_that_adds_nothing_returns_none() -> None:
     assert resolve_wrapped_url(url, row, [], ["  ' and prose"], len(row)) is None
 
 
+def test_uri_scheme_is_lower_cased_whatever_the_link_says() -> None:
+    """Review of PR 615 (S4): the terminal's `file:` branch (and with it
+    the local extras' gate) goes by the scheme, not by a prefix, so
+    `FILE:///x` from an OSC 8 hyperlink is a file URI there as it is to
+    GIO, and never reaches the URI launcher."""
+    from collins.linkpatterns import uri_scheme
+
+    for uri in ("file:///etc/hostname", "FILE:///etc/hostname", "File://host/etc/hostname", "fIlE:/x"):
+        assert uri_scheme(uri) == "file", uri
+    assert uri_scheme("HTTPS://example.test/a") == "https"
+    assert uri_scheme("filer:///x") == "filer" and uri_scheme("sftp://h/x") == "sftp"
+    for none in ("", "/etc/hostname", "www.example.test", "file", "http://[bad"):
+        assert uri_scheme(none) != "file", none
+
+
 def test_token_at_column() -> None:
     text = "  wrote o.py:7) done"
     assert token_at_column(text, 8) == "o.py:7)"

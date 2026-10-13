@@ -35,7 +35,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import clonerepo, ghsetup, jobclient  # noqa: E402
+from . import apilink, clonerepo, ghsetup, jobclient  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
 
@@ -383,7 +383,9 @@ class CloneDialog(Adw.Dialog):
     def _browse_target(self) -> None:
         picker = Gtk.FileDialog(title=_("Choose the folder to clone into"))
         current = clonerepo.parent_directory(self._target.get_text())
-        if os.path.isdir(current):
+        # The native chooser is a `local` client's (§3.11): only then is the
+        # folder it opens at one this device can look for.
+        if apilink.is_local() and os.path.isdir(current):
             picker.set_initial_folder(Gio.File.new_for_path(current))
 
         def picked(picker: Gtk.FileDialog, result) -> None:

@@ -107,6 +107,22 @@ def test_the_local_proof_is_read_from_this_side_only(link, service, monkeypatch)
     assert link.prove_local() is True and sent == ["local"] and link.local
 
 
+def test_the_local_flag_is_the_last_hellos_proof(link, service):
+    """Review of PR 615 (S3): `local` is a connection's. A link that
+    proved it, reconnects and then cannot prove it (the proof no longer
+    readable from this side: another machine's service behind the same
+    link) reads False, as the service already holds it."""
+    link.connect()
+    assert link.local is False  # connected, nothing proved yet
+    assert link.prove_local() is True and link.local is True
+    link.connect()  # a reconnect: the proof is not carried over
+    assert link.local is False
+    link.app_id = "com.example.NoSuchService"  # this side cannot read a proof now
+    assert link.prove_local() is False and link.local is False
+    link.app_id = service.app_id
+    assert link.prove_local() is True and link.local is True
+
+
 def test_a_symlinked_or_wrong_mode_proof_is_refused(service, tmp_path):
     from collins.api.client import read_local_proof
 

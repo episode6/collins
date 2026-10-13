@@ -27,6 +27,72 @@ convention, not a workaround. Modules whose pure half needs key constants
 spell keyvals and modifier bits as integers for the same reason
 (`composerkeys`, `panelkeys`).
 
+**The pathless test** (`tests/test_client_is_pathless.py`, required: it
+runs with the rest of the suite and needs only `ast`). `tests/pathless.py`
+walks every GTK module and the `CLIENT_HELPERS` for filesystem and
+subprocess calls; each site (``module:qualname:call``) must be in
+`tests/pathless_allowlist.py`, and each entry must still match a site.
+The list is final since PR-2.8: a new `os.path.isdir`,
+`Path.read_text`, `shutil.which` or `subprocess` call in a widget module
+fails the suite until it is filed, and each group is pinned by its size
+(`DEVICE` per module too), so filing one is an edit of the test that a
+reviewer sees; only this device's own files and gated local extras
+belong. Ask the service instead (`remotefiles.stat_path` and
+friends, off the main loop). The four groups have a rule each: `DEVICE`
+is this device's own files and programs; a `LOCAL_EXTRAS` site must be
+**behind** `apilink.is_local()` in its own function
+(`pathless.function_asks_local` reads the AST: every call of the site
+after an earlier `if not apilink.is_local(): return` in the function's
+own body, or inside `if apilink.is_local():`, or after the ask in the
+same `and`. The ask is `apilink`'s function, called: not the bare
+attribute, not another object's `is_local()`, not one after the read, in
+another branch, inside a lambda or bound to a name first; a closure does
+not inherit its parent's ask); `UNRULED` is pinned to the three sites
+reported for a ruling and only shrinks; `RECORDED` is four `gitloads`
+default arguments (`run=subprocess.run`, `exists=os.path.exists`),
+pinned the same way. Every function a qualname names is held to the ask
+(a property's getter and its setter), and a function that binds
+`apilink` itself has none.
+
+**When the test names a site that is no read.** The any-receiver words
+and the name hints match by name: `entry.is_dir()` on a service fact,
+`decoder.load_bytes(data)`, a `Gtk.Root` called `root` with
+`.resolve()`. Such a site has no truthful group. Rename a local variable
+that only looks like a path; otherwise add the site to
+`pathless_allowlist.NOT_A_SITE` with the number of calls it covers and
+a line saying what the receiver is, and edit
+`test_what_is_no_site_is_pinned_with_its_reason_and_its_count` in the
+same diff. The failing test prints the four answers (ask the service;
+gate and `LOCAL_EXTRAS`; `DEVICE`; `NOT_A_SITE`). `HONEST` in the test
+is the table of what the walker says of honest code.
+
+**What the walker reads, and what it does not.** It resolves import
+aliases (`import shutil as sh`, `from os import path as P`), follows a
+name bound to a path or a `Gio.File` inside a function (an assignment, a
+tuple, a walrus, a `Path` annotation or default, a loop over
+`.iterdir()`, a name bound to a bound name), looks through a path's own
+method chains (`Path(p).expanduser().resolve().is_dir()`), takes
+`is_dir` / `is_file` / `read_text` / `iterdir` and the other names only
+a path has on any receiver at all, and counts a site's function that is
+handed on or bound without being called (`map(os.path.isdir, ps)`, a
+`run=subprocess.run` default), and takes the names only a `Gio.File`
+has (`load_contents`, `load_bytes`, `query_info`, `query_exists`, …)
+and `spawn_async` / `spawnv` on any receiver. `test_the_walker_catches` and
+`test_the_walker_is_known_to_miss` are tables of both: add a row when
+the vocabulary changes. It does **not** follow calls: a site is named by
+the function the read is written in, so a widget calling a disk-reading
+function of `sessions`, `providers`, `clonerepo`, `panelhistory` or a
+helper of its own module is invisible to it. Nor does it see a hintless
+receiver for the method names other objects share (`p.exists()`,
+`self._thing.unlink()`, `write_text`), the launchers (`Gtk.FileLauncher`,
+`Gtk.UriLauncher`, `AppInfo.launch`), `expanduser` / `abspath`, a star
+import, `asyncio` / `pty` / `multiprocessing`, or a read through
+another library. Check those by hand when adding one. The
+ones known today, with the `UNRULED` and `RECORDED` sites, are recorded
+and not moved (spec D50; D54 rules what Phase 3 does with the first
+list): the record is the comment at `UNRULED` in
+`tests/pathless_allowlist.py`, which names every form the walker misses.
+
 Fixtures worth knowing (all in `tests/conftest.py`): `projects_dir` (a fake
 `~/.claude/projects` with two projects, monkeypatched into `sessions` and
 forcing `ClaudeProvider.available()` True), `app_state` (an `AppState`
@@ -92,6 +158,24 @@ Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 `Callable` comes from `collections.abc`).
 
 ## Writing an e2e check
+
+**A client that is not local.** No transport makes one before Phase 3,
+so a check takes the proof away: `apilink.current().local = False` on
+the app's link (`check_local_extras.py`), or a second `SocketLink` that
+never calls `prove_local` (`check_drop_upload.py`,
+`check_filetree_ops.py`). `apilink.is_local()` is the one reader, so
+every gate follows at once; widgets that decided at build time (the
+footer) are read on a tab built afterwards. `check_local_extras.py` is
+the pattern for anything that would start a program or open the file
+manager: it replaces `Gtk.FileLauncher.new` and `Gtk.UriLauncher.new`
+with a recorder before importing `collins` (an assignment on the GI
+class; every module sees it), wraps `footerapps.launch_app`, stages its
+own `ghostty` and footer-app stubs on `PATH` and under a scratch
+`XDG_DATA_HOME`, and gives the service a scratch `$HOME` (`start_service
+({**os.environ, "HOME": ...})`), so nothing reaches the desktop even
+when a gate is broken. A window's actions are `win.lookup_action(name).
+activate(variant)`: `win.activate_action("name", …)` without the `win.`
+prefix does nothing and makes a "nothing happened" assertion vacuous.
 
 **The probe** (D27). A session's logic runs on the service, so a
 check never reads a tab's privates: `tab.probe(name)`,

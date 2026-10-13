@@ -168,6 +168,16 @@ the glue, as the tab's.
   the workspace itself; `sandbox_plan` is the pty's `plan`. The client
   still checks `plan_lookup()` first, so "no plan" is the same message and
   the same retry on the next show.
+- **The cwd is the service's to judge (D39, PR-2.8).** `_spawn` sends the
+  cwd it was given (no `Path.is_dir`); the service starts the shell there
+  or, when that is no directory on its machine, in its `$HOME`
+  (`core.spawn_cwd`), and the reply's `cwd` is kept as `started_cwd`.
+  `_sync_cwd` (the panel shown again, `follow_cwd`'s worktree offer) asks
+  `fs.stat` off the main loop and types the `cd` when the answer lands,
+  if the shell is still idle and still elsewhere (`_cd_seq` drops an
+  older ask); a path that is no directory there types nothing. So the
+  `cd` is asynchronous: an e2e check waits for `process_cwd`, and a bare
+  `PanelTerminal` with no link (`apilink.current()` None) never moves.
 - **Reads go to the service.** `capture_contents()` is the screen model's
   (the `pty.capture` request), `has_running_command()` / `_shell_pid()` /
   the cwd `follow_cwd` and `_sync_cwd` compare against are the pty

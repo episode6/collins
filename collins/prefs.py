@@ -475,7 +475,8 @@ class PreferencesDialog(Adw.Dialog):
     def _browse_clone_directory(self) -> None:
         picker = Gtk.FileDialog(title=_("Choose the folder new clones go in"))
         current = clonerepo.parent_directory(self._state.get_setting("clone_directory"))
-        if os.path.isdir(current):
+        # The native chooser is a `local` client's (§3.11).
+        if apilink.is_local() and os.path.isdir(current):
             picker.set_initial_folder(Gio.File.new_for_path(current))
 
         def picked(picker: Gtk.FileDialog, result) -> None:
@@ -1119,6 +1120,12 @@ class PreferencesDialog(Adw.Dialog):
         _searchable(self._footer_apps_group, _("Add application…"))
         self._footer_app_rows: list[Adw.PreferencesRow] = []
         self._rebuild_footer_apps()
+        # The launchers are local extras (§3.12): a window that is not on
+        # the service's machine has no footer buttons and no "Open In…" for
+        # these picks to appear in, so the group is hidden there, from the
+        # page and from the search (`_apply_filter`).
+        self._footer_apps_group.local_only = True
+        self._footer_apps_group.set_visible(apilink.is_local())
         return self._footer_apps_group
 
     def _build_pr_group(self, state: AppState) -> _SearchableGroup:
@@ -1642,6 +1649,9 @@ class PreferencesDialog(Adw.Dialog):
         query = self._search_entry.get_text()
         anything_matched = False
         for group in self._page.groups:
+            if getattr(group, "local_only", False) and not apilink.is_local():
+                group.set_visible(False)  # a local extra's settings: never offered
+                continue
             whole_group = prefssearch.matches(query, _group_text(group))
             matched_rows = False
             for row in group.rows:
