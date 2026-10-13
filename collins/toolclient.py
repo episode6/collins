@@ -699,11 +699,15 @@ class ToolClient:
         # never the project's, so it is never asked.
         deferred = mcptools.DeferredResult()
 
-        def shown(ok: bool, _why: str | None) -> None:
+        def shown(ok: bool, why: str | None) -> None:
             if ok:
                 deferred.resolve(True, "Image shown.")
             elif tab.get_root() is None:
                 deferred.resolve(False, "That session's tab closed before the image arrived")
+            elif why == "superseded":
+                # A newer lightbox (a gallery arrow, a clicked reference,
+                # another session's tool) won: not a decode failure.
+                deferred.resolve(False, f"Another image replaced {raw} before it showed")
             else:
                 deferred.resolve(False, f"Collins couldn't display {raw}")
 

@@ -262,6 +262,34 @@ def test_the_put_refuses_an_unknown_session_a_bad_name_and_a_body_past_the_cap(u
     assert not (uploads_root / "sid-1").exists()
 
 
+def test_the_put_refuses_a_live_sessions_handle_as_its_session(uploads_root):
+    """The PR 612 review's nit 3: an upload keyed by a handle (`s-7`) would
+    land in a directory no trash or delete ever names. A live session is
+    known by its id alone; the handle is refused like any unknown id."""
+
+    class Live:
+        session_id = "sid-live"
+        handle = "s-7"
+
+    class Record:
+        session = Live()
+
+    core = Core()
+    core.sessions = {7: Record()}
+    feed = _inline(core)
+    assert _put(feed, "session=sid-live&name=a.png", b"x")[0] == 200
+    assert _put(feed, "session=s-7&name=a.png", b"x")[0] == 403
+    assert not (uploads_root / "s-7").exists()
+
+
+def test_a_name_with_a_lone_surrogate_is_written_without_it(uploads_root):
+    """The PR 612 review's nit 4: a lone surrogate raised UnicodeEncodeError
+    out of safe_name's measure (and would out of os.open); it is dropped."""
+    assert uploads.safe_name("sh\ud800ot.png") == "shot.png"
+    assert uploads.safe_name("\ud800") is None
+    assert uploads.write("sid-1", "a\udcffb.png", b"x").name == "ab.png"
+
+
 # -- the client's end ---------------------------------------------------------------
 
 

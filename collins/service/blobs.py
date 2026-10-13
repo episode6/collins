@@ -123,12 +123,20 @@ class ImageRegistry:
         return frozenset(self._paths.get(key) or ())
 
 
-def _session_records(core, key: str):
+def _session_records(core, key: str, handles: bool = True):
+    """The live sessions *key* names: by session id, or — with *handles*,
+    and only while the session has no id yet — by the handle a client
+    asks with before the resolve. A resolved session is keyed by its id
+    alone, so the handle is no second durable key (the PR 612 review's
+    nit 8)."""
+    if not key:
+        return
     for record in list(getattr(core, "sessions", {}).values()):
         session = getattr(record, "session", None)
         if session is None:
             continue
-        if key and key in (getattr(session, "session_id", None), getattr(session, "handle", None)):
+        session_id = getattr(session, "session_id", None)
+        if key == session_id or (handles and not session_id and key == getattr(session, "handle", None)):
             yield session
 
 
@@ -153,9 +161,10 @@ def agent_named(core, key: str) -> tuple[frozenset[str], frozenset[str]]:
 
 
 def known_session(core, session_id: str) -> bool:
-    """Whether *session_id* is a session the service knows: a live one's,
-    or one the store lists."""
-    if any(_session_records(core, session_id)):
+    """Whether *session_id* is a session the service knows: a live one's
+    id (never its handle: an upload keyed by a handle would land in a
+    directory no trash or delete ever names), or one the store lists."""
+    if any(_session_records(core, session_id, handles=False)):
         return True
     store = getattr(core, "store", None)
     try:

@@ -140,6 +140,24 @@ def test_a_link_out_of_a_root_is_outside_it(picture, tmp_path):
     assert _get(feed, f"path={root / 'link.png'}")[0] == 403
 
 
+def test_a_handle_names_a_live_session_only_until_it_resolves(picture):
+    """The PR 612 review's nit 8: the transcript's images are keyed by the
+    handle while the session has no id (the client asks with it then) and
+    by the id alone once it has one, so the handle is no second durable key."""
+    unresolved = Session(session_id=None, handle="s-1", seen=[str(picture)])
+    core = Core([unresolved])
+    assert list(blobs._session_records(core, "s-1")) == [unresolved]
+    assert blobs.agent_named(core, "s-1")[1] == frozenset({str(picture)})
+    unresolved.session_id = "sid-1"
+    assert list(blobs._session_records(core, "s-1")) == []
+    assert list(blobs._session_records(core, "sid-1")) == [unresolved]
+    assert blobs.agent_named(core, "s-1")[1] == frozenset()
+    assert blobs.agent_named(core, "sid-1")[1] == frozenset({str(picture)})
+    assert blobs.known_session(core, "sid-1") and not blobs.known_session(core, "s-1")
+    unresolved.session_id = None
+    assert not blobs.known_session(core, "s-1")  # never by handle: an upload would be orphaned
+
+
 def test_the_sessions_uploads_and_the_pending_ones_are_admitted(tmp_path, monkeypatch):
     monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
     mine = uploads.write("sid-1", "a.png", b"\x89PNG")

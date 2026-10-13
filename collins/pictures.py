@@ -108,24 +108,29 @@ def fetch(
     if url in _waiting:
         _waiting[url].append(on_ready)
         return
-    _waiting[url] = [on_ready]
+    _waiting[url] = waiting = [on_ready]
     if fetcher is None:
 
         def fetcher() -> Path:
             return blobcache.fetch_image(url, session)
 
     threading.Thread(
-        target=_fetch, args=(url, fetcher), name="image-fetch", daemon=True
+        target=_fetch, args=(url, fetcher, waiting), name="image-fetch", daemon=True
     ).start()
 
 
 def forget(url: str) -> None:
-    """Drop what is remembered about *url*, so the next `fetch` really fetches."""
+    """Drop what is remembered about *url*, so the next `fetch` really
+    fetches — a fetch already in flight included: its landing still
+    reaches the callers that joined it, but is no answer to the next ask
+    and is not remembered (a file the agent rewrote must not show its
+    previous contents once)."""
     _files.pop(url, None)
     _errors.pop(url, None)
+    _waiting.pop(url, None)
 
 
-def _fetch(url: str, fetcher: Callable[[], Path]) -> None:
+def _fetch(url: str, fetcher: Callable[[], Path], waiting: list) -> None:
     path = error = None
     try:
         with _GATE:
@@ -133,14 +138,18 @@ def _fetch(url: str, fetcher: Callable[[], Path]) -> None:
     except Exception as failure:  # a fetch must never take the thread with it
         error = str(failure)
         log.debug("pictures: fetching %s failed", url, exc_info=True)
-    GLib.idle_add(_landed, url, path, error, priority=GLib.PRIORITY_DEFAULT)
+    GLib.idle_add(_landed, url, path, error, waiting, priority=GLib.PRIORITY_DEFAULT)
 
 
-def _landed(url: str, path: Path | None, error: str | None) -> bool:
-    _files[url] = path
-    if error is not None:
-        _errors[url] = error
-    for on_ready in _waiting.pop(url, []):
+def _landed(url: str, path: Path | None, error: str | None, waiting: list) -> bool:
+    if _waiting.get(url) is waiting:
+        # Still the current fetch: remembered. One a `forget` overtook is
+        # handed to its own callers only.
+        _waiting.pop(url)
+        _files[url] = path
+        if error is not None:
+            _errors[url] = error
+    for on_ready in waiting:
         on_ready(path, error)
     return GLib.SOURCE_REMOVE
 

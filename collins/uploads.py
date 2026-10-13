@@ -94,12 +94,14 @@ def directory(session_id: str | None) -> Path:
 def safe_name(name: object) -> str | None:
     """*name* reduced to a basename a file can be created under, or None
     when nothing usable is left: the last path component, control
-    characters dropped, no leading dots (a hidden file nobody sees), at
-    most `NAME_MAX` bytes with the extension kept."""
+    characters and lone surrogates dropped (a name UTF-8 cannot spell
+    would raise out of the measure below and out of `os.open`), no
+    leading dots (a hidden file nobody sees), at most `NAME_MAX` bytes
+    with the extension kept."""
     if not isinstance(name, str):
         return None
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
-    base = _CONTROL_RE.sub("", base).strip().lstrip(".")
+    base = _CONTROL_RE.sub("", base).encode("utf-8", "ignore").decode("utf-8").strip().lstrip(".")
     if not base:
         return None
     stem, dot, ext = base.rpartition(".")
