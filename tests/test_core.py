@@ -1743,6 +1743,9 @@ class _Poller:
         self.background_ids = set()
         self._on_change = lambda changed: None
 
+    def set_on_change(self, on_change):
+        self._on_change = on_change
+
     def start(self, dirs):
         pass
 
@@ -2145,6 +2148,43 @@ def test_the_repair_job_matches_off_the_loop_and_records_the_link(
         unknown = repair("nope")
         assert pump(5, lambda: outcome(unknown) is not None)
         assert outcome(unknown)["state"] == "refused"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_sweep_skips_a_live_agent_pty_whose_cli_is_not_up(app_state, projects_dir, tmp_path, monkeypatch):
+    """Deviation 7: the sweep's "running" is any live agent pty, as the old
+    "a tab is open" was — a tab sitting at its shell with the CLI gone, or a
+    spawn the resolver has not bound, is skipped like a running CLI, not
+    trashed and closed under whoever is looking at it (PR 606's second
+    review, should-fix 2)."""
+    import time as time_mod
+
+    from collins import autodelete
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("SHELL", CAT)
+    _root, ids = projects_dir
+    core, store, _poller, srv, client, ends = _store_core(app_state, tmp_path)
+    try:
+        state = core.state
+        state.update_settings({autodelete.SETTING_COUNT: 1, autodelete.SETTING_UNIT: "days"})
+        old = time_mod.time() - 3 * 86400
+        for sid in (ids["alpha2"], ids["beta1"]):
+            state.set_archived(sid, True)
+            state.archived_at[sid] = old
+        # A tab on alpha2 whose CLI never came up (cat is the shell; the
+        # typed command is echoed, not run): no running CLI, a live pty.
+        pty = spawn_agent(client, tmp_path, session=ids["alpha2"])["pty"]
+        assert ids["alpha2"] not in set(core.agent_pty_sessions().values())
+        assert core.agent_pty_sessions(include_finished=True)[pty] == ids["alpha2"]
+        trashed_sids = []
+        monkeypatch.setattr(store, "trash_many", lambda sids: trashed_sids.extend(sids) or {})
+        assert core.sweep_archived() == [ids["beta1"]]
+        assert trashed_sids == [ids["beta1"]]
+        assert state.is_archived(ids["alpha2"])  # kept: somebody's tab shows it
+        assert [e["session"] for e in ends.of("forgotten")] == [ids["beta1"]]
     finally:
         srv.shutdown()
         pump(0.3)

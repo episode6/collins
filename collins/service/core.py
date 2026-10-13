@@ -1685,7 +1685,11 @@ class ServiceCore:
             state=self.state,
             records=self._records,
             activity=self.activity,
-            running=lambda: {sid for sid in self.agent_pty_sessions().values() if sid},
+            # The sweep's "running" is any live agent pty (deviation 7: the
+            # old "a tab is open"), the CLI up or not: a tab left at its
+            # shell, or a spawn the resolver has not bound, is a tab somebody
+            # is looking at, not a transcript to trash and close under them.
+            running=lambda: {sid for sid in self.agent_pty_sessions(include_finished=True).values() if sid},
             get_setting=self._get_setting,
             **kwargs,
         )
@@ -1721,7 +1725,10 @@ class ServiceCore:
                 landed.set()
 
         background._land(land)
-        landed.wait(10)
+        if not landed.wait(10):
+            # The result is reported either way; the forward lands when the
+            # loop frees up. Said, so a stuck loop is visible in the log.
+            log.warning("session.repair: the main loop took over 10 s to record the link; reporting anyway")
         return {"found": found}
 
     def _worktree_check_job(self, job: jobs.Job, args: dict) -> dict:
@@ -1752,7 +1759,8 @@ class ServiceCore:
                     landed.set()
 
             background._land(land)
-            landed.wait(10)
+            if not landed.wait(10):
+                log.warning("worktree.check: the main loop took over 10 s to judge sharing; saying unshared")
         return {"removable": _jsonable(state), "shares": bool(shares[0])}
 
     def sync_transcript_paths(self) -> None:
