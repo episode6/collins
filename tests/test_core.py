@@ -854,6 +854,54 @@ def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
     assert record._chain is not None and record._chain.handle == second
 
 
+# -- the spawn's roads (the Fable review of PR 603, should-fix 4 and nit 12) ------------------
+
+
+def test_a_spawn_naming_a_transcript_outside_the_projects_is_refused(server, tmp_path, monkeypatch):
+    """Probe P1 of the review: `transcript.set` refused an outside path
+    and `spawn` tailed it. The third road a client names a transcript by
+    is confined like the other two; a spawn under the projects dir goes."""
+    from collins import sessions as sessions_mod
+
+    monkeypatch.setattr(sessions_mod, "CLAUDE_PROJECTS_DIR", tmp_path / "projects")
+    (tmp_path / "projects" / "p").mkdir(parents=True)
+    inside = tmp_path / "projects" / "p" / "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0.jsonl"
+    inside.write_text("")
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text("")
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    for bad in (str(outside), "/etc/passwd", str(tmp_path / "projects" / "p" / "x.txt")):
+        with pytest.raises(loopback.RequestRefused) as refused:
+            spawn_agent(client, tmp_path, session="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", jsonl_path=bad)
+        assert refused.value.error == protocol.ERROR_REFUSED
+    assert not server.core.sessions and not server.core.ptys.ptys
+    pty = spawn_agent(
+        client, tmp_path, session="0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", jsonl_path=str(inside)
+    )["pty"]
+    assert server.core.sessions[pty].session.transcript_path == str(inside)
+
+
+def test_a_spawn_that_fails_after_its_pty_is_live_closes_the_pty(server, tmp_path, monkeypatch):
+    """Nit 12: an exception in the session's set-up after `spawn_agent_pty`
+    registered the pty (the resolver, the new-chat poll, the tracker) is
+    the router's `failed`; the live pty is closed rather than left in
+    `sessions` with no client ever told to attach or close it."""
+    from collins.service import session as session_mod
+
+    def broken(self):
+        raise RuntimeError("the poll's timer")
+
+    monkeypatch.setattr(session_mod.Session, "start_new_chat_prompt_poll", broken)
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    with pytest.raises(loopback.RequestRefused) as refused:
+        spawn_agent(client, tmp_path, prompt="hello")
+    assert refused.value.error == protocol.ERROR_FAILED
+    assert pump(3, lambda: not server.core.ptys.ptys)  # SIGHUP'd, reaped, its row gone
+    assert not server.core.sessions
+
+
 # -- the attach snapshot's busy and landed (the Fable review of PR 603, should-fix 2 and 3) --
 
 

@@ -91,7 +91,7 @@ from gi.repository import Gio, GLib
 from .. import activity, composerkeys, dropimages, editorfiles, proctree, sandboxplan
 from ..formatting import display_path
 from ..gitinfo import current_branch
-from ..i18n import _
+from ..i18n import N_, _
 from ..providers import EnteredPrompt, Provider
 from ..prstatus import (
     PullRequest,
@@ -206,7 +206,7 @@ CUT_VERIFY_MS = (150, 400, 900)
 # Why a prompt sent to a session wouldn't land (see Session.prompt_block):
 # the one sentence, as a msgid, so the service can hand it to a client to
 # translate (§3.14).
-PROMPT_BLOCK_MSGID = "This session isn't at an empty prompt."
+PROMPT_BLOCK_MSGID = N_("This session isn't at an empty prompt.")
 
 
 def _within(root: str, path: str) -> bool:

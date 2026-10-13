@@ -138,6 +138,7 @@ from typing import Any, Protocol
 
 from .. import chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
 from ..api import protocol
+from ..i18n import N_
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
 from . import diffs as diffs_mod
@@ -146,6 +147,10 @@ from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
 from .session import PROMPT_BLOCK_MSGID
+
+# The refusal a client translates (§3.14) when it names a transcript the
+# service may not tail: `spawn`'s `jsonl_path`, `transcript.set`, `relocate`.
+NOT_A_TRANSCRIPT_MSGID = N_("Not a transcript Collins reads")
 
 log = logging.getLogger(__name__)
 
@@ -441,6 +446,14 @@ class ServiceCore:
         below; the reply is the pty and the session's handle, or the
         spawn's refusal."""
         provider = providers.get_provider(message.get("provider") or "claude")
+        jsonl_path = message.get("jsonl_path")
+        if jsonl_path is not None and not transcript_path_allowed(jsonl_path):
+            # The same confinement as `transcript.set` and `relocate` (rule
+            # 5): a client names a transcript the service tails only under
+            # the projects or chats directory. The spawn is refused, not
+            # started without the field: a resume with no transcript would
+            # be a tab with no facts and no refusal painted anywhere.
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, NOT_A_TRANSCRIPT_MSGID)
         options = self._launch_options(message)
         if options is not None and message.get("sandbox") and not options.sandbox_plan:
             options = self._box_for_launch(message, options)
@@ -468,23 +481,33 @@ class ServiceCore:
         prompt = message.get("prompt")
         if prompt:
             session.hold_new_chat_prompt(prompt)
-        session.set_transcript_path(message.get("jsonl_path"))
-        session.spawn(message.get("cwd"), message.get("session"))
-        if record.spawn_error is not None:
-            return _spawn_refusal(message, record.spawn_error)
-        if record.pty_id is None:
-            return protocol.refuse(
-                message.id, protocol.ERROR_FAILED, "failed to start shell: {msg}", {"msg": "no pty"}
-            )
-        fresh = message.get("session") is None
-        if message.get("jsonl_path") is None and fresh:
-            session.start_resolver(session.cwd or message.get("cwd"))
-        elif session.fork_resolve:
-            session.start_resolver(session.cwd or message.get("cwd"))
-        if prompt:
-            session.start_new_chat_prompt_poll()
-        if self.activity is not None:
-            self.activity.started(record, fresh=fresh)
+        session.set_transcript_path(jsonl_path)
+        try:
+            session.spawn(message.get("cwd"), message.get("session"))
+            if record.spawn_error is not None:
+                return _spawn_refusal(message, record.spawn_error)
+            if record.pty_id is None:
+                return protocol.refuse(
+                    message.id, protocol.ERROR_FAILED, "failed to start shell: {msg}", {"msg": "no pty"}
+                )
+            fresh = message.get("session") is None
+            if jsonl_path is None and fresh:
+                session.start_resolver(session.cwd or message.get("cwd"))
+            elif session.fork_resolve:
+                session.start_resolver(session.cwd or message.get("cwd"))
+            if prompt:
+                session.start_new_chat_prompt_poll()
+            if self.activity is not None:
+                self.activity.started(record, fresh=fresh)
+        except Exception:
+            # The router answers `failed`; a pty already live under the
+            # record would otherwise stay in `sessions` with no client ever
+            # told of it to attach or close. Closing it runs the exit's own
+            # clean-up (`_on_pty_exit`: the session's, the record dropped).
+            if record.pty_id is not None and self.ptys.ptys.get(record.pty_id) is not None:
+                log.exception("session %s: the spawn failed after its pty was live; closed", record.handle)
+                self.ptys.close(record.pty_id)
+            raise
         pty = self.ptys.get(record.pty_id)
         return protocol.reply(
             message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
@@ -681,7 +704,7 @@ class ServiceCore:
         session = self._record(message).session
         if not session.agent_is_running():
             return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "Add to chat: the agent isn't running in this tab"
+                message.id, protocol.ERROR_REFUSED, N_("Add to chat: the agent isn't running in this tab")
             )
         reference = session.provider.file_reference(
             message.get("path"),
@@ -691,7 +714,7 @@ class ServiceCore:
         )
         if reference is None:
             return protocol.refuse(
-                message.id, protocol.ERROR_REFUSED, "Add to chat isn't available for this file"
+                message.id, protocol.ERROR_REFUSED, N_("Add to chat isn't available for this file")
             )
         session.write_text(session.mention_leading_space() + reference + " ")
         return protocol.reply(message.id)
@@ -717,14 +740,14 @@ class ServiceCore:
     def _req_transcript_set(self, message: protocol.Message, client: Client) -> dict:
         path = message.get("path")
         if path is not None and not transcript_path_allowed(path):
-            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Not a transcript Collins reads")
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, NOT_A_TRANSCRIPT_MSGID)
         self._record(message).session.set_transcript_path(path)
         return protocol.reply(message.id)
 
     def _req_transcript_relocate(self, message: protocol.Message, client: Client) -> dict:
         path = message.get("path")
         if not transcript_path_allowed(path):
-            return protocol.refuse(message.id, protocol.ERROR_REFUSED, "Not a transcript Collins reads")
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, NOT_A_TRANSCRIPT_MSGID)
         self._record(message).session.relocate_transcript(path)
         return protocol.reply(message.id)
 
