@@ -133,8 +133,8 @@ class DeliveredFiles:
     (D51, review of PR 615): what `as=file` admits from the transcript.
     The registry's rule for a tool call, kept for a record: a link put at
     the named path afterwards resolves to a file nobody delivered, and is
-    refused. Per session key (its id, its handle), bounded as the
-    registry is, kept for the service's run.
+    refused. Per session key (its id; its handle while it has none),
+    bounded as the registry is, kept for the service's run.
 
     "First saw" is exact about its limits: the first time *this run* of
     the service saw the record *under that key, while it still holds
@@ -204,8 +204,11 @@ def _thread(fn: Callable[[], None], name: str) -> None:
 
 def note_delivered(core, record) -> None:
     """A session's transcript landed (main loop): hand its delivered-file
-    records to the core's `DeliveredFiles`, under the session's id and its
-    handle. Pictures are not noted: they are admitted as before (D38)."""
+    records to the core's `DeliveredFiles`, under the session's id, or
+    under its handle only while it has no id yet: `_session_records`'
+    rule (the PR 612 review's nit 8), so the handle is no second durable
+    key here either. Pictures are not noted: they are admitted as before
+    (D38)."""
     delivered = getattr(core, "delivered_files", None)
     session = getattr(record, "session", None)
     if delivered is None or session is None:
@@ -223,7 +226,8 @@ def note_delivered(core, record) -> None:
         and one.key.startswith("/")
     ]
     if keys:
-        delivered.note([getattr(session, "session_id", None), getattr(record, "handle", None)], keys)
+        key = getattr(session, "session_id", None) or getattr(record, "handle", None)
+        delivered.note([key], keys)
 
 
 def _session_records(core, key: str, handles: bool = True):
@@ -371,7 +375,13 @@ class FileBlobs(_Feed):
     path a delivered file's transcript record resolved to when the service
     first saw it (`DeliveredFiles`) — and never merely for being
     inside a root: `fs.read` is the reader of a project's text, and a
-    root is not an attachment. A `local` client is never served one (it
+    root is not an attachment. Such a request **names its session**
+    (`uploads.inside(real, session)` with no session would admit the
+    pending uploads folder, D37's, to any client that is not local: a
+    whole file of any kind for a request that named nobody; refused 400
+    since the 2026-10-13 round, the Fable review of PR 615's nit 7. A
+    picture's request keeps the sessionless form PR-2.7 gave it, which
+    the composer's previews of a pending drop use). A `local` client is never served one (it
     opens the file itself), so its answers are what they were. The cap
     (`FILE_MAX_BYTES`), the tag and the 304 are the pictures'; the type
     of a file that is no picture is `application/octet-stream`."""
@@ -391,6 +401,12 @@ class FileBlobs(_Feed):
             self._answer(respond, 400)
             return
         if not whole and not editorfiles.is_image_path(path):
+            self._answer(respond, 400)
+            return
+        if whole and not session and not editorfiles.is_image_path(path):
+            # A file that is no picture is served for a session's sake
+            # only: with none named there is nobody whose agent named it,
+            # and the pending uploads folder is not a way round that.
             self._answer(respond, 400)
             return
         # What the worker confines to, gathered here on the main loop where

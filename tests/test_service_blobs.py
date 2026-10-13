@@ -362,7 +362,9 @@ def test_a_named_file_that_is_no_picture_is_served_whole_to_a_client_that_is_not
     # landing is what names the file (`note_delivered`).
     assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 400
     core.landed()
-    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 200  # by the handle too
+    # By its id alone once it has one: the handle is no second durable key
+    # (`_session_records`' rule, kept for a delivered file).
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 403
     status, headers, body = _get(feed, f"path={report}&session=sid-1&as=file")
     assert status == 200 and body == b"%PDF-1.4 report"
     assert headers["Content-Type"] == "application/octet-stream"
@@ -375,7 +377,32 @@ def test_a_named_file_that_is_no_picture_is_served_whole_to_a_client_that_is_not
     feed = _inline(blobs.FileBlobs, core)
     assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
     assert _get(feed, f"path={report}&session=sid-2&as=file")[0] == 403
-    assert _get(feed, f"path={report}&as=file")[0] == 403
+    assert _get(feed, f"path={report}&as=file")[0] == 400  # no session named: nobody's file
+
+
+def test_a_delivered_file_is_served_by_the_handle_only_while_the_session_has_no_id(report):
+    core = Core([Session(session_id=None, handle="s-1", seen=[str(report)])])
+    feed = _inline(blobs.FileBlobs, core)
+    core.landed()
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 200
+
+
+def test_a_file_that_is_no_picture_is_never_served_without_a_session(tmp_path, monkeypatch):
+    """The Fable review of PR 615, nit 7: `uploads.inside(real, None)`
+    admits the pending uploads folder, so `as=file` with no session would
+    hand any pending upload whole to a client that is not local. A
+    non-picture needs its session; a pending picture is served as before
+    (the composer's preview of a drop made before the session has an id)."""
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    document = uploads.write(None, "notes.pdf", b"%PDF pending")
+    picture = uploads.write(None, "shot.png", b"\x89PNG pending")
+    feed = _inline(blobs.FileBlobs, Core([Session()]))
+    assert _get(feed, f"path={document}&as=file")[0] == 400
+    assert _get(feed, f"path={document}&session=&as=file")[0] == 400
+    assert _get(feed, f"path={picture}&as=file")[0] == 200
+    assert _get(feed, f"path={picture}")[0] == 200
+    # With its session named, a pending upload is the session's to fetch (D37).
+    assert _get(feed, f"path={document}&session=sid-1&as=file")[0] == 200
 
 
 def test_without_as_file_nothing_but_a_picture_is_served_named_or_not(report):
@@ -524,6 +551,11 @@ def test_the_cached_copys_suffix_is_never_one_a_desktop_would_run():
     ):
         assert blobcache.file_suffix(key) == ".bin", key
         assert not blobcache.opens_by_default(key), key
+        # The copy's own name answers the same (nit 8 of the Fable review of
+        # PR 615: the panel asks the copy, not the key).
+        assert not blobcache.copy_opens_by_default("/cache/abc" + blobcache.file_suffix(key))
+    assert blobcache.copy_opens_by_default("/cache/abc.pdf")
+    assert not blobcache.copy_opens_by_default("/cache/abc")  # no suffix at all: the chooser
     url = blobcache.whole_file_url("/p/a b.pdf", "sid-1")
     assert url == "/api/blob?kind=file&path=%2Fp%2Fa%20b.pdf&session=sid-1&as=file"
 

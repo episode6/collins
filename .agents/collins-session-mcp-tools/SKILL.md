@@ -504,8 +504,11 @@ a local extra, with Show in Folder, which is hidden elsewhere) and this
 device's cached copy anywhere else (`_with_cached_copy`: a picture
 through `fetch_image`, any other file through `blobcache.fetch_file`,
 i.e. `GET /api/blob?kind=file&as=file`). The service answers `as=file`
-only for a client that is not `local` and only for a file the session's
-agent **named**: inside its uploads, a path a tool call registered
+only for a client that is not `local`, only for a request that names
+its session (a file that is no picture with no `session` is `400`: the
+pending uploads folder is not a way round the rule; a session is named
+by its id, or by its handle only while it has none) and only for a file
+the session's agent **named**: inside its uploads, a path a tool call registered
 (`ImageRegistry`), or a delivered file's record of its live transcript
 (`DeliveredFiles`, noted by `ServiceCore.session_transcript_landed` and
 resolved on a thread), each by the path it resolved to **when the service
@@ -523,9 +526,10 @@ until it has. The cached copy is
 `<sha1 of the url><suffix>`, 0600, never executable; the suffix is the
 only part taken from the service's path and `blobcache.file_suffix`
 replaces a missing, odd or runnable one (`.desktop`, `.sh`, `.AppImage`,
-`.py`, `.exe`, …) with `.bin`, and then `opens_by_default` is False and
-the row's activation shows the app chooser (`set_always_ask`) instead of
-a default app. The
+`.py`, `.exe`, …) with `.bin`, and then `copy_opens_by_default` (asked
+of the copy that landed, so the choice cannot disagree with the name it
+was written under) is False and the row's activation shows the app
+chooser (`set_always_ask`) instead of a default app. The
 "new images" handle badge needs both an announced-set and a moving timestamp
 baseline; a lightbox showing suppresses its own echo by key
 (`_attachments_beheld`). The panel docks itself once per tab when a column is

@@ -343,13 +343,22 @@ class AttachmentsView(Gtk.Box):
         machine that is the file itself (a local extra, §3.12); anywhere
         else it is this device's cached copy (`_with_file`, D51), through
         the app chooser when the copy's name says nothing this device
-        trusts (`blobcache.opens_by_default`)."""
+        trusts (`blobcache.copy_opens_by_default`, read off the copy that
+        landed, so the choice and the copy's suffix are one decision)."""
         if one.kind == "image":
             self._open_image(one, one.key, lambda step: self._navigate_from(one, step))
-        elif apilink.is_local() or blobcache.opens_by_default(one.key):
+        elif apilink.is_local():
             self._with_file(one, self._launch_default)
         else:
-            self._with_file(one, self._launch)
+            self._with_file(one, self._launch_copy)
+
+    def _launch_copy(self, path: str) -> None:
+        """This device's cached copy of a file row (D51): the default app
+        when its name kept a suffix, the app chooser when it did not."""
+        if blobcache.copy_opens_by_default(path):
+            self._launch_default(path)
+        else:
+            self._launch(path)
 
     def _navigate_from(self, one: Attachment, step: int) -> None:
         """Open the image *step* rows away from *one* (the lightbox's arrow
