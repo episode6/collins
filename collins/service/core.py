@@ -1894,6 +1894,7 @@ class ServiceCore:
             ran = self.agent_pty_sessions().get(pty_id)
         self._cli_running[pty_id] = running
         if running:
+            record.cli_ever_ran = True  # a shell alone from here on is the CLI's leaving, not a startup
             self.publish_pty(pty_id)
             return
         self._broadcast({"t": "pty-exited", "pty": pty_id, "status": None, "table": True})

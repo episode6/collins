@@ -288,10 +288,17 @@ plain Quit detaches such a tab, and a session detached while its CLI runs
 is left a bare shell when the CLI quits by itself; neither has a running
 row or anything that would attach to it, so the service ends it rather
 than keep it for its life. A pty mid-close is left to its close flow.
-Known windows (PR 605's verification): a detach within the first second
-of a spawn, before the shell has started the CLI, closes a healthy launch;
-an attach aimed at a pty being closed this way is refused and falls back
-to a resume. The tab's `destroy` also detaches (no longer `release_pty`): a
+**The startup hold:** `has_running_command` is the pty's foreground group,
+the shell's own until its rc has run and it forks the typed command (bash
+or zsh with a heavy rc: a second or more), so a pty whose CLI has never
+been seen running (`SessionRecord.cli_ever_ran`, set by `cli_changed(True)`)
+is never closed for "no CLI" inside `hosting.ORPHAN_HOLD_S` (30 s) of its
+`spawned_at`: one re-check is scheduled for the hold's end with the same
+guards (nobody shows it, CLI not running, not closing, not exited), an
+attach in the meantime cancels it, and a CLI seen running and then gone
+closes at once. A pty whose master is already gone (`pty.master < 0`) is
+not forced twice. The one window left: an attach aimed at a pty being
+closed this way is refused and falls back to a resume. The tab's `destroy` also detaches (no longer `release_pty`): a
 window that closes for real leaves its sessions running. **Opening a
 running session attaches** (D31): `open_session` asks `store.pty_for(id)`
 and, while that pty's CLI still runs (`pty.info`'s `running_command`; a shell-only pty is resumed over, which the service takes by closing it), builds `TerminalTab(attach_pty=…)`, which reads the pty's grid

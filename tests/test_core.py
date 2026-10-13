@@ -1444,8 +1444,23 @@ def test_the_shells_exit_ends_a_close_in_flight(tmp_path, monkeypatch):
         pump(0.3)
 
 
+def _orphan_rig(tmp_path, monkeypatch, hold_s=1.5, shell="/bin/sh"):
+    """A core on *shell* with the shell-alone startup hold cut to *hold_s*
+    and a short kill grace; the caller spawns."""
+    from collins.service import hosting, ptyserver
+
+    monkeypatch.setenv("SHELL", shell)
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    monkeypatch.setattr(hosting, "ORPHAN_HOLD_S", hold_s)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    return srv, core, client, ends
+
+
 @pytest.mark.parametrize("leave", ["detach", "client_gone"])
-def test_a_shell_alone_nobody_shows_is_closed(tmp_path, monkeypatch, leave):
+def test_a_shell_alone_nobody_shows_is_closed_at_the_holds_end(tmp_path, monkeypatch, leave):
     """PR 605's verification: a CLI that never came up (no `claude`, a bad
     `claude_cli_path`, a failed sandbox launch) left a shell the client's
     `cli_exited()` could not tell from a CLI still starting, so a plain
@@ -1453,15 +1468,9 @@ def test_a_shell_alone_nobody_shows_is_closed(tmp_path, monkeypatch, leave):
     with no attachment and no running row, closed only by a resume of that
     session, so it was orphaned for the service's life. The last client's
     detach (or its departure) from an agent pty whose CLI is not running
-    closes the pty."""
-    from collins.service import ptyserver
-
-    monkeypatch.setenv("SHELL", "/bin/sh")
-    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
-    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
-    srv = loopback.LoopbackServer(core)
-    ends = Client()
-    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    closes the pty — after the startup hold, since a CLI never seen running
+    may still be the shell's rc before it forks the typed command."""
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch)
     try:
         # The typed command is `true`: the "CLI" never comes up, the shell is alone.
         pty = spawn_agent(client, tmp_path)["pty"]
@@ -1469,12 +1478,43 @@ def test_a_shell_alone_nobody_shows_is_closed(tmp_path, monkeypatch, leave):
         screen = core.ptys.get(pty).screen
         assert pump(3, lambda: "true" in screen.capture_contents())
         assert not core.ptys.get(pty).has_running_command()
+        record = core.sessions[pty]
         if leave == "detach":
             client.request({"t": "detach", "pty": pty})
         else:
             client.close()
-        assert pump(5, lambda: pty not in core.ptys.ptys), "the shell alone outlived its last client"
+        assert record._orphan_recheck is not None  # held, one re-check scheduled
+        pump(0.8)
+        assert pty in core.ptys.ptys  # inside the hold: kept
+        assert pump(5, lambda: pty not in core.ptys.ptys), "the shell alone outlived the hold"
         assert pump(3, lambda: pty not in core.sessions)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_launch_whose_cli_comes_up_inside_the_hold_is_kept(tmp_path, monkeypatch):
+    """The window the hold is for: a detach (or a client crash) right after
+    a new-chat Send, while the shell still runs its rc. `sleep 1; exec sleep
+    300` is that shell: no command of its own for a second, then the 'CLI'.
+    Detached at once, the launch is kept, and still there after the hold.
+    The slow rc is a wrapper shell that sleeps in the shell's own group (no
+    job of its own, so `has_running_command` is False, as under a real rc),
+    then execs /bin/sh, which runs the typed command."""
+    slow = tmp_path / "slowsh"
+    slow.write_text('#!/bin/sh\nsleep 1\nexec /bin/sh "$@"\n')
+    slow.chmod(0o755)
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch, shell=str(slow))
+    try:
+        pty = spawn_agent(client, tmp_path, command_override="sleep 300")["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        client.request({"t": "detach", "pty": pty})
+        record = core.sessions[pty]
+        assert pty in core.ptys.ptys and record._orphan_recheck is not None
+        assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+        pump(1.8)  # past the hold's end and its re-check
+        assert pty in core.ptys.ptys and record._orphan_recheck is None
+        assert record.cli_ever_ran
     finally:
         srv.shutdown()
         pump(0.3)
@@ -1483,25 +1523,37 @@ def test_a_shell_alone_nobody_shows_is_closed(tmp_path, monkeypatch, leave):
 def test_a_detached_sessions_cli_leaving_by_itself_closes_the_shell(tmp_path, monkeypatch):
     """The other way round: the session is detached while its CLI runs,
     then the CLI quits on its own. The table says so (`pty-exited`, status
-    null, `table: true`) and the shell alone goes with it; nobody was
-    attached, so nothing else would ever close it."""
-    from collins.service import ptyserver
-
-    monkeypatch.setenv("SHELL", "/bin/sh")
-    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
-    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
-    srv = loopback.LoopbackServer(core)
-    ends = Client()
-    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    null, `table: true`) and the shell alone goes with it at once — no hold,
+    the CLI was seen running; nobody was attached, so nothing else would
+    ever close it."""
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch, hold_s=600.0)
     try:
         pty = spawn_agent(client, tmp_path, command_override="sleep 2")["pty"]
         client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
         assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+        assert core.sessions[pty].cli_ever_ran
         client.request({"t": "detach", "pty": pty})
         pump(0.3)
         assert pty in core.ptys.ptys  # the CLI runs: a detached session, not an orphan
         # (The table's `pty-exited` goes to subscribers; this client is none.)
         assert pump(10, lambda: pty not in core.ptys.ptys), "the shell left by the CLI outlived it"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_an_attach_inside_the_hold_cancels_the_recheck(tmp_path, monkeypatch):
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch)
+    try:
+        pty = spawn_agent(client, tmp_path)["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        client.request({"t": "detach", "pty": pty})
+        record = core.sessions[pty]
+        assert record._orphan_recheck is not None
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        assert record._orphan_recheck is None
+        pump(2.0)  # past where the hold would have ended
+        assert pty in core.ptys.ptys  # shown: kept
     finally:
         srv.shutdown()
         pump(0.3)
@@ -1516,6 +1568,7 @@ def test_a_shown_shell_and_a_closing_one_are_left_alone(server, tmp_path):
     pty, _screen = _ready_agent(server, client, tmp_path)
     second.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     record = server.core.sessions[pty]
+    record.cli_ever_ran = True  # past the startup hold's question
     client.request({"t": "detach", "pty": pty})
     pump(0.3)
     assert pty in server.core.ptys.ptys  # the second client shows it
@@ -1525,6 +1578,7 @@ def test_a_shown_shell_and_a_closing_one_are_left_alone(server, tmp_path):
     assert pty in server.core.ptys.ptys  # a close flow owns it
     record.session.closing = False
     assert record.close_if_orphan_shell("the test asks") is True
+    assert record.close_if_orphan_shell("asked again") is False  # the master is gone: no second force
     assert pump(3, lambda: pty not in server.core.ptys.ptys)
 
 
