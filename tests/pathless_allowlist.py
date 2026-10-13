@@ -46,6 +46,8 @@ ALLOWLIST = frozenset(
         "connection:spawn_service:subprocess.Popen",
         "connection:systemctl_start:shutil.which",
         "connection:systemctl_start:subprocess.run",
+        "connection:unit_state:shutil.which",  # the systemctl show of a timed-out wait (604)
+        "connection:unit_state:subprocess.run",
         "prefs:PreferencesDialog._on_restart:subprocess.Popen",
         # -- the local extras (PR-2.8 gates them on the `local` capability) ---------
         "attachpanel:AttachmentsView._on_show_folder:os.path.exists",
