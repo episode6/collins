@@ -49,11 +49,15 @@ from . import editorfiles, prdetail, prstatus
 # screenshots in git shouldn't get to stall a page opening on one.
 MAX_BLOB_BYTES = 10 * 1024 * 1024
 
-# The gates. A repository is owner/name as GitHub spells one; a ref is a
-# commit sha, already held to that shape by prdetail — checked again here
-# because this is the module that builds the request.
-_REPOSITORY = re.compile(r"[A-Za-z0-9._-]{1,100}/[A-Za-z0-9._-]{1,100}")
-_REF = re.compile(r"[0-9a-f]{7,40}")
+# The gates. A repository is owner/name as GitHub spells one — the owner a
+# login (mdblocks.LOGIN_RE's alphabet: letters, digits and hyphens, 39 at
+# most; never a dot, so `..` is no owner), the name GitHub's repository
+# alphabet, `.` and `..` excluded — and a ref a full commit sha, already
+# held to that shape by prdetail (`_oid`) — checked again here because
+# this is the module that builds the request, and the whole of what the
+# blob GET checks (nit 4 of PR 610's review).
+_REPOSITORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/(?!\.\.?$)[A-Za-z0-9._-]{1,100}")
+_REF = re.compile(r"[0-9a-f]{40}")
 
 
 # gh's word for what happened to a file (prdetail.PrFile.change_type),

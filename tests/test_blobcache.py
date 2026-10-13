@@ -3,6 +3,7 @@ fetch keeps and sends back, a 304 that keeps the file, the 24-hour
 prune, the reasons a stand-in carries."""
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -129,6 +130,29 @@ def test_a_304_with_the_file_gone_is_a_failure_not_a_path(cache):
         blobcache.fetch(URL, ".png", link=link)
 
 
+def test_a_304_for_a_blob_the_prune_swept_meanwhile_is_a_failure_not_a_path(cache, monkeypatch):
+    """Nit 5 of PR 610's review: the prune runs outside the lock, so a
+    blob exactly a day old can go between the fetch's exists() and its
+    utime; the utime is the liveness test, and a path that is gone is
+    never returned."""
+    link = BlobLink()
+    link.answers.append((200, {"ETag": '"t"'}, b"KEEP"))
+    held = blobcache.fetch(URL, ".png", link=link)
+    real_utime = os.utime
+
+    def swept_utime(path, *args, **kwargs):
+        if Path(path) == held:
+            held.unlink()  # the sweep, a beat before
+            raise FileNotFoundError(str(path))
+        return real_utime(path, *args, **kwargs)
+
+    monkeypatch.setattr(blobcache.os, "utime", swept_utime)
+    link.answers.append((304, {"ETag": '"t"'}, b""))
+    with pytest.raises(ValueError):
+        blobcache.fetch(URL, ".png", link=link)
+    assert not held.exists()
+
+
 def test_no_link_or_a_link_with_no_http_is_not_connected(cache, monkeypatch):
     monkeypatch.setattr(apilink, "_current", None)
     with pytest.raises(ValueError, match="Not connected"):
@@ -157,6 +181,15 @@ def test_each_service_has_its_own_directory(cache):
     two.answers.append((200, {}, b"2"))
     assert blobcache.fetch(URL, link=one).parent.name == "svc-1"
     assert blobcache.fetch(URL, link=two).parent.name == "svc_.._2"
+
+
+def test_a_given_link_without_an_id_never_borrows_the_current_links(cache, monkeypatch):
+    """Nit 7 of PR 610's review: `directory(None)` reads apilink.current();
+    a link handed in with no service id is its own, "service"."""
+    monkeypatch.setattr(apilink, "_current", BlobLink("other-service"))
+    bare = BlobLink("")
+    bare.answers.append((200, {}, b"1"))
+    assert blobcache.fetch(URL, link=bare).parent.name == "service"
 
 
 def test_a_blob_older_than_a_day_is_pruned_with_its_tag(cache):

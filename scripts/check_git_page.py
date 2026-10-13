@@ -468,15 +468,34 @@ def check_sidebar(repo: str) -> None:
     # mutation re-seeded as it landed: no second reload.
     reads_before = len(reads)
     heard = page.changes_heard
-    sidebar.stage_all()
     # A git-changed whose state the watch sampled with the mutation half
     # done lands while the mutation's own reload is out: it differs from
     # what that read sampled, but is confirmed against the service's state
-    # as it is now (the same as the read's) before any reload.
-    caught = wait_for(lambda: not sidebar.busy and page._loading)
-    check("the mutation's own read is out when a mid-mutation state lands", caught, (sidebar.busy, page._loading))
-    page._on_git_changed({"t": "git-changed", "cwd": page._watched_cwd, "tree": "t", "refs": "r", "state": "mid-mutation"})
-    landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
+    # as it is now (the same as the read's) before any reload. The read is
+    # held at a gate (as the "ask lands while a read is out" cases below
+    # hold theirs) so the state lands while it is out on any machine: its
+    # own duration is tens of milliseconds here, a window a fast box
+    # closed before the poll saw it.
+    gate = threading.Event()
+    real_read_diff = gitops.read_diff
+    held_reads: list[object] = []
+
+    def held_read_diff(*args, **kwargs):
+        read = real_read_diff(*args, **kwargs)
+        held_reads.append(args[1] if len(args) > 1 else kwargs.get("load"))
+        gate.wait(STEP_TIMEOUT_S)
+        return read
+
+    gitops.read_diff = held_read_diff
+    try:
+        sidebar.stage_all()
+        caught = wait_for(lambda: len(held_reads) == 1 and not sidebar.busy and page._loading)
+        check("the mutation's own read is out when a mid-mutation state lands", caught, (sidebar.busy, page._loading, held_reads))
+        page._on_git_changed({"t": "git-changed", "cwd": page._watched_cwd, "tree": "t", "refs": "r", "state": "mid-mutation"})
+        gate.set()
+        landed = wait_for(lambda: not sidebar.busy and len(reads) == reads_before + 1 and page.settled())
+    finally:
+        gitops.read_diff = real_read_diff
     check("stage_all reloads the view once", landed, len(reads) - reads_before)
     check("and staged the tree", git_out(repo, "diff", "--name-only") == "" and git_out(repo, "diff", "--cached", "--name-only").split() == ["a.txt"])
     check("the unstaged view emptied", wait_for(lambda: page.diff_view.file_rows() == []), page.diff_view.file_rows())

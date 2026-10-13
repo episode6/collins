@@ -176,6 +176,12 @@ def test_an_empty_reply_is_a_failure(gh):
         ("episode6/collins", SHA, "collins/prview.py"),  # not an image
         ("episode6", SHA, "data/icon.png"),  # not owner/name
         ("episode6/collins;rm -rf", SHA, "data/icon.png"),
+        ("../x", SHA, "data/icon.png"),  # a traversal is no owner (nit 4 of PR 610's review)
+        ("episode6/..", SHA, "data/icon.png"),
+        ("episode6/.", SHA, "data/icon.png"),
+        (".github/collins", SHA, "data/icon.png"),  # a login never starts with a dot
+        ("a" * 40 + "/collins", SHA, "data/icon.png"),  # over a login's 39
+        ("episode6/collins", SHA[:7], "data/icon.png"),  # a short sha is not the full commit
         ("episode6/collins", "main", "data/icon.png"),  # a ref that isn't a commit
         ("episode6/collins", "", "data/icon.png"),
         ("episode6/collins", SHA, "../../etc/hosts.png"),

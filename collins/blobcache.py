@@ -79,7 +79,9 @@ def fetch(url: str, suffix: str = "", link: apilink.Link | None = None) -> Path:
     link = link or apilink.current()
     if link is None or not hasattr(link, "http_get"):
         raise ValueError(_("Not connected to the service"))
-    folder = directory(str(getattr(link, "hello", {}).get("service_id") or "") or None)
+    # The given link's own id ("service" when it has none): directory(None)
+    # would read apilink.current(), another link's (nit 7 of PR 610's review).
+    folder = directory(str(getattr(link, "hello", {}).get("service_id") or "") or "service")
     folder.mkdir(parents=True, exist_ok=True)
     prune(folder)
     key = key_for(url)
@@ -96,16 +98,25 @@ def fetch(url: str, suffix: str = "", link: apilink.Link | None = None) -> Path:
         status, got, data = link.http_get(url, headers)
     except Exception as err:  # the socket went away under the GET
         raise ValueError(str(err) or _("The service did not answer.")) from None
-    if status == 304 and target.exists():
+    if status == 304:
         # Kept as it is (the tag says the bytes are the same), its clock
         # restarted: the prune goes by mtime, so it reads "last used" — a
         # blob looked at daily is never pruned and fetched whole again.
-        for held in (target, etag_file):
+        # The utime is the liveness test too: another thread's prune (it
+        # runs outside _prune_lock) may have swept a blob exactly a day
+        # old since the exists() above, and a path that is gone is the
+        # failure below, not a stand-in for one picture (nit 5 of PR
+        # 610's review).
+        try:
+            os.utime(target)
+        except OSError:
+            pass
+        else:
             try:
-                os.utime(held)
+                os.utime(etag_file)
             except OSError:
                 pass
-        return target
+            return target
     if status != 200:
         raise ValueError(_reason(status))
     if len(data) > MAX_BYTES:

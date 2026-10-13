@@ -47,7 +47,9 @@ re-emitted. The gh calls keep their names as `remoteprs` functions —
 its record), `fetch_detail` / `fetch_threads` (`pr.detail` /
 `pr.threads`: `prdetail.detail_record` / `detail_from_record`, a patch
 over `WIRE_PATCH_MAX` crossing as None), `fetch_blob` (`pr.blob`, PR-2.2:
-the service checks `prblobs.check`'s gates and answers the blob GET's URL,
+the service checks `prblobs.check`'s gates — the owner a login, the name
+GitHub's repository alphabet minus `.` and `..`, the ref a full 40-hex
+commit, the path an image inside the tree — and answers the blob GET's URL,
 `prblobs.blob_url` → `GET /api/blob?kind=pr&repository=&ref=&path=`,
 which `blobcache.fetch` GETs into `~/.cache/collins/blobs/<service id>/`
 with `If-None-Match`; the route is `service.prfeed.PrBlobs.blob`, gh's
