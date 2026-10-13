@@ -174,7 +174,7 @@ class ClientSession:
     # -- the decisions the tab makes on the session's events (GTK-free) ---------------
 
     @staticmethod
-    def cut_action(state: str | None, composer_open: bool) -> str:
+    def cut_action(state: str | None, composer_open: bool, known: bool = True) -> str:
         """What a `cut` event asks of the tab whose composer began it.
         `seeded` with the composer still up seeds it (`CUT_SEED`); arriving
         after the composer closed — over a socket the erase can land after
@@ -182,7 +182,16 @@ class ClientSession:
         does (`CUT_STASH`: `_restore_or_stash`), never lost. `refused` with
         the composer up lowers it (`CUT_REFUSE`); `refused` after it closed,
         and `cancelled` (the service let the handle go: an empty box, a box
-        that never settled, a cancel of our own), ask nothing."""
+        that never settled, a cancel of our own), ask nothing.
+
+        A handle the tab does not *know* (the composer closed and forgot
+        it; or, over a socket whose events outrun the sync channel's reply,
+        a seed that lands before the `cut` reply names its handle) is the
+        same with the composer counted closed: a seed's text is the box's,
+        erased, and goes to the box or the stash — never dropped; anything
+        else asks nothing."""
+        if not known:
+            composer_open = False
         if state == "seeded":
             return CUT_SEED if composer_open else CUT_STASH
         if state == "refused":

@@ -375,6 +375,20 @@ def test_the_cuts_three_states_decide_what_the_tab_does():
     assert ClientSession.cut_action(None, True) == CUT_IGNORE
 
 
+def test_a_seed_under_an_unknown_handle_is_never_dropped():
+    """Should-fix 5 of the review: over a socket the `seeded` event can
+    outrun the `cut` reply that names its handle (D26: events on the
+    primary connection, the reply on the sync channel), and the tab used
+    to `return` on a handle it did not know — the box erased, the text
+    gone. An unknown handle's seed is the closed-composer case: stashed."""
+    from collins.clientsession import CUT_IGNORE, CUT_STASH
+
+    assert ClientSession.cut_action("seeded", True, known=False) == CUT_STASH
+    assert ClientSession.cut_action("seeded", False, known=False) == CUT_STASH
+    assert ClientSession.cut_action("refused", True, known=False) == CUT_IGNORE
+    assert ClientSession.cut_action("cancelled", True, known=False) == CUT_IGNORE
+
+
 def test_the_close_budget_is_the_forced_close():
     assert ClientSession.close_action("budget") == "force"
     assert ClientSession.close_action("exited") is None

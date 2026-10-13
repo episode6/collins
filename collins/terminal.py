@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-12. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -2280,16 +2280,18 @@ class TerminalTab(Gtk.Box):
         if event.get("pty") != self.session.pty:
             return
         composer = self._cuts.pop(str(event.get("handle") or ""), None)
-        if composer is None:
-            return
         text = str(event.get("text") or "")
-        up = composer is self._composer and self.composer_open()
-        action = self.session.cut_action(event.get("state"), up)
+        up = composer is not None and composer is self._composer and self.composer_open()
+        action = self.session.cut_action(event.get("state"), up, known=composer is not None)
         if action == clientsession.CUT_SEED:
             composer.seed_text(text)
         elif action == clientsession.CUT_STASH:
-            # The cut landed after the composer closed: what it took out of
-            # the box goes where a closing composer's text goes.
+            # The cut landed after the composer closed, or under a handle
+            # this tab never learnt (its reply still in flight): the box was
+            # erased, so what the cut took goes where a closing composer's
+            # text goes — after the service's chain is called off, or its
+            # verify rounds would erase the restored text as a leftover.
+            self.session.cancel_cut()
             self._restore_or_stash(text)
         elif action == clientsession.CUT_REFUSE:
             self._stash_draft(composer.peek_text())
