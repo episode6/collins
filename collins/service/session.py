@@ -209,6 +209,10 @@ CUT_VERIFY_MS = (150, 400, 900)
 # the one sentence, as a msgid, so the service can hand it to a client to
 # translate (§3.14).
 PROMPT_BLOCK_MSGID = N_("This session isn't at an empty prompt.")
+# Why a composer's cut was refused before the erase (D55): the box's text,
+# stand-ins expanded, would not fit the `cut` event's byte budget. The box
+# keeps its text and the composer opens empty over it; nothing is shortened.
+CUT_TOO_LARGE_MSGID = N_("The input box holds more than the composer can carry; it stays in the box")
 
 
 def _within(root: str, path: str) -> bool:
@@ -487,6 +491,7 @@ class Session:
         sandbox_host: Callable[[], sandboxplan.SandboxHost | None] = lambda: None,
         sandbox_grants: Callable[[], Any] = lambda: None,
         scheduler: Scheduler | None = None,
+        seed_fits: Callable[[str], bool] | None = None,
     ) -> None:
         """*progress* says whether the terminal parses the agent's own
         progress announcements (VTE's termprop; a VTE too old has none), so
@@ -497,8 +502,13 @@ class Session:
         choice. *sandbox_host* and *sandbox_grants* answer the app's
         sandboxplan.SandboxHost and sandboxgrants.GrantMounts, read at each
         use (None: every sandboxed decision degrades to an unsandboxed
-        launch that says so, and grants apply at the next restart)."""
+        launch that says so, and grants apply at the next restart).
+        *seed_fits* says whether a cut's text can reach the composer whole
+        (the host's: the `cut` event's byte budget); a box whose text
+        can't is never cut (D55: `cut_fits_now`, and the settle's own
+        check before the erase). None: every text fits."""
         self.provider = provider
+        self.seed_fits = seed_fits
         self.handle = f"s-{next(_handles)}"
         self.pty = pty
         self.screen = screen
@@ -1012,6 +1022,22 @@ class Session:
 
     # -- the composer's open-cut ---------------------------------------------
 
+    def _seed_fits(self, text: str) -> bool:
+        return self.seed_fits is None or bool(self.seed_fits(text))
+
+    def cut_fits_now(self) -> bool:
+        """Whether the box's text as the screen shows it now, stand-ins
+        expanded, could reach a composer whole (*seed_fits*). False is the
+        `cut` request's refusal (D55): the box is left as it is and the
+        composer opens empty over it, nothing the user typed shortened. A
+        box that can't be read, or holds a stand-in that isn't ours, fits
+        here: the settle decides those (`_apply_cut`)."""
+        prompt = self.entered_prompt()
+        if prompt is None or not prompt.text.strip():
+            return True
+        text = self._expand_box_read(prompt.text)
+        return text is None or self._seed_fits(text)
+
     def begin_cut(self, sink: CutSink) -> None:
         """Take the typed-but-unsent prompt out of the CLI's input box and
         into the composer behind *sink* — the open-cut, run as a chain of
@@ -1133,6 +1159,13 @@ class Session:
         text = self._expand_box_read(prompt.text)
         if text is None:
             sink.refuse()
+            return
+        if not self._seed_fits(text):
+            # D55's belt: the request was refused on the live read already
+            # (`cut_fits_now`); should the settled read come out larger,
+            # the box is still not erased. The composer keeps what it has.
+            log.info("session %s: a cut whose text can't be carried is left in the box", self.handle)
+            sink.ended()
             return
         keys = self.provider.clear_prompt_keys(prompt)
         if not keys:

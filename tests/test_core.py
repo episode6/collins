@@ -603,6 +603,38 @@ def test_a_cut_seeds_the_box_and_refuses_a_foreign_paste(server, tmp_path):
     assert handle not in record.cuts
 
 
+def test_a_cut_whose_text_would_not_frame_is_refused_before_the_erase(server, tmp_path, monkeypatch):
+    """D55 over the loopback: a box whose text, expanded, is over the `cut`
+    event's byte budget is not cut. The `cut` request is refused with a
+    msgid the client translates, the pty receives no erase keystroke, no
+    `cut` event is sent, and the box still holds its text; the composer is
+    open (empty) over it as the service sees it. A box that fits is cut."""
+    from collins.service.session import CUT_TOO_LARGE_MSGID
+
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty, screen = _ready_agent(server, client, tmp_path)
+    record = server.core.sessions[pty]
+    record.session.agent_is_running = lambda: True
+    client.send_input(pty, "❯\xa0hello there".encode())
+    assert pump(3, lambda: "hello there" in screen.capture_contents())
+    writes = []
+    monkeypatch.setattr(server.core.ptys, "write", lambda pty_id, data: writes.append(data))
+    monkeypatch.setattr(protocol, "EVENT_TEXT_BYTES", 8)  # "hello there" is more than the frame may carry
+    with pytest.raises(loopback.RequestRefused) as refused:
+        client.request({"t": "cut", "pty": pty})
+    assert refused.value.error == protocol.ERROR_REFUSED and refused.value.msgid == CUT_TOO_LARGE_MSGID
+    pump(0.5)
+    assert writes == [] and not record.cuts and not ends.of("cut")
+    assert "hello there" in screen.capture_contents()
+    assert record.composer_open() is True  # open, empty, over the intact box
+    # With room for it, the same box is cut.
+    monkeypatch.setattr(protocol, "EVENT_TEXT_BYTES", protocol.MAX_FRAME - 4096)
+    handle = client.request({"t": "cut", "pty": pty})["handle"]
+    assert pump(5, lambda: _cut_state(ends, handle) == "seeded")
+    assert writes, "the erase keystrokes went to the pty"
+
+
 def test_a_cut_that_finds_nothing_ends_with_a_cancelled_word(server, tmp_path):
     """An empty box: the settle agrees with itself and cuts nothing; the
     client hears `cancelled` and the record lets the handle go."""
@@ -1079,7 +1111,10 @@ def test_the_snapshot_previews_the_held_prompt_and_leaves_the_paste_back_record_
     assert record.session.paste_back_pending == ["y" * 100_000]
 
 
-def test_a_cuts_seed_is_fitted_by_bytes_so_the_event_frames():
+def test_a_cuts_seed_is_told_whole():
+    """D55: the seed is never cut back — a text that would not frame is
+    refused before the erase (`cut_fits_now`), so what reaches the sink is
+    the box's text whole; the record's `seed_fits` is the frame's budget."""
     from collins.service import hosting
 
     class Sink:
@@ -1093,14 +1128,9 @@ def test_a_cuts_seed_is_fitted_by_bytes_so_the_event_frames():
         cuts: dict = {}
 
     sink = Sink()
-    hosting.CutSink(Record(), sink, "cut-1")._tell("seeded", "\x01" * protocol.TEXT_MAX)
-    event = sink.events[-1]
-    assert event["state"] == "seeded" and 0 < len(event["text"]) < protocol.TEXT_MAX
-    assert len(protocol.encode(event).encode("utf-8")) <= protocol.MAX_FRAME
-    assert isinstance(protocol.validate(dict(event), protocol.SERVICE), protocol.Message)
-    # A seed that fits goes whole.
     hosting.CutSink(Record(), sink, "cut-2")._tell("seeded", "a" * 200_000)
     assert sink.events[-1]["text"] == "a" * 200_000
+    assert len(protocol.encode(sink.events[-1]).encode("utf-8")) <= protocol.MAX_FRAME
 
 
 def test_the_transcript_lists_are_cut_to_their_byte_budgets(server, tmp_path):

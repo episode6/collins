@@ -590,9 +590,14 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   `fit_list_bytes`, so an event with every field at its bound still
   encodes under `MAX_FRAME` — `ledger_armed`, with `landed` and `reset`
   one-shots), and the activity verdicts by handle (`busy`, `finished`).
-  The `cut` event's seed and the `composer` event's stash are fitted by
-  bytes too (`fit_text_bytes` to `EVENT_TEXT_BYTES`): a TEXT_MAX string
-  escaped and encoded can pass the frame. `composer_open` — the client
+  The `composer` event's stash is fitted by bytes too (`fit_text_bytes` to
+  `EVENT_TEXT_BYTES`: a TEXT_MAX string escaped and encoded can pass the
+  frame). The `cut` event's seed is **never cut back** (D55): a box whose
+  text, stand-ins expanded, would not frame is refused before the erase —
+  `Session.cut_fits_now` on the `cut` request, answered `refused` with
+  `CUT_TOO_LARGE_MSGID`, which the tab paints (`ClientSession.cut_refusal`)
+  while its composer stays empty over the intact box; the settle's own
+  check (`_apply_cut` → `ended`) is the belt. `composer_open` — the client
   fact `_post_switch` reads — arrives on the `switch`, `send`, `cut` and
   `draft.restore` requests and is remembered. `paint` formats the
   "[session manager]" line and inserts it into the stream (a line painted

@@ -229,10 +229,11 @@ class CutSink:
         # pty, so a cut can't outlive the id it was begun under.
         event: dict = {"t": "cut", "pty": self.record.pty_id, "handle": self.handle, "state": state}
         if text is not None:
-            # Fitted by bytes, not characters: TEXT_MAX characters escaped
-            # and encoded can pass MAX_FRAME, and a seed the socket can't
-            # frame is the composer's text lost (the box was erased).
-            event["text"] = protocol.fit_text_bytes(text[: protocol.TEXT_MAX], protocol.EVENT_TEXT_BYTES)
+            # Never cut back (D55): a seed that would not frame is refused
+            # before the box is erased (`Session.cut_fits_now`, and the
+            # settle's own check), so what is told here is the box's text
+            # whole.
+            event["text"] = text[: protocol.TEXT_MAX]
         try:
             self.sink.send_event(event)
         except Exception:
@@ -265,6 +266,9 @@ class SessionRecord:
             host=self,
             sandbox_host=lambda: core.sandbox_host,
             sandbox_grants=lambda: core.sandbox_grants,
+            # D55: a cut whose text would not frame as a `cut` event is
+            # refused before the erase, never cut back.
+            seed_fits=lambda text: protocol.json_bytes(text) <= protocol.EVENT_TEXT_BYTES,
             **session_kwargs,
         )
 
@@ -544,6 +548,8 @@ class SessionRecord:
             return
         event: dict = {"t": "composer", "pty": pty.id, "what": what}
         if text is not None:
+            # The stash's belt: a text the frame can't carry loses its tail
+            # here rather than the event (a cut's seed never comes this way).
             event["text"] = protocol.fit_text_bytes(text[: protocol.TEXT_MAX], protocol.EVENT_TEXT_BYTES)
         self._event(event, active_only=True)
 

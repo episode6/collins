@@ -513,6 +513,31 @@ def test_a_cut_settles_erases_and_seeds(rig):
     assert session.cut_pending is None  # proved empty
 
 
+def test_a_box_whose_text_cannot_be_carried_is_not_cut(agent):
+    """D55: a cut whose text would not fit the `cut` event is refused
+    before the erase (`cut_fits_now`, the request's refusal), and should
+    the settled read come out larger still, the settle leaves the box as
+    it is (`ended`: the composer keeps what it has). No erase keystroke
+    reaches the pty either way; nothing the user typed is shortened."""
+    term, host, clock = FakeTerminal(), FakeHost(), FakeScheduler()
+    session = Session(
+        provider=ClaudeProvider(), pty=term, screen=term, host=host, scheduler=clock,
+        seed_fits=lambda text: len(text) <= 5,
+    )
+    host.composer_is_open = True
+    term.write(b"short")
+    assert session.cut_fits_now() is True
+    term.write(b" and then too long")
+    term.writes.clear()
+    assert session.cut_fits_now() is False  # the request is refused here (ServiceCore._req_cut)
+    sink = FakeSink()
+    session.begin_cut(sink)  # the belt: a cut begun anyway settles without erasing
+    clock.advance(CUT_SETTLE_MS * 3)
+    assert sink.seeded == [] and sink.refused == 0 and sink.ended_count == 1
+    assert term.writes == [] and term.box == "short and then too long"
+    assert session.cut_pending is None and not session.cut_settling
+
+
 def test_an_empty_box_settles_and_cuts_nothing(rig):
     session, term, host, clock = rig
     host.composer_is_open = True

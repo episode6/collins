@@ -228,6 +228,10 @@ def test_the_cut_is_begun_and_called_off_by_handle(mirror):
     ]
     client.refuse.add("cut")
     assert session.begin_cut() is None
+    assert session.cut_refusal == "no"  # D55: the refusal's msgid, for the tab to paint
+    client.refuse.discard("cut")
+    client.replies["cut"] = {"handle": "cut-4"}
+    assert session.begin_cut() == "cut-4" and session.cut_refusal is None
 
 
 def test_a_draft_goes_back_through_the_service(mirror):

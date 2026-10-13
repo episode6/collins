@@ -122,6 +122,7 @@ class ClientSession:
         self.cwd = cwd
         self.transcript_path: str | None = str(jsonl_path) if jsonl_path else None
         self.exited = False
+        self.cut_refusal: str | None = None  # the last `cut` request's refusal msgid (D55)
         for name, value in _FIELD_DEFAULTS.items():
             if name == "transcript_path":
                 continue
@@ -330,8 +331,22 @@ class ClientSession:
             clear()
 
     def begin_cut(self) -> str | None:
-        """Start the open-cut; its handle, which the `cut` events carry."""
-        reply = self._ask({"t": "cut"})
+        """Start the open-cut; its handle, which the `cut` events carry, or
+        None with the refusal's msgid in `cut_refusal` (D55: a box whose
+        text would not reach the composer whole is left as it is; the tab
+        paints the reason and the composer stays empty over it)."""
+        self.cut_refusal = None
+        if self.pty is None or self.exited:
+            return None
+        try:
+            reply = self._request({"t": "cut", "pty": self.pty})
+        except RequestRefused as refusal:
+            log.info("session %s: cut refused: %s", self.handle, refusal.msgid)
+            self.cut_refusal = str(refusal.msgid or "") or None
+            return None
+        except ValueError as error:
+            log.error("session %s: cut is not a valid request: %s", self.handle, error)
+            return None
         return str(reply["handle"]) if reply and reply.get("handle") else None
 
     def cancel_cut(self, handle: str | None = None) -> None:

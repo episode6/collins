@@ -4518,6 +4518,11 @@ class TerminalTab(Gtk.Box):
         handle = self.session.begin_cut()
         if handle:
             self._cuts[handle] = composer
+        elif self.session.cut_refusal:
+            # D55: the box holds more than a `cut` event can carry. Nothing
+            # was erased; the composer stays empty over the intact box, and
+            # the terminal says why.
+            self.feed_message(_(self.session.cut_refusal))
 
     def _pick_file_for_composer(self) -> None:
         """The composer's attach button: pick a file, landing its mention in

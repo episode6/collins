@@ -146,7 +146,7 @@ from . import hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse,
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
-from .session import PROMPT_BLOCK_MSGID
+from .session import CUT_TOO_LARGE_MSGID, PROMPT_BLOCK_MSGID
 
 # The refusal a client translates (§3.14) when it names a transcript the
 # service may not tail: `spawn`'s `jsonl_path`, `transcript.set`, `relocate`.
@@ -680,7 +680,11 @@ class ServiceCore:
 
     def _req_cut(self, message: protocol.Message, client: Client) -> dict:
         record = self._record(message)
-        record.set_composer_open(True)
+        record.set_composer_open(True)  # it opens either way: over an emptied box, or an intact one
+        if not record.session.cut_fits_now():
+            # D55: a box whose text would not frame is not cut; the client
+            # paints the reason and its composer stays empty over the box.
+            return protocol.refuse(message.id, protocol.ERROR_REFUSED, CUT_TOO_LARGE_MSGID)
         handle = record.begin_cut(client.sink_for(record.pty_id))
         return protocol.reply(message.id, handle=handle)
 
