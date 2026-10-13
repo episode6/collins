@@ -49,7 +49,11 @@ downloads of each version, see the
   file has moved under. A discarded untracked file goes to the trash on
   the service's machine. A change too large to send in one piece (a
   whole-file revert of a patch near the page's 1 MB cap) is refused with
-  a toast rather than left spinning. Nothing looks different, and a slow or stopped
+  a toast rather than left spinning. One thing the page no longer does:
+  a symlink in the tree that points outside it is neither shown as an
+  untracked file nor moved to the trash from the page (every path the
+  service opens on the window's behalf must resolve inside the
+  repository; git and a shell still handle the link). Nothing else looks different, and a slow or stopped
   service holds the window for half a second at most (the branch label
   and the menus read the window's last answer while a refresh is on its
   way); the

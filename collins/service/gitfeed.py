@@ -644,7 +644,11 @@ class _Watch:
         """`directories` on the host's thread, then `install` on its main
         loop: the whole start for a watch nobody has to confine (the git
         page's own, when git is local)."""
-        self.feed._spawn(lambda: self.feed._dispatch(lambda: self.install(self.directories())), "git-watch")
+        def run() -> None:
+            dirs = self.directories()  # the walk on this thread, never the main loop
+            self.feed._dispatch(lambda: self.install(dirs))
+
+        self.feed._spawn(run, "git-watch")
 
     def stop(self) -> None:
         self._stopped = True

@@ -483,7 +483,18 @@ paths are confined the same way (Gio moves the file the path resolves
 to), relative to the root `run_plan` runs from; the watch's monitored
 directories are filtered by the same rule. A new builder that hands git
 a file on disk names it in `disk_paths` — the confinement knows no
-other way.
+other way. **A behaviour change, stated plainly:** a symlink inside the
+tree whose target lies outside it (`link.txt -> ~/secret`) can no longer
+be read as an untracked file or moved to the trash from the page — the
+resolved path is outside, so the read is `invalid` (the row shows no
+diff) and *Discard file…* on it is refused; before the fix the link
+itself was diffed (`--no-index` on a direct link shows the link, not
+its target) and trashed. The link is git's to add, and a shell's to
+remove; the page gives up the two for the symlinked-directory hole they
+share a mechanism with. `local_watch`'s `start()` walks the directories
+on its thread before dispatching the install, as the service path does
+(the first cut evaluated `directories()` inside the dispatched lambda,
+on the GTK main loop).
 The reply is git's exit status (null: unreachable) and both streams as
 text, the client's runner deciding which statuses are ok; a stdout past
 the frame cap travels as `TAG_BLOB` chunks on the asking connection

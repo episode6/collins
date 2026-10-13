@@ -267,6 +267,25 @@ def test_the_confinement_resolves_no_root_on_the_main_loop(tmp_path, monkeypatch
         answer = core.git.handle(_message({"t": "git.info", "cwd": str(elsewhere)}), client)
         drain()
         assert resolves == [] and answer.reply.get("ok")
+        # The page's local watch (gitfeed.local_watch, real threads): the
+        # walk runs on its thread too, never on the main loop (the first
+        # `start()` evaluated `directories()` inside the dispatched lambda).
+        import threading
+
+        main_resolves: list[str] = []
+
+        def counted_by_thread(self, *args, **kwargs):
+            if threading.current_thread() is threading.main_thread():
+                main_resolves.append(str(self))
+            return real_resolve(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", counted_by_thread)
+        watch = gitfeed.local_watch(str(repo), ["a.txt"], None, lambda event: None)
+        try:
+            assert pump(3.0, lambda: bool(watch._monitors))
+        finally:
+            watch.stop()
+        assert main_resolves == []
     finally:
         core.git.shutdown()
 
