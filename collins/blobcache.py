@@ -171,6 +171,16 @@ def opens_by_default(key: str) -> bool:
     return file_suffix(key) != UNSAFE_SUFFIX
 
 
+def copy_opens_by_default(copy: str | os.PathLike) -> bool:
+    """`opens_by_default`, asked of the cached *copy* itself: whether the
+    name `fetch_file` gave it kept a suffix (one, and not `UNSAFE_SUFFIX`).
+    The one place the default-app decision is made for a copy, so it
+    cannot disagree with the name the copy was written under (whatever
+    key or suffix a caller fetched it with)."""
+    suffix = os.path.splitext(os.fspath(copy))[1]
+    return bool(suffix) and suffix != UNSAFE_SUFFIX
+
+
 def fetch_file(key: str, session: str = "", link: apilink.Link | None = None) -> Path:
     """`fetch` of the file *key* names, whole (`whole_file_url`), for
     handing to an app: never for a decoder (pictures go through
