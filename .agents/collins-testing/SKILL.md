@@ -21,7 +21,7 @@ Gsk, Graphene, Vte}`, in both import styles (`gi.require_version` and a bare
 `from gi.repository import Gtk`). So a test may import only GTK-free modules.
 This is why the codebase splits every feature into a pure module (`editorfiles`,
 `gitinfo`, `docktree`, `prstatus`, `notifycenter`, `traymodel`, `composerkeys`,
-`gitloads`, `diffmodel`, `gitpatch`, …) and a widget module that imports it. If logic you want to test
+`gitloads`, `diffmodel`, `gitpatch`, `gitfresh`, …) and a widget module that imports it. If logic you want to test
 sits in a widget module, move it into the pure sibling first — that is the
 convention, not a workaround. Modules whose pure half needs key constants
 spell keyvals and modifier bits as integers for the same reason

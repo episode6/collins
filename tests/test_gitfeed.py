@@ -544,17 +544,247 @@ def test_a_local_watch_is_the_pages_own_monitors_when_git_is_local(tmp_path):
     assert watch._monitors == [] and watch._tick == 0
 
 
+def test_a_local_watch_replaces_the_last_loads_by_the_services_rule(tmp_path):
+    """The verification of PR 610's fix pass: the page's fallback made a new
+    local watch on every same-cwd load without stopping the last one (N
+    reloads, N live watches: monitors, ticks and threads each, duplicate
+    deliveries), and carried nothing, so should-fix 1's window was open
+    there. `local_watch(previous=)` stops the predecessor and starts from
+    it by `replacement_seed`: one live watch after N loads, the digits
+    carried when it had them, the first compare delivered when it had none."""
+    repo = make_repo(tmp_path)
+    events: list[dict] = []
+    state = gitops.tree_state_signature(repo)
+    first = gitfeed.local_watch(str(repo), ["a.txt"], state, events.append)
+    watches = [first]
+    try:
+        assert pump(3.0, lambda: first.last[0] is not None)
+        for _ in range(3):  # three loads landing: each replaces the last
+            watches.append(
+                gitfeed.local_watch(str(repo), ["a.txt"], state, events.append, previous=watches[-1])
+            )
+        live = [w for w in watches if not w._stopped]
+        assert live == [watches[-1]]
+        assert all(w._monitors == [] and w._tick == 0 and w._refs_tick == 0 for w in watches[:-1])
+        # The landed predecessor's digests were carried: no first delivery.
+        assert watches[-1].last[:2] == first.last[:2] and not watches[-1]._deliver_first
+        assert pump(3.0, lambda: watches[-1]._monitors and not watches[-1]._checking)
+        assert events == []
+        # A replacement of one that had seen nothing yet (a first watch whose
+        # seed compare is still on its thread) delivers its first compare.
+        watches[-1].stop()
+        unlanded = gitfeed.local_watch(str(repo), ["a.txt"], state, events.append)
+        assert unlanded.last[0] is None and not unlanded._stopped
+        replacement = gitfeed.local_watch(str(repo), ["a.txt"], state, events.append, previous=unlanded)
+        watches += [unlanded, replacement]
+        assert unlanded._stopped and replacement._deliver_first
+        assert pump(3.0, lambda: bool(events))
+        assert [e["t"] for e in events] == ["git-changed"] and events[0]["cwd"] == str(repo)
+        # Another cwd carries nothing and is no first delivery; the refs-only form has no monitors.
+        other = gitfeed.local_watch(
+            str(tmp_path), [], None, events.append, previous=replacement, working_tree=False
+        )
+        watches.append(other)
+        assert replacement._stopped and not other._deliver_first and other.last == (None, None, None)
+        assert pump(3.0, lambda: other._refs_tick != 0 and not other._checking)
+        assert other._monitors == [] and other.working_tree is False
+    finally:
+        for watch in watches:
+            watch.stop()
+
+
+@pytest.mark.parametrize(
+    ("old", "expected"),
+    [
+        (None, (None, False)),
+        (("other", ("t", "r", "s")), (None, False)),
+        (("repo", ("t", "r", "s")), (("t", "r"), False)),
+        (("repo", (None, None, "s")), (None, True)),
+        (("repo", (None, None, None)), (None, True)),
+    ],
+)
+def test_replacement_seed_is_the_one_rule_for_both_watches(old, expected):
+    class Old:
+        def __init__(self, cwd, last):
+            self.cwd, self.last = cwd, last
+
+    assert gitfeed.replacement_seed(None if old is None else Old(*old), "repo") == expected
+
+
 def test_a_compare_that_raises_leaves_the_watch_checking_again(served, monkeypatch):
     core, client, repo, _events = served
     client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": []})
     watch = core.git.watch_of(client, "p1")
 
-    def boom(cwd):
+    def boom(cwd, *_args):
         raise OSError("gone")
 
     monkeypatch.setattr(gitfeed, "signatures", boom)
     watch.check()
     assert not watch._checking  # landed through the failure: the next event still compares
+
+
+# -- the 2 s tick of the tree and refs digests (PR-2.2) -----------------------------------
+
+
+def _changed(events: list[dict]) -> list[dict]:
+    return [e for e in events if e.get("t") == "git-changed"]
+
+
+def test_the_refs_tick_reports_an_index_move_no_monitor_saw(served):
+    """The page's old 2 s compare, on the service: a `git add` from a shell
+    moves the index, which no monitor of the working tree reports; the
+    tick reads the digests, sees the move and the full compare pushes."""
+    core, client, repo, events = served
+    state = gitops.tree_state_signature(repo)
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state})
+    watch = core.git.watch_of(client, "p1")
+    assert watch._refs_tick != 0
+    before = len(_changed(events))
+    watch._on_refs_tick()  # nothing moved: no compare, no event
+    assert len(_changed(events)) == before
+    git(repo, "add", "a.txt")
+    watch._on_refs_tick()
+    changed = _changed(events)[before:]
+    assert len(changed) == 1
+    tree, refs = gitfeed.cheap_signatures(str(repo))
+    assert changed[0]["tree"] == tree and changed[0]["refs"] == refs
+    watch._on_refs_tick()
+    assert len(_changed(events)) == before + 1  # seen: the same digests again are no event
+    client.request({"t": "git.unwatch", "handle": "p1"})
+    assert watch._refs_tick == 0
+
+
+def test_a_watch_without_the_working_tree_has_no_monitors_and_no_state(served):
+    """A commit, range or branch load's watch: no monitors, no state
+    digest, and a commit made elsewhere is a `git-changed` on the tick."""
+    core, client, repo, events = served
+    client.request(
+        {"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": [], "working_tree": False}
+    )
+    watch = core.git.watch_of(client, "p1")
+    assert not watch.working_tree and watch._monitors == [] and watch._tick == 0
+    assert watch.last[0] is not None and watch.last[2] is None  # seeded by the first look
+    before = len(_changed(events))
+    git(repo, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+    watch._on_refs_tick()
+    changed = _changed(events)[before:]
+    assert len(changed) == 1 and changed[0]["state"] is None
+    # An edit to the working tree is no business of this watch.
+    (repo / "a.txt").write_text("edited\n")
+    watch.check()
+    assert len(_changed(events)) == before + 1
+
+
+def test_a_replaced_watch_keeps_the_digests_so_a_commit_between_is_reported(served):
+    """The page re-sends its watch under its handle at every load; a commit
+    landing between the two is a move the new watch reports, not a digest
+    it adopts as its seed."""
+    core, client, repo, events = served
+    state = gitops.tree_state_signature(repo)
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state})
+    first = core.git.watch_of(client, "p1")
+    seen = first.last[:2]
+    git(repo, "commit", "-q", "--allow-empty", "-m", "between")
+    before = len(_changed(events))
+    fresh_state = gitops.tree_state_signature(repo)
+    client.request(
+        {"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": fresh_state}
+    )
+    second = core.git.watch_of(client, "p1")
+    assert first._stopped and second is not first
+    changed = _changed(events)[before:]
+    assert len(changed) == 1 and changed[0]["tree"] != seen[0]
+    # A fresh handle adopts what it finds, as before: no event.
+    before = len(_changed(events))
+    client.request({"t": "git.watch", "cwd": str(repo), "handle": "p2", "files": [], "state": fresh_state})
+    assert len(_changed(events)) == before
+
+
+def _queued_core(tmp_path, monkeypatch):
+    """A core whose feed lands inline but runs its thread work from a queue
+    the test drains by hand: what a compare still out looks like."""
+    monkeypatch.setenv("SHELL", "/bin/cat")
+    queue: list = []
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    core.git = gitfeed.GitFeed(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: queue.append(fn))
+    server = inproc.LoopbackServer(core)
+    events: list[dict] = []
+    client = server.connect(lambda *a: None, events.append, device="laptop")
+    client.local = True
+    return core, client, events, queue, server
+
+
+def _watch_message(repo: Path, state: str) -> protocol.Message:
+    fields = {"cwd": str(repo), "handle": "p1", "files": ["a.txt"], "state": state}
+    return protocol.Message("git.watch", protocol.REQUEST, 7, fields)
+
+
+def test_a_watch_replaced_before_its_first_compare_landed_reports_a_commit_between(tmp_path, monkeypatch):
+    """Should-fix 1 of PR 610's review (the reviewer's probe_replace.py):
+    the page re-sends its watch at every landing, and its reread path
+    lands two reads back to back, so a replacement within one `git
+    status` of its predecessor is a normal sequence. The predecessor has
+    no digests yet to carry (its compare is still out), so a commit from a
+    shell in that window was adopted as the new seed: no `git-changed`,
+    and the refs tick saw nothing after. Now the replacement's first
+    compare is delivered whatever it finds."""
+    core, client, events, queue, server = _queued_core(tmp_path, monkeypatch)
+    repo = make_repo(tmp_path)
+    try:
+        state = gitops.tree_state_signature(repo)
+        core.git.watch(_watch_message(repo, state), client)  # a Deferred: its thread work is queued
+        queue.pop(0)()  # the directories' walk lands: the watch installs and its seed compare is queued
+        first = core.git.watch_of(client, "p1")
+        assert first is not None and first._checking and first.last[0] is None
+        git(repo, "commit", "-q", "--allow-empty", "-m", "between")
+        core.git.watch(_watch_message(repo, gitops.tree_state_signature(repo)), client)
+        second = core.git.watch_of(client, "p1")
+        assert first._stopped and second is not first
+        queue.pop(1)()  # the replacement's walk lands, ahead of the predecessor's compare
+        assert len(queue) == 2
+        while queue:
+            queue.pop(0)()  # both compares land: the predecessor's into a stopped watch
+        changed = _changed(events)
+        assert len(changed) == 1 and changed[0]["cwd"] == str(repo)
+        tree, refs = gitfeed.cheap_signatures(str(repo))
+        assert changed[0]["tree"] == tree and changed[0]["refs"] == refs
+        # Seen now: the refs tick and the next compare are quiet.
+        second._on_refs_tick()
+        queue.pop(0)()
+        second.check()
+        queue.pop(0)()
+        assert len(_changed(events)) == 1
+        # A fresh handle on the same tree adopts what it finds: no event.
+        fields = {"cwd": str(repo), "handle": "p2", "files": [], "state": gitops.tree_state_signature(repo)}
+        core.git.watch(protocol.Message("git.watch", protocol.REQUEST, 8, fields), client)
+        while queue:
+            queue.pop(0)()
+        assert len(_changed(events)) == 1
+    finally:
+        server.shutdown()
+
+
+def test_a_replacement_whose_predecessor_landed_carries_digests_not_a_first_delivery(tmp_path, monkeypatch):
+    """The control: a predecessor that saw the tree hands its digests on,
+    and the replacement's first compare over an unmoved tree is silent."""
+    core, client, events, queue, server = _queued_core(tmp_path, monkeypatch)
+    repo = make_repo(tmp_path)
+    try:
+        state = gitops.tree_state_signature(repo)
+        core.git.watch(_watch_message(repo, state), client)
+        while queue:
+            queue.pop(0)()
+        first = core.git.watch_of(client, "p1")
+        assert first.last[0] is not None and not _changed(events)
+        core.git.watch(_watch_message(repo, state), client)
+        while queue:
+            queue.pop(0)()
+        second = core.git.watch_of(client, "p1")
+        assert second.last[:2] == first.last[:2] and not second._deliver_first
+        assert not _changed(events)
+    finally:
+        server.shutdown()
 
 
 # -- the builders hold the wire's text to their grammar (D33) -------------------------
