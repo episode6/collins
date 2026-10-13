@@ -1072,3 +1072,38 @@ def test_collins_uri_carries_a_name_that_is_not_utf8_byte_for_byte():
     assert uri == "collins://svc1/p/bad-%FF.txt"
     assert path_from_collins_uri(uri, "svc1") == name
     assert parse_copied_files(f"copy\n{uri}", "svc1", local=False) == ([name], False)
+
+
+# -- D39: where the service says the session started -------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("root", "asked", "started", "landing"),
+    [
+        # The service fell back (the asked cwd is no directory there): the tab's own root moves.
+        ("/gone/project", "/gone/project", "/home/me", "/home/me"),
+        # The Fable review of PR 615, nit 5: the editor's root is a Path's
+        # string and the request's cwd is its own text, so a trailing slash
+        # or a doubled separator must not keep the tab where the service
+        # did not start it (it compared as text, and never landed).
+        ("/gone/project", "/gone/project/", "/home/me", "/home/me"),
+        ("/gone/project", "/gone//project", "/home/me", "/home/me"),
+        ("/gone/project", "/gone/./project/", "/home/me", "/home/me"),
+        # Started where it was asked, however either spells it: no move.
+        ("/a/b", "/a/b", "/a/b", None),
+        ("/a/b", "/a/b/", "/a/b", None),
+        ("/a/b", "/a/b", "/a/b/", None),
+        # The editor followed elsewhere since (a worktree): left where it is.
+        ("/a/b/.claude/worktrees/x", "/a/b", "/home/me", None),
+        # Nothing usable from the service, or nothing asked.
+        ("/a/b", "/a/b", None, None),
+        ("/a/b", "/a/b", "", None),
+        ("/a/b", "/a/b", 7, None),
+        ("/home/me", None, "/home/me", None),
+        ("/home/me", "", "/srv", None),
+    ],
+)
+def test_the_editor_lands_where_the_service_says_the_session_started(root, asked, started, landing):
+    from collins.editorfiles import service_landing
+
+    assert service_landing(root, asked, started) == landing

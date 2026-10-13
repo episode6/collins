@@ -17,6 +17,7 @@ widgets, clipboard payloads and GtkSource calls.
 from __future__ import annotations
 
 import enum
+import os
 import urllib.parse
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -621,6 +622,28 @@ def path_from_collins_uri(uri: str, service_id: str | None) -> str | None:
         return None
     path = urllib.parse.unquote(parsed.path, errors="surrogateescape")
     return path if path.startswith("/") else None
+
+
+def service_landing(root: str | Path, asked: str | None, started: object) -> str | None:
+    """D39: where the tab's editor moves when the service says the
+    session's shell started in *started* (the `spawn` reply's `cwd`)
+    though the tab asked for *asked*: *started*, or None for no move.
+    No move when the service started where it was asked, when it said
+    nothing usable, or when the editor is no longer rooted at *asked* (a
+    follow into a worktree since: only the tab's own root moves).
+
+    The three are compared as paths, not as text: *root* is a `Path`'s
+    string (no trailing slash, no doubled separator) and *asked* is the
+    request's own text, so `/a/b/` and `/a//b` are `/a/b` here. Lexical
+    only (`normpath`): no disk is asked, the paths being the service's."""
+    if not isinstance(started, str) or not started or not asked:
+        return None
+    wanted = os.path.normpath(asked)
+    if os.path.normpath(started) == wanted:
+        return None
+    if os.path.normpath(os.fspath(root)) != wanted:
+        return None
+    return started
 
 
 class LatestAsk:
