@@ -730,6 +730,35 @@ class _Watch:
             log.exception("gitfeed: a git-changed delivery failed")
 
 
+class _LocalHost:
+    """A `_Watch` host outside the feed: GLib's idle and a daemon thread,
+    the feed's own defaults. The git page's, when git is local."""
+
+    _dispatch = staticmethod(_dispatch_default)
+    _spawn = staticmethod(_spawn_default)
+
+
+class _Deliverer:
+    """The `client` of a local watch: `deliver(event)` is the page's."""
+
+    def __init__(self, deliver: Callable[[dict], None]) -> None:
+        self.deliver = deliver
+
+
+def local_watch(cwd: str, paths: Sequence[str], state: str | None, deliver: Callable[[dict], None]) -> _Watch:
+    """The page's own watch of *cwd* when git is local — the service has
+    no `git` capability (an older build serving a newer window until
+    *Restart service*), so `git.watch` cannot be sent and the page keeps
+    the monitors it had before the split, through the same `_Watch` the
+    service runs: the directories walked on a thread, the monitors,
+    debounce and slow tick on this process's main loop, every move a
+    `git-changed`-shaped event to *deliver* (should-fix 4 of PR 608's
+    review). Started; `stop()` ends it."""
+    watch = _Watch(_LocalHost(), cwd, _Deliverer(deliver), paths, state)
+    watch.start()
+    return watch
+
+
 def signatures(cwd: str) -> tuple[str | None, str | None, str | None]:
     """(tree, refs, state) digests of the repository enclosing *cwd*:
     the index's mtime, HEAD and the markers; the refs' mtimes; the

@@ -501,6 +501,30 @@ def test_a_client_going_away_drops_its_watches(served):
     assert not core.git.watching(client, str(repo))
 
 
+def test_a_local_watch_is_the_pages_own_monitors_when_git_is_local(tmp_path):
+    """Should-fix 4 of PR 608's Fable review: against a service with no
+    `git` capability (an older build until *Restart service*) the page
+    sent no watch and caught no working-tree edit. `gitfeed.local_watch`
+    runs the service's `_Watch` in the client's process — the walk on a
+    thread, the monitors and tick on this main loop — and hands every
+    move to the page's own handler, `git-changed`-shaped."""
+    repo = make_repo(tmp_path)
+    events: list[dict] = []
+    state = gitops.tree_state_signature(repo)
+    watch = gitfeed.local_watch(str(repo), ["a.txt", "sub/none.txt"], state, events.append)
+    try:
+        assert pump(3.0, lambda: watch._monitors and watch._seeded and watch.last[0] is not None)
+        assert events == []  # the seed matched the client's state: no move
+        git(repo, "add", "a.txt")  # the index moves; the state digest with it
+        watch._on_event(None, Gio.File.new_for_path(str(repo / "a.txt")), None, None)
+        assert pump(3.0, lambda: bool(events))
+        assert events[0]["t"] == "git-changed" and events[0]["cwd"] == str(repo)
+        assert events[0]["state"] == gitops.tree_state_signature(repo) != state
+    finally:
+        watch.stop()
+    assert watch._monitors == [] and watch._tick == 0
+
+
 def test_a_compare_that_raises_leaves_the_watch_checking_again(served, monkeypatch):
     core, client, repo, _events = served
     client.request({"t": "git.watch", "cwd": str(repo), "handle": "p1", "files": []})

@@ -137,6 +137,15 @@ from .gitoperation import OperationBar  # noqa: E402
 from .gitsidebar import GitSidebar  # noqa: E402
 from .i18n import _  # noqa: E402
 
+# The local fallback's two pieces (should-fix 4 of PR 608's review): with
+# no `git` capability on the service (an older build serving this window
+# until *Restart service*) git runs here, as before the split, and the
+# page keeps its trash and its monitors through the same GLib-only code
+# the service runs — never the other way round (nothing in service/
+# imports GTK).
+from .service import files as servicefiles  # noqa: E402
+from .service import gitfeed as servicegitfeed  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 # The width a column has to reach for the dock to spend free gutter on one
@@ -312,6 +321,9 @@ class GitPage(Adw.Bin):
         # event carried while a read was out (compared when the read lands).
         self._watched_cwd: str | None = None
         self._watch_stale: str | None = None
+        # The page's own monitors when git is local (no `git` capability
+        # on the service): a `gitfeed._Watch` run in this process.
+        self._local_watch = None
         # The last whole settings dict apply_settings saw: what a key that
         # writes an option applies locally when no window action is there
         # to persist it (a page in a bare test window).
@@ -1310,6 +1322,14 @@ class GitPage(Adw.Bin):
             for path in (file.path, file.previous_path):
                 if path:
                     paths.append(path)
+        if gitops.transport() is None:
+            # Git is local (no `git` capability): the page's own monitors,
+            # the service's `_Watch` run in this process, its events
+            # landing where the service's would (should-fix 4 of PR 608's
+            # review: the fallback had no watch at all).
+            self._local_watch = servicegitfeed.local_watch(cwd, paths, self._tree_state, self._on_git_changed)
+            self._watched_cwd = cwd
+            return
         mirror = remotegit.mirror()
         mirror.on_changed(cwd, self._on_git_changed)
         # The read's own sample seeds the service's compare, so an edit
@@ -1332,6 +1352,9 @@ class GitPage(Adw.Bin):
         return self._watched_cwd is not None
 
     def _drop_watch(self) -> None:
+        if self._local_watch is not None:
+            self._local_watch.stop()
+            self._local_watch = None
         if self._watched_cwd is not None:
             mirror = remotegit.mirror()
             mirror.off_changed(self._watched_cwd, self._on_git_changed)
@@ -1523,7 +1546,10 @@ class GitPage(Adw.Bin):
                     # Discard file makes, through run_plan (gitfeed).
                     plan = gitpatch.Plan(gitpatch.OP_TRASH, (path,), None, None, "")
                     context = gitops.PlanContext("unstaged", path)
-                    result = gitops.run_plan(root, plan, context=context)
+                    # The mover is the service's; with git local (no
+                    # transport) run_plan takes this process's, the same
+                    # Gio trash, never an unlink.
+                    result = gitops.run_plan(root, plan, context=context, trash=servicefiles.trash_paths)
                     return gitops.GitResult(result.ok, result.stdout, result.stderr, result.unreachable)
                 return gitops.checkout_paths(cwd, [path])
             except Exception as err:  # the worker's last line of defence
@@ -1928,7 +1954,12 @@ class GitPage(Adw.Bin):
         )
 
         def work() -> gitops.ApplyResult:
-            return gitops.run_plan(cwd, plan, three_way=three_way, context=context)
+            # `trash` is this process's mover for the local fallback (no
+            # transport: git runs here); over the API run_plan ignores it
+            # and the service's trashes.
+            return gitops.run_plan(
+                cwd, plan, three_way=three_way, context=context, trash=servicefiles.trash_paths
+            )
 
         def done(answer: object) -> None:
             # Also the failure path (run_mutation's `failed`, the error as

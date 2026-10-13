@@ -908,7 +908,21 @@ cwd's `git-changed` events (`Mirror.on_changed`); a commit / range load
 watches nothing, and `_drop_watch` (`_close_view`, a reload) sends
 `git.unwatch {handle}`. The mirror remembers every live watch and sends
 them again on `reset` (a reconnect: the service dropped them with the
-client). On the service (`gitfeed._Watch`, one per client and handle)
+client). **When git is local** — the service's hello has no `git`
+capability (`App._install_git_transport` uninstalls the transport: an
+older service build serving this window until *Restart service*, which
+`PROTOCOL` still at 1 and D13 make a legitimate peer), or a bare page
+in a widget check — `_install_watch` runs the same `_Watch` in this
+process instead (`gitfeed.local_watch(cwd, paths, state, deliver)`:
+GLib's idle and a thread as the host, the page's `_on_git_changed` as
+the deliverer, `_drop_watch` stops it), and `_run_plan` /
+`_run_file_action` hand `run_plan` `servicefiles.trash_paths` as the
+`trash` mover (ignored over the API, the service's own trash there), so
+the fallback is what the page did before the split: monitors, debounce,
+slow tick and the trash (should-fix 4 of PR 608's review: it had
+neither). `check_git_page.py` exercises the service path alone; the
+fallback's watch is pinned in `test_gitfeed.py`, its trash by
+`test_gitops`' `run_plan` mover cases. On the service (`gitfeed._Watch`, one per client and handle)
 the same rules as the page had: a `Gio.FileMonitor` on each distinct directory of the loaded
 files (old paths of renames too) — over `MAX_DIR_MONITORS` (64), or with
 no file at all, the repository root alone; events (not for the `.git`
