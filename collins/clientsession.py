@@ -70,8 +70,6 @@ _FIELD_DEFAULTS: dict[str, Any] = {
     "foreign_paste": False,
     "agent_running": False,
     "running_command": False,
-    "pasted_back": {},
-    "paste_back_pending": None,
     "model": None,
     "effort": None,
     "permission_mode": None,

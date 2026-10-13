@@ -90,8 +90,6 @@ def test_every_field_lands_on_the_attribute_the_forwarder_reads(mirror):
             foreign_paste=False,
             agent_running=True,
             running_command=True,
-            pasted_back={"[Pasted text #1 +2 lines]": "a\nb\nc"},
-            paste_back_pending=["a"],
             model="claude-opus-5-5",
             effort="max",
             permission_mode="acceptEdits",
@@ -116,8 +114,6 @@ def test_every_field_lands_on_the_attribute_the_forwarder_reads(mirror):
     assert session.entered_prompt() == EnteredPrompt(text="half", rows_below=1)
     assert session.prompt_block_text() == "This session isn't at an empty prompt."
     assert session.has_running_command() and session.agent_is_running()
-    assert session.pasted_back == {"[Pasted text #1 +2 lines]": "a\nb\nc"}
-    assert session.paste_back_pending == ["a"]
     assert session.model == "claude-opus-5-5" and session.current_model() == "claude-opus-5-5"
     assert session.current_effort() == "max" and session.current_permission_mode() == "acceptEdits"
     assert session.transcript_path.endswith(".jsonl")

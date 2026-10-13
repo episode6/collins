@@ -632,7 +632,8 @@ _SESSION_FIELDS = {
     "resolver_cwd": _null(_PATH),
     "initial_command": _null(_s(PATH_MAX)),
     "worktree_launch": _BOOL,
-    "new_chat_prompt": _null(_TEXT),
+    # A preview of the held prompt (the whole text is the spawn's `prompt`).
+    "new_chat_prompt": _null(_s(PREVIEW_MAX)),
     "shells_follow_armed": _BOOL,
     "closing": _BOOL,
     # the sandbox
@@ -649,8 +650,9 @@ _SESSION_FIELDS = {
     "foreign_paste": _BOOL,
     "agent_running": _BOOL,
     "running_command": _BOOL,
-    "pasted_back": Field(K_MAP, high=256, item=_TEXT),
-    "paste_back_pending": _null(Field(K_LIST, high=256, item=_TEXT)),
+    # (The paste-back's record, `pasted_back` and `paste_back_pending`, is
+    # the service's alone: no client reads it, and 256 x TEXT_MAX of text
+    # would not fit a frame. The e2e checks read it through `debug.*`.)
     # the transcript tail
     "model": _null(_s(MODEL_MAX)),
     "effort": _null(_SHORT),
@@ -658,6 +660,9 @@ _SESSION_FIELDS = {
     "transcript_path": _null(_PATH),
     "prs": _PR_RECORDS,
     "lookup_empty": _BOOL,
+    # The sender fits `prs`, `touched_files` and `attachments` under byte
+    # budgets as well (SESSION_LIST_BYTES): their item bounds alone could
+    # pass a frame.
     "touched_files": Field(K_LIST, high=64, item=_PATH),
     "attachments": Field(K_LIST, high=1000, item=Field(K_JSON_OBJECT)),
     "ledger_armed": _BOOL,
@@ -671,6 +676,23 @@ _SESSION_FIELDS = {
 }
 
 SESSION_FIELDS = _SESSION_FIELDS  # the `session` event's fields, for the service's fitter
+
+# The byte budgets the `session` event's lists are fitted under by their
+# sender (`fit_list_bytes`), as `encode` measures them: a list of records
+# read off a transcript is foreign content (rule 5), and 100 PR records or
+# 1000 attachment records of TEXT_MAX strings each would pass MAX_FRAME.
+# With these, a `session` event carrying every field at its bound encodes
+# under MAX_FRAME (tests/test_protocol.py pins it).
+SESSION_LIST_BYTES = {
+    "prs": 128 * 1024,
+    "touched_files": 64 * 1024,
+    "attachments": 256 * 1024,
+}
+# What the one text field of an event may weigh once encoded, for the
+# events that carry a TEXT_MAX string beside a few small fields (the `cut`
+# event's seed, the `composer` event's stash): the frame less room for the
+# rest. The sender fits the text to it (`fit_text_bytes`).
+EVENT_TEXT_BYTES = MAX_FRAME - 4096
 
 _STATE_FIELDS = {
     "key": Field(K_STR, required=True, low=1, high=KEY_MAX, pattern=_KEY_RE),
@@ -1909,6 +1931,42 @@ def fit_field(name: str, value, spec: Field) -> tuple[bool, object]:
 
 
 _UNFIT = object()
+
+
+def json_bytes(value) -> int:
+    """How many bytes *value* takes in a frame, as `encode` writes it."""
+    return len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+
+
+def fit_text_bytes(text: str, budget: int) -> str:
+    """The longest prefix of *text* that encodes in at most *budget* bytes
+    (`json_bytes`, the quotes included): a sender's bound on the one text
+    field of an event whose character bound (TEXT_MAX) alone could pass
+    MAX_FRAME once escaped and encoded."""
+    if json_bytes(text) <= budget:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if json_bytes(text[:mid]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]
+
+
+def fit_list_bytes(items: list, budget: int) -> list:
+    """The longest prefix of *items* that encodes as a list in at most
+    *budget* bytes: a sender's bound on a list of records whose item
+    bounds alone could pass MAX_FRAME (the `session` event's lists)."""
+    used = 2  # the brackets
+    kept: list = []
+    for item in items:
+        used += json_bytes(item) + (1 if kept else 0)
+        if used > budget:
+            break
+        kept.append(item)
+    return kept
 
 
 def _fit_closer(name: str, value, spec: Field):

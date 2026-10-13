@@ -229,7 +229,10 @@ class CutSink:
         # pty, so a cut can't outlive the id it was begun under.
         event: dict = {"t": "cut", "pty": self.record.pty_id, "handle": self.handle, "state": state}
         if text is not None:
-            event["text"] = text[: protocol.TEXT_MAX]
+            # Fitted by bytes, not characters: TEXT_MAX characters escaped
+            # and encoded can pass MAX_FRAME, and a seed the socket can't
+            # frame is the composer's text lost (the box was erased).
+            event["text"] = protocol.fit_text_bytes(text[: protocol.TEXT_MAX], protocol.EVENT_TEXT_BYTES)
         try:
             self.sink.send_event(event)
         except Exception:
@@ -398,13 +401,17 @@ class SessionRecord:
             "options": options_record(session.options),
             "initial_command": session.initial_command,
             "worktree_launch": bool(session.worktree_launch),
-            "new_chat_prompt": session.new_chat_prompt,
+            # A preview (PREVIEW_MAX): the whole prompt came in on the
+            # spawn, and TEXT_MAX of it would not fit a frame. The
+            # paste-back's record (`pasted_back`, `paste_back_pending`) is
+            # not a fact at all: no client reads it, the checks probe it.
+            "new_chat_prompt": (
+                session.new_chat_prompt[: protocol.PREVIEW_MAX]
+                if session.new_chat_prompt is not None
+                else None
+            ),
             "shells_follow_armed": bool(session.shells_follow_armed),
             "closing": bool(session.closing),
-            "pasted_back": dict(session.pasted_back),
-            "paste_back_pending": (
-                list(session.paste_back_pending) if session.paste_back_pending is not None else None
-            ),
         }
 
     def sandbox_facts(self) -> dict:
@@ -447,18 +454,23 @@ class SessionRecord:
     def transcript_facts(self) -> dict:
         session = self.session
         transcript = session.transcript
-        return {
+        touched = [p for p in transcript.touched_files() if isinstance(p, str) and p.startswith("/")]
+        facts = {
             "model": transcript.model(),
             "effort": transcript.effort(),
             "permission_mode": transcript.permission_mode(),
             "transcript_path": session.transcript_path,
             "prs": prstatus.to_records(self._shown_prs)[: protocol.PRS_MAX],
-            "touched_files": [
-                p for p in transcript.touched_files() if isinstance(p, str) and p.startswith("/")
-            ][:TOUCHED_FILES_MAX],
+            "touched_files": touched[:TOUCHED_FILES_MAX],
             "attachments": attachrecords.to_records(transcript.attachments())[:1000],
             "ledger_armed": bool(session.finish_ledger.armed),
         }
+        # The lists are read off the transcript (rule 5) and their item
+        # bounds alone could pass a frame: each is cut to its byte budget
+        # as storefeed caps an item, so the event always frames.
+        for name, budget in protocol.SESSION_LIST_BYTES.items():
+            facts[name] = protocol.fit_list_bytes(facts[name], budget)
+        return facts
 
     def refresh_facts(self) -> None:
         """The screen settled (or the process questions moved): re-read the
@@ -519,7 +531,7 @@ class SessionRecord:
             return
         event: dict = {"t": "composer", "pty": pty.id, "what": what}
         if text is not None:
-            event["text"] = text[: protocol.TEXT_MAX]
+            event["text"] = protocol.fit_text_bytes(text[: protocol.TEXT_MAX], protocol.EVENT_TEXT_BYTES)
         self._event(event, active_only=True)
 
     def mapped(self) -> bool:

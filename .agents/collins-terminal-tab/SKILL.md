@@ -575,14 +575,21 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   identity (`session`, `fork`, `options`, `cwd`, `agent_cwd`, `pid`), the
   box reads (`takes_prompt`, `entered`, `prompt_block` as a msgid,
   `unstarted`, `foreign_paste`, `agent_running`, `running_command`), the
-  launch state (`initial_command`, `worktree_launch`, `new_chat_prompt`,
-  `pasted_back`, `paste_back_pending`, `shells_follow_armed`, `closing`),
+  launch state (`initial_command`, `worktree_launch`, `new_chat_prompt` as
+  a `PREVIEW_MAX` preview, `shells_follow_armed`, `closing`; the
+  paste-back's `pasted_back` / `paste_back_pending` are not sent — no
+  client reads them, the checks probe them),
   the sandbox (`sandboxed`, `sandbox_box`, `sandbox_plan_path`,
   `defaults_owed`, `can_restart`), the transcript tail (`model`, `effort`,
   `permission_mode` — the transcript's own, None while unknown —
-  `transcript_path`, `prs`, `touched_files`, `attachments`,
-  `ledger_armed`, with `landed` and `reset` one-shots), and the activity
-  verdicts by handle (`busy`, `finished`). `composer_open` — the client
+  `transcript_path`, `prs`, `touched_files`, `attachments` — the three
+  lists cut to the byte budgets of `protocol.SESSION_LIST_BYTES` with
+  `fit_list_bytes`, so an event with every field at its bound still
+  encodes under `MAX_FRAME` — `ledger_armed`, with `landed` and `reset`
+  one-shots), and the activity verdicts by handle (`busy`, `finished`).
+  The `cut` event's seed and the `composer` event's stash are fitted by
+  bytes too (`fit_text_bytes` to `EVENT_TEXT_BYTES`): a TEXT_MAX string
+  escaped and encoded can pass the frame. `composer_open` — the client
   fact `_post_switch` reads — arrives on the `switch`, `send`, `cut` and
   `draft.restore` requests and is remembered. `paint` formats the
   "[session manager]" line and inserts it into the stream (a line painted

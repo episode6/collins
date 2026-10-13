@@ -852,3 +852,71 @@ def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
     assert first not in record.cuts and second in record.cuts
     assert [e["state"] for e in ends.of("cut") if e.get("handle") == first] == ["cancelled"]
     assert record._chain is not None and record._chain.handle == second
+
+
+# -- the events frame (the Fable review of PR 603, should-fix 1) ------------------------------
+
+
+def test_the_snapshot_previews_the_held_prompt_and_leaves_the_paste_back_record_out(server, tmp_path):
+    """A `session` event of 256 x TEXT_MAX (the paste-back record) or a
+    TEXT_MAX `new_chat_prompt` could pass MAX_FRAME, and the socket's
+    sender would drop it whole. The prompt goes as a PREVIEW_MAX preview
+    and the record stays on the service, where the checks probe it."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path, prompt="p" * (protocol.PREVIEW_MAX * 3))["pty"]
+    record = server.core.sessions[pty]
+    record.session.pasted_back = {"[Pasted text #1 +2 lines]": "x" * 100_000}
+    record.session.paste_back_pending = ["y" * 100_000]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    first = ends.of("session")[0]
+    assert first["new_chat_prompt"] == "p" * protocol.PREVIEW_MAX
+    assert "pasted_back" not in first and "paste_back_pending" not in first
+    assert len(protocol.encode(first).encode("utf-8")) <= protocol.MAX_FRAME
+    # The probe still reads the record off the session itself.
+    assert record.session.paste_back_pending == ["y" * 100_000]
+
+
+def test_a_cuts_seed_is_fitted_by_bytes_so_the_event_frames():
+    from collins.service import hosting
+
+    class Sink:
+        events: list = []
+
+        def send_event(self, event):
+            self.events.append(event)
+
+    class Record:
+        pty_id = 7
+        cuts: dict = {}
+
+    sink = Sink()
+    hosting.CutSink(Record(), sink, "cut-1")._tell("seeded", "\x01" * protocol.TEXT_MAX)
+    event = sink.events[-1]
+    assert event["state"] == "seeded" and 0 < len(event["text"]) < protocol.TEXT_MAX
+    assert len(protocol.encode(event).encode("utf-8")) <= protocol.MAX_FRAME
+    assert isinstance(protocol.validate(dict(event), protocol.SERVICE), protocol.Message)
+    # A seed that fits goes whole.
+    hosting.CutSink(Record(), sink, "cut-2")._tell("seeded", "a" * 200_000)
+    assert sink.events[-1]["text"] == "a" * 200_000
+
+
+def test_the_transcript_lists_are_cut_to_their_byte_budgets(server, tmp_path):
+    from collins import attachrecords
+
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    record = server.core.sessions[pty]
+    attachments = [
+        attachrecords.Attachment(key=f"/x/{i}/" + "a" * 4000, kind="image", caption="c" * 4000)
+        for i in range(1000)
+    ]
+    record.session.transcript.attachments = lambda: attachments
+    record.session.transcript.touched_files = lambda: [f"/t/{i}/" + "f" * 4000 for i in range(64)]
+    facts = record.transcript_facts()
+    for name, budget in protocol.SESSION_LIST_BYTES.items():
+        assert protocol.json_bytes(facts[name]) <= budget, name
+    assert 0 < len(facts["attachments"]) < 1000 and 0 < len(facts["touched_files"]) < 64
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert len(protocol.encode(ends.of("session")[0]).encode("utf-8")) <= protocol.MAX_FRAME

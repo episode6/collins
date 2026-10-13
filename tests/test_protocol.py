@@ -318,8 +318,6 @@ SESSION_EVENT = {
     "foreign_paste": False,
     "agent_running": True,
     "running_command": True,
-    "pasted_back": {"[Pasted text #1 +11 lines]": "a draft"},
-    "paste_back_pending": ["a piece"],
     "model": "claude-opus-5-5",
     "effort": "high",
     "permission_mode": "acceptEdits",
@@ -1515,3 +1513,136 @@ def test_importing_protocol_loads_no_gi():
         cwd=Path(__file__).resolve().parent.parent,
     )
     assert result.stdout.strip() == "False"
+
+
+# -- the byte fits: an event at every bound still frames (PR-1.12a review) ---------------------
+
+HEAVY = "\x01"  # six bytes once JSON-escaped: the heaviest a character gets in a frame
+
+
+def _heavy(n: int) -> str:
+    return HEAVY * n
+
+
+def _heavy_path(n: int = p.PATH_MAX) -> str:
+    return "/" + HEAVY * (n - 1)
+
+
+def test_fit_text_bytes_keeps_the_longest_prefix_that_frames():
+    assert p.fit_text_bytes("abc", 100) == "abc"
+    fitted = p.fit_text_bytes(_heavy(1000), 6 * 100 + 2)
+    assert fitted == _heavy(100) and p.json_bytes(fitted) == 602
+    assert p.json_bytes(p.fit_text_bytes("ü" * 1000, 1001)) <= 1001
+    assert p.fit_text_bytes("abc", 1) == ""
+
+
+def test_fit_list_bytes_keeps_the_longest_prefix_that_frames():
+    items = [{"k": _heavy(10)} for _ in range(10)]
+    one = p.json_bytes(items[0])
+    assert p.fit_list_bytes(items, 2 + 3 * one + 2) == items[:3]
+    assert p.fit_list_bytes(items, 10_000) == items
+    assert p.fit_list_bytes(items, 1) == []
+    assert p.fit_list_bytes([], 1) == []
+
+
+def _full_bound_session_event() -> dict:
+    """A `session` event with every foreign-content field at its bound,
+    spelled in the heaviest character a frame carries, and the service's
+    own identity fields at their realistic maxima (an options record with
+    ADD_DIRS_MAX paths of PATH_MAX ASCII characters)."""
+    handle = "s" + "9" * 127
+    record = {"url": "https://github.com/o/r/pull/1", "number": 1, "title": _heavy(10_000)}
+    attachment = {"key": _heavy_path(), "kind": "image", "caption": _heavy(10_000)}
+    return {
+        "t": "session",
+        "pty": p.U32_MAX,
+        "handle": handle,
+        "session": handle,
+        "fork": True,
+        "provider": _heavy(p.SHORT_MAX),
+        "options": {
+            "model": "m" * p.MODEL_MAX,
+            "effort": "e" * p.SHORT_MAX,
+            "permission_mode": "p" * p.SHORT_MAX,
+            "add_dirs": ["/" + "d" * (p.PATH_MAX - 1)] * p.ADD_DIRS_MAX,
+            "worktree": True,
+            "worktree_name": "w" * p.NAME_MAX,
+            "sandbox": True,
+            "sandbox_plan": "/" + "s" * (p.PATH_MAX - 1),
+            "sandbox_box": BOX,
+        },
+        "command_override": _heavy(p.PATH_MAX),
+        "cwd": _heavy_path(),
+        "agent_cwd": _heavy_path(),
+        "pid": p.PID_MAX,
+        "resolver_cwd": _heavy_path(),
+        "initial_command": _heavy(p.PATH_MAX),
+        "worktree_launch": True,
+        "new_chat_prompt": _heavy(p.PREVIEW_MAX),
+        "shells_follow_armed": True,
+        "closing": True,
+        "sandboxed": True,
+        "sandbox_box": _heavy(p.ID_MAX),
+        "sandbox_plan_path": _heavy_path(),
+        "defaults_owed": True,
+        "can_restart": True,
+        "takes_prompt": True,
+        "entered": {"text": _heavy(p.PREVIEW_MAX), "rows_below": p.MAX_ROWS},
+        "prompt_block": _heavy(p.MSGID_MAX),
+        "unstarted": True,
+        "foreign_paste": True,
+        "agent_running": True,
+        "running_command": True,
+        "model": _heavy(p.MODEL_MAX),
+        "effort": _heavy(p.SHORT_MAX),
+        "permission_mode": _heavy(p.SHORT_MAX),
+        "transcript_path": _heavy_path(),
+        "prs": p.fit_list_bytes([record] * p.PRS_MAX, p.SESSION_LIST_BYTES["prs"]),
+        "lookup_empty": True,
+        "touched_files": p.fit_list_bytes([_heavy_path()] * 64, p.SESSION_LIST_BYTES["touched_files"]),
+        "attachments": p.fit_list_bytes([attachment] * 1000, p.SESSION_LIST_BYTES["attachments"]),
+        "ledger_armed": True,
+        "landed": True,
+        "reset": True,
+        "busy": True,
+        "finished": True,
+        "forked": handle,
+    }
+
+
+def test_a_session_event_at_every_bound_frames():
+    """The review's finding: `pasted_back` x 256 x TEXT_MAX and a free
+    `attachments` list could pass MAX_FRAME, which the socket's sender
+    raises on — the event lost, the mirror stale. With the paste-back
+    record out of the event and the lists fitted to their byte budgets,
+    the worst event validates and frames."""
+    event = _full_bound_session_event()
+    checked = p.validate(dict(event), p.SERVICE)
+    assert isinstance(checked, p.Message), getattr(checked, "msgid", None)
+    assert set(checked.fields) == set(event) - {"t"}
+    assert "pasted_back" not in p.SESSION_FIELDS and "paste_back_pending" not in p.SESSION_FIELDS
+    frame = p.encode(event)  # raises over MAX_FRAME
+    assert len(frame.encode("utf-8")) <= p.MAX_FRAME
+    # Each list is as full as its budget allows and the budget bit: the
+    # fit was exercised, not dodged.
+    for name, budget in p.SESSION_LIST_BYTES.items():
+        items = event[name]
+        assert items and p.json_bytes(items) <= budget, name
+        assert p.json_bytes(items + [items[0]]) > budget, name
+
+
+def test_a_cut_event_at_its_bound_frames():
+    """A seed of TEXT_MAX characters is over the frame once escaped
+    (`hosting.CutSink._tell` cut it by characters); fitted by bytes to
+    EVENT_TEXT_BYTES it frames with the event's other fields at their bound."""
+    text = p.fit_text_bytes(_heavy(p.TEXT_MAX), p.EVENT_TEXT_BYTES)
+    assert len(text) < p.TEXT_MAX and p.json_bytes(text) <= p.EVENT_TEXT_BYTES
+    event = {"t": "cut", "pty": p.U32_MAX, "handle": "c" + "9" * 127, "state": "seeded", "text": text}
+    assert isinstance(p.validate(dict(event), p.SERVICE), p.Message)
+    assert len(p.encode(event).encode("utf-8")) <= p.MAX_FRAME
+    stash = {"t": "composer", "pty": p.U32_MAX, "what": "stash", "text": text}
+    assert isinstance(p.validate(dict(stash), p.SERVICE), p.Message)
+    assert len(p.encode(stash).encode("utf-8")) <= p.MAX_FRAME
+    # A plain text that frames is kept whole: the bound bites only when it must.
+    plain = "a" * (p.EVENT_TEXT_BYTES - 2)
+    assert p.fit_text_bytes(plain, p.EVENT_TEXT_BYTES) == plain
