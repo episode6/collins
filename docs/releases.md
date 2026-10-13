@@ -47,7 +47,9 @@ downloads of each version, see the
   tree for the page's reloads, and hands a stage / discard / revert plan
   to the service, which re-reads the file and refuses to apply a plan the
   file has moved under. A discarded untracked file goes to the trash on
-  the service's machine. Nothing looks different, and a slow or stopped
+  the service's machine. A change too large to send in one piece (a
+  whole-file revert of a patch near the page's 1 MB cap) is refused with
+  a toast rather than left spinning. Nothing looks different, and a slow or stopped
   service holds the window for half a second at most (the branch label
   and the menus read the window's last answer while a refresh is on its
   way); the

@@ -57,7 +57,7 @@ from . import apilink, gitinfo, gitops, gitpatch
 from .api import protocol
 from .api.protocol import RequestRefused
 from .gitfiles import GitInfo
-from .i18n import _
+from .i18n import N_, _
 
 
 def _words(refusal: RequestRefused) -> str:
@@ -69,6 +69,15 @@ def _words(refusal: RequestRefused) -> str:
         return refusal.msgid
 
 log = logging.getLogger(__name__)
+
+# The words of a plan refused before it is sent (Transport.plan): the
+# patch and its keys would not fit one frame of the API.
+PLAN_TOO_LARGE = N_("The change is too large to send to the service: use git from a shell")
+
+
+def _failure_words(err: BaseException) -> str:
+    return str(err) or err.__class__.__name__
+
 
 # How much longer than git's own timeout a `git.run` reply is waited for:
 # the service kills git at the timeout and answers `unreachable`; the
@@ -379,6 +388,9 @@ class Transport:
             fields = apilink.call(message, timeout=message["timeout"] + margin)
         except RequestRefused as refusal:
             return gitops.GitResult(False, "", _words(refusal), unreachable=True)
+        except Exception as err:  # rule 4: a runner never raises into a worker
+            log.exception("remotegit: git.run failed")
+            return gitops.GitResult(False, "", _failure_words(err), unreachable=True)
         status = fields.get("status")
         stdout = fields.get("stdout") or ""
         stderr = fields.get("stderr") or ""
@@ -404,7 +416,11 @@ class Transport:
         listed = list(paths)[: protocol.REPO_PATHS_MAX]
         if not listed:
             return {}
-        fields = apilink.call({"t": "git.sizes", "cwd": root, "paths": listed}, timeout=CALL_MARGIN_S)
+        try:
+            fields = apilink.call({"t": "git.sizes", "cwd": root, "paths": listed}, timeout=CALL_MARGIN_S)
+        except Exception as err:  # a refusal or a link that raised: every path unsized
+            log.debug("remotegit: git.sizes failed: %s", err)
+            return dict.fromkeys(listed)
         sizes = fields.get("sizes") or {}
         return {path: sizes.get(path) for path in listed}
 
@@ -428,12 +444,22 @@ class Transport:
             "three_way": bool(three_way),
             "keys": list(context.keys),
         }
+        # A plan the frame cannot carry (a whole-file apply of a patch near
+        # diffmodel.TOO_LARGE_BYTES with very many hunks' keys) is refused
+        # here with its words, never sent: the link's encode would refuse
+        # it `invalid` anyway, and the page needs an answer it can toast
+        # (PR 608's review, should-fix 3).
+        if protocol.json_bytes(message) > protocol.MAX_FRAME:
+            return gitops.ApplyResult(False, "", _(PLAN_TOO_LARGE), unreachable=True)
         try:
             fields = apilink.call(message, timeout=max(timeout, gitops.GIT_TIMEOUT_S) * 2 + CALL_MARGIN_S)
         except RequestRefused as refusal:
             if refusal.error == protocol.ERROR_STALE:
                 return gitops.ApplyResult(False, "", _words(refusal), stale=True)
             return gitops.ApplyResult(False, "", _words(refusal), unreachable=True)
+        except Exception as err:  # rule 4: the page's worker hears a failure, never a raise
+            log.exception("remotegit: git.plan failed")
+            return gitops.ApplyResult(False, "", _failure_words(err), unreachable=True)
         return gitops.ApplyResult(
             bool(fields.get("applied")),
             fields.get("stdout") or "",

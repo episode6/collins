@@ -1931,9 +1931,13 @@ class GitPage(Adw.Bin):
             return gitops.run_plan(cwd, plan, three_way=three_way, context=context)
 
         def done(answer: object) -> None:
+            # Also the failure path (run_mutation's `failed`, the error as
+            # the answer): the view's busy is cleared on every outcome, so
+            # a plan the link refused never leaves the buttons insensitive.
             self._diffview.set_busy(False)
             if not isinstance(answer, gitops.ApplyResult):
-                self._toast(_("git failed"))
+                words = str(answer) if isinstance(answer, BaseException) else ""
+                self._toast(_("git failed: {error}").format(error=words) if words else _("git failed"))
                 return
             if answer.stale:
                 # The service re-read the file and a key moved: the words
@@ -1947,7 +1951,7 @@ class GitPage(Adw.Bin):
             if answer.ok or answer.conflicts:
                 self.sidebar.emit("mutated")
 
-        if not self.sidebar.run_mutation(work, done):
+        if not self.sidebar.run_mutation(work, done, failed=done):
             self._diffview.set_busy(False)
 
     def _scheme(self):

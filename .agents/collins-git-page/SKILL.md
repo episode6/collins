@@ -858,7 +858,24 @@ OP_TRASH through `service.files.trash_paths` (`Gio.File.trash`, never an
 unlink; the e2e stubs it inside the service with `e2e_stubs`'
 `trash_aside` — **Gio refuses to trash on "system internal" mounts**, a
 tmpfs `/tmp` included, and the toast then says so). The sidebar's
-*Discard file…* of an untracked row is the same plan. The toast from
+*Discard file…* of an untracked row is the same plan. **A plan the
+frame cannot carry is an answer, never a raise** (PR 608's review,
+should-fix 3): `diffmodel.TOO_LARGE_BYTES` had equalled the API's 1 MiB
+frame and counted raw UTF-8, so a whole-file revert of a ~1.04 MB patch
+made `protocol.encode` raise in the link, the raise reached the page's
+worker, `run_mutation` landed None, `done` never ran and the view stayed
+busy with every button insensitive. Now the stanza's weight is its
+frame bytes (`diffmodel.patch_weight`: JSON-escaped), the cap sits
+`PLAN_HEADROOM_BYTES` (64 KiB) under `FRAME_BYTES` (pinned equal to
+`protocol.MAX_FRAME`) for the plan's other fields, `Transport.plan`
+measures the request with `protocol.json_bytes` and answers
+`remotegit.PLAN_TOO_LARGE` unreachable without sending (a file of very
+many hunks' keys), every `Transport` method catches any exception into an
+unreachable result, and `GitSidebar.run_mutation(work, done, failed=)`
+lands a raising work on *failed* (`_run_plan` passes its `done`, which
+clears the view's busy and toasts "git failed: …"; without one the
+sidebar toasts). `check_native_mutations` makes `gitops.run_plan` raise
+under a *Revert file* and reads the toast and the freed view. The toast from
 `gitpatch.outcome_words`, and `sidebar.emit("mutated")` when it landed
 or left conflicts → `_on_mutated` refreshes the mirror, re-seeds the
 signatures, re-reads the stack and reloads by key. `three_way` is only a revert's: **`--3way` implies

@@ -533,11 +533,47 @@ def test_parse_numstat_bounds_paths_and_the_file_count(monkeypatch):
 
 def test_too_large_applies_hunks_caps():
     assert diffmodel.TOO_LARGE_LINES == 20_000
-    assert diffmodel.TOO_LARGE_BYTES == 1_048_576
-    assert not too_large(10_000, 10_000, 1_048_576)
+    assert diffmodel.TOO_LARGE_BYTES == 1_048_576 - 64 * 1024
+    assert not too_large(10_000, 10_000, diffmodel.TOO_LARGE_BYTES)
     assert too_large(10_001, 10_000, 0)
-    assert too_large(0, 0, 1_048_577)
+    assert too_large(0, 0, diffmodel.TOO_LARGE_BYTES + 1)
     assert not too_large(0, 0, 0)
+
+
+def test_the_weight_cap_leaves_a_whole_file_plan_room_in_the_frame():
+    """Should-fix 3 of PR 608's Fable review: TOO_LARGE_BYTES equalled the
+    API's frame cap and counted raw UTF-8, so a file whose patch was
+    between ~1.02 and 1.048 MB was shown, and a whole-file revert of it
+    (`git.plan` with the whole patch) could not be encoded. The weight is
+    now the stanza's frame bytes (`patch_weight`: JSON-escaped, a newline
+    two bytes) and the cap sits PLAN_HEADROOM_BYTES under the frame, so a
+    stanza at the cap in a plan with every other field at a generous size
+    still encodes."""
+    from collins.api import protocol
+
+    assert diffmodel.FRAME_BYTES == protocol.MAX_FRAME
+    assert diffmodel.TOO_LARGE_BYTES == protocol.MAX_FRAME - diffmodel.PLAN_HEADROOM_BYTES
+    # Short lines: the escaping is the heaviest a text patch gets.
+    line = "+ab\n"  # five frame bytes a line (the newline escaped), plus the quotes
+    patch = line * ((diffmodel.TOO_LARGE_BYTES - 2) // 5)
+    assert diffmodel.patch_weight(patch) <= diffmodel.TOO_LARGE_BYTES < diffmodel.patch_weight(patch + line)
+    assert not too_large(0, 0, diffmodel.patch_weight(patch))
+    assert diffmodel.patch_weight(patch) > len(patch.encode())  # the escape counts
+    # What the headroom promises room for: a long cwd and paths, a range
+    # load, and a few hundred hunks' stable keys (path, digest, ordinal).
+    # A plan past that is refused by the client with its words, not sent.
+    keys = [f"{'p' * 100}|{'0' * 40}|{i}/300" for i in range(300)]
+    message = {
+        "t": "git.plan", "id": 2**31, "cwd": "/" + "d" * 1024,
+        "load": {"range": "a" * 256 + "..." + "b" * 256},
+        "path": "p" * 512, "previous_path": "q" * 512, "parent_target": "r" * 256,
+        "op": "apply-worktree-reverse", "paths": ["p" * 512, "q" * 512], "patch": patch,
+        "three_way": True, "keys": keys,
+    }
+    assert protocol.json_bytes(message) <= protocol.MAX_FRAME
+    protocol.encode(message)  # raises over the frame
+    # And a stanza one line over the cap is the placeholder, as before.
+    assert too_large(0, 0, diffmodel.patch_weight(patch + line * 2))
 
 
 # -- gaps -------------------------------------------------------------------------

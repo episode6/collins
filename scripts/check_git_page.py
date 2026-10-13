@@ -1932,6 +1932,25 @@ def check_native_mutations(repo: str, page: GitPage, window: Gtk.Window, lines: 
         check("the refusal toasts, asks nothing and changes nothing", wait_for(lambda: len(toasts) > before, timeout=5.0) and toasts[-1] == "blob.bin is binary: use git from a shell" and len(asked) == asks and wait_for(idle) and "blob.bin" not in unstaged_paths() and index_paths() == set(), (toasts[-1:], asked[asks:], unstaged_paths(), index_paths()))
         check("the view is free after the refusal", not view.busy() and page.shows({"show": "HEAD"}))
 
+        # -- a plan whose run raises frees the view with a toast (PR 608's review, should-fix 3) ------------------
+        # A link that raised (a plan the frame could not carry) propagated
+        # into the page's worker; run_mutation landed None, `done` never
+        # ran, and every button stayed insensitive until the page closed.
+        page.load({"show": "HEAD~1"})
+        check("show HEAD~1 loads the text commit", wait_for(lambda: page.settled() and page.shows({"show": "HEAD~1"}), timeout=5.0) and "staged.txt" in shown_paths(), shown_paths())
+        real_run_plan = gitops.run_plan
+
+        def exploding_run_plan(*_args, **_kwargs):
+            raise RuntimeError("the link tore")
+
+        gitops.run_plan = exploding_run_plan
+        try:
+            before = len(toasts)
+            check("Revert file with a run that raises", view.click_file_action("staged.txt"))
+            check("the failure toasts with its words and the view is free again", wait_for(lambda: len(toasts) > before, timeout=5.0) and toasts[-1] == "git failed: the link tore" and wait_for(idle, timeout=5.0) and not view.busy() and not sidebar.busy, (toasts[-1:], view.busy(), sidebar.busy))
+        finally:
+            gitops.run_plan = real_run_plan
+
         page.load("unstaged")
         check("back on the working tree", wait_for(lambda: page.settled() and page.loaded == "unstaged", timeout=5.0))
         check("no lingering busy", idle())

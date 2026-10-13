@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-from collins import apilink, gitinfo, gitops, gitpatch, remotegit
+from collins import apilink, diffmodel, gitinfo, gitops, gitpatch, remotegit
 from collins.api import protocol
 from collins.api.protocol import RequestRefused
 from collins.gitfiles import GitInfo
@@ -385,6 +385,60 @@ def test_run_plan_is_git_plan_and_stale_comes_back_as_stale(link):
     result = gitops.run_plan("/srv/project", plan, context=context)
     assert result.stale and not result.ok and result.stderr == "a.txt moved"
     assert gitops.run_plan("/srv/project", plan).stderr == "no plan context"
+
+
+class EncodingLink(FakeLink):
+    """A fake that frames every request with the real `protocol.encode`
+    before answering, as `SocketLink._blocking` does."""
+
+    def _request(self, message: dict, timeout: float | None = None) -> dict:
+        protocol.encode({**message, "id": 1})
+        return super()._request(message, timeout)
+
+
+def test_a_plan_the_frame_cannot_carry_is_a_failed_result_not_a_raise(monkeypatch):
+    """Should-fix 3 of PR 608's Fable review (the stuck-busy view): a
+    whole-file revert of a ~1.04 MB patch made `protocol.encode` raise in
+    the link, which propagated through `Transport.plan` into the page's
+    worker; `run_mutation` landed None and the view stayed busy. The plan
+    is measured first and refused with its words, never sent; a link that
+    raises anything else is a failure with the error's words too."""
+    fake = EncodingLink()
+    monkeypatch.setattr(apilink, "_current", fake)
+    transport = remotegit.Transport(remotegit.Mirror())
+    fake.answers["git.plan"] = {"applied": True, "stdout": "", "stderr": ""}
+    patch = ("+" + "x" * 60 + "\n") * 16_800  # 1.04 MB, under TOO_LARGE_LINES
+    assert 1_030_000 < len(patch.encode()) < protocol.MAX_FRAME
+    assert diffmodel.too_large(16_800, 0, diffmodel.patch_weight(patch))  # the view would not show it...
+    plan = gitpatch.Plan(gitpatch.OP_APPLY_WORKTREE_REVERSE, ("a.txt",), patch, None, "")
+    context = gitops.PlanContext({"show": SHA}, "a.txt", None, "main", ("a.txt|k|0/1",))
+    # ...but a plan of it is still an answer, not a raise:
+    result = transport.plan("/srv/project", plan, context, False, 30.0)
+    assert not result.ok and result.unreachable and not result.stale
+    assert result.stderr == remotegit.PLAN_TOO_LARGE
+    assert fake.calls == []  # never sent
+    # A patch at the view's cap, with the keys of a file of many hunks: the
+    # frame's rule decides, and the answer is the same words.
+    fitting = ("+" + "x" * 60 + "\n") * 15_000
+    assert not diffmodel.too_large(15_000, 0, diffmodel.patch_weight(fitting))
+    keys = tuple(f"a.txt|{'0' * 40}|{i}/4000" for i in range(4000))
+    heavy = gitops.PlanContext({"show": SHA}, "a.txt", None, "main", keys)
+    fitting_plan = gitpatch.Plan(plan.op, ("a.txt",), fitting, None, "")
+    result = transport.plan("/srv/project", fitting_plan, heavy, False, 30.0)
+    assert not result.ok and result.stderr == remotegit.PLAN_TOO_LARGE and fake.calls == []
+    # One that fits goes through the real encode and is applied.
+    light = gitops.PlanContext({"show": SHA}, "a.txt", None, "main", ("a.txt|k|0/1",))
+    result = transport.plan("/srv/project", fitting_plan, light, False, 30.0)
+    assert result.ok and len(fake.calls) == 1
+    # A link that raises something else: a failure with the words, no raise.
+    fake.answers["git.plan"] = RuntimeError("socket torn")
+    result = transport.plan("/srv/project", fitting_plan, light, False, 30.0)
+    assert not result.ok and result.unreachable and result.stderr == "socket torn"
+    fake.answers["git.run"] = RuntimeError("socket torn")
+    run = transport.run("/srv/project", gitops.status_argv(), None, 5.0, None, (0,))
+    assert not run.ok and run.unreachable and run.stderr == "socket torn"
+    fake.answers["git.sizes"] = RuntimeError("socket torn")
+    assert transport.sizes("/srv/project", ["a.txt", "b.txt"]) == {"a.txt": None, "b.txt": None}
 
 
 def test_blob_url():
