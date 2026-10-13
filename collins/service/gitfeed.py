@@ -817,8 +817,8 @@ class _LocalHost:
     """A `_Watch` host outside the feed: GLib's idle and a daemon thread,
     the feed's own defaults. The git page's, when git is local."""
 
-    _dispatch = staticmethod(_dispatch_default)
-    _spawn = staticmethod(_spawn_default)
+    _dispatch = staticmethod(dispatch_default)
+    _spawn = staticmethod(spawn_default)
 
 
 class _Deliverer:
