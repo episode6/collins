@@ -854,6 +854,82 @@ def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
     assert record._chain is not None and record._chain.handle == second
 
 
+# -- the box a sandboxed resume or fork runs in (should-fix 6) ----------------------------------
+
+
+class FakeBoxHost:
+    """The SandboxHost half `_box_for_launch` asks: boxes minted, tool
+    switches copied, every call recorded."""
+
+    def __init__(self):
+        self.calls = []
+        self.minted = 0
+
+    def mint_box(self, workspace, seed=True):
+        self.minted += 1
+        box = f"{self.minted:032x}"
+        self.calls.append(("mint", workspace, seed, box))
+        return box
+
+    def copy_tools(self, source, box, only_off=False):
+        self.calls.append(("copy_tools", source, box))
+
+
+def _core_with_state(app_state, tmp_path):
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    core.sandbox_host = FakeBoxHost()
+    return core, service_state
+
+
+def test_a_sandboxed_fork_gets_a_box_of_its_own_seeded_from_its_origin(app_state, tmp_path):
+    """What MainWindow.open_session minted before the sessions were the
+    service's: a fork's box is minted unseeded (`seed=False`: no project
+    defaults) and starts with a copy of the origin's grants and tool
+    switches; the origin keeps its own box."""
+    from collins import providers
+
+    core, state = _core_with_state(app_state, tmp_path)
+    origin_id, origin_box = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0", "a" * 32
+    state.set_sandboxed(origin_id, True, box=origin_box)
+    state.set_sandbox_grants(origin_box, ["/srv/data", "/opt/tools"])
+    options = providers.SessionOptions(sandbox=True)
+    message = {"session": origin_id, "fork": True, "cwd": str(tmp_path), "sandbox": True}
+    forked = core._box_for_launch(message, options)
+    box = forked.sandbox_box
+    assert box and box != origin_box
+    assert core.sandbox_host.calls == [
+        ("mint", str(tmp_path), False, box),
+        ("copy_tools", origin_box, box),
+    ]
+    assert state.get_sandbox_grants(box) == ["/srv/data", "/opt/tools"]
+    assert state.get_sandbox_grants(origin_box) == ["/srv/data", "/opt/tools"]
+    assert state.sandbox_box(origin_id) == origin_box  # the fork's id is the resolver's to record
+    assert forked.sandbox is True
+
+
+def test_a_sandboxed_resume_with_no_box_yet_is_minted_one_and_recorded(app_state, tmp_path):
+    """A session recorded before the boxes (or back from the trash) gets a
+    box seeded with its project's defaults, recorded against its id; a
+    resume whose box is known keeps it and mints nothing; a fresh session
+    (no id) is left to the launch's own minting."""
+    from collins import providers
+
+    core, state = _core_with_state(app_state, tmp_path)
+    session_id = "1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    options = providers.SessionOptions(sandbox=True)
+    resumed = core._box_for_launch({"session": session_id, "cwd": str(tmp_path)}, options)
+    box = resumed.sandbox_box
+    assert box and core.sandbox_host.calls == [("mint", str(tmp_path), True, box)]
+    assert state.sandbox_box(session_id) == box
+    # Known: no mint, the recorded box.
+    again = core._box_for_launch({"session": session_id, "cwd": str(tmp_path)}, options)
+    assert again.sandbox_box == box and len(core.sandbox_host.calls) == 1
+    # Fresh: nothing to look up, the options untouched.
+    fresh = core._box_for_launch({"cwd": str(tmp_path)}, options)
+    assert fresh is options and len(core.sandbox_host.calls) == 1
+
+
 # -- the spawn's roads (the Fable review of PR 603, should-fix 4 and nit 12) ------------------
 
 
