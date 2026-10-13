@@ -702,11 +702,35 @@ class SessionRecord:
     def client_detached(self) -> None:
         """A client left this pty (a `detach`, or the client gone). A close
         whose budget ran out while it was attached waits for its answer;
-        once no client is left to give one, the force is the service's."""
+        once no client is left to give one, the force is the service's.
+        And a pty nobody shows whose CLI is not running is a shell alone
+        (`close_if_orphan_shell`)."""
         pty = self.pty()
-        if pty is None or pty.attachments or not self.budget_spent or not self.session.closing:
+        if pty is None or pty.attachments:
             return
-        self._force_close("the client the budget was told to has gone")
+        if self.budget_spent and self.session.closing:
+            self._force_close("the client the budget was told to has gone")
+            return
+        self.close_if_orphan_shell("the last client detached")
+
+    def close_if_orphan_shell(self, why: str) -> bool:
+        """A shell alone with no client showing it is nothing the service
+        keeps: the CLI never came up (no `claude` on PATH, a bad
+        `claude_cli_path`, a sandbox launch that failed) and the tab was
+        detached or its window went, or the CLI left by itself after the
+        tab was detached. No running row stands for it, nothing attaches to
+        it, and only a resume of the same session would ever close it: it
+        is closed here instead (PR 605's verification). Not while a close
+        flow owns the pty (`closing`: the poll ends the shell itself).
+        Returns whether it was closed."""
+        pty = self.pty()
+        if pty is None or pty.attachments or self.session.closing or self.exited:
+            return False
+        if self.session.has_running_command():
+            return False
+        log.info("session %s: a shell alone with no client, %s: the pty is ended", self.handle, why)
+        self.core.force_close(pty.id)
+        return True
 
     def _force_close(self, why: str) -> None:
         pty = self.pty()

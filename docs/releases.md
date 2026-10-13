@@ -54,7 +54,9 @@ downloads of each version, see the
   that ignores it, whether or not a window is watching. A New Thread whose
   first prompt was never sent ends with the window instead of lingering in
   the service as a "New session" row; a tab whose agent is still starting
-  when you quit is kept and comes back. The quit dialog counts agents, not
+  when you quit is kept and comes back. A shell no window shows and no
+  agent runs in (a launch whose `claude` never started, a detached session
+  whose agent quit) is closed by the service instead of kept for good. The quit dialog counts agents, not
   a tab busy only in its terminal panel, and says when a panel's command
   ends with the quit.
 

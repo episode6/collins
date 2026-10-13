@@ -77,7 +77,7 @@ class RemoteNotifications(NotificationCenter):
         if not self._resyncing:
             self._resyncing = True
             self._hold()
-        self._moved = bool(self._rows)
+        self._moved = self._moved or bool(self._rows)  # a prior reset's emptied rows count too
         self._rows.clear()
 
     def resynced(self) -> None:

@@ -2287,6 +2287,9 @@ class App(Adw.Application):
             self.store.subscribe()
         except RequestRefused as refusal:
             log.warning("resubscribe refused: %s", refusal.msgid)
+            # No snapshot is coming: the mirror announces what it has (the
+            # emptied rows) rather than holding its listeners for ever.
+            self.notification_center.resynced()
             if refusal.error == protocol.ERROR_GONE and self._connection is not None:
                 self._connection.lost("the resubscribe found the link gone")
             return

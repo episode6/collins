@@ -96,6 +96,10 @@ the window ends nothing; the next launch finds the tabs where they were.
 A session you asked to stop (a tab's close, *Stop Sessions and Quit*)
 stops even if its window goes before the agent has left: the service runs
 the graceful exit and, when the agent ignores it, ends the session itself.
+A shell with no agent in it that no window shows — a launch whose `claude`
+never started, or a detached session whose agent has quit on its own — is
+closed by the service rather than kept: it is no running session, and
+nothing would ever attach to it.
 A finish or a message that arrives while no window is open is in the bell
 when the next window connects, unread, not on the desktop: nothing was
 there to announce it, and the window does not announce it late. A window

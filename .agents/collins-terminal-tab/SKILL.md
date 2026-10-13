@@ -279,7 +279,19 @@ calls `TerminalTab.detach_pty()` (a `detach`, the client closed) instead of
 `release_pty()` (`detach_page` refuses a page mid-close, `_page_settling`,
 and closes a tab whose CLI has exited instead; the row menu asks
 `can_detach_session`); the panel shells still end (their history written by the
-service). The tab's `destroy` also detaches (no longer `release_pty`): a
+service). On the service, a shell alone nobody shows is closed
+(`SessionRecord.close_if_orphan_shell`, from `client_detached` on the last
+`detach` / `client_gone` and from `cli_changed(False)`): the client's
+`cli_exited()` cannot tell a CLI that never came up (no `claude`, a bad
+`claude_cli_path`, a failed sandbox launch) from one still starting, so a
+plain Quit detaches such a tab, and a session detached while its CLI runs
+is left a bare shell when the CLI quits by itself; neither has a running
+row or anything that would attach to it, so the service ends it rather
+than keep it for its life. A pty mid-close is left to its close flow.
+Known windows (PR 605's verification): a detach within the first second
+of a spawn, before the shell has started the CLI, closes a healthy launch;
+an attach aimed at a pty being closed this way is refused and falls back
+to a resume. The tab's `destroy` also detaches (no longer `release_pty`): a
 window that closes for real leaves its sessions running. **Opening a
 running session attaches** (D31): `open_session` asks `store.pty_for(id)`
 and, while that pty's CLI still runs (`pty.info`'s `running_command`; a shell-only pty is resumed over, which the service takes by closing it), builds `TerminalTab(attach_pty=…)`, which reads the pty's grid

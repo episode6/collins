@@ -1088,6 +1088,7 @@ def test_a_client_attaching_after_a_landing_is_told_landed(server, tmp_path):
     assert "landed" not in record.snapshot()
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     assert "landed" not in ends.of("session")[0]
+    record.session.has_running_command = lambda: True  # a detach from a shell alone would close it
     client.request({"t": "detach", "pty": pty})
     record.transcript_landed([], True)
     snapshot = record.snapshot()
@@ -1441,6 +1442,90 @@ def test_the_shells_exit_ends_a_close_in_flight(tmp_path, monkeypatch):
     finally:
         srv.shutdown()
         pump(0.3)
+
+
+@pytest.mark.parametrize("leave", ["detach", "client_gone"])
+def test_a_shell_alone_nobody_shows_is_closed(tmp_path, monkeypatch, leave):
+    """PR 605's verification: a CLI that never came up (no `claude`, a bad
+    `claude_cli_path`, a failed sandbox launch) left a shell the client's
+    `cli_exited()` could not tell from a CLI still starting, so a plain
+    Quit detached it and recorded it; on the service it was a shell alone
+    with no attachment and no running row, closed only by a resume of that
+    session, so it was orphaned for the service's life. The last client's
+    detach (or its departure) from an agent pty whose CLI is not running
+    closes the pty."""
+    from collins.service import ptyserver
+
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    try:
+        # The typed command is `true`: the "CLI" never comes up, the shell is alone.
+        pty = spawn_agent(client, tmp_path)["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        screen = core.ptys.get(pty).screen
+        assert pump(3, lambda: "true" in screen.capture_contents())
+        assert not core.ptys.get(pty).has_running_command()
+        if leave == "detach":
+            client.request({"t": "detach", "pty": pty})
+        else:
+            client.close()
+        assert pump(5, lambda: pty not in core.ptys.ptys), "the shell alone outlived its last client"
+        assert pump(3, lambda: pty not in core.sessions)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_detached_sessions_cli_leaving_by_itself_closes_the_shell(tmp_path, monkeypatch):
+    """The other way round: the session is detached while its CLI runs,
+    then the CLI quits on its own. The table says so (`pty-exited`, status
+    null, `table: true`) and the shell alone goes with it; nobody was
+    attached, so nothing else would ever close it."""
+    from collins.service import ptyserver
+
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    try:
+        pty = spawn_agent(client, tmp_path, command_override="sleep 2")["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+        client.request({"t": "detach", "pty": pty})
+        pump(0.3)
+        assert pty in core.ptys.ptys  # the CLI runs: a detached session, not an orphan
+        # (The table's `pty-exited` goes to subscribers; this client is none.)
+        assert pump(10, lambda: pty not in core.ptys.ptys), "the shell left by the CLI outlived it"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_shown_shell_and_a_closing_one_are_left_alone(server, tmp_path):
+    """The rule's edges: a shell alone a client still shows stays (a tab
+    at the shell prompt), and a pty mid-close is the close flow's."""
+    ends, other = Client(), Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    second = server.connect(other.on_output, other.on_event, device="desk")
+    pty, _screen = _ready_agent(server, client, tmp_path)
+    second.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    client.request({"t": "detach", "pty": pty})
+    pump(0.3)
+    assert pty in server.core.ptys.ptys  # the second client shows it
+    record.session.closing = True
+    second.request({"t": "detach", "pty": pty})
+    pump(0.3)
+    assert pty in server.core.ptys.ptys  # a close flow owns it
+    record.session.closing = False
+    assert record.close_if_orphan_shell("the test asks") is True
+    assert pump(3, lambda: pty not in server.core.ptys.ptys)
 
 
 def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):

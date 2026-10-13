@@ -1899,6 +1899,9 @@ class ServiceCore:
         self._broadcast({"t": "pty-exited", "pty": pty_id, "status": None, "table": True})
         if self.feed is not None and ran:
             self.feed.refresh_running({ran})
+        # The CLI left a pty no client shows (detached, then the agent
+        # quit by itself): the shell alone is closed, not kept for good.
+        record.close_if_orphan_shell("the CLI left with no client attached")
 
     def publish_pty(self, pty_id: int) -> None:
         """An agent pty spawned or resolved: every subscriber is sent its

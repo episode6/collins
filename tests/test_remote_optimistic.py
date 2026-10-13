@@ -165,3 +165,19 @@ def test_a_reset_announces_nothing_until_the_snapshot_has_landed():
     # Live again: a row that moves announces as before.
     link.dispatch(_notify_event("n-3", "s3"))
     assert seen[-1] == {"s1", "s3"}
+
+
+def test_a_double_reset_still_announces_the_rows_the_first_emptied():
+    """A second loss before the snapshot has landed: the first reset's
+    emptied rows are a move the one `changed` at the end must carry, even
+    when the second reset finds the mirror empty and the snapshot brings
+    nothing back (every row read elsewhere meanwhile)."""
+    link = HeldLink()
+    center = RemoteNotifications(link)
+    link.dispatch(_notify_event("n-1", "s1"))
+    seen = []
+    center.connect(lambda: seen.append(set(center.unread_sessions())))
+    center.reset()
+    center.reset()  # the rows were already emptied: no move of its own
+    center.resynced()
+    assert seen == [set()]  # s1's notification comes down once, at the end
