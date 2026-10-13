@@ -634,9 +634,11 @@ def walk_reply(root: str, hidden: bool) -> dict:
 def names_reply(root: str) -> dict:
     """`fs.names`'s fields (a worker thread): the names in *root* that are
     not directories, a symlink to a directory counting as one (what the
-    client's `os.scandir` test did). A name over FS_NAME_MAX or one that
-    is not text is left out; past FS_NAMES_MAX the rest is dropped and the
-    reply says `truncated`."""
+    client's `os.scandir` test did). A name over FS_NAME_MAX is left out,
+    and so is one that is not UTF-8 on disk (`scandir` surrogate-escapes
+    it, and the reply would fail validation whole: `projectfiles.
+    list_entries`' rule for `fs.list` and `fs.walk`); past FS_NAMES_MAX
+    the rest is dropped and the reply says `truncated`."""
     names: list[str] = []
     truncated = False
     try:

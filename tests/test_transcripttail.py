@@ -131,6 +131,49 @@ def test_the_reply_of_a_full_bound_validates_and_fits_a_frame():
     assert len(json.dumps(reply)) < protocol.MAX_FRAME
 
 
+def test_bound_drops_a_link_utf8_cannot_carry_and_keeps_the_rest():
+    """The Fable review of PR 614: `json.dumps` of a str never raises, so a
+    lone surrogate passed `bound` and the whole reply failed validation."""
+    links = ["https://a.test/", "https://x.test/a\udc80b", "collins/\ud83dfoo.py:3", "https://b.test/"]
+    kept = transcripttail.bound(links)
+    assert kept == ["https://a.test/", "https://b.test/"]
+    reply = protocol.reply(1, links=kept)
+    assert not isinstance(protocol.validate_response(reply, "store.transcript-tail"), protocol.Refusal)
+    protocol.encode(reply)  # and the frame encodes
+    # a whole astral character is text, and stays
+    assert transcripttail.bound(["https://x.test/\U0001f600"]) == ["https://x.test/\U0001f600"]
+    # nothing but text of some length is a link
+    assert transcripttail.bound(["", None, 7, "https://c.test/"]) == ["https://c.test/"]
+
+
+def test_a_tail_holding_a_lone_surrogate_still_answers_its_other_links(tmp_path):
+    """The escape as Node's JSON.stringify writes an unpaired surrogate:
+    literally, in the transcript's line."""
+    path = tmp_path / "t.jsonl"
+    line = {"type": "user", "message": {"role": "user", "content": "PLACEHOLDER"}}
+    text = json.dumps(line).replace(
+        "PLACEHOLDER", "see https://dirty.test/a\\udc80b and https://clean.test/ok"
+    )
+    path.write_text(text + "\n")
+    links = transcripttail.read_links(str(path))
+    assert links == ["https://clean.test/ok"]
+    reply = protocol.reply(1, links=links)
+    assert not isinstance(protocol.validate_response(reply, "store.transcript-tail"), protocol.Refusal)
+
+
+def test_bound_measures_a_link_as_the_frame_writes_it(monkeypatch):
+    """UTF-8 bytes, not ASCII escapes (nit 4 of the same review): a
+    non-ASCII link costs what it costs on the wire (78 bytes quoted here,
+    138 escaped), and the kept list encodes to the budget and not past
+    it."""
+    links = ["https://x.test/" + "中" * 20 + str(n) for n in range(10)]
+    assert protocol.json_bytes(links[0]) == 78
+    monkeypatch.setattr(protocol, "TRANSCRIPT_LINKS_BYTES", 2 + 78 * 3 + 2)
+    kept = transcripttail.bound(links)
+    assert kept == links[-3:]
+    assert protocol.json_bytes(kept) == protocol.TRANSCRIPT_LINKS_BYTES
+
+
 # -- store.transcript-tail --------------------------------------------------------------
 
 

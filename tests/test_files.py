@@ -596,7 +596,22 @@ def test_names_skips_a_name_that_is_not_text(tmp_path):
         (tmp_path / os.fsdecode(b"bad-\xff.txt")).write_text("x")
     except OSError:
         pytest.skip("this filesystem refuses a non-UTF-8 name")
-    assert files.names_reply(str(tmp_path)) == {"names": ["ok.txt"], "truncated": False}
+    fields = files.names_reply(str(tmp_path))
+    assert fields == {"names": ["ok.txt"], "truncated": False}
+    # 611's rule for `fs.list` and `fs.walk`, held here too: the reply the
+    # skipped name would have failed whole validates and encodes.
+    reply = protocol.reply(1, **fields)
+    assert not isinstance(protocol.validate_response(reply, "fs.names"), protocol.Refusal)
+    protocol.encode(reply)
+
+
+def test_names_over_the_request_skips_a_name_that_is_not_text(served):
+    _core, client, project, _events = served
+    try:
+        (project / os.fsdecode(b"bad-\xff.txt")).write_text("x")
+    except OSError:
+        pytest.skip("this filesystem refuses a non-UTF-8 name")
+    assert client.request({"t": "fs.names", "root": str(project)})["names"] == ["a.txt"]
 
 
 def test_names_of_a_missing_root_is_gone(served):
