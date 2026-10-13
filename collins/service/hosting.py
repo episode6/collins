@@ -255,6 +255,7 @@ class SessionRecord:
         self._shown_prs: list[prstatus.PullRequest] = []
         self._pending_paints: list[str] = []
         self._sent: dict[str, Any] = {}  # the facts the clients were last sent
+        self._landed = False  # a transcript read has landed since the last reset
         self._settle: int | None = None  # the output settle's timer, while one runs
         self.on_settled: Callable[[SessionRecord], None] | None = None  # the tracker's hook
         self.session = Session(
@@ -373,7 +374,10 @@ class SessionRecord:
             self.send(changed)
 
     def snapshot(self) -> dict:
-        """Every fact, for a client attaching."""
+        """Every fact, for a client attaching. `landed` rides along once a
+        transcript read has landed (the tab acts on the transcript facts
+        — labels, chips, agent files — only under it), and `busy` and
+        `lookup_empty` as the tracker and the last landing left them."""
         session = self.session
         facts = {
             "session": session.session_id,
@@ -390,9 +394,18 @@ class SessionRecord:
             **self.box_facts(),
             **self.process_facts(),
             **self.transcript_facts(),
+            "lookup_empty": bool(self._sent.get("lookup_empty", False)),
             "busy": bool(self._sent.get("busy", False)),
         }
+        if self._landed:
+            facts["landed"] = True
         return self._fit(facts)
+
+    def busy_changed(self, busy: bool) -> None:
+        """The tracker's verdict for this session, by handle (a placeholder
+        row's word): sent on the edge and remembered, so an attach in the
+        middle of a turn is told `busy` as it stands."""
+        self._send_changed({"busy": bool(busy)})
 
     def launch_facts(self) -> dict:
         session = self.session
@@ -562,15 +575,21 @@ class SessionRecord:
 
     def transcript_reset(self) -> None:
         self._shown_prs = []
-        facts = self.transcript_facts()
+        self._landed = False
+        # Through `_fit` as every fact goes (rule 5): one that doesn't fit
+        # is dropped alone, never the whole event with it.
+        facts = self._fit(self.transcript_facts())
         self._sent.update(facts)
+        self._sent["lookup_empty"] = False
         self.send({**facts, "reset": True})
 
     def transcript_landed(self, prs: list[prstatus.PullRequest], lookup_empty: bool) -> None:
         self._shown_prs = list(prs)
-        facts = self.transcript_facts()
+        self._landed = True
+        facts = self._fit(self.transcript_facts())
         changed = {k: v for k, v in facts.items() if self._sent.get(k, _UNSENT) != v}
         self._sent.update(facts)
+        self._sent["lookup_empty"] = bool(lookup_empty)
         changed["landed"] = True
         if lookup_empty:
             changed["lookup_empty"] = True

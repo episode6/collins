@@ -312,7 +312,9 @@ class ServiceActivity:
             self.judge.drop(key)
         record = self._record_by_handle(key)
         if record is not None:
-            record.send({"busy": busy})
+            # Through the record's facts, not a bare send: the attach
+            # snapshot answers `busy` from what was last sent.
+            record.busy_changed(busy)
             return
         self._sync_row_busy(key)
 

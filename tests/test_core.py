@@ -854,6 +854,84 @@ def test_a_newer_cut_ends_the_one_it_supersedes(server, tmp_path):
     assert record._chain is not None and record._chain.handle == second
 
 
+# -- the attach snapshot's busy and landed (the Fable review of PR 603, should-fix 2 and 3) --
+
+
+def test_a_client_attaching_mid_turn_is_told_busy_as_it_stands(server, tmp_path):
+    """Probe P2 of the review: the tracker's mark reached the attached
+    client, but a second client's snapshot said idle, because the verdict
+    bypassed the record's sent facts. A tab attaching to a live session
+    mid-turn (PR 605) would show an idle pole until the next edge."""
+    activity = server.core.start_activity()
+    first = Client()
+    client = server.connect(first.on_output, first.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    activity.tracker.mark(record.handle)
+    assert first.of("session")[-1]["busy"] is True
+    assert activity.tracker.is_busy(record.handle)
+    second = Client()
+    other = server.connect(second.on_output, second.on_event, device="desk")
+    other.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert second.of("session")[0]["busy"] is True
+    activity.tracker.clear(record.handle)
+    assert first.of("session")[-1]["busy"] is False and second.of("session")[-1]["busy"] is False
+    third = Client()
+    late = server.connect(third.on_output, third.on_event, device="phone")
+    late.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert third.of("session")[0]["busy"] is False
+
+
+def test_a_client_attaching_after_a_landing_is_told_landed(server, tmp_path):
+    """Should-fix 3: the tab acts on the transcript facts (model label, PR
+    chips, agent files, attachments) only under `landed`, which went to
+    the clients attached at the landing alone. The snapshot carries it
+    once a read has landed, with `lookup_empty` as the last landing said,
+    and drops it again on a reset."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    record = server.core.sessions[pty]
+    assert "landed" not in record.snapshot()
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert "landed" not in ends.of("session")[0]
+    client.request({"t": "detach", "pty": pty})
+    record.transcript_landed([], True)
+    snapshot = record.snapshot()
+    assert snapshot["landed"] is True and snapshot["lookup_empty"] is True
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    attached = [e for e in ends.of("session") if "cwd" in e][-1]  # the snapshot, not a changed-fields event
+    assert attached["landed"] is True and attached["lookup_empty"] is True
+    assert isinstance(protocol.validate(dict(attached), protocol.SERVICE), protocol.Message)
+    record.transcript_reset()
+    assert "landed" not in record.snapshot() and record.snapshot()["lookup_empty"] is False
+    record.transcript_landed([], False)
+    assert record.snapshot()["landed"] is True and record.snapshot()["lookup_empty"] is False
+
+
+def test_a_landing_whose_fact_does_not_fit_still_goes(server, tmp_path):
+    """Nit 13: `transcript_landed` and `transcript_reset` route the facts
+    through `_fit` as `refresh_facts` does, so one fact that doesn't fit
+    the protocol (a touched path with a NUL) is dropped alone and the
+    landing still reaches the client."""
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    pty = spawn_agent(client, tmp_path)["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    record.session.transcript.touched_files = lambda: ["/ok.py", "/bad\0.py"]
+    record.session.transcript.model = lambda: "claude-opus-5-5"
+    before = len(ends.of("session"))
+    record.transcript_landed([], False)
+    landed = [e for e in ends.of("session")[before:] if e.get("landed")]
+    assert landed and landed[-1]["model"] == "claude-opus-5-5"
+    assert landed[-1]["touched_files"] == ["/ok.py"]
+    record.transcript_reset()
+    reset = [e for e in ends.of("session") if e.get("reset")]
+    assert reset and reset[-1]["touched_files"] == ["/ok.py"]
+
+
 # -- the events frame (the Fable review of PR 603, should-fix 1) ------------------------------
 
 

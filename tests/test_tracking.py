@@ -83,6 +83,9 @@ class FakeRecord:
     def send(self, fields, active_only=False):
         self.sent.append(dict(fields))
 
+    def busy_changed(self, busy):
+        self.send({"busy": busy})
+
     def refresh_process_facts(self):
         self.process_reads += 1
 
