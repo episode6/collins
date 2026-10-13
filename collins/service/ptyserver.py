@@ -29,7 +29,7 @@ failure where it asked, not as an exit 127 a moment later. The
 fork runs inside the service, a threaded process;
 that is acceptable because nothing Python-heavy runs between fork and exec
 (no allocation of note, no locks taken, the same thing `pty.fork` and VTE
-do), and PR-1.12 moves the whole server into the service process. The
+do). The
 environment is the caller's plus what VTE would have set and the CLI's
 terminal detection reads: ``TERM=xterm-256color``, ``COLORTERM=truecolor``,
 ``VTE_VERSION`` (the client's, else 8400) and the two spoofs of

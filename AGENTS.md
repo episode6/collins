@@ -137,7 +137,10 @@ pending-detach replay, the link repair, the busy feed), and `bgblock.py`
 (GTK-free) is the /bg gate both halves read. Their verdicts reach a client as `item`
 fields (`busy`, `unread`, `background`, `backgrounding`, `can_background`,
 `running`); `store.flags` carries only what a person did at a client's
-screen (`status`, `unread: false`). `running` is "a live agent pty whose
+screen (`status`, `unread` — off when the person looked, on when a
+client's delivery table flagged a notification or a placeholder handed its
+flag to the row; `busy`, `backgrounding` and `can_background` from a
+client are refused). `running` is "a live agent pty whose
 CLI runs" and follows the CLI's life (`ServiceCore.cli_changed`), so a shell
 left behind after the agent exits is not a running row. The service
 refuses to spawn a second CLI on a session already running (`refused`,

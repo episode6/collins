@@ -55,7 +55,9 @@ tracker (`tracking.ServiceActivity`, `start_activity`) is fed by the stream
 filter's `Progress` events, every pty's output after the filter, the input
 frames and the ``/proc`` poll, and sets `busy` and a counted finish's
 `unread` on the store's items itself. `store.flags` keeps what a person did
-at a client's screen — `status`, `unread` — and refuses `busy`.
+at a client's screen — `status`, `unread` off (the person looked) or on (a
+notification its delivery table flagged) — and refuses `busy`,
+`backgrounding` and `can_background`, the service's own verdicts.
 
 **The background agents are the service's** (§3.22, PR-1.12d,
 `bgagents.BackgroundAgents`, `start_background`): the agent list's poller
