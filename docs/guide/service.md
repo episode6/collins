@@ -112,7 +112,12 @@ after the agent exited is not a running row, and opening that session
 resumes it. A shell with no agent in it that no window shows — a launch
 whose `claude` never started, or a detached session whose agent has quit
 on its own — is closed by the service rather than kept: it is no running
-session, and nothing would ever attach to it. The service refuses to
+session, and nothing would ever attach to it. A fresh launch is given
+time first: a shell whose agent has never been seen running is held for
+30 s from its spawn (the shell may still be running its rc before it
+starts the typed command) and checked once more at the hold's end, so a
+detach or a crash of the window right after Send does not close a healthy
+launch; attaching within the hold cancels the check. The service refuses to
 spawn a second CLI on a session that is already running ("This session is
 already running in the Collins service"); the window attaches instead.
 

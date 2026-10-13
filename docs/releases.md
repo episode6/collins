@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-12. Full change history: git log for this file.
+fork. Last modified: 2026-10-13. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -76,7 +76,9 @@ downloads of each version, see the
   row; a tab whose agent is still starting when you quit is kept and comes
   back. A shell no window shows and no agent runs in (a launch whose
   `claude` never started, a detached session whose agent quit) is closed
-  by the service instead of kept for good. *Restart service* in the main
+  by the service instead of kept for good — after a 30 s hold from its
+  spawn for a launch whose agent was never seen running, so a detach
+  right after Send does not close a healthy launch. *Restart service* in the main
   menu restarts the service now or once no session is busy, and the tabs
   resume on the new one; the dialog says what ends (the foreground
   sessions, gracefully) and what survives (the `/bg` agents); a service
