@@ -172,29 +172,51 @@ def delete(session_id: str) -> None:
 HISTORY_REQUEST_BUDGET = 900_000
 
 
+def _tail_fitting(text: str, budget: int) -> str:
+    """The longest suffix of *text* whose JSON encoding (`protocol.
+    json_bytes`, the quotes included) is at most *budget* bytes."""
+    from .api.protocol import json_bytes
+
+    if json_bytes(text) <= budget:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if json_bytes(text[len(text) - mid :]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[len(text) - lo :] if lo else ""
+
+
 def history_requests(key: str, shells: list[dict], budget: int = HISTORY_REQUEST_BUDGET) -> list[dict]:
     """The `panel.history` requests that write *shells* (entries of
     ``{"ordinal", "pty"}`` or ``{"ordinal", "text"}``) under *key*: one
-    request when the texts fit *budget* together, else a first request
+    request when it frames within *budget* whole, else a first request
     naming every ordinal (the ptys as they are, every text entry marked
     ``keep`` so its file survives the keep-set) followed by one
     ``partial`` request per text, each alone, so no shell's history is
-    blanked by another's. A text over the budget by itself is cut to its
-    tail. GTK-free; `tests/test_panelhistory.py` pins it."""
+    blanked by another's. A text whose request would pass the budget by
+    itself is cut to its tail. *budget* bounds the **frame**: each request
+    as `protocol.encode` writes it (`json_bytes`), not the texts' UTF-8 —
+    a scrollback dense with newlines, quotes, backslashes or control
+    characters encodes larger than it measures, and a request past
+    `MAX_FRAME` is one the link refuses to send (the review of PR 604,
+    should-fix 1). GTK-free; `tests/test_panelhistory_requests.py` pins it."""
+    from .api.protocol import json_bytes
 
-    def size(entry: dict) -> int:
-        return len(entry.get("text", "").encode("utf-8", "surrogateescape"))
-
-    if sum(size(e) for e in shells) <= budget:
-        return [{"t": "panel.history", "key": key, "shells": shells}]
+    whole = {"t": "panel.history", "key": key, "shells": shells}
+    if json_bytes(whole) <= budget:
+        return [whole]
     first = [{"ordinal": e["ordinal"], "keep": True} if "text" in e else e for e in shells]
     out = [{"t": "panel.history", "key": key, "shells": first}]
     for entry in shells:
         if "text" not in entry:
             continue
-        text = entry["text"]
-        while len(text.encode("utf-8", "surrogateescape")) > budget:
-            text = text[-(len(text) * 9 // 10) :]
-        out.append({"t": "panel.history", "key": key, "partial": True,
-                    "shells": [{"ordinal": entry["ordinal"], "text": text}]})
+        request = {"t": "panel.history", "key": key, "partial": True,
+                   "shells": [{"ordinal": entry["ordinal"], "text": ""}]}
+        # What the frame has left for the text, its two quotes counted once.
+        room = budget - json_bytes(request) + 2
+        request["shells"][0]["text"] = _tail_fitting(entry["text"], room)
+        out.append(request)
     return out

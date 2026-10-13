@@ -67,7 +67,7 @@ def test_a_call_while_disconnected_is_gone(link):
 def test_an_unanswered_call_times_out_as_gone(link, monkeypatch):
     link.connect()
     monkeypatch.setattr("collins.api.client.CALL_TIMEOUT_S", 0.3)
-    monkeypatch.setattr(link, "_send_text", lambda channel, message: None)  # the request never leaves
+    monkeypatch.setattr(link, "_send_text", lambda channel, message, text=None: None)  # never leaves
     started = time.monotonic()
     with pytest.raises(RequestRefused) as refused:
         link.call({"t": "service.status"})
@@ -165,3 +165,26 @@ def test_acks_go_every_64k_or_100ms(link, tmp_path):
     assert pump(5, lambda: any(o >= protocol.ACK_BYTES for _p, o, _t in acks))
     offsets = [o for _p, o, _t in acks]
     assert offsets == sorted(offsets)
+
+
+def test_a_request_the_frame_cannot_carry_is_refused_and_leaves_no_pending(link):
+    """The review of PR 604, should-fix 1 and nit 12: `_blocking` and `send`
+    registered the pending entry before the encode, so an oversized request
+    raised ValueError out of `call` (or out of `send`, with `on_refused`
+    never called) and the entry stayed in the channel's map for good. The
+    encode comes first now, and the refusal is `invalid`."""
+    link.connect()
+    too_big = {
+        "t": "panel.history", "key": "s", "partial": True,
+        "shells": [{"ordinal": 0, "text": "y\n" * 500_000}],  # TEXT_MAX chars, 1.5 MB escaped
+    }
+    with pytest.raises(RequestRefused) as refused:
+        link.call(too_big)
+    assert refused.value.error == "invalid" and "frame" in refused.value.msgid
+    assert link._sync.pending == {} and link._primary.pending == {}
+    outcomes = []
+    link.send(too_big, lambda fields: outcomes.append(("ok", fields)), lambda r: outcomes.append(("err", r.error)))  # noqa: E501
+    assert outcomes == [("err", "invalid")]
+    assert link._primary.pending == {}
+    # The link is still good for a request that fits.
+    assert link.call({"t": "service.status"})["clients"] == 1

@@ -410,8 +410,12 @@ class SocketLink(apilink.Link):
             raise RequestRefused(protocol.ERROR_INVALID, text, {})
         return checked
 
-    def _send_text(self, channel: _Channel, message: dict) -> None:
-        text = protocol.encode(message)
+    def _send_text(self, channel: _Channel, message: dict, text: str | None = None) -> None:
+        """Post *message* to the I/O thread, encoded here (or *text*, already
+        encoded: a request encodes before its pending entry is registered,
+        so an oversized one is refused rather than leaked)."""
+        if text is None:
+            text = protocol.encode(message)
 
         def do_send():
             ws = channel.ws
@@ -434,12 +438,13 @@ class SocketLink(apilink.Link):
         checked = self._check(message)
         if checked.kind != protocol.REQUEST:
             raise RequestRefused(protocol.ERROR_INVALID, f"{checked.type} is an event, not a request", {})
+        text = self._encode_request(checked.type, message)  # before the pending: no entry to leak
         pending = _Pending(checked.type, event=threading.Event())
         with self._lock:
             if channel.ws is None:
                 raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
             channel.pending[message["id"]] = pending
-        self._send_text(channel, message)
+        self._send_text(channel, message, text)
         if not pending.event.wait(timeout):
             with self._lock:
                 channel.pending.pop(message["id"], None)
@@ -486,6 +491,14 @@ class SocketLink(apilink.Link):
             if on_refused is not None:
                 on_refused(RequestRefused(protocol.ERROR_INVALID, f"{checked.type} is an event", {}))
             return
+        try:
+            text = self._encode_request(checked.type, message)
+        except RequestRefused as refusal:
+            if on_refused is not None:
+                on_refused(refusal)
+            else:
+                log.warning("api client: %s refused: %s", checked.type, refusal.msgid)
+            return
         pending = _Pending(checked.type, on_reply=on_reply, on_refused=on_refused)
         with self._lock:
             if not self.connected or self._primary.ws is None:
@@ -496,7 +509,18 @@ class SocketLink(apilink.Link):
                     log.warning("api client: %s refused: not connected", checked.type)
                 return
             self._primary.pending[message["id"]] = pending
-        self._send_text(self._primary, message)
+        self._send_text(self._primary, message, text)
+
+    @staticmethod
+    def _encode_request(kind: str, message: dict) -> str:
+        """The frame of a request, or the `invalid` refusal of one the
+        protocol can't carry (over MAX_FRAME, a lone surrogate): decided
+        before the pending entry exists, so nothing is left behind (the
+        review of PR 604, should-fix 1 and nit 12)."""
+        try:
+            return protocol.encode(message)
+        except ValueError as error:
+            raise RequestRefused(protocol.ERROR_INVALID, f"{kind}: {error}", {}) from error
 
     def send_event(self, message: dict) -> None:
         """A client event on the primary (`resize`, `focus`, `theme`,
