@@ -2208,7 +2208,11 @@ class App(Adw.Application):
                 window.set_reconnecting(reconnecting)
 
     def _on_connection_lost(self, reason: str) -> None:
+        """The link is gone (the banner is `_on_connection_state`'s): a job
+        in flight (a clone, an icon, the login repair) will never report
+        again, so its watcher hears `failed` now (spec §3.20)."""
         log.warning("the service connection was lost: %s", reason)
+        jobclient.reset(self._service_link)
 
     def _on_connected(self, first: bool) -> None:
         """Connected: on the first time the mirrors are built next

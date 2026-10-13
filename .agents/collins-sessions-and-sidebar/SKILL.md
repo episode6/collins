@@ -169,7 +169,11 @@ history through its notification center, the marks through
 (kind and arguments, answered with an id) and `job` events (`running`
 with progress or a partial result, then `done`, `failed`, `refused` or
 `cancelled`), run by `service/jobs.py`'s `JobRunner` on daemon threads and
-read through `jobclient.start(kind, args, on_event)`. Worktree recovery
+read through `jobclient.start(kind, args, on_event)`. A job in flight when
+the link is lost never reports again (the service forgets a gone client's
+jobs; the reconnect is a new client), so `App._on_connection_lost` calls
+`jobclient.reset(link)` and every watcher hears one final `failed`
+("The connection to the service was lost"). Worktree recovery
 (`worktree.trash`, `worktree.restore`: `sessions.trash_worktree` /
 `restore_worktree` on the service's machine), the chat folder made and
 trusted before its session starts (`chats.trust`: `chats.create_chat_dir`

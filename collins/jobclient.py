@@ -55,7 +55,7 @@ class Jobs:
 
     def __init__(self, link) -> None:
         self._link = link
-        self._watchers: dict[str, Callable[[JobEvent], None]] = {}
+        self._watchers: dict[str, tuple[str, Callable[[JobEvent], None]]] = {}  # job id -> (kind, watcher)
         self._early: dict[str, list[dict]] = {}
         link.on("job", self._on_job)
 
@@ -66,10 +66,26 @@ class Jobs:
             on_event(JobEvent("", kind, protocol.JOB_REFUSED, translate(refusal.msgid, refusal.details)))
             return None
         job_id = reply["job"]
-        self._watchers[job_id] = on_event
+        self._watchers[job_id] = (kind, on_event)
         for event in self._early.pop(job_id, []):
             self._hand(job_id, event)
         return job_id
+
+    def reset(self) -> None:
+        """The link is lost (spec §3.20; the review of PR 604, should-fix
+        3): the service forgets this client's jobs (`jobs.forget` in
+        `client_gone`) and a reconnect is a new client, so no job in flight
+        will ever report again. Every watcher hears one final ``failed``
+        now, instead of a spinner that never stops; events held early are
+        dropped with the jobs they were for."""
+        watchers, self._watchers = self._watchers, {}
+        self._early.clear()
+        text = _("The connection to the service was lost")
+        for job_id, (kind, watcher) in watchers.items():
+            try:
+                watcher(JobEvent(job_id, kind, protocol.JOB_FAILED, text))
+            except Exception:
+                log.exception("jobs: a %s watcher failed", kind)
 
     def cancel(self, job_id: str | None) -> None:
         if not job_id or job_id not in self._watchers:
@@ -88,11 +104,12 @@ class Jobs:
 
     def _hand(self, job_id: str, event: dict) -> None:
         state = event.get("state", "")
-        watcher = self._watchers.get(job_id)
+        entry = self._watchers.get(job_id)
         if state != protocol.JOB_RUNNING:
             self._watchers.pop(job_id, None)
-        if watcher is None:
+        if entry is None:
             return
+        _kind, watcher = entry
         result = event.get("result")
         try:
             watcher(
@@ -116,6 +133,14 @@ def jobs_for(link) -> Jobs:
     if jobs is None or jobs._link is not link:
         jobs = _by_link[id(link)] = Jobs(link)
     return jobs
+
+
+def reset(link) -> None:
+    """The link was lost: settle every job started over it (`Jobs.reset`).
+    Nothing to do when no job was ever started on it."""
+    jobs = _by_link.get(id(link))
+    if jobs is not None and jobs._link is link:
+        jobs.reset()
 
 
 def start(kind: str, args: dict, on_event: Callable[[JobEvent], None]) -> str | None:
