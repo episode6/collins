@@ -135,7 +135,7 @@ import secrets
 import shutil
 import stat as stat_mod
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -698,7 +698,7 @@ def _undo(dir_fd: int, name: str, fd: int) -> None:
         pass
 
 
-def _remove_contents(fd: int) -> None:
+def _remove_contents(fd: int, ours: bool = False, spare: Collection[tuple[int, int]] = ()) -> bool:
     """Everything inside the held directory *fd* removed through it (D53:
     an fd-relative `rmtree`, never a path): the entries from
     `os.scandir(fd)`, each kind from a stat relative to *fd*, a file or
@@ -707,31 +707,63 @@ def _remove_contents(fd: int) -> None:
     never followed), emptied the same way and then `rmdir`ed by name
     only while the name still holds the emptied directory (`_holds`;
     `rmdir` removes an empty directory and nothing else). The first
-    `OSError` is raised, as `shutil.rmtree` raises its first."""
+    `OSError` is raised, as `shutil.rmtree` raises its first.
+
+    *ours* is the undo of the service's own temporary tree (`_copy_tree`,
+    `_walk`) and nothing else: each directory is made writable first,
+    `fchmod(fd, 0o700)` **through its descriptor** (never by name), since
+    the walk gave it its source's mode and a folder copied from a
+    read-only one (0555) would otherwise refuse the `unlink`s inside it
+    and stay behind. A copied directory can always be opened here: its
+    source was opened for reading, so its mode has the owner's read bit.
+    A move's source removal never passes it: `shutil.rmtree` did not
+    chmod what it removed either, and a source the user made read-only
+    is "failed, both halves kept" (D46).
+
+    *spare* holds the `(st_dev, st_ino)` of directories that were swapped
+    onto a temporary name inside the tree and refused (`_make_temp_dir`):
+    not the service's, so never opened, chmodded or removed, and the
+    directories above one are left standing around it. Returns whether
+    *fd* was emptied (False only when something was spared)."""
+    emptied = True
+    if ours:
+        try:
+            os.fchmod(fd, 0o700)
+        except OSError:
+            pass  # not ours to chmod after all: the removal below says why it failed
     with os.scandir(fd) as entries:
         names = [entry.name for entry in entries]
     for name in names:
         st = os.stat(name, dir_fd=fd, follow_symlinks=False)
         if stat_mod.S_ISDIR(st.st_mode):
+            if (st.st_dev, st.st_ino) in spare:
+                emptied = False
+                continue
             cfd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=fd)
             try:
-                _remove_contents(cfd)
-                if _holds(fd, name, cfd):
+                if not _remove_contents(cfd, ours, spare):
+                    emptied = False
+                elif _holds(fd, name, cfd):
                     os.rmdir(name, dir_fd=fd)
             finally:
                 _close(cfd)
         else:
             os.unlink(name, dir_fd=fd)
+    return emptied
 
 
-def _remove_tree(dir_fd: int, name: str, fd: int) -> None:
+def _remove_tree(
+    dir_fd: int, name: str, fd: int, ours: bool = False, spare: Collection[tuple[int, int]] = ()
+) -> None:
     """The directory *name* of the held *dir_fd*, whose own descriptor
     *fd* is held, removed: its contents through *fd* (`_remove_contents`),
     then the emptied directory by name under `_holds`. The source's
     removal after a cross-filesystem copy (D53) and a failed tree copy's
-    undo (`_copy_tree`) are both this; neither names the tree's path."""
-    _remove_contents(fd)
-    if _holds(dir_fd, name, fd):
+    undo (`_copy_tree`, with *ours*: its directories made writable
+    through their descriptors first, and *spare* what was swapped into
+    it and refused, which keeps the directories around it) are both
+    this; neither names the tree's path."""
+    if _remove_contents(fd, ours, spare) and _holds(dir_fd, name, fd):
         os.rmdir(name, dir_fd=dir_fd)
 
 
@@ -739,8 +771,74 @@ def _temp_name() -> str:
     """A name nothing can guess, for a directory built in place and landed
     exclusively afterwards (`_copy_tree`, D53): hidden, so a tree with
     hidden files off never shows it, and short, so it fits beside any
-    name the destination takes."""
+    name the destination takes. Unguessable, not unobservable: a listing
+    or an inotify watch of the destination reads it the moment it is
+    made (`_make_temp_dir` says what is checked for that reason)."""
     return f".collins-{secrets.token_hex(12)}"
+
+
+class _NotOurs(OSError):
+    """What `_make_temp_dir` opened is not the directory it made; `inode`
+    is its `(st_dev, st_ino)`, for the undo to leave it alone."""
+
+    inode: tuple[int, int] = (0, 0)
+
+
+class _WalkErrors(list):
+    """A tree copy's error entries (`_walk`), with the directories that
+    were refused as not the service's own (`spare`, for the undo)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.spare: set[tuple[int, int]] = set()
+
+
+def _make_temp_dir(dir_fd: int) -> tuple[str, int]:
+    """A fresh directory of the service's own in the held *dir_fd*, for a
+    tree copy to build in: `(name, fd)`, the descriptor the caller's to
+    close. `os.mkdir` of a `_temp_name` (0700 until the walk gives it its
+    source's mode), then the open by that name `O_DIRECTORY|O_NOFOLLOW`.
+    These are two calls, and the name can be read by anyone watching the
+    destination, so what the descriptor holds is **checked before a byte
+    is written through it**: it must be owned by the service's uid
+    (`fstat`) and empty (a `scandir` of the descriptor). Anything else is
+    not the directory this call made: the entry fails (`_NotOurs`,
+    `ESTALE`), nothing is written into it and nothing in it is removed;
+    it is left where the swap put it (under the temporary name; for a
+    subdirectory of a tree, inside what the failed copy's undo then
+    leaves of the temporary tree, `_remove_contents`'s *spare*).
+
+    What that does and does not guarantee: a directory with contents, or
+    another user's, swapped onto the name between the two calls is never
+    filled, chmodded, landed or emptied. What remains is an **empty
+    directory of the same owner** swapped for the empty one just made,
+    which the copy then uses as its own (and, landed or removed, treats
+    as its own); and a link or a file swapped in is refused by the open.
+    When the open itself fails (`EMFILE`, say) the directory just made
+    is `rmdir`ed by name under the held parent, which removes it only if
+    it is still empty."""
+    tmp = _temp_name()
+    os.mkdir(tmp, 0o700, dir_fd=dir_fd)
+    try:
+        fd = os.open(tmp, _DIR_NOFOLLOW_FLAGS, dir_fd=dir_fd)
+    except BaseException:
+        try:
+            os.rmdir(tmp, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+    try:
+        st = os.fstat(fd)
+        with os.scandir(fd) as entries:
+            empty = next(entries, None) is None
+        if st.st_uid != os.geteuid() or not empty:
+            error = _NotOurs(errno.ESTALE, f"Not the folder this copy made: {tmp}")
+            error.inode = (st.st_dev, st.st_ino)
+            raise error
+    except BaseException:
+        _close(fd)
+        raise
+    return tmp, fd
 
 
 def _close(*fds: int | None) -> None:
@@ -887,9 +985,12 @@ def _copy_tree(
     a file swapped in is refused, never followed: Linux answers `ENOTDIR`
     for a link under that pair of flags, `ELOOP` only without
     `O_DIRECTORY`), the new tree **built under a temporary name nothing
-    can guess** (`_temp_name`: `os.mkdir` then the open by that name,
-    which nothing can have swapped in between, D53) and filled through
-    that descriptor by the walk (`_walk`, everything relative to
+    can guess** (`_make_temp_dir`, D53: `os.mkdir` of a `_temp_name`,
+    the open by that name, and a check through the descriptor that what
+    was opened is the service's own empty directory; the name can be
+    observed, so a directory swapped in between the two calls is not
+    impossible, only refused unless it is an empty one of the same
+    owner) and filled through that descriptor by the walk (`_walk`, everything relative to
     descriptors; `shutil.copytree` is not used, since it walks and stats
     by path), then **landed exclusively** on *newname* with the move's
     own primitive (`_move_exclusive`: `renameat2(RENAME_NOREPLACE)`, the
@@ -903,21 +1004,26 @@ def _copy_tree(
     it (`copytree`'s shape: `(source, target, words)` per entry, the two
     paths spelled from *labels*, the tree's two paths as the request
     named them — words for the banner, never opened), and like any other
-    failure past the `mkdir` the built tree is removed first through its
-    descriptor (`_remove_tree`, D46: only what this operation made, only
-    while it holds it; the temporary name was the service's alone, so
-    whatever was put inside it goes with it), nothing left at any name.
+    failure once the temporary directory is held the built tree is
+    removed first through its descriptor (`_remove_tree` with `ours`,
+    D46: only what this operation made, only while it holds it, each of
+    its directories made writable through its descriptor first so a
+    folder copied from a read-only one goes too; the temporary name was
+    the service's alone, so whatever was put inside it goes with it),
+    nothing left at any name. Two things can still leave a
+    `.collins-<hex>` name behind: a service killed while the copy runs
+    (nothing sweeps it; it is safe to delete), and a directory that was
+    swapped onto the temporary name and refused, which is not the
+    service's to remove.
     Returns the top source directory's descriptor, still open, for a
     move's check that the source name still holds what was copied (the
     caller closes it), and the name the tree landed under; closed here
     on any failure."""
     sfd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=src_fd)
     try:
-        tmp = _temp_name()
-        os.mkdir(tmp, 0o777, dir_fd=dst_fd)
-        dfd = os.open(tmp, _DIR_NOFOLLOW_FLAGS, dir_fd=dst_fd)
+        tmp, dfd = _make_temp_dir(dst_fd)
+        errors = _WalkErrors()
         try:
-            errors: list[tuple[str, str, str]] = []
             _walk(sfd, dfd, *(labels or (name, newname)), errors)
             if errors:
                 raise shutil.Error(errors)
@@ -932,7 +1038,7 @@ def _copy_tree(
                 raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), name, None, newname)
         except BaseException:
             try:
-                _remove_tree(dst_fd, tmp, dfd)
+                _remove_tree(dst_fd, tmp, dfd, ours=True, spare=errors.spare)
             except OSError:
                 pass
             raise
@@ -944,13 +1050,13 @@ def _copy_tree(
     return sfd, landing
 
 
-def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: list) -> None:
+def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: _WalkErrors) -> None:
     """One directory of the tree copy, *sfd* into *dfd*: each entry's kind
     from a stat relative to *sfd* (never `entry.is_dir()`, whose
     `DT_UNKNOWN` fallback stats by a relative name); a directory recurses
     the top's way (`_copy_tree`'s: its own `O_NOFOLLOW` open under *sfd*,
-    a temporary name made and opened under *dfd*, which nothing can swap
-    in between, then landed exclusively on the entry's name: a name
+    a temporary directory made, opened and checked under *dfd*
+    (`_make_temp_dir`), then landed exclusively on the entry's name: a name
     taken inside the new tree, a link planted where the directory is to
     go, is `EEXIST`, never followed and never written into, the built
     subtree removed), a link and a regular file take `_copy_entry`,
@@ -966,15 +1072,13 @@ def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: list) -> N
             if stat_mod.S_ISDIR(st.st_mode):
                 csfd = os.open(entry, _DIR_NOFOLLOW_FLAGS, dir_fd=sfd)
                 try:
-                    tmp = _temp_name()
-                    os.mkdir(tmp, 0o777, dir_fd=dfd)
-                    cdfd = os.open(tmp, _DIR_NOFOLLOW_FLAGS, dir_fd=dfd)
+                    tmp, cdfd = _make_temp_dir(dfd)
                     try:
                         _walk(csfd, cdfd, src_path, dst_path, errors)
                         _land_in_place(dfd, tmp, entry)
                     except BaseException:
                         try:
-                            _remove_tree(dfd, tmp, cdfd)
+                            _remove_tree(dfd, tmp, cdfd, ours=True, spare=errors.spare)
                         except OSError:
                             pass
                         raise
@@ -987,6 +1091,8 @@ def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: list) -> N
             else:
                 raise OSError(errno.ENOTSUP, f"Not a regular file: {entry}")
         except OSError as err:
+            if isinstance(err, _NotOurs):
+                errors.spare.add(err.inode)
             errors.append((src_path, dst_path, str(err)))
     try:
         _copy_metadata(sfd, dfd, os.fstat(sfd))
@@ -1058,7 +1164,7 @@ def _is_dir_entry(dir_fd: int, name: str) -> bool:
 
 def _move_exclusive(
     src_fd: int, name: str, dst_fd: int, newname: str, labels: tuple[str, str] | None = None
-) -> None:
+) -> int | None:
     """*name* of the held *src_fd* moved to *newname* in the held *dst_fd*,
     which must not be there (a rename, or a cut's paste), in the spec's
     order: `_rename_noreplace`; where the flag is not supported, the

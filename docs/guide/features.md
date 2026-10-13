@@ -508,7 +508,11 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   moment, not only against your own clicks; a cut moves, and an open file
   follows its rename or move with its unsaved edits; a big folder copy
   takes as long as it takes, with the rest of the window live, and
-  appears whole or not at all). Copies
+  appears whole or not at all: it is built under a hidden
+  `.collins-…` name beside where it will land and renamed when it is
+  complete. A failed copy removes that folder itself; if the service is
+  stopped while a copy is still running, the hidden folder stays, and
+  it is an unfinished copy that is safe to delete). Copies
   travel through the system clipboard as Collins' own
   `collins://` references to the service's files — and, when the service is
   this machine, as ordinary file URIs too, so files round-trip with your

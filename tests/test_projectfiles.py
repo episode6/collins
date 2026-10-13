@@ -2250,3 +2250,212 @@ def test_a_recursion_error_fails_one_entry_and_the_others_stand(tmp_path, monkey
     assert [o.error for o in outcomes] == [None, PasteError.FAILED, None] and _fds() == before
     assert "recursion" in outcomes[1].message
     assert sorted(os.listdir(tmp_path / "dest")) == ["a.txt", "z.txt"]  # the tree's temporary name gone too
+
+
+# -- the second round on PR 613: the undo of a read-only tree, the temporary directory checked --
+
+
+@pytest.mark.parametrize("shape", ["subfolder", "top", "unreadable", "cut"])
+def test_a_failed_copy_of_a_tree_with_a_read_only_folder_leaves_nothing(tmp_path, monkeypatch, shape):
+    """The verification of 71f5b4e, should-fix 1: the walk gives each new
+    directory its source's mode, so a folder copied from a 0555 one
+    refused the undo's `unlink`s (`EACCES`, swallowed) and the
+    `.collins-<hex>` tree stayed, one more per retry. The undo of the
+    service's own temporary tree makes each directory writable through
+    its descriptor first; nothing is left at any name."""
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "tree"
+    (src / "ro").mkdir(parents=True)
+    (src / "ro" / "f").write_text("f")
+    if shape == "unreadable":
+        (src / "secret").write_text("s")
+        os.chmod(src / "secret", 0o000)
+    else:
+        os.mkfifo(src / "pipe")
+    os.chmod(src / "ro", 0o555)
+    if shape == "top":
+        os.chmod(src, 0o555)
+    if shape == "cut":
+        _force_copy_path(monkeypatch)
+    before = _fds()
+    try:
+        for _retry in range(2):
+            (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)], shape == "cut")
+            if shape == "unreadable" and os.geteuid() == 0:
+                assert outcome.error is None  # root reads it: nothing fails
+                return
+            assert outcome.error is PasteError.FAILED
+            assert os.listdir(tmp_path / "dest") == [] and _fds() == before
+        assert (src / "ro" / "f").read_text() == "f"  # a cut's source intact
+        assert stat.S_IMODE((src / "ro").stat().st_mode) == 0o555  # and never chmodded
+    finally:
+        for folder in (src, src / "ro"):
+            os.chmod(folder, 0o755)
+
+
+def test_a_read_only_folder_still_lands_read_only(tmp_path):
+    """The control: with nothing failing, the mode the undo would lift is
+    the mode the copy lands with."""
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "tree"
+    (src / "ro").mkdir(parents=True)
+    (src / "ro" / "f").write_text("f")
+    os.chmod(src / "ro", 0o555)
+    try:
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+        assert outcome.error is None and sorted(os.listdir(tmp_path / "dest")) == ["tree"]
+        assert stat.S_IMODE((outcome.target / "ro").stat().st_mode) == 0o555
+    finally:
+        os.chmod(src / "ro", 0o755)
+        os.chmod(tmp_path / "dest" / "tree" / "ro", 0o755)
+
+
+def test_a_moves_source_removal_never_chmods_a_read_only_folder(tmp_path, monkeypatch):
+    """The lift is the undo's alone: a cut across filesystems whose source
+    has a read-only folder is still "failed, both halves kept" (D46), the
+    source folder's mode and contents as they were."""
+    _force_copy_path(monkeypatch)
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "tree"
+    (src / "ro").mkdir(parents=True)
+    (src / "ro" / "f").write_text("f")
+    os.chmod(src / "ro", 0o555)
+    if os.geteuid() == 0:
+        pytest.skip("root removes inside a read-only folder")
+    try:
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)], move=True)
+        assert outcome.error is PasteError.FAILED
+        assert stat.S_IMODE((src / "ro").stat().st_mode) == 0o555
+        assert (src / "ro" / "f").read_text() == "f"
+        assert (tmp_path / "dest" / "tree" / "ro" / "f").read_text() == "f"
+    finally:
+        os.chmod(src / "ro", 0o755)
+        os.chmod(tmp_path / "dest" / "tree" / "ro", 0o755)
+
+
+def _swap_onto_the_temporary_name(monkeypatch, victim: Path, at: int = 1) -> list[str]:
+    """`os.mkdir` patched so that the *at*-th temporary directory made is
+    replaced, before it is opened, by *victim* renamed onto its name (a
+    watcher that read the name off the destination). Returns the names
+    made."""
+    real_mkdir = projectfiles.os.mkdir
+    made: list[str] = []
+
+    def swapping_mkdir(path, *args, **kwargs):
+        real_mkdir(path, *args, **kwargs)
+        if os.fspath(path).startswith(".collins-"):
+            made.append(os.fspath(path))
+            if len(made) == at:
+                os.rmdir(path, dir_fd=kwargs["dir_fd"])
+                os.rename(victim, path, dst_dir_fd=kwargs["dir_fd"])
+
+    monkeypatch.setattr(projectfiles.os, "mkdir", swapping_mkdir)
+    return made
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_a_directory_swapped_onto_the_temporary_name_is_neither_filled_nor_emptied(
+    tmp_path, monkeypatch, fails
+):
+    """The verification of 71f5b4e, nits 1 and 2 (its forced probe V1): the
+    `mkdir` and the open by name are two calls and the name can be read
+    off the destination, so a directory with contents renamed onto it in
+    between was filled, `fchmod`ed and landed as the copy, and a copy
+    that then failed emptied it. What the descriptor holds is checked
+    first (owned by the service, empty): the entry fails, nothing is
+    written into the directory and nothing in it is removed."""
+    (tmp_path / "d").mkdir()
+    src = tmp_path / "t"
+    (src / "sub").mkdir(parents=True)
+    (src / "sub" / "f").write_text("f")
+    os.chmod(src, 0o700)
+    if fails:
+        os.mkfifo(src / "pipe")
+    victim = tmp_path / "victim"
+    (victim / "deep").mkdir(parents=True)
+    (victim / "deep" / "precious").write_text("PRECIOUS")
+    os.chmod(victim, 0o755)
+    made = _swap_onto_the_temporary_name(monkeypatch, victim)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(src)])
+    monkeypatch.undo()
+    assert outcome.error is PasteError.FAILED and "Not the folder this copy made" in outcome.message
+    assert _fds() == before and len(made) == 1  # refused before anything else was made
+    assert os.listdir(tmp_path / "d") == made  # nothing landed; the stranger's left where it was put
+    swapped = tmp_path / "d" / made[0]
+    assert _tree_of(swapped) == ["deep", "deep/precious:PRECIOUS"]
+    assert stat.S_IMODE(swapped.stat().st_mode) == 0o755  # not the source's 0o700
+
+
+def test_a_directory_swapped_in_below_the_top_is_spared_by_the_undo(tmp_path, monkeypatch):
+    """The same swap at a subdirectory's temporary name, inside the
+    service's own temporary tree: the entry is an error, the copy fails,
+    and the undo removes what the copy wrote but neither opens nor
+    removes the directory that is not its own (it stays, with the
+    temporary directories around it)."""
+    (tmp_path / "d").mkdir()
+    src = tmp_path / "t"
+    (src / "sub").mkdir(parents=True)
+    (src / "sub" / "f").write_text("f")
+    (src / "top.txt").write_text("top")
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (victim / "precious").write_text("PRECIOUS")
+    made = _swap_onto_the_temporary_name(monkeypatch, victim, at=2)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(src)])
+    monkeypatch.undo()
+    assert outcome.error is PasteError.FAILED and "Not the folder this copy made" in outcome.message
+    assert _fds() == before and len(made) == 2
+    top, sub = made
+    assert _tree_of(tmp_path / "d") == [top, f"{top}/{sub}", f"{top}/{sub}/precious:PRECIOUS"]
+
+
+def test_a_temporary_directory_of_another_owner_is_refused(tmp_path, monkeypatch):
+    """The owner half of the check: what was opened must be the service's
+    uid's."""
+    (tmp_path / "d").mkdir()
+    (tmp_path / "t").mkdir()
+    (tmp_path / "t" / "f").write_text("f")
+    monkeypatch.setattr(projectfiles.os, "geteuid", lambda: os.getuid() + 1)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(tmp_path / "t")])
+    monkeypatch.undo()
+    assert outcome.error is PasteError.FAILED and "Not the folder this copy made" in outcome.message
+    assert _fds() == before
+    (left,) = os.listdir(tmp_path / "d")
+    assert left.startswith(".collins-") and os.listdir(tmp_path / "d" / left) == []  # never written into
+
+
+@pytest.mark.parametrize("depth", ["top", "sub"])
+def test_a_temporary_directory_that_cannot_be_opened_is_removed(tmp_path, monkeypatch, depth):
+    """The verification of 71f5b4e, nit 3: `mkdir` succeeded and the open
+    by name failed (`EMFILE`), and the empty directory stayed. It is
+    `rmdir`ed by name under the held parent, which removes it only while
+    it is empty."""
+    import errno
+
+    (tmp_path / "d").mkdir()
+    src = tmp_path / "t"
+    (src / "sub").mkdir(parents=True)
+    (src / "sub" / "f").write_text("f")
+    real_open = projectfiles.os.open
+    opened: list[str] = []
+
+    def failing_open(path, flags, mode=0o777, *, dir_fd=None):
+        if isinstance(path, str) and path.startswith(".collins-"):
+            opened.append(path)
+            if len(opened) == (1 if depth == "top" else 2):
+                raise OSError(errno.EMFILE, "Too many open files")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(projectfiles.os, "open", failing_open)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(src)])
+    monkeypatch.undo()
+    assert outcome.error is PasteError.FAILED and "Too many open files" in outcome.message
+    assert os.listdir(tmp_path / "d") == [] and _fds() == before
+
+
+def test_move_exclusive_says_what_it_returns():
+    assert projectfiles._move_exclusive.__annotations__["return"] == "int | None"

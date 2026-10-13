@@ -415,18 +415,48 @@ touches the disk.
   new tree, the top and each subdirectory, is built under a temporary
   name nothing can guess and landed exclusively** (D53, the Fable
   review's S1: `_temp_name` is `.collins-<24 hex>`, made and opened
-  under the held parent — a `mkdir` then an open *by the final name* let
-  a directory swapped in between be opened, written into and
-  `fchmod`ed, which `O_NOFOLLOW` only refuses for a link — then
-  `_land_in_place`: `renameat2(RENAME_NOREPLACE)` onto the final name,
+  under the held parent by `_make_temp_dir` — a `mkdir` then an open
+  *by the final name* let a directory swapped in between be opened,
+  written into and `fchmod`ed, which `O_NOFOLLOW` only refuses for a
+  link — then `_land_in_place`: `renameat2(RENAME_NOREPLACE)` onto the final name,
   the placeholder path where the flag is not supported). So a
   half-copied tree is never visible under its final name, `EEXIST` at
   the landing is the next "(copy N)" with the built tree renamed there
   and never walked again (`_paste_one`'s `next_name`), and a tree copy
-  that fails partway (an error entry, a `RecursionError`, anything past
-  the `mkdir`) is removed through its own descriptor (`_remove_tree`),
-  nothing left at any name: the temporary name was the service's alone,
-  so whatever was put inside it meanwhile goes with it. (Linux answers
+  that fails partway (an error entry, a `RecursionError`, anything once
+  the temporary directory is held) is removed through its own
+  descriptor (`_remove_tree(..., ours=True)`), nothing left at any name:
+  the temporary name was the service's alone, so whatever was put inside
+  it meanwhile goes with it. `ours` is the undo's alone: each directory
+  is `fchmod`ed 0700 **through its descriptor** before it is emptied,
+  because the walk gave it its source's mode and a folder copied from a
+  0555 one would otherwise refuse the `unlink`s inside it and the whole
+  `.collins-<hex>` tree would stay, one more per retry; a move's source
+  removal never passes it (a read-only source folder is "failed, both
+  halves kept", as `shutil.rmtree` left it). **What the temporary name
+  guarantees, exactly:** it is unguessable, not unobservable (a listing
+  or an inotify watch of the destination reads it the moment it is
+  made), and `mkdir` then the open by name are still two calls. So
+  `_make_temp_dir` checks what the descriptor holds before a byte goes
+  through it: owned by the service's uid (`fstat`) and empty (a
+  `scandir` of the descriptor). Anything else fails the entry
+  (`_NotOurs`, "Not the folder this copy made"), is never written into,
+  chmodded or landed, and is never emptied either: it is left where the
+  swap put it, and when that was a subdirectory's temporary name inside
+  the tree, the undo spares it by inode (`_WalkErrors.spare`) and
+  leaves the temporary directories around it standing. What is not
+  closed: an *empty directory of the same owner* swapped for the empty
+  one just made is used as the copy's own. When the open after the
+  `mkdir` fails (`EMFILE`), the directory is `rmdir`ed by name under the
+  held parent (only an empty one goes). **What can leave a
+  `.collins-<hex>` folder behind:** a refused swap, as above, and a
+  service that ends mid-copy (a restart or an upgrade during a long
+  paste, D41 and D52's `KillMode=process`): the half-built tree stays
+  under its hidden temporary name, hidden files off never shows it, git
+  sees it as untracked, and **nothing sweeps it** (the service does not
+  record in-flight copies, so it could not know where to look; left for
+  the Fable review). It is a copy that did not finish and is safe to
+  delete. (Linux answers
   `ENOTDIR`, not `ELOOP`, for a link opened `O_DIRECTORY|O_NOFOLLOW`:
   an error entry either way, nothing followed.) **A move** (a cut's paste, and a
   rename; `_move_exclusive`) is `renameat2(src_fd, name, dst_fd,

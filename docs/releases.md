@@ -52,7 +52,10 @@ downloads of each version, see the
   a folder or a file swapped for a link in mid-operation carries nothing
   out of the project and nothing into it; a copy that fails partway
   leaves no partial file or folder behind (a folder is built under a
-  temporary name and appears whole, or not at all), and a failed move
+  hidden temporary name, `.collins-…`, and appears whole, or not at
+  all; a read-only folder inside it does not stop the clean-up; only a
+  service stopped in the middle of a copy leaves that hidden folder,
+  which is safe to delete), and a failed move
   removes only what it put there itself.
   An open file still follows its rename or move with its unsaved edits,
   even when the move took long enough for the editor to be told the old
