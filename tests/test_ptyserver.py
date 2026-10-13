@@ -919,3 +919,23 @@ def test_attaching_an_attached_sink_again_is_idempotent(server):
     assert len(sink.redraws()) == redraws + 1
     assert len([e for e in sink.events if e.get("t") == "pty"]) == events + 1
     assert reply["active"] is True and server.get(pty).active == id(sink)
+
+
+def test_a_re_attach_drops_what_the_sink_still_holds_before_its_redraw(server):
+    """The review of PR 604, should-fix 4: `attach` zeroed `queued` on a
+    re-attach without the sink's `drop_queued()`, and `_redraw` drops only
+    when `queued` is non-zero, so a socket sink's pending frames were
+    released after the redraw. The count stands until the redraw drops."""
+    pty = spawn_cat(server)
+    sink = Sink()
+    server.attach(pty, sink, 100, 30)
+    server.write(pty, b"hello\r")
+    wait_live(sink, b"hello")
+    attachment = server.get(pty).attachments[id(sink)]
+    assert attachment.queued > 0 and sink.drops == 0  # the fake never reports drained
+    server.attach(pty, sink, 100, 30)
+    assert sink.drops == 1 and attachment.queued == 0
+    # A fresh attach has nothing to drop.
+    other = Sink()
+    server.attach(pty, other, 100, 30)
+    assert other.drops == 0

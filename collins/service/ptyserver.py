@@ -818,7 +818,12 @@ class PtyServer:
         if attachment is None:
             attachment = pty.attachments[key] = _Attachment(sink, cols, rows)
         else:
-            attachment.cols, attachment.rows, attachment.queued = cols, rows, 0
+            # A re-attach: the grid is the new one; `queued` stays as it is
+            # so `_redraw` drops what the sink still holds of the old
+            # stream (zeroing it here left the socket sink's pending frames
+            # to be released after the redraw, stale output painted over
+            # the fresh screen: the review of PR 604, should-fix 4).
+            attachment.cols, attachment.rows = cols, rows
         became_active = False
         if pty.active is None:
             pty.active = key

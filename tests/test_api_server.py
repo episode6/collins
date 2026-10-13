@@ -421,6 +421,47 @@ def test_the_cut_off_redraws_and_acks_after_a_drop_still_count(served, monkeypat
     client.close()
 
 
+def test_a_re_attach_with_pending_bytes_replays_nothing_after_its_redraw(served, monkeypatch):
+    """The reviewer's probe (PR 604, should-fix 4): ACK_WINDOW lowered, more
+    than a window of output through `cat` never acked, then a second
+    `attach` from the same connection. The sink's pending frames survived
+    the re-attach and the first ack released them as live frames after the
+    redraw: stale output painted over the fresh screen. They are dropped
+    with the redraw now, and an ack afterwards releases nothing."""
+    server, path = served
+    monkeypatch.setattr(protocol, "ACK_WINDOW", 100_000)
+    client = Raw(path)
+    client.hello()
+    pty = client.request({"t": "spawn", "kind": "shell", "cwd": "/tmp", "cols": 200, "rows": 24})["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 200, "rows": 24})
+    assert pump(2, lambda: any(h.flags & protocol.FLAG_REDRAW_END for h, _ in client.frames))
+    sink = server.clients["client-1"].sink_for(pty)
+    for _ in range(45):  # ~360 KB echoed back, nothing acked: the window fills, the rest pends
+        client.send_binary(protocol.pack_frame(protocol.TAG_INPUT, 0, pty, 0, b"y" * 4000 + b"\r"))
+    assert pump(5, lambda: sink.pending_bytes > 100_000)
+    assert sink.sent >= 100_000
+    # Let the echo finish: what pends afterwards is all of the old stream.
+    settled = [sink.pending_bytes, time.monotonic()]
+
+    def quiet():
+        if sink.pending_bytes != settled[0]:
+            settled[:] = [sink.pending_bytes, time.monotonic()]
+        return time.monotonic() - settled[1] > 0.5
+
+    assert pump(10, quiet)
+    client.frames.clear()
+    client.request({"t": "attach", "pty": pty, "cols": 200, "rows": 24})
+    assert pump(2, lambda: any(h.flags & protocol.FLAG_REDRAW_END for h, _ in client.frames))
+    assert sink.pending_bytes == 0 and not sink.pending
+    client.frames.clear()
+    client.send({"t": "ack", "pty": pty, "offset": sink.sent})
+    assert pump(1, lambda: sink.acked == sink.sent)
+    pump(0.3)
+    live = [(h, p) for h, p in client.frames if not h.flags]
+    assert live == [], f"{len(live)} stale live frame(s) after the redraw"
+    client.close()
+
+
 def test_service_restart_now_is_served_and_idle_refused(tmp_path, monkeypatch):
     monkeypatch.setenv("SHELL", CAT)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
