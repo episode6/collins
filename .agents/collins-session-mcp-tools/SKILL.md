@@ -117,7 +117,9 @@ import it. It holds:
   per-client `Gio.FileMonitor`s on the service (at most 512 a client)
   pushing `file-changed {handle, path, mtime, size, gone}`, debounced
   300 ms; the first stat is compared against the client's `mtime` seed,
-  so a change between the client's read and its watch is an event at once. The handlers are
+  so a change between the client's read and its watch is an event at
+  once; the watch's confinement resolves on a worker like the read's and
+  the write's, and its reply is a `Deferred`. The handlers are
   `service/files.py`'s `Files`, the client's `remotefiles.py`. A message
   over the frame cap is chunked **either way**: `split_message` /
   `join_message` on the first of `CHUNKED_FIELDS` (`stdout`, `text`) a

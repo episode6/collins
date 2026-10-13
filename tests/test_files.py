@@ -344,6 +344,67 @@ def test_a_directory_watch_is_not_served_yet(served):
 # -- the helpers -----------------------------------------------------------------------
 
 
+def _ask(core, client, message: dict):
+    """The handler's answer to *message* as the core would route it: a
+    `Deferred` here, settled once the worker ran (the test runs it)."""
+    message = {**message, "id": 99}
+    checked = protocol.validate(message, protocol.CLIENT)
+    assert not isinstance(checked, protocol.Refusal), checked
+    return core.files.handle(checked, client)
+
+
+def test_a_watch_confines_on_the_worker_not_the_main_loop(served, monkeypatch, tmp_path):
+    """The Fable review of PR 609, should-fix 4: `fs.watch` ran `is_inside`
+    (two `Path.resolve` per root) on the main loop. Now the roots' names
+    are read there and the resolving runs on the worker, so the handler's
+    main-loop part resolves nothing; the monitor is installed when the
+    worker's verdict lands, and a path outside is refused the same way."""
+    core, client, project, _events = served
+    client.local = False
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(project)})()]})()
+    workers: list = []
+    core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: workers.append(fn))
+    import pathlib
+
+    resolves: list[str] = []
+    real_resolve = pathlib.Path.resolve
+
+    def counting(self, *args, **kwargs):
+        resolves.append(str(self))
+        return real_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", counting)
+    inside = {"t": "fs.watch", "path": str(project / "a.txt"), "kind": "file", "handle": "w1"}
+    deferred = _ask(core, client, inside)
+    assert isinstance(deferred, protocol.Deferred) and not deferred.settled
+    assert resolves == [] and len(workers) == 1  # the main-loop half resolved no root
+    assert not core.files.watching(client, "w1")
+    workers.pop()()  # the worker: the resolves, then the install lands
+    assert resolves and core.files.watching(client, "w1")
+    assert deferred.settled and deferred.reply.get("ok") is True
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    deferred = _ask(core, client, {"t": "fs.watch", "path": str(outside), "kind": "file", "handle": "w2"})
+    workers.pop()()
+    reply = deferred.reply
+    assert reply["ok"] is False and reply["error"] == protocol.ERROR_REFUSED
+    assert reply["msgid"] == files.OUTSIDE_MSGID
+    assert not core.files.watching(client, "w2")
+
+
+def test_a_watch_whose_client_left_during_confinement_is_not_installed(served):
+    core, client, project, _events = served
+    workers: list = []
+    core.files = files.Files(core, dispatch=lambda fn: fn(), spawn=lambda fn, name: workers.append(fn))
+    inside = {"t": "fs.watch", "path": str(project / "a.txt"), "kind": "file", "handle": "w1"}
+    deferred = _ask(core, client, inside)
+    core.client_gone(client)
+    workers.pop()()
+    assert deferred.settled and deferred.reply["ok"] is False
+    assert deferred.reply["error"] == protocol.ERROR_GONE
+    assert not core.files._watches
+
+
 def test_file_stat_of_a_directory_is_gone(tmp_path):
     assert files.file_stat(str(tmp_path)) == (None, None, True)
     assert files.file_stat(str(tmp_path / "nope")) == (None, None, True)
