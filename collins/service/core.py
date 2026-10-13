@@ -1902,7 +1902,13 @@ class ServiceCore:
         run on a thread, and a directory under a day old is left for the
         next tick (a session the scan has not caught up with). Nothing runs
         before the store's first scan: with no sessions known, every upload
-        would read as an orphan. Never raises."""
+        would read as an orphan. For the same reason a scan that listed no
+        session at all is not trusted (`providers.discover` answers [] when
+        the projects directory is not there — a transient unmount, an
+        unreadable directory — and the store applies it), and the thread
+        checks the projects directory is a readable directory before it
+        scans the uploads: every refusal is logged, nothing is removed.
+        Never raises."""
         from .. import uploads
 
         store = self.store
@@ -1910,18 +1916,28 @@ class ServiceCore:
             return
         known: set[str] = set()
         try:
+            listed = {s.session_id for s in store.all_sessions() if s.session_id}
+            if not listed:
+                log.info("orphan uploads sweep skipped: the store's scan listed no session")
+                return
+            known.update(listed)
             known.update(sid for sid in self.agent_pty_sessions(include_finished=True).values() if sid)
             for record in list(self.sessions.values()):
                 sid = getattr(record.session, "session_id", None)
                 if sid:
                     known.add(sid)
-            known.update(s.session_id for s in store.all_sessions() if s.session_id)
         except Exception:
             log.warning("orphan uploads sweep: the known sessions could not be read", exc_info=True)
             return
+        base = sessions.CLAUDE_PROJECTS_DIR
 
         def sweep() -> None:
             try:
+                try:
+                    os.listdir(base)
+                except OSError as error:
+                    log.info("orphan uploads sweep skipped: %s is not a readable directory (%s)", base, error)
+                    return
                 gone = uploads.sweep_orphans(known)
             except Exception:
                 log.warning("orphan uploads sweep failed", exc_info=True)

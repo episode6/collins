@@ -553,7 +553,11 @@ transcript, or it went outside Collins — never reaches `trash_many` or
 `delete`, so the same tick removes its `uploads/<id>/` once the directory
 is a day old (`ServiceCore.sweep_orphan_uploads` → `uploads.sweep_orphans`:
 the known ids gathered on the main loop, the removes on a thread, nothing
-before the store's first scan, a planted link never followed). An empty
+before the store's first scan, a planted link never followed; a scan that
+listed no session at all is not trusted and the thread checks the projects
+directory is readable before it scans the uploads — `providers.discover`
+answers `[]` when `~/.claude/projects` is not there, and an unmount must
+not read as every session gone). An empty
 upload is refused (400), and one past 64 MiB is 413 on
 its headers with the body drained, never held (`set_accumulate(False)` in
 the early handler).
