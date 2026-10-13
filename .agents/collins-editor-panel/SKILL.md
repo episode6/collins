@@ -90,7 +90,12 @@ files.py` the service's:
   same way). A refusal's words come translated through
   `remotefiles.refusal_words` into the banner; a fresh open closes its tab,
   a reload keeps it. `load_id` still makes a superseded read (a rename's)
-  a no-op.
+  a no-op (`editorfiles.load_applies`: the generation gate, with `_shut`
+  and the page still open). `_retarget_open` re-watches the file under its
+  new path in every case, loading or not: `_on_loaded` re-watches only a
+  fresh open, so a rename during a *reload* once left the watch on the old
+  name, which reported the file deleted, dirtied the buffer and lost the
+  mtime (the Fable review of PR 609).
 - `_fill` holds the buffer's text as LF lines and keeps the file's own
   line ending as `opened.newline` (`editorfiles.fill_text`: the majority
   of CRLF, LF and CR, the first seen on a tie, as `GtkSource.File`'s

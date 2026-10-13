@@ -611,17 +611,22 @@ class EditorPane(Gtk.Box):
                 page.set_title(Path(moved).name)
                 continue
             opened.path = Path(moved)
+            self._open[moved] = opened
             # A save writes to `opened.path`, so this is what keeps Ctrl+S
             # from recreating the old name; a rename keeps the file's mtime,
             # so the one the next save expects stays.
             if opened.loading:
                 # The load in flight is reading the old path, so it is
                 # already doomed: start it again from the new one, which
-                # supersedes it.
+                # supersedes it (`load_id`: the old read's landing is a
+                # no-op, `editorfiles.load_applies`).
                 self._start_load(opened, opened.pending_cursor, reload=opened.reloading)
-            else:
-                self._watch_external_changes(opened)
-            self._open[moved] = opened
+            # The watch moves to the new path in every case: `_on_loaded`
+            # re-watches only a fresh open, so a rename during a *reload*
+            # left the watch on the old name, which then reported the file
+            # deleted (the Fable review of PR 609, should-fix 3). The seed
+            # is the opened mtime: a rename keeps the inode's.
+            self._watch_external_changes(opened)
             page.set_title(("• " if opened.buffer.get_modified() else "") + opened.path.name)
         self._sync_status()
 
@@ -895,21 +900,19 @@ class EditorPane(Gtk.Box):
         self._select_page(page)
 
     def _on_loaded(self, opened: _OpenFile, load_id: int, kind: str, value) -> None:
-        if self._shut:
-            return  # the tab closed while the read was in flight: nothing to fill or watch
-        if load_id != opened.load_id:
-            return  # a newer load (a rename's) owns this buffer now
+        # Looked up under the file's *current* path, since a rename may have
+        # moved it since the load started — and by identity, so a page closed
+        # and reopened meanwhile isn't mistaken for this one. The generation
+        # gate (`editorfiles.load_applies`): the tab closed while the read
+        # was in flight, or a newer load (a rename's) owns this buffer now,
+        # and this landing touches nothing.
+        key = str(opened.path)
+        if not editorfiles.load_applies(load_id, opened.load_id, self._shut, self._open.get(key) is opened):
+            return
         opened.loading = False
         reload = opened.reloading
         opened.reloading = False
         restore_cursor = opened.pending_cursor
-        # Looked up under the file's *current* path, since a rename may have
-        # moved it since the load started — and by identity, so a page closed
-        # and reopened meanwhile isn't mistaken for this one.
-        key = str(opened.path)
-        still_open = self._open.get(key) is opened
-        if not still_open:
-            return
         failure: str | None = None
         if kind != "ok":
             failure = remotefiles.refusal_words(value)

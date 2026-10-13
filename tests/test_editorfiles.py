@@ -34,6 +34,7 @@ from collins.editorfiles import (
     lightbox_zoom_slot,
     lightbox_zoombar_inside,
     list_dir,
+    load_applies,
     pane_layout,
     parse_copied_files,
     paste_entries,
@@ -364,6 +365,24 @@ def test_lightbox_layout_unrealized_window_uses_fallback():
 def test_lightbox_layout_zero_size_image_does_not_divide_by_zero():
     side, w, h = lightbox_layout(0, 0, 1920, 1080)
     assert (w, h) == (LIGHTBOX_MIN_W, LIGHTBOX_MIN_H)
+
+
+# -- load_applies (the generation gate of _on_loaded) ------------------------------
+
+
+def test_a_superseded_loads_landing_is_dropped():
+    """The Fable review of PR 609, should-fix 3: a rename during a load
+    restarts it from the new path and bumps the generation; the old path's
+    read lands later and must touch nothing (its text is the old name's,
+    and acting on it would re-watch or re-fill behind the live load)."""
+    assert load_applies(load_id=1, live_id=1, shut=False, still_open=True) is True
+    assert load_applies(load_id=1, live_id=2, shut=False, still_open=True) is False
+    assert load_applies(load_id=2, live_id=2, shut=False, still_open=True) is True
+
+
+def test_a_landing_after_shutdown_or_on_a_closed_page_is_dropped():
+    assert load_applies(1, 1, shut=True, still_open=True) is False
+    assert load_applies(1, 1, shut=False, still_open=False) is False
 
 
 # -- holds_nul (the client's own refusal of a NUL in fs.read's text) -------------

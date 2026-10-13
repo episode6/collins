@@ -266,6 +266,17 @@ def guess_language_id(path: str | Path, first_line: str = "") -> str | None:
     return None
 
 
+def load_applies(load_id: int, live_id: int, shut: bool, still_open: bool) -> bool:
+    """Whether a read's landing may touch its buffer: the generation gate
+    of `EditorPane._on_loaded`. Each `_start_load` bumps the file's
+    `load_id`, so a landing carries the generation it was started under
+    and a superseded one (a rename restarted the load from the new path,
+    the Fable review of PR 609, should-fix 3) fills nothing, installs no
+    watch and judges no parked change; nor does one that lands after the
+    pane's `shutdown`, or for a page closed meanwhile."""
+    return not shut and load_id == live_id and still_open
+
+
 def holds_nul(text: str) -> bool:
     """Whether *text* (what `fs.read` answered) has a NUL in it: the
     buffer's `set_text` stops at one, so a file shown through it would be

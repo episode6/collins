@@ -16,7 +16,8 @@ text and the new mtime; a save after it writes through `fs.write` and the
 file carries the edit; a clean buffer reloads silently, cursor kept; a
 save over a file that moved underneath is refused `stale` and asks before
 overwriting (the "changed on disk" dialog, stubbed), the file untouched
-until Overwrite; a CRLF file is written back CRLF on every line; a
+until Overwrite; a rename during a silent reload moves the watch to the
+new name; a CRLF file is written back CRLF on every line; a
 deleted file is told and marked dirty; a change that
 waited for a reload is judged even when the reload fails; a save before
 the first read lands writes nothing; a change between the read and the
@@ -370,6 +371,61 @@ def run(root: str) -> int:
         )
     finally:
         remotefiles.read = real_read
+
+    # -- a rename during a silent reload moves the watch (the Fable review of PR 609) --
+    # The reload's read is slowed; the file is renamed on disk and the pane
+    # told (`_retarget_open`, what the tree's rename does) while it is in
+    # flight. The first split version left the service's watch on the old
+    # name: it reported the file deleted, the buffer went dirty, the mtime
+    # was lost and a write to the new name was never seen.
+    pane._banner.set_revealed(False)
+    old_name = os.path.join(root, "a-renamed.txt")
+    new_name = os.path.join(root, "b-renamed.txt")
+    with open(old_name, "w") as fh:
+        fh.write("one\n")
+    pane.open_file(old_name)
+    moved = pane._open[old_name]
+    if not wait_for(lambda: not moved.loading):
+        print("FAIL  the rename case's read never landed")
+        return 1
+    real_read = remotefiles.read
+
+    def slow_reload(path, *args, **kwargs):
+        if path in (old_name, new_name):
+            time.sleep(0.8)
+        return real_read(path, *args, **kwargs)
+
+    remotefiles.read = slow_reload
+    try:
+        write_outside(old_name, "two\n")  # a clean buffer: a silent reload starts
+        if not wait_for(lambda: moved.loading and moved.reloading):
+            print("FAIL  the external write started no reload")
+            return 1
+        from pathlib import Path as _Path
+
+        os.rename(old_name, new_name)
+        pane._retarget_open(_Path(old_name), _Path(new_name))
+        check("the rename re-keys the open file", new_name in pane._open and old_name not in pane._open)
+        if not wait_for(lambda: not moved.loading and buffer_text(moved) == "two"):
+            print("FAIL  the restarted reload never landed:", repr(buffer_text(moved)), moved.loading)
+            return 1
+    finally:
+        remotefiles.read = real_read
+    settle(1.0)
+    check("no false deletion is told after the rename", not pane._banner.get_revealed(), pane._banner.get_title())
+    check("the buffer stays clean", not moved.buffer.get_modified())
+    check("and keeps its mtime", moved.mtime == os.stat(new_name).st_mtime_ns // 1000, moved.mtime)
+    check(
+        "the client's watch names the new path",
+        moved.watch_handle and watcher._watches[moved.watch_handle].path == new_name,
+        moved.watch_handle,
+    )
+    write_outside(new_name, "three\n")
+    if not wait_for(lambda: buffer_text(moved) == "three"):
+        print("FAIL  a write to the renamed file never reached the buffer:", repr(buffer_text(moved)))
+        return 1
+    check("a write to the new name reaches the buffer", buffer_text(moved) == "three")
+    check("with no banner", not pane._banner.get_revealed(), pane._banner.get_title())
 
     # -- a CRLF file keeps CRLF on every line (the Fable review of PR 609) -----------
     # `FileSaver` converted every line ending to the file's type; the first
