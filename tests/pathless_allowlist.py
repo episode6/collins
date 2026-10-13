@@ -195,7 +195,7 @@ LOCAL_EXTRAS = frozenset(
 # written down.
 #
 # Line numbers are as of 2026-10-13 (the round after the Fable review of
-# PR 615, on PR 614's `66dac3c`; the thirteen fix rounds below this PR
+# PR 615, on PR 614's `3aaed7b`; the thirteen fix rounds below this PR
 # moved most of them, and a later rebase may move them again by a few
 # lines). Record only: under
 # D50 nothing here was moved or gated.
@@ -208,18 +208,18 @@ LOCAL_EXTRAS = frozenset(
 #   (dialogs.py:846)
 # - the replay (`replaymodel.read_session_turns`, replayview.py:32) and
 #   `window._open_session_file` through `sessions.session_from_file`
-#   (window.py:7035)
+#   (window.py:7072)
 # - `clonerepo.destination_status` (disk reads per keystroke in the clone
 #   dialog, clonedialog.py:337)
-# - `panelhistory.load_all` (terminal.py:5577) and `panelhistory.delete`
-#   (terminal.py:5657, window.py:2761, 2835, 2916)
+# - `panelhistory.load_all` (terminal.py:5629) and `panelhistory.delete`
+#   (terminal.py:5709, window.py:2761, 2871, 2952)
 # - `clisetup.validate` (prefs.py:1560, welcome.py:283, 325); `pkgrepos`
-#   (sidebar.py:2049, window.py:6238)
+#   (sidebar.py:2049, window.py:6275)
 #
 # From the Opus review of PR 615:
 # 1. `sessions.resume_cwd(session)` (sessions.py: the transcript's tail,
 #    then `Path(cwd).is_dir()`), five call sites: window.py:2124 (every
-#    session open), window.py:3595 (native chat), window.py:5977 (Open in
+#    session open), window.py:3631 (native chat), window.py:6014 (Open in
 #    Ghostty, behind the proof), sidebar.py:1990 (the PR sweep's worker),
 #    and sidebar.py:2979 (`_session_cwd`). **The gate order in
 #    `show_row_menu`**: it reads `local = apilink.is_local()` at
@@ -233,14 +233,14 @@ LOCAL_EXTRAS = frozenset(
 #    CLI (providers.py:359 `Provider.available()`): through
 #    `available_providers()` (window.py:501, 517, 522) and
 #    `default_provider()` (window.py:2215, sidebar.py:633, 2279),
-#    `chat_variants()` (window.py:523, 3573, 3590; sidebar.py:2678),
+#    `chat_variants()` (window.py:523, 3609, 3626; sidebar.py:2678),
 #    `new_command()` (toolclient.py:999), and `continue_command()` at
-#    window.py:2970, whose result goes to the service as the spawn's
+#    window.py:3006, whose result goes to the service as the spawn's
 #    `command_override`: this device's `claude` path typed into the
 #    service's shell.
 # 3. Native chat runs the agent in the client process:
 #    `chatsession.py:193` (`subprocess.Popen(argv, cwd=self.cwd)`, with
-#    `chats.chat_cwd_or_fallback`), built from window.py:3577, 3594.
+#    `chats.chat_cwd_or_fallback`), built from window.py:3613, 3630.
 # 4. `~/.claude.json` read by the client: `sessions.read_mcp_config()`
 #    (dialogs.py:712) and `sessions.configured_mcp_servers(session.cwd)`
 #    (dialogs.py:848).
@@ -260,15 +260,15 @@ LOCAL_EXTRAS = frozenset(
 #    and :1006.
 # 9. Six native choosers that start at a path of the service's with no
 #    gate (`Gio.File.new_for_path` with no read, so the walker sees
-#    nothing): window.py:2309, 2324, 2948, 3547 (from
-#    `_visible_project_dir`), terminal.py:4959 (the composer's attach),
+#    nothing): window.py:2309, 2324, 2984, 3583 (from
+#    `_visible_project_dir`), terminal.py:5011 (the composer's attach),
 #    sandboxchip.py:449; and the composer's attach mentions the picked
 #    path of this device to the service's CLI, where a drop of the same
 #    file uploads. (The three whose starting folder IS read are gated and
-#    on `LOCAL_EXTRAS`: prefs.py:480, clonedialog.py:389, window.py:7027.)
+#    on `LOCAL_EXTRAS`: prefs.py:480, clonedialog.py:389, window.py:7064.)
 #    All of it is PR-3.2's path picker by the spec's 3.11.
 # Lesser: this device's `Path.home()` sent as a service cwd
-#    (terminal.py:1195, 1975, 2042, 2389; sidebar.py:2414; window.py:2006;
+#    (terminal.py:1210, 1991, 2058, 2441; sidebar.py:2414; window.py:2006;
 #    D39's fallback absorbs it) and used to abbreviate service paths:
 #    `formatting.display_path` (formatting.py:405, some twenty call
 #    sites), clonerepo.py:309, and `sidebar._abbreviate_path`
@@ -353,8 +353,8 @@ LOCAL_EXTRAS = frozenset(
 #   `open_containing_folder`. They open nothing themselves; they hand a
 #   path to a program of this device's, which is what a local extra is.
 #   Every one today is gated by hand or works on this device's cached
-#   copy (D51): attachpanel.py:498-516, lightbox.py:339, 776,
-#   terminal.py:315-318, 806, window.py:6061, 6361, footerapps.py:92,
+#   copy (D51): attachpanel.py:507-524, lightbox.py:339, 776,
+#   terminal.py:319-322, 813, window.py:6098, 6398, footerapps.py:92,
 #   120, openwith.py:163, copylabel.py:59 (GitHub, releases, the `gh`
 #   install page).
 # - **Not reads, but this device's facts applied to a service path**:
