@@ -32,19 +32,58 @@ import ast
 
 import pathless
 import pytest
-from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, RECORDED, UNRULED
+from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE, RECORDED, UNRULED
+
+WHAT_TO_DO = """
+Each is a call the walker reads as the client opening a file or starting a
+program (`module:function:call`). The client opens no file of the service's,
+so one of these is the answer, in this order:
+
+1. It reads a path of the service's (a project file, a cwd, a transcript):
+   ask the service instead (`remotefiles.stat_path` and friends, off the main
+   loop), and the site goes away.
+2. It hands a path of the service's to something on this device (an app, the
+   file manager, a native chooser's starting folder): put it behind
+   `if not apilink.is_local(): return` in the same function and file it in
+   `LOCAL_EXTRAS`.
+3. It is this device's own file or program (ui-state.json, the caches, the
+   desktop entry, a dropped file being uploaded): file it in `DEVICE`.
+4. It is no read at all: the name matched an object that is no path and no
+   file (a service fact with an `is_dir()` of its own, a module's
+   `load_bytes(data)`). Rename a local variable that only looks like a path;
+   otherwise add it to `NOT_A_SITE` with a line saying what the receiver is.
+
+The lists are in tests/pathless_allowlist.py. Each is pinned in this file
+(`test_each_group_is_pinned…`, `test_what_is_no_site_is_pinned…`), so filing
+means editing the pin in the same diff. `UNRULED` and `RECORDED` take nothing
+new."""
 
 
 def test_no_site_outside_the_allowlist():
     found = pathless.walk()
-    new = sorted(found - ALLOWLIST)
-    assert not new, f"new filesystem or subprocess sites in the client: {new}"
+    new = sorted(found - ALLOWLIST - set(NOT_A_SITE))
+    assert not new, f"new filesystem or subprocess sites in the client: {new}\n{WHAT_TO_DO}"
 
 
 def test_no_stale_entry_in_the_allowlist():
     found = pathless.walk()
-    stale = sorted(ALLOWLIST - found)
-    assert not stale, f"allowlist entries nothing matches any more (remove them): {stale}"
+    stale = sorted((ALLOWLIST | set(NOT_A_SITE)) - found)
+    assert not stale, f"entries nothing matches any more (remove them): {stale}"
+
+
+def test_what_is_no_site_is_pinned_with_its_reason_and_its_count():
+    """The verification of PR 615, S3: the any-receiver words match by
+    name, and a match on an object that is no path has no truthful group
+    (`DEVICE` is this device's files, `LOCAL_EXTRAS` needs the ask, the
+    other two are closed). `NOT_A_SITE` answers it where a reviewer sees
+    it: pinned here by its exact entries, each with a reason and with the
+    number of calls it covers, and never also on the allowlist."""
+    assert set(NOT_A_SITE) == {"pictures:thumbnail:Gio.File.load_bytes"}
+    assert not set(NOT_A_SITE) & ALLOWLIST
+    found = pathless.counts()
+    for site, (count, reason) in NOT_A_SITE.items():
+        assert found.get(site) == count, (site, found.get(site))
+        assert len(reason) > 20, site  # says what the receiver is
 
 
 def test_the_git_pages_sites_are_gone():
@@ -154,6 +193,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "app": 2,
         "blobcache": 12,
         "remoteimages": 4,
+        "remoteuploads": 2,
         "uistate": 6,
         "window": 2,
         "desktopentry": 17,
@@ -164,7 +204,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "sidebar": 1,
         "openwith": 5,
     }
-    assert len(DEVICE) == 65
+    assert len(DEVICE) == 67
     # `openwith`'s five device sites are lookups of this device's terminal
     # preference; its launchers are local extras and nowhere else.
     assert {s for s in DEVICE if s.startswith("openwith:")} == {
@@ -226,14 +266,19 @@ def test_the_walker_tells_a_function_that_asks_from_one_that_does_not(monkeypatc
 
 
 def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
-    """`DEVICE` is the device's own: the blob cache, `ui-state.json`, the
-    export's destination, the desktop entry, the update check, `buildinfo`,
+    """`DEVICE` is the device's own: the blob cache, a dropped file being
+    uploaded, `ui-state.json`, the export's destination, the desktop entry, the update check, `buildinfo`,
     the service's process, and which programs this device has. A site in
     any other module belongs in another group, or behind the API."""
     modules = {site.split(":", 1)[0] for site in DEVICE}
     assert modules == {
-        "app", "blobcache", "remoteimages", "uistate", "window", "desktopentry", "updatecheck",
-        "buildinfo", "connection", "prefs", "sidebar", "openwith",
+        "app", "blobcache", "remoteimages", "remoteuploads", "uistate", "window", "desktopentry",
+        "updatecheck", "buildinfo", "connection", "prefs", "sidebar", "openwith",
+    }
+    # `remoteuploads` is there for the dropped file it reads to upload, and nothing else.
+    assert {s for s in DEVICE if s.startswith("remoteuploads:")} == {
+        "remoteuploads:_read:Gio.File.query_info",
+        "remoteuploads:_read:Gio.File.load_bytes",
     }
     # The four GTK modules in the group are there for exactly these sites.
     assert {s for s in DEVICE if s.startswith(("app:", "window:", "prefs:", "sidebar:"))} == {
@@ -409,7 +454,87 @@ CAUGHT = {
     "handed to map": ("def f(ps):\n    return list(map(os.path.isfile, ps))\n", "os.path.isfile"),
     "a default argument": ("def f(a, run=subprocess.run):\n    return run(a)\n", "subprocess.run"),
     "a default through an alias": ("def f(n, find=sh.which):\n    return find(n)\n", "shutil.which"),
-    "getattr on the module": ("def f(p):\n    return getattr(os.path, 'isdir')(p)\n", "getattr.os.path"),
+    "getattr with a constant name": ("def f(p):\n    return getattr(os.path, 'isdir')(p)\n", "os.path.isdir"),
+    "getattr with a name it cannot read": (
+        "def f(p, n):\n    return getattr(os.path, n)(p)\n",
+        "getattr.os.path",
+    ),
+    # -- round two (the verification of PR 615, S2) -----------------------------------------
+    "a Gio.File parameter": (
+        "def f(gfile):\n    return gfile.load_contents(None)\n",
+        "Gio.File.load_contents",
+    ),
+    "a Gio.File kept on self": (
+        "class C:\n    def f(self):\n        return self._gfile.query_info('*', 0, None)\n",
+        "C.f:Gio.File.query_info",
+    ),
+    "a dropped file's bytes": (
+        "def f(gfile):\n    return gfile.load_bytes(None)[0]\n",
+        "Gio.File.load_bytes",
+    ),
+    "Gio.File.parse_name": (
+        "def f(p):\n    return Gio.File.parse_name(p).load_contents(None)\n",
+        "Gio.File.parse_name.load_contents",
+    ),
+    "Gio.File.new_build_filenamev": (
+        "def f(p):\n    return Gio.File.new_build_filenamev([p, 'x']).trash(None)\n",
+        "Gio.File.new_build_filenamev.trash",
+    ),
+    "Gio.file_new_for_path": (
+        "def f(p):\n    return Gio.file_new_for_path(p).delete(None)\n",
+        "Gio.File.new_for_path.delete",
+    ),
+    "Vte's spawn_async": (
+        "def f(term, argv, cwd):\n    term.spawn_async(0, cwd, argv, None, 0, None, None, -1, None, None)\n",
+        "Process.spawn_async",
+    ),
+    "a SubprocessLauncher's spawnv": (
+        "def f(argv):\n    launcher = Gio.SubprocessLauncher.new(0)\n    return launcher.spawnv(argv)\n",
+        "Process.spawnv",
+    ),
+    "Gio.Subprocess(argv=...)": (
+        "def f(argv):\n    return Gio.Subprocess(argv=argv, flags=0)\n",
+        "Gio.Subprocess",
+    ),
+    "Gtk.show_uri": ("def f(win, p):\n    Gtk.show_uri(win, 'file://' + p, 0)\n", "Gtk.show_uri"),
+    "webbrowser.open": (
+        "import webbrowser\ndef f(p):\n    webbrowser.open('file://' + p)\n",
+        "webbrowser.open",
+    ),
+    "codecs.open": ("import codecs\ndef f(p):\n    return codecs.open(p).read()\n", "codecs.open"),
+    "os.fwalk": ("def f(p):\n    return list(os.fwalk(p))\n", "os.fwalk"),
+    "os.statvfs": ("def f(p):\n    return os.statvfs(p)\n", "os.statvfs"),
+    "os.chown": ("def f(p):\n    os.chown(p, 0, 0)\n", "os.chown"),
+    "os.listxattr": ("def f(p):\n    return os.listxattr(p)\n", "os.listxattr"),
+    "Path.readlink": ("def f(p):\n    return Path(p).readlink()\n", "Path.readlink"),
+    "readlink on anything": ("def f(p):\n    return p.readlink()\n", "Path.readlink"),
+    "Path.owner": ("def f(p):\n    return Path(p).owner()\n", "Path.owner"),
+    "is_fifo on anything": ("def f(p):\n    return p.is_fifo()\n", "Path.is_fifo"),
+    "is_socket on anything": ("def f(p):\n    return p.is_socket()\n", "Path.is_socket"),
+    "Gtk.Picture.new_for_file": (
+        "def f(g):\n    return Gtk.Picture.new_for_file(g)\n",
+        "Picture.new_for_file",
+    ),
+    "set_file": ("def f(picture, g):\n    picture.set_file(g)\n", "Widget.set_file"),
+    "load_from_file": ("def f(css, g):\n    css.load_from_file(g)\n", "Widget.load_from_file"),
+    "Gtk.Builder.new_from_file": (
+        "def f(p):\n    return Gtk.Builder.new_from_file(p)\n",
+        "Builder.new_from_file",
+    ),
+    "Pixbuf.get_file_info": (
+        "from gi.repository import GdkPixbuf\ndef f(p):\n    return GdkPixbuf.Pixbuf.get_file_info(p)\n",
+        "Pixbuf.get_file_info",
+    ),
+    "savev": ("def f(pixbuf, p):\n    pixbuf.savev(p, 'png', [], [])\n", "Widget.savev"),
+    "save_to_png": ("def f(texture, p):\n    texture.save_to_png(p)\n", "Widget.save_to_png"),
+    "GtkSource.FileLoader": (
+        "from gi.repository import GtkSource\ndef f(b, sf):\n    return GtkSource.FileLoader.new(b, sf)\n",
+        "FileLoader.new",
+    ),
+    "GLib.IOChannel.new_file": (
+        "def f(p):\n    return GLib.IOChannel.new_file(p, 'r')\n",
+        "IOChannel.new_file",
+    ),
 }
 
 
@@ -419,6 +544,8 @@ def test_the_walker_catches(spelling):
     sites = pathless.sites_of("m", ast.parse(_HEADER + body))
     if spelling == "a loop over iterdir":
         assert sites == {"m:f:Path.iterdir", "m:f:Path.unlink"}
+    elif expected.startswith("C.f:"):
+        assert sites == {f"m:{expected}"}
     else:
         assert sites == {f"m:f:{expected}"}
 
@@ -454,12 +581,112 @@ MISSED = {
     "a bare open handed on": "def f(ps):\n    return list(map(open, ps))\n",
     "another library's reader": "def f(p):\n    import zipfile\n    return zipfile.ZipFile(p)\n",
     "a Gio.File with no read": "def f(dialog, p):\n    dialog.set_initial_folder(Gio.File.new_for_path(p))\n",
+    # -- round two: the verifier's spellings that stay unseen (each on the record) ---------
+    "a star import": "from os.path import *\ndef f(p):\n    return isdir(p)\n",
+    "a module bound to a name": "def f(a):\n    mod = subprocess\n    return mod.run(a)\n",
+    "os.path bound to a name": "def f(p):\n    op = os.path\n    return op.getsize(p)\n",
+    "__import__": "def f(p):\n    return __import__('os').path.isdir(p)\n",
+    "asyncio's subprocess": (
+        "import asyncio\n"
+        "async def f(a):\n"
+        "    return await asyncio.create_subprocess_exec(*a)\n"
+    ),
+    "pty.spawn": "import pty\ndef f(a):\n    return pty.spawn(a)\n",
+    "multiprocessing": "import multiprocessing\ndef f(fn):\n    multiprocessing.Process(target=fn).start()\n",
+    "a bare .spawn on an object": "def f(launcher, a):\n    return launcher.spawn(a)\n",
+    "sqlite3": "import sqlite3\ndef f(p):\n    return sqlite3.connect(p)\n",
+    "Gio.DesktopAppInfo.new_from_filename": "def f(p):\n    return Gio.DesktopAppInfo.new_from_filename(p)\n",
+    "a call's result and a slash": "def f(k):\n    return (cache_place() / k).exists()\n",
+    "a subscript": "def f(found):\n    return found[0].exists()\n",
+    "a path kept on self under a plain name": (
+        "class C:\n    def __init__(self, x):\n        self._p = Path(x)\n"
+        "    def f(self):\n        return self._p.exists()\n"
+    ),
+    "open() on a hintless parameter": "def f(p):\n    with p.open() as fh:\n        return fh.read()\n",
+    "a Gio.File's shared word on a parameter": "def f(gfile):\n    gfile.trash(None)\n",
 }
 
 
 @pytest.mark.parametrize("spelling", sorted(MISSED))
 def test_the_walker_is_known_to_miss(spelling):
     assert pathless.sites_of("m", ast.parse(_HEADER + MISSED[spelling])) == set()
+
+
+# Honest code: nothing of the service's is read and nothing is started.
+# The verifier's 28 spellings, each with what the walker says of it: None
+# (no site), or the site it is still named. A flagged one is what
+# `NOT_A_SITE` is for when it turns up in the tree (or a renamed variable,
+# for the name hints); the table pins which is which, so narrowing or
+# widening a word shows here.
+HONEST = {
+    "getattr of a flag": ("def f():\n    return getattr(os, 'O_NOFOLLOW', 0)\n", None),
+    "getattr of a function that reads nothing": ("def f():\n    return getattr(os, 'getuid', None)\n", None),
+    "a str named path, replace": ("def f(path):\n    return path.replace('/', '-')\n", None),
+    "a str named filename, replace": ("def f(filename):\n    return filename.replace('.png', '')\n", None),
+    "glob.escape": ("def f(p):\n    return glob.escape(p)\n", None),
+    "shutil.get_terminal_size": ("def f():\n    return shutil.get_terminal_size()\n", None),
+    "subprocess.list2cmdline": ("def f(a):\n    return subprocess.list2cmdline(a)\n", None),
+    "except subprocess.TimeoutExpired": (
+        "def f(g):\n    try:\n        g()\n    except subprocess.TimeoutExpired:\n        pass\n",
+        None,
+    ),
+    "a Gio input stream's read_bytes": ("def f(stream):\n    return stream.read_bytes(4096, None)\n", None),
+    "GLib.spawn_check_wait_status": ("def f(s):\n    return GLib.spawn_check_wait_status(s)\n", None),
+    "GLib.filename_to_uri": ("def f(p):\n    return GLib.filename_to_uri(p, None)\n", None),
+    "a buffer named source, replace": ("def f(source):\n    return source.replace('a', 'b')\n", None),
+    "tempfile.gettempdir": ("def f():\n    return tempfile.gettempdir()\n", None),
+    "a resource:// Gio.File": (
+        "def f():\n    return Gio.File.new_for_uri('resource:///x/y.css').load_contents(None)\n",
+        None,
+    ),
+    "a resource:// Gio.File bound to a name": (
+        "def f():\n    g = Gio.File.new_for_uri('resource:///x/y.css')\n    return g.load_bytes(None)\n",
+        None,
+    ),
+    "a dict named roots, get": ("def f(roots, k):\n    return roots.get(k)\n", None),
+    "a class of subprocess as a value": (
+        "def f():\n    kind = subprocess.CompletedProcess\n    return kind\n",
+        None,
+    ),
+    "a CompletedProcess constructed": (
+        "def f(a):\n    return subprocess.CompletedProcess(a, 0, b'', b'')\n",
+        None,
+    ),
+    # -- still named a site: NOT_A_SITE's to answer, or a rename's -----------------------
+    "a service entry's own is_dir()": ("def f(entry):\n    return entry.is_dir()\n", "Path.is_dir"),
+    "a clipboard's read_text": ("def f(clip):\n    return clip.read_text()\n", "Path.read_text"),
+    "a module's own load_bytes(data)": (
+        "def f(decoder, data):\n    return decoder.load_bytes(data)\n",
+        "Gio.File.load_bytes",
+    ),
+    "a Gtk.Root named root, resolve": ("def f(root):\n    return root.resolve()\n", "Path.resolve"),
+    "a drop target named target, open": ("def f(drop_target):\n    return drop_target.open()\n", "Path.open"),
+    "a redirect (contains dir)": ("def f(redirect):\n    return redirect.exists()\n", "Path.exists"),
+    "a profile (contains file)": ("def f(profile):\n    return profile.stat()\n", "Path.stat"),
+    "a print setting's set_filename": (
+        "def f(thing, n):\n    thing.set_filename(n)\n",
+        "Widget.set_filename",
+    ),
+    "any .parent": ("def f(row):\n    return row.parent.exists()\n", "Path.exists"),
+    "a service reply named file_info": ("def f(file_info):\n    return file_info.exists()\n", "Path.exists"),
+    "a remote entry named remote_file": ("def f(remote_file):\n    return remote_file.stat()\n", "Path.stat"),
+    "a one-argument rename on a name with a hint": (
+        "def f(target):\n    return target.rename('x')\n",
+        "Path.rename",
+    ),
+    # Honest, and a site by design: this device's own, filed in DEVICE.
+    "realpath of this device's own folder": (
+        "def f():\n    return os.path.realpath(os.environ.get('XDG_CACHE_HOME', '~'))\n",
+        "os.path.realpath",
+    ),
+}
+
+
+@pytest.mark.parametrize("spelling", sorted(HONEST))
+def test_what_the_walker_says_of_honest_code(spelling):
+    body, expected = HONEST[spelling]
+    sites = pathless.sites_of("m", ast.parse(_HEADER + body))
+    assert sites == (set() if expected is None else {f"m:f:{expected}"})
 
 
 def test_what_is_no_site_stays_none():
@@ -618,6 +845,47 @@ NOT_BEHIND_THE_ASK = {
     "a module that never imported apilink": (
         "import os\ndef f(p):\n    if not apilink.is_local():\n        return\n    return os.path.isdir(p)\n"
     ),
+    # The verification of PR 615, S4: every function a qualname names.
+    "a second def of the same name that does not ask": (
+        "def f(p):\n    if not apilink.is_local():\n        return\n    return os.path.isdir(p)\n"
+        "def f(p):\n    return os.path.isdir(p)\n"
+    ),
+    "a property's getter asks, its setter does not": (
+        "class C:\n"
+        "    @property\n"
+        "    def f(self):\n"
+        "        if not apilink.is_local():\n"
+        "            return\n"
+        "        return os.path.isdir('.')\n"
+        "    @f.setter\n"
+        "    def f(self, p):\n"
+        "        os.path.isdir(p)\n"
+    ),
+    # A name the function or the module binds itself is not the import.
+    "apilink assigned in the function": (
+        "def f(p):\n"
+        "    apilink = type('X', (), {'is_local': staticmethod(lambda: True)})\n"
+        "    if not apilink.is_local():\n"
+        "        return\n"
+        "    return os.path.isdir(p)\n"
+    ),
+    "apilink as a parameter": (
+        "def f(p, apilink):\n    if not apilink.is_local():\n        return\n    return os.path.isdir(p)\n"
+    ),
+    "an imported is_local redefined in the module": (
+        "import os\nfrom .apilink import is_local\n"
+        "def is_local():\n    return True\n"
+        "def f(p):\n    if not is_local():\n        return\n    return os.path.isdir(p)\n"
+    ),
+    "an imported alias shadowed by a loop variable": (
+        "import os\nfrom collins.apilink import is_local as ok\n"
+        "def f(p, fs):\n"
+        "    for ok in fs:\n"
+        "        pass\n"
+        "    if not ok():\n"
+        "        return\n"
+        "    return os.path.isdir(p)\n"
+    ),
     "is_local imported from elsewhere": (
         "import os\nfrom .remoteuploads import is_local\n"
         "def f(p):\n    if not is_local():\n        return\n    return os.path.isdir(p)\n"
@@ -629,8 +897,30 @@ def _asks(source: str) -> bool:
     # A case that brings its own imports starts with them; the rest get
     # the usual `from . import apilink`.
     tree = ast.parse(source if source.startswith("import os\n") else _ASK_HEADER + source)
-    assert "m:f:os.path.isdir" in pathless.sites_of("m", tree)
-    return pathless.function_asks_local("m:f:os.path.isdir", {"m": tree})
+    found = pathless.sites_of("m", tree)
+    site = "m:f:os.path.isdir" if "m:f:os.path.isdir" in found else "m:C.f:os.path.isdir"
+    assert site in found
+    return pathless.function_asks_local(site, {"m": tree})
+
+
+def test_both_functions_of_a_name_pass_when_both_ask():
+    source = _ASK_HEADER + (
+        "class C:\n"
+        "    @property\n"
+        "    def f(self):\n"
+        "        if not apilink.is_local():\n"
+        "            return\n"
+        "        return os.path.isdir('.')\n"
+        "    @f.setter\n"
+        "    def f(self, p):\n"
+        "        if apilink.is_local() and os.path.isdir(p):\n"
+        "            pass\n"
+    )
+    assert pathless.function_asks_local("m:C.f:os.path.isdir", {"m": ast.parse(source)})
+    # A read at a class's own level has no function to ask in.
+    tree = ast.parse(_ASK_HEADER + "class C:\n    there = apilink.is_local() and os.path.isdir('.')\n")
+    assert pathless.sites_of("m", tree) == {"m:C:os.path.isdir"}
+    assert not pathless.function_asks_local("m:C:os.path.isdir", {"m": tree})
 
 
 @pytest.mark.parametrize("shape", sorted(BEHIND_THE_ASK))
