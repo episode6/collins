@@ -902,7 +902,7 @@ def test_the_watch_bound_counts_pending_watches(served, monkeypatch):
     for run in workers:
         run()
     assert core.files.watching(client, "w1") and core.files.watching(client, "w2")
-    assert not core.files.watching(client, "w3") and not core.files._pending
+    assert not core.files.watching(client, "w3") and not core.files._installing
     assert core.files._watches[(id(client), "w1")].path == str(project)
 
 
@@ -921,8 +921,8 @@ def test_a_newer_watch_of_a_pending_handle_wins_in_either_landing_order(served, 
     run_older, run_newer = workers
     for run in ((run_older, run_newer) if order == "older first" else (run_newer, run_older)):
         run()
-    assert older.settled and older.reply.get("ok") is True
+    assert older.settled and older.reply["ok"] is False and older.reply["error"] == protocol.ERROR_GONE
     assert newer.settled and newer.reply.get("ok") is True
     assert core.files._watches[(id(client), "w1")].path == str(project / "b.txt")
     assert sum(1 for k in core.files._watches if k[0] == id(client)) == 1
-    assert not core.files._pending
+    assert not core.files._installing

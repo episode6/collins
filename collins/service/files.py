@@ -825,7 +825,7 @@ class Files:
         # worker (a reconnect re-sends every live watch at once; the same
         # handle again is a replacement, not one more): refused here, before
         # a thread is spent on it (the Fable review of PR 611, nit 6).
-        held = {k for k in (*self._watches, *self._pending) if k[0] == id(client)}
+        held = {k for k in (*self._watches, *self._installing) if k[0] == id(client)}
         held.discard(key)
         if len(held) >= MAX_WATCHES_PER_CLIENT:
             return protocol.refuse(

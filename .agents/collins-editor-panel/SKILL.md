@@ -246,9 +246,10 @@ pathless walker reads as `Path` methods):
   loop, `allows` resolving on the worker, as `fs.read` / `fs.write` and
   PR 609's file watch do); `fs.list`'s client-named `root` is held to the
   known roots too. A watch is installed when its confinement lands
-  (`Files._pending`: an `fs.unwatch` first, a newer watch of the handle
-  or the client going away wins, the older landing answers ok and
-  installs nothing; pinned in both landing orders), the per-client bound
+  (`Files._installing`, PR 609's registry of in-flight installs: an
+  `fs.unwatch` first, a newer watch of the handle or the client going away
+  wins, the older landing installs nothing and is refused `gone`; pinned
+  in both landing orders), the per-client bound
   is checked before the worker is spent, against the installed and the
   pending (a reconnect re-sends every live watch at once; the same handle
   again is a replacement), and one Gio cannot make a monitor for is
