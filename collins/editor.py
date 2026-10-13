@@ -1043,6 +1043,17 @@ class EditorPane(Gtk.Box):
             opened.newline,  # the file's line ending, every line's; the final one `_fill` stripped
             opened.buffer.get_implicit_trailing_newline(),
         )
+        if len(text) > protocol.FILE_TEXT_MAX:
+            # The request's text bound (`protocol._FILE_TEXT`): the validator
+            # would refuse it with its own words; these name the limit.
+            self._notify(
+                _("{name} is too large to save from the editor (over {max} characters).").format(
+                    name=opened.path.name, max=f"{protocol.FILE_TEXT_MAX:,}"
+                )
+            )
+            if on_done is not None:
+                on_done(False)
+            return
         path = str(opened.path)
         encoding = opened.encoding
         opened.saving = True
@@ -1053,16 +1064,29 @@ class EditorPane(Gtk.Box):
 
     def _on_saved(self, opened: _OpenFile, on_done, expect: int | None, kind: str, value) -> None:
         opened.saving = False
+        waiters, opened.save_again = opened.save_again, None
         if self._shut:
+            # The tab is going: this save's outcome to its caller, and the
+            # saves queued behind it never happen (their waiters hear so).
             if on_done is not None:
                 on_done(kind == "ok")
+            for waiter in waiters or ():
+                waiter(False)
             return
-        waiters, opened.save_again = opened.save_again, None
         if kind != "ok":
             refusal: RequestRefused = value
             for waiter in waiters or ():
                 waiter(False)
             if remotefiles.is_stale(refusal) and expect is not None:
+
+                def dismissed() -> None:
+                    # Cancel: the `file-changed` that made the save stale
+                    # (parked during the save) is judged now, so the dirty
+                    # buffer gets its Reload banner.
+                    self._settle_pending_change(opened)
+                    if on_done is not None:
+                        on_done(False)
+
                 dialogs.confirm_dialog(
                     self.get_root(),
                     _("{name} changed on disk").format(name=opened.path.name),
@@ -1070,7 +1094,7 @@ class EditorPane(Gtk.Box):
                     _("Overwrite"),
                     lambda: self._do_save(opened, on_done),
                     default_response="cancel",
-                    on_dismiss=(lambda: on_done(False)) if on_done is not None else None,
+                    on_dismiss=dismissed,
                 )
                 return
             self._notify(

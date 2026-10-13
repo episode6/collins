@@ -296,8 +296,16 @@ a blob is `GET /api/blob?kind=git` (`blobcache.py` is the client's cache
 for it, which PR-2.2 puts the diff's images on), the page's watch is
 `git.watch` / `git-changed` on the service (`service/gitfeed.py`; a watch
 per page handle) and a plan is `git.plan`, refused `stale` when a stable
-key moved; `service/files.py` is the trash and the rule confining every
-path to a root the service knows (or anything for a `local` client). The
+key moved; `service/files.py` is the trash, the rule confining every
+path to a root the service knows (`Confinement`: the roots' names on the
+main loop, the resolving on the request's worker; anything for a `local`
+client) and, since PR-2.3, the editor's files: `fs.read` (text, encoding,
+mtime, size, `binary` for a NUL anywhere), `fs.write` (compared against
+`expect_mtime` right before the write, `stale` with nothing written when
+it moved) and `fs.watch` / `file-changed` (a `Gio.FileMonitor` per client
+and handle, debounced on the service), the client's end `remotefiles.py`
+over which `editor.py` loads, saves and follows external changes; the
+editor opens no project file itself. The
 builders validate their own arguments (a ref, a path, a count:
 `ValueError`, `invalid` on the wire), since the service runs what they
 make of a client's args. On the GTK main thread a plain read of the
@@ -458,7 +466,7 @@ spec's `%changelog`.
 | Session MCP tools, the shim, the socket service, lightbox and attachments | `mcp_shim` `mcptools` `mcpserver` `service/tools` `toolclient` `remoteimages` `lightbox` `attachrecords` `attachpanel` `pictures` `animatedimage` | `collins-session-mcp-tools` |
 | Pull requests: status, hub, detail page, body markdown, actions, menus, gh setup | `prstatus` `prstore` `service/prfeed` `remoteprs` `prdetail` `practions` `prmenu` `prview` `mdblocks` `mdwidgets` `prattach` `prblobs` `prfileimages` `avatars` `bodyimages` `ghsetup` `ghwelcome` | `collins-pull-requests` |
 | The git page: the native diff view, its GTK-free model and staging arithmetic, the commits and files sidebar, the loads vocabulary, git info and its mirror, the builders and runners over the API, the panels' model | `gitpage` `gitfresh` `gitsidebar` `diffview` `diffmodel` `diffnotes` `gitpatch` `gitloads` `gitinfo` `gitfiles` `remotegit` `gitmodel` `gitops` `service/gitfeed` `service/files` `blobcache` `commitcard` `gitoperation` `keyedslots` `imagediff` | `collins-git-page` |
-| Editor panel: file tree, quick open, pop-out, narrow mode | `editor` `editorfiles` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
+| Editor panel: file tree, quick open, pop-out, narrow mode, the files over the API | `editor` `editorfiles` `remotefiles` `service/files` `filetree` `quickopen` `fuzzy` `fileclipboard` `editorwindow` `filetypes` | `collins-editor-panel` |
 | Notifications, bell, cards, sounds, status icon, dock badge, update check, Caffeine | `notifycenter` `service/notifications` `remotenotify` `notifyoverlay` `notifypanel` `notifysound` `statusicon` `traymodel` `flash` `updatecheck` `caffeine` | `collins-notifications-and-tray` |
 | Everything that spends tokens or calls Anthropic: titles, models, usage, login repair, welcome, icon generation, claude.ai archive | `titles` `claudemodels` `modelcatalog` `usage` `usagepanel` `tokenrefresh` `tokensettings` `service/tokenuse` `service/jobs` `jobclient` `welcome` `welcomegate` `clisetup` `icongen` `remotearchive` | `collins-token-use-and-claude-api` |
 | Preferences dialog, keybindings, themes, translations | `prefs` `prefslayout` `prefssearch` `keybindings` `keymap` `keybindingsdialog` `themes` `i18n` `po/` | `collins-preferences-keybindings-i18n` |

@@ -249,6 +249,9 @@ def test_read_and_write_are_deferreds_settled_later(served):
 
 
 def test_a_worker_that_raises_settles_failed(served, monkeypatch):
+    """The refusal's words name no file (the chunk's rule; the Fable review
+    of PR 609, nit 10): an unexpected OSError's `strerror`, not its `str`,
+    which carries the filename; any other exception its type."""
     core, client, project, _events = served
 
     def boom(path, max_bytes, roots=None):
@@ -257,7 +260,16 @@ def test_a_worker_that_raises_settles_failed(served, monkeypatch):
     monkeypatch.setattr(files, "read_file", boom)
     with pytest.raises(inproc.RequestRefused) as refused:
         client.request({"t": "fs.read", "path": str(project / "a.txt")})
-    assert refused.value.error == protocol.ERROR_FAILED and refused.value.details["error"] == "disk on fire"
+    assert refused.value.error == protocol.ERROR_FAILED and refused.value.details["error"] == "RuntimeError"
+
+    def boom_os(path, max_bytes, roots=None):
+        raise OSError(5, "Input/output error", str(project / "a.txt"))
+
+    monkeypatch.setattr(files, "read_file", boom_os)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.read", "path": str(project / "a.txt")})
+    assert refused.value.details["error"] == "Input/output error"
+    assert "a.txt" not in refused.value.details["error"]
 
 
 # -- the watch -------------------------------------------------------------------------

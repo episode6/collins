@@ -126,8 +126,18 @@ files.py` the service's:
   file beside it with the old mode and one `os.replace`, a new file under
   the umask; a read-only file of the user's own is refused Permission
   denied, never swapped out; the compare runs right before the write, and
-  the reply's mtime is the written descriptor's. A save whose encoding differs from
-  the read's (latin-1 that could not carry the text) is told in the banner.
+  the reply's mtime is the written descriptor's. A save whose encoding
+  differs from the read's (latin-1 that could not carry the text) is told
+  in the banner. A buffer past `protocol.FILE_TEXT_MAX` characters is
+  refused before the request with a banner naming the limit (the
+  validator's words were "text must be at most 5242880 characters"). The
+  stale dialog's Cancel settles the parked `pending_change`, so the change
+  that made the save stale still raises the Reload banner. Known gap: a
+  write whose reply lands after `remotefiles.CALL_TIMEOUT_S` (60 s) did
+  land on disk, but the client keeps the old mtime and the dirty flag, so
+  the service's `file-changed` for it reads as a change (a Reload banner
+  over the user's own saved text) and the next Ctrl+S asks before
+  overwriting; nothing is lost either way.
 - `_watch_external_changes` installs `fs.watch kind: file` under a handle
   the client mints (`remotefiles.Watcher`), seeded with `opened.mtime`:
   the service's first stat (on a thread) is compared against the seed, so
@@ -141,7 +151,8 @@ files.py` the service's:
   a tab for good and when the window itself is destroyed) — without it
   every watch, and through it the pane, outlived its tab; `shutdown` sets
   `_shut`, so a read or write that lands after it fills nothing and
-  installs no watch (a restored tab closed soon after its files reopened). The service's
+  installs no watch (a restored tab closed soon after its files
+  reopened). The service's
   `Gio.FileMonitor` debounces 300 ms, stats on a thread and pushes
   `file-changed {handle, path, mtime, size, gone}` once per burst whose
   stat moved. `_check_external` judges it against `opened.mtime` and
@@ -153,8 +164,12 @@ files.py` the service's:
   hello (`App._install_file_transport`, decided on every connect like
   git's); against a service without it nothing is sent and every open
   lands in the banner. A reconnect (`remotefiles.reset()` in
-  `App._on_connected`) re-sends every live watch. The agent rewrites these files constantly, so this path is
-  exercised more than manual saves are.
+  `App._on_connected`) re-sends every live watch. The agent rewrites these
+  files constantly, so this path is exercised more than manual saves are.
+  Known gap: keystrokes typed during a silent reload's round trip are
+  replaced by the disk's text when the reload lands (`_on_loaded` with
+  `reload=True` fills without a `get_modified()` check, as the old
+  `FileLoader` reload did; the window is a socket round trip now).
 - A text over the 1 MiB frame cap crosses as `TAG_BLOB` chunks either way
   (`protocol.split_request` / `split_reply`, the `text_chunked` /
   `text_bytes` fields), so a 5 MiB file saves.

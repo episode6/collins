@@ -301,6 +301,15 @@ def _os_error(exc: OSError) -> str:
     return (exc.strerror or str(exc))[: protocol.ARG_TEXT_MAX]
 
 
+def _failure_words(exc: BaseException) -> str:
+    """An unexpected exception's words for a refusal: the chunk's rule is
+    that the service's refusal words name no file, and `str(OSError)`
+    carries the filename (the Fable review of PR 609, nit 10)."""
+    if isinstance(exc, OSError):
+        return (exc.strerror or type(exc).__name__)[: protocol.ARG_TEXT_MAX]
+    return type(exc).__name__[: protocol.ARG_TEXT_MAX]
+
+
 def read_file(path: str, max_bytes: int, roots: Sequence[str] | None = None) -> dict:
     """`fs.read`'s work (a worker thread): the reply's fields, or a
     `ReadRefused`. The open is non-blocking and the file's kind is read
@@ -545,7 +554,9 @@ class Files:
 
     def _later(self, message: protocol.Message, name: str, work: Callable[[], dict]) -> protocol.Deferred:
         """*work* on a thread, its reply dict settled on the main loop; a
-        worker that raises settles a `failed` refusal."""
+        worker that raises settles a `failed` refusal whose words name no
+        file (`_failure_words`: an OSError's strerror, else the exception's
+        type; the log has the rest)."""
         deferred = protocol.Deferred()
 
         def run() -> None:
@@ -555,7 +566,7 @@ class Files:
                 log.exception("files: %s failed on its thread", name)
                 reply = protocol.refuse(
                     message.id, protocol.ERROR_FAILED, "{what} failed: {error}",
-                    {"what": name, "error": str(exc)[: protocol.ARG_TEXT_MAX]},
+                    {"what": name, "error": _failure_words(exc)},
                 )
             self._dispatch(lambda: deferred.settle(reply))
 
