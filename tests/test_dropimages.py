@@ -5,14 +5,15 @@ import time
 from collins.dropimages import (
     PASTE_PREFIX,
     PRUNE_AFTER_SECONDS,
+    cache_directory,
     cell_width,
-    default_directory,
     leading_space,
     mention_text,
     mention_tokens,
+    png_name,
     prune_stale,
     remove_mention,
-    save_png,
+    save_copy,
 )
 
 # Claude Code draws its input box as a ❯ and a no-break space (the space
@@ -165,48 +166,49 @@ def test_cell_width_ignores_marks_and_joiners():
     assert cell_width("") == 0
 
 
-# -- default_directory --------------------------------------------------------
+# -- cache_directory ----------------------------------------------------------
 
 
-def test_default_directory_honors_xdg_cache_home(monkeypatch, tmp_path):
+def test_cache_directory_honors_xdg_cache_home(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    assert default_directory() == tmp_path / "collins" / "dropped-images"
+    assert cache_directory() == tmp_path / "collins"
 
 
-def test_default_directory_falls_back_to_dot_cache(monkeypatch, tmp_path):
+def test_cache_directory_falls_back_to_dot_cache(monkeypatch, tmp_path):
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    assert default_directory() == tmp_path / ".cache" / "collins" / "dropped-images"
+    assert cache_directory() == tmp_path / ".cache" / "collins"
 
 
-# -- save_png -----------------------------------------------------------------
+# -- png_name / save_copy -------------------------------------------------------
 
 
-def test_save_png_writes_data_and_creates_directory(tmp_path):
+def test_png_name_is_a_timestamped_drop_name():
+    # The upload's name (PR-2.7): the service adds -N when the second is taken.
+    assert png_name(timestamp=_NOW) == f"{_STEM}.png"
+
+
+def test_png_name_prefix_names_how_the_copy_arrived():
+    # The composer's paste path files its copies beside the dropped ones
+    # under its own first word, so a listing says which way each came in.
+    assert png_name(PASTE_PREFIX, _NOW) == _STEM.replace("drop-", "paste-", 1) + ".png"
+
+
+def test_save_copy_writes_data_and_creates_directory(tmp_path):
     directory = tmp_path / "not" / "yet" / "there"
-    path = save_png(b"png-bytes", directory, _NOW)
+    path = save_copy(b"png-bytes", directory, "drop", ".png", _NOW)
     assert path == directory / f"{_STEM}.png"
     assert path.read_bytes() == b"png-bytes"
 
 
-def test_save_png_same_second_gets_distinct_names(tmp_path):
-    first = save_png(b"one", tmp_path, _NOW)
-    second = save_png(b"two", tmp_path, _NOW)
-    third = save_png(b"three", tmp_path, _NOW)
+def test_save_copy_same_second_gets_distinct_names(tmp_path):
+    first = save_copy(b"one", tmp_path, "drop", ".png", _NOW)
+    second = save_copy(b"two", tmp_path, "drop", ".png", _NOW)
+    third = save_copy(b"three", tmp_path, "drop", ".png", _NOW)
     assert first != second != third
     assert second == tmp_path / f"{_STEM}-2.png"
     assert third == tmp_path / f"{_STEM}-3.png"
     assert first.read_bytes() == b"one"  # never clobbered
-
-
-def test_save_png_prefix_names_how_the_copy_arrived(tmp_path):
-    # The composer's paste path files its copies beside the dropped ones
-    # under its own first word, so a listing says which way each came in.
-    path = save_png(b"pasted", tmp_path, _NOW, prefix=PASTE_PREFIX)
-    assert path == tmp_path / (_STEM.replace("drop-", "paste-", 1) + ".png")
-    assert path.read_bytes() == b"pasted"
-    # Its own name space: a paste in the same second as a drop is no clash.
-    assert save_png(b"dropped", tmp_path, _NOW) == tmp_path / f"{_STEM}.png"
 
 
 # -- prune_stale --------------------------------------------------------------
@@ -215,8 +217,8 @@ def test_save_png_prefix_names_how_the_copy_arrived(tmp_path):
 def test_prune_stale_removes_only_old_files(tmp_path):
     import os
 
-    old = save_png(b"old", tmp_path, _NOW)
-    fresh = save_png(b"fresh", tmp_path, _NOW)
+    old = save_copy(b"old", tmp_path, "drop", ".png", _NOW)
+    fresh = save_copy(b"fresh", tmp_path, "drop", ".png", _NOW)
     os.utime(old, (_NOW - PRUNE_AFTER_SECONDS - 1, _NOW - PRUNE_AFTER_SECONDS - 1))
     os.utime(fresh, (_NOW - 60, _NOW - 60))
     prune_stale(tmp_path, _NOW)

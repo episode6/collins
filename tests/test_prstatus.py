@@ -1164,14 +1164,18 @@ def test_gh_bytes_degrades_on_failure(monkeypatch):
     assert prstatus.gh_bytes(["api", "repos/o/n/contents/x.png"]) is None
 
 
-def test_gh_bytes_drops_an_oversized_blob(monkeypatch):
+def test_gh_bytes_drops_an_oversized_blob_and_says_so(monkeypatch):
+    """The cap is a post-read measure (gh has none of its own), so the
+    outcome is told apart from a miss: `TooLarge`, never None (the blob
+    route's 413 over its 404; the PR 610 review's nit 6)."""
     monkeypatch.setattr(prstatus.shutil, "which", lambda _: "/usr/bin/gh")
     monkeypatch.setattr(
         prstatus.subprocess, "run",
         lambda *a, **kw: subprocess.CompletedProcess(
             [], 0, stdout=b"x" * 100, stderr=b""),
     )
-    assert prstatus.gh_bytes(["api", "x"], max_bytes=99) is None
+    with pytest.raises(prstatus.TooLarge):
+        prstatus.gh_bytes(["api", "x"], max_bytes=99)
     assert prstatus.gh_bytes(["api", "x"], max_bytes=100) == b"x" * 100
 
 

@@ -1,15 +1,35 @@
-"""Tests for project-icon discovery (collins.projecticons)."""
+"""Tests for project-icon discovery: the gates (collins.projecticons) and
+the service's read of the file (`service.blobs.read_icon`, PR-2.7: the
+client reads no project file, it fetches `kind=icon`)."""
 
+import os
 from pathlib import Path
 
-from collins.projecticons import (
-    _MAX_ICON_BYTES,
-    PROJECT_ICON_FILENAME,
-    project_icon_data,
-    project_icon_path,
-)
+from collins.projecticons import MAX_ICON_BYTES as _MAX_ICON_BYTES
+from collins.projecticons import PROJECT_ICON_FILENAME
+from collins.service.blobs import read_icon
 
 _SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"/>'
+
+
+def project_icon_data(cwd):
+    """The bytes the service would serve for *cwd*'s icon, or None."""
+    if not cwd:
+        return None
+    found = read_icon(str(cwd))
+    return found[0] if found is not None else None
+
+
+def project_icon_path(cwd):
+    """The icon file found at *cwd* (by the bytes served), or None."""
+    return Path(cwd) / PROJECT_ICON_FILENAME if project_icon_data(cwd) is not None else None
+
+
+def _padded(size: int) -> bytes:
+    """A valid icon of exactly *size* bytes (a comment pads it out)."""
+    head = b'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><!--'
+    tail = b"--></svg>"
+    return head + b"x" * (size - len(head) - len(tail)) + tail
 
 
 def _write_icon(project: Path, data: bytes = _SVG) -> Path:
@@ -45,13 +65,28 @@ def test_empty_icon_is_ignored(tmp_path):
 
 
 def test_oversized_icon_is_ignored(tmp_path):
-    _write_icon(tmp_path, b"x" * (_MAX_ICON_BYTES + 1))
+    _write_icon(tmp_path, _padded(_MAX_ICON_BYTES + 1))
     assert project_icon_path(tmp_path) is None
 
 
 def test_icon_at_size_cap_is_accepted(tmp_path):
-    icon = _write_icon(tmp_path, b"x" * _MAX_ICON_BYTES)
+    icon = _write_icon(tmp_path, _padded(_MAX_ICON_BYTES))
     assert project_icon_path(tmp_path) == icon
+
+
+def test_a_symlinked_icon_is_not_followed(tmp_path):
+    elsewhere = tmp_path / "elsewhere.svg"
+    elsewhere.write_bytes(_SVG)
+    project = tmp_path / "project"
+    project.mkdir()
+    os.symlink(elsewhere, project / PROJECT_ICON_FILENAME)
+    assert project_icon_data(project) is None
+
+
+def test_the_served_tag_follows_the_file(tmp_path):
+    _write_icon(tmp_path)
+    data, tag = read_icon(str(tmp_path))
+    assert data == _SVG and tag.startswith('"') and tag.endswith(f'-{len(_SVG)}"')
 
 
 def test_icon_in_subdirectory_is_not_picked_up(tmp_path):

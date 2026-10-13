@@ -72,7 +72,9 @@ CLIENT_HELPERS = (
     "linkpatterns",
     "projecticons",
     "remotegit",
+    "remoteicons",
     "remoteimages",
+    "remoteuploads",
     "transcriptlinks",
     "uistate",
 )

@@ -213,8 +213,10 @@ class PrBlobs:
     ) -> None:
         """*respond(status, headers, body)* on the main loop: ``400`` for a
         blob the gates refuse, ``304`` on a matching ``If-None-Match``
-        (gh is not asked), ``404`` for one gh would not hand over, else
-        ``200`` with the bytes and the tag. *client* is unused: a PR blob
+        (gh is not asked), ``413`` for one over `prblobs.MAX_BLOB_BYTES`
+        (gh read it whole; the client's stand-in says "too large"),
+        ``404`` for one gh would not hand over, else ``200`` with the
+        bytes and the tag. *client* is unused: a PR blob
         is a gh read, which any client of the service may ask for."""
         params = {key: values[-1] for key, values in parse_qs(query or "", keep_blank_values=True).items()}
         repository = params.get("repository") or ""
@@ -233,6 +235,10 @@ class PrBlobs:
         def work() -> None:
             try:
                 data = prblobs.fetch_bytes(repository, ref, path)
+            except prblobs.BlobTooLarge as error:
+                log.debug("prfeed: blob %s@%s:%s: %s", repository, ref[:7], path, error)
+                self._dispatch(lambda: respond(413, {}, b""))
+                return
             except prblobs.BlobError as error:
                 log.debug("prfeed: blob %s@%s:%s: %s", repository, ref[:7], path, error)
                 self._dispatch(lambda: respond(404, {}, b""))

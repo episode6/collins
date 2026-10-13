@@ -46,12 +46,11 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GObject, Gtk, Pango  # noqa: E402
 
-from . import modelcatalog, modelmenu  # noqa: E402
+from . import modelcatalog, modelmenu, remoteicons  # noqa: E402
 from .chats import is_chat_cwd  # noqa: E402
 from .composer import ComposerView  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _  # noqa: E402
-from .projecticons import project_icon_data  # noqa: E402
 from .sessions import project_name_for_cwd  # noqa: E402
 from .svgtexture import svg_texture  # noqa: E402
 
@@ -130,12 +129,18 @@ class NewChatView(Gtk.Box):
 
         chat = is_chat_cwd(cwd)
         icon = Gtk.Image(pixel_size=_ICON_PX, halign=Gtk.Align.CENTER)
-        texture = None if chat else svg_texture(project_icon_data(cwd), _ICON_PX * 2)
-        if texture is not None:
-            icon.set_from_paintable(texture)
-        else:
-            icon.set_from_icon_name("chat-bubble-symbolic" if chat else "folder-symbolic")
-            icon.add_css_class("dim-label")
+        # The project's icon is the service's (`kind=icon`, PR-2.7): what is
+        # held now, swapped in when a fetch brings it.
+        def show_icon(data: bytes | None) -> None:
+            texture = None if chat else svg_texture(data, _ICON_PX * 2)
+            if texture is not None:
+                icon.set_from_paintable(texture)
+                icon.remove_css_class("dim-label")
+            else:
+                icon.set_from_icon_name("chat-bubble-symbolic" if chat else "folder-symbolic")
+                icon.add_css_class("dim-label")
+
+        show_icon(None if chat else remoteicons.icon_bytes(cwd, show_icon))
         icon.add_css_class("new-chat-icon")
         icon.set_margin_bottom(12)
         column.append(icon)

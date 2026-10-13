@@ -167,6 +167,20 @@ def test_an_empty_reply_is_a_failure(gh):
         prblobs.fetch_bytes(REPO, SHA, "data/icon.png")
 
 
+def test_a_file_over_the_cap_is_too_large_not_missing(monkeypatch):
+    """`gh_bytes` raises `TooLarge` for a reply over its cap: that is a
+    `BlobTooLarge` (the route's 413), a `BlobError` still."""
+
+    def gh_bytes(args, max_bytes=None):
+        assert max_bytes == prblobs.MAX_BLOB_BYTES
+        raise prstatus.TooLarge("over")
+
+    monkeypatch.setattr(prstatus, "gh_bytes", gh_bytes)
+    with pytest.raises(prblobs.BlobTooLarge, match="over 10 MiB"):
+        prblobs.fetch_bytes(REPO, SHA, "data/icon.png")
+    assert issubclass(prblobs.BlobTooLarge, prblobs.BlobError)
+
+
 # -- the gates ----------------------------------------------------------------
 
 

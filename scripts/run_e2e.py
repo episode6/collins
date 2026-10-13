@@ -91,6 +91,7 @@ CHECK_SECONDS = {
     # app launches on one service, a shim, the quit dialog, a relaunch).
     "check_detach_reopen.py": 46.0,
     "check_composer_paste.py": 6.0,
+    "check_drop_upload.py": 6.0,  # PR-2.7; estimated until the next refresh
     "check_composer_spell_click.py": 5.9,
     "check_token_use_prefs.py": 5.3,
     "check_auto_delete.py": 5.2,
