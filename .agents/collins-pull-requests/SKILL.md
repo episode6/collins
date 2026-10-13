@@ -55,7 +55,11 @@ which `blobcache.fetch` GETs into `~/.cache/collins/blobs/<service id>/`
 with `If-None-Match`; the route is `service.prfeed.PrBlobs.blob`, gh's
 bytes on a thread with `prblobs.blob_tag`, a matching tag answered `304`
 with no gh call — a commit's file never changes; nothing is written on
-the service and no path crosses),
+the service and no path crosses; a file over `prblobs.MAX_BLOB_BYTES`
+is `413`, not `404`: gh has no cap of its own, so `gh_bytes` reads the
+reply whole, measures it and raises `prstatus.TooLarge`, which
+`fetch_bytes` turns into `BlobTooLarge` and the route into the status
+whose stand-in says "too large"),
 `invalidate` and `sweep` / `resync` (`pr.fetch`, `pr.sweep`) — called from
 worker threads as before; a refusal reads as the function's own failure.
 The Session's own transcript-driven fetches (`enrich`, `discover_pr`) are

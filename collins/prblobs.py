@@ -27,7 +27,10 @@ Everything naming the blob is repository content and is gated before it can
 become part of a request: the repository must be ``owner/name``, the ref a
 full commit sha (never a branch name — see prdetail._oid), the path a
 relative one with no traversal in it, and the suffix one of the image kinds
-the viewer can decode. What comes back is capped at `MAX_BLOB_BYTES`.
+the viewer can decode. What comes back is capped at `MAX_BLOB_BYTES`: gh
+reads the file whole (it has no cap of its own), `prstatus.gh_bytes`
+measures it, and one over the cap is `BlobTooLarge` — the route's 413, so
+the viewer says "too large" and not "no such file".
 
 GTK-free, like prdetail and prstatus beside it: CI runs with no GTK, and the
 gates are the half worth testing.
@@ -70,6 +73,11 @@ _NO_AFTER = ("REMOVED", "DELETED")
 
 class BlobError(Exception):
     """Why a blob didn't arrive, in words a stand-in can carry as a tooltip."""
+
+
+class BlobTooLarge(BlobError):
+    """The file is there, and over `MAX_BLOB_BYTES` (`prfeed.PrBlobs.blob`
+    answers 413 for it, 404 for any other `BlobError`)."""
 
 
 @dataclass(frozen=True)
@@ -194,14 +202,18 @@ def fetch_bytes(repository: str, ref: str, path: str) -> bytes:
     to make: gate, fetch. Raises `BlobError` — a file that isn't there at
     that commit (the before-side of a file the PR adds, a rename's old
     name) is a 404 like any other failure, and the client shows its
-    stand-in. Never call on the main thread.
+    stand-in — or its `BlobTooLarge` for a file over the cap (a 413: the
+    stand-in says so). Never call on the main thread.
     """
     check(repository, ref, path)
-    data = prstatus.gh_bytes(
-        ["api", _endpoint(repository, ref, path),
-         "-H", "Accept: application/vnd.github.raw"],
-        max_bytes=MAX_BLOB_BYTES,
-    )
+    try:
+        data = prstatus.gh_bytes(
+            ["api", _endpoint(repository, ref, path),
+             "-H", "Accept: application/vnd.github.raw"],
+            max_bytes=MAX_BLOB_BYTES,
+        )
+    except prstatus.TooLarge:
+        raise BlobTooLarge(f"{path} at {ref[:7]} is over {MAX_BLOB_BYTES // (1024 * 1024)} MiB") from None
     if data is None:
         raise BlobError(f"GitHub wouldn't hand over {path} at {ref[:7]}")
     if not data:

@@ -52,7 +52,8 @@ downloads of each version, see the
   of a URL is downloaded by the service. Nothing looks different; the
   window no longer opens a project's image or icon itself (the seventh
   chunk of the split's Phase 2). The old `~/.cache/collins/dropped-images/`
-  is no longer written and is left in place.
+  is no longer written and is left in place. A PR image over 10 MiB now
+  reads "too large" in its stand-in instead of "no such file".
 - **The editor's tree, quick open and roots go over the service's socket.**
   The file tree lists a folder by asking the service (the folder's entries
   and the names git ignores in one answer, off the window's main loop,

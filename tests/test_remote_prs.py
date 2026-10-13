@@ -261,3 +261,38 @@ def test_a_pr_blob_is_a_url_the_blobcache_fetches(wired, monkeypatch, tmp_path):
     with pytest.raises(Exception, match="Not a commit"):
         remoteprs.fetch_blob("o/r", "main", "docs/shot.png")
     assert wired.calls.count("pr.blob") == 3
+
+
+def test_a_pr_blob_over_the_cap_is_413_and_reads_as_too_large(wired, monkeypatch, tmp_path):
+    """The PR 610 review's nit 6: a file over `prblobs.MAX_BLOB_BYTES` was a
+    404 ("No such file") because `gh_bytes` answered None for the cap and
+    a miss alike. The cap is told apart (`prstatus.TooLarge` →
+    `prblobs.BlobTooLarge` → 413) and the client's words say so; a miss is
+    still 404."""
+    from collins import blobcache, prblobs
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    answers = {"big.png": prstatus.TooLarge("over"), "gone.png": None}
+
+    def gh_bytes(args, max_bytes=None):
+        answer = answers[args[1].rsplit("/", 1)[-1].split("?")[0]]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(prstatus, "gh_bytes", gh_bytes)
+    blobs = prfeed.PrBlobs(dispatch=lambda fn: fn(), spawn=lambda fn, _name: fn())
+
+    def http_get(path_query, headers=None, timeout=60.0):
+        answer = []
+        blobs.blob(None, path_query.split("?", 1)[1], (headers or {}).get("If-None-Match"),
+                   lambda status, hdrs, body: answer.append((status, hdrs, body)))
+        return answer[0]
+
+    wired.http_get = http_get
+    sha = "a" * 40
+    with pytest.raises(prblobs.BlobError, match="too large"):
+        remoteprs.fetch_blob("o/r", sha, "big.png")
+    with pytest.raises(prblobs.BlobError, match="No such file"):
+        remoteprs.fetch_blob("o/r", sha, "gone.png")
+    assert blobcache._reason(413) != blobcache._reason(404)
