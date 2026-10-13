@@ -406,6 +406,86 @@ doesn't show). Read the **visible screen** (`get_text_format`) indexed by
 screen row — the CLI's repaint renderer leaves VTE's ring a page away from
 the adjustment, so adjustment-derived rows read empty.
 
+**Links over the API (PR-2.6; every path is the service's, the click opens
+no file).** `on_pressed` reads what needs the widget on the main loop (the
+match under the pointer, `_screen_at`'s snapshot of the rows, the roots, the
+tab's session id), claims the gesture when there is a candidate under the
+pointer, and hands the rest to `remotefiles.off_main(_click_target ...)`: the
+resolution is a pure function over the snapshot (`_click_target`, with
+`_resolve_wrapped_at` / `_resolve_wrapped_url_at` / `_resolve_from_transcript_at`
+taking the snapshot, never the terminal), whose only side reads are an
+`exists` predicate (`linkpatterns.resolve_path` / `resolve_file_reference` /
+`resolve_wrapped_reference` take it as a required argument; the click passes
+`remotefiles.present`, an `fs.stat` remembered for the click, and the
+attachment log passes `os.path.exists`) and `links_of` (the transcript's
+links, asked once and only when a click gets that far). The answer lands at
+`PRIORITY_DEFAULT` in `_on_click_resolved`, which opens a URL or
+`_open_file_reference`: one `fs.stat` of the path with the tab's editor root
+(its `kind` says file or not, its `inside` says editor or default app, and an
+image goes to the lightbox with that `inside` as its Open-in-Editor
+decision). **Because the answer is asynchronous the gesture is claimed on a
+candidate, resolved or not**: a click on a match that resolves nowhere is
+swallowed where it used to fall through to the terminal; a click on no
+candidate (the token under the pointer stands in) is not claimed and opens
+on the reply. The transcript is the service's file:
+`transcriptlinks.fetch(session)` is `store.transcript-tail`, answered by
+`service/transcripttail.py` (the last 2 MiB parsed once per size and mtime,
+bounded by `protocol.TRANSCRIPT_LINKS_*` in `bound`, the bytes measured as
+the frame writes them with `protocol.json_bytes`, the path off the store's
+row and checked by `transcript_path_allowed`); the client never opens it.
+**`bound` drops every link UTF-8 cannot encode**: the reply is validated
+whole, so one lone surrogate (the CLI cuts tool output by UTF-16 unit, and
+both link patterns take a surrogate as part of a token) would otherwise
+cost the session every link of its tail until the tail moved past it; a
+reply's list is fitted per item on the service, never left to the
+validator. `fs.names` holds the same rule for a name that is not UTF-8 on
+disk (`names_reply`, as `projectfiles.list_entries` for `fs.list`), and
+`transcriptlinks.completions` (pure) still decides what the screen
+corroborates. `_RootNameLinks` asks `fs.names {root}` (non-directory names,
+5000 at most, `names` a `protocol.CHUNKED_JSON_FIELDS` so a full bound of long
+names travels as blob frames, confined on the worker like `fs.walk`, off the
+main loop; the answer is dropped when the root moved or
+a newer ask overtook it, kept when the service cannot answer) and holds a
+`fs.watch {kind: dir}` on the root (`self._monitor` is its handle) whose
+`dir-changed` re-asks through the same 500 ms leading-edge throttle. A link
+check that needs the files transport must `remotefiles.install(link)` first
+(the app does on every connect; a widget check on a harness link does it
+itself, as `check_root_name_links.py` does). "Is this directory a git
+checkout" (the worktree box, the sidebar project menu, the header's one-off
+entry, a sibling's worktree launch) is `checkouts` — an `fs.stat` of
+`.git` off the main loop, in two forms because a failure means two things.
+`checkouts.ask` is for an *offer* (the menus, a sibling's launch): False on
+any failure, so a worktree is simply not offered. `checkouts.ask_answer` is
+for the new-chat screen, whose Send may already be waiting on it: True,
+False, or **None for "could not ask"** (a refusal, no link, nothing within
+`ANSWER_TIMEOUT_S`, 10 s, not the files' 60), and None is never remembered
+(the next caller asks again). The new-chat screen builds its
+checkbox hidden and shows it when the answer lands (`NewChatView.set_is_git`).
+A Send that beats the answer (nothing a person does against a local
+service, a line's typing against a remote one) must not read the hidden box
+as unticked, which would launch a default-on project plain: until the
+answer the screen sends the box's *wish* (`newchat.worktree_wish`, `is_git`
+None), and `MainWindow._on_new_chat_send` holds the launch on
+`TerminalTab.when_checkout_known`. While it is held the whole screen is
+insensitive (`TerminalTab.set_new_chat_held`: what is typed or picked after
+the Send would be thrown away by the launch), a second Send starts nothing
+(`_new_chat_sends_held`), and a page that leaves the window (closed, handed
+over) has its hold called off (`_call_off_new_chat_send`). What the answer
+does is `newchat.send_outcome`: a worktree in a checkout, plain in what is
+known to be none, and **no launch at all on None** — the screen comes back
+with its text, the draft stays, a toast says the folder could not be
+checked. Never launch outside the worktree the user asked for: the session
+would edit the checkout the worktree was to protect. A draft's restored
+choice is kept through the wait too (`newchat.worktree_draft_choice`).
+`check_new_chat.py` drives all of it with `checkouts.ask_answer` held back.
+Two Ctrl+clicks on images are ordered by the press, not the landing: the
+press takes a number (`tab.link_clicks`, `editorfiles.ClickOrder`), carried
+through `_on_click_resolved` and `_open_file_reference` to `_present_image`,
+which presents nothing for a click older than one already shown. The menus
+build when it lands (an ask a newer one overtook adds nothing), and
+`start_background_session(..., is_git=)` is handed the answer
+(`_BackgroundSpawn.begin` asks only when the launch would use a worktree).
+
 Easy copy & paste (`easy_copy_paste`): Ctrl+C copies when there is a
 selection else SIGINT, Ctrl+V pastes; these live in `_on_key_pressed`
 consulting `keymap.KeyMatcher`, not in `Gtk.Shortcut`s (a shortcut can't be

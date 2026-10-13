@@ -38,7 +38,6 @@ on this screen it is the page rather than a stand-in raised over one.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
 import gi
 
@@ -46,7 +45,7 @@ gi.require_version("Adw", "1")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Adw, GObject, Gtk, Pango  # noqa: E402
 
-from . import modelcatalog, modelmenu, remoteicons  # noqa: E402
+from . import modelcatalog, modelmenu, newchat, remoteicons  # noqa: E402
 from .chats import is_chat_cwd  # noqa: E402
 from .composer import ComposerView  # noqa: E402
 from .formatting import display_path  # noqa: E402
@@ -73,7 +72,9 @@ class NewChatView(Gtk.Box):
     passed straight through (ComposerView says what each is for).
     *worktree_default* is the project's effective "new sessions use a
     worktree" value, which the checkbox starts on; *is_git* False leaves the
-    checkbox out — the flag has no meaning outside a checkout.
+    checkbox out — the flag has no meaning outside a checkout — and None
+    is "not known yet" (`set_is_git` follows): no checkbox either, but a
+    Send before the answer still carries the box's wish (`worktree`).
     *sandbox_default* and *sandbox_available* are the Sandboxed box's pair
     on the same terms: the project's effective "new sessions are sandboxed"
     value, and whether a box can be built here at all (sandboxplan.
@@ -102,7 +103,7 @@ class NewChatView(Gtk.Box):
         file_reference: Callable[[str], str | None],
         notify: Callable[[str], None],
         worktree_default: bool,
-        is_git: bool,
+        is_git: bool | None,
         model: str = "",
         pick_model: bool = True,
         effort: str = "",
@@ -214,6 +215,8 @@ class NewChatView(Gtk.Box):
             _("Work in a fresh worktree of this project, apart from its uncommitted changes")
         )
         self._worktree.set_active(bool(worktree_default))
+        # None: the service has not answered yet (see `worktree`).
+        self._is_git: bool | None = None if is_git is None else bool(is_git)
         self._worktree.set_visible(bool(is_git))
         self._worktree.connect("toggled", self._on_worktree_toggled)
         self.composer.add_row_option(self._worktree)
@@ -249,17 +252,29 @@ class NewChatView(Gtk.Box):
         """Seed the box with a kept draft, cursor at the end."""
         self.composer.set_text(text)
 
+    def set_is_git(self, is_git: bool) -> None:
+        """The service answered whether the directory is a git checkout
+        (`checkouts.ask`, a moment after the screen was built): the
+        checkbox shows only in one — the flag has no meaning elsewhere."""
+        self._is_git = bool(is_git)
+        self._worktree.set_visible(bool(is_git))
+
     def worktree_choice(self) -> bool | None:
         """The checkbox as the user left it, or None while it still follows
         the project's default (what the draft record keeps — see
-        newchat.draft_record)."""
-        if not self._worktree.get_visible():
-            return None
-        return self._worktree.get_active() if self._worktree_touched else None
+        newchat.draft_record). A choice restored before the service's
+        answer is kept through the wait (`newchat.worktree_draft_choice`)."""
+        return newchat.worktree_draft_choice(
+            self._worktree.get_active(), self._worktree_touched, self._is_git
+        )
 
     def worktree(self) -> bool:
-        """Whether the box is ticked right now (False with no box at all)."""
-        return self._worktree.get_visible() and self._worktree.get_active()
+        """Whether a Send asks for a worktree: the box ticked, and False
+        with no box at all — except before the service has said whether
+        this is a checkout, when the hidden box's state (the project's
+        default, a draft's choice) is the wish the window then holds to
+        the answer (`newchat.worktree_wish`)."""
+        return newchat.worktree_wish(self._worktree.get_active(), self._is_git)
 
     def set_worktree_choice(self, choice: bool | None) -> None:
         """Put a kept draft's checkbox back: an explicit choice ticks (or
@@ -421,8 +436,3 @@ class NewChatView(Gtk.Box):
             "send-requested", text, self.worktree(), self.sandbox(), self.model(), self.effort()
         )
 
-
-def is_git_checkout(cwd: str) -> bool:
-    """Whether the worktree flag means anything in *cwd* — `.git` is a file
-    in worktree checkouts, so either form counts (the window's own test)."""
-    return (Path(cwd) / ".git").exists()

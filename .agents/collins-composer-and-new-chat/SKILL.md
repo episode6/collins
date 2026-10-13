@@ -122,7 +122,12 @@ checkbox and the model and effort pickers in the Send row. Nothing is spawned
 until Send (`TerminalTab.begin_session`), which spawns the CLI with `--model`
 / `--effort` only when picked (a pick is for this launch alone; nothing writes
 the user's default) and `-w` per `newchat.effective_worktree(choice,
-project_default, is_git)`, then polls `takes_prompt` (`Session._new_chat_prompt_tick`,
+project_default, is_git)` (whether the folder is a checkout is the
+service's answer, `checkouts.ask`: the box is hidden until it lands, a Send
+before then carries the box's wish, `newchat.worktree_wish`, and the window
+holds the launch for the answer with the screen insensitive; a wish the
+service could not answer launches nothing, `newchat.send_outcome`; see
+`collins-terminal-tab`), then polls `takes_prompt` (`Session._new_chat_prompt_tick`,
 ~90 s budget, ~6 s idle-shell cutoff) and types the prompt. With nothing
 typed the button reads **Empty Session** and starts the agent bare. Until
 Send the tab is a **draft**: text or a terminal opened beside it
