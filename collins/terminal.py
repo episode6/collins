@@ -5559,17 +5559,26 @@ class TerminalTab(Gtk.Box):
             name="editor-inside",
         )
 
-    def ask_image_open(self, path: str | Path, then: Callable[[bool], None]) -> None:
+    def ask_image_open(
+        self,
+        path: str | Path,
+        then: Callable[[bool], None],
+        dropped: Callable[[], None] | None = None,
+    ) -> None:
         """`ask_can_open_in_editor` for a picture about to be shown in the
         lightbox, which shows one at a time: the newest ask wins, and an
         older ask's landing is dropped (`editorfiles.LatestAsk`), so two
-        opens close together (the gallery's arrow twice, two Ctrl+clicks)
-        never leave the older picture on top with its own `navigate`."""
+        opens close together (the gallery's arrow twice, two Ctrl+clicks,
+        an agent's `show_image` beside a user's gesture) never leave the
+        older picture on top with its own `navigate`. *dropped* hears a
+        landing that was superseded (a tool reply must still land)."""
         token = self._image_asks.take()
 
         def landed(inside: bool) -> None:
             if self._image_asks.current(token):
                 then(inside)
+            elif dropped is not None:
+                dropped()
 
         self.ask_can_open_in_editor(path, landed)
 

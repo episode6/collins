@@ -684,7 +684,9 @@ class ToolClient:
         if not editorfiles.is_image_path(path):
             return False, f"Not an image Collins can display: {raw}"
         # Project membership (the "Open in Editor" button) is the service's
-        # answer (PR-2.4): the reply waits for it.
+        # answer (PR-2.4): the reply waits for it. The ask is the lightbox's
+        # ordered one (`ask_image_open`): a user's own image open landing
+        # after this one must not be replaced by it, and the reverse.
         deferred = mcptools.DeferredResult()
         caption = args.get("caption")
 
@@ -698,7 +700,10 @@ class ToolClient:
                 logging.getLogger(__name__).exception("show_image lightbox failed")
                 deferred.resolve(False, f"Collins couldn't show {raw}")
 
-        tab.ask_can_open_in_editor(path, landed)
+        def dropped() -> None:
+            deferred.resolve(False, "A newer picture was opened before this one could show")
+
+        tab.ask_image_open(path, landed, dropped)
         return deferred
 
     def _present_image(

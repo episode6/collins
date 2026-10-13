@@ -280,7 +280,11 @@ pathless walker reads as `Path` methods):
   shows one at a time and two asks close together (the gallery's arrow
   twice, two Ctrl+clicks) land in either order, so the tab numbers them
   (`editorfiles.LatestAsk`) and an older landing presents nothing; a
-  remote attachment, never asked, takes a number too. The
+  remote attachment, never asked, takes a number too, and the
+  `show_image` tool's ask is the same ordered one (its superseded
+  landing resolves the tool reply as not shown). `open_in_editor` is
+  not in the sequence: it opens a tab, not the lightbox, and a user's
+  image click must not cancel it. The
   Agent files list (`set_agent_files`: one pass of stats in flight, the
   latest paths kept), a fresh open (the load's worker refuses one outside
   the root; a reload is not confined, so a file a re-root left open

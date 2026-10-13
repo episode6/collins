@@ -1177,7 +1177,9 @@ class GitSidebar(Gtk.Box):
         if not candidate:
             return ""
         try:
-            return candidate if remotefiles.stat_path(candidate).is_file else ""
+            # The root named: only the kind is read, and a stat with no root
+            # makes the service compute `inside` of every root it knows.
+            return candidate if remotefiles.stat_path(candidate, self._repo_root).is_file else ""
         except RequestRefused:
             return ""
 
@@ -1299,7 +1301,8 @@ class GitSidebar(Gtk.Box):
                 return  # the list was rebuilt while the service answered
             self._pop_file_menu(row, candidate if kind == "ok" and found.is_file else "", x, y)
 
-        remotefiles.off_main(lambda: remotefiles.stat_path(candidate), landed, name="git-sidebar-stat")
+        root = self._repo_root
+        remotefiles.off_main(lambda: remotefiles.stat_path(candidate, root), landed, name="git-sidebar-stat")
 
     def _pop_file_menu(self, row: _FileRow, full_path: str, x: float, y: float) -> None:
         sections = self._file_menu_items(row, full_path)
