@@ -5591,6 +5591,13 @@ class TerminalTab(Gtk.Box):
         terminal's foreground (`Session.has_running_command`)."""
         return self.session.has_running_command()
 
+    def cli_exited(self) -> bool:
+        """Whether the CLI has come and gone (the shell alone is left, or
+        the pty exited); False while a fresh spawn's or an attach's CLI is
+        still coming up (`ClientSession.cli_exited`): what the quit's rules
+        read instead of `has_running_command` (`quitrules`)."""
+        return self.session.cli_exited()
+
     def apply_settings(self, settings: dict) -> None:
         font = settings.get("font") or ""
         self.terminal.set_font(Pango.FontDescription.from_string(font) if font else None)

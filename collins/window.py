@@ -50,6 +50,7 @@ from . import (
     paneldnd,
     panelhistory,
     pkgrepos,
+    quitrules,
     sandboxstatus,
     uistate,
     updatecheck,
@@ -782,10 +783,14 @@ class MainWindow(Adw.ApplicationWindow):
             # per-tab drain, so capture their panel histories and state now
             # (a no-op for tabs that already drained through _on_close_page).
             # A plain Quit lands here too: every tab still open detaches as
-            # the window goes (TerminalTab.detach_pty on destroy).
+            # the window goes (TerminalTab.detach_pty on destroy) — except
+            # an unstarted thread, which has nothing to keep (quitrules).
             self._release_all_editor_windows()
             self._save_panel_data()
             self._persist_last_session()
+            for tab in self._terminal_tabs():
+                if tab.pty_id is not None and tab.unstarted_thread():
+                    tab.release_pty()
             self._close_for_good()
             return False  # tabs drained (or the user insisted) — really close
         self._last_active_session = self._active_restore_id() or ""
@@ -808,12 +813,15 @@ class MainWindow(Adw.ApplicationWindow):
             self._save_panel_data()
             self._persist_last_session()
             # Stop sessions and quit, with nothing busy to drain: what is
-            # left (an unstarted thread) ends with the window, as it always
-            # did. A tab whose CLI has exited ends with it whatever the
-            # setting: a shell alone is no session to leave running. The
-            # rest detach as the window goes, their sessions running on.
+            # left ends with the window, as it always did. An unstarted
+            # thread ends with it whatever the setting (nothing to keep;
+            # otherwise every abandoned New Session would be a CLI left in
+            # the service), and so does a tab whose CLI has exited: a shell
+            # alone is no session to leave running. The rest — a spawn or
+            # attach whose CLI is still coming up among them — detach as
+            # the window goes, their sessions running on (quitrules).
             for tab in self._terminal_tabs():
-                if behavior == "exit" or not tab.has_running_command():
+                if self._quit_fate(tab, behavior) == quitrules.RELEASE:
                     tab.release_pty()
             self._close_for_good()
             return False  # nothing running or unsaved; continue with the normal close
@@ -828,6 +836,17 @@ class MainWindow(Adw.ApplicationWindow):
             if isinstance(tab, TerminalTab):
                 tabs.append(tab)
         return tabs
+
+    @staticmethod
+    def _quit_fate(tab: TerminalTab, behavior: str) -> str | None:
+        """What a quit that asks nothing more does with *tab*
+        (`quitrules.tab_fate` over the tab's mirror facts)."""
+        return quitrules.tab_fate(
+            behavior=behavior,
+            has_pty=tab.pty_id is not None,
+            cli_exited=tab.cli_exited(),
+            unstarted=tab.unstarted_thread(),
+        )
 
     def _close_for_good(self) -> None:
         """This window is going for real: the device's open tabs are written
@@ -864,11 +883,19 @@ class MainWindow(Adw.ApplicationWindow):
         for i in range(self.tab_view.get_n_pages()):
             page = self.tab_view.get_nth_page(i)
             tab = page.get_child()
-            if not isinstance(tab, TerminalTab) or self._page_settling(page):
+            if not isinstance(tab, TerminalTab):
                 continue
             pty = tab.pty_id
-            if pty is None or not tab.has_running_command():
-                continue  # no pty, or a shell alone: no session to reopen
+            # No pty, a shell alone, an unstarted New Thread or a page
+            # mid-close: no session to reopen. A spawn or attach whose CLI
+            # is still coming up is one (quitrules.records_as_open).
+            if not quitrules.records_as_open(
+                has_pty=pty is not None,
+                cli_exited=tab.cli_exited(),
+                unstarted=tab.unstarted_thread(),
+                settling=self._page_settling(page),
+            ):
+                continue
             if tab.session_id and not tab.fork:
                 entries.append(tab.session_id)
             else:
@@ -1164,14 +1191,15 @@ class MainWindow(Adw.ApplicationWindow):
         self.state.flush_drafts(tab.session_id)
 
     def _busy_tab_count(self) -> int:
-        """Tabs the quit confirmation should count as active sessions. An
-        unstarted New Thread (empty input box, first prompt never sent) has
-        nothing going on, so it doesn't make quitting a question — and a
+        """Tabs that make quitting a question: an agent owning its terminal,
+        or a command running in a tab's terminal panel (the quit ends panel
+        shells, so the dialog has to say so; its heading counts the agents
+        alone). An unstarted New Thread (empty input box, first
+        prompt never sent) has nothing going on, so it doesn't count — and a
         quit with only such tabs open takes _on_close_request's nothing-busy
-        fast path, tearing the CLI down with the window (pty hangup) rather
-        than draining it through a graceful exit. That is deliberate: with
-        no first prompt ever sent there is no transcript or state to wind
-        down, and the graceful drain would keep the window up for it."""
+        fast path, which releases its pty (quitrules: nothing to keep) rather
+        than detaching it to run on in the service or draining it through a
+        graceful exit."""
         count = 0
         for i in range(self.tab_view.get_n_pages()):
             tab = self.tab_view.get_nth_page(i).get_child()
@@ -1294,8 +1322,9 @@ class MainWindow(Adw.ApplicationWindow):
             # launch), then every tab detaches and its session keeps running
             # in the Collins service — except a page already mid-close (a
             # graceful exit, a /bg handoff), which drains as do_quit's do,
-            # and a shell whose CLI has exited, which ends. _on_close_page
-            # reissues the window close once the last page is gone.
+            # and a shell whose CLI has exited or an unstarted New Thread,
+            # which end (quitrules). _on_close_page reissues the window
+            # close once the last page is gone.
             self._quit_asking = False
             self._quitting = True
             self._close_for_good()
@@ -1303,13 +1332,15 @@ class MainWindow(Adw.ApplicationWindow):
             for page in pages:
                 self._close_ok.add(page)
                 tab = page.get_child()
-                if (
-                    isinstance(tab, TerminalTab)
-                    and not self._page_settling(page)
-                    and tab.pty_id is not None
-                    and tab.has_running_command()
-                ):
+                if not isinstance(tab, TerminalTab) or self._page_settling(page):
+                    continue
+                fate = self._quit_fate(tab, "detach")
+                if fate == quitrules.DETACH:
                     self._detached_pages.add(page)
+                elif fate == quitrules.RELEASE:
+                    # An unstarted thread, or a shell left after its CLI:
+                    # torn down with the window, no graceful drain.
+                    self._confirmed_closes.add(page)
             if not pages:
                 GLib.idle_add(self.close, priority=GLib.PRIORITY_DEFAULT)
                 return

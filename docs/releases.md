@@ -51,7 +51,10 @@ downloads of each version, see the
   tabs resume on the new one; a service speaking another protocol is
   offered the same restart. A session asked to stop stops even when its
   window goes first: the service runs the graceful exit and ends a session
-  that ignores it, whether or not a window is watching.
+  that ignores it, whether or not a window is watching. A New Thread whose
+  first prompt was never sent ends with the window instead of lingering in
+  the service as a "New session" row; a tab whose agent is still starting
+  when you quit is kept and comes back.
 
 - **The service is its own process.** Collins is now two programs:
   `collins-service` runs the sessions (every agent's pty, the terminal

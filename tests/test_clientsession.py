@@ -173,6 +173,25 @@ def test_the_exit_blanks_the_reads(mirror):
     assert session.prompt_block_text()  # a gone session takes no prompt
 
 
+def test_the_cli_has_exited_only_once_it_was_seen_up(mirror):
+    """Should-fix 5 of PR 605's review: `running_command` is False until
+    the CLI's first output settles, so a fresh spawn or an attach is not a
+    shell left after its CLI; it is one once the CLI was seen and has gone,
+    or the pty exited."""
+    session, _client = mirror
+    assert not session.cli_exited()  # nothing landed yet: the CLI is coming up
+    session.apply(event(running_command=False, takes_prompt=False))
+    assert not session.cli_exited()
+    session.apply(event(running_command=True))
+    assert session.cli_seen and not session.cli_exited()
+    session.apply(event(running_command=False))
+    assert session.cli_exited()  # the shell has the terminal back
+    session.apply(event(running_command=True))  # a restart in the same shell
+    assert not session.cli_exited()
+    session.exit()
+    assert session.cli_exited()
+
+
 def test_the_model_and_effort_fall_back_to_the_options_while_the_transcript_is_silent(mirror):
     session, _client = mirror
     assert session.current_model() == "opus" and session.current_effort() == ""

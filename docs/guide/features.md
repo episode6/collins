@@ -316,8 +316,11 @@ Enter opens, Esc closes.
   window while the sessions keep running, and without a status icon it
   says how a hidden window comes back. Closing one of several windows
   says that window closes; its tabs are reopened at the next launch all
-  the same. A tab already closing finishes its close, and a tab whose
-  agent has exited ends with the window. The preference's choices are
+  the same. A tab already closing finishes its close; a tab whose agent
+  has exited, and a New Thread whose first prompt was never sent, end
+  with the window (nothing of theirs is left to keep running, and neither
+  is brought back). A tab whose agent is still starting is kept and comes
+  back like any other. The preference's choices are
   *Leave Running* (the default; an install that had *Ask* moves to it
   once), *Ask*, *Stop Sessions*, *Background Session* and *Hide Window*.
 - **Restart service** (the main menu) restarts the Collins service after

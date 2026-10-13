@@ -292,11 +292,17 @@ entry of `open_tabs`), with a placeholder row like a fresh tab's.
 
 Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit`, by
 `quit_with_running_sessions`: **detach** (the default since PR-1.12c, D30:
-`do_detach` records `open_tabs` with `_close_for_good`, marks every
-running tab `_detached_pages` and closes all pages with `_close_ok`, so a
-page mid-close drains and a shell-only tab ends, and the last page's close
-reissues the window's; a non-last window's tabs are kept by
-`App.keep_open_tabs`),
+`do_detach` records `open_tabs` with `_close_for_good`, marks every tab
+`quitrules.tab_fate` says `DETACH` as `_detached_pages`, the ones it says
+`RELEASE` — a shell left after its CLI, an unstarted New Thread, which has
+nothing to keep — as `_confirmed_closes`, and closes all pages with
+`_close_ok`, so a page mid-close drains and the rest detach or end, and
+the last page's close reissues the window's; a non-last window's tabs are
+kept by `App.keep_open_tabs`; the nothing-busy fast path of
+`_on_close_request` releases the `RELEASE` tabs the same way; `quitrules`
+is GTK-free and reads `TerminalTab.cli_exited()` — the CLI once seen up
+and gone, or the pty exited — not `has_running_command()`, which is False
+for the first second after a spawn or an attach),
 **exit** (*Stop Sessions and Quit*: close all with `_close_ok`, as quitting
 always did; with nothing busy the fast path releases each pty), background
 (the /bg queue), **hide** (the window hides, sessions keep running, the
@@ -312,7 +318,9 @@ Window)*; its first showing adds the status-icon sentence
 page alive with no `Gio.Application.hold()`.
 
 **open_tabs** (§3.21): `App.persist_open_tabs` (debounced 250 ms) writes
-every open window's `open_tab_entries()` — a tab with a live pty, as its
+every open window's `open_tab_entries()` — a tab with a live pty whose CLI
+is up or still coming up (`quitrules.records_as_open`: not a shell left
+after its CLI, not an unstarted New Thread, not a page mid-close), as its
 session id or `pty:<id>` for an unresolved one or a fork — through
 `AppState.set_open_tabs` into the per-service block of `ui-state.json`, on
 every page attached, detached, reordered and resolved. It is frozen while
