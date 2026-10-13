@@ -383,6 +383,8 @@ class MainWindow(Adw.ApplicationWindow):
         # New-session tabs shown as "New Thread" placeholder rows in the
         # sidebar until the store discovers their session: page -> placeholder id.
         self._placeholder_pages: dict[Adw.TabPage, str] = {}
+        # New-chat pages whose Send waits for the checkout answer.
+        self._new_chat_sends_held: set[Adw.TabPage] = set()
         # The keys this window has sent a desktop notification under (see
         # _send_desktop_notification) — read by the placeholder → real-row
         # handoff, which is the one place a notification has to be re-sent
@@ -2782,13 +2784,22 @@ class MainWindow(Adw.ApplicationWindow):
         own input box. The draft is spent: the text is about to be the
         session's first turn, and the dock's shells go on under the session
         id from here."""
+        if page in self._new_chat_sends_held:
+            return  # a second Send while the first waits below: one launch
         if worktree:
             # The checkbox is shown only in a checkout, and the tab holds the
-            # service's answer it asked for it (`checkouts.ask`); a Send in
-            # the milliseconds before it landed waits for it.
-            tab.when_checkout_known(
-                lambda is_git: self._send_new_chat(tab, text, is_git, sandbox, model, effort, page)
-            )
+            # service's answer it asked for it (`checkouts.ask`). A Send
+            # before the answer carries the box's wish (the project's
+            # default, a draft's choice: `newchat.worktree_wish`) and waits
+            # here for it, so the launch never falls back to plain just
+            # because the answer was slow.
+            self._new_chat_sends_held.add(page)
+
+            def answered(is_git: bool) -> None:
+                self._new_chat_sends_held.discard(page)
+                self._send_new_chat(tab, text, is_git, sandbox, model, effort, page)
+
+            tab.when_checkout_known(answered)
         else:
             self._send_new_chat(tab, text, False, sandbox, model, effort, page)
 

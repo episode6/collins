@@ -159,6 +159,29 @@ def effective_worktree(choice: bool | None, project_default: bool, is_git: bool)
     return project_default if choice is None else bool(choice)
 
 
+def worktree_wish(ticked: bool, is_git: bool | None) -> bool:
+    """What the screen's Send says about the worktree box: ticked, and not
+    in a directory known to be no checkout. *is_git* None is "the service
+    has not answered yet" (`checkouts.ask`): the box is still hidden then,
+    but it starts on the project's default (or a restored draft's choice),
+    and reading a hidden box as unticked would launch a default-on project
+    without its worktree for a Send that beat the answer. The wish is
+    held to the answer by the window (`TerminalTab.when_checkout_known`),
+    so a wish in what turns out to be no checkout still launches plain."""
+    return bool(ticked) and is_git is not False
+
+
+def worktree_draft_choice(ticked: bool, touched: bool, is_git: bool | None) -> bool | None:
+    """What a draft record keeps of the worktree box: the user's explicit
+    choice, None while the box follows the project's default and None
+    where the directory is known to be no checkout (no box at all). A
+    choice restored before the service's answer (*is_git* None) is kept
+    through the wait, as the Sandboxed box keeps its own."""
+    if is_git is False or not touched:
+        return None
+    return bool(ticked)
+
+
 def effective_sandbox(choice: bool | None, project_default: bool, available: bool) -> bool:
     """Whether a draft launches inside a sandbox: the Sandboxed box as the
     user left it, else the project's default -- and never where no box can

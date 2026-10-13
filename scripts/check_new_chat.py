@@ -213,8 +213,46 @@ def a_hidden_sandbox_box_keeps_the_draft_choice() -> None:
     )
 
 
+def a_send_before_the_checkout_answer_keeps_the_worktree_wish() -> None:
+    """The worktree box is hidden until the service says the directory is
+    a checkout (`checkouts.ask`). A Send that beats the answer carries the
+    hidden box's wish, which the window holds to the answer; a known
+    non-checkout has no wish at all."""
+
+    def screen(default: bool) -> NewChatView:
+        return NewChatView(
+            PROJECT,
+            lambda: None,
+            lambda _path: None,
+            lambda _message: None,
+            worktree_default=default,
+            is_git=None,
+            pick_model=False,
+            pick_effort=False,
+            sandbox_default=False,
+            sandbox_available=False,
+        )
+
+    view = screen(default=True)
+    check("no worktree box before the checkout answer", not view._worktree.get_visible())
+    check("…but a Send then carries the project's default-on wish", view.worktree() is True)
+    check("…and the draft keeps no choice the user didn't make", view.worktree_choice() is None)
+    view.set_is_git(False)
+    check("…no wish once the directory is known to be no checkout", view.worktree() is False)
+    view = screen(default=False)
+    check("a default-off project has no wish before the answer", view.worktree() is False)
+    view.set_worktree_choice(True)
+    check("a draft's worktree choice is kept through the wait", view.worktree_choice() is True)
+    view.set_is_git(True)
+    check(
+        "…and shows ticked when the answer lands",
+        (view._worktree.get_visible(), view.worktree(), view.worktree_choice()) == (True, True, True),
+    )
+
+
 def on_the_screen() -> bool:
     a_hidden_sandbox_box_keeps_the_draft_choice()
+    a_send_before_the_checkout_answer_keeps_the_worktree_wish()
     win = state["win"]
     page = win.tab_view.get_selected_page()
     tab = page.get_child()
