@@ -3,6 +3,8 @@
 transport: start → wait → connect → lost → backoff → reconnect →
 resubscribe, the systemd-or-spawn starter, and the backoff ladder."""
 
+import os
+
 from collins import APP_ID, connection
 
 
@@ -196,7 +198,32 @@ def test_systemctl_is_only_for_the_default_id(monkeypatch):
     assert connection.systemctl_start("com.episode6.Collins.Debug") is False
     assert calls == []
     assert connection.systemctl_start(APP_ID) is True
-    assert calls == [["systemctl", "--user", "start", "collins-service.service"]]
+    assert calls == [["systemctl", "--user", "start", "--no-block", "collins-service.service"]]
+
+
+def test_systemctl_start_does_not_wait_for_the_start_job(tmp_path, monkeypatch):
+    """The review of PR 604, should-fix 2: `systemctl start` waits for the
+    start job (a `Type=notify` unit's whole startup; after a stop, the
+    deactivating unit's stop sequence first), and a reconnect's `_retry`
+    runs on the main loop. A fake systemctl that blocks like the real one
+    unless told `--no-block` must come back at once."""
+    import stat
+    import time
+
+    fake = tmp_path / "systemctl"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$@\" > {tmp_path / 'argv'}\n"
+        "for arg in \"$@\"; do [ \"$arg\" = --no-block ] && exit 0; done\n"
+        "sleep 20\n"
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ.get('PATH', '')}")
+    started = time.monotonic()
+    assert connection.systemctl_start(APP_ID) is True
+    assert time.monotonic() - started < 5
+    argv = (tmp_path / "argv").read_text().split()
+    assert argv == ["--user", "start", "--no-block", "collins-service.service"]
 
 
 def test_the_starter_falls_back_to_a_spawn(monkeypatch):

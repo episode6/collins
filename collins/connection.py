@@ -17,6 +17,13 @@ effect injectable so `tests/test_connection.py` drives it with fakes:
   `collins-service --app-id <id>` detached (`start_new_session=True`), the
   fallback with no systemd (the debug instance, a check, the macOS port).
   A `systemctl` that fails (no unit installed) falls back to the spawn.
+  The start is `--no-block`: `systemctl start` otherwise waits for the
+  start job, which for a `Type=notify` unit is the whole startup (the
+  login-shell capture, the store's first scan), and after a `stop` or a
+  `service.restart` queues behind the deactivating unit's stop sequence
+  (up to `STOP_BOUND_S`) — on a reconnect that is the window's main loop
+  frozen with the banner unpainted. The wait that follows polls the
+  socket anyway, so nothing is lost.
 - **wait**: poll the socket every `POLL_MS` for up to `WAIT_S`.
 - **connect**: both channels and the hello (`SocketLink.connect`), the
   local proof from the client's own filesystem (`prove_local`), then the
@@ -94,13 +101,15 @@ def spawn_service(app_id: str, env: dict[str, str] | None = None) -> int:
 
 
 def systemctl_start(app_id: str) -> bool:
-    """`systemctl --user start` the unit: True when it reported success.
-    Only for the default app id (the unit runs the default)."""
+    """`systemctl --user start --no-block` the unit: True when the start
+    job was queued. Only for the default app id (the unit runs the
+    default). `--no-block` because the caller may be the main loop (see
+    the module docstring); the wait polls the socket."""
     if app_id != APP_ID or shutil.which("systemctl") is None:
         return False
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "start", UNIT],
+            ["systemctl", "--user", "start", "--no-block", UNIT],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
