@@ -51,7 +51,7 @@ import subprocess
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from . import diffmodel, gitfiles, gitinfo, gitloads, gitpatch
 from .diffmodel import File
@@ -2200,59 +2200,78 @@ def _match_checkout_branch(argv: list[str]) -> dict | None:
     return None
 
 
-def _registry() -> dict[str, tuple[Callable[..., list[str] | None], Matcher]]:
+class Builder(NamedTuple):
+    """One registry entry: the builder, the matcher that parses its argv
+    back, and `disk_paths`: the names of its arguments that reach git as
+    **paths on disk** rather than pathspecs or revisions — the arguments
+    git follows a symlink through (`diff --no-index` opens the file it is
+    handed; a pathspec names an entry of the tree and never crosses a
+    link). The service confines each such argument inside the
+    repository on its worker before the run (`gitfeed.GitFeed.run`,
+    through `disk_paths()`), so a link planted inside the tree cannot
+    make a builder read a file outside it. A new builder that hands git
+    a disk path names it here, or the confinement does not know it."""
+
+    build: Callable[..., list[str] | None]
+    match: Matcher
+    disk_paths: tuple[str, ...] = ()
+
+
+def _registry() -> dict[str, Builder]:
     return {
-        "fixup_argv": (fixup_argv, _match_fixup),
-        "commit_argv": (commit_argv, _match_commit),
-        "log_argv": (log_argv, _match_log),
-        "unpushed_argv": (unpushed_argv, _exact(unpushed_argv)),
-        "has_remote_tracking_argv": (has_remote_tracking_argv, _exact(has_remote_tracking_argv)),
-        "status_argv": (status_argv, _exact(status_argv)),
-        "branch_tips_argv": (branch_tips_argv, _exact(branch_tips_argv)),
-        "stack_walk_argv": (stack_walk_argv, _match_stack_walk),
-        "staged_paths_argv": (staged_paths_argv, _exact(staged_paths_argv)),
-        "stage_all_argv": (stage_all_argv, _exact(stage_all_argv)),
-        "unstage_all_argv": (unstage_all_argv, _exact(unstage_all_argv)),
-        "revert_argv": (revert_argv, _match_revert),
-        "revert_quit_argv": (revert_quit_argv, _exact(revert_quit_argv)),
-        "continue_argv": (continue_argv, _match_operation("--continue")),
-        "abort_argv": (abort_argv, _match_operation("--abort")),
-        "resolve_commit_argv": (
+        "fixup_argv": Builder(fixup_argv, _match_fixup),
+        "commit_argv": Builder(commit_argv, _match_commit),
+        "log_argv": Builder(log_argv, _match_log),
+        "unpushed_argv": Builder(unpushed_argv, _exact(unpushed_argv)),
+        "has_remote_tracking_argv": Builder(has_remote_tracking_argv, _exact(has_remote_tracking_argv)),
+        "status_argv": Builder(status_argv, _exact(status_argv)),
+        "branch_tips_argv": Builder(branch_tips_argv, _exact(branch_tips_argv)),
+        "stack_walk_argv": Builder(stack_walk_argv, _match_stack_walk),
+        "staged_paths_argv": Builder(staged_paths_argv, _exact(staged_paths_argv)),
+        "stage_all_argv": Builder(stage_all_argv, _exact(stage_all_argv)),
+        "unstage_all_argv": Builder(unstage_all_argv, _exact(unstage_all_argv)),
+        "revert_argv": Builder(revert_argv, _match_revert),
+        "revert_quit_argv": Builder(revert_quit_argv, _exact(revert_quit_argv)),
+        "continue_argv": Builder(continue_argv, _match_operation("--continue")),
+        "abort_argv": Builder(abort_argv, _match_operation("--abort")),
+        "resolve_commit_argv": Builder(
             gitloads.resolve_commit_argv,
             _match_commit_ref(["rev-parse", "--verify", "--quiet"]),
         ),
-        "rev_parse_argv": (rev_parse_argv, _match_rev_parse),
-        "head_abbrev_argv": (head_abbrev_argv, _exact(head_abbrev_argv)),
-        "merge_base_argv": (merge_base_argv, _match_merge_base),
-        "show_argv": (show_argv, _match_show),
-        "diff_argv": (diff_argv, _match_diff),
-        "numstat_argv": (numstat_argv, _match_numstat),
-        "untracked_diff_argv": (untracked_diff_argv, _match_untracked_diff),
-        "conflict_diff_argv": (conflict_diff_argv, _match_conflict_diff),
-        "file_at_argv": (file_at_argv, _match_file_at),
-        "apply_argv": (apply_argv, _match_apply),
-        "checkout_side_argv": (checkout_side_argv, _match_checkout_side),
-        "checkout_paths_argv": (checkout_paths_argv, _match_paths(["checkout", "-q", "--"])),
-        "add_paths_argv": (add_paths_argv, _match_paths(["add", "-A", "--"])),
-        "reset_paths_argv": (reset_paths_argv, _match_paths(["reset", "-q", "--"])),
-        "unmerged_stages_argv": (unmerged_stages_argv, _match_unmerged_stages),
-        "remove_paths_argv": (remove_paths_argv, _match_paths(["rm", "-q", "--"])),
-        "commit_subject_argv": (
+        "rev_parse_argv": Builder(rev_parse_argv, _match_rev_parse),
+        "head_abbrev_argv": Builder(head_abbrev_argv, _exact(head_abbrev_argv)),
+        "merge_base_argv": Builder(merge_base_argv, _match_merge_base),
+        "show_argv": Builder(show_argv, _match_show),
+        "diff_argv": Builder(diff_argv, _match_diff),
+        "numstat_argv": Builder(numstat_argv, _match_numstat),
+        "untracked_diff_argv": Builder(untracked_diff_argv, _match_untracked_diff, disk_paths=("path",)),
+        "conflict_diff_argv": Builder(conflict_diff_argv, _match_conflict_diff),
+        "file_at_argv": Builder(file_at_argv, _match_file_at),
+        "apply_argv": Builder(apply_argv, _match_apply),
+        "checkout_side_argv": Builder(checkout_side_argv, _match_checkout_side),
+        "checkout_paths_argv": Builder(checkout_paths_argv, _match_paths(["checkout", "-q", "--"])),
+        "add_paths_argv": Builder(add_paths_argv, _match_paths(["add", "-A", "--"])),
+        "reset_paths_argv": Builder(reset_paths_argv, _match_paths(["reset", "-q", "--"])),
+        "unmerged_stages_argv": Builder(unmerged_stages_argv, _match_unmerged_stages),
+        "remove_paths_argv": Builder(remove_paths_argv, _match_paths(["rm", "-q", "--"])),
+        "commit_subject_argv": Builder(
             gitloads.commit_subject_argv,
             _match_commit_ref(["log", "-1", "--format=%s"]),
         ),
-        "commit_message_argv": (
+        "commit_message_argv": Builder(
             gitloads.commit_message_argv,
             _match_commit_ref(["log", "-1", f"--format={gitloads.COMMIT_FORMAT}"]),
         ),
-        "status_porcelain_argv": (gitinfo.status_porcelain_argv, _exact(gitinfo.status_porcelain_argv)),
-        "check_ignore_argv": (gitinfo.check_ignore_argv, _exact(gitinfo.check_ignore_argv)),
-        "pull_argv": (pull_argv, _exact(pull_argv)),
-        "checkout_branch_argv": (checkout_branch_argv, _match_checkout_branch),
+        "status_porcelain_argv": Builder(
+            gitinfo.status_porcelain_argv, _exact(gitinfo.status_porcelain_argv)
+        ),
+        "check_ignore_argv": Builder(gitinfo.check_ignore_argv, _exact(gitinfo.check_ignore_argv)),
+        "pull_argv": Builder(pull_argv, _exact(pull_argv)),
+        "checkout_branch_argv": Builder(checkout_branch_argv, _match_checkout_branch),
     }
 
 
-BUILDERS: dict[str, tuple[Callable[..., list[str] | None], Matcher]] = _registry()
+BUILDERS: dict[str, Builder] = _registry()
 # The most argv elements a built argv may have, and the longest one: what
 # the service checks a builder's result against before running it.
 MAX_ARGV_ITEMS = 8192
@@ -2267,7 +2286,7 @@ def build(name: str, args: dict) -> list[str]:
     entry = BUILDERS.get(name)
     if entry is None:
         raise KeyError(name)
-    builder = entry[0]
+    builder = entry.build
     if not isinstance(args, dict) or not all(isinstance(key, str) for key in args):
         raise ValueError("args must be an object of keyword arguments")
     try:
@@ -2285,12 +2304,30 @@ def build(name: str, args: dict) -> list[str]:
     return argv
 
 
+def disk_paths(name: str, args: dict) -> list[str]:
+    """The values of builder *name*'s `disk_paths` arguments in *args*
+    (a str, or a list of them): every path the built argv hands git as a
+    file on disk, for the service to confine before the run. Empty for
+    a builder with none, or a name outside BUILDERS."""
+    entry = BUILDERS.get(name)
+    if entry is None or not isinstance(args, dict):
+        return []
+    found: list[str] = []
+    for key in entry.disk_paths:
+        value = args.get(key)
+        if isinstance(value, str):
+            found.append(value)
+        elif isinstance(value, list | tuple):
+            found.extend(item for item in value if isinstance(item, str))
+    return found
+
+
 def match_argv(argv: Sequence[str]) -> tuple[str, dict] | None:
     """(builder name, keyword args) that make *argv*, or None when no
     builder does — including one whose matcher parses it but whose
     re-built argv differs (the round trip is the proof)."""
     listed = [str(item) for item in argv]
-    for name, (builder, matcher) in BUILDERS.items():
+    for name, (builder, matcher, _disk) in BUILDERS.items():
         try:
             parsed = matcher(listed)
         except (TypeError, ValueError, IndexError):

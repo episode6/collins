@@ -179,9 +179,22 @@ class GitFeed:
         env = self._environment(message.get("env") or protocol.GIT_ENV_DEFAULT)
         stdin_text = message.get("stdin")
         stdin = stdin_text.encode("utf-8", "replace") if isinstance(stdin_text, str) and stdin_text else None
+        on_disk = gitops.disk_paths(name, message.get("args") or {})
         re_id = message.id
 
         def work() -> dict:
+            # The builder's disk-path arguments (gitops.Builder.disk_paths:
+            # what git opens as a file, `diff --no-index`'s) must resolve
+            # inside the repository — the lexical safe_path admits
+            # `linkdir/secret` where linkdir is a symlink out of the tree,
+            # and git follows it. A pathspec never does; only these are
+            # checked, on the worker (the resolve is a stat per component).
+            outside = _outside_tree(cwd, on_disk)
+            if outside is not None:
+                return protocol.refuse(
+                    re_id, protocol.ERROR_INVALID, "{builder}: {path} is outside the repository",
+                    {"builder": name, "path": outside[: protocol.ARG_TEXT_MAX]},
+                )
             status, stdout, stderr = run_git_raw(cwd, argv, stdin, timeout, env)
             if status is None:
                 return protocol.reply(re_id, status=None, stdout="", stderr=stderr, unreachable=True)
@@ -320,6 +333,15 @@ class GitFeed:
                         re_id, protocol.ERROR_STALE, "{path} changed since the plan was made: reloading",
                         {"path": path},
                     )
+            if op == gitpatch.OP_TRASH:
+                # The trash is a disk path too (Gio moves the file the
+                # path resolves to): confined like a builder's.
+                outside = _outside_tree(cwd, paths, from_root=True)
+                if outside is not None:
+                    return protocol.refuse(
+                        re_id, protocol.ERROR_INVALID, "{path} is outside the repository",
+                        {"path": outside[: protocol.ARG_TEXT_MAX]},
+                    )
             result = gitops.run_plan(cwd, plan, three_way=three_way, trash=files.trash_paths)
             return protocol.reply(
                 re_id,
@@ -361,6 +383,27 @@ class GitFeed:
             self._dispatch(lambda: respond(status, headers, body))
 
         self._spawn(work, "git-blob")
+
+
+def _tree_base(cwd: str) -> str:
+    """The repository root enclosing *cwd*, or *cwd* itself outside one:
+    what a working-tree path is confined to."""
+    root = gitfiles.repo_root(cwd)
+    return str(root) if root is not None else cwd
+
+
+def _outside_tree(cwd: str, paths: Sequence[str], from_root: bool = False) -> str | None:
+    """The first of *paths* (relative to *cwd*, or to the repository root
+    when *from_root*: a plan's) that does not resolve inside the
+    repository enclosing *cwd* — symlinks followed, as git's
+    `--no-index` and Gio's trash follow them — or None when every one
+    does. Worker thread: a stat walk per path."""
+    base = _tree_base(cwd)
+    at = base if from_root else cwd
+    for path in paths:
+        if not files.is_inside(base, os.path.join(at, path)):
+            return path
+    return None
 
 
 def _plan_refusal(load, path, previous, parent, op, paths, patch) -> str | None:

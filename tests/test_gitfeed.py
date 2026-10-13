@@ -512,6 +512,100 @@ def test_the_untracked_read_cannot_name_a_file_outside_the_tree(served, tmp_path
     assert refused.value.error == protocol.ERROR_INVALID
 
 
+def _confined_to(core, client, repo: Path) -> None:
+    """*client* is not local and *repo* is the one root the store knows
+    (the reviewer's probe of PR 608's must-fix)."""
+    client.local = False
+    core.store = type("Store", (), {"all_sessions": lambda self: [type("S", (), {"cwd": str(repo)})()]})()
+
+
+def test_the_untracked_read_cannot_follow_a_symlinked_directory_out_of_the_tree(served, tmp_path):
+    """The must-fix of PR 608's Fable review, CONFIRMED by its probe: a
+    repository holding `linkdir -> <outside>`; `untracked_diff_argv` of
+    `linkdir/outside-secret.txt` passes the lexical `safe_path`, and
+    `git diff --no-index` takes a disk path and follows the link, so the
+    reply carried the file's contents as `+` lines. The builder's
+    disk-path argument is now confined on the worker (resolved inside
+    the repository) before the run; a direct file link stays what it was
+    (status 1, the link itself diffed, no contents)."""
+    core, client, repo, _events = served
+    _confined_to(core, client, repo)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "outside-secret.txt").write_text("s3cret-outside\n")
+    (repo / "linkdir").symlink_to(outside)
+    with pytest.raises(inproc.RequestRefused) as refused:
+        run(client, "untracked_diff_argv", {"path": "linkdir/outside-secret.txt"}, cwd=repo)
+    assert refused.value.error == protocol.ERROR_INVALID and "outside the repository" in refused.value.msgid
+    # A subdirectory as the cwd: the path is relative to it, and confined the same.
+    sub = repo / "sub"
+    sub.mkdir()
+    (sub / "linkdir2").symlink_to(outside)
+    (sub / "inner.txt").write_text("inner\n")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        run(client, "untracked_diff_argv", {"path": "linkdir2/outside-secret.txt"}, cwd=sub)
+    assert refused.value.error == protocol.ERROR_INVALID
+    # A file inside the tree still reads, from the root and from a subdirectory.
+    reply = run(client, "untracked_diff_argv", {"path": "new.txt"}, cwd=repo)
+    assert reply["status"] == 1 and "+hello" in reply["stdout"]
+    reply = run(client, "untracked_diff_argv", {"path": "inner.txt"}, cwd=sub)
+    assert reply["status"] == 1 and "+inner" in reply["stdout"]
+    # A direct file link: the link is diffed, never its target's contents.
+    (repo / "link.txt").symlink_to(outside / "outside-secret.txt")
+    with pytest.raises(inproc.RequestRefused):
+        run(client, "untracked_diff_argv", {"path": "link.txt"}, cwd=repo)
+
+
+def test_a_plan_cannot_trash_through_a_symlinked_directory(served, tmp_path, monkeypatch):
+    """OP_TRASH hands Gio a disk path (the file the path resolves to is
+    what moves): confined like a builder's disk-path argument, so a
+    `git.plan` naming `linkdir/secret` is refused before the mover runs."""
+    core, client, repo, _events = served
+    _confined_to(core, client, repo)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret").write_text("keep me\n")
+    (repo / "linkdir").symlink_to(outside)
+    moved: list = []
+    ok = gitops.GitResult(True, "", "")
+    monkeypatch.setattr(files, "trash_paths", lambda root, paths: moved.append(tuple(paths)) or ok)
+    plan = {
+        "t": "git.plan", "cwd": str(repo), "load": "unstaged", "path": "linkdir/secret",
+        "op": gitpatch.OP_TRASH, "paths": ["linkdir/secret"],
+    }
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request(plan)
+    assert refused.value.error == protocol.ERROR_INVALID and moved == []
+    assert (outside / "secret").exists()
+    # The same plan on a file of the tree reaches the mover.
+    client.request({**plan, "path": "new.txt", "paths": ["new.txt"]})
+    assert moved == [("new.txt",)]
+
+
+def test_the_registry_flags_every_disk_path_argument():
+    """`gitops.Builder.disk_paths` is the confinement's knowledge of which
+    arguments git opens as files: today the one `--no-index` builder.
+    Every other builder hands git pathspecs (`:(literal)`, never followed
+    through a link), revisions, counts or a `-m` text; `check_ignore_argv`'s
+    names arrive on stdin and are matched against the ignore rules, not
+    opened. A builder added with a disk path is added here too."""
+    flagged = {name for name, entry in gitops.BUILDERS.items() if entry.disk_paths}
+    assert flagged == {"untracked_diff_argv"}
+    assert gitops.disk_paths("untracked_diff_argv", {"path": "a/b"}) == ["a/b"]
+    assert gitops.disk_paths("status_argv", {}) == []
+    assert gitops.disk_paths("nope", {"path": "x"}) == []
+    for name, entry in gitops.BUILDERS.items():
+        assert "--no-index" not in _argv_tokens(entry) or name in flagged, name
+
+
+def _argv_tokens(entry) -> set[str]:
+    """The string constants a builder's code holds (a `--no-index` in a
+    new builder's argv trips the audit above)."""
+    import dis
+
+    return {const for const in dis.Bytecode(entry.build).codeobj.co_consts if isinstance(const, str)}
+
+
 def test_a_run_whose_work_raises_still_answers(served, monkeypatch):
     core, client, repo, _events = served
 

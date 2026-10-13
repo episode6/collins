@@ -464,6 +464,26 @@ unknown name is `unknown`, args the builder refuses or an argv that isn't
 bounded text `invalid`). An argv no builder makes is `unreachable` with a
 logged error: a new git call is a new builder, matcher and registry
 entry, and `tests/test_gitops.py` pins that every builder round-trips.
+**A builder's disk paths are confined on the service's worker.** The
+builders' checks are lexical (`safe_path`: relative, no `..`), which is
+all a pathspec needs — git never follows a symlink through `:(literal)`
+— but `untracked_diff_argv`'s path goes to `diff --no-index`, which
+opens the file it is handed and follows a link, so `linkdir/secret`
+under a `linkdir -> ~` planted in the tree read any file the service
+could (PR 608's Fable review, must-fix 1). Each registry entry is a
+`gitops.Builder(build, match, disk_paths=())`, `disk_paths` naming the
+arguments git opens as files (today `untracked_diff_argv`'s `path`
+alone; `test_the_registry_flags_every_disk_path_argument` audits that no
+other builder's code carries `--no-index`), and `GitFeed.run` resolves
+every one of them (`gitops.disk_paths(name, args)`,
+`gitfeed._outside_tree`: `files.is_inside` against the repository root
+enclosing the cwd, relative to the cwd git runs in) before the run,
+refusing `invalid` for one that lands outside. `git.plan`'s OP_TRASH
+paths are confined the same way (Gio moves the file the path resolves
+to), relative to the root `run_plan` runs from; the watch's monitored
+directories are filtered by the same rule. A new builder that hands git
+a file on disk names it in `disk_paths` — the confinement knows no
+other way.
 The reply is git's exit status (null: unreachable) and both streams as
 text, the client's runner deciding which statuses are ok; a stdout past
 the frame cap travels as `TAG_BLOB` chunks on the asking connection
