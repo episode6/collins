@@ -1099,6 +1099,7 @@ def test_collins_uri_carries_a_name_that_is_not_utf8_byte_for_byte():
         ("/a/b", "/a/b", None, None),
         ("/a/b", "/a/b", "", None),
         ("/a/b", "/a/b", 7, None),
+        ("/a/b", "/a/b", "relative/answer", None),  # a root is an absolute path or nothing
         ("/home/me", None, "/home/me", None),
         ("/home/me", "", "/srv", None),
     ],

@@ -629,14 +629,14 @@ def service_landing(root: str | Path, asked: str | None, started: object) -> str
     session's shell started in *started* (the `spawn` reply's `cwd`)
     though the tab asked for *asked*: *started*, or None for no move.
     No move when the service started where it was asked, when it said
-    nothing usable, or when the editor is no longer rooted at *asked* (a
+    nothing usable (no text, or no absolute path), or when the editor is no longer rooted at *asked* (a
     follow into a worktree since: only the tab's own root moves).
 
     The three are compared as paths, not as text: *root* is a `Path`'s
     string (no trailing slash, no doubled separator) and *asked* is the
     request's own text, so `/a/b/` and `/a//b` are `/a/b` here. Lexical
     only (`normpath`): no disk is asked, the paths being the service's."""
-    if not isinstance(started, str) or not started or not asked:
+    if not isinstance(started, str) or not os.path.isabs(started) or not asked:
         return None
     wanted = os.path.normpath(asked)
     if os.path.normpath(started) == wanted:
