@@ -171,7 +171,7 @@ os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"  # unique; 'r' 
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"        # write "{}" to it
 os.environ["COLLINS_CHATS_DIR"] = f"{E2E}/chats"                  # NOT optional: else the app reaps the user's chats
-os.environ["COLLINS_UPLOADS_DIR"] = f"{E2E}/uploads"              # the service sweeps uploads by the sessions it knows
+os.environ["COLLINS_UPLOADS_DIR"] = f"{E2E}/uploads"              # the service sweeps uploads by the sessions it knows; never isolate by HOME alone
 os.environ["XDG_CONFIG_HOME"] = f"{E2E}/config"
 os.environ["XDG_STATE_HOME"] = f"{E2E}/state"
 ```
@@ -254,6 +254,12 @@ a tab running a real CLI, kill the foreground process group
 - To read a sidebar context menu without compositing, stub
   `SessionSidebar._popup_menu` to capture the `Gio.Menu` and walk its
   sections (`get_item_link(i, Gio.MENU_LINK_SECTION)`).
+- A scratch `HOME` is never isolation on its own: with the user's
+  `XDG_DATA_HOME` inherited the service reads the scratch home's "CLI
+  projects directory", the orphan-uploads refusal does not fire, and the
+  sweep runs against the user's real uploads root. Set
+  `COLLINS_UPLOADS_DIR` (and `COLLINS_PROJECTS_DIR`) whenever `HOME` is
+  redirected.
 - Real-CLI probes: copy `~/.claude.json` into the scratch `HOME` so folder
   trust resolves (headless `-p` skips the trust gate and proves nothing);
   scrub `CLAUDE_*` from the environment (an inherited

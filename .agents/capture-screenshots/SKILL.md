@@ -78,7 +78,11 @@ set (`uploads.sweep_refusal`, logged once; `XDG_DATA_HOME` does not count,
 since a user may export it for real), `with-headless-display.sh` and
 `scripts/run_e2e.py` export a scratch one when the caller set none, and the
 recipe above sets it. A check that wants the sweep to run (none does yet)
-must set `COLLINS_UPLOADS_DIR` itself.
+must set `COLLINS_UPLOADS_DIR` itself. Never isolate a run by `HOME` alone:
+with a scratch `HOME` and the user's own `XDG_DATA_HOME` inherited, the
+service reads "the CLI's own" projects directory under the scratch home, the
+refusal does not fire, and the sweep runs against the user's real uploads
+root. Set `COLLINS_UPLOADS_DIR` whenever `HOME` is redirected.
 
 ## Rule 3: capture headlessly
 
