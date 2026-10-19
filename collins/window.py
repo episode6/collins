@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-13. Full change history: git log for this file.
+# fork. Last modified: 2026-10-18. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -384,7 +384,10 @@ class MainWindow(Adw.ApplicationWindow):
         # sidebar until the store discovers their session: page -> placeholder id.
         self._placeholder_pages: dict[Adw.TabPage, str] = {}
         # New-chat pages whose Send waits for the checkout answer.
-        self._new_chat_sends_held: set[Adw.TabPage] = set()
+        # A held Send per page (`_on_new_chat_send`), each hold a token of
+        # its own: a page handed to another window and back inside one
+        # round trip launches with the Send that is current, not the first.
+        self._new_chat_sends_held: dict[Adw.TabPage, object] = {}
         # The keys this window has sent a desktop notification under (see
         # _send_desktop_notification) — read by the placeholder → real-row
         # handoff, which is the one place a notification has to be re-sent
@@ -2801,11 +2804,12 @@ class MainWindow(Adw.ApplicationWindow):
         # the worktree the user asked for would edit the checkout it was
         # meant to protect, so the screen and its draft stay and a toast
         # says why.
-        self._new_chat_sends_held.add(page)
+        token = self._new_chat_sends_held[page] = object()
 
         def answered(answer: bool | None) -> None:
-            held = page in self._new_chat_sends_held
-            self._new_chat_sends_held.discard(page)
+            held = self._new_chat_sends_held.get(page) is token
+            if held:
+                del self._new_chat_sends_held[page]
             if not newchat.send_goes_on(held, tab.get_root() is not None):
                 return  # called off (the page left this window), or the tab went
             outcome = newchat.send_outcome(True, answer)
@@ -2815,11 +2819,14 @@ class MainWindow(Adw.ApplicationWindow):
                     _("Couldn't check whether this folder is a git checkout. Nothing was started.")
                 )
                 return
-            self._send_new_chat(
-                tab, text, outcome == newchat.SEND_WORKTREE, sandbox, model, effort, page
-            )
-            if tab.is_new_chat:
-                tab.set_new_chat_held(False)  # the launch declined: the screen is back
+            try:
+                self._send_new_chat(
+                    tab, text, outcome == newchat.SEND_WORKTREE, sandbox, model, effort, page
+                )
+            finally:
+                # The launch declined, or raised: the screen is back (a no-op
+                # once the launch took it down).
+                tab.set_new_chat_held(False)
 
         tab.when_checkout_known(answered)
         if page in self._new_chat_sends_held:
@@ -2832,9 +2839,8 @@ class MainWindow(Adw.ApplicationWindow):
         with its Send still held: the hold is this window's, so it ends
         here without a launch, and the screen (should it live on in
         another window) is usable again."""
-        if page not in self._new_chat_sends_held:
+        if self._new_chat_sends_held.pop(page, None) is None:
             return
-        self._new_chat_sends_held.discard(page)
         tab = page.get_child()
         if isinstance(tab, TerminalTab):
             tab.set_new_chat_held(False)

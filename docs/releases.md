@@ -53,7 +53,9 @@ downloads of each version, see the
   so a project whose new sessions use a worktree by default still gets one,
   and if the service cannot say within ten seconds nothing is started: the
   screen comes back with its text and a note, rather than a session in the
-  main checkout when a worktree was asked for. A link the transcript holds
+  main checkout when a worktree was asked for (a screen opened while the
+  service was away asks again when it is back, so its box still appears).
+  A link the transcript holds
   with a broken character in it (tool output cut mid-emoji) is left out of
   the tail's answer instead of costing the session every other link.
   One visible difference: a Ctrl+click on text that looks like a path but is

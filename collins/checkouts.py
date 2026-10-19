@@ -20,8 +20,12 @@ requests, because a failure means two different things:
   new-chat screen's Send). There False is not safe: launching plain would
   put the session in the checkout the worktree was meant to protect. So a
   failure is its own answer, None ("could not ask"), on which the caller
-  does not launch, and the ask has a short timeout of its own
-  (ANSWER_TIMEOUT_S) because a person is waiting on it.
+  does not launch.
+
+Both wait ANSWER_TIMEOUT_S, not the files' CALL_TIMEOUT_S (sized for 5 MiB
+reads): a person is waiting on each of them, at a Send, at a right-click
+whose menu is built on the answer, or at a `start_session` tool call whose
+tab opens on it.
 """
 
 from __future__ import annotations
@@ -44,7 +48,8 @@ def is_checkout(kind: str | None) -> bool:
     return kind in ("file", "dir")
 
 
-# How long a held launch waits for its answer before "could not ask".
+# How long an ask waits for its answer: a held launch's before "could not
+# ask", an offer's before "not offered".
 ANSWER_TIMEOUT_S = 10.0
 
 
@@ -75,7 +80,7 @@ def ask_answer(
     )
 
 
-def ask(cwd: str, then: Callable[[bool], None]) -> None:
+def ask(cwd: str, then: Callable[[bool], None], timeout: float | None = ANSWER_TIMEOUT_S) -> None:
     """`ask_answer` for an offer: `then(is_checkout)`, False on any
-    failure, with the files' ordinary timeout."""
-    ask_answer(cwd, lambda answer: then(bool(answer)), timeout=None)
+    failure, within the same ANSWER_TIMEOUT_S."""
+    ask_answer(cwd, lambda answer: then(bool(answer)), timeout=timeout)

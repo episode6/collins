@@ -634,7 +634,9 @@ def walk_reply(root: str, hidden: bool) -> dict:
 def names_reply(root: str) -> dict:
     """`fs.names`'s fields (a worker thread): the names in *root* that are
     not directories, a symlink to a directory counting as one (what the
-    client's `os.scandir` test did). A name over FS_NAME_MAX is left out,
+    client's `os.scandir` test did); an entry whose kind cannot be told (a
+    link into a directory the service cannot stat) is a name, as a
+    dangling link is, and never costs the listing. A name over FS_NAME_MAX is left out,
     and so is one that is not UTF-8 on disk (`scandir` surrogate-escapes
     it, and the reply would fail validation whole: `projectfiles.
     list_entries`' rule for `fs.list` and `fs.walk`); past FS_NAMES_MAX
@@ -644,8 +646,11 @@ def names_reply(root: str) -> dict:
     try:
         with os.scandir(root) as entries:
             for entry in entries:
-                if entry.is_dir():
-                    continue
+                try:
+                    if entry.is_dir():
+                        continue
+                except OSError:
+                    pass  # unstat-able (a link into another user's 0700): listed as a name
                 name = entry.name
                 if len(name) > protocol.FS_NAME_MAX:
                     continue

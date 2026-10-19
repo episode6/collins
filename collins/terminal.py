@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-13. Full change history: git log for this file.
+# fork. Last modified: 2026-10-18. Full change history: git log for this file.
 
 """A tab hosting a VTE terminal running the user's shell with an agent CLI inside."""
 
@@ -216,9 +216,10 @@ def _setup_links(terminal: Vte.Terminal) -> None:
     the way GNOME Terminal matches them, and path-shaped file references
     (`collins/foo.py:12`) matched by a second regex and validated against the
     filesystem only at click time — VTE has no per-match callback, so the
-    hover underline can't know whether the file exists, but a click on a
-    candidate that resolves nowhere falls through to the terminal unclaimed
-    and costs the user nothing. Root-level files carry no slash, so the path
+    hover underline can't know whether the file exists, and since the
+    filesystem is the service's the click is claimed on a candidate and
+    resolved afterwards (D40): a candidate that resolves nowhere is
+    swallowed, never handed to the terminal. Root-level files carry no slash, so the path
     grammar can't take them; _RootNameLinks keeps one more regex built from
     the names actually at the project root, so `README.md` underlines too.
 
@@ -625,10 +626,10 @@ class _RootNameLinks:
     answer for a root this has since left, or one an asked-again has
     overtaken, is dropped. A service that cannot answer leaves the names
     as they were, and a reconnect asks again (`Watcher.on_reset`).
-    Between snapshots the
-    usual guarantees hold: a deleted file's click resolves nowhere and falls
-    through unclaimed. The terminal's signal closures keep the instance
-    alive; no one else needs to hold it."""
+    Between snapshots the usual guarantees hold: a deleted file's click is
+    claimed, resolves nowhere on the service and is swallowed (D40). The
+    terminal's signal closures keep the instance alive; no one else needs
+    to hold it."""
 
     def __init__(self, terminal: Vte.Terminal, tag_kinds: dict[int, str]) -> None:
         self._terminal = terminal
@@ -810,8 +811,16 @@ def _present_image(terminal: Vte.Terminal, path: str, can_edit: bool, click: int
     than a click already presented presents nothing (`editorfiles.
     ClickOrder`), and the newest click's picture is the one left up."""
     tab = terminal.get_ancestor(TerminalTab)
-    if tab is not None and not tab.link_clicks.presents(click):
-        return
+    if tab is not None:
+        # No caption to record: a clicked reference is a path, not something
+        # anyone described. The line it was printed on almost always says
+        # what it is, and the transcript's own snippet fills the label in
+        # later (attachrecords lets context land in an empty slot). Recorded
+        # before the click order is judged: the gallery is what the user
+        # clicked, whether or not this click's lightbox lands.
+        tab.record_attachment(path)
+        if not tab.link_clicks.presents(click):
+            return
     on_open = None
     if can_edit:
 
@@ -821,11 +830,6 @@ def _present_image(terminal: Vte.Terminal, path: str, can_edit: bool, click: int
             )
 
     if tab is not None:
-        # No caption to record: a clicked reference is a path, not something
-        # anyone described. The line it was printed on almost always says
-        # what it is, and the transcript's own snippet fills the label in
-        # later (attachrecords lets context land in an empty slot).
-        tab.record_attachment(path)
         # The answer is already here (the click's own `fs.stat`), so nothing
         # is asked; an older lightbox ask still out must not replace this.
         tab._image_asks.take()
@@ -1716,6 +1720,7 @@ class TerminalTab(Gtk.Box):
         self._is_git_checkout: bool | None = None
         self._checkout_waiters: list[Callable[[bool | None], None]] = []
         self._checkout_asking = False  # an ask is out (`_ask_checkout`)
+        self._checkout_reask_armed = False  # a reconnect will ask again (`_arm_checkout_reask`)
         self._history_key: str | None = None
         # Every _RootNameLinks watching a terminal inside this tab — the agent's
         # and one per panel shell — so a re-root can re-point them all. They
@@ -2224,7 +2229,13 @@ class TerminalTab(Gtk.Box):
         asked (`checkouts.ask_answer`: a refusal, no link, or nothing
         within its ANSWER_TIMEOUT_S). None is not remembered: the box
         stays out, the screen keeps its wish, and the next caller asks
-        again, so a Send after a failed answer is a fresh question."""
+        again, so a Send after a failed answer is a fresh question. A
+        screen whose own first ask failed (built while the link was down
+        or the service stalled: a *Restart service*, a reconnect after
+        sleep) would otherwise never show its box in a project whose
+        default is off, since no Send there asks; so a failed ask arms
+        one re-ask on the next reconnect (`remotefiles.Watcher.on_reset`,
+        the `_RootNameLinks` idiom) while the screen stands."""
         if self._is_git_checkout is not None:
             then(self._is_git_checkout)
             return
@@ -2242,11 +2253,30 @@ class TerminalTab(Gtk.Box):
         self._checkout_asking = False
         if answer is not None:
             self._is_git_checkout = bool(answer)
+            self._disarm_checkout_reask()
             if self._new_chat is not None:
                 self._new_chat.set_is_git(bool(answer))
+        elif self._new_chat is not None:
+            self._arm_checkout_reask()
         waiters, self._checkout_waiters = self._checkout_waiters, []
         for then in waiters:
             then(answer)
+
+    def _arm_checkout_reask(self) -> None:
+        """The next reconnect asks `_ask_checkout` again, once."""
+        if not self._checkout_reask_armed:
+            self._checkout_reask_armed = True
+            remotefiles.watcher().on_reset(self._reask_checkout)
+
+    def _disarm_checkout_reask(self) -> None:
+        if self._checkout_reask_armed:
+            self._checkout_reask_armed = False
+            remotefiles.watcher().off_reset(self._reask_checkout)
+
+    def _reask_checkout(self) -> None:
+        self._disarm_checkout_reask()
+        if self._new_chat is not None and self._is_git_checkout is None:
+            self._ask_checkout()
 
     def set_new_chat_held(self, held: bool) -> None:
         """A Send is waiting for the checkout answer (`MainWindow.
@@ -2350,6 +2380,7 @@ class TerminalTab(Gtk.Box):
         if view is None:
             return
         self._new_chat = None
+        self._disarm_checkout_reask()
         self._history_key = None
         self._rekey_panel_shells()
         self.session.options = options
@@ -3433,6 +3464,8 @@ class TerminalTab(Gtk.Box):
         self.connect("destroy", lambda *_a: self.detach_pty())
         # Nor its panel shells' (a stowed or maximized one included).
         self.connect("destroy", lambda *_a: self.release_panel_ptys())
+        # A new-chat screen's pending re-ask on reconnect goes with the tab.
+        self.connect("destroy", lambda *_a: self._disarm_checkout_reask())
 
     def _leave_pr_store(self, *_args) -> None:
         if self._pr_store is None:

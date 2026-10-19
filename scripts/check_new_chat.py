@@ -105,7 +105,7 @@ gi.require_version("Vte", "3.91")
 import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
-from collins import checkouts, i18n, newchat, proctree, trust  # noqa: E402
+from collins import checkouts, i18n, newchat, proctree, remotefiles, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.newchatview import NewChatView  # noqa: E402
 from collins.state import AppState  # noqa: E402
@@ -655,6 +655,36 @@ def send_and_fail_the_answer() -> bool:
 def after_the_plain_send() -> bool:
     check("that was one more launch", launches() == state["launches"] + 1, launches())
     check("…without the worktree flag", worktree_launches() == 1, worktree_launches())
+
+    # A screen whose own first ask failed, in a project whose default is off:
+    # no Send there asks, so the next reconnect must (the 2026-10-18 review's
+    # should-fix 1).
+    state["win"]._start_new_session(PROJECT, worktree=False)
+    GLib.timeout_add(800, fail_the_screens_own_ask)
+    return GLib.SOURCE_REMOVE
+
+
+def fail_the_screens_own_ask() -> bool:
+    win, page, tab = selected()
+    view = tab._new_chat
+    check("the screen's own ask is out", len(_pending_asks) == 1, len(_pending_asks))
+    answer_the_asks(None)
+    check("a failed first ask leaves the box out and the question open", not view._worktree.get_visible())
+    check("…nothing asked again on its own", tab._is_git_checkout is None and not _pending_asks)
+    remotefiles.watcher().reset()  # a reconnect
+    check("a reconnect asks again", len(_pending_asks) == 1, len(_pending_asks))
+    answer_the_asks(True)
+    check("…and the box appears on the answer", view._worktree.get_visible() and tab._is_git_checkout is True)
+    remotefiles.watcher().reset()
+    check("a later reconnect asks nothing more", not _pending_asks, len(_pending_asks))
+    win.tab_view.close_page(page)
+    GLib.timeout_add(800, after_the_reask)
+    return GLib.SOURCE_REMOVE
+
+
+def after_the_reask() -> bool:
+    remotefiles.watcher().reset()
+    check("a closed screen's re-ask is gone with it", not _pending_asks, len(_pending_asks))
     checkouts.ask_answer = _real_ask_answer
     return finish()
 

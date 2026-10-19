@@ -458,8 +458,18 @@ entry, a sibling's worktree launch) is `checkouts` — an `fs.stat` of
 any failure, so a worktree is simply not offered. `checkouts.ask_answer` is
 for the new-chat screen, whose Send may already be waiting on it: True,
 False, or **None for "could not ask"** (a refusal, no link, nothing within
-`ANSWER_TIMEOUT_S`, 10 s, not the files' 60), and None is never remembered
-(the next caller asks again). The new-chat screen builds its
+`ANSWER_TIMEOUT_S`, 10 s, not the files' 60; since the 2026-10-18 review's
+nit 5 `ask` waits the same 10 s, since a person waits on an offer too: at a
+right-click whose menu is built on it, at a `start_session` tool call whose
+tab opens on it), and None is never remembered
+(the next caller asks again). A screen whose own first ask failed, built
+while the link was down or the service stalled, arms one re-ask on the
+next reconnect (`_arm_checkout_reask`, `remotefiles.Watcher.on_reset`, the
+`_RootNameLinks` idiom; disarmed when the answer lands, when the screen
+goes at Send and on destroy): without it a project whose default is off
+never showed its box for the screen's life, since no Send there asks
+(the review's should-fix 1; `check_new_chat.py` drives it with a
+`watcher().reset()`). The new-chat screen builds its
 checkbox hidden and shows it when the answer lands (`NewChatView.set_is_git`).
 A Send that beats the answer (nothing a person does against a local
 service, a line's typing against a remote one) must not read the hidden box
@@ -481,8 +491,14 @@ choice is kept through the wait too (`newchat.worktree_draft_choice`).
 Two Ctrl+clicks on images are ordered by the press, not the landing: the
 press takes a number (`tab.link_clicks`, `editorfiles.ClickOrder`), carried
 through `_on_click_resolved` and `_open_file_reference` to `_present_image`,
-which presents nothing for a click older than one already shown. The menus
-build when it lands (an ask a newer one overtook adds nothing), and
+which presents nothing for a click older than one already shown but still
+records it in the attachments gallery (the gallery is what the user
+clicked, not which lightbox won). The hold is a token per page
+(`_new_chat_sends_held` is a dict), so a page handed to another window and
+back inside one round trip launches with its current Send, and the screen
+is released in a `finally` around the launch. The menus
+build when it lands (an ask a newer one overtook adds nothing: the header
+entry's `_alt_new_asked`, the project header's `_group_menu_asked`), and
 `start_background_session(..., is_git=)` is handed the answer
 (`_BackgroundSpawn.begin` asks only when the launch would use a worktree).
 

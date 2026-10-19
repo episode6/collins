@@ -557,12 +557,36 @@ def test_names_answers_the_non_directory_names_of_a_root(served, tmp_path):
     assert reply == {"names": [".env", "README.md", "a.txt", "alias.txt", "dangling"], "truncated": False}
 
 
-def test_names_is_bounded_and_leaves_out_a_name_over_the_bound(served, monkeypatch):
+def test_names_leaves_out_a_name_over_the_bound(served, monkeypatch):
     core, client, project, _events = served
     (project / "a-name-over-the-bound").write_text("long")
     monkeypatch.setattr(protocol, "FS_NAME_MAX", 12)  # the filesystem's own is 255
     assert "a-name-over-the-bound" not in files.names_reply(str(project))["names"]
-    monkeypatch.setattr(protocol, "FS_NAME_MAX", 1024)
+
+
+def test_names_lists_an_entry_it_cannot_stat_as_a_name(served, tmp_path):
+    """The 2026-10-18 review's nit 2: `DirEntry.is_dir()` follows a link
+    and raises for a target the service cannot stat; that entry is a name
+    (as a dangling link is), and the listing is not `gone` for it."""
+    if os.geteuid() == 0:
+        pytest.skip("root stats anything")
+    core, client, project, _events = served
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "inner").mkdir()
+    os.chmod(locked, 0o000)
+    try:
+        (project / "into-locked").symlink_to(locked / "inner")
+        with pytest.raises(PermissionError):
+            os.stat(project / "into-locked")
+        reply = client.request({"t": "fs.names", "root": str(project)})
+        assert reply == {"names": ["a.txt", "into-locked"], "truncated": False}
+    finally:
+        os.chmod(locked, 0o755)
+
+
+def test_names_is_bounded(served):
+    core, client, project, _events = served
     for index in range(protocol.FS_NAMES_MAX + 2):
         (project / f"f{index:05d}").touch()
     reply = client.request({"t": "fs.names", "root": str(project)})
