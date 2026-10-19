@@ -352,7 +352,7 @@ name first, or some other object's `is_local()` does not count). Open With in th
 row's default app there, are not: not local, they hand over this device's
 cached copy (D51; `GET /api/blob?kind=file&as=file` serves a file that is
 no picture only to a request that names a session the service knows
-(`blobs.names_a_session`) and only when that session's agent named it, and the copy's suffix
+(`blobs.names_a_session`, one handle rule for the uploads, the delivered set and the show_image registry alike) and only when that session's agent named it, and the copy's suffix
 is made safe by `blobcache.file_suffix`). Nor is the Markdown export: the service renders the transcript
 (`store.transcript-export`) and the window writes its own file. Nor is
 where a session or a shell starts: the client sends the cwd it has and

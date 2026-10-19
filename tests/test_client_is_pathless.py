@@ -535,6 +535,62 @@ CAUGHT = {
         "def f(p):\n    return GLib.IOChannel.new_file(p, 'r')\n",
         "IOChannel.new_file",
     ),
+    # -- the Fable pass of 2026-10-18 (S1): five families the record did not name ------------
+    # 1. A path's method handed on or bound without being called.
+    "Path.is_dir handed to map": ("def f(ps):\n    return list(map(Path.is_dir, ps))\n", "Path.is_dir"),
+    "Path.exists handed to filter": ("def f(ps):\n    return list(filter(Path.exists, ps))\n", "Path.exists"),
+    "Path.stat as a key": ("def f(ps):\n    return max(ps, key=Path.stat)\n", "Path.stat"),
+    "Path.read_text bound and called later": (
+        "def f(p):\n    fn = Path.read_text\n    return fn(p)\n",
+        "Path.read_text",
+    ),
+    "pathlib.Path.is_file handed on": (
+        "def f(ps):\n    return any(map(pathlib.Path.is_file, map(Path, ps)))\n",
+        "Path.is_file",
+    ),
+    # 2. The keyword-property constructor of a GTK file opener, and set_property.
+    "Gtk.Picture(file=)": ("def f(g):\n    return Gtk.Picture(file=g)\n", "Widget.Picture(file=)"),
+    "Gtk.Image(file=)": ("def f(p):\n    return Gtk.Image(file=p)\n", "Widget.Image(file=)"),
+    "Gtk.MediaFile(file=)": ("def f(g):\n    return Gtk.MediaFile(file=g)\n", "Widget.MediaFile(file=)"),
+    "Gtk.Video(filename=)": ("def f(p):\n    return Gtk.Video(filename=p)\n", "Widget.Video(filename=)"),
+    "GtkSource.FileLoader(buffer=, file=)": (
+        "from gi.repository import GtkSource\n"
+        "def f(b, sf):\n    return GtkSource.FileLoader(buffer=b, file=sf)\n",
+        "Widget.FileLoader(file=)",
+    ),
+    "GtkSource.FileSaver(buffer=, location=)": (
+        "from gi.repository import GtkSource\n"
+        "def f(b, g):\n    return GtkSource.FileSaver(buffer=b, location=g)\n",
+        "Widget.FileSaver(location=)",
+    ),
+    "set_property('file', g)": (
+        "def f(picture, g):\n    picture.set_property('file', g)\n",
+        "Widget.set_property.file",
+    ),
+    # 3. io's other openers, and posixpath.
+    "io.FileIO": ("def f(p):\n    return io.FileIO(p).read()\n", "io.FileIO"),
+    "io.open_code": ("def f(p):\n    return io.open_code(p)\n", "io.open_code"),
+    "from io import FileIO": ("from io import FileIO\ndef f(p):\n    return FileIO(p)\n", "io.FileIO"),
+    "posixpath.isdir": ("import posixpath\ndef f(p):\n    return posixpath.isdir(p)\n", "os.path.isdir"),
+    # 4. Vte's third spawn.
+    "a terminal's spawn_with_fds_async": (
+        "def f(term, argv):\n    term.spawn_with_fds_async(0, None, argv, None, [], [], 0, None, None, -1)\n",
+        "Process.spawn_with_fds_async",
+    ),
+    "a pty's spawn_with_fds_async": (
+        "def f(pty, argv):\n    pty.spawn_with_fds_async(None, argv, None, [], [], 0, None, None, -1)\n",
+        "Process.spawn_with_fds_async",
+    ),
+    # 5. A Gio.File renamed, re-moded or made.
+    "Gio.File renamed": (
+        "def f(p):\n    return Gio.File.new_for_path(p).set_display_name('x', None)\n",
+        "Gio.File.new_for_path.set_display_name",
+    ),
+    "Gio.File re-moded": (
+        "def f(p):\n    Gio.File.new_for_path(p).set_attribute_uint32('unix::mode', 0o700, 0, None)\n",
+        "Gio.File.new_for_path.set_attribute_uint32",
+    ),
+    "Gio.File.new_tmp": ("def f():\n    return Gio.File.new_tmp('x-XXXXXX', None)\n", "Gio.File.new_tmp"),
 }
 
 
@@ -604,6 +660,9 @@ MISSED = {
     ),
     "open() on a hintless parameter": "def f(p):\n    with p.open() as fh:\n        return fh.read()\n",
     "a Gio.File's shared word on a parameter": "def f(gfile):\n    gfile.trash(None)\n",
+    # The Fable pass of 2026-10-18: the one spelling of a GTK file property the
+    # walker still does not see (an attribute store, not a call).
+    "a props store": "def f(picture, g):\n    picture.props.file = g\n",
 }
 
 
@@ -785,6 +844,22 @@ NOT_BEHIND_THE_ASK = {
         "def f(p):\n    if not apilink.is_local:\n        return None\n    return os.path.isdir(p)\n"
     ),
     "self.is_local()": "def f(self, p):\n    if not self.is_local():\n        return\n    os.path.isdir(p)\n",
+    # The Fable pass of 2026-10-18 (N1): the module's function reassigned
+    # as an attribute, or by setattr with a constant name.
+    "the module's is_local reassigned as an attribute": (
+        "def f(p):\n"
+        "    apilink.is_local = lambda: True\n"
+        "    if not apilink.is_local():\n"
+        "        return\n"
+        "    return os.path.isdir(p)\n"
+    ),
+    "setattr on the module": (
+        "def f(p):\n"
+        "    setattr(apilink, 'is_local', lambda: True)\n"
+        "    if not apilink.is_local():\n"
+        "        return\n"
+        "    return os.path.isdir(p)\n"
+    ),
     "a clipboard's is_local()": (
         "def f(clipboard, p):\n    if not clipboard.is_local():\n        return\n    os.path.isdir(p)\n"
     ),

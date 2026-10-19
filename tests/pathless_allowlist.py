@@ -331,8 +331,9 @@ LOCAL_EXTRAS = frozenset(
 #   (`os.kill` of the service's pid).
 #
 # **What the walker cannot see** (`tests/pathless.py`; every form its
-# author and two reviews have found, as of round two of 2026-10-13: not a
-# proof that there is no other. The rounds closed the cheap ones: an
+# author and three reviews have found, as of the Fable pass of
+# 2026-10-18: not a proof that there is no other. The rounds closed the
+# cheap ones: an
 # `import … as`
 # alias, `from os import path as P`, `io.open` / `builtins.open`,
 # `glob.*`, `tempfile.*`, `os.path.realpath`, a chain through a path's
@@ -346,12 +347,22 @@ LOCAL_EXTRAS = frozenset(
 # `new_for_commandline_arg`, `GLib.file_*` / `spawn_*` /
 # `find_program_in_path`, `Gio.Subprocess`, a site's function handed on
 # or bound without being called (`run=subprocess.run`, `map(os.path.isdir,
-# ps)`, `fn = os.path.isdir`), `getattr(os.path, …)`, the GTK
+# ps)`, `fn = os.path.isdir`), a path's method handed on or bound uncalled
+# (`filter(Path.is_dir, ps)`, `key=Path.stat`, `fn = Path.read_text`;
+# 2026-10-18), `getattr(os.path, …)`, the GTK
 # constructors and setters that open or write a file by path or by
-# `Gio.File` (`Picture.new_for_file`, `set_file`, `load_from_file`,
+# `Gio.File` in their `.new(...)` and `set_*` spellings
+# (`Picture.new_for_file`, `set_file`, `load_from_file`,
 # `savev`, `save_to_png`, `Builder.new_from_file`,
-# `Pixbuf.get_file_info`, `GtkSource.FileLoader` / `FileSaver`,
-# `GLib.IOChannel.new_file`), the method names only a `Gio.File` has on
+# `Pixbuf.get_file_info`, `GtkSource.FileLoader.new` / `FileSaver.new`,
+# `GLib.IOChannel.new_file`) and, since 2026-10-18, the keyword-property
+# constructor (`Gtk.Picture(file=g)`, `Gtk.Image(filename=p)`,
+# `GtkSource.FileLoader(buffer=b, location=f)`, `Gtk.MediaFile` /
+# `Video` the same) and `set_property("file" | "filename", …)` on any
+# receiver; `io.FileIO`, `io.open_code` and `posixpath.*` (read as
+# `os.path`); `spawn_with_fds_async` (Vte's third spawn); a `Gio.File`
+# renamed or re-moded (`set_display_name`, `set_attribute*`) and
+# `Gio.File.new_tmp`; the method names only a `Gio.File` has on
 # any receiver (`load_contents`, `load_bytes`, `query_info`,
 # `query_exists`, `enumerate_children`, `monitor_file`,
 # `replace_contents`, …: a parameter, an attribute), `Gio.File.parse_name`
@@ -398,6 +409,9 @@ LOCAL_EXTRAS = frozenset(
 #   terminal.py:319-322, 813, window.py:6098, 6398, footerapps.py:92,
 #   120, openwith.py:163, copylabel.py:59 (GitHub, releases, the `gh`
 #   install page).
+# - **A property store**: `picture.props.file = g` / `.props.filename =`
+#   (an `ast.Attribute` store, not a call); the constructor and
+#   `set_property` forms are seen.
 # - **Not reads, but this device's facts applied to a service path**:
 #   `os.path.expanduser`, `os.path.abspath`, `os.getcwd`-relative joins,
 #   `os.environ`, `Path.home()` used as a value.
@@ -405,7 +419,10 @@ LOCAL_EXTRAS = frozenset(
 #   file formats (behind `clipboard_scope`, read by hand).
 # - A read through another library: `json.load` and the like on a handle
 #   are seen at the `open`; `zipfile`, `tarfile`, `sqlite3`,
-#   `configparser`, `mimetypes`, `importlib.resources`,
+#   `configparser`, `mimetypes`, `importlib.resources` and the rest of
+#   the standard library's openers by name (`tokenize.open`, `gzip` /
+#   `bz2` / `lzma` `.open`, `xml.etree.ElementTree.parse`, `ctypes.CDLL`,
+#   `linecache`, `fileinput`),
 #   `Gio.DesktopAppInfo.new_from_filename`, `Gio.Settings`, `GLib.Dir`,
 #   `GLib.MappedFile`, `Gio.Resource.load`, `Gio.FileEnumerator`'s own
 #   children are not (`GLib.KeyFile.load_from_file` is, by its method's
@@ -427,9 +444,12 @@ LOCAL_EXTRAS = frozenset(
 # function a qualname names is held to it (a property's getter and its
 # setter, a function defined twice); and a function that binds `apilink`
 # itself (a parameter, an assignment, a loop variable), or a module that
-# redefines an imported `is_local`, has no ask. It does not prove
+# redefines an imported `is_local`, has no ask, and nor does one that
+# stores to `<module>.is_local` as an attribute or `setattr`s it with a
+# constant name (2026-10-18). It does not prove
 # anything about a helper the function calls before it asks, about a
-# rebinding the AST does not show (`globals()`, `setattr` on the module),
+# rebinding the AST does not show (`globals()`, a `global` statement in
+# another function, `setattr` with a name it cannot read),
 # nor about a read of the kinds above. All sixteen were read by hand as
 # well.
 #

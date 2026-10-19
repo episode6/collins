@@ -75,9 +75,16 @@ method chains (`Path(p).expanduser().resolve().is_dir()`), takes
 `is_dir` / `is_file` / `read_text` / `iterdir` and the other names only
 a path has on any receiver at all, and counts a site's function that is
 handed on or bound without being called (`map(os.path.isdir, ps)`, a
-`run=subprocess.run` default), and takes the names only a `Gio.File`
+`run=subprocess.run` default; a path's method the same: `filter(Path.
+is_dir, ps)`, `key=Path.stat`), and takes the names only a `Gio.File`
 has (`load_contents`, `load_bytes`, `query_info`, `query_exists`, …)
-and `spawn_async` / `spawnv` on any receiver. `test_the_walker_catches` and
+and `spawn_async` / `spawn_with_fds_async` / `spawnv` on any receiver,
+the keyword-property constructors of the GTK file openers
+(`Gtk.Picture(file=g)`, `GtkSource.FileLoader(buffer=b, location=f)`)
+and `set_property("file", …)`, `io.FileIO` / `io.open_code` /
+`posixpath.*`, and a `Gio.File` renamed, re-moded or made
+(`set_display_name`, `set_attribute*`, `new_tmp`): the five families the
+2026-10-18 Fable pass found missing. `test_the_walker_catches` and
 `test_the_walker_is_known_to_miss` are tables of both: add a row when
 the vocabulary changes. It does **not** follow calls: a site is named by
 the function the read is written in, so a widget calling a disk-reading

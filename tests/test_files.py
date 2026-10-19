@@ -585,6 +585,20 @@ def test_names_lists_an_entry_it_cannot_stat_as_a_name(served, tmp_path):
         os.chmod(locked, 0o755)
 
 
+def test_names_stops_collecting_at_the_collection_bound(tmp_path, monkeypatch):
+    """N3 of the 2026-10-18 pass: a pathological root is not read whole on
+    the worker; the collection stops at FS_NAMES_COLLECT_MAX and the reply
+    says `truncated` whatever the sorted cut would have said."""
+    monkeypatch.setattr(files, "FS_NAMES_COLLECT_MAX", 7)
+    for index in range(10):
+        (tmp_path / f"f{index}").touch()
+    fields = files.names_reply(str(tmp_path))
+    assert len(fields["names"]) == 7 and fields["truncated"] is True
+    monkeypatch.setattr(files, "FS_NAMES_COLLECT_MAX", 10)
+    fields = files.names_reply(str(tmp_path))
+    assert len(fields["names"]) == 10 and fields["truncated"] is False
+
+
 def test_names_is_bounded(served):
     core, client, project, _events = served
     for index in range(protocol.FS_NAMES_MAX + 2):

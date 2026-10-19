@@ -400,7 +400,10 @@ class FileBlobs(_Feed):
     made before its session has an id), and a non-picture in the pending
     folder is served to a request that names any *known* session, not
     only the one the drop is for (the pending folder is not per session).
-    A `local` client is never served one (it opens the file itself), so
+    The same handle rule holds the show_image registry: a path admitted
+    under a session's id and handle is served by the handle only while
+    the session has no id. A `local` client is never served one (it
+    opens the file itself), so
     its answers are what they were. The cap
     (`FILE_MAX_BYTES`), the tag and the 304 are the pictures'; the type
     of a file that is no picture is `application/octet-stream`."""
@@ -435,8 +438,13 @@ class FileBlobs(_Feed):
         delivered = getattr(self.core, "delivered_files", None)
         # Whose account the request is on: a non-picture is served only on
         # a known session's (see the class docstring). A key `DeliveredFiles`
-        # still holds for a handle whose session has an id since is not read.
+        # still holds for a handle whose session has an id since is not read,
+        # and nor is the registry's (show_image admits under both keys, so
+        # a resolved session's handle would otherwise still name its
+        # pictures): one handle rule for every admission.
         session_named = not local and names_a_session(self.core, session)
+        if not session_named:
+            admitted = frozenset()
         handed = delivered.paths(session) if delivered is not None and session_named else frozenset()
 
         def work() -> tuple[int, dict, bytes]:

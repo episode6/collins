@@ -508,7 +508,10 @@ only for a client that is not `local`, only for a request that names
 a session the service knows (`blobs.names_a_session`: a live session's
 id, its handle only while it has none, or an id the store lists; with
 no `session` a file that is no picture is `400`, with one that names
-nobody neither the uploads folders nor the delivered set count and it
+nobody neither the uploads folders, the delivered set nor the show_image
+registry count (the registry admits under the id and the handle, both
+keys always, so without that rule a resolved session's handle still
+named its pictures: the 2026-10-18 pass's N2) and it
 is `403`. A pending picture is still served to any request, and a
 pending non-picture to a request naming any known session: the pending
 folder is not per session) and only for a file

@@ -110,7 +110,9 @@ def test_a_path_the_sessions_show_image_named_is_admitted_for_that_session_only(
     core.image_registry.admit(["sid-1", "s-1"], str(picture))
     feed = _inline(blobs.FileBlobs, core)
     assert _get(feed, f"path={picture}&session=sid-1")[0] == 200
-    assert _get(feed, f"path={picture}&session=s-1")[0] == 200  # the handle, while unresolved
+    # The handle of a resolved session names nobody (2026-10-18, N2): the
+    # unresolved case is the handle test below.
+    assert _get(feed, f"path={picture}&session=s-1")[0] == 403
     assert _get(feed, f"path={picture}&session=sid-2")[0] == 403
     assert _get(feed, f"path={picture}")[0] == 403
 
@@ -378,6 +380,27 @@ def test_a_named_file_that_is_no_picture_is_served_whole_to_a_client_that_is_not
     assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
     assert _get(feed, f"path={report}&session=sid-2&as=file")[0] == 403
     assert _get(feed, f"path={report}&as=file")[0] == 400  # no session named: nobody's file
+
+
+def test_a_registered_path_is_served_by_the_handle_only_while_the_session_has_no_id(picture, report):
+    """The Fable pass of 2026-10-18, N2: show_image admits a path under the
+    session's id and its handle, both keys always, and `agent_named` read
+    the registry by whatever key the request named; after the resolve the
+    handle still served the picture (and the file with `as=file`) where
+    `_session_records` and `DeliveredFiles` refused it. One handle rule."""
+    session = Session(session_id=None, handle="s-1")
+    core = Core([session])
+    core.image_registry.admit(["sid-1", "s-1"], str(picture))
+    core.image_registry.admit(["sid-1", "s-1"], str(report))
+    feed = _inline(blobs.FileBlobs, core)
+    assert _get(feed, f"path={picture}&session=s-1")[0] == 200  # the handle, while unresolved
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 200
+    session.session_id = "sid-1"
+    assert _get(feed, f"path={picture}&session=s-1")[0] == 403
+    assert _get(feed, f"path={report}&session=s-1&as=file")[0] == 403
+    assert _get(feed, f"path={picture}&session=sid-1")[0] == 200
+    assert _get(feed, f"path={report}&session=sid-1&as=file")[0] == 200
+    assert _get(feed, f"path={picture}&session=nobody")[0] == 403
 
 
 def test_a_delivered_file_is_served_by_the_handle_only_while_the_session_has_no_id(report):
