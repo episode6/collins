@@ -248,6 +248,42 @@ def test_parse_args_defaults_the_app_id_from_the_environment(monkeypatch):
     assert service_main.parse_args([]).app_id == "com.episode6.Collins"
 
 
+def test_the_descriptor_limit_is_raised_to_the_hard_limit_at_most_the_ceiling(monkeypatch):
+    """Nit 1 of the 2026-10-18 review of PR 613: two descriptors per level
+    of a tree copy against systemd's 1024 soft limit. The soft limit goes
+    up to the hard one (at most the ceiling), never down, and a refused
+    `setrlimit` is None, not a crash."""
+    import resource
+
+    calls: list[tuple[int, int]] = []
+
+    def getrlimit(which):
+        return (1024, 524288)
+
+    def setrlimit(which, limits):
+        calls.append(limits)
+
+    monkeypatch.setattr(resource, "getrlimit", getrlimit)
+    monkeypatch.setattr(resource, "setrlimit", setrlimit)
+    assert service_main.raise_descriptor_limit() == 65536 and calls == [(65536, 524288)]
+    calls.clear()
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (1024, 4096))
+    assert service_main.raise_descriptor_limit() == 4096 and calls == [(4096, 4096)]
+    calls.clear()
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (100000, 524288))
+    assert service_main.raise_descriptor_limit() == 100000 and calls == []  # never lowered
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (1024, resource.RLIM_INFINITY))
+    assert service_main.raise_descriptor_limit() == 65536 and calls == [(65536, resource.RLIM_INFINITY)]
+    calls.clear()
+
+    def refuse(which, limits):
+        raise ValueError("not allowed")
+
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (1024, 524288))
+    monkeypatch.setattr(resource, "setrlimit", refuse)
+    assert service_main.raise_descriptor_limit() is None
+
+
 def test_the_entry_point_is_registered():
     from pathlib import Path
 

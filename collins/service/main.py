@@ -397,6 +397,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+DESCRIPTOR_LIMIT = 65536
+
+
+def raise_descriptor_limit(ceiling: int = DESCRIPTOR_LIMIT) -> int | None:
+    """The soft `RLIMIT_NOFILE` raised to the hard limit, at most *ceiling*,
+    as every long-running daemon does: the pty table holds a master per
+    session and shell, each watch a descriptor, and a tree copy two per
+    level (`projectfiles._walk`), so under systemd's user-unit default
+    of 1024 a tree some 500 levels deep failed "Too many open files"
+    (the Fable review of PR 613, nit 1); the ceiling then becomes the
+    interpreter's recursion limit, which fails one entry. Never lowers
+    the soft limit; fail-soft. Returns the soft limit set, or None."""
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        wanted = ceiling if hard == resource.RLIM_INFINITY else min(hard, ceiling)
+        if soft == resource.RLIM_INFINITY or wanted <= soft:
+            return soft
+        resource.setrlimit(resource.RLIMIT_NOFILE, (wanted, hard))
+        return wanted
+    except (ImportError, OSError, ValueError):
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(
@@ -408,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         return check(args.app_id)
     if args.print_socket:
         return print_socket(args.app_id)
+    raise_descriptor_limit()
     # The service formats only `paint` text, per client locale (§3.14).
     i18n.init("en")
     try:
