@@ -996,14 +996,19 @@ def test_a_link_planted_inside_the_new_tree_at_a_subdirectorys_name_is_an_error_
     # open; the planted link makes the landing `EEXIST`, an error entry.
     assert all(name.startswith(".collins-") for name in made) and len(made) == 2
     assert outcome.error is PasteError.FAILED and _fds() == before
-    # `copytree`'s shape: the entry's two paths as the request named them, then the words.
-    assert repr((str(root / "tree" / "sub"), str(root / "dest" / "tree" / "sub")))[:-1] in outcome.message
-    assert "exists" in outcome.message
+    # The banner's words are the entry's: the rule and the name, never a path
+    # of the tree or the temporary name (nit 5 of the 2026-10-18 review).
+    assert outcome.message == "File exists: sub"
     assert os.listdir(outside) == []  # nothing written through
-    # A tree with an error entry lands nowhere: the built tree is removed
-    # through its descriptor, the planted link inside it with it, and no
-    # temporary name is left in the destination.
-    assert os.listdir(root / "dest") == []
+    # A tree whose walk finished with an error entry lands short of it, as
+    # `copytree` landed it (the Fable review of 2026-10-18, S1): the tree
+    # is there under its final name, nothing under a temporary one, and
+    # the planted link is inside it as a link, still pointing outside and
+    # never followed.
+    assert os.listdir(root / "dest") == ["tree"]
+    assert os.listdir(root / "dest" / "tree") == ["sub"]
+    assert (root / "dest" / "tree" / "sub").is_symlink()
+    assert os.listdir(outside) == []
 
 
 def test_a_source_swapped_before_the_unlink_leaves_the_stranger_and_counts_the_move_done(
@@ -1508,7 +1513,11 @@ def test_no_descriptor_is_left_open_on_any_refusal_or_failure(tmp_path, monkeypa
         assert _fds() == before and os.listdir(dest) == []
         (outcome,) = paste_entries(tmp_path, dest, [str(tmp_path / "tree")])
         assert outcome.error is failed and "Not a regular file" in outcome.message and _fds() == before
-        assert os.listdir(dest) == []  # nothing lands short (D53): the built tree removed, no temporary name
+        # The walk finished, so the tree lands short of the FIFO (S1 of the
+        # 2026-10-18 review), under its final name and no temporary one.
+        assert os.listdir(dest) == ["tree"] and sorted(os.listdir(dest / "tree")) == ["f", "sub"]
+        assert os.listdir(dest / "tree" / "sub") == []
+        shutil.rmtree(dest / "tree")
         # Into a folder that takes nothing: a file, a link, a tree, copied and cut.
         into = [str(tmp_path / "ok.txt"), str(tmp_path / "ln"), str(tmp_path / "tree")]
         for move in (False, True):
@@ -2067,16 +2076,18 @@ def test_a_tree_landing_on_a_taken_name_takes_the_next_without_a_second_copy(tmp
 def test_a_tree_copy_that_fails_partway_leaves_no_temporary_name(tmp_path, monkeypatch):
     """D53: a half-copied tree is never visible under its final name, and
     the temporary one goes with the failure (a copy, and a cut across
-    filesystems, which copies too)."""
+    filesystems, which copies too). The failure is the top's landing: an
+    error entry lands the tree short instead, since the 2026-10-18
+    review's S1."""
     _force_copy_path(monkeypatch)
     (tmp_path / "dest").mkdir()
     (tmp_path / "tree" / "sub").mkdir(parents=True)
     (tmp_path / "tree" / "sub" / "f").write_text("f")
-    os.mkfifo(tmp_path / "tree" / "sub" / "pipe")
+    _fail_the_top_landing(monkeypatch)
     before = _fds()
     for move in (False, True):
         (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(tmp_path / "tree")], move)
-        assert outcome.error is PasteError.FAILED and "Not a regular file" in outcome.message
+        assert outcome.error is PasteError.FAILED and "Input/output" in outcome.message
         assert os.listdir(tmp_path / "dest") == [] and _fds() == before
         assert (tmp_path / "tree" / "sub" / "f").read_text() == "f"  # a cut's source intact
 
@@ -2255,6 +2266,22 @@ def test_a_recursion_error_fails_one_entry_and_the_others_stand(tmp_path, monkey
 # -- the second round on PR 613: the undo of a read-only tree, the temporary directory checked --
 
 
+def _fail_the_top_landing(monkeypatch, top: str = "tree") -> None:
+    """`_land_in_place` patched to fail the landing of *top* (the tree's
+    final name) with `EIO`, a failure past the walk that the undo answers;
+    the subdirectories' landings go through."""
+    import errno
+
+    real_land = projectfiles._land_in_place
+
+    def fail_top(dir_fd, tmp, newname):
+        if newname == top:
+            raise OSError(errno.EIO, "Input/output error")
+        real_land(dir_fd, tmp, newname)
+
+    monkeypatch.setattr(projectfiles, "_land_in_place", fail_top)
+
+
 @pytest.mark.parametrize("shape", ["subfolder", "top", "unreadable", "cut"])
 def test_a_failed_copy_of_a_tree_with_a_read_only_folder_leaves_nothing(tmp_path, monkeypatch, shape):
     """The verification of 71f5b4e, should-fix 1: the walk gives each new
@@ -2262,7 +2289,9 @@ def test_a_failed_copy_of_a_tree_with_a_read_only_folder_leaves_nothing(tmp_path
     refused the undo's `unlink`s (`EACCES`, swallowed) and the
     `.collins-<hex>` tree stayed, one more per retry. The undo of the
     service's own temporary tree makes each directory writable through
-    its descriptor first; nothing is left at any name."""
+    its descriptor first; nothing is left at any name. (Since the
+    2026-10-18 review's S1 an error entry lands the tree short rather
+    than undoing it, so the failure here is the top's landing.)"""
     (tmp_path / "dest").mkdir()
     src = tmp_path / "tree"
     (src / "ro").mkdir(parents=True)
@@ -2277,14 +2306,12 @@ def test_a_failed_copy_of_a_tree_with_a_read_only_folder_leaves_nothing(tmp_path
         os.chmod(src, 0o555)
     if shape == "cut":
         _force_copy_path(monkeypatch)
+    _fail_the_top_landing(monkeypatch)
     before = _fds()
     try:
         for _retry in range(2):
             (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)], shape == "cut")
-            if shape == "unreadable" and os.geteuid() == 0:
-                assert outcome.error is None  # root reads it: nothing fails
-                return
-            assert outcome.error is PasteError.FAILED
+            assert outcome.error is PasteError.FAILED and "Input/output" in outcome.message
             assert os.listdir(tmp_path / "dest") == [] and _fds() == before
         assert (src / "ro" / "f").read_text() == "f"  # a cut's source intact
         assert stat.S_IMODE((src / "ro").stat().st_mode) == 0o555  # and never chmodded
@@ -2389,10 +2416,12 @@ def test_a_directory_swapped_onto_the_temporary_name_is_neither_filled_nor_empti
 
 def test_a_directory_swapped_in_below_the_top_is_spared_by_the_undo(tmp_path, monkeypatch):
     """The same swap at a subdirectory's temporary name, inside the
-    service's own temporary tree: the entry is an error, the copy fails,
-    and the undo removes what the copy wrote but neither opens nor
-    removes the directory that is not its own (it stays, with the
-    temporary directories around it)."""
+    service's own temporary tree: the copy fails (a refused swap is not
+    an error entry the tree lands around, since that would land the
+    stranger's directory inside the new tree under a hidden name), and
+    the undo removes what the copy wrote but neither opens nor removes
+    the directory that is not its own (it stays, with the temporary
+    directories around it)."""
     (tmp_path / "d").mkdir()
     src = tmp_path / "t"
     (src / "sub").mkdir(parents=True)
@@ -2476,8 +2505,209 @@ def test_a_temporary_directory_that_cannot_be_opened_is_removed(tmp_path, monkey
     (outcome,) = paste_entries(tmp_path, tmp_path / "d", [str(src)])
     monkeypatch.undo()
     assert outcome.error is PasteError.FAILED and "Too many open files" in outcome.message
-    assert os.listdir(tmp_path / "d") == [] and _fds() == before
+    assert _fds() == before
+    if depth == "top":
+        assert os.listdir(tmp_path / "d") == []
+    else:
+        # The subdirectory is an error entry, so the tree lands short of it
+        # (S1 of the 2026-10-18 review); its empty temporary directory was
+        # `rmdir`ed, so no `.collins-` name is anywhere in the landing.
+        assert _tree_of(tmp_path / "d") == ["t"]
 
 
 def test_move_exclusive_says_what_it_returns():
     assert projectfiles._move_exclusive.__annotations__["return"] == "int | None"
+
+
+# -- the Fable review of 2026-10-18 (PR 613): S1, S2, nits 3 and 5 ---------------------------
+
+
+@pytest.mark.parametrize("special", ["fifo", "socket"])
+@pytest.mark.parametrize("move", [False, True])
+def test_a_tree_with_an_uncopyable_entry_lands_short_and_the_entry_is_failed(
+    tmp_path, monkeypatch, special, move
+):
+    """S1: a folder holding a FIFO or a socket (a Rails `tmp/sockets`, a
+    build tree's pipe) copies as `copytree` copied it: the tree lands
+    under its final name without the entry nobody can copy, with its
+    metadata, the outcome `failed` with the list, descriptors balanced;
+    a cut across filesystems keeps both halves, as `shutil.move` did."""
+    import socket as socket_mod
+
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "t"
+    (src / "sub").mkdir(parents=True)
+    (src / "f").write_text("f")
+    (src / "sub" / "g").write_text("g")
+    if special == "fifo":
+        os.mkfifo(src / "sub" / "pipe")
+    else:
+        sock = socket_mod.socket(socket_mod.AF_UNIX)
+        sock.bind(str(src / "sub" / "pipe"))
+    os.utime(src / "sub", ns=(1_000_000_000, 1_000_000_000))
+    os.chmod(src / "sub", 0o750)
+    if move:
+        _force_copy_path(monkeypatch)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)], move)
+    assert outcome.error is PasteError.FAILED and _fds() == before
+    assert "Not a regular file" in outcome.message and "pipe" in outcome.message
+    assert os.listdir(tmp_path / "dest") == ["t"]  # landed, no temporary name
+    landed = tmp_path / "dest" / "t"
+    assert sorted(os.listdir(landed)) == ["f", "sub"] and os.listdir(landed / "sub") == ["g"]
+    assert (landed / "sub" / "g").read_text() == "g"
+    sub = (landed / "sub").stat()
+    assert stat.S_IMODE(sub.st_mode) == 0o750 and sub.st_mtime_ns == 1_000_000_000
+    # A cut keeps the source whole: the removal never ran.
+    assert sorted(os.listdir(src)) == ["f", "sub"] and sorted(os.listdir(src / "sub")) == ["g", "pipe"]
+    if special == "socket":
+        sock.close()
+
+
+def test_a_tree_copy_still_lands_nowhere_when_it_fails_past_the_walk(tmp_path, monkeypatch):
+    """The other half of S1: D53's undo stays for every failure that is not
+    an error entry (here a refused landing): nothing at any name."""
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "tree"
+    (src / "sub").mkdir(parents=True)
+    (src / "sub" / "f").write_text("f")
+    _fail_the_top_landing(monkeypatch)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+    assert outcome.error is PasteError.FAILED and _fds() == before
+    assert os.listdir(tmp_path / "dest") == []
+
+
+def test_a_temporary_name_in_the_source_is_never_copied(tmp_path, monkeypatch):
+    """S2: a `.collins-<24 hex>` directory in the source (a killed
+    service's leftover) is left out of the copy, silently, so the hidden
+    leftover does not spread into every later copy of the folder; a cut
+    across filesystems still removes it with the source."""
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "t"
+    leftover = src / f".collins-{'a' * 24}"
+    (leftover / "deep").mkdir(parents=True)
+    (leftover / "deep" / "junk").write_text("junk")
+    (src / "f").write_text("f")
+    (src / ".collins-short").mkdir()  # not the service's shape: copied like any name
+    (src / ".collins-short" / "h").write_text("h")
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+    assert outcome.error is None and _fds() == before
+    assert sorted(os.listdir(tmp_path / "dest" / "t")) == [".collins-short", "f"]
+    _force_copy_path(monkeypatch)
+    (tmp_path / "d2").mkdir()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "d2", [str(src)], move=True)
+    assert outcome.error is None and _fds() == before
+    assert sorted(os.listdir(tmp_path / "d2" / "t")) == [".collins-short", "f"]
+    assert not src.exists()  # the leftover went with the source
+
+
+def test_another_copys_tree_being_built_in_the_source_is_never_copied(tmp_path, monkeypatch):
+    """S2's concurrent case, made deterministic: another paste is building
+    `t/.collins-<hex>` while `t` itself is copied (planted the moment this
+    copy's temporary directory is made, after the source is open); the
+    landed copy does not carry it."""
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "t"
+    (src / "sub").mkdir(parents=True)
+    (src / "f").write_text("f")
+    real_mkdir = projectfiles.os.mkdir
+    planted: list[Path] = []
+
+    def plant_in_the_source(path, *args, **kwargs):
+        real_mkdir(path, *args, **kwargs)
+        if not planted and os.fspath(path).startswith(".collins-"):
+            other = src / projectfiles._temp_name()
+            (other / "partial").mkdir(parents=True)
+            (other / "partial" / "big").write_text("half")
+            planted.append(other)
+
+    monkeypatch.setattr(projectfiles.os, "mkdir", plant_in_the_source)
+    before = _fds()
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+    assert outcome.error is None and _fds() == before and planted
+    assert sorted(os.listdir(tmp_path / "dest" / "t")) == ["f", "sub"]
+    assert planted[0].is_dir()  # the other copy's tree untouched in the source
+
+
+def test_the_undo_opens_a_copied_folder_with_no_owner_read_bit(tmp_path, monkeypatch):
+    """Nit 3: a source folder readable to the service only through its
+    group or other bits copies with those as its owner bits, so the
+    undo's `O_RDONLY` open of the service's own directory is `EACCES`;
+    the undo opens it `O_PATH`, chmods it through that descriptor and
+    goes on. Nothing is left, on the first try and on a retry."""
+    if os.geteuid() == 0:
+        pytest.skip("root opens anything")
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "tree"
+    (src / "sub" / "deeper").mkdir(parents=True)
+    (src / "sub" / "deeper" / "f").write_text("f")
+    (src / "g").write_text("g")
+    real_metadata = projectfiles._copy_metadata
+
+    def as_a_strangers_folder(src_fd, dst_fd, sst):
+        real_metadata(src_fd, dst_fd, sst)
+        if stat.S_ISDIR(sst.st_mode) and _dir_of(src_fd) in (str(src / "sub"), str(src / "sub" / "deeper")):
+            os.fchmod(dst_fd, 0o075)
+
+    monkeypatch.setattr(projectfiles, "_copy_metadata", as_a_strangers_folder)
+    _fail_the_top_landing(monkeypatch)
+    before = _fds()
+    for _retry in range(2):
+        (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+        assert outcome.error is PasteError.FAILED and _fds() == before
+        assert os.listdir(tmp_path / "dest") == []
+
+
+def test_the_open_for_the_undo_chmods_only_through_the_pinned_descriptor(tmp_path):
+    """`_open_ours` never chmods by a name in the tree: the `O_PATH`
+    descriptor's `/proc/self/fd` link is the inode it opened."""
+    if os.geteuid() == 0:
+        pytest.skip("root opens anything")
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "f").write_text("f")
+    os.chmod(tmp_path / "d", 0o075)
+    pfd = os.open(tmp_path, os.O_PATH | os.O_DIRECTORY)
+    try:
+        with pytest.raises(PermissionError):
+            os.open("d", projectfiles._DIR_NOFOLLOW_FLAGS, dir_fd=pfd)
+        fd = projectfiles._open_ours("d", pfd)
+        try:
+            assert stat.S_IMODE(os.fstat(fd).st_mode) == 0o700
+            assert os.listdir(fd) == ["f"]
+        finally:
+            os.close(fd)
+    finally:
+        os.close(pfd)
+        os.chmod(tmp_path / "d", 0o755)
+
+
+def test_the_banner_words_of_a_tree_failure_are_the_first_entrys_and_a_count():
+    """Nit 5: a tree's `shutil.Error` reached the banner as the repr of a
+    list of tuples with two full paths per entry; the words are the first
+    entry's without the `[Errno N] ` prefix, and how many more."""
+    import errno
+
+    words = str(OSError(errno.ENOTSUP, "Not a regular file: pipe"))
+    assert words.startswith("[Errno")
+    one = shutil.Error([("/s/sub/pipe", "/d/sub/pipe", words)])
+    assert projectfiles._error_words(one) == "Not a regular file: pipe"
+    entries = [("/s/sub/pipe", "/d/sub/pipe", words), ("/s/a", "/d/a", "x"), ("/s/b", "/d/b", "y")]
+    three = shutil.Error(entries)
+    assert projectfiles._error_words(three) == "Not a regular file: pipe (and 2 more)"
+    assert projectfiles._error_words(OSError(errno.EIO, "Input/output error")) == "Input/output error"
+    assert projectfiles._error_words(RecursionError("maximum recursion depth exceeded")).startswith("maximum")
+    assert projectfiles._error_words(shutil.Error("plain words")) == "plain words"
+
+
+def test_a_tree_failures_banner_never_carries_the_list_repr(tmp_path):
+    (tmp_path / "dest").mkdir()
+    src = tmp_path / "t"
+    src.mkdir()
+    for name in ("p1", "p2", "p3"):
+        os.mkfifo(src / name)
+    (outcome,) = paste_entries(tmp_path, tmp_path / "dest", [str(src)])
+    assert outcome.error is PasteError.FAILED
+    assert outcome.message.startswith("Not a regular file: p") and outcome.message.endswith("(and 2 more)")
+    assert "[(" not in outcome.message and str(tmp_path) not in outcome.message

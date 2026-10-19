@@ -423,15 +423,35 @@ touches the disk.
   half-copied tree is never visible under its final name, `EEXIST` at
   the landing is the next "(copy N)" with the built tree renamed there
   and never walked again (`_paste_one`'s `next_name`), and a tree copy
-  that fails partway (an error entry, a `RecursionError`, anything once
-  the temporary directory is held) is removed through its own
+  that fails partway (a `RecursionError`, a refused swap, `EMFILE` at
+  the top, a failed landing: anything once the temporary directory is
+  held that is not an error entry) is removed through its own
   descriptor (`_remove_tree(..., ours=True)`), nothing left at any name:
   the temporary name was the service's alone, so whatever was put inside
-  it meanwhile goes with it. `ours` is the undo's alone: each directory
+  it meanwhile goes with it. **A walk that finished with error entries
+  lands short of them** (the Fable review of 2026-10-18, S1: a FIFO or
+  a socket in the tree, an unreadable file, a link planted at a
+  subdirectory's name): `_copy_tree` raises the `shutil.Error` *after*
+  the landing, so the tree is there under its final name without those
+  entries, with its metadata, the entry `failed` with the list, as
+  `copytree` landed it before the split; a cut across filesystems then
+  keeps both halves (`_move_by_copy` raises before the source removal).
+  The one `OSError` of the walk that is *not* an error entry is a
+  refused swap (`_NotOurs`), which is raised through every level so a
+  stranger's directory never lands inside the new tree under a hidden
+  name. The banner's words for a tree are the first entry's rule and
+  name plus a count ("Not a regular file: pipe (and 2 more)",
+  `_error_words`), never the list's repr with two paths per entry (nit
+  5). `ours` is the undo's alone: each directory
   is `fchmod`ed 0700 **through its descriptor** before it is emptied,
   because the walk gave it its source's mode and a folder copied from a
   0555 one would otherwise refuse the `unlink`s inside it and the whole
-  `.collins-<hex>` tree would stay, one more per retry; a move's source
+  `.collins-<hex>` tree would stay, one more per retry; a subdirectory
+  copied from a folder readable only through its group or other bits
+  (another user's `0075`, now the service's own with no owner read bit)
+  is opened `O_PATH`, made 0700 through that descriptor's
+  `/proc/self/fd` link and opened again (`_open_ours`; nit 3 of the
+  2026-10-18 review); a move's source
   removal never passes it (a read-only source folder is "failed, both
   halves kept", as `shutil.rmtree` left it). **What the temporary name
   guarantees, exactly:** it is unguessable, not unobservable (a listing
@@ -455,14 +475,28 @@ touches the disk.
   (D46's accepted class). When the open after the
   `mkdir` fails (`EMFILE`), the directory is `rmdir`ed by name under the
   held parent (only an empty one goes). **What can leave a
-  `.collins-<hex>` folder behind:** a refused swap, as above, and a
-  service that ends mid-copy (a restart or an upgrade during a long
+  `.collins-<hex>` name behind:** a refused swap, as above; a link or a
+  file swapped onto the name before the open (the open refuses it
+  `ENOTDIR`, the `rmdir` by name cannot remove it, and it is not the
+  service's to remove: D46's class, nit 2 of the 2026-10-18 review); and
+  a service that ends mid-copy (a restart or an upgrade during a long
   paste, D41 and D52's `KillMode=process`): the half-built tree stays
   under its hidden temporary name, hidden files off never shows it, git
   sees it as untracked, and **nothing sweeps it** (the service does not
-  record in-flight copies, so it could not know where to look; left for
-  the Fable review). It is a copy that did not finish and is safe to
-  delete. (Linux answers
+  record in-flight copies, so it could not know where to look; ruled
+  2026-10-18: documented, no sweep; an `inflight_copies` row in
+  `state.json` is a §8 note for PR-3.6's keeper). It is a copy that did
+  not finish and is safe to delete. **It does not spread:** the walk
+  leaves every `.collins-<24 hex>` name of a source out of a copy
+  (`_TEMP_NAME_RE`; S2 of the same review), so another paste's tree
+  still being built in the folder, or a killed service's leftover, is
+  never carried into the new tree as a hidden permanent folder; a cut's
+  source removal still takes it with the source. The service raises its
+  soft `RLIMIT_NOFILE` to the hard limit (at most 65536) at start
+  (`service/main.py`'s `raise_descriptor_limit`, nit 1): the walk holds
+  two descriptors per level, and systemd's 1024 default failed a tree
+  some 500 levels deep "Too many open files"; the ceiling is now the
+  interpreter's recursion limit, one failed entry. (Linux answers
   `ENOTDIR`, not `ELOOP`, for a link opened `O_DIRECTORY|O_NOFOLLOW`:
   an error entry either way, nothing followed.) **A move** (a cut's paste, and a
   rename; `_move_exclusive`) is `renameat2(src_fd, name, dst_fd,

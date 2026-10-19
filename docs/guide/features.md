@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-13. Full change history: git log for this file.
+fork. Last modified: 2026-10-18. Full change history: git log for this file.
 -->
 
 # Features
@@ -510,9 +510,12 @@ A syntax-highlighted code editor lives beside the agent terminal — the
   takes as long as it takes, with the rest of the window live, and
   appears whole or not at all: it is built under a hidden
   `.collins-…` name beside where it will land and renamed when it is
-  complete. A failed copy removes that folder itself; if the service is
-  stopped while a copy is still running, the hidden folder stays, and
-  it is an unfinished copy that is safe to delete; it also stays, around
+  complete. A folder holding something that cannot be copied (a socket,
+  a pipe, a file you cannot read) still lands, without that entry, and
+  the message says which. A failed copy removes that folder itself; if
+  the service is stopped while a copy is still running, the hidden
+  folder stays, and it is an unfinished copy that is safe to delete,
+  which later copies of that folder leave out; it also stays, around
   that folder, when another program moved a folder of its own into the
   copy while it was being built). Copies
   travel through the system clipboard as Collins' own

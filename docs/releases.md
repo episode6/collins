@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-13. Full change history: git log for this file.
+fork. Last modified: 2026-10-18. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -53,9 +53,12 @@ downloads of each version, see the
   out of the project and nothing into it; a copy that fails partway
   leaves no partial file or folder behind (a folder is built under a
   hidden temporary name, `.collins-…`, and appears whole, or not at
-  all; a read-only folder inside it does not stop the clean-up; a
+  all; a folder holding an entry nobody can copy, a socket or a pipe,
+  lands without it and the message names it; a read-only folder inside
+  it does not stop the clean-up; a
   service stopped in the middle of a copy leaves that hidden folder,
-  which is safe to delete, and so does another program moving a folder
+  which is safe to delete and which later copies leave out, and so does
+  another program moving a folder
   of its own into the copy while it is being built, in which case what
   is left holds that folder), and a failed move
   removes only what it put there itself.

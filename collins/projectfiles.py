@@ -131,6 +131,7 @@ import enum
 import errno
 import logging
 import os
+import re
 import secrets
 import shutil
 import stat as stat_mod
@@ -714,11 +715,17 @@ def _remove_contents(fd: int, ours: bool = False, spare: Collection[tuple[int, i
     `fchmod(fd, 0o700)` **through its descriptor** (never by name), since
     the walk gave it its source's mode and a folder copied from a
     read-only one (0555) would otherwise refuse the `unlink`s inside it
-    and stay behind. A copied directory can always be opened here: its
-    source was opened for reading, so its mode has the owner's read bit.
-    A move's source removal never passes it: `shutil.rmtree` did not
-    chmod what it removed either, and a source the user made read-only
-    is "failed, both halves kept" (D46).
+    and stay behind. A copied subdirectory may not open at all: a source
+    folder owned by someone else and readable to the service only
+    through its group or other bits (0075, say) was copied with those as
+    its *owner* bits, so the `O_RDONLY` open of the service's own
+    directory is `EACCES`; under *ours* that opens it `O_PATH` instead
+    (no permission needed), makes it 0700 through the `/proc/self/fd`
+    magic link of that descriptor (the pinned inode, never a name in the
+    tree) and opens it again (`_open_ours`; the Fable review of
+    2026-10-18, nit 3). A move's source removal never passes it:
+    `shutil.rmtree` did not chmod what it removed either, and a source
+    the user made read-only is "failed, both halves kept" (D46).
 
     *spare* holds the `(st_dev, st_ino)` of directories that were swapped
     onto a temporary name inside the tree and refused (`_make_temp_dir`):
@@ -739,7 +746,7 @@ def _remove_contents(fd: int, ours: bool = False, spare: Collection[tuple[int, i
             if (st.st_dev, st.st_ino) in spare:
                 emptied = False
                 continue
-            cfd = os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=fd)
+            cfd = _open_ours(name, fd) if ours else os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=fd)
             try:
                 if not _remove_contents(cfd, ours, spare):
                     emptied = False
@@ -750,6 +757,26 @@ def _remove_contents(fd: int, ours: bool = False, spare: Collection[tuple[int, i
         else:
             os.unlink(name, dir_fd=fd)
     return emptied
+
+
+def _open_ours(name: str, dir_fd: int) -> int:
+    """A directory of the service's own temporary tree opened for its
+    removal (`_remove_contents` with *ours*): `O_RDONLY|O_DIRECTORY|
+    O_NOFOLLOW` under *dir_fd*, and when that is `EACCES` (the walk gave
+    it a source's mode with no owner read bit) the same name opened
+    `O_PATH|O_DIRECTORY|O_NOFOLLOW`, which needs no permission, made 0700
+    through that descriptor's `/proc/self/fd` link (the inode it pins,
+    so nothing swapped onto the name in between is chmodded) and opened
+    again."""
+    try:
+        return os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=dir_fd)
+    except PermissionError:
+        pfd = os.open(name, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        try:
+            os.chmod(f"/proc/self/fd/{pfd}", 0o700)
+        finally:
+            _close(pfd)
+        return os.open(name, _DIR_NOFOLLOW_FLAGS, dir_fd=dir_fd)
 
 
 def _remove_tree(
@@ -775,6 +802,14 @@ def _temp_name() -> str:
     or an inotify watch of the destination reads it the moment it is
     made (`_make_temp_dir` says what is checked for that reason)."""
     return f".collins-{secrets.token_hex(12)}"
+
+
+# What `_temp_name` makes, for the walk to leave out of a copy: another
+# copy's tree still being built in the source, or one a service that
+# ended mid-copy left there, is an unfinished copy and never worth
+# copying, and copying it would carry the hidden leftover into every
+# later copy of that folder (the Fable review of 2026-10-18, S2).
+_TEMP_NAME_RE = re.compile(r"\.collins-[0-9a-f]{24}\Z")
 
 
 class _NotOurs(OSError):
@@ -819,10 +854,12 @@ def _make_temp_dir(dir_fd: int) -> tuple[str, int]:
     not compared: a filesystem may present another owner for what the
     service itself makes (sshfs without `idmap`, an NFS export that
     squashes), and an owner check there refused every tree copy. A link
-    or a file swapped in is refused by the open.
-    When the open itself fails (`EMFILE`, say) the directory just made
-    is `rmdir`ed by name under the held parent, which removes it only if
-    it is still empty."""
+    or a file swapped in is refused by the open (`ENOTDIR`).
+    When the open itself fails (`EMFILE`, say, or that swap) the
+    directory just made is `rmdir`ed by name under the held parent,
+    which removes it only if it is still an empty directory: a planted
+    link or file stays under the hidden name, not the service's to
+    remove (D46), the same class as the refused directory."""
     tmp = _temp_name()
     os.mkdir(tmp, 0o700, dir_fd=dir_fd)
     try:
@@ -838,7 +875,7 @@ def _make_temp_dir(dir_fd: int) -> tuple[str, int]:
         with os.scandir(fd) as entries:
             empty = next(entries, None) is None
         if not empty:
-            error = _NotOurs(errno.ESTALE, f"Not the folder this copy made: {tmp}")
+            error = _NotOurs(errno.ESTALE, "Not the folder this copy made")
             error.inode = (st.st_dev, st.st_ino)
             raise error
     except BaseException:
@@ -1005,21 +1042,32 @@ def _copy_tree(
     the name taken: *next_name* is asked for the next one and the built
     tree lands there without being copied again; None, or no
     *next_name*, removes the built tree and raises it. Errors of the walk
-    are collected per entry and raised together as `shutil.Error` after
-    it (`copytree`'s shape: `(source, target, words)` per entry, the two
-    paths spelled from *labels*, the tree's two paths as the request
-    named them — words for the banner, never opened), and like any other
-    failure once the temporary directory is held the built tree is
-    removed first through its descriptor (`_remove_tree` with `ours`,
-    D46: only what this operation made, only while it holds it, each of
-    its directories made writable through its descriptor first so a
-    folder copied from a read-only one goes too; the temporary name was
-    the service's alone, so whatever was put inside it goes with it),
-    nothing left at any name. Two things can still leave a
-    `.collins-<hex>` name behind: a service killed while the copy runs
-    (nothing sweeps it; it is safe to delete), and a directory that was
-    swapped onto the temporary name and refused, which is not the
-    service's to remove.
+    are collected per entry and raised together as `shutil.Error`
+    **after the landing** (`copytree`'s shape: `(source, target, words)`
+    per entry, the two paths spelled from *labels*, the tree's two paths
+    as the request named them — words for the banner, never opened): a
+    walk that finished with an entry nobody can copy (a FIFO, a socket,
+    an unreadable file, a link planted at a subdirectory's name) is not
+    a half-copied tree, so the built tree lands short of those entries
+    with its metadata, as `copytree` landed it, and the entry is
+    `failed` with the list (the Fable review of 2026-10-18, S1; a cut
+    across filesystems then keeps both halves, since `_move_by_copy`
+    raises before the source removal). Any other failure once the
+    temporary directory is held (a refused swap, `EMFILE`, a
+    `RecursionError`, a failed landing) removes the built tree first
+    through its descriptor (`_remove_tree` with `ours`, D46: only what
+    this operation made, only while it holds it, each of its directories
+    made writable through its descriptor first so a folder copied from a
+    read-only one goes too; the temporary name was the service's alone,
+    so whatever was put inside it goes with it), nothing left at any
+    name. What can still leave a `.collins-<hex>` name behind: a service
+    killed while the copy runs (nothing sweeps it; it is safe to delete),
+    a directory that was swapped onto the temporary name and refused,
+    which is not the service's to remove, and a link or a file swapped
+    onto the name before the open, which the open refuses and the
+    `rmdir` by name cannot remove (`_make_temp_dir`). The walk never
+    copies such a name out of a source (`_TEMP_NAME_RE`), so a leftover
+    does not spread.
     Returns the top source directory's descriptor, still open, for a
     move's check that the source name still holds what was copied (the
     caller closes it), and the name the tree landed under; closed here
@@ -1030,8 +1078,6 @@ def _copy_tree(
         errors = _WalkErrors()
         try:
             _walk(sfd, dfd, *(labels or (name, newname)), errors)
-            if errors:
-                raise shutil.Error(errors)
             landing: str | None = newname
             while landing is not None:
                 try:
@@ -1049,6 +1095,11 @@ def _copy_tree(
             raise
         finally:
             _close(dfd)
+        if errors:
+            # Raised after the landing, never before it: the walk finished,
+            # so the tree lands short of its error entries, as `copytree`
+            # landed it, and the entry is still `failed` with the list.
+            raise shutil.Error(errors)
     except BaseException:
         _close(sfd)
         raise
@@ -1067,9 +1118,18 @@ def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: _WalkError
     subtree removed), a link and a regular file take `_copy_entry`,
     anything else is an error entry; an entry's `OSError` is collected
     in *errors* and the walk goes on; the directory's own metadata goes
-    on *dfd* after its entries."""
+    on *dfd* after its entries. A directory swapped onto a subdirectory's
+    temporary name and refused (`_NotOurs`) is not an error entry but the
+    copy's failure, raised through every level with its inode in
+    *errors.spare*: the tree lands nowhere rather than with a stranger's
+    directory inside it under a hidden name. A `.collins-<24 hex>` name in the source
+    (`_TEMP_NAME_RE`: another copy's tree still being built there, or a
+    killed service's leftover) is left out, silently: an unfinished copy
+    is never worth copying, and no error entry, since the skip is no
+    failure of this copy. A move's source removal still removes it
+    (`_remove_contents` takes every name), so a cut leaves nothing."""
     with os.scandir(sfd) as entries:
-        names = [entry.name for entry in entries]
+        names = [entry.name for entry in entries if not _TEMP_NAME_RE.match(entry.name)]
     for entry in names:
         src_path, dst_path = os.path.join(src_label, entry), os.path.join(dst_label, entry)
         try:
@@ -1094,15 +1154,30 @@ def _walk(sfd: int, dfd: int, src_label: str, dst_label: str, errors: _WalkError
             elif stat_mod.S_ISLNK(st.st_mode) or stat_mod.S_ISREG(st.st_mode):
                 _close(*_copy_entry(sfd, entry, dfd, entry))
             else:
-                raise OSError(errno.ENOTSUP, f"Not a regular file: {entry}")
+                raise OSError(errno.ENOTSUP, "Not a regular file")
+        except _NotOurs as err:
+            # Not an error entry: a stranger's directory swapped onto a
+            # temporary name inside the tree must never land inside the
+            # user's new tree under a hidden name, so the copy fails and
+            # every level's undo spares that directory by inode (D53).
+            errors.spare.add(err.inode)
+            raise
         except OSError as err:
-            if isinstance(err, _NotOurs):
-                errors.spare.add(err.inode)
-            errors.append((src_path, dst_path, str(err)))
+            errors.append((src_path, dst_path, _entry_words(err, entry)))
     try:
         _copy_metadata(sfd, dfd, os.fstat(sfd))
     except OSError as err:
-        errors.append((src_label, dst_label, str(err)))
+        errors.append((src_label, dst_label, _entry_words(err, os.path.basename(src_label))))
+
+
+def _entry_words(err: OSError, entry: str) -> str:
+    """An error entry's words (the third of `copytree`'s triple): the
+    error's `strerror` and the entry's name ("Not a regular file: pipe",
+    "File exists: sub"), never a path of the tree or a temporary name
+    (`FileExistsError`'s own text names the `.collins-<hex>` the landing
+    came from); `str(err)` when there is no `strerror`."""
+    words = getattr(err, "strerror", None)
+    return f"{words}: {entry}" if words else str(err)
 
 
 # -- the move ------------------------------------------------------------------------------
@@ -1480,13 +1555,32 @@ def _paste_one(
     except (OSError, shutil.Error, RecursionError) as err:
         # A `RecursionError` (a tree deeper than the interpreter's limit)
         # fails this entry alone, so the request's other outcomes stand.
-        message = getattr(err, "strerror", None) or str(err)
-        return PasteOutcome(src, None, PasteError.FAILED, message)
+        return PasteOutcome(src, None, PasteError.FAILED, _error_words(err))
     finally:
         _close(src_fd)
     if landing is None:
         return PasteOutcome(src, None, PasteError.NO_ROOM)
     return PasteOutcome(src, landing, mtime=mtime)
+
+
+_ERRNO_PREFIX = re.compile(r"\A\[Errno -?\d+\] ")
+
+
+def _error_words(err: BaseException) -> str:
+    """A failed entry's words for the banner ("Couldn't paste {name}:
+    {message}"): an `OSError`'s `strerror`, else `str(err)`; a tree's
+    `shutil.Error` (a list of `(source, target, words)` entries) is its
+    first entry's words without the `[Errno N] ` prefix, then how many
+    more there were, rather than the repr of the whole list with two
+    full paths per entry (the Fable review of 2026-10-18, nit 5)."""
+    if isinstance(err, shutil.Error) and err.args and isinstance(err.args[0], list) and err.args[0]:
+        entries = err.args[0]
+        first = entries[0]
+        words = str(first[-1] if isinstance(first, tuple) and first else first)
+        words = _ERRNO_PREFIX.sub("", words, count=1)
+        more = len(entries) - 1
+        return f"{words} (and {more} more)" if more else words
+    return getattr(err, "strerror", None) or str(err)
 
 
 class MkdirError(enum.Enum):
