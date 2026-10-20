@@ -903,7 +903,7 @@ class PanelTerminal(Gtk.Box):
 
     As the tab does (spec §3.15, PR-1.8), the terminal has no child and
     shows a pty of kind ``shell`` on the service's pty server, through its
-    own loopback client: output frames fed, commits sent back as input, the
+    own pty client: output frames fed, commits sent back as input, the
     redraw guard, resize and focus as events, `pty-exited` for
     `child-exited` (ptyclient.ClientTerminal). Everything that reads or
     writes the shell goes through the service: its text is the screen model's capture, the
@@ -1202,7 +1202,7 @@ class PanelTerminal(Gtk.Box):
 
     def release_pty(self) -> None:
         """The page is closing for good, or its tab is: end the shell on the
-        service and let the loopback client go — what the widget's finalize
+        service and let the pty client go — what the widget's finalize
         did to its VTE child. A no-op once done."""
         view, client = self._view, self._client
         if client.closed:

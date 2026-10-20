@@ -29,8 +29,8 @@ transcript is read here: the per-refresh I/O stays on the service.
 back. The flags this client decides — `unread`, `status` — are applied to
 the row at once (D16) and sent; a refusal puts the old value back. The
 window's handlers on the store's signals (the green row's rise,
-`_reraise_green`) count on that edge being synchronous, as it was on the
-loopback. **The background agents are the service's too** (§3.22,
+`_reraise_green`) count on that edge being synchronous.
+**The background agents are the service's too** (§3.22,
 PR-1.12d): a row's `background` (its conversation runs as a /bg agent),
 `backgrounding` (a /bg in flight) and `can_background` (the gate) arrive
 as `item` fields only, and each move of one is `background-changed`, what
@@ -59,10 +59,9 @@ can know the outcome: the state change goes through `RemoteState.request`
 row's name and star are re-projected at once (as they are for any change
 of a name, a title switch or the favorites in the mirror, a write made
 straight on the state included). The new row order of a
-favorite or an archive waits for the service's `rows`: one round trip, and
-none on the loopback. `trash_many`, `delete` and the lookups wait for their
-reply (`Link.call`), which on the loopback is immediate; the socket client
-of PR-1.12 makes their callers wait the same way they wait on a dialog.
+favorite or an archive waits for the service's `rows`: one round trip.
+`trash_many`, `delete` and the lookups wait for their reply (`Link.call`,
+on the sync channel), so their callers wait the way they wait on a dialog.
 
 **Forwarders kept for the e2e checks and the panel code**: `sessions`
 (the dict of every session, paging), `pr_store` (the mirror of the
@@ -396,8 +395,7 @@ class RemoteStore(GObject.Object):
         optimistic write, or its revert). The name and the star only: a
         star's flip does not move the row into Favorites here (its
         `group_key` and the list's order wait for the service's `rows`, one
-        round trip; none on the loopback). PR-1.12 revisits that once the
-        socket makes the round trip visible."""
+        round trip)."""
         for session_id in session_ids:
             item = self._items.get(session_id)
             if item is None:
@@ -727,8 +725,8 @@ class RemoteStore(GObject.Object):
         `status`: D29) is applied to the row
         at once, so what listens on the store's signals (the green row's
         rise in `App._sync_green`, the window's `_reraise_green`, which
-        counts on the edge being synchronous) sees it inside the call, as
-        on the loopback; the service's `item` echo confirms it (D16).
+        counts on the edge being synchronous) sees it inside the call; the service's
+        `item` echo confirms it (D16).
         `busy` is the service's verdict and is only ever sent (and
         refused); the background agents' three facts are never sent
         (PR-1.12d)."""

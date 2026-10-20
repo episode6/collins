@@ -10,8 +10,8 @@ window's geometry, the sidebar's width, fonts, themes, keybindings,
 sounds, the tray, Caffeine, the composer's and editor's and git page's
 appearance — lives here, per device, and so does what this device keeps
 *per service* it talks to: each session's dock layout and editor state,
-the tabs that were open and the session that was active. In Phase 1 the
-one service is the local one, and this file sits beside `state.json` on
+the tabs that were open and the session that was active. While the one
+service is the local one, this file sits beside `state.json` on
 the same machine; nothing of it ever crosses the API.
 
 Shape:

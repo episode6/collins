@@ -55,7 +55,9 @@ tracker (`tracking.ServiceActivity`, `start_activity`) is fed by the stream
 filter's `Progress` events, every pty's output after the filter, the input
 frames and the ``/proc`` poll, and sets `busy` and a counted finish's
 `unread` on the store's items itself. `store.flags` keeps what a person did
-at a client's screen — `status`, `unread` — and refuses `busy`.
+at a client's screen — `status`, `unread` off (the person looked) or on (a
+notification its delivery table flagged) — and refuses `busy`,
+`backgrounding` and `can_background`, the service's own verdicts.
 
 **The background agents are the service's** (§3.22, PR-1.12d,
 `bgagents.BackgroundAgents`, `start_background`): the agent list's poller
@@ -95,7 +97,7 @@ replies back.
 
 Spawning is the core's: a client asks for an agent's or a shell's pty in a
 directory at a grid, and the core runs the user's `$SHELL` there with the
-service's own environment (the app's, in Phase 1) plus the two declarations
+service's own environment (the login-shell capture, `service.main`) plus the two declarations
 that coax the CLI's progress announcements out (`session.agent_environment`,
 decided by the `progress_termprop` setting at spawn, as the VTE path did).
 For an agent the `Session` is built first and `Session.spawn` settles the
@@ -1968,8 +1970,7 @@ class ServiceCore:
     def _tool_client(self, session) -> Client | None:
         """The session's active client (D20): of the subscribed clients,
         the one whose device is the active client of the session's agent
-        pty, else the one that subscribed last. Through Phase 1 there is
-        one subscriber, the app's own connection."""
+        pty, else the one that subscribed last."""
         if not self._subscribers:
             return None
         device = None
@@ -2073,8 +2074,7 @@ class ServiceCore:
 
     def _req_panel_history(self, message: protocol.Message, client: Client) -> dict:
         """The tab's three saves (a draft save, the tab's close, the quit):
-        `write_panel_history` as a request (PR-1.12b; through Phase 1 it
-        was the loopback's one shortcut, D21)."""
+        `write_panel_history` as a request (PR-1.12b)."""
         shells: dict[int, int | str] = {}
         keep: set[int] = set()
         for entry in message.get("shells") or []:
@@ -2120,8 +2120,8 @@ class ServiceCore:
 
     def debug_spy_writes(self, pty_id: int) -> None:
         """Record every byte written to *pty_id* from now on
-        (`debug_written` reads them): what a check used to read by
-        wrapping the loopback's `PtyServer.write`."""
+        (`debug_written` reads them): what a check cannot read by
+        wrapping `PtyServer.write` in its own process."""
         if getattr(self, "_write_spy", None) is None:
             self._write_spy: dict[int, list[str]] = {}
             real_write = self.ptys.write

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-08-30. Full change history: git log for this file.
+fork. Last modified: 2026-10-13. Full change history: git log for this file.
 -->
 # Packaging
 
@@ -18,6 +18,59 @@ exist once set up for it.)
 | **PyPI** | `pyproject.toml` + `.github/workflows/release.yml` | Auto-published on tag via trusted publishing (once configured). |
 | **Ubuntu PPA** | `debian/` + `packaging/build-ppa-source.sh` | Source upload to Launchpad; see below. |
 | **Fedora COPR** | `packaging/fedora/` | SRPM upload to COPR, which builds for every Fedora and RHEL 10; see below. |
+
+## The service and its systemd unit
+
+Collins is two programs: `collins` (the window) and `collins-service` (the
+sessions, their ptys, the shared state, the `gh` and `git` calls; see the
+guide's *The service* page). Every channel ships both commands and the
+service's systemd user unit, `data/collins-service.service`, and **no
+channel enables or starts the unit**: the window starts it on demand, and a
+user who wants it from login runs `systemctl --user enable
+collins-service.service` themselves.
+
+- **The command.** `pyproject.toml` declares `collins-service =
+  "collins.service.main:main"` under `[project.scripts]`, so the wheel, the
+  PPA package (pybuild), the RPM (`%{_bindir}/collins-service` in `%files`)
+  and the AUR package (python-installer) all get it from there.
+  `scripts/build_deb.sh` installs no wheel and writes `usr/bin/collins-service`
+  by hand, like its `collins` launcher. A source checkout has neither on
+  `PATH`: the window falls back to `python3 -m collins.service.main` from its
+  own tree (`connection.service_argv`), and `data/install.sh` installs no
+  unit.
+- **The unit.** `debian/rules` installs it to `usr/lib/systemd/user/` and
+  overrides `dh_installsystemduser --no-enable` (and `dh_installsystemd
+  --no-enable --no-start`, for a system unit that does not exist) so the
+  generated maintainer scripts neither enable it nor start or restart it on
+  an upgrade. The spec installs it to `%{_userunitdir}` (`BuildRequires:
+  systemd-rpm-macros`) and lists it in `%files`, with no `%systemd_user_*`
+  scriptlets. The PKGBUILD and `build_deb.sh` copy it to
+  `/usr/lib/systemd/user/`. For a pip or pipx install, `collins
+  --install-desktop` writes a copy to `$XDG_DATA_HOME/systemd/user/` with
+  `ExecStart=` resolved to the installed script and runs `systemctl --user
+  daemon-reload`; that is why the unit is also package data in the wheel
+  (the `collins/collins-service.service` symlink into `data/`, checked by
+  `scripts/verify_wheel_data.py`).
+- **CI.** The `packaging` job extracts the built `.deb` and asserts
+  `usr/bin/collins-service` is executable and the unit file exists; the `rpm`
+  job asserts the same two paths after `dnf install`.
+- **libsoup 3** is a hard runtime dependency since the split: the window and
+  the service talk WebSocket over a Unix socket through it. It is
+  `gir1.2-soup-3.0` in `debian/control` and `build_deb.sh`'s control block
+  (the two Depends lists are kept identical), `Requires: libsoup3` in the
+  spec, and `libsoup3` in the PKGBUILD and `.SRCINFO` — the AUR indexes
+  `.SRCINFO`, so regenerate it (`makepkg --printsrcinfo`) on every PKGBUILD
+  edit, not only at a version bump.
+- **`KillMode=process`** (split-service spec D52) is the unit's one
+  non-default: a stop or restart signals the service alone, never the ptys'
+  children or the CLI's `/bg` daemon. The service's own stop sequence then
+  ends the foreground sessions gracefully (they are resumable) and the
+  daemon and its agents run on. Since no channel restarts the unit on an
+  upgrade, a running service keeps serving the upgraded window for as long
+  as their protocols overlap; the new service code, and any change to the
+  unit itself, takes effect at the next *Restart service* (or `systemctl
+  --user restart collins-service.service`), and the `--install-desktop` copy
+  changes only when that command is run again.
 
 ## Ubuntu PPA
 

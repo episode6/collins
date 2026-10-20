@@ -190,9 +190,8 @@ class StoreFeed:
         """Publish what the save changed. A map entry is sent whole, and
         an entry near the protocol's TEXT_MAX (a long draft, a large
         attachments list) plus its framing would pass MAX_FRAME once the
-        socket of PR-1.12 encodes it: the loopback carries dicts and never
-        meets that cap, so the socket's sender has to chunk such an entry
-        or refuse it there."""
+        socket encodes it, so the socket's sender has to chunk such an entry
+        or refuse it."""
         for name, key in SHARED_KEYS.items():
             current = self.state.export_key(name)
             old = self._published.get(name)

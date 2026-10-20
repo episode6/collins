@@ -159,8 +159,8 @@ each taken from the code the message replaces:
   service's machine: `pr.set` (a session's list, wholesale), `pr.fetch`
   (re-read the statuses of some URLs), `pr.sweep` (the sidebar's sweep),
   `pr.detail` and `pr.threads` (the PR page's data, `prdetail`'s, as JSON
-  objects), `pr.blob` (an image in the Files view; through Phase 1 the
-  file the service wrote, from PR-1.12 a blob transfer) and the actions:
+  objects), `pr.blob` (an image in the Files view: the path of the file
+  the service wrote; a blob transfer is Phase 2's) and the actions:
   `pr.action` (`practions.perform`'s keys), `pr.comment`, `pr.review` and
   `pr.thread` (reply in a review thread, or resolve it). Each names the PR
   by its record, from which the service rebuilds it with
