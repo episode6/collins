@@ -48,9 +48,17 @@ class SessionItem(GObject.Object):
     # session as a background agent (or confirmation times out).
     backgrounding = GObject.Property(type=bool, default=False)
     # Whether this row's background button can be pressed right now: it needs
-    # an open tab whose session id is registered, and no other handoff still
-    # waiting for its new id (see bgstatus.background_blocker).
+    # a running session whose id is registered, and no other handoff still
+    # waiting for its new id (see bgblock.background_blocker). The service's
+    # word (service.bgagents), as `backgrounding` is.
     can_background = GObject.Property(type=bool, default=False)
+    # Whether the row's conversation runs as a background agent (/bg):
+    # "running" when the agent CLI lists it (under any id of its forward
+    # chain), "pending" while a /bg fed for it waits for the list to say so,
+    # "" otherwise. The service's word (service.bgagents, split-service spec
+    # §3.22); a client reads it for the yellow line of a row with no tab
+    # (its `status` "background").
+    background = GObject.Property(type=str, default="")
     # An agent pty on the Collins service runs this session right now (the
     # service's word, an `item` field and the pty table's rows; split-service
     # spec §3.21): with no tab on this device the row is a running row —

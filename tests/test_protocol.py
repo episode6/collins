@@ -136,6 +136,7 @@ PHASE_ONE_TYPES = [
     # CLI's folder trust.
     "rows",
     "put-away",
+    "forgotten",
     "store.lookup",
     "store.page-archived",
     "store.refresh",
@@ -152,6 +153,7 @@ PHASE_ONE_TYPES = [
     "store.keep-projects",
     "store.forget-project",
     "store.move-project",
+    "store.forget",
     "store.flags",
     "trust.check",
     "trust.grant",
@@ -458,6 +460,7 @@ SAMPLES = {
         "syncing": False,
         "backgrounding": False,
         "can_background": True,
+        "background": "running",
         "running": True,
         "mtime": 1790000000.5,
         "created": 1790000000,
@@ -479,6 +482,7 @@ SAMPLES = {
         "chats": 0,
     },
     ("put-away", p.EVENT): {"session": ID},
+    ("forgotten", p.EVENT): {"session": ID},
     ("store.lookup", p.REQUEST): {"session": ID},
     ("store.page-archived", p.REQUEST): {},
     ("store.refresh", p.REQUEST): {"force": True},
@@ -495,6 +499,7 @@ SAMPLES = {
     ("store.keep-projects", p.REQUEST): {"projects": ["project"]},
     ("store.forget-project", p.REQUEST): {"project": "kept"},
     ("store.move-project", p.REQUEST): {"project": "project", "before": "kept"},
+    ("store.forget", p.REQUEST): {"session": ID},
     ("store.flags", p.REQUEST): {
         "session": ID,
         "status": "open",
@@ -714,6 +719,7 @@ REPLIES = {
     "store.keep-projects": {},
     "store.forget-project": {},
     "store.move-project": {},
+    "store.forget": {},
     "store.flags": {},
     "trust.check": {"trusted": False, "root": "/home/u/project"},
     "trust.grant": {"written": True},
@@ -777,6 +783,7 @@ REPLIES = {
         "sandbox": "",
         "live": "bindfs not installed",
         "pid": 4242,
+        "gh": "logged-out",
     },
 }
 

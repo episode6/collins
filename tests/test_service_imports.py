@@ -41,6 +41,7 @@ def test_the_service_and_the_api_load_no_gtk():
     for name in (
         "tools", "notifications", "jobs", "tokenuse", "prfeed", "sandbox", "diffs",
         "hosting", "tracking", "finish",  # PR-1.12a: the session on the service
+        "bgagents",  # PR-1.12d: the background agents
     ):
         assert f"collins.service.{name}" in modules, name
     root = Path(collins.__file__).resolve().parent.parent
