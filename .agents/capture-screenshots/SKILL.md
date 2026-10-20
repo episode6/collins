@@ -254,8 +254,8 @@ not a docs one: the Preferences dialog filtered to the Notifications
 group), `welcome` and `welcome-cli`
 (the first-launch dialog with the CLI found, and with it not found — the
 shot runs with `welcome_seen` set back to false, and the not-found one
-hides `claude` from clisetup and seeds `~/.local/bin/claude` for the
-prefill), and `new-chat` (also copied to `hero.png`, the docs site's hero).
+hides the service's `claude` from remotecli and seeds `~/.local/bin/claude`
+for the service's prefill), and `new-chat` (also copied to `hero.png`, the docs site's hero).
 Name scenes to redo only those. `capture-docs.py` takes `--size WxH` and `--set KEY=JSON`,
 which edit the staged `state.json`'s settings before launch — that is how one
 staged tree serves every window size and panel width.

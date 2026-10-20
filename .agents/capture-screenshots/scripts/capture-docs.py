@@ -31,7 +31,7 @@ window's card stack directly, with their clocks stopped for the shot.
 The two welcome scenes shoot the first-launch dialog (collins/welcome.py),
 so they need the staged state's welcome_seen set back to false (--set
 welcome_seen=false; refresh-docs-screenshots.sh does). welcome shows the
-CLI found; welcome-cli hides `claude` from clisetup and seeds
+CLI found; welcome-cli hides the service's `claude` (remotecli) and seeds
 ~/.local/bin/claude under the scratch HOME, so the dialog opens on the
 ask, prefilled with the launcher's usual place and a green verdict.
 
@@ -119,7 +119,7 @@ shutil.which = lambda cmd, *a, **k: (
     "claude" if cmd == "claude" else _orig_which(cmd, *a, **k)
 )
 
-from collins import clisetup, dialogs, i18n, notifycenter, prdetail, trust  # noqa: E402
+from collins import dialogs, i18n, notifycenter, prdetail, remotecli, trust  # noqa: E402
 from collins.prstatus import PullRequest  # noqa: E402
 
 U1 = "11111111-1111-4111-8111-111111111111"
@@ -219,15 +219,16 @@ if args.scene == "pr-page":
 # ask prefills. The entry then reads it as ~/.local/bin/claude (see stage).
 CLI_HOME_LAUNCHER = os.path.expanduser("~/.local/bin/claude")
 if args.scene == "welcome":
-    # The found state names the claude in use; the patched shutil.which
-    # above would name it "claude", so say where a real one usually is.
-    clisetup.found_at = lambda: "~/.local/bin/claude"
+    # The found state names the claude in use, the service's word
+    # (remotecli); its lookup lands on the scratch shim, so say where a
+    # real one usually is.
+    remotecli.found_at = lambda: "~/.local/bin/claude"
 if args.scene == "welcome-cli":
-    # A launch that can't find claude: the dialog's blocking state. The
-    # shim stays on PATH for everything else (the store's provider check
-    # goes through the patched shutil.which above).
-    clisetup.on_path = lambda: False
-    clisetup.found_at = lambda: None
+    # A launch whose service can't find claude: the dialog's blocking
+    # state. The shim stays on PATH for everything else; the pre-fill and
+    # the verdict are still the service's, judged under the scratch HOME.
+    remotecli.missing = lambda: True
+    remotecli.found_at = lambda: None
     os.makedirs(os.path.dirname(CLI_HOME_LAUNCHER), exist_ok=True)
     shutil.copy(os.path.join(os.path.dirname(os.environ["COLLINS_PROJECTS_DIR"]), "bin", "claude"),
                 CLI_HOME_LAUNCHER)

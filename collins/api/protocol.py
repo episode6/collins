@@ -671,6 +671,12 @@ _HOST = _s(HOST_MAX)
 _SHORT = _s(SHORT_MAX)
 _BOOL = Field(K_BOOL)
 _NUM = Field(K_NUM)
+# The claude CLI's location (cli.check, service.status): as typed, so
+# neither absolute nor non-empty is required.
+_CLI_PATH = _s(PATH_MAX)
+# clisetup's verdicts on a path (OK, MISSING, BAD_NAME, VERSIONED,
+# VERSION_MANAGED), held to clisetup's by tests/test_protocol.py.
+CLI_STATUSES = frozenset({"ok", "missing", "bad-name", "versioned", "version-managed"})
 _COUNT = _i(0, COUNT_MAX)
 _MSGID = _s(MSGID_MAX, low=1)
 _ARGS = Field(K_MAP, high=ARGS_MAX, key=_ARG_KEY_RE, item=Field(K_SCALAR))
@@ -2575,7 +2581,29 @@ _TABLE: tuple[MessageType, ...] = (
                 # word: "ready", "missing", "logged-out"); absent until the
                 # service has asked (PR-1.12d).
                 "gh": _SHORT,
+                # Where the service's `claude` lookup lands ("" when it
+                # finds none): what the welcome gate asks (welcomegate).
+                # Absent from an older service, which the client reads as
+                # found, so nothing asks.
+                "cli": _CLI_PATH,
             }
+        ),
+    ),
+    MessageType(
+        "cli.check",
+        "The service's claude CLI: where it is, where it might be, and a path's verdict.",
+        request=_request(
+            # A path as the user typed it (unexpanded: "~/.local/bin/claude"
+            # is the usual answer), judged on the service's machine.
+            {"path": _CLI_PATH},
+            reply={
+                # Where the service's `claude` lookup lands now, "" for none.
+                "found": _req(_CLI_PATH),
+                # clisetup.detect's pre-fill, when no path was asked about.
+                "detected": _CLI_PATH,
+                # clisetup.validate's verdict on *path*, when one was.
+                "status": Field(K_STR, choices=CLI_STATUSES, high=SHORT_MAX),
+            },
         ),
     ),
 )

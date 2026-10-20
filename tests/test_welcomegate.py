@@ -35,10 +35,20 @@ def test_a_missing_cli_asks_again_seen_or_not():
     assert welcomegate.should_show(_State(), cli_found=False)
 
 
-def test_cli_found_is_asked_of_clisetup_when_not_given(monkeypatch):
-    monkeypatch.setattr(welcomegate.clisetup, "on_path", lambda: False)
+def test_cli_found_is_the_services_word_when_not_given(monkeypatch):
+    """Not this process's PATH: a window launched from the desktop lacks
+    ~/.local/bin while its service runs claude fine (the every-launch
+    welcome this replaced)."""
+    monkeypatch.setattr(welcomegate.remotecli, "_found", "")
     assert welcomegate.should_show(_State(welcome_seen=True))
-    monkeypatch.setattr(welcomegate.clisetup, "on_path", lambda: True)
+    monkeypatch.setattr(welcomegate.remotecli, "_found", "/home/u/.local/bin/claude")
+    monkeypatch.setenv("PATH", "/nowhere")
+    assert not welcomegate.should_show(_State(welcome_seen=True))
+
+
+def test_a_service_that_never_said_is_not_missing_a_cli(monkeypatch):
+    # An older service (no `cli` in its status): no ask it couldn't take.
+    monkeypatch.setattr(welcomegate.remotecli, "_found", None)
     assert not welcomegate.should_show(_State(welcome_seen=True))
 
 

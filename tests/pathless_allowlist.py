@@ -227,8 +227,8 @@ LOCAL_EXTRAS = frozenset(
 #   dialog, clonedialog.py:337)
 # - `panelhistory.load_all` (terminal.py:5629) and `panelhistory.delete`
 #   (terminal.py:5709, window.py:2761, 2871, 2952)
-# - `clisetup.validate` (prefs.py:1560, welcome.py:283, 325); `pkgrepos`
-#   (sidebar.py:2049, window.py:6275)
+# - `pkgrepos` (sidebar.py:2049, window.py:6275); `clisetup.validate`
+#   was here until it moved to the service (item 7 below)
 #
 # From the Opus review of PR 615:
 # 1. `sessions.resume_cwd(session)` (sessions.py: the transcript's tail,
@@ -265,11 +265,14 @@ LOCAL_EXTRAS = frozenset(
 #    from this device's environment and `realpath`; about twenty call
 #    sites (window.py, sidebar.py, dialogs.py:770, newchatview.py:131,
 #    switcher.py:94, remotestore.py:551).
-# 7. `clisetup` beyond `validate`: `on_path()` (welcome.py:102 on every
-#    launch, welcomegate.py:37, prefs.py:1572, tokenrefresh.py:285),
-#    `found_at()` (prefs.py:1575), `detect()` (welcome.py:248) and
-#    `apply()` (prefs.py:1567, welcome.py:336), which changes the client
-#    process's `PATH`.
+# 7. Moved: `clisetup` in the client (`on_path`, `found_at`, `detect`,
+#    `validate`, and `apply`, which changed the client process's `PATH`)
+#    is the service's word now: `service.status`'s `cli` and `cli.check`,
+#    read through `remotecli` by the welcome gate, the welcome dialog and
+#    Preferences, and the service applies a written `claude_cli_path` to
+#    its own `PATH`. (A window whose PATH lacked the CLI's folder showed
+#    the not-found welcome on every launch.) `tokenrefresh`'s `on_path()`
+#    always ran on the service.
 # 8. `toolclient`'s `os.path.realpath` on service paths: toolclient.py:372
 #    and :1006.
 # 9. Six native choosers that start at a path of the service's with no

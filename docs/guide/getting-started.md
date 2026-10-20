@@ -210,13 +210,14 @@ doesn't come back.
 
 ![The first-launch dialog](/img/welcome.png)
 
-Its first group is the `claude` CLI. Launched from a shell, Collins finds
-the one on your `PATH` and names it. Launched from the desktop it often
-can't — that `PATH` doesn't include the folders your shell adds, and
-`~/.local/bin`, where Claude Code's own installer puts its launcher, is
-one of them — and then the group is a path box instead: prefilled from the
-usual install locations when one of them has the CLI, with a Browse button
-and a live verdict beside it. Point it at the stable launcher (usually
+Its first group is the `claude` CLI. The CLI runs where Collins' service
+runs, so it is the service that looks for it: on its `PATH`, which takes
+your login shell's (and with it `~/.local/bin`, where Claude Code's own
+installer puts its launcher), however the window was started. It names the
+one it found. When it finds none, the group is a path box instead:
+prefilled from the usual install locations on the service's machine when
+one of them has the CLI, with a Browse button and a live verdict beside it,
+both judged by the service. Point it at the stable launcher (usually
 `~/.local/bin/claude`; a path with a version number in it is refused, since
 it would break on the CLI's next self-update). The location is remembered,
 and the row at the top of Preferences changes it later. There is no

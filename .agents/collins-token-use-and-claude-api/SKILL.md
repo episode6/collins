@@ -8,7 +8,7 @@ description: >-
   model/effort resolution (claudemodels.py), the usage panel (usage.py,
   usagepanel.py), claude.ai archive mirroring (remotearchive.py), the Token
   use preferences and first-launch welcome dialog (tokensettings.py,
-  welcome.py, welcomegate.py), and locating the claude CLI (clisetup.py). Use
+  welcome.py, welcomegate.py), and locating the claude CLI (clisetup.py, remotecli.py). Use
   when adding any feature that spends tokens or talks to Anthropic, changing
   how a model is picked or named, debugging an expired-login symptom, or
   changing the welcome dialog.
@@ -144,10 +144,17 @@ per session tool) and shown in two places from the same builder: Preferences'
 **Token use** group directly under General (order pinned by
 `prefslayout.TOKEN_USE_ROWS`) and the first-launch **Before you start**
 dialog (`welcome.py`, gate `welcomegate.should_show`: `welcome_seen` unset —
-once per install, existing installs included — or the CLI not found on PATH,
+once per install, existing installs included — or the service has no CLI,
 which recurs every launch and can't be escaped, only answered or quit). The
 dialog's first group is the CLI: found (one row naming which `claude`) or a
 path box (prefilled from `clisetup.known_locations`, Browse, live verdict).
+Every CLI answer is the **service's** (`remotecli`: `service.status`'s `cli`
+at connect, `cli.check` for the pre-fill and each keystroke's verdict, sent
+on the primary so it follows a `state.set`); the client never asks its own
+PATH or disk, nor changes its PATH. A desktop-launched window's PATH lacks
+`~/.local/bin` while the service, with the login shell's, runs `claude`
+fine: gating on the window's PATH showed the ask on every launch. A service
+that never said (`cli` absent) counts as found. Browse is a local extra.
 Width 640 to match Preferences; ComboRow values get a 160 px minimum
 (`_keep_value_readable`). Toggles write immediately; Continue records
 `welcome_seen`. E2E checks and capture scenes seed `welcome_seen: true`.
@@ -156,7 +163,9 @@ Width 640 to match Preferences; ComboRow values get a 160 px minimum
 installer puts `claude`, so a blank sidebar is the symptom. The chosen path is
 stored **exactly as given** (symlinks unexpanded — the launcher is repointed
 on every self-update) and a versioned path is refused (accepted with a warning
-only inside nvm/asdf trees); `apply` **appends** its directory to PATH.
+only inside nvm/asdf trees); `apply` **appends** its directory to PATH — the
+service's, at start (`apply_saved`) and whenever a client writes
+`claude_cli_path` (`_req_state_set`; cleared, the entry comes off).
 
 ## Footguns
 

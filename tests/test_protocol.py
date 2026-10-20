@@ -236,6 +236,9 @@ PHASE_ONE_TYPES = [
     "fs.names",
     "service.restart",
     "service.status",
+    # The claude CLI is the service's to find and judge (the welcome gate,
+    # Preferences' CLI row; the D50 record's item 7).
+    "cli.check",
 ]
 
 
@@ -243,6 +246,14 @@ def test_table_is_exactly_the_phase_one_list():
     """The spec's list for Phase 1 (PR-1.3), and nothing else: a type added
     later lands behind a capability, and lands here on purpose."""
     assert list(p.type_names()) == PHASE_ONE_TYPES
+
+
+def test_cli_statuses_are_clisetups_verdicts():
+    from collins import clisetup
+
+    verdicts = {clisetup.OK, clisetup.MISSING, clisetup.BAD_NAME}
+    verdicts |= {clisetup.VERSIONED, clisetup.VERSION_MANAGED}
+    assert verdicts == p.CLI_STATUSES
 
 
 def _forms():
@@ -747,6 +758,7 @@ SAMPLES = {
     ("fs.names", p.REQUEST): {"root": "/home/u/project"},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
+    ("cli.check", p.REQUEST): {"path": "~/.local/bin/claude"},
 }
 
 REPLIES = {
@@ -981,7 +993,9 @@ REPLIES = {
         "live": "bindfs not installed",
         "pid": 4242,
         "gh": "logged-out",
+        "cli": "/home/u/.local/bin/claude",
     },
+    "cli.check": {"found": "", "detected": "/home/u/.local/bin/claude", "status": "versioned"},
 }
 
 

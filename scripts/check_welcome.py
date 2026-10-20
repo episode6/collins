@@ -293,6 +293,12 @@ i18n.init(AppState().get_setting("language"))
 # The model catalog the service answers with: the same canned list this
 # process patched over claudemodels (scripts/e2e_stubs.py).
 e2e_service.start_service(stubs={"models": claudemodels.model_records(CATALOG)})
+# The window's own PATH finds no claude (a desktop launch's PATH has no
+# ~/.local/bin): the found state below is the service's word, the one place
+# the CLI runs, and not this process's lookup (remotecli).
+os.environ["PATH"] = os.pathsep.join(
+    d for d in os.environ["PATH"].split(os.pathsep) if d and not os.path.exists(os.path.join(d, "claude"))
+)
 app = App()
 
 exit_code = 1

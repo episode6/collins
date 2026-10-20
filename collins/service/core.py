@@ -155,7 +155,17 @@ from typing import Any, Protocol
 
 from gi.repository import GLib
 
-from .. import autodelete, chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
+from .. import (
+    autodelete,
+    chats,
+    clisetup,
+    panelhistory,
+    providers,
+    sandboxgrants,
+    sandboxplan,
+    sessions,
+    trust,
+)
 from ..api import protocol
 from ..i18n import N_
 from ..shellinput import shell_command
@@ -1032,8 +1042,8 @@ class ServiceCore:
 
     def _req_service_status(self, message: protocol.Message, client: Client) -> dict:
         """What the service is running (§3.10): its version and protocol,
-        the counts, when it started, the sandbox probe's verdict and the
-        live grants' word."""
+        the counts, when it started, the sandbox probe's verdict, the
+        live grants' word and where its claude CLI is."""
         from .. import __version__
 
         busy = self.activity.busy_count() if self.activity is not None else 0
@@ -1045,6 +1055,7 @@ class ServiceCore:
             "clients": len(self._clients),
             "started": self._started,
             "pid": os.getpid(),
+            "cli": _cli_found(),
         }
         reason = sandboxplan.probe_reason()
         if reason is not None:
@@ -1053,6 +1064,21 @@ class ServiceCore:
             fields["live"] = (self.sandbox_grants.capable() or "")[: protocol.ARG_TEXT_MAX]
         if self.gh_status is not None:
             fields["gh"] = self.gh_status[: protocol.SHORT_MAX]
+        return protocol.reply(message.id, **fields)
+
+    def _req_cli_check(self, message: protocol.Message, client: Client) -> dict:
+        """The claude CLI on this machine, for the welcome dialog and
+        Preferences: where a lookup lands now, and either the pre-fill
+        (no path asked about) or a typed path's verdict. Every answer is
+        clisetup's, judged here, where the CLI runs; the client's own PATH
+        and disk say nothing about it."""
+        path = message.get("path")
+        fields: dict = {"found": _cli_found()}
+        if path is None:
+            detected = clisetup.detect()
+            fields["detected"] = detected if len(detected) <= protocol.PATH_MAX else ""
+        else:
+            fields["status"] = clisetup.validate(path)
         return protocol.reply(message.id, **fields)
 
     def activity_call(self, name: str, *args, **kwargs):
@@ -1466,6 +1492,12 @@ class ServiceCore:
         if state.export_key(name) != before:
             state.save()
             if name == "settings":
+                # A client's answer to "where is claude" (the welcome, or
+                # Preferences) goes on this PATH at once: the next spawn,
+                # and the cli.check that follows it, find it. Cleared, the
+                # entry an earlier answer added comes off.
+                if entry == clisetup.PATH_SETTING:
+                    clisetup.apply(state.get_setting(clisetup.PATH_SETTING) or "")
                 self.store.apply_pr_titles()
                 self.store.apply_cli_titles()
                 if self.background is not None:
@@ -2703,6 +2735,13 @@ def transcript_path_allowed(path: object) -> bool:
         if real.startswith(base.rstrip(os.sep) + os.sep):
             return True
     return False
+
+
+def _cli_found() -> str:
+    """Where this process's `claude` lookup lands, "" for none (or for a
+    path too long to carry, which is no path anyone answered)."""
+    found = clisetup.found_at() or ""
+    return found if len(found) <= protocol.PATH_MAX else ""
 
 
 def _jsonable(value):
