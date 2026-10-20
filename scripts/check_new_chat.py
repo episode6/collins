@@ -33,6 +33,7 @@ E2E = tempfile.mkdtemp(prefix="collins-newchat-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -215,7 +216,7 @@ def on_the_screen() -> bool:
     tab = page.get_child()
     state["page"], state["tab"] = page, tab
     check("a session started by hand opens onto the new-chat screen", tab.is_new_chat)
-    check("…with nothing spawned behind it", tab._child_pid is None, tab._child_pid)
+    check("…with nothing spawned behind it", tab.probe_call("child_pid") is None, tab.probe_call("child_pid"))
     check(
         "…showing the screen, not the console",
         tab._stage.get_visible_child_name() == "new-chat",
@@ -412,7 +413,7 @@ def send_an_empty_screen() -> bool:
     view.composer._send.emit("clicked")  # the button itself: the real path
     check("Empty Session leaves the screen", not tab.is_new_chat)
     check("…for the console", tab._stage.get_visible_child_name() == "terminal")
-    check("…with no prompt waiting to be typed", tab._new_chat_prompt is None)
+    check("…with no prompt waiting to be typed", tab.probe("new_chat_prompt") is None)
     GLib.timeout_add(3000, after_the_empty_send)
     return GLib.SOURCE_REMOVE
 
@@ -455,7 +456,8 @@ def finish() -> bool:
     # its own. The panel shells die with their pty.
     for i in range(win.tab_view.get_n_pages()):
         page_tab = win.tab_view.get_nth_page(i).get_child()
-        pid = getattr(page_tab, "_child_pid", None)
+        probe = getattr(page_tab, "probe_call", None)
+        pid = probe("child_pid") if probe is not None else None
         if pid:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)

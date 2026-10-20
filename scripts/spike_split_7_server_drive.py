@@ -43,6 +43,10 @@ parser.add_argument("--out", required=True, help="directory the PNGs go to")
 parser.add_argument("--model", default="claude-haiku-4-5-20251001", help="the cheapest model")
 parser.add_argument("--keep-home", action="store_true")
 parser.add_argument("--no-turn", action="store_true", help="type the prompt but never send it (no quota)")
+parser.add_argument(
+    "--composer-turn", action="store_true",
+    help="with --no-turn, still send the composer's prompt (one real turn: the model switch and the send)",
+)
 ARGS = parser.parse_args()
 os.makedirs(ARGS.out, exist_ok=True)
 
@@ -296,10 +300,28 @@ def steps():
     check(
         "the composer cut the text out of the box", ok, tab._composer.peek_text() if tab._composer else None
     )
-    check("…and the box is empty", tab.takes_prompt())
+    # The box reads come off the mirror the service fills on its 50 ms
+    # settle (PR-1.12a, D28): the erase shows a beat after the seed.
+    ok = yield from until(tab.takes_prompt, 3000)
+    check("…and the box is empty", ok, tab.entered_prompt())
     shot(win, "3-composer")
-    tab._composer.set_text("")
-    tab.close_composer()
+    # A model switch from under the composer types straight in (the request
+    # carries composer_open), and the composer's send is a real turn: the
+    # reply names the switched model.
+    tab.switch_model("sonnet")
+    yield 1500
+    if ARGS.no_turn and not ARGS.composer_turn:
+        tab._composer.set_text("")
+        tab.close_composer()
+    else:
+        tab._composer.set_text("Reply with exactly this and nothing else: pong")
+        tab._on_composer_send(None, tab._composer.peek_text())
+        ok = yield from until(lambda: not tab.composer_open(), 3000)
+        check("the composer's send lowered the composer", ok)
+        ok = yield from until(lambda: (tab.current_model() or "").startswith("claude-sonnet"), 90000)
+        check("the switched model answered the composer's prompt", ok, tab.current_model())
+        ok = yield from until(tab.takes_prompt, 30000)
+        check("…and the box is empty again", ok)
     yield 800
 
     # A paste (VTE's own paste path: a bracketed commit through the guard
@@ -426,7 +448,10 @@ def tick():
     except StopIteration:
         return GLib.SOURCE_REMOVE
     except Exception as exc:  # noqa: BLE001
+        import traceback
+
         check("the drive ran to its end", False, repr(exc))
+        traceback.print_exc()
         app.quit()
         return GLib.SOURCE_REMOVE
     GLib.timeout_add(delay, tick)

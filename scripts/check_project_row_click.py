@@ -32,6 +32,7 @@ E2E = tempfile.mkdtemp(prefix="collins-rowclick-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
 # Isolation first: every one of these is read at import time somewhere below.
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -221,7 +222,7 @@ def after_the_row_click() -> bool:
         bool(tabs) and tabs[0].start_cwd == PROJECT,
         [t.start_cwd for t in tabs],
     )
-    check("…with nothing spawned behind it", bool(tabs) and tabs[0]._child_pid is None)
+    check("…with nothing spawned behind it", bool(tabs) and tabs[0].probe_call("child_pid") is None)
     check("…and the group left as it was", header.group_key not in win.sidebar._collapsed)
     state["after_row"] = win.tab_view.get_n_pages()
 

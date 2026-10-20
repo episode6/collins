@@ -41,7 +41,7 @@ from . import (
     pkgrepos,
     prmenu,
     remoteprs,
-    sandboxplan,
+    sandboxstatus,
 )
 from .chats import is_chat_cwd
 from .flash import FLASH_MS, flash
@@ -2740,9 +2740,10 @@ class SessionSidebar(Gtk.Box):
             open_section.append(_("New sessions use a worktree"), "sidebar.project-worktree")
 
         # The sandbox pin, on the same terms — offered only where a box can
-        # be built (the probe's cached verdict; Preferences says why not).
-        # Not for the Chats project: a scratch directory is never sandboxed.
-        if sandboxplan.probe_reason() == "" and not is_chat_cwd(row.cwd):
+        # be built (the service's verdict as last heard; Preferences says
+        # why not). Not for the Chats project: a scratch directory is never
+        # sandboxed.
+        if sandboxstatus.probe_reason() == "" and not is_chat_cwd(row.cwd):
             self._sandbox_menu_project = project_name
             self._project_sandbox_action.set_state(
                 GLib.Variant.new_boolean(self.store.state.sandbox_for_project(project_name))

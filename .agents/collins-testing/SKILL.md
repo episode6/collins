@@ -82,6 +82,20 @@ Also: `ruff check collins/ tests/` (CI pins `ruff==0.16.4`, rules
 
 ## Writing an e2e check
 
+**The probe** (PR-1.12a, D27). A session's logic runs on the service, so a
+check never reads a tab's privates: `tab.probe(name)`,
+`tab.probe_set(name, value)` and `tab.probe_call(name, *args, **kwargs)`
+are the `debug.session.*` requests (a dotted name walks from the
+`Session`: `finish_ledger.armed`, `transcript.set_path`,
+`host.session_resolved`, `activity.tracker.mark`, `activity.judge.held`),
+`debug.screen` / `debug.pty` read a pty's model and process facts, and
+`debug.sandbox` calls the sandbox host, the live grants or the core. The
+service serves them only with `COLLINS_DEBUG_API=1` in its environment:
+every check sets it in its preamble (the service is in-process) and
+`run_e2e.py` sets it for the subprocess. A probe answers None with no pty
+(before a new chat's Send, after the exit) and raises on a refusal. Keep a
+check's assertions as they were: only the call path moves.
+
 A check that drives widgets with **no `App`** behind them and reaches the
 service (a PR page's gh requests, a job, the model catalog: anything
 through `apilink.current()`) must opt in to the harness loopback with

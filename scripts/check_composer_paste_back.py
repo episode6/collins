@@ -38,6 +38,7 @@ import time
 E2E = tempfile.mkdtemp(prefix="collins-pasteback-")
 RUN = "r" + "".join(c for c in os.path.basename(E2E) if c.isalnum())
 
+os.environ["COLLINS_DEBUG_API"] = "1"  # the e2e probe (debug.*): served only with this set
 os.environ["COLLINS_APP_ID"] = f"com.episode6.Collins.E2E.{RUN}"
 os.environ["COLLINS_PROJECTS_DIR"] = f"{E2E}/projects"
 os.environ["COLLINS_CLAUDE_CONFIG"] = f"{E2E}/claude.json"
@@ -222,8 +223,8 @@ def steps():
     check("closing puts the draft in the box, unfolded", box() == read_back(DRAFT), box())
     check(
         "…and records nothing as folded",
-        tab._pasted_back == {} and tab._paste_back_pending is None,
-        (tab._pasted_back, tab._paste_back_pending),
+        tab.probe("pasted_back") == {} and tab.probe("paste_back_pending") is None,
+        (tab.probe("pasted_back"), tab.probe("paste_back_pending")),
     )
     tab.open_composer()
     yield 2000
@@ -246,8 +247,8 @@ def steps():
     check("a whole-draft paste folds into a stand-in", box() == "[Pasted text #1 +11 lines]", box())
     check(
         "…which the verify read records against the draft",
-        tab._pasted_back == {"[Pasted text #1 +11 lines]": DRAFT},
-        tab._pasted_back,
+        tab.probe("pasted_back") == {"[Pasted text #1 +11 lines]": DRAFT},
+        tab.probe("pasted_back"),
     )
     tab.feed_child_text(" and more")
     yield 400
@@ -256,7 +257,7 @@ def steps():
     got = tab._composer.peek_text()
     check("reopening puts the draft back in the stand-in's place", got == DRAFT + " and more", got)
     check("…and empties the box", tab.takes_prompt(), box())
-    check("…and spends the record", tab._pasted_back == {}, tab._pasted_back)
+    check("…and spends the record", tab.probe("pasted_back") == {}, tab.probe("pasted_back"))
     tab._composer.set_text("")
     tab.close_composer()
     yield 600
@@ -283,7 +284,7 @@ def steps():
     check("…and leaves it in the box", box() == "[Pasted text #3 +3 lines]", box())
 
     try:
-        os.killpg(os.getpgid(tab._child_pid), signal.SIGKILL)
+        os.killpg(os.getpgid(tab.probe_call("child_pid")), signal.SIGKILL)
     except OSError:
         pass
     app.quit()

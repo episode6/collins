@@ -81,17 +81,51 @@ PHASE_ONE_TYPES = [
     "detach",
     "resize",
     "focus",
+    # PR-1.12a: the session asks its active client for the keyboard.
+    "focus.terminal",
     "theme",
     "spawn",
     # PR-1.11: the panel history key moves into the service.
     "panel.key",
+    # PR-1.12a: a panel shell's reads, over the API.
+    "pty.info",
+    "pty.capture",
     "prompt",
     "switch",
+    # PR-1.12a (spec §3.19): the session on the service. The requests a
+    # tab makes of its session, the events the session sends, and the
+    # e2e probe (D27).
+    "write",
+    "send",
     "mention",
     "cut",
+    "cut.cancel",
+    "draft.restore",
     "clear",
     "paint",
     "close",
+    "close.nudge",
+    "close.end",
+    "session",
+    "composer",
+    "shells",
+    "resolver.arm",
+    "transcript.update",
+    "transcript.set",
+    "transcript.relocate",
+    "prs.restore",
+    "cwd.settle",
+    "shells.follow",
+    "finish.witness",
+    "baseline.absorb",
+    "baseline.cmdlines",
+    "restart.worktreeless",
+    "debug.session.get",
+    "debug.session.set",
+    "debug.session.call",
+    "debug.screen",
+    "debug.pty",
+    "debug.sandbox",
     "state.set",
     "state.get",
     "item",
@@ -160,6 +194,10 @@ PHASE_ONE_TYPES = [
     "sandbox.revoke",
     "sandbox.tools",
     "sandbox.restart",
+    # PR-1.12a: a sibling's derived plan, a box let go of, a box forgotten.
+    "sandbox.derive",
+    "sandbox.drop",
+    "sandbox.forget",
     "sandbox",
     "service.restart",
     "service.status",
@@ -233,7 +271,7 @@ def test_table_shapes_are_sound():
 
 ID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
 BOX = "0123456789abcdef0123456789abcdef"
-TERM = {"vte": 8400, "fg": "#c0c0c0", "bg": "#000000", "scheme": "dark"}
+TERM = {"vte": 8400, "fg": "#c0c0c0", "bg": "#000000", "scheme": "dark", "palette": ["#2e3436"] * 16}
 DELIVERY = {
     "path": "/home/u/data",
     "status": "pending",
@@ -248,6 +286,52 @@ MARKS = {
     "session": ID,
     "notes": [{"id": "n1", "path": "a.py", "side": "new", "line": 3, "summary": "Why"}],
     "highlights": [{"id": "h1", "path": "a.py", "side": "new", "line": 3, "start": 0, "end": 4}],
+}
+
+SESSION_EVENT = {
+    "pty": 7,
+    "handle": "s-4",
+    "session": ID,
+    "fork": False,
+    "provider": "claude",
+    "options": {"model": "opus", "effort": "", "permission_mode": "", "add_dirs": [], "worktree": False,
+                "worktree_name": "", "sandbox": True, "sandbox_plan": "/run/p.json", "sandbox_box": BOX},
+    "command_override": "claude --continue",
+    "cwd": "/home/u/project",
+    "agent_cwd": "/home/u/project/.claude/worktrees/x",
+    "pid": 4242,
+    "resolver_cwd": "/home/u/project",
+    "initial_command": "claude --mcp-config /x/mcp.json",
+    "worktree_launch": False,
+    "new_chat_prompt": "Fix the build",
+    "shells_follow_armed": False,
+    "closing": False,
+    "sandboxed": True,
+    "sandbox_box": BOX,
+    "sandbox_plan_path": "/run/p.json",
+    "defaults_owed": False,
+    "can_restart": True,
+    "takes_prompt": False,
+    "entered": {"text": "half a thought", "rows_below": 0},
+    "prompt_block": "This session isn't at an empty prompt.",
+    "unstarted": False,
+    "foreign_paste": False,
+    "agent_running": True,
+    "running_command": True,
+    "model": "claude-opus-5-5",
+    "effort": "high",
+    "permission_mode": "acceptEdits",
+    "transcript_path": "/home/u/.claude/projects/p/" + ID + ".jsonl",
+    "prs": [PR_RECORD],
+    "lookup_empty": False,
+    "touched_files": ["/home/u/project/a.py"],
+    "attachments": [{"key": "/home/u/shot.png", "source": "lightbox"}],
+    "ledger_armed": True,
+    "landed": True,
+    "reset": False,
+    "busy": True,
+    "finished": False,
+    "forked": "1f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
 }
 
 SAMPLES = {
@@ -266,6 +350,7 @@ SAMPLES = {
     ("detach", p.REQUEST): {"pty": 7},
     ("resize", p.EVENT): {"pty": 7, "cols": 100, "rows": 30},
     ("focus", p.EVENT): {"pty": 7, "focused": True},
+    ("focus.terminal", p.EVENT): {"pty": 7},
     ("theme", p.EVENT): {"term": TERM},
     ("spawn", p.REQUEST): {
         "kind": "agent",
@@ -280,19 +365,69 @@ SAMPLES = {
         "worktree_name": "feature-x",
         "sandbox": True,
         "sandbox_box": BOX,
+        "fork": False,
+        "command_override": "claude --continue",
+        "jsonl_path": "/home/u/.claude/projects/-home-u-project/" + ID + ".jsonl",
+        "sandbox_plan": "/run/user/1000/collins/app/sandbox/plan.json",
+        "fork_resolve": False,
+        "handle": "s-4",
         "cols": 120,
         "rows": 40,
         "history": ID,
         "ordinal": 2,
     },
-    ("panel.key", p.REQUEST): {"pty": 7, "history": ID},
-    ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld"},
-    ("switch", p.REQUEST): {"pty": 7, "model": "opus", "effort": "max"},
+    ("panel.key", p.REQUEST): {"pty": 7, "history": ID, "handle": "s-4"},
+    ("pty.info", p.REQUEST): {"pty": 7},
+    ("pty.capture", p.REQUEST): {"pty": 7},
+    ("prompt", p.REQUEST): {"pty": 7, "text": "hello\nworld", "focus": False, "when_empty": True},
+    ("switch", p.REQUEST): {"pty": 7, "model": "opus", "effort": "max", "composer_open": True},
+    ("write", p.REQUEST): {"pty": 7, "text": " @a.py#L2-4 ", "mention": True},
+    ("send", p.REQUEST): {"pty": 7, "text": "Fix the build", "composer_open": True},
     ("mention", p.REQUEST): {"pty": 7, "path": "/home/u/project/a.py", "start_line": 2, "end_line": 4},
     ("cut", p.REQUEST): {"pty": 7},
+    ("cut", p.EVENT): {"pty": 7, "handle": "cut-3", "state": "seeded", "text": "half a thought"},
+    ("cut.cancel", p.REQUEST): {"pty": 7, "handle": "cut-3"},
+    ("draft.restore", p.REQUEST): {"pty": 7, "text": "a draft\nin two lines"},
     ("clear", p.REQUEST): {"pty": 7},
     ("paint", p.REQUEST): {"pty": 7, "text": "\x1b[1;33m[session manager]\x1b[0m hi"},
-    ("close", p.REQUEST): {"pty": 7, "mode": "background"},
+    ("close", p.REQUEST): {"pty": 7, "mode": "background", "text": "/bg\r", "force": False},
+    ("close", p.EVENT): {"pty": 7, "state": "budget", "phase": "shell"},
+    ("close.nudge", p.REQUEST): {"pty": 7},
+    ("close.end", p.REQUEST): {"pty": 7},
+    ("session", p.EVENT): SESSION_EVENT,
+    ("composer", p.EVENT): {"pty": 7, "what": "stash", "text": "kept for the next composer"},
+    ("shells", p.EVENT): {"pty": 7, "what": "stale"},
+    ("resolver.arm", p.REQUEST): {"pty": 7},
+    ("transcript.update", p.REQUEST): {"pty": 7, "discover": True},
+    ("transcript.set", p.REQUEST): {"pty": 7, "path": "/home/u/.claude/projects/p/" + ID + ".jsonl"},
+    ("transcript.relocate", p.REQUEST): {"pty": 7, "path": "/home/u/.claude/projects/w/" + ID + ".jsonl"},
+    ("prs.restore", p.REQUEST): {"pty": 7, "records": [PR_RECORD]},
+    ("cwd.settle", p.REQUEST): {
+        "pty": 7,
+        "cwd": "/home/u/project/.claude/worktrees/x",
+        "root": "/home/u/project",
+    },
+    ("shells.follow", p.REQUEST): {"pty": 7, "armed": False},
+    ("finish.witness", p.REQUEST): {"pty": 7},
+    ("baseline.absorb", p.REQUEST): {"pty": 7},
+    ("baseline.cmdlines", p.REQUEST): {"pty": 7},
+    ("restart.worktreeless", p.REQUEST): {"pty": 7},
+    ("debug.session.get", p.REQUEST): {"pty": 7, "name": "finish_ledger.armed"},
+    ("debug.session.set", p.REQUEST): {"pty": 7, "name": "session_id", "value": ID},
+    ("debug.session.call", p.REQUEST): {
+        "pty": 7,
+        "name": "transcript.set_path",
+        "args": ["/tmp/t.jsonl"],
+        "kwargs": {"discover": True},
+    },
+    ("debug.screen", p.REQUEST): {"pty": 7},
+    ("debug.pty", p.REQUEST): {"pty": 7},
+    ("debug.sandbox", p.REQUEST): {
+        "target": "host",
+        "name": "grants",
+        "args": [BOX],
+        "kwargs": {"seed": False},
+    },
     ("state.set", p.REQUEST): {"key": "names", "entry": ID, "value": "A title"},
     ("state.set", p.EVENT): {"key": "settings", "entry": "title_model", "value": {"a": [1, 2.5, None]}},
     ("state.get", p.REQUEST): {"key": "favorites", "entry": ID},
@@ -476,8 +611,13 @@ SAMPLES = {
         "reset": False,
     },
     ("sandbox.restart", p.REQUEST): {"box": BOX, "pty": 7, "handle": "s-4"},
+    ("sandbox.derive", p.REQUEST): {"box": BOX, "pty": 7, "handle": "s-4", "cwd": "/home/u/project/sub"},
+    ("sandbox.drop", p.REQUEST): {"box": BOX, "pty": 7, "handle": "s-4", "plan": "/run/user/1000/plan.json"},
+    ("sandbox.forget", p.REQUEST): {"box": BOX, "pty": 7, "handle": "s-4"},
     ("sandbox", p.EVENT): {
         "box": BOX,
+        "what": "probe",
+        "reason": "bwrap not installed",
         "pty": 7,
         "session": ID,
         "path": "/home/u/data",
@@ -502,11 +642,44 @@ REPLIES = {
     "subscribe": {"items": 12, "ptys": 2},
     "attach": {"cols": 120, "rows": 40, "active": False, "sized_for": "desktop", "modes": ["?1004h", ">5u"]},
     "detach": {},
-    "spawn": {"pty": 8, "cols": 120, "rows": 40},
+    "spawn": {"pty": 8, "cols": 120, "rows": 40, "handle": "s-4"},
     "prompt": {},
     "switch": {},
     "mention": {},
-    "cut": {"text": "half a thought"},
+    "pty.info": {
+        "kind": "shell",
+        "child_pid": 4242,
+        "shell_pid": 4243,
+        "foreground_pgrp": 4243,
+        "running_command": False,
+        "process_cwd": "/home/u/project",
+        "plan": "/run/user/1000/plan.json",
+    },
+    "pty.capture": {"text": "$ ls\nREADME.md"},
+    "write": {},
+    "send": {"sent": True},
+    "cut": {"handle": "cut-3"},
+    "cut.cancel": {},
+    "draft.restore": {"restored": True},
+    "close.nudge": {},
+    "close.end": {},
+    "resolver.arm": {},
+    "transcript.update": {},
+    "transcript.set": {},
+    "transcript.relocate": {},
+    "prs.restore": {},
+    "cwd.settle": {"scope": "auto"},
+    "shells.follow": {},
+    "finish.witness": {"stamp": [3, 7], "size": 4096},
+    "baseline.absorb": {"capturing": True},
+    "baseline.cmdlines": {"cmdlines": ["node /x/mcp-server.js"]},
+    "restart.worktreeless": {},
+    "debug.session.get": {"value": {"a": [1, None]}, "callable": False},
+    "debug.session.set": {},
+    "debug.session.call": {"value": "ok"},
+    "debug.screen": {"rows": ["❯ "], "cursor": [2, 0], "columns": 80, "row_count": 24, "capture": "❯ "},
+    "debug.pty": {"child_pid": 4242, "foreground_pgrp": 5151, "shell_pid": 4242, "process_cwd": "/home/u"},
+    "debug.sandbox": {"value": ["/home/u/data"]},
     "clear": {},
     "paint": {},
     "close": {},
@@ -576,6 +749,9 @@ REPLIES = {
     "sandbox.revoke": {"live": False},
     "sandbox.tools": {"tools": {"show_image": True}},
     "sandbox.restart": {},
+    "sandbox.derive": {"plan": "/run/user/1000/plan-2.json", "box": BOX, "reason": ""},
+    "sandbox.drop": {},
+    "sandbox.forget": {},
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
@@ -584,6 +760,8 @@ REPLIES = {
         "busy": 1,
         "clients": 2,
         "started": 1790000000.0,
+        "sandbox": "",
+        "live": "bindfs not installed",
     },
 }
 
@@ -1335,3 +1513,149 @@ def test_importing_protocol_loads_no_gi():
         cwd=Path(__file__).resolve().parent.parent,
     )
     assert result.stdout.strip() == "False"
+
+
+# -- the byte fits: an event at every bound still frames (PR-1.12a review) ---------------------
+
+HEAVY = "\x01"  # six bytes once JSON-escaped: the heaviest a character gets in a frame
+
+
+def _heavy(n: int) -> str:
+    return HEAVY * n
+
+
+def _heavy_path(n: int = p.PATH_MAX) -> str:
+    return "/" + HEAVY * (n - 1)
+
+
+def test_fit_text_bytes_keeps_the_longest_prefix_that_frames():
+    assert p.fit_text_bytes("abc", 100) == "abc"
+    fitted = p.fit_text_bytes(_heavy(1000), 6 * 100 + 2)
+    assert fitted == _heavy(100) and p.json_bytes(fitted) == 602
+    assert p.json_bytes(p.fit_text_bytes("ü" * 1000, 1001)) <= 1001
+    assert p.fit_text_bytes("abc", 1) == ""
+
+
+def test_the_byte_measures_do_not_raise_on_a_lone_surrogate():
+    """A stash text with a lone surrogate (a torn paste) is measured, not
+    raised on: the fit runs before the event's own validation, which is
+    where such text is refused. `encode` still refuses it."""
+    torn = "ab\ud800cd"
+    assert p.json_bytes(torn) == 3 + 3 + 3  # quote + "ab", the surrogate's three, "cd" + quote
+    assert p.fit_text_bytes(torn, 1000) == torn
+    assert p.fit_text_bytes(torn * 100, 20).startswith("ab")
+    assert p.fit_list_bytes([{"k": torn}], 1000) == [{"k": torn}]
+    with pytest.raises(ValueError):
+        p.encode({"text": torn})
+
+
+def test_fit_list_bytes_keeps_the_longest_prefix_that_frames():
+    items = [{"k": _heavy(10)} for _ in range(10)]
+    one = p.json_bytes(items[0])
+    assert p.fit_list_bytes(items, 2 + 3 * one + 2) == items[:3]
+    assert p.fit_list_bytes(items, 10_000) == items
+    assert p.fit_list_bytes(items, 1) == []
+    assert p.fit_list_bytes([], 1) == []
+
+
+def _full_bound_session_event() -> dict:
+    """A `session` event with every foreign-content field at its bound,
+    spelled in the heaviest character a frame carries, and the service's
+    own identity fields at their realistic maxima (an options record with
+    ADD_DIRS_MAX paths of PATH_MAX ASCII characters)."""
+    handle = "s" + "9" * 127
+    record = {"url": "https://github.com/o/r/pull/1", "number": 1, "title": _heavy(10_000)}
+    attachment = {"key": _heavy_path(), "kind": "image", "caption": _heavy(10_000)}
+    return {
+        "t": "session",
+        "pty": p.U32_MAX,
+        "handle": handle,
+        "session": handle,
+        "fork": True,
+        "provider": _heavy(p.SHORT_MAX),
+        "options": {
+            "model": "m" * p.MODEL_MAX,
+            "effort": "e" * p.SHORT_MAX,
+            "permission_mode": "p" * p.SHORT_MAX,
+            "add_dirs": ["/" + "d" * (p.PATH_MAX - 1)] * p.ADD_DIRS_MAX,
+            "worktree": True,
+            "worktree_name": "w" * p.NAME_MAX,
+            "sandbox": True,
+            "sandbox_plan": "/" + "s" * (p.PATH_MAX - 1),
+            "sandbox_box": BOX,
+        },
+        "command_override": _heavy(p.PATH_MAX),
+        "cwd": _heavy_path(),
+        "agent_cwd": _heavy_path(),
+        "pid": p.PID_MAX,
+        "resolver_cwd": _heavy_path(),
+        "initial_command": _heavy(p.PATH_MAX),
+        "worktree_launch": True,
+        "new_chat_prompt": _heavy(p.PREVIEW_MAX),
+        "shells_follow_armed": True,
+        "closing": True,
+        "sandboxed": True,
+        "sandbox_box": _heavy(p.ID_MAX),
+        "sandbox_plan_path": _heavy_path(),
+        "defaults_owed": True,
+        "can_restart": True,
+        "takes_prompt": True,
+        "entered": {"text": _heavy(p.PREVIEW_MAX), "rows_below": p.MAX_ROWS},
+        "prompt_block": _heavy(p.MSGID_MAX),
+        "unstarted": True,
+        "foreign_paste": True,
+        "agent_running": True,
+        "running_command": True,
+        "model": _heavy(p.MODEL_MAX),
+        "effort": _heavy(p.SHORT_MAX),
+        "permission_mode": _heavy(p.SHORT_MAX),
+        "transcript_path": _heavy_path(),
+        "prs": p.fit_list_bytes([record] * p.PRS_MAX, p.SESSION_LIST_BYTES["prs"]),
+        "lookup_empty": True,
+        "touched_files": p.fit_list_bytes([_heavy_path()] * 64, p.SESSION_LIST_BYTES["touched_files"]),
+        "attachments": p.fit_list_bytes([attachment] * 1000, p.SESSION_LIST_BYTES["attachments"]),
+        "ledger_armed": True,
+        "landed": True,
+        "reset": True,
+        "busy": True,
+        "finished": True,
+        "forked": handle,
+    }
+
+
+def test_a_session_event_at_every_bound_frames():
+    """The review's finding: `pasted_back` x 256 x TEXT_MAX and a free
+    `attachments` list could pass MAX_FRAME, which the socket's sender
+    raises on — the event lost, the mirror stale. With the paste-back
+    record out of the event and the lists fitted to their byte budgets,
+    the worst event validates and frames."""
+    event = _full_bound_session_event()
+    checked = p.validate(dict(event), p.SERVICE)
+    assert isinstance(checked, p.Message), getattr(checked, "msgid", None)
+    assert set(checked.fields) == set(event) - {"t"}
+    assert "pasted_back" not in p.SESSION_FIELDS and "paste_back_pending" not in p.SESSION_FIELDS
+    frame = p.encode(event)  # raises over MAX_FRAME
+    assert len(frame.encode("utf-8")) <= p.MAX_FRAME
+    # Each list is as full as its budget allows and the budget bit: the
+    # fit was exercised, not dodged.
+    for name, budget in p.SESSION_LIST_BYTES.items():
+        items = event[name]
+        assert items and p.json_bytes(items) <= budget, name
+        assert p.json_bytes(items + [items[0]]) > budget, name
+
+
+def test_a_cut_event_at_its_bound_frames():
+    """A seed of TEXT_MAX characters is over the frame once escaped
+    (`hosting.CutSink._tell` cut it by characters); fitted by bytes to
+    EVENT_TEXT_BYTES it frames with the event's other fields at their bound."""
+    text = p.fit_text_bytes(_heavy(p.TEXT_MAX), p.EVENT_TEXT_BYTES)
+    assert len(text) < p.TEXT_MAX and p.json_bytes(text) <= p.EVENT_TEXT_BYTES
+    event = {"t": "cut", "pty": p.U32_MAX, "handle": "c" + "9" * 127, "state": "seeded", "text": text}
+    assert isinstance(p.validate(dict(event), p.SERVICE), p.Message)
+    assert len(p.encode(event).encode("utf-8")) <= p.MAX_FRAME
+    stash = {"t": "composer", "pty": p.U32_MAX, "what": "stash", "text": text}
+    assert isinstance(p.validate(dict(stash), p.SERVICE), p.Message)
+    assert len(p.encode(stash).encode("utf-8")) <= p.MAX_FRAME
+    # A plain text that frames is kept whole: the bound bites only when it must.
+    plain = "a" * (p.EVENT_TEXT_BYTES - 2)
+    assert p.fit_text_bytes(plain, p.EVENT_TEXT_BYTES) == plain
