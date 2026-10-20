@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-18. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -31,6 +31,7 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk  # noqa: E402
 
 from . import (
+    checkouts,
     contextmenu,
     desktopentry,
     footerapps,
@@ -1406,6 +1407,7 @@ class SessionSidebar(Gtk.Box):
         # accepted cosmetic miss, not state worth persisting.
         self._archiving: set[str] = set()
         self._rows: dict[str, SessionRow] = {}
+        self._group_menu_asked = 0  # the newest project-header right-click's ask (`show_group_menu`)
         self._header_rows: dict[tuple, GroupHeaderRow] = {}
         # The stand-in row under each group that has nothing else in it.
         self._new_thread_rows: dict[tuple, NewThreadRow] = {}
@@ -2767,10 +2769,25 @@ class SessionSidebar(Gtk.Box):
             self._popup_menu(menu, row, x, y)
             return
 
+        # Whether the project is a checkout is the service's answer
+        # (`fs.stat` of its `.git`, off the main loop): the menu is built
+        # when it lands, a few milliseconds after the click; a landing older
+        # than the newest right-click (a stalled service answering late)
+        # builds nothing.
+        self._group_menu_asked += 1
+        asked = self._group_menu_asked
+        checkouts.ask(row.cwd or "", lambda is_git: self._show_group_menu(row, x, y, is_git, asked))
+
+    def _show_group_menu(
+        self, row: GroupHeaderRow, x: float, y: float, is_git: bool, asked: int | None = None
+    ) -> None:
+        if asked is not None and asked != self._group_menu_asked:
+            return  # a newer right-click's menu is the one wanted
+        if row.get_root() is None:
+            return  # the row went (a rebuild) while the service answered
         project_name = row.group_key[1]
 
         open_section = Gio.Menu()
-        is_git = bool(row.cwd) and (Path(row.cwd) / ".git").exists()
         if row.cwd:
             new_item = Gio.MenuItem.new(_("New session here"), None)
             new_item.set_action_and_target_value(

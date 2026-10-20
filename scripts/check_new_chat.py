@@ -105,7 +105,7 @@ gi.require_version("Vte", "3.91")
 import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
-from collins import i18n, newchat, proctree, trust  # noqa: E402
+from collins import checkouts, i18n, newchat, proctree, remotefiles, trust  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.newchatview import NewChatView  # noqa: E402
 from collins.state import AppState  # noqa: E402
@@ -213,8 +213,46 @@ def a_hidden_sandbox_box_keeps_the_draft_choice() -> None:
     )
 
 
+def a_send_before_the_checkout_answer_keeps_the_worktree_wish() -> None:
+    """The worktree box is hidden until the service says the directory is
+    a checkout (`checkouts.ask`). A Send that beats the answer carries the
+    hidden box's wish, which the window holds to the answer; a known
+    non-checkout has no wish at all."""
+
+    def screen(default: bool) -> NewChatView:
+        return NewChatView(
+            PROJECT,
+            lambda: None,
+            lambda _path: None,
+            lambda _message: None,
+            worktree_default=default,
+            is_git=None,
+            pick_model=False,
+            pick_effort=False,
+            sandbox_default=False,
+            sandbox_available=False,
+        )
+
+    view = screen(default=True)
+    check("no worktree box before the checkout answer", not view._worktree.get_visible())
+    check("…but a Send then carries the project's default-on wish", view.worktree() is True)
+    check("…and the draft keeps no choice the user didn't make", view.worktree_choice() is None)
+    view.set_is_git(False)
+    check("…no wish once the directory is known to be no checkout", view.worktree() is False)
+    view = screen(default=False)
+    check("a default-off project has no wish before the answer", view.worktree() is False)
+    view.set_worktree_choice(True)
+    check("a draft's worktree choice is kept through the wait", view.worktree_choice() is True)
+    view.set_is_git(True)
+    check(
+        "…and shows ticked when the answer lands",
+        (view._worktree.get_visible(), view.worktree(), view.worktree_choice()) == (True, True, True),
+    )
+
+
 def on_the_screen() -> bool:
     a_hidden_sandbox_box_keeps_the_draft_choice()
+    a_send_before_the_checkout_answer_keeps_the_worktree_wish()
     win = state["win"]
     page = win.tab_view.get_selected_page()
     tab = page.get_child()
@@ -449,9 +487,206 @@ def close_an_empty_screen() -> bool:
     GLib.timeout_add(500, lambda: (
         check("closing an empty screen writes nothing", empty_id not in saved_drafts(), saved_drafts()),
         check("…and leaves no row", empty_id not in win.sidebar._placeholder_rows),
-        finish(),
+        hold_the_answer(),
     )[-1])
     return GLib.SOURCE_REMOVE
+
+
+# -- a Send that beats the checkout answer --------------------------------------------------
+#
+# Whether the folder is a checkout is the service's answer (`checkouts.
+# ask_answer`), and against a local service it lands long before anyone can
+# press Send. Here the answer is held back, so the window's half of the rule
+# is driven: the Send waits, the screen waits with it, and what happens then
+# is the wish and the answer — a worktree, a plain launch, or no launch at
+# all when the service could not be asked.
+
+_pending_asks: list = []
+_real_ask_answer = checkouts.ask_answer
+
+
+def _held_ask_answer(cwd, then, timeout=checkouts.ANSWER_TIMEOUT_S):
+    _pending_asks.append(then)
+
+
+def answer_the_asks(answer) -> int:
+    waiting, _pending_asks[:] = list(_pending_asks), []
+    for then in waiting:
+        then(answer)
+    return len(waiting)
+
+
+def spawn_log() -> str:
+    try:
+        with open(os.environ["SPAWN_LOG"], encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def launches() -> int:
+    return spawn_log().count("<<<ARGV>>>")
+
+
+def worktree_launches() -> int:
+    argvs = [block.split("\n<<<END>>>")[0] for block in spawn_log().split("<<<ARGV>>>\n")[1:]]
+    return sum(1 for argv in argvs if "-w" in argv.split())
+
+
+def draft_texts() -> list:
+    return [record.get("text") for record in saved_drafts().values()]
+
+
+def selected():
+    win = state["win"]
+    page = win.tab_view.get_selected_page()
+    return win, page, page.get_child()
+
+
+def hold_the_answer() -> bool:
+    checkouts.ask_answer = _held_ask_answer
+    state["launches"] = launches()
+    # A project whose new sessions use a worktree: the box starts ticked,
+    # hidden until the answer.
+    state["win"]._start_new_session(PROJECT, worktree=True)
+    GLib.timeout_add(800, send_before_the_answer)
+    return GLib.SOURCE_REMOVE
+
+
+def send_before_the_answer() -> bool:
+    win, page, tab = selected()
+    view = tab._new_chat
+    check("the checkout question is out and unanswered", len(_pending_asks) == 1, len(_pending_asks))
+    check("…so there is no worktree box yet", not view._worktree.get_visible())
+    check("…and the screen's wish is the project's default (on)", view.worktree() is True)
+    view.set_text("FIRST prompt, at the Send")
+    view.composer._send.emit("clicked")
+    check("a Send before the answer is held: still the new-chat screen", tab.is_new_chat)
+    check("…the page in the window's held set", page in win._new_chat_sends_held)
+    check("…nothing spawned", tab.probe_call("child_pid") is None and launches() == state["launches"])
+    check("…and the screen waits with it, insensitive", tab.new_chat_held and not view.get_sensitive())
+    check("…down to the Send button", not view.composer._send.is_sensitive())
+    # Enter again (the key path emits the same signal as the button).
+    view.composer.emit("send-requested", "SECOND prompt, pressed in the wait")
+    check(
+        "a second Send in the wait launches nothing and waits on nothing more",
+        tab.is_new_chat and len(tab._checkout_waiters) == 1 and len(_pending_asks) == 1,
+        (len(tab._checkout_waiters), len(_pending_asks)),
+    )
+    answer_the_asks(True)
+    check("the answer launches: off the screen", not tab.is_new_chat)
+    check(
+        "…in a worktree, as the hidden box wished",
+        tab.launch_options is not None and tab.launch_options.worktree is True,
+        tab.launch_options,
+    )
+    check("…and the held set is empty", not win._new_chat_sends_held)
+    GLib.timeout_add(4000, after_the_held_send)
+    return GLib.SOURCE_REMOVE
+
+
+def after_the_held_send() -> bool:
+    log = spawn_log()
+    check("the held Send launched once", launches() == state["launches"] + 1, launches())
+    check("…with the worktree flag", worktree_launches() == 1, worktree_launches())
+    check("…and the first prompt, the one Send was pressed on", "FIRST prompt" in log, repr(log[-300:]))
+    check("…never the one pressed in the wait", "SECOND prompt" not in log)
+    state["launches"] = launches()
+
+    # The tab closed while its Send is held: the answer launches nothing.
+    state["win"]._start_new_session(PROJECT, worktree=True)
+    GLib.timeout_add(800, close_a_held_send)
+    return GLib.SOURCE_REMOVE
+
+
+def close_a_held_send() -> bool:
+    win, page, tab = selected()
+    state["closed"] = tab
+    tab._new_chat.set_text("closed in the wait")
+    tab._new_chat.composer._send.emit("clicked")
+    check("a second held Send", tab.is_new_chat and page in win._new_chat_sends_held)
+    win.tab_view.close_page(page)
+    GLib.timeout_add(1200, after_the_held_close)
+    return GLib.SOURCE_REMOVE
+
+
+def after_the_held_close() -> bool:
+    win = state["win"]
+    check("closing the page calls the hold off", not win._new_chat_sends_held)
+    check("the answer was still owed", answer_the_asks(True) == 1)
+    check("…and a closed tab launches nothing on it", launches() == state["launches"], launches())
+    check("…its draft kept", "closed in the wait" in draft_texts(), draft_texts())
+
+    # The service cannot be asked: no launch, the screen and its text back.
+    win._start_new_session(PROJECT, worktree=True)
+    GLib.timeout_add(800, send_and_fail_the_answer)
+    return GLib.SOURCE_REMOVE
+
+
+def send_and_fail_the_answer() -> bool:
+    win, page, tab = selected()
+    view = tab._new_chat
+    view.set_text("asked for a worktree")
+    view.composer._send.emit("clicked")
+    check("a third held Send", tab.is_new_chat and tab.new_chat_held)
+    answer_the_asks(None)  # a refusal, no link, or nothing in ANSWER_TIMEOUT_S
+    stayed = tab.is_new_chat and launches() == state["launches"]
+    check("an answer that could not be had launches nothing", stayed)
+    check("…never plain, outside the worktree that was asked for", tab.probe_call("child_pid") is None)
+    check("…the hold is over", page not in win._new_chat_sends_held)
+    check("…the screen is usable again", not tab.new_chat_held and view.composer._send.is_sensitive())
+    check("…with its text", view.text() == "asked for a worktree", repr(view.text()))
+    still_open = tab._is_git_checkout is None and view.worktree() is True
+    check("…and the question still open, the wish kept", still_open)
+    # Send again: a fresh question, and this time the folder is no checkout.
+    view.composer._send.emit("clicked")
+    check("the next Send asks again", len(_pending_asks) == 1 and tab.new_chat_held, len(_pending_asks))
+    answer_the_asks(False)
+    check("no checkout: the Send launches", not tab.is_new_chat)
+    check(
+        "…plain (the flag means nothing there)",
+        tab.launch_options is not None and tab.launch_options.worktree is False,
+        tab.launch_options,
+    )
+    GLib.timeout_add(4000, after_the_plain_send)
+    return GLib.SOURCE_REMOVE
+
+
+def after_the_plain_send() -> bool:
+    check("that was one more launch", launches() == state["launches"] + 1, launches())
+    check("…without the worktree flag", worktree_launches() == 1, worktree_launches())
+
+    # A screen whose own first ask failed, in a project whose default is off:
+    # no Send there asks, so the next reconnect must (the 2026-10-18 review's
+    # should-fix 1).
+    state["win"]._start_new_session(PROJECT, worktree=False)
+    GLib.timeout_add(800, fail_the_screens_own_ask)
+    return GLib.SOURCE_REMOVE
+
+
+def fail_the_screens_own_ask() -> bool:
+    win, page, tab = selected()
+    view = tab._new_chat
+    check("the screen's own ask is out", len(_pending_asks) == 1, len(_pending_asks))
+    answer_the_asks(None)
+    check("a failed first ask leaves the box out and the question open", not view._worktree.get_visible())
+    check("…nothing asked again on its own", tab._is_git_checkout is None and not _pending_asks)
+    remotefiles.watcher().reset()  # a reconnect
+    check("a reconnect asks again", len(_pending_asks) == 1, len(_pending_asks))
+    answer_the_asks(True)
+    check("…and the box appears on the answer", view._worktree.get_visible() and tab._is_git_checkout is True)
+    remotefiles.watcher().reset()
+    check("a later reconnect asks nothing more", not _pending_asks, len(_pending_asks))
+    win.tab_view.close_page(page)
+    GLib.timeout_add(800, after_the_reask)
+    return GLib.SOURCE_REMOVE
+
+
+def after_the_reask() -> bool:
+    remotefiles.watcher().reset()
+    check("a closed screen's re-ask is gone with it", not _pending_asks, len(_pending_asks))
+    checkouts.ask_answer = _real_ask_answer
+    return finish()
 
 
 def finish() -> bool:

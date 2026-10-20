@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-13. Full change history: git log for this file.
+# fork. Last modified: 2026-10-18. Full change history: git log for this file.
 """Main window: composes the session sidebar with the tabbed terminal area."""
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from . import (
     apilink,
     buildinfo,
     chats,
+    checkouts,
     clonedialog,
     contextmenu,
     desktopentry,
@@ -382,6 +383,11 @@ class MainWindow(Adw.ApplicationWindow):
         # New-session tabs shown as "New Thread" placeholder rows in the
         # sidebar until the store discovers their session: page -> placeholder id.
         self._placeholder_pages: dict[Adw.TabPage, str] = {}
+        # New-chat pages whose Send waits for the checkout answer.
+        # A held Send per page (`_on_new_chat_send`), each hold a token of
+        # its own: a page handed to another window and back inside one
+        # round trip launches with the Send that is current, not the first.
+        self._new_chat_sends_held: dict[Adw.TabPage, object] = {}
         # The keys this window has sent a desktop notification under (see
         # _send_desktop_notification) — read by the placeholder → real-row
         # handoff, which is the one place a notification has to be re-sent
@@ -508,6 +514,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._new_menu = new_menu
         self._alt_new_pos = new_menu.get_n_items()
         self._alt_new_present = False
+        self._alt_new_asked = 0  # which ask of the service the entry waits on
         # The sidebar's Chats project: a session in a throwaway directory
         # ("chat" here ≠ the native streaming chat entries below).
         new_menu.append(_("New chat (scratch folder)"), "win.new-session-in-chats")
@@ -2245,12 +2252,22 @@ class MainWindow(Adw.ApplicationWindow):
     def _refresh_alt_new_session_item(self) -> None:
         """Rebuild the header dropdown's one-off worktree entry for the visible
         project: launch there with the opposite of its effective choice. Hidden
-        when there's no visible git project to invert for (chats included)."""
+        when there's no visible git project to invert for (chats included).
+        Whether the project is a checkout is the service's answer
+        (`checkouts.ask`, off the main loop), so the entry appears when it
+        lands; an ask a newer refresh has overtaken adds nothing."""
         if self._alt_new_present:
             self._new_menu.remove(self._alt_new_pos)
             self._alt_new_present = False
+        self._alt_new_asked += 1
+        asked = self._alt_new_asked
         cwd = self._visible_project_dir()
-        if not cwd or chats.is_chat_cwd(cwd) or not (Path(cwd) / ".git").exists():
+        if not cwd or chats.is_chat_cwd(cwd):
+            return
+        checkouts.ask(cwd, lambda is_git: self._add_alt_new_session_item(cwd, asked, is_git))
+
+    def _add_alt_new_session_item(self, cwd: str, asked: int, is_git: bool) -> None:
+        if not is_git or asked != self._alt_new_asked or self._alt_new_present:
             return
         project = project_name_for_cwd(cwd)
         label = (
@@ -2354,11 +2371,10 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _worktree_for_new_session(self, cwd: str) -> bool:
         """Whether a new session in `cwd` should launch with the worktree flag:
-        the project's pinned choice, else the app setting — and never outside a
-        git checkout (`.git` is a file in worktree checkouts, so either form
-        counts), where the flag has no meaning."""
-        if not (Path(cwd) / ".git").exists():
-            return False
+        the project's pinned choice, else the app setting. Whether `cwd` is a
+        git checkout, where the flag means anything, is the service's answer
+        and not this method's: the new-chat screen asks it for its checkbox
+        (`checkouts.ask`) and a background launch is handed it."""
         return self.state.worktree_for_project(project_name_for_cwd(cwd))
 
     def _sandbox_for_new_session(self, cwd: str, choice: bool | None = None) -> bool:
@@ -2439,8 +2455,9 @@ class MainWindow(Adw.ApplicationWindow):
     def _start_new_session(
         self, cwd: str, provider=None, options=None, worktree: bool | None = None
     ) -> None:
-        """`worktree` forces this one launch on/off (still never outside a git
-        checkout); None resolves the project's effective value as usual."""
+        """`worktree` forces this one launch on/off (the new-chat screen still
+        shows its checkbox only in a git checkout); None resolves the
+        project's effective value as usual."""
         provider = provider or self._default_provider()
         self._with_folder_trust(
             cwd, provider, lambda: self._launch_new_session(cwd, provider, options, worktree)
@@ -2452,6 +2469,7 @@ class MainWindow(Adw.ApplicationWindow):
         provider=None,
         options=None,
         worktree: bool | None = None,
+        is_git: bool | None = None,
     ) -> TerminalTab | None:
         """Start a session in a tab that never takes the selection, the focus,
         or the view — the launch path behind a session asking for a sibling
@@ -2465,13 +2483,18 @@ class MainWindow(Adw.ApplicationWindow):
         bell, the header flash — stays on. Those are how a background session
         announces itself; only the ones that move the app under the user's
         hands are skipped.
+
+        *is_git* is whether `cwd` is a git checkout, the service's answer
+        (`checkouts.ask`) the caller holds: a worktree launch needs it and
+        nothing here may stat the directory. None (not asked) is "not a
+        checkout", so no worktree.
         """
         provider = provider or self._default_provider()
         if not (chats.is_chat_cwd(cwd) or self.store.folder_trust(cwd)[0]):
             return None
         return self._launch_new_session(
             cwd, provider, options, worktree, background=True,
-            initial_size=self._background_terminal_size(),
+            initial_size=self._background_terminal_size(), is_git=is_git,
         )
 
     def _background_terminal_size(self) -> tuple[int, int]:
@@ -2496,18 +2519,20 @@ class MainWindow(Adw.ApplicationWindow):
         worktree: bool | None = None,
         background: bool = False,
         initial_size: tuple[int, int] | None = None,
+        is_git: bool | None = None,
     ) -> TerminalTab:
         if worktree is None:
             worktree = self._worktree_for_new_session(cwd)
-        else:
-            worktree = worktree and (Path(cwd) / ".git").exists()
         if not background:
             # A session started by hand opens onto the new-chat screen: the
             # first prompt is written there, and its Send is what launches
             # the agent (_on_new_chat_send) — with the worktree decision as
             # the screen's checkbox then says, seeded from what was resolved
             # above. Nothing runs until then, so nothing is trusted or
-            # flagged here either.
+            # flagged here either. *is_git* is for the background branch
+            # below alone: here the checkout question is the screen's own
+            # (`TerminalTab.when_checkout_known` holds a Send until the
+            # service has answered).
             tab = TerminalTab(
                 cwd=cwd, session_id=None, settings=self.state.settings, provider=provider,
                 options=options, new_chat=True, worktree_default=worktree,
@@ -2529,6 +2554,9 @@ class MainWindow(Adw.ApplicationWindow):
             # the caller already settled the box (the start_session tool
             # does, with the parent's own sandbox in mind).
             options = self._sandboxed_options(options)
+        # Never outside a git checkout (`.git` is a file in worktree
+        # checkouts, so either form counts), where the flag has no meaning.
+        worktree = bool(worktree) and bool(is_git)
         if worktree:
             # The agent's worktree flag reads trust off the launch directory
             # itself, with none of the inheritance an ordinary session enjoys
@@ -2759,8 +2787,79 @@ class MainWindow(Adw.ApplicationWindow):
         own input box. The draft is spent: the text is about to be the
         session's first turn, and the dock's shells go on under the session
         id from here."""
+        if page in self._new_chat_sends_held:
+            return  # a second Send while the first waits below: one launch
+        if not worktree:
+            self._send_new_chat(tab, text, False, sandbox, model, effort, page)
+            return
+        # The checkbox is shown only in a checkout, and whether this is one
+        # is the service's answer, which the tab asked for
+        # (`checkouts.ask_answer`). A Send before the answer carries the
+        # box's wish (the project's default, a draft's choice:
+        # `newchat.worktree_wish`) and waits here for it. What the answer
+        # then does is `newchat.send_outcome`: a worktree in a checkout,
+        # plain in what is known to be none, and **no launch at all** when
+        # the service could not be asked (a refusal, no link, nothing
+        # within `checkouts.ANSWER_TIMEOUT_S`): a session started outside
+        # the worktree the user asked for would edit the checkout it was
+        # meant to protect, so the screen and its draft stay and a toast
+        # says why.
+        token = self._new_chat_sends_held[page] = object()
+
+        def answered(answer: bool | None) -> None:
+            held = self._new_chat_sends_held.get(page) is token
+            if held:
+                del self._new_chat_sends_held[page]
+            if not newchat.send_goes_on(held, tab.get_root() is not None):
+                return  # called off (the page left this window), or the tab went
+            outcome = newchat.send_outcome(True, answer)
+            if outcome == newchat.SEND_REFUSED:
+                tab.set_new_chat_held(False)
+                self.show_toast(
+                    _("Couldn't check whether this folder is a git checkout. Nothing was started.")
+                )
+                return
+            try:
+                self._send_new_chat(
+                    tab, text, outcome == newchat.SEND_WORKTREE, sandbox, model, effort, page
+                )
+            finally:
+                # The launch declined, or raised: the screen is back (a no-op
+                # once the launch took it down).
+                tab.set_new_chat_held(False)
+
+        tab.when_checkout_known(answered)
+        if page in self._new_chat_sends_held:
+            # The answer is still out: the screen waits with the Send, so
+            # nothing typed or picked meanwhile is lost to the launch.
+            tab.set_new_chat_held(True)
+
+    def _call_off_new_chat_send(self, page: Adw.TabPage) -> None:
+        """*page* is leaving this window (closed, or handed to another)
+        with its Send still held: the hold is this window's, so it ends
+        here without a launch, and the screen (should it live on in
+        another window) is usable again."""
+        if self._new_chat_sends_held.pop(page, None) is None:
+            return
+        tab = page.get_child()
+        if isinstance(tab, TerminalTab):
+            tab.set_new_chat_held(False)
+
+    def _send_new_chat(
+        self,
+        tab: TerminalTab,
+        text: str,
+        worktree: bool,
+        sandbox: bool,
+        model: str,
+        effort: str,
+        page: Adw.TabPage,
+    ) -> None:
+        """`_on_new_chat_send` with the worktree flag settled (never outside
+        a git checkout)."""
+        if tab.get_root() is None:
+            return  # the tab went while the service answered
         cwd = tab.start_cwd or ""
-        worktree = bool(worktree) and (Path(cwd) / ".git").exists()
         if worktree:
             self.store.trust_folder(cwd, launch=True)  # see _launch_new_session
         options = replace(
@@ -3600,6 +3699,7 @@ class MainWindow(Adw.ApplicationWindow):
         # this pop finds nothing left for it.)
         self._tab_wiring.pop(page, None)
         self._cancel_new_chat_save(page)
+        self._call_off_new_chat_send(page)
         self._discarding_drafts.discard(page)
         self._notify_tray()
         self._open_tabs_changed()

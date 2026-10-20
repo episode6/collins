@@ -100,6 +100,49 @@ def test_effective_worktree_follows_choice_then_default_never_outside_git():
     assert not newchat.effective_worktree(True, True, False)
 
 
+def test_a_send_before_the_checkout_answer_carries_the_hidden_boxes_wish():
+    """Nit 3 of PR 614's Fable review: the box is hidden until the service
+    says the directory is a checkout, and a hidden box read as unticked
+    launched a default-on project without its worktree for a Send that
+    beat the answer. The wish crosses instead; the window holds it to the
+    answer (`TerminalTab.when_checkout_known`)."""
+    assert newchat.worktree_wish(True, None)  # not answered yet: the wish
+    assert not newchat.worktree_wish(False, None)
+    assert newchat.worktree_wish(True, True)
+    assert not newchat.worktree_wish(False, True)
+    assert not newchat.worktree_wish(True, False)  # known: no checkout, no box
+
+
+def test_a_sends_outcome_is_the_wish_and_the_answer_and_never_plain_on_no_answer():
+    """The window's launch rule (`MainWindow._on_new_chat_send`). The
+    verification of PR 614, S2: a wish the service could not answer used to
+    launch plain, in the checkout the worktree was meant to protect."""
+    assert newchat.send_outcome(True, True) == newchat.SEND_WORKTREE
+    assert newchat.send_outcome(True, False) == newchat.SEND_PLAIN  # no checkout: the flag means nothing
+    assert newchat.send_outcome(True, None) == newchat.SEND_REFUSED  # could not ask: no launch
+    # no wish needs no answer, whatever it would have been
+    for answer in (True, False, None):
+        assert newchat.send_outcome(False, answer) == newchat.SEND_PLAIN
+    # and a wish before the answer is still a wish at the outcome
+    assert newchat.send_outcome(newchat.worktree_wish(True, None), True) == newchat.SEND_WORKTREE
+
+
+def test_a_held_sends_answer_launches_only_while_the_hold_and_the_tab_stand():
+    assert newchat.send_goes_on(True, True)
+    assert not newchat.send_goes_on(False, True)  # called off: the page left the window
+    assert not newchat.send_goes_on(True, False)  # the tab went
+    assert not newchat.send_goes_on(False, False)
+
+
+def test_a_drafts_worktree_choice_survives_the_wait_for_the_answer():
+    assert newchat.worktree_draft_choice(True, True, None) is True
+    assert newchat.worktree_draft_choice(False, True, None) is False
+    assert newchat.worktree_draft_choice(True, False, None) is None  # the default, not a choice
+    assert newchat.worktree_draft_choice(True, True, True) is True
+    assert newchat.worktree_draft_choice(True, False, True) is None
+    assert newchat.worktree_draft_choice(True, True, False) is None  # no box at all
+
+
 def test_draft_record_keeps_a_model_pick_only():
     record = newchat.draft_record("/p", "claude", "hi", None, None, 1.0, model="")
     assert "model" not in record  # the default is re-read, not kept
