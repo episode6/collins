@@ -117,6 +117,15 @@ jobs:
       - run: twine check --strict dist/*
       - run: python3 scripts/verify_wheel_data.py
       - run: ./scripts/build_deb.sh
+      # The .deb ships the whole package: extract it and import the app from
+      # the extracted tree, so a subpackage build_deb.sh forgot (service/,
+      # api/) fails here, not at a user's first launch after a release.
+      - name: The .deb's package imports
+        run: |
+          rm -rf /tmp/deb-root
+          dpkg -x dist/collins_*_all.deb /tmp/deb-root
+          cd /tmp
+          PYTHONPATH=/tmp/deb-root/usr/lib/python3/dist-packages python3 -c "import collins.app; print(collins.app.__file__)"
 
   # Everything release.yml's ppa job does short of signing and uploading, in
   # the same images -- so a build-dep an image lacks fails a PR here, not the

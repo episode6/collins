@@ -102,6 +102,11 @@ downloads of each version, see the
   finished-run notification all waited for an Enter typed into the
   terminal itself. Every prompt Collins sends now counts, whichever way it
   was sent.
+- **The release .deb ships the whole package.** `scripts/build_deb.sh`
+  copied only the top-level modules, so the .deb attached to a GitHub
+  release lacked `collins/service/` and `collins/api/` and could not start.
+  It now copies every subpackage, and CI installs the built .deb into a
+  scratch root and imports the app from it.
 
 ### v0.1.4 — 2026-09-27
 
