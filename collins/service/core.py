@@ -155,7 +155,17 @@ from typing import Any, Protocol
 
 from gi.repository import GLib
 
-from .. import autodelete, chats, panelhistory, providers, sandboxgrants, sandboxplan, sessions, trust
+from .. import (
+    autodelete,
+    chats,
+    clisetup,
+    panelhistory,
+    providers,
+    sandboxgrants,
+    sandboxplan,
+    sessions,
+    trust,
+)
 from ..api import protocol
 from ..i18n import N_
 from ..shellinput import shell_command
@@ -1466,6 +1476,12 @@ class ServiceCore:
         if state.export_key(name) != before:
             state.save()
             if name == "settings":
+                # A client's answer to "where is claude" (the welcome, or
+                # Preferences) goes on the service's PATH at once, as it went
+                # on the window's before the split: the next spawn uses it.
+                # Cleared, the entry an earlier answer added comes off.
+                if entry == clisetup.PATH_SETTING:
+                    clisetup.apply(state.get_setting(clisetup.PATH_SETTING) or "")
                 self.store.apply_pr_titles()
                 self.store.apply_cli_titles()
                 if self.background is not None:

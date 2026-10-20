@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-12. Full change history: git log for this file.
+# fork. Last modified: 2026-10-20. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -24,6 +24,7 @@ from . import (
     DEBUG_APP_ID,
     apilink,
     buildinfo,
+    clisetup,
     connection,
     desktopentry,
     dialogs,
@@ -2227,6 +2228,12 @@ class App(Adw.Application):
         # decided on every hello like git's.
         self._install_file_transport()
         self.store.subscribe()
+        # The remembered CLI location goes on this process's PATH too, as it
+        # did before the split: the welcome gate, Preferences' CLI row and
+        # providers still look for `claude` here (the D50 record's item 7,
+        # Phase 3's to move to the service). Without it a launch whose PATH
+        # lacks the CLI's folder shows the not-found welcome every time.
+        clisetup.apply_saved(self.state)
         self._refresh_service_status()
 
     def _install_git_transport(self) -> None:

@@ -268,7 +268,9 @@ LOCAL_EXTRAS = frozenset(
 # 7. `clisetup` beyond `validate`: `on_path()` (welcome.py:102 on every
 #    launch, welcomegate.py:37, prefs.py:1572, tokenrefresh.py:285),
 #    `found_at()` (prefs.py:1575), `detect()` (welcome.py:248) and
-#    `apply()` (prefs.py:1567, welcome.py:336), which changes the client
+#    `apply()` (prefs.py:1567, welcome.py:336) and `apply_saved()`
+#    (app.py's `_start_service_client`, restoring the pre-split launch's
+#    PATH so the gate finds the stored CLI), which change the client
 #    process's `PATH`.
 # 8. `toolclient`'s `os.path.realpath` on service paths: toolclient.py:372
 #    and :1006.

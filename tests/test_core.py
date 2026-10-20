@@ -2055,6 +2055,33 @@ def test_the_poll_setting_written_by_a_client_reaches_the_poller(app_state, proj
         pump(0.3)
 
 
+def test_the_cli_path_written_by_a_client_goes_on_the_services_path(app_state, tmp_path, monkeypatch):
+    """The welcome's and Preferences' answer to "where is claude" reaches the
+    service's PATH at once, and clearing it takes the entry back off."""
+    from collins import clisetup
+
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    cli = tools / "claude"
+    cli.write_text("#!/bin/sh\n")
+    cli.chmod(0o755)
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr(clisetup, "_appended", None)
+    core, _store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+
+    def setting(value):
+        return {"t": "state.set", "key": "settings", "entry": clisetup.PATH_SETTING, "value": value}
+
+    try:
+        client.request(setting(str(cli)))
+        assert os.environ["PATH"].split(os.pathsep)[-1] == str(tools)
+        client.request(setting(""))
+        assert str(tools) not in os.environ["PATH"].split(os.pathsep)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
 def test_an_agent_spawn_in_a_chat_folder_makes_it_again(app_state, projects_dir, tmp_path, monkeypatch):
     from collins import chats
 
