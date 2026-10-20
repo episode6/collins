@@ -1089,6 +1089,25 @@ def test_side_ref_names_where_each_side_of_a_load_reads_a_whole_file_from():
     assert gitops.side_ref("nope", OLD) is None and gitops.side_ref({"range": "a..b"}, NEW) is None
 
 
+def test_side_blob_names_what_the_blob_get_reads_for_each_side():
+    """The blob GET's (at, ref, path) per side (PR-2.2): side_ref's word,
+    the working tree only for the unstaged load's new side, the old path
+    of a rename on the old side, nothing unsafe."""
+    OLD, NEW = diffmodel.OLD, diffmodel.NEW
+    W, X, R = gitops.AT_WORKTREE, gitops.AT_INDEX, gitops.AT_REF
+    assert gitops.side_blob("unstaged", NEW, "a.png") == (W, None, "a.png")
+    assert gitops.side_blob("unstaged", OLD, "a.png") == (X, None, "a.png")
+    assert gitops.side_blob("staged", OLD, "a.png") == (R, "HEAD", "a.png")
+    assert gitops.side_blob("staged", NEW, "a.png") == (X, None, "a.png")
+    assert gitops.side_blob(SHOW, OLD, "new.png", "old.png") == (R, f"{SHA_A}^", "old.png")
+    assert gitops.side_blob(SHOW, NEW, "new.png", "old.png") == (R, SHA_A, "new.png")
+    branch_old = gitops.side_blob("branch", OLD, "a.png", parent_target="main", merge_base=SHA_B)
+    assert branch_old == (R, SHA_B, "a.png")
+    assert gitops.side_blob("branch", OLD, "a.png") is None  # no parent: no old side
+    assert gitops.side_blob("staged", NEW, "../etc/passwd") is None
+    assert gitops.side_blob({"show": "-x"}, NEW, "a.png") is None
+
+
 def test_apply_and_paths_argv():
     base = ["apply", "--recount", "--unidiff-zero"]
     assert gitops.apply_argv(cached=True, reverse=False) == [*base, "--cached", "-"]

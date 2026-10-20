@@ -68,8 +68,9 @@ come from the same read) with `gitinfo.github_url` beside it, the
 read, see Watch mode) — landing in `_diff_read` at `PRIORITY_DEFAULT`, one
 read at a time with a newer ask parked in `_pending_load` — **an ask for
 the same load that arrives while a read is out re-reads after the landed
-read is drawn** (the tick's moved index, a mutation landing, the untracked
-switch: the tick already advanced its signature past the move, so nothing
+read is drawn** (a `git-changed` compare's moved index, a mutation
+landing, the untracked switch: the compare already advanced its
+signature past the move, so nothing
 else would reload, and the stale read stood in for it until PR 4's review
 — the e2e gates `gitops.read_diff`'s landing to prove it). The breadcrumb
 and `set_context` come from the `Loaded` + that sha (`_resolved_sha`); the
@@ -109,16 +110,61 @@ lands on the file's nearest hunk (`diffmodel.nearest_hunk`) and reveal
 still answers True — the file *is* in the diff — and `DiffView.holds_line`
 lets the tool's reply say the line itself is not in a changed region.
 
-**Freshness.** Working-tree edits are the file monitors' (Watch mode,
-below); commits and staging done from a shell or by the agent are caught
-by the tab footer's 2 s tick forwarding `poll_tick` while the page is
-mapped (`_tick`): `gitinfo.tree_signature` (index mtime, HEAD sha, parent
-ref) changed → reload what is shown, and either that or a
-`refs_signature` move (`refs/heads` and `refs/remotes` directory mtimes,
-`packed-refs`: a branch made, deleted or committed to in another worktree,
-a push) → `_refresh_branch_stack` (below), which re-reads the commits list
-when it lands. A native mutation from the sidebar or the view (`mutated`)
-re-seeds the signatures, re-reads the stack and reloads at once.
+**Freshness (PR-2.2: on the service's `git-changed`).** Every load has a
+watch on the service under the page's `watch_handle` (Watch mode,
+below): a working-tree load's carries the monitors and the tree-state
+digest, a commit, range or branch load's is `working_tree: false` (no
+monitors, no state; `page.watching` is the working-tree watch,
+`page.watching_refs` any). Every watch reads the tree and refs digests
+(`gitfeed.cheap_signatures`: `.git` stats, no process) on its own 2 s
+tick (`WATCH_REFS_TICK_S`, the page's old cadence) and runs the full
+compare when one moved, so commits and staging done from a shell or by
+the agent push a `git-changed` within 2 s; a watch replaced under the
+same handle (every load re-sends it) keeps the digests its predecessor
+saw (a commit between the two is still an event), and one replaced
+before its predecessor's first compare landed (two loads within one
+`git status`: `_diff_read`'s reread path) is delivered on its own first
+compare whatever it finds (`_Watch(deliver_first=True)`: one compare
+the page runs over a tree that may not have moved, rather than a commit
+in the window adopted as the seed). The mirror re-reads
+the cwd **before** it hands the event over (`Mirror.refresh_then`), and
+the page compares its own signatures against it (`_compare_on_event` →
+`_check_root` + `_compare_signatures`, then `_tick`):
+`gitinfo.tree_signature` (index mtime, HEAD sha, parent ref) changed →
+reload what is shown, and either that or a `refs_signature` move
+(`refs/heads` and `refs/remotes` directory mtimes, `packed-refs`: a
+branch made, deleted or committed to in another worktree, a push) →
+`_refresh_branch_stack` (below), which re-reads the commits list when it
+lands. **What an event, a retry, a map, a landed read or a confirmed
+state does is the freshness table's** — `gitfresh.Freshness`, GTK-free
+(`tests/test_gitfresh.py` walks the sequences; should-fix 2 of PR 610's
+review): the page asks it with a `gitfresh.Page` (mapped, a sidebar
+mutation in flight, a read in flight, a working-tree load up) and runs
+the `Actions` it answers (`_run_actions`: the compare, counted into
+`changes_heard` or not, the retry timer, a reload; `_diff_read` runs
+the `confirm`). The table keeps `tree_state` (the page's `_tree_state`
+property), `compare_due`, `deferred_state` (`gitfresh.NO_STATE` when
+none) and `watch_stale`. Its rules: a page that is not mapped keeps the
+compare, and the event's tree state, for its next map (`pending`,
+`check_now`: §3.15, only a visible page reloads); one whose sidebar has
+a mutation in flight retries every `_COMPARE_RETRY_MS` until it landed,
+since a native mutation from the sidebar or the view (`mutated`)
+re-seeds the signatures, re-reads the stack and reloads at once — its
+own move is never reloaded twice; a tree state kept from during the
+mutation is dropped by the mutation's own reload (`read_started`: a
+read that really starts with no mutation out) and compared on the
+retry when there was none (`retry`, then `take_deferred` with a fresh
+look, since the compare may have started a read). `check_now` goes
+through the same gate. A fresh watch (the first, or another cwd) is
+followed by one compare against a re-read mirror, for a move between
+the page's seed and the watch's first look. The tab footer's 2 s tick
+(`poll_tick`) keeps only what no git event says: the agent's cwd on
+another tree (reopen), the tree gone (the card) or turned up (open), and
+the parent the host names (a PR's base, Preferences → Git: re-resolved,
+a move re-seeds the signature, re-reads the stack and reloads a branch
+diff) — all off the mirror without waiting. The host's finish edge calls
+`check_now()` (the mirror refreshed, half a second at most, then the
+compare) so the agent's commit shows on the edge.
 
 **Parent branch and the stack.** Git is the source of truth: `gitops.
 read_stack(cwd, trunk)` — `for-each-ref refs/heads` tips intersected
@@ -212,7 +258,8 @@ gates) is `in_progress(...).label`. **The markers are part of
 `gitinfo.tree_signature`** (`operation_markers`, its fourth element):
 an operation started or finished from a shell moves the index or HEAD
 anyway, but `git merge --quit` and its kin forget one without touching
-either, and the tick has to take the bar down for those too.
+either, and the `git-changed` compare (the watch's tree digest carries
+them) has to take the bar down for those too.
 
 **The runs.** `gitops.continue_operation(cwd, kind)` is `git <kind>
 --continue` under `no_editor_env()` — `GIT_EDITOR=true`, so the message
@@ -524,10 +571,26 @@ untracked and unmerged readers is `git.sizes` (`gitops.file_sizes`), the
 watch's tree state `git.info` with `state`, and a plan is one `git.plan`
 (below). The service answers every one of these off its main loop: the
 handler returns a `protocol.Deferred` and the thread's reply settles it
-(`gitfeed._later`); `tests/inproc.py` pumps the loop for one. A
-`blobcache.fetch(url)` is the `pictures.fetch` fetcher over the same GET
-into `~/.cache/collins/blobs/<service id>/` with the ETag kept beside the
-file (PR-2.2 moves the diff's images onto it).
+(`gitfeed._later`); `tests/inproc.py` pumps the loop for one.
+
+**The diff's images are the blob GET's, by URL (PR-2.2).** A gap's
+context still reads the bytes (`side_bytes` → `file_at`, the GET without
+a cache), but an image preview never does: `DiffView.load` takes an
+`image_locator(file, side)` beside the context reader (the page's:
+`gitops.side_blob(load, side, path, previous_path, parent_target, base)`
+→ `(at, ref, path)`, the same sides `side_bytes` reads, then
+`remotegit.blob_url(cwd, at, ref, path)`), and each side's fetcher is
+`blobcache.fetch(url, suffix)` — the `pictures.fetch` fetcher over the
+same GET into `~/.cache/collins/blobs/<service id>/<sha1 of the url>`
+with the ETag in a `.etag` sidecar and `If-None-Match` on the next fetch
+(a `304` keeps the file as it is), the directory swept of files older
+than 24 h (`remoteimages.prune_stale`, at most once per ten minutes per
+directory). The run's key in `pictures` still names the load, the side
+and the patch hash, so an edit to the working tree is a new fetch of the
+same URL, answered `304` when the file's mtime and size did not move.
+No locator, no previews (a bare `DiffView` in a probe). The old
+`git-blobs` directory is gone; `DiffView.preview_pictures(path)` is the
+e2e's probe of how many sides landed as pictures.
 
 **`gitloads.py` is the `Loaded` vocabulary**: `MODES` / `DEFAULT_MODE`,
 `SHOW_KEY` / `RANGE_KEY`, `safe_ref` (the one rule for a ref that goes on
@@ -910,14 +973,19 @@ can't give "3 of 12". Matches are re-counted (position kept) on every
 `load`, `filter` and layout change; the page re-reads the label
 (`_sync_search_label`). Closing the bar focuses the current match's view.
 
-**Watch mode (the service's since PR-2.1).** After a working-tree load
-lands, `_install_watch` sends `git.watch {cwd, handle, files, state}`
+**Watch mode (the service's since PR-2.1).** After a load lands,
+`_install_watch` sends `git.watch {cwd, handle, files, state,
+working_tree}`
 (`remotegit.Mirror.watch`; the `handle` is the page's own,
 `GitPage.watch_handle`, so two pages on one tree are two watches and
 one page's unwatch never takes the other's down) and listens for the
-cwd's `git-changed` events (`Mirror.on_changed`); a commit / range load
-watches nothing, and `_drop_watch` (`_close_view`, a reload) sends
-`git.unwatch {handle}`. The mirror remembers every live watch and sends
+cwd's `git-changed` events (`Mirror.on_changed`); a commit, range or
+branch load sends `working_tree: false` (the 2 s tick of the tree and
+refs digests alone, PR-2.2). The next load on the same cwd re-sends the
+watch under the same handle, which replaces it on the service keeping
+the digests it had seen (or, when it had seen none yet, delivering the
+new watch's first compare unconditionally); `_drop_watch` (`_close_view`, another cwd)
+sends `git.unwatch {handle}`. The mirror remembers every live watch and sends
 them again on `reset` (a reconnect: the service dropped them with the
 client). **When git is local** — the service's hello has no `git`
 capability (`App._install_git_transport` uninstalls the transport: an
@@ -926,7 +994,13 @@ older service build serving this window until *Restart service*, which
 in a widget check — `_install_watch` runs the same `_Watch` in this
 process instead (`gitfeed.local_watch(cwd, paths, state, deliver)`:
 GLib's idle and a thread as the host, the page's `_on_git_changed` as
-the deliverer, `_drop_watch` stops it), and `_run_plan` /
+the deliverer, `_drop_watch` stops it; the next load on the same cwd
+passes the last watch as `previous=`, which `local_watch` stops and
+starts from by the service's own replacement rule,
+`gitfeed.replacement_seed` — digests carried, or `deliver_first` when it
+had seen none — so N loads leave one live watch; `working_tree=False`
+for a commit, range or branch load, and `page.watching` reads True
+under the fallback as on the service), and `_run_plan` /
 `_run_file_action` hand `run_plan` `servicefiles.trash_paths` as the
 `trash` mover (ignored over the API, the service's own trash there), so
 the fallback is what the page did before the split: monitors, debounce,
@@ -941,22 +1015,31 @@ entry itself) debounce `WATCH_DEBOUNCE_MS` (300) into a compare on a
 thread of the three signatures (`gitfeed.signatures`: the tree digest of
 index mtime, HEAD and markers; the refs digest; `gitops.
 tree_state_signature`), one compare at a time with a stale mark for an
-event landing during one, and a slow tick every `WATCH_SLOW_TICK_S` (10)
-regardless; any move is one `git-changed {cwd, tree, refs, state}` to
+event landing during one, a slow tick every `WATCH_SLOW_TICK_S` (10)
+regardless, and the refs tick every `WATCH_REFS_TICK_S` (2: the tree and
+refs digests alone, `gitfeed.cheap_signatures`, a full compare when one
+moved); any move is one `git-changed {cwd, tree, refs, state}` to
 the watching client. **The seed is the client's**: the page's read
 worker samples `tree_state_signature` **before** `read_diff` and sends it
 with the watch, so an edit between the read and the watch's first look
 is a move (the service adopts the tree and refs digests on that first
 compare without a push). On the page `_on_git_changed` compares the
-event's `state` with `_tree_state` and reloads by key; one landing beside
-a read in flight is kept (`_watch_stale`) and compared when the read
-lands (`_diff_read`). The signature hashes `git status` **and** `numstat`
+event's `state` with `_tree_state` and reloads by key (`Freshness.
+state_event`); one landing beside a read in flight is kept
+(`Freshness.watch_stale`) and compared when the read lands
+(`_diff_read` → `read_landed`) — and when it differs from what the read
+sampled, confirmed first (`_confirm_state`: `Mirror.state_then`, a `git.info`
+with `state` by `send`), since the event's sample may predate the
+read's own (a mutation half done, its reload already out); the load is
+re-read only when the fresh state differs too, or can't be had. The
+signature hashes `git status` **and** `numstat`
 **and** the size + mtime of every path on the working-tree side: an edit
 that rewrites an already-changed line moves neither the letter nor the
-counts and went unnoticed until the stats were added. The tick's index
-and HEAD compares read the mirror, refreshed once per tick
-(`gitinfo.refresh`) and after every mutation and stack read, so a move
-the page itself made is never reloaded twice.
+counts and went unnoticed until the stats were added. The index and
+HEAD compares (Freshness, above) run on the same event, against the
+mirror the event refreshed, and the page re-seeds them after every
+mutation and stack read (`gitinfo.refresh`), so a move the page itself
+made is never reloaded twice.
 
 **Measured (this machine, headless).** `read_diff` + `DiffView.load` of
 PR 500's squash (`git show 449fc98`: 16 files, 76 hunks, 3118 patch
@@ -1002,7 +1085,8 @@ loading, the split files list and the other side's click, stage_all and
 commit reloading exactly once — counted by wrapping `page._read_diff` —
 the in-progress bar (a native revert stopped on a clash brings it up,
 Abort… asks and takes it down; a cherry-pick stopped from a shell comes
-up on the tick, the resolution re-words the hint, Continue finishes it)
+up on the service's `git-changed`, the resolution re-words the hint,
+Continue finishes it)
 and the page size), `check_native(repo)` (stages every section kind in
 the tmp repository with `stage_native_fixture` — two unstaged hunks with
 gaps around them, a staged edit, a staged rename, a modified binary, an
@@ -1095,7 +1179,7 @@ loop): the footer's 2 s tick's `current_branch`, a right-click's menu
 get the entry as it is and a refresh by `send`, one in flight per cwd
 (a stopped service used to hold the main loop 13 s). The main thread
 waits only when asked for freshness, `remotegit.MAIN_THREAD_TIMEOUT_S`
-(0.5 s) at most: `gitinfo.refresh` (the page's tick, its open and
+(0.5 s) at most: `gitinfo.refresh` (the page's `check_now`, its open and
 `_on_mutated`, which re-seeds `_signature` from the answer so a move
 the page made is never reloaded twice — the reason refresh waits),
 a cwd the mirror has never seen, and — with the status's own budget,

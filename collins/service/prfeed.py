@@ -33,6 +33,14 @@ can come near the 1 MiB frame cap once the socket encodes it. The socket's sende
 have to drop patches (they cross as None, drawn as over the cap) or chunk
 the reply there, as `storefeed`'s large state entries will.
 
+An image the Files view shows (PR-2.2, §3.23) is two steps: `pr.blob`
+checks the gates (`prblobs.check`) and answers the blob's URL, and the
+client's blobcache GETs it on the same socket (`GET /api/blob?kind=pr&
+repository=&ref=&path=`, routed by `api.server` to `PrBlobs.blob`), whose
+answer is the bytes gh hands over, fetched on a thread, with the
+commit's tag — ``304`` with no gh call for a client already holding it.
+No file is written here: a blob is never a path on the wire.
+
 GLib only; nothing here imports GTK.
 """
 
@@ -40,9 +48,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from urllib.parse import parse_qs
 
 from .. import practions, prblobs, prdetail, prstatus
 from ..api import protocol
+from . import gitfeed
 
 log = logging.getLogger(__name__)
 
@@ -159,11 +169,12 @@ def handle_gh(message: protocol.Message) -> dict:
         threads = prdetail.fetch_threads(message.get("url"))
         return protocol.reply(message.id, threads=[prdetail.thread_record(t) for t in threads][:1000])
     if kind == "pr.blob":
+        repository, ref, path = message.get("repository"), message.get("ref"), message.get("path")
         try:
-            path = prblobs.fetch_to_file(message.get("repository"), message.get("ref"), message.get("path"))
+            prblobs.check(repository, ref, path)
         except prblobs.BlobError as error:
             return _error(message, str(error))
-        return protocol.reply(message.id, file=str(path))
+        return protocol.reply(message.id, url=prblobs.blob_url(repository, ref, path))
     pr = _pr(message)
     if pr is None:
         return _error(message, NOT_A_PR)
@@ -179,3 +190,58 @@ def handle_gh(message: protocol.Message) -> dict:
         resolved = bool(message.get("resolved"))
         return _error(message, practions.set_thread_resolved(pr, message.get("thread"), resolved))
     return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
+
+
+# ---- the blob GET (PR-2.2) ----------------------------------------------------------
+
+
+class PrBlobs:
+    """`GET /api/blob?kind=pr` (see the module docstring), in
+    `gitfeed.GitFeed.blob`'s shape. *dispatch* lands the thread's answer
+    on the main loop and *spawn* runs it (a test's inline)."""
+
+    def __init__(
+        self,
+        dispatch: Callable[[Callable[[], object]], None] | None = None,
+        spawn: Callable[[Callable[[], None], str], None] | None = None,
+    ) -> None:
+        self._dispatch = dispatch or gitfeed.dispatch_default
+        self._spawn = spawn or gitfeed.spawn_default
+
+    def blob(
+        self, client, query: str, if_none_match: str | None, respond: Callable[[int, dict, bytes], None]
+    ) -> None:
+        """*respond(status, headers, body)* on the main loop: ``400`` for a
+        blob the gates refuse, ``304`` on a matching ``If-None-Match``
+        (gh is not asked), ``404`` for one gh would not hand over, else
+        ``200`` with the bytes and the tag. *client* is unused: a PR blob
+        is a gh read, which any client of the service may ask for."""
+        params = {key: values[-1] for key, values in parse_qs(query or "", keep_blank_values=True).items()}
+        repository = params.get("repository") or ""
+        ref = params.get("ref") or ""
+        path = params.get("path") or ""
+        try:
+            prblobs.check(repository, ref, path)
+        except prblobs.BlobError:
+            self._dispatch(lambda: respond(400, {}, b""))
+            return
+        tag = prblobs.blob_tag(repository, ref, path)
+        if if_none_match and any(part.strip() in (tag, "*") for part in if_none_match.split(",")):
+            self._dispatch(lambda: respond(304, {"ETag": tag}, b""))
+            return
+
+        def work() -> None:
+            try:
+                data = prblobs.fetch_bytes(repository, ref, path)
+            except prblobs.BlobError as error:
+                log.debug("prfeed: blob %s@%s:%s: %s", repository, ref[:7], path, error)
+                self._dispatch(lambda: respond(404, {}, b""))
+                return
+            except Exception:
+                log.exception("prfeed: a blob fetch failed on its thread")
+                self._dispatch(lambda: respond(500, {}, b""))
+                return
+            headers = {"Content-Type": "application/octet-stream", "ETag": tag}
+            self._dispatch(lambda: respond(200, headers, data))
+
+        self._spawn(work, "pr-blob")
