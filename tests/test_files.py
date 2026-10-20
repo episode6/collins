@@ -585,6 +585,20 @@ def test_names_lists_an_entry_it_cannot_stat_as_a_name(served, tmp_path):
         os.chmod(locked, 0o755)
 
 
+def test_names_stops_collecting_at_the_collection_bound(tmp_path, monkeypatch):
+    """N3 of the 2026-10-18 pass: a pathological root is not read whole on
+    the worker; the collection stops at FS_NAMES_COLLECT_MAX and the reply
+    says `truncated` whatever the sorted cut would have said."""
+    monkeypatch.setattr(files, "FS_NAMES_COLLECT_MAX", 7)
+    for index in range(10):
+        (tmp_path / f"f{index}").touch()
+    fields = files.names_reply(str(tmp_path))
+    assert len(fields["names"]) == 7 and fields["truncated"] is True
+    monkeypatch.setattr(files, "FS_NAMES_COLLECT_MAX", 10)
+    fields = files.names_reply(str(tmp_path))
+    assert len(fields["names"]) == 10 and fields["truncated"] is False
+
+
 def test_names_is_bounded(served):
     core, client, project, _events = served
     for index in range(protocol.FS_NAMES_MAX + 2):
@@ -592,6 +606,53 @@ def test_names_is_bounded(served):
     reply = client.request({"t": "fs.names", "root": str(project)})
     assert len(reply["names"]) == protocol.FS_NAMES_MAX == 5000 and reply["truncated"] is True
     assert all(len(name) <= protocol.FS_NAME_MAX for name in reply["names"])
+
+
+def test_a_truncated_reply_is_the_sorted_first_names_whatever_order_the_directory_gives(
+    tmp_path, monkeypatch
+):
+    """D45 (PR-2.8): the names are collected, sorted, then cut, so a
+    truncated reply is the sorted first FS_NAMES_MAX and the same between
+    asks. `scandir` is made to answer in two different orders, both with
+    the names that sort first arriving last: a cut taken in `scandir`'s
+    order (what `names_reply` did before) would keep neither set."""
+    monkeypatch.setattr(protocol, "FS_NAMES_MAX", 4)
+    names = [f"n{index:02d}.txt" for index in range(10)]
+    for name in names:
+        (tmp_path / name).touch()
+    (tmp_path / "a-folder").mkdir()  # sorts first, and is not a name
+    real_scandir = os.scandir
+
+    class _Scan:
+        """`os.scandir`, its entries handed over in the order *key* gives."""
+
+        def __init__(self, path, key):
+            with real_scandir(path) as entries:
+                self.entries = sorted(entries, key=key)
+
+        def __enter__(self):
+            return iter(self.entries)
+
+        def __exit__(self, *_exc):
+            return False
+
+    # Last name first, then an order with the first names in the middle.
+    orders = [lambda e: [-ord(c) for c in e.name], lambda e: (e.name[2] != "5", e.name)]
+    seen: list[list[str]] = []
+    for key in orders:
+        monkeypatch.setattr(files.os, "scandir", lambda path, key=key: _Scan(path, key))
+        seen.append([entry.name for entry in _Scan(str(tmp_path), key).entries])
+        assert files.names_reply(str(tmp_path)) == {"names": names[:4], "truncated": True}
+    monkeypatch.setattr(files.os, "scandir", real_scandir)
+    # The directory really was read in two orders, neither with the sorted
+    # first names in its first four.
+    assert seen[0] != seen[1]
+    assert all(set(order[:4]) != set(names[:4]) for order in seen)
+    # Exactly the bound is not truncated; one more is.
+    monkeypatch.setattr(protocol, "FS_NAMES_MAX", 10)
+    assert files.names_reply(str(tmp_path)) == {"names": names, "truncated": False}
+    monkeypatch.setattr(protocol, "FS_NAMES_MAX", 9)
+    assert files.names_reply(str(tmp_path)) == {"names": names[:9], "truncated": True}
 
 
 def test_a_full_bound_of_long_names_chunks_through_the_real_framing(tmp_path):

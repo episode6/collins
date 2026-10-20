@@ -15,8 +15,10 @@ the main loop — and the `PUT /api/upload` the server hands its body to:
   own agent* named — a show_image path (`ImageRegistry`, recorded as the
   call lands in `service.tools`) or an image the service's transcript scan
   of that live session found (`Session.transcript.attachments`); anything
-  for a `local` client. Only an image suffix is served (`400` otherwise),
-  at most `editorfiles`' 50 MiB viewer cap (`413`), tagged
+  for a `local` client. Only an image suffix is served (`400` otherwise;
+  the one exception is `as=file`, D51, in `FileBlobs`' docstring: a file
+  the session's agent named, whole, for a client that is not `local` to
+  hand to an app), at most `editorfiles`' 50 MiB viewer cap (`413`), tagged
   ``"<mtime µs>-<size>"`` and answered `304` on a match.
 - **`kind=remote&url=…`** (`RemoteBlobs`): an http(s) image, fetched *by
   the service* through `remoteimages.fetch` (the 25 MiB cap, the redirect
@@ -51,6 +53,7 @@ import logging
 import os
 import stat as stat_mod
 import tempfile
+import threading
 import time
 from collections import OrderedDict
 from collections.abc import Callable
@@ -121,6 +124,121 @@ class ImageRegistry:
 
     def paths(self, key: str) -> frozenset[str]:
         return frozenset(self._paths.get(key) or ())
+
+
+class DeliveredFiles:
+    """The files a session's agent delivered (its transcript's attachment
+    records that are no picture: a `SendUserFile` call's), each held by
+    the path it resolved to **when the service first saw the record**
+    (D51, review of PR 615): what `as=file` admits from the transcript.
+    The registry's rule for a tool call, kept for a record: a link put at
+    the named path afterwards resolves to a file nobody delivered, and is
+    refused. Per session key (its id; its handle while it has none),
+    bounded as the registry is, kept for the service's run.
+
+    "First saw" is exact about its limits: the first time *this run* of
+    the service saw the record *under that key, while it still holds
+    it*. A record is resolved again when it is noted under a key that has
+    not held it (a session's id, once its handle resolves to one), when
+    its key was evicted past the bounds (`REGISTRY_SESSIONS`,
+    `REGISTRY_PER_SESSION`) and the transcript lands again, and after a
+    service restart; each of those reads what the path names then. And
+    it is not resolved again otherwise: a link the agent re-points on
+    purpose keeps admitting its old target, not its new one, and a
+    closed session's delivered files stay admitted for the run.
+
+    `note` is the main loop's (the transcript's landing); the resolving
+    runs on a thread (*spawn*), since a `realpath` is a disk read, and a
+    record is admitted once that lands: a request that beats it is
+    refused, and the client asks afresh on the next click."""
+
+    def __init__(self, spawn: Callable[[Callable[[], None], str], None] | None = None) -> None:
+        self._lock = threading.Lock()
+        # key -> record key -> the path it resolved to (None while unresolved)
+        self._seen: OrderedDict[str, OrderedDict[str, str | None]] = OrderedDict()
+        self._spawn = spawn or _thread
+
+    def note(self, keys, record_keys) -> None:
+        """Record *record_keys* (absolute paths the transcript named) for
+        each of the session's *keys*; the ones not seen before are
+        resolved now, once, and never again."""
+        keys = [key for key in keys if key]
+        fresh: list[str] = []
+        with self._lock:
+            for key in keys:
+                held = self._seen.setdefault(key, OrderedDict())
+                self._seen.move_to_end(key)
+                for record_key in record_keys:
+                    if record_key not in held:
+                        held[record_key] = None
+                        if record_key not in fresh:
+                            fresh.append(record_key)
+                while len(held) > REGISTRY_PER_SESSION:
+                    held.popitem(last=False)
+            while len(self._seen) > REGISTRY_SESSIONS:
+                self._seen.popitem(last=False)
+        if not fresh:
+            return
+
+        def resolve() -> None:
+            resolved = {record_key: os.path.realpath(record_key) for record_key in fresh}
+            with self._lock:
+                for key in keys:
+                    held = self._seen.get(key)
+                    if held is None:
+                        continue
+                    for record_key, real in resolved.items():
+                        if record_key in held and held[record_key] is None:
+                            held[record_key] = real
+
+        self._spawn(resolve, "delivered-files")
+
+    def paths(self, key: str) -> frozenset[str]:
+        with self._lock:
+            return frozenset(real for real in (self._seen.get(key) or {}).values() if real)
+
+
+def _thread(fn: Callable[[], None], name: str) -> None:
+    threading.Thread(target=fn, name=name, daemon=True).start()
+
+
+def note_delivered(core, record) -> None:
+    """A session's transcript landed (main loop): hand its delivered-file
+    records to the core's `DeliveredFiles`, under the session's id, or
+    under its handle only while it has no id yet: `_session_records`'
+    rule (the PR 612 review's nit 8), so the handle is no second durable
+    key here either. Pictures are not noted: they are admitted as before
+    (D38)."""
+    delivered = getattr(core, "delivered_files", None)
+    session = getattr(record, "session", None)
+    if delivered is None or session is None:
+        return
+    try:
+        seen = session.transcript.attachments()
+    except Exception:
+        return
+    keys = [
+        one.key
+        for one in seen
+        if getattr(one, "kind", "image") != "image"
+        and not getattr(one, "remote", False)
+        and isinstance(one.key, str)
+        and one.key.startswith("/")
+    ]
+    if keys:
+        key = getattr(session, "session_id", None) or getattr(record, "handle", None)
+        delivered.note([key], keys)
+
+
+def names_a_session(core, key: str) -> bool:
+    """Whether *key* names a session the service knows, for a request
+    that asks for a file on a session's account (`as=file`): a live
+    session's id, its handle only while it has no id
+    (`_session_records`' rule), or an id the store lists
+    (`known_session`). Main loop."""
+    if not key:
+        return False
+    return any(_session_records(core, key)) or known_session(core, key)
 
 
 def _session_records(core, key: str, handles: bool = True):
@@ -230,7 +348,9 @@ def serve_file(
     """A regular file's bytes with its tag (*path* already confined): 404
     for none, 413 over *max_bytes*, 304 on a matching tag. Worker thread."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        # *path* is resolved already (the confinement was of its realpath):
+        # a link put at its last component since then is not followed.
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
     except OSError:
         return 404, {}, b""
     try:
@@ -254,31 +374,98 @@ def serve_file(
 
 
 class FileBlobs(_Feed):
-    """`kind=file` (see the module docstring)."""
+    """`kind=file` (see the module docstring).
+
+    A picture is served from a root, the session's uploads, or a path the
+    session's agent named (D38); anything for a `local` client. **A file
+    that is no picture** (D51, PR-2.8: the attachments panel's Open With…
+    and a file row's default app, on a client that is not `local`) is
+    served only to a request that says `as=file`, and only when the
+    session's agent *named* it — its uploads, the
+    exact resolved path a tool call registered (`ImageRegistry`), or the
+    path a delivered file's transcript record resolved to when the service
+    first saw it (`DeliveredFiles`) — and never merely for being
+    inside a root: `fs.read` is the reader of a project's text, and a
+    root is not an attachment. Such a request **names a session the
+    service knows** (`names_a_session`: a live session's id, its handle
+    only while it has no id, or an id the store lists). For any other
+    `session` — none, an empty one, a name the service never heard of,
+    one that is no valid session name, a resolved session's handle —
+    neither the uploads folders (`uploads.inside` admits the pending
+    one, D37's, whatever the session) nor the delivered set count, so a
+    file that is no picture is refused: `400` with no session at all,
+    `403` with one that names nobody. What stays open, as it has been
+    since PR-2.7: a **picture** in the pending folder is served to a
+    request with any session or none (the composer's preview of a drop
+    made before its session has an id), and a non-picture in the pending
+    folder is served to a request that names any *known* session, not
+    only the one the drop is for (the pending folder is not per session).
+    The same handle rule holds the show_image registry: a path admitted
+    under a session's id and handle is served by the handle only while
+    the session has no id. A `local` client is never served one (it
+    opens the file itself), so
+    its answers are what they were. The cap
+    (`FILE_MAX_BYTES`), the tag and the 304 are the pictures'; the type
+    of a file that is no picture is `application/octet-stream`."""
 
     def blob(self, client, query: str, if_none_match: str | None, respond: Respond) -> None:
         params = _params(query)
         path = params.get("path") or ""
         session = params.get("session") or ""
-        if not os.path.isabs(path) or "\x00" in path or not editorfiles.is_image_path(path):
+        local = bool(getattr(client, "local", False))
+        # `as=file`: the asker wants the file as it is, to hand to an app
+        # (D51), and takes no picture for granted. Without it only a
+        # picture is served, exactly as before PR-2.8, so nothing that
+        # decodes what it fetched (the lightbox, a thumbnail) is ever sent
+        # anything else.
+        whole = params.get("as") == "file" and not local
+        if not os.path.isabs(path) or "\x00" in path:
             self._answer(respond, 400)
             return
-        local = bool(getattr(client, "local", False))
+        if not whole and not editorfiles.is_image_path(path):
+            self._answer(respond, 400)
+            return
+        if whole and not session and not editorfiles.is_image_path(path):
+            # A file that is no picture is served for a session's sake
+            # only: with none named there is nobody whose agent named it,
+            # and the pending uploads folder is not a way round that.
+            self._answer(respond, 400)
+            return
         # What the worker confines to, gathered here on the main loop where
         # the store, the records and the registry live.
         roots = None if local else files.roots(self.core)
         admitted, seen = (frozenset(), frozenset()) if local else agent_named(self.core, session)
+        delivered = getattr(self.core, "delivered_files", None)
+        # Whose account the request is on: a non-picture is served only on
+        # a known session's (see the class docstring). A key `DeliveredFiles`
+        # still holds for a handle whose session has an id since is not read,
+        # and nor is the registry's (show_image admits under both keys, so
+        # a resolved session's handle would otherwise still name its
+        # pictures): one handle rule for every admission.
+        session_named = not local and names_a_session(self.core, session)
+        if not session_named:
+            admitted = frozenset()
+        handed = delivered.paths(session) if delivered is not None and session_named else frozenset()
 
         def work() -> tuple[int, dict, bytes]:
             real = os.path.realpath(path)
-            if roots is not None and not (
-                any(editorfiles.is_inside(root, real) for root in roots)
-                or uploads.inside(real, session or None)
-                or real in admitted
-                or real in {os.path.realpath(key) for key in seen}
-            ):
+            picture = editorfiles.is_image_path(path) and editorfiles.is_image_path(real)
+            if roots is None:
+                return serve_file(real, if_none_match) if picture else (400, {}, b"")
+            # Named by the session's agent, by the exact path it resolved to
+            # when it was named (D38, D51): its uploads, a tool call's
+            # registered path, a delivered file's as the service first saw
+            # its record. A link swapped in since resolves elsewhere.
+            uploaded = uploads.inside(real, session or None) and (picture or session_named)
+            exact = uploaded or real in admitted or real in handed
+            # A picture the transcript scan found is admitted as before
+            # PR-2.8, by what its record's key resolves to now (D38).
+            named = exact or real in {os.path.realpath(key) for key in seen}
+            if not named and not any(editorfiles.is_inside(root, real) for root in roots):
                 return 403, {}, b""
-            if not editorfiles.is_image_path(real):
+            if not picture and not (whole and exact):
+                # No picture, and not a file the session's agent named asked
+                # for whole: inside a root it is `fs.read`'s to read.
                 return 400, {}, b""
             return serve_file(real, if_none_match)
 

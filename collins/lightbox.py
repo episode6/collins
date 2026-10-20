@@ -137,7 +137,8 @@ class ImageLightbox(Gtk.Box):
     ) -> None:
         """*path* is the blob-cache file to show (None: the fetch failed,
         *why* says why); *open_with* the file "Open With…" hands another
-        app (the cache's copy by default)."""
+        app (the cache's copy by default: a file of this device's, which
+        any client may hand to an app of this device's)."""
         super().__init__()
         self._path = Path(path) if path is not None else None
         self._open_with = open_with or (str(self._path) if self._path is not None else None)
@@ -832,8 +833,11 @@ def show_image(
             if on_shown is not None:
                 on_shown(False, "superseded" if mine != _showing else "gone")
             return
-        link = apilink.current()
-        open_with = key if (not remote and getattr(link, "local", False)) else None
+        # "Open With…" hands another app the service's own file only as a
+        # local extra (§3.12: a client on the service's machine,
+        # `apilink.is_local`); otherwise, and for a web image, this
+        # device's copy in the blob cache, which is the device's own file.
+        open_with = key if (not remote and apilink.is_local()) else None
         box = ImageLightbox(
             path,
             can_open_in_editor,

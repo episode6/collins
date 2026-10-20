@@ -38,6 +38,30 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The window opens no file of the service's; the local extras know when
+  they apply.** The last chunk of the split's Phase 2. *Export as
+  Markdown…* asks the service for the rendered transcript and writes the
+  file where you choose, instead of reading the transcript itself. A
+  session or a panel terminal started in a folder that is gone lands
+  where the service says (its home; for a session whose worktree is gone,
+  the repository first, as before) instead of the window checking the
+  folder itself, and an idle panel terminal is moved into the session's
+  folder only once the service has said the folder is there. The things
+  that hand a path to an app on your desktop are now *local extras*,
+  tied to the window running on the service's machine: **Open In…**
+  everywhere, the footer's app launchers, file manager button and the
+  panel toggle's right-click, **Open in Ghostty**, **Reveal transcript**,
+  the attachments panel's **Show in Folder**, and a Ctrl+click on a
+  folder or on a file outside the project. A window that is not on the
+  service's machine leaves them out rather than greying them out; there,
+  the attachments panel's **Open With…** and a click on a file row hand
+  the app the window's own cached copy of the file, as the lightbox's
+  **Open With…** does. Nothing changes today,
+  when the window and its service always share a machine; a remote window
+  (Phase 3) is what will see the difference. One fix on the way: the
+  names behind a bare `README.md` link are now the alphabetically first
+  5,000 of a folder with more than that, the same every time, instead of
+  whichever 5,000 the folder listed first.
 - **Terminal links and the worktree checks go over the service's socket.**
   Ctrl+click on a path asks the service whether it is there (and whether it
   is inside the project, which picks the editor over the default app) and

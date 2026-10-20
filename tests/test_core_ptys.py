@@ -87,6 +87,24 @@ def test_spawn_attach_type_and_see_the_echo(server):
     assert announce[-1]["cwd"] == "/tmp" and announce[-1]["kind"] == "shell"
 
 
+def test_the_ptys_row_says_where_the_service_started_it(server, tmp_path, monkeypatch):
+    """D39 (PR-2.8): a cwd that is no directory on the service falls back
+    to the service's home at `spawn`; the row in the pty table (and the
+    `pty` event) carries where the pty started, not what was asked."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    kept = spawn(client, cwd=str(tmp_path))
+    assert server.records[kept]["cwd"] == str(tmp_path)
+    fell = spawn(client, cwd=str(tmp_path / "gone"))
+    assert server.records[fell]["cwd"] == str(home)
+    client.request({"t": "attach", "pty": fell, "cols": 80, "rows": 24})
+    announce = [e for e in ends.events if e["t"] == "pty" and e["pty"] == fell]
+    assert announce and announce[-1]["cwd"] == str(home)
+
+
 def child_environ(pid):
     with open(f"/proc/{pid}/environ", "rb") as f:
         return dict(item.split(b"=", 1) for item in f.read().split(b"\0") if b"=" in item)
@@ -142,17 +160,25 @@ def test_messages_are_validated_both_ways(server):
     assert ends.events == []
 
 
-def test_refusals_carry_the_protocols_error_and_a_msgid(server):
+def test_refusals_carry_the_protocols_error_and_a_msgid(server, monkeypatch):
     ends = Client()
     client = server.connect(ends.on_output, ends.on_event)
     with pytest.raises(loopback.RequestRefused) as caught:
         client.request({"t": "attach", "pty": 99, "cols": 80, "rows": 24})
     assert caught.value.error == protocol.ERROR_GONE and caught.value.details == {"pty": 99}
-    with pytest.raises(loopback.RequestRefused) as caught:
-        client.request({"t": "spawn", "kind": "shell", "cwd": "/nonexistent/dir", "cols": 80, "rows": 24})
+    # A spawn that cannot start is refused `failed` with what it could not
+    # start. (Until PR-2.8 the case here was a shell's cwd that is not a
+    # directory; that is the service's fallback now, D39, pinned in
+    # test_the_ptys_row_says_where_the_service_started_it, and the chdir
+    # refusal itself in tests/test_ptyserver.py. A shell that is not there
+    # is still a refusal.)
+    with monkeypatch.context() as patched:
+        patched.setenv("SHELL", "/nonexistent/shell")
+        with pytest.raises(loopback.RequestRefused) as caught:
+            client.request({"t": "spawn", "kind": "shell", "cwd": "/tmp", "cols": 80, "rows": 24})
     assert caught.value.error == protocol.ERROR_FAILED
     assert "failed to start shell" in caught.value.msgid
-    assert "/nonexistent/dir" in caught.value.details["msg"]
+    assert "/nonexistent/shell" in caught.value.details["msg"]
     assert server.core.ptys.ptys == {}  # nothing left in the table
     # An agent's launch in a directory that is gone is the session's to
     # settle (Session._finish_spawn: it starts in the repository or HOME

@@ -728,6 +728,19 @@ def test_the_file_blob_is_an_image_confined_to_the_roots_or_a_local_client(serve
     status, _h, _b = _http_get(path, query, {"Collins-Client": "remote-client"})
     assert status == 403
     server.core.image_registry.admit(["sid-1"], str(picture))
+    # The registry is read on a known session's account only (one handle
+    # rule, the 2026-10-18 pass's N2): a session nobody knows is still 403.
+    status, _h, _b = _http_get(path, query, {"Collins-Client": "remote-client"})
+    assert status == 403
+
+    class KnownStore:
+        def all_sessions(self):
+            return []
+
+        def get_session(self, session_id):
+            return object() if session_id == "sid-1" else None
+
+    server.core.store = KnownStore()
     status, headers, body = _http_get(path, query, {"Collins-Client": "remote-client"})
     assert status == 200 and body == b"\x89PNG-shot" and headers["Content-Type"] == "image/png"
     other = f"kind=file&path={picture}&session=sid-2"

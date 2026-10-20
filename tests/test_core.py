@@ -15,6 +15,7 @@ import inproc as loopback
 import pytest
 from gi.repository import GLib
 
+from collins import proctree
 from collins.api import protocol
 from collins.service.core import ServiceCore
 from collins.sessions import discover_sessions
@@ -145,6 +146,59 @@ def test_a_spawn_in_a_gone_directory_is_the_sessions_fallback(server, tmp_path):
     session = server.core.sessions[pty].session
     assert session.cwd != str(tmp_path / "gone")
     assert pump(2, lambda: "no longer exists" in server.core.ptys.get(pty).screen.capture_contents())
+
+
+def test_a_spawn_says_where_it_started_and_the_fallback_is_the_services(server, tmp_path, monkeypatch):
+    """D39 (PR-2.8): the client sends the cwd it has and never looks; a
+    cwd that is no directory on the service starts the pty in the
+    service's home, and the reply and `pty.info` say where it started
+    (the pty's row: tests/test_core_ptys.py)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    project = tmp_path / "project"
+    project.mkdir()
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+
+    def shell(cwd) -> dict:
+        return client.request({"t": "spawn", "kind": "shell", "cwd": str(cwd), "cols": 80, "rows": 24})
+
+    # A directory that is there: the shell starts in it.
+    there = shell(project)
+    assert there["cwd"] == str(project)
+    assert server.core.ptys.get(there["pty"]).cwd == str(project)
+    assert client.request({"t": "pty.info", "pty": there["pty"]})["cwd"] == str(project)
+    started = server.core.ptys.get(there["pty"])
+    assert pump(2, lambda: proctree.process_cwd(started.child_pid()) == str(project))
+    # One that is gone, and a file where a directory was asked for: the
+    # service's home, said three ways, and the child really is there.
+    (tmp_path / "a-file").write_text("x")
+    for missing in (tmp_path / "gone", tmp_path / "a-file"):
+        reply = shell(missing)
+        pty = server.core.ptys.get(reply["pty"])
+        assert reply["cwd"] == str(home) == pty.cwd
+        assert client.request({"t": "pty.info", "pty": reply["pty"]})["cwd"] == str(home)
+        assert pump(2, lambda pty=pty: proctree.process_cwd(pty.child_pid()) == str(home))
+    # An agent's: the session's own fallback (the repository of a worktree
+    # that is gone, else home), reported the same way.
+    agent = spawn_agent(client, tmp_path / "gone")
+    session = server.core.sessions[agent["pty"]].session
+    assert agent["cwd"] == session.cwd == str(home)
+    kept = spawn_agent(client, project)
+    assert kept["cwd"] == str(project) == server.core.sessions[kept["pty"]].session.cwd
+
+
+def test_spawn_cwd_is_the_directory_or_the_services_home(tmp_path, monkeypatch):
+    from collins.service.core import spawn_cwd
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert spawn_cwd(str(tmp_path)) == str(tmp_path)
+    for bad in (str(tmp_path / "gone"), "", None, 7):
+        assert spawn_cwd(bad) == str(tmp_path / "home")
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path)  # a link to a directory is one (the shell `cd`s through it)
+    assert spawn_cwd(str(link)) == str(link)
 
 
 def test_a_shells_spawn_names_its_agent_and_is_refiled_on_resolve(server, tmp_path):

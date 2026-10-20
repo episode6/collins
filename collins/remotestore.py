@@ -80,7 +80,7 @@ from pathlib import Path
 
 from gi.repository import Gio, GObject
 
-from . import chats
+from . import apilink, chats
 from .api.protocol import RequestRefused
 from .models import SessionItem
 from .sessions import Session, worktree_project_root
@@ -121,6 +121,26 @@ _TITLE_SWITCHES = ("cli_title_sessions", "pr_title_sessions")
 # State keys whose change moves what a row shows (settings: the title
 # switches above, and only on a flip).
 _NAME_KEYS = frozenset({"names", "generated_names", "cli_titles", "settings"})
+
+
+# How long the Markdown export waits for the service's render: a long
+# transcript is read whole (seconds for hundreds of megabytes), and the
+# sync channel pipelines calls, so nothing else waits behind it.
+EXPORT_TIMEOUT_S = 300.0
+
+
+def transcript_export(session_id: str) -> str:
+    """A session's transcript as Markdown, rendered by the service from the
+    transcript its store names (`store.transcript-export`, §3.23, PR-2.8):
+    the text the window's *Export as Markdown…* writes to a file of this
+    device's. Blocking on the link's sync channel: call it from a worker
+    thread. Raises `RequestRefused` (no such session, a render over the
+    wire's bound, a link that is down)."""
+    fields = apilink.call(
+        {"t": "store.transcript-export", "session": session_id}, timeout=EXPORT_TIMEOUT_S
+    )
+    text = fields.get("text")
+    return text if isinstance(text, str) else ""
 
 
 class RemoteStore(GObject.Object):

@@ -112,7 +112,8 @@ PR-2.6 adds the bare root-name links' read:
 
 - `fs.names {root}`: `names_reply`, the names in an allowed root that are
   not directories (a symlink to a directory is one), at most
-  FS_NAMES_MAX and `truncated`, on a thread. The client holds a
+  FS_NAMES_MAX and `truncated` (the sorted first ones: collected, sorted,
+  then cut, D45), on a thread. The client holds a
   `fs.watch {kind: dir}` on the root and asks again on its `dir-changed`.
 
 **Nothing blocks the main loop**: every read, write and stat runs on a
@@ -631,6 +632,12 @@ def walk_reply(root: str, hidden: bool) -> dict:
     return {"paths": paths, "truncated": truncated}
 
 
+# How many names `names_reply` collects before it stops (and says
+# `truncated`): a bound on the worker's memory and time for a pathological
+# root, far above any real folder's count.
+FS_NAMES_COLLECT_MAX = 50 * protocol.FS_NAMES_MAX
+
+
 def names_reply(root: str) -> dict:
     """`fs.names`'s fields (a worker thread): the names in *root* that are
     not directories, a symlink to a directory counting as one (what the
@@ -639,13 +646,23 @@ def names_reply(root: str) -> dict:
     dangling link is, and never costs the listing. A name over FS_NAME_MAX is left out,
     and so is one that is not UTF-8 on disk (`scandir` surrogate-escapes
     it, and the reply would fail validation whole: `projectfiles.
-    list_entries`' rule for `fs.list` and `fs.walk`); past FS_NAMES_MAX
-    the rest is dropped and the reply says `truncated`."""
+    list_entries`' rule for `fs.list` and `fs.walk`). Every name is
+    collected and sorted before the cut (D45, PR-2.8): past FS_NAMES_MAX
+    the reply is the sorted first FS_NAMES_MAX and says `truncated`, the
+    same names on every ask (`scandir`'s own order is the directory's, and
+    differs between asks and filesystems). The collection itself stops at
+    FS_NAMES_COLLECT_MAX (fifty times the bound): a root with a million
+    entries is not listed whole on the worker for a reply of 5000, and
+    only such a root loses D45's determinism (the Fable pass of
+    2026-10-18, N3)."""
     names: list[str] = []
-    truncated = False
+    stopped = False
     try:
         with os.scandir(root) as entries:
             for entry in entries:
+                if len(names) >= FS_NAMES_COLLECT_MAX:
+                    stopped = True
+                    break
                 try:
                     if entry.is_dir():
                         continue
@@ -658,14 +675,12 @@ def names_reply(root: str) -> dict:
                     name.encode("utf-8")
                 except UnicodeEncodeError:
                     continue
-                if len(names) >= protocol.FS_NAMES_MAX:
-                    truncated = True
-                    break
                 names.append(name)
     except OSError:
         raise ReadRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID) from None
     names.sort()
-    return {"names": names, "truncated": truncated}
+    truncated = stopped or len(names) > protocol.FS_NAMES_MAX
+    return {"names": names[: protocol.FS_NAMES_MAX], "truncated": truncated}
 
 
 def _dispatch_default(fn: Callable[[], object]) -> None:
