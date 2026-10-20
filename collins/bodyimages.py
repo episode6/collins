@@ -31,7 +31,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import animatedimage, pictures  # noqa: E402
+from . import animatedimage, blobcache, pictures  # noqa: E402
 from .formatting import BodyImage  # noqa: E402
 from .i18n import _  # noqa: E402
 from .lightbox import present_image_lightbox  # noqa: E402
@@ -60,7 +60,13 @@ def image(entry: BodyImage) -> Gtk.Widget:
     # The placeholder goes up first and is replaced in the same frame when
     # the file is already here (pictures.fetch answers a hit straight away).
     _swap(slot, _placeholder(entry))
-    pictures.fetch(entry.url, lambda path, error: _fill(slot, entry, path, error))
+    # Always the service's `kind=remote` (PR-2.7): a body's image is a URL,
+    # never a path on any machine, whatever the parser let through.
+    pictures.fetch(
+        entry.url,
+        lambda path, error: _fill(slot, entry, path, error),
+        fetcher=lambda url=entry.url: blobcache.fetch(blobcache.remote_url(url), None),
+    )
     return slot
 
 

@@ -161,6 +161,7 @@ from ..i18n import N_
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
 from . import bgagents, gitfeed, hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
+from . import blobs as blobs_mod
 from . import diffs as diffs_mod
 from . import files as files_mod
 from . import notifications as notifications_mod
@@ -292,6 +293,14 @@ class ServiceCore:
         # Files over the API (PR-2.3): the editor's reads, writes and
         # file watches, answered off the main loop.
         self.files = files_mod.Files(self)
+        # The image blobs and the uploads (PR-2.7): `kind=file`, `kind=remote`
+        # and `kind=icon` GETs and `PUT /api/upload`, each on a thread; the
+        # registry of the paths a session's own tool calls named (D38).
+        self.image_registry = blobs_mod.ImageRegistry()
+        self.file_blobs = blobs_mod.FileBlobs(self)
+        self.remote_blobs = blobs_mod.RemoteBlobs(self)
+        self.icon_blobs = blobs_mod.IconBlobs(self)
+        self.upload_blobs = blobs_mod.UploadBlobs(self)
         self.tools: tools_mod.SessionTools | None = None
         self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
         # The sandbox host and the live grants (start_sandbox_host), the
@@ -1602,6 +1611,8 @@ class ServiceCore:
             notifications=notifications or self.notifications,
             diffs=diffs or self.diffs,
             shell_spawner=self._spawn_tool_shell,
+            registry=self.image_registry,
+            fetch_remote=self.remote_blobs.download_then,
         )
         return self.tools
 
@@ -1851,7 +1862,9 @@ class ServiceCore:
     def start_housekeeping(self) -> None:
         """The service's own timers (PR-1.12d): the archive sweep at start
         and every `SWEEP_POLL_S` (autodelete makes it one sweep a day, none
-        until the setting is on), and gh asked about once. The first sweep
+        until the setting is on), the pending uploads' week (D37) and the
+        uploads of sessions the service no longer knows
+        (`sweep_orphan_uploads`) on the same tick, and gh asked about once. The first sweep
         waits for the store's first scan: before it the store knows no
         session, and a sweep then would stamp the day having trashed
         nothing."""
@@ -1861,17 +1874,92 @@ class ServiceCore:
             def first(*_args) -> None:
                 self.store.disconnect(handler)
                 self.sweep_archived()
+                self.sweep_orphan_uploads()
 
             handler = self.store.connect("refreshed", first)
         else:
             self.sweep_archived()
+            self.sweep_orphan_uploads()
+        self.sweep_pending_uploads()
         if not self._sweep_source:
             self._sweep_source = GLib.timeout_add_seconds(SWEEP_POLL_S, self._sweep_tick)
         self.check_gh()
 
     def _sweep_tick(self) -> bool:
         self.sweep_archived()
+        self.sweep_pending_uploads()
+        self.sweep_orphan_uploads()
         return True
+
+    def sweep_orphan_uploads(self) -> None:
+        """The uploads of a session the service no longer knows go
+        (`uploads.sweep_orphans`): a transcript the CLI's own
+        `cleanupPeriodDays` took, or one removed outside Collins, never
+        reaches `store.trash_many` / `delete`, so nothing else would remove
+        its `uploads/<id>/`. The known ids are gathered here, on the main
+        loop (every agent pty's session, resolved or finished, and every
+        session the store's last scan listed); the scandir and the removes
+        run on a thread, and a directory under a day old is left for the
+        next tick (a session the scan has not caught up with). Nothing runs
+        before the store's first scan: with no sessions known, every upload
+        would read as an orphan. For the same reason a scan that listed no
+        session at all is not trusted (`providers.discover` answers [] when
+        the projects directory is not there — a transient unmount, an
+        unreadable directory — and the store applies it), and the thread
+        checks the projects directory is a readable directory before it
+        scans the uploads: every refusal is logged, nothing is removed.
+        Never raises."""
+        from .. import uploads
+
+        store = self.store
+        if store is None or not store.applied:
+            return
+        known: set[str] = set()
+        try:
+            listed = {s.session_id for s in store.all_sessions() if s.session_id}
+            if not listed:
+                log.info("orphan uploads sweep skipped: the store's scan listed no session")
+                return
+            known.update(listed)
+            known.update(sid for sid in self.agent_pty_sessions(include_finished=True).values() if sid)
+            for record in list(self.sessions.values()):
+                sid = getattr(record.session, "session_id", None)
+                if sid:
+                    known.add(sid)
+        except Exception:
+            log.warning("orphan uploads sweep: the known sessions could not be read", exc_info=True)
+            return
+        base = sessions.CLAUDE_PROJECTS_DIR
+
+        def sweep() -> None:
+            try:
+                try:
+                    os.listdir(base)
+                except OSError as error:
+                    log.info("orphan uploads sweep skipped: %s is not a readable directory (%s)", base, error)
+                    return
+                gone = uploads.sweep_orphans(known)
+            except Exception:
+                log.warning("orphan uploads sweep failed", exc_info=True)
+                return
+            if gone:
+                log.info("orphan uploads sweep: removed the uploads of %d gone session(s)", len(gone))
+
+        gitfeed.spawn_default(sweep, "orphan-sweep")
+
+    def sweep_pending_uploads(self) -> None:
+        """The uploads made with no session id (D37) that are older than a
+        week go (`uploads.sweep_pending`: a scandir and an unlink per
+        entry, so on a thread, never the main loop). Never raises."""
+        from .. import uploads
+
+        def sweep() -> None:
+            try:
+                uploads.sweep_pending()
+            except Exception:
+                log.warning("pending uploads sweep failed", exc_info=True)
+
+        gitfeed.spawn_default(sweep, "pending-sweep")
 
     def sweep_archived(self) -> list[str] | None:
         """Ask autodelete whether a sweep is due (the setting and the

@@ -16,7 +16,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
-from . import apilink, claudemodels, composerkeys, editorfiles, jobclient, modelcatalog
+from . import apilink, claudemodels, composerkeys, editorfiles, jobclient, modelcatalog, remoteicons
 from .api import protocol
 from .api.protocol import RequestRefused
 from .chats import is_chat_cwd
@@ -1152,6 +1152,9 @@ def generate_icon_dialog(
             status.set_label(_("Saving failed: {error}").format(error=error))
             status.set_visible(True)
             return
+        # The sidebar's held answer is stale now (PR-2.7): its next ask
+        # fetches the icon just written.
+        remoteicons.forget()
         dialog.close()
         on_saved()
 

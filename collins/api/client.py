@@ -534,11 +534,28 @@ class SocketLink(apilink.Link):
         I/O thread — with a `Soup.Session` of its own, since libsoup's
         sync API is per thread and the link's session lives on its
         thread. Raises `ConnectionLost` when nothing answers."""
+        return self._http("GET", path_query, headers, None, timeout)
+
+    def http_put(
+        self, path_query: str, body: bytes, headers: dict[str, str] | None = None, timeout: float = 120.0
+    ) -> tuple[int, dict[str, str], bytes]:
+        """A plain HTTP PUT of *body* on the service's socket (`PUT
+        /api/upload`, §3.11, PR-2.7), as `http_get` does its GET."""
+        return self._http("PUT", path_query, headers, body, timeout)
+
+    def _http(
+        self,
+        method: str,
+        path_query: str,
+        headers: dict[str, str] | None,
+        body: bytes | None,
+        timeout: float,
+    ) -> tuple[int, dict[str, str], bytes]:
         if self._on_io_thread():
-            raise RuntimeError("http_get cannot run on the link's own thread")
+            raise RuntimeError("an HTTP request cannot run on the link's own thread")
         session = Soup.Session(remote_connectable=Gio.UnixSocketAddress.new(self.path))
         session.set_timeout(int(max(1.0, timeout)))
-        message = Soup.Message.new("GET", "http://collins" + path_query)
+        message = Soup.Message.new(method, "http://collins" + path_query)
         if message is None:
             raise ValueError(f"not a URL path: {path_query!r}")
         # The service confines a blob by the client it is for (its `local`
@@ -546,8 +563,10 @@ class SocketLink(apilink.Link):
         message.get_request_headers().replace("Collins-Client", self.client_id)
         for name, value in (headers or {}).items():
             message.get_request_headers().replace(name, value)
+        if body is not None:
+            message.set_request_body_from_bytes("application/octet-stream", GLib.Bytes.new(body))
         try:
-            body = session.send_and_read(message, None)
+            answer = session.send_and_read(message, None)
         except GLib.Error as err:
             raise ConnectionLost(err.message) from None
         status = int(message.get_status())
@@ -557,7 +576,7 @@ class SocketLink(apilink.Link):
             value = response.get_one(name)
             if value is not None:
                 got[name] = value
-        return status, got, bytes(body.get_data() or b"")
+        return status, got, bytes(answer.get_data() or b"")
 
     def _primary_blocking(self, message: dict, timeout: float) -> dict:
         done: list = []

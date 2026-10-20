@@ -2211,6 +2211,91 @@ def test_the_sweep_skips_a_live_agent_pty_whose_cli_is_not_up(app_state, project
         pump(0.3)
 
 
+def test_the_orphan_uploads_sweep_knows_the_live_and_listed_sessions(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    """Should-fix 1 of the PR 612 review: the uploads of a session neither a
+    pty runs nor the store lists are swept on the housekeeping tick, after
+    the store's first scan and never before it, with the known ids gathered
+    on the main loop and the sweep itself handed to a thread."""
+    from collins import uploads
+    from collins.service import gitfeed
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    monkeypatch.setattr(core, "sweep_archived", lambda: None)
+    monkeypatch.setattr(core, "sweep_pending_uploads", lambda: None)
+    monkeypatch.setattr(core, "check_gh", lambda fresh=False: None)
+    monkeypatch.setattr(core, "agent_pty_sessions", lambda include_finished=False: {1: "live-1", 2: None})
+    swept = []
+    monkeypatch.setattr(uploads, "sweep_orphans", lambda known, *a, **kw: swept.append(set(known)) or [])
+    monkeypatch.setattr(gitfeed, "spawn_default", lambda fn, name: fn())
+    try:
+        core.start_housekeeping()
+        core.sweep_orphan_uploads()
+        assert swept == []  # before the first scan every upload would read as an orphan
+        store._last_sessions = discover_sessions()
+        store._apply()
+        assert len(swept) == 1
+        listed = {s.session_id for s in store.all_sessions()}
+        assert listed and swept[0] == listed | {"live-1"}
+        core._sweep_tick()
+        assert len(swept) == 2
+    finally:
+        core.shutdown()
+
+
+def test_the_orphan_uploads_sweep_distrusts_an_empty_scan_and_a_missing_projects_dir(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    """The verification of d212775: `providers.discover` answers [] when
+    the projects directory is not there (a transient unmount, an unreadable
+    directory) and the store applies it, so a tick then would have removed
+    every non-live upload directory older than a day. A scan that listed no
+    session is not trusted, and the thread checks the projects directory
+    is readable before the uploads are scanned; nothing is removed either
+    way."""
+    from collins import sessions, uploads
+    from collins.service import gitfeed
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    monkeypatch.setattr(core, "sweep_archived", lambda: None)
+    monkeypatch.setattr(core, "sweep_pending_uploads", lambda: None)
+    monkeypatch.setattr(core, "check_gh", lambda fresh=False: None)
+    monkeypatch.setattr(core, "agent_pty_sessions", lambda include_finished=False: {1: "live-1"})
+    monkeypatch.setattr(gitfeed, "spawn_default", lambda fn, name: fn())
+    stale = uploads.write("gone-1", "a.png", b"x").parent
+    os.utime(stale, (time.time() - 2 * uploads.ORPHAN_AFTER_SECONDS,) * 2)
+    try:
+        # An empty scan applied: a live pty is known, but the store's half is nothing.
+        store._last_sessions = []
+        store._apply()
+        core.sweep_orphan_uploads()
+        assert stale.exists()
+        # A real scan, but the projects directory is gone by the time the thread runs.
+        store._last_sessions = discover_sessions()
+        assert store.all_sessions()
+        store._apply()
+        mounted = sessions.CLAUDE_PROJECTS_DIR
+        monkeypatch.setattr(sessions, "CLAUDE_PROJECTS_DIR", tmp_path / "unmounted")
+        core.sweep_orphan_uploads()
+        assert stale.exists()
+        # Both in order: the sweep runs and the orphan goes.
+        monkeypatch.setattr(sessions, "CLAUDE_PROJECTS_DIR", mounted)
+        core.sweep_orphan_uploads()
+        assert not stale.exists()
+    finally:
+        core.shutdown()
+
+
 def test_the_first_sweep_waits_for_the_stores_first_scan(app_state, projects_dir, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     service_state = app_state.AppState(migrate=True, device=False)

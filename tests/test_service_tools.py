@@ -565,3 +565,84 @@ def test_with_no_link_every_call_is_gone(monkeypatch):
     with pytest.raises(RequestRefused) as refused:
         apilink.call({"t": "pr.detail", "url": "https://github.com/o/r/pull/1"})
     assert refused.value.error == protocol.ERROR_GONE
+
+
+# -- show_image on the service (PR-2.7) -----------------------------------------------------
+
+
+def test_show_image_resolves_and_registers_the_path_before_the_client_sees_it(world, tmp_path):
+    """The event carries the absolute path the service resolved (a
+    relative one against the agent's cwd), and the path is admitted for
+    the session (D38) so the client's `kind=file` GET may read it."""
+    from collins.service.blobs import ImageRegistry
+
+    world["tools"].registry = registry = ImageRegistry()
+    world["sessions"][0].cwd = str(tmp_path)
+    (tmp_path / "shot.png").write_bytes(b"\x89PNG")
+    client = attach(world)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "shot.png"})
+    assert got == (True, "done")
+    (event,) = client.events
+    assert event["arguments"]["path"] == str(tmp_path / "shot.png")
+    assert str(tmp_path / "shot.png") in registry.paths("sid-1")
+    assert str(tmp_path / "shot.png") in registry.paths("h-sid-1")
+    gone = world["tools"].dispatch(4242, "show_image", {"path": "gone.png"})
+    assert gone == (False, "No such file: gone.png")
+
+
+def test_show_image_of_a_url_is_downloaded_by_the_service_before_it_is_forwarded(world):
+    fetched = []
+
+    def fetch_remote(url, done):
+        fetched.append(url)
+        world["holder"]["done"] = done
+
+    world["tools"]._fetch_remote = fetch_remote
+    client = attach(world)
+    url = "https://example.com/plot.png"
+    got = world["tools"].dispatch(4242, "show_image", {"path": url})
+    assert isinstance(got, mcptools.DeferredResult) and not got.resolved
+    assert fetched == [url] and client.events == []  # nothing forwarded before the bytes are here
+    world["holder"]["done"](None)
+    assert got.resolved and got.result() == (True, "done")
+    assert client.events[0]["arguments"]["path"] == url
+
+
+def test_show_image_of_a_url_the_service_cannot_fetch_says_why(world):
+    world["tools"]._fetch_remote = lambda url, done: done("The server answered 404 for " + url)
+    client = attach(world)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/x.png"})
+    assert got == (False, "The server answered 404 for https://example.com/x.png")
+    assert client.events == []
+    assert world["tools"].dispatch(4242, "show_image", {"path": "ftp://example.com/x.png"})[0] is False
+
+
+def test_show_image_of_a_url_with_no_client_is_recorded_after_the_download(world):
+    world["tools"]._fetch_remote = lambda url, done: done(None)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/x.png"})
+    assert got == (True, tools_mod.SHOW_IMAGE_RECORDED)
+    (record,) = world["state"].attachments["sid-1"]
+    assert record["key"] == "https://example.com/x.png"
+
+
+def test_show_image_of_a_dripping_url_answers_at_the_bound(world):
+    """The deferred is bounded from the start (PR 612's review): a download
+    that never lands answers the agent at TOOL_BOUND_S, and a late landing
+    forwards nothing."""
+    world["tools"]._fetch_remote = lambda url, done: world["holder"].update(done=done)
+    client = attach(world)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/drip.png"})
+    assert isinstance(got, mcptools.DeferredResult) and not got.resolved
+    (bound,) = [ms for ms, _fn, _args in world["timers"].due.values()]
+    assert bound == int(tools_mod.TOOL_BOUND_S * 1000)
+    world["timers"].fire_all()
+    assert got.result() == (False, "Timed out after 14s fetching https://example.com/drip.png")
+    world["holder"]["done"](None)
+    assert client.events == []
+
+
+def test_show_image_of_a_url_that_lands_cancels_its_bound(world):
+    world["tools"]._fetch_remote = lambda url, done: done(None)
+    attach(world)
+    got = world["tools"].dispatch(4242, "show_image", {"path": "https://example.com/x.png"})
+    assert got == (True, "done") and world["timers"].due == {}

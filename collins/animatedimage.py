@@ -15,9 +15,17 @@ animation for free.
 
 GTK4 has no animation decoder of its own; gdk-pixbuf's `PixbufAnimation` is
 the only one in the stack (deprecated, with nothing replacing it — the
-warnings it raises are noted and deliberate). Only a `.gif` takes that path:
-it is the one animated format the loader handles, and everything else is
-better served by GdkTexture's own decoders.
+warnings it raises are noted and deliberate). Only a GIF takes that path
+(known by its signature, not its name): it is the one animated format the
+loader handles, and everything else is better served by GdkTexture's own
+decoders.
+
+**Bytes, not files** (split-service spec §3.23, PR-2.7). What the client
+decodes is always a blob the service sent: `load(path)` reads the file
+through `blobcache.read`, which refuses anything outside the blob cache,
+and decodes the bytes (`load_bytes`: `Gdk.Texture.new_from_bytes`, and a
+`GdkPixbuf.PixbufLoader` for an animation), so no project file is ever
+opened here.
 
 The frame clock is the paintable's own, and it stops itself. A paintable
 can't see whether its widget is mapped, on a hidden panel tab, or scrolled
@@ -39,6 +47,8 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Gdk, GdkPixbuf, GLib, GObject  # noqa: E402
 
+from . import blobcache  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 # Browsers clamp absurdly fast GIF frames rather than obeying them (a 0ms
@@ -50,30 +60,47 @@ _CLAMPED_DELAY_MS = 100
 
 
 def load(path: str | Path) -> Gdk.Paintable | None:
-    """The file at *path* as a paintable, animated if it is an animated GIF.
+    """The blob-cache file at *path* (`blobcache.fetch`'s) as a paintable,
+    animated if it is an animated GIF.
 
-    None when it can't be decoded — every caller already has a "couldn't
-    show this" path, and this function never raises into one.
+    None when it can't be read or decoded — every caller already has a
+    "couldn't show this" path, and this function never raises into one.
     """
-    path = Path(path)
-    if path.suffix.lower() == ".gif":
-        animation = _animation(path)
+    data = blobcache.read(path)
+    return load_bytes(data) if data else None
+
+
+def is_gif(data: bytes) -> bool:
+    """Whether *data* carries a GIF's signature."""
+    return data[:6] in (b"GIF87a", b"GIF89a")
+
+
+def load_bytes(data: bytes) -> Gdk.Paintable | None:
+    """*data* as a paintable, animated if it is an animated GIF; None when
+    it won't decode."""
+    if is_gif(data):
+        animation = _animation(data)
         if animation is not None:
             return animation
     try:
-        return Gdk.Texture.new_from_filename(str(path))
+        return Gdk.Texture.new_from_bytes(GLib.Bytes.new(data))
     except GLib.Error:
         return None
 
 
-def _animation(path: Path) -> _Animation | None:
+def _animation(data: bytes) -> _Animation | None:
     """An `_Animation` for a multi-frame GIF; None for anything else — a
     still GIF included, so it goes through GdkTexture's decoder like every
     other still image rather than through a one-frame animation."""
     try:
-        animation = GdkPixbuf.PixbufAnimation.new_from_file(str(path))
+        loader = GdkPixbuf.PixbufLoader.new_with_type("gif")
+        loader.write(data)
+        loader.close()
+        animation = loader.get_animation()
     except GLib.Error:
         return None  # not decodable as an animation; the texture path may still be
+    if animation is None:
+        return None
     if animation.is_static_image():
         return None
     if animation.get_width() <= 0 or animation.get_height() <= 0:
@@ -81,7 +108,7 @@ def _animation(path: Path) -> _Animation | None:
     try:
         return _Animation(animation)
     except GLib.Error:
-        log.debug("animatedimage: %s has no first frame", path, exc_info=True)
+        log.debug("animatedimage: an animation with no first frame", exc_info=True)
         return None
 
 

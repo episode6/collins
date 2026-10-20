@@ -880,16 +880,24 @@ def gh_text(args: list[str], max_bytes: int | None = None) -> str | None:
     return result.stdout
 
 
+class TooLarge(Exception):
+    """`gh_bytes`' one failure that is not None: the reply came back whole
+    and was over the caller's *max_bytes*. The caller can say so (a blob
+    route's 413) where "None on any failure" could only say 404."""
+
+
 def gh_bytes(args: list[str], max_bytes: int | None = None) -> bytes | None:
     """`gh_text`'s sibling for a reply that isn't text: raw stdout, undecoded.
 
     What fetches a file's bytes out of a repository (`prblobs`): an image
     blob is not UTF-8, and the replacement decoding every other call here
     relies on would hand back something that no longer is the file. Same
-    action timeout, same optional *max_bytes* cap over which the reply is
-    dropped rather than returned, same "None on any failure" contract —
-    stderr is still text, and is logged as the reason. Never call on the
-    main thread.
+    action timeout, same "None on any failure" contract — stderr is still
+    text, and is logged as the reason — with one exception: a reply over
+    the optional *max_bytes* cap is dropped and `TooLarge` raised, since
+    gh has no cap of its own (the reply is read whole, then measured) and
+    the caller can tell that outcome from a miss. Never call on the main
+    thread.
     """
     result = _gh(args, timeout=_GH_ACTION_TIMEOUT_S, binary=True)
     if result is None:
@@ -901,7 +909,7 @@ def gh_bytes(args: list[str], max_bytes: int | None = None) -> bytes | None:
         return None
     if max_bytes is not None and len(result.stdout) > max_bytes:
         log.info("prstatus: gh %s reply over %s bytes; dropped", " ".join(args), max_bytes)
-        return None
+        raise TooLarge(f"{len(result.stdout)} bytes, over {max_bytes}")
     return result.stdout
 
 
