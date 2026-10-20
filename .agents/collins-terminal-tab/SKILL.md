@@ -257,20 +257,127 @@ the window's final close calls `end_close`): it re-nudges at
 `EXIT_NUDGE_TICKS`/`BG_NUDGE_TICKS` (a mid-turn agent spends the first
 Ctrl+C Ctrl+C interrupting itself), answers the CLI's "keep or remove this
 worktree?" dialog with keep (`worktree_exit_prompt_keystrokes`), and
-force-closes at the tick budget (the window's `_close_confirmed`, handed
-in). Once the CLI is gone `_poll_shell_exit` feeds `shellinput.shell_command("exit\r")` — the `" \x15"` line reset first,
+force-closes at the tick budget (`SessionRecord.close_budget`: a `close`
+event, `state: budget`, to the attached clients, which the window answers
+with `_close_confirmed`; with no client attached — the tab detached
+mid-drain, a quit insisted on, a client crash — the service forces it
+itself, `ServiceCore.force_close`, and a last detach after the event went
+out does the same (`client_detached`), so a session the user asked to
+stop ends whether anyone watches or not). Once the CLI is gone `_poll_shell_exit` feeds `shellinput.shell_command("exit\r")` — the `" \x15"` line reset first,
 because a shell inherits input the CLI never read (VTE mouse reports), and a
 bare kill-line at column 0 rings the bell — and force-closes if the shell
 ignores it. Keys fed to the *CLI* get no reset (raw-mode TUI). A `/bg` close
 marks the row `backgrounding` (yellow, disabled) until the daemon lists the
 job or a timeout, and `_watch_background_fork` handles older CLIs that fork.
 
-Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit` (close
-all / background all in a queue / **hide** — the window hides, sessions keep
-running, the status icon brings it back; `request_quit` bypasses hide).
-`_close_ok` also covers the no-dialog paths. Finalizing a `Vte.Terminal`
-SIGHUPs its child; a hidden window keeps every page alive with no
-`Gio.Application.hold()`.
+**Detach** (PR-1.12c, spec §3.21, D12): `win.detach-session` (the tab
+menu's item targets "" = the menu's page; the row menu's names the
+session, routed to its owner window) → `MainWindow.detach_page` → the
+editor's Save Changes? only → the page goes into `_detached_pages` and
+`close_page` → `_on_close_page` skips every ask and the graceful close and
+calls `TerminalTab.detach_pty()` (a `detach`, the client closed) instead of
+`release_pty()` (`detach_page` refuses a page mid-close, `_page_settling`,
+and closes a tab whose CLI has exited instead; the row menu asks
+`can_detach_session`); the panel shells still end (their history written by the
+service). On the service, a shell alone nobody shows is closed
+(`SessionRecord.close_if_orphan_shell`, from `client_detached` on the last
+`detach` / `client_gone` and from `cli_changed(False)`): the client's
+`cli_exited()` cannot tell a CLI that never came up (no `claude`, a bad
+`claude_cli_path`, a failed sandbox launch) from one still starting, so a
+plain Quit detaches such a tab, and a session detached while its CLI runs
+is left a bare shell when the CLI quits by itself; neither has a running
+row or anything that would attach to it, so the service ends it rather
+than keep it for its life. A pty mid-close is left to its close flow.
+**The startup hold:** `has_running_command` is the pty's foreground group,
+the shell's own until its rc has run and it forks the typed command (bash
+or zsh with a heavy rc: a second or more), so a pty whose CLI has never
+been seen running (`SessionRecord.cli_ever_ran`, set by `cli_changed(True)`)
+is never closed for "no CLI" inside `hosting.ORPHAN_HOLD_S` (30 s) of its
+`spawned_at`: one re-check is scheduled for the hold's end with the same
+guards (nobody shows it, CLI not running, not closing, not exited), an
+attach in the meantime cancels it, and a CLI seen running and then gone
+closes at once. A pty whose master is already gone (`pty.master < 0`) is
+not forced twice. The one window left: an attach aimed at a pty being
+closed this way is refused and falls back to a resume. The tab's `destroy` also detaches (no longer `release_pty`): a
+window that closes for real leaves its sessions running. **Opening a
+running session attaches** (D31): `open_session` asks `store.pty_for(id)`
+and, while that pty's CLI still runs (`pty.info`'s `running_command`; a shell-only pty is resumed over, which the service takes by closing it), builds `TerminalTab(attach_pty=…)`, which reads the pty's grid
+(`pty.info` `cols`/`rows`, so the attach paints at the pty's own size and
+the model, which never reflows, cuts nothing), claims the pty and attaches;
+the `session` snapshot fills the mirror. `attach_refused` (the pty ended
+meanwhile) falls back to a resume. `open_running_pty(pty)` does the same
+for a session with no id yet (a running "New session" row, a `pty:<id>`
+entry of `open_tabs`), with a placeholder row like a fresh tab's.
+
+Quitting: `_on_close_request` → `_begin_quit_flow` → `_confirm_quit`, by
+`quit_with_running_sessions`: **detach** (the default since PR-1.12c, D30:
+`do_detach` records `open_tabs` with `_close_for_good`, marks every tab
+`quitrules.tab_fate` says `DETACH` as `_detached_pages`, the ones it says
+`RELEASE` — a shell left after its CLI, an unstarted New Thread, which has
+nothing to keep — as `_confirmed_closes`, and closes all pages with
+`_close_ok`, so a page mid-close drains and the rest detach or end, and
+the last page's close reissues the window's; a non-last window's tabs are
+kept by `App.keep_open_tabs`; the nothing-busy fast path of
+`_on_close_request` releases the `RELEASE` tabs the same way; `quitrules`
+is GTK-free and reads `TerminalTab.cli_exited()` — the CLI once seen up
+and gone, or the pty exited — not `has_running_command()`, which is False
+for the first second after a spawn or an attach),
+**exit** (*Stop Sessions and Quit*: close all with `_close_ok`, as quitting
+always did; with nothing busy the fast path releases each pty), background
+(the /bg queue), **hide** (the window hides, sessions keep running, the
+status icon brings it back; `request_quit` bypasses hide) or **ask**: the
+dialog (`dialogs.answer_dialog`) "N sessions keep running in the Collins
+service" with *Quit*, *Stop Sessions and Quit*, *Keep Running (Hide
+Window)*; its first showing adds the status-icon sentence
+(`quit_notice_shown`). The words are `quitrules.quit_heading` /
+`quit_body` (GTK-free, tested): N is `_agent_busy_count` (agents owning
+their terminals; `_busy_tab_count`, which gates the dialog, also counts a
+tab busy only in its panel), and with a command running in a terminal
+panel (`_panel_busy`) the body says Quit and Stop Sessions both end it
+with its tab, only Keep Running keeps it — the panel shells go through
+`release_panel_ptys` on every close but a hide. An install whose stored value was `ask` moves to
+`detach` once (`state.migrate_device_settings`, marked by
+`quit_detach_migrated`). `_close_for_good` writes `open_tabs` one last time
+(with this window's tabs when it is the last window) and freezes it.
+`_close_ok` also covers the no-dialog paths. A hidden window keeps every
+page alive with no `Gio.Application.hold()`.
+
+**open_tabs** (§3.21): `App.persist_open_tabs` (debounced 250 ms) writes
+every open window's `open_tab_entries()` — a tab with a live pty whose CLI
+is up or still coming up (`quitrules.records_as_open`: not a shell left
+after its CLI, not an unstarted New Thread, not a page mid-close), as its
+session id or `pty:<id>` for an unresolved one or a fork — through
+`AppState.set_open_tabs` into the per-service block of `ui-state.json`, on
+every page attached, detached, reordered and resolved. It is frozen while
+the link is down (tabs whose ptys went with the service close as their
+reattach fails; that must not shrink the record) and after the last
+window's quit. `MainWindow.reopen_tabs()` (the launch, from
+`do_activate`) and `App._on_connected` after a reconnect (after
+`reattach_tabs`) reopen each entry not shown: attached when the service
+runs it, resumed when not (a `pty:` entry that no longer runs is dropped);
+a session the store has not scanned yet waits for its first refresh. With
+`open_tabs` empty the launch falls back to `restore_last_session`.
+
+**Restart service** (`win.restart-service`, the main menu):
+`MainWindow._ask_restart_service` reads `service.status` (`busy`, `pid`)
+and the mirror's agent ptys for the blast radius, then
+`App.restart_service("now" | "idle", pid)`. *Now* flushes and freezes
+`open_tabs` and tells the connection manager to wait for that pid to be
+gone (`ConnectionManager.expect_restart`) before it starts another
+service. *Idle* is `ServiceCore.restart_when_idle` (polls
+`activity.busy_count()` every `RESTART_POLL_MS`, 2 s; `service.restart
+{when: cancel}` → `cancel_restart`), shown as "Restarting when idle" with
+Cancel in the reconnect banner (`MainWindow.set_restart_pending`). The
+service's stop now ends its clients **before** its sessions
+(`Service.stop`), so a client sees the link go, not one `pty-exited` per
+session. *Restart Service* is offered only for an older service
+(`mismatch.service < mismatch.client`). A `hello` refused `protocol`
+raises `api.client.ProtocolMismatch`:
+at startup `App._mismatch_at_startup` asks over a bare window on a nested
+loop (*Restart Service*: `connection.stop_service` SIGTERMs the socket's
+peer, found by `SO_PEERCRED`, then `start_local` again; *Quit*); on a
+reconnect the manager goes to `mismatch` and `App._on_protocol_mismatch`
+asks over the window.
 
 ## Footer and chrome
 
@@ -520,7 +627,8 @@ swap 2 of §3.5:
   `exit` and `background` are the session's graceful close on the service
   — `Session.begin_close` — and a budget that runs out comes back as a
   `close` event the window answers), detaches and closes its `PtyClient`:
-  closing a tab ends the session (D12) until *Detach* in PR-1.12c.
+  closing a tab ends the session (D12). `TerminalTab.detach_pty()` is
+  *Detach*'s and a destroyed tab's (PR-1.12c): the pty runs on.
   `App.do_shutdown` closes the panel shells' ptys and the link; the
   agents' ptys live on (§3.10) and the next client attaches.
 - **The wiring.** `App._start_service` builds the `SocketLink` and the
@@ -611,7 +719,9 @@ PR-1.12a (spec §3.19) moved the `Session` off the client. The pieces:
   `refocus_composer`, `resend_composed`, `stash_draft` and
   `mark_stale_shells` are `focus.terminal`, `composer` and `shells`
   events; a close budget running out is a `close` event (`state: budget`)
-  the window answers by forcing the close.
+  the window answers by forcing the close — sent only while a client is
+  attached; with none the service forces the close itself
+  (`ServiceCore.force_close`).
 - **The requests** (`ServiceCore._req_*`, each routed to the session by
   its pty): `prompt {text, focus, when_empty}` (with `when_empty` the
   service re-reads `takes_prompt` off the live screen and refuses with

@@ -173,7 +173,7 @@ SPAWN_ENV_STRIPPED = (
     "INVOCATION_ID",
     "JOURNAL_STREAM",
 )
-ALREADY_RUNNING_MSGID = "This session is already running in the Collins service"
+ALREADY_RUNNING_MSGID = protocol.ALREADY_RUNNING_MSGID
 # How long stop_sessions waits for every close flow (the agent's exit
 # budget, the shell's, the SIGKILL grace) before shutting what is left.
 STOP_BOUND_S = 30.0
@@ -277,6 +277,14 @@ class ServiceCore:
         # The subscribed clients, in the order they subscribed: who a
         # UI-bound tool call can go to (_tool_client).
         self._subscribers: list[Client] = []
+        # A restart waiting for no session to be busy (restart_when_idle):
+        # what to call, and the poll's source.
+        self._restart_waiting: Callable[[], None] | None = None
+        self._restart_source = 0
+        # Agent pty id -> whether its CLI runs (the facts' running_command,
+        # hosting.SessionRecord._send_changed): a session counts as running
+        # only while it does (cli_changed).
+        self._cli_running: dict[int, bool] = {}
         pruned = self.ptys.prune_models()
         if pruned:
             log.info("pruned %d model file(s) of ptys no longer in the table", pruned)
@@ -303,7 +311,7 @@ class ServiceCore:
 
             store = SessionStore(self.state)
         self.store = store
-        self.feed = storefeed.StoreFeed(store, self.state)
+        self.feed = storefeed.StoreFeed(store, self.state, running=self.running_sessions)
         # The notification history (PR-1.11): the service's, over the same
         # state, published to the same subscribers.
         self.notifications = notifications_mod.ServiceNotifications(self.state)
@@ -339,9 +347,13 @@ class ServiceCore:
             record = self.sessions.get(pty_id)
             if record is not None:
                 # A cut whose composer went with the client is called off;
-                # nothing else about the session changes.
+                # nothing else about the session changes — but a close
+                # whose budget this client was told of is forced once no
+                # client is left to answer (`client_detached`).
                 record.client_gone(sink)
             self.ptys.detach(pty_id, sink)
+            if record is not None:
+                record.client_detached()
 
     # -- requests
 
@@ -477,14 +489,20 @@ class ServiceCore:
         if options is not None and message.get("sandbox") and not options.sandbox_plan:
             options = self._box_for_launch(message, options)
         wanted = message.get("session")
-        if wanted:
+        # A fork starts its own conversation: no running pty of its origin
+        # stands in for it, and none is closed for it (PR-1.12c review).
+        if wanted and not message.get("fork"):
             for live in self._records():
                 if live.pty_id not in self.ptys.ptys or live.session.session_id != wanted:
                     continue
+                if live.session.fork:
+                    # A fork's pty is no view of the session it forked
+                    # from: neither attached to nor closed for it.
+                    continue
                 if live.session.has_running_command():
                     # Two CLIs on one transcript would both write it; the
-                    # client paints this where a spawn error goes, and
-                    # PR-1.12c attaches to the running pty instead.
+                    # client (PR-1.12c) attaches to the running pty it names;
+                    # a client that cannot paints it where a spawn error goes.
                     return protocol.refuse(
                         message.id, protocol.ERROR_REFUSED, ALREADY_RUNNING_MSGID, {"pty": live.pty_id}
                     )
@@ -546,6 +564,12 @@ class ServiceCore:
                 self.ptys.close(record.pty_id)
             raise
         pty = self.ptys.get(record.pty_id)
+        # Every subscriber's sidebar hears of the new agent pty (PR-1.12c).
+        # The broadcast is queued before the reply is returned, but the
+        # requester's client lands the reply first (a `call` returns before
+        # the events the reply implies are drained, api.client), so its tab
+        # knows its own pty by the time the table names it.
+        self.publish_pty(record.pty_id)
         return protocol.reply(
             message.id, pty=record.pty_id, cols=pty.cols, rows=pty.rows, handle=record.handle
         )
@@ -672,6 +696,16 @@ class ServiceCore:
         self.rekey_shells(record, session_id)
         if self.activity is not None:
             self.activity.resolved(record)
+        if pty is not None:
+            # The row of the pty table names the session now (PR-1.12c).
+            self.publish_pty(pty.id)
+
+    def session_forked(self, record: hosting.SessionRecord, session_id: str) -> None:
+        """A sandboxed fork's resolver found the forked conversation: its
+        pty runs that session from now on, as the pty table tells it."""
+        record.forked = session_id
+        if record.pty_id is not None:
+            self.publish_pty(record.pty_id)
 
     def rekey_shells(self, record: hosting.SessionRecord, session_id: str) -> None:
         """File the history of every panel shell of *record*'s session (the
@@ -978,6 +1012,9 @@ class ServiceCore:
         self.ptys.get(pty_id)
         self.ptys.detach(pty_id, client.sink_for(pty_id))
         client.forget(pty_id)
+        record = self.sessions.get(pty_id)
+        if record is not None:
+            record.client_detached()
         return protocol.reply(message.id)
 
     def _req_paint(self, message: protocol.Message, client: Client) -> dict:
@@ -994,10 +1031,12 @@ class ServiceCore:
                 return protocol.refuse(
                     message.id, protocol.ERROR_REFUSED, "A graceful close needs the exit keystrokes"
                 )
+            record.budget_spent = False
             record.session.begin_close(text, mode == "background", record.close_budget)
             return protocol.reply(message.id)
         if record is not None:
             record.session.end_close()
+            record.budget_spent = False
         self.ptys.close(pty_id)
         return protocol.reply(message.id)
 
@@ -1031,6 +1070,8 @@ class ServiceCore:
             running_command=bool(pty.has_running_command()),
             process_cwd=pty.process_cwd(),
             plan=pty.plan,
+            cols=pty.cols,
+            rows=pty.rows,
         )
 
     def _req_pty_capture(self, message: protocol.Message, client: Client) -> dict:
@@ -1061,7 +1102,16 @@ class ServiceCore:
         its session with no client attached (SessionTools.agent_exited) and
         drops the session once the exit is reported."""
         if pty.kind != "shell":
+            ran = self.agent_pty_sessions(include_finished=True).get(pty.id)
+            self._cli_running.pop(pty.id, None)
             record = self.sessions.pop(pty.id, None)
+            # The subscribers' word that the agent's row left the table
+            # (PR-1.12c): its session runs no more.
+            self._broadcast(
+                {"t": "pty-exited", "pty": pty.id, "status": pty.exit_status, "table": True}
+            )
+            if self.feed is not None and ran:
+                self.feed.refresh_running({ran})
             if record is not None:
                 status = -1 if pty.exit_status is None else int(pty.exit_status)
                 try:
@@ -1156,21 +1206,10 @@ class ServiceCore:
     def _req_subscribe(self, message: protocol.Message, client: Client) -> dict:
         items = self.feed.subscribe(client, client.deliver)
         ptys = 0
-        for pty_id, pty in list(self.ptys.ptys.items()):
-            event = {
-                "t": "pty",
-                "pty": pty_id,
-                "kind": pty.kind or "agent",
-                "cols": pty.cols,
-                "rows": pty.rows,
-            }
-            if pty.cwd:
-                event["cwd"] = pty.cwd
-            if pty.session:
-                event["session"] = pty.session
-            pid = pty.child_pid()
-            if pid:
-                event["pid"] = pid
+        for pty_id in list(self.ptys.ptys):
+            event = self.table_row(pty_id)
+            if event is None:
+                continue
             client.deliver(event)
             ptys += 1
         for record in self._records():
@@ -1781,6 +1820,147 @@ class ServiceCore:
         """The hex of every write recorded for *pty_id* since the spy."""
         return list(getattr(self, "_write_spy", {}).get(pty_id, []))
 
+    # -- the pty table as the subscription carries it (PR-1.12c, §3.21)
+
+    def agent_pty_sessions(self, include_finished: bool = False) -> dict[int, str | None]:
+        """Every live agent pty whose CLI runs, and the session it runs: the
+        id a resume or a resolved fresh spawn runs under; for a fork, the
+        forked conversation's id once its resolver found it, else None (a
+        fork's pty is no view of the session it forked from); None for a
+        fresh spawn that has not resolved yet. A pty whose CLI has exited
+        (the shell alone, or the CLI not up yet) is no running session and
+        is left out (`cli_changed`, the /proc poll's word); *include_finished*
+        (the exit's own read) takes every agent pty, finished or not."""
+        table: dict[int, str | None] = {}
+        for pty_id, pty in self.ptys.ptys.items():
+            if pty.kind == "shell" or (getattr(pty, "_finished", False) and not include_finished):
+                continue
+            record = self.sessions.get(pty_id)
+            if not include_finished and record is not None and not self._cli_running.get(pty_id):
+                continue
+            if record is None:
+                table[pty_id] = pty.session or None
+            elif record.session.fork:
+                table[pty_id] = getattr(record, "forked", None)
+            else:
+                table[pty_id] = record.session.session_id or None
+        return table
+
+    def running_sessions(self) -> set[str]:
+        """The session ids an agent pty on the service runs right now
+        (each item's `running` field)."""
+        return {sid for sid in self.agent_pty_sessions().values() if sid}
+
+    def table_row(self, pty_id: int) -> dict | None:
+        """The `pty` event a subscriber is sent for one row of the pty
+        table (``table: true``: the sidebar's, never a view's); None for a
+        pty that is gone."""
+        pty = self.ptys.ptys.get(pty_id)
+        if pty is None or getattr(pty, "_finished", False):
+            return None
+        if pty.kind != "shell" and pty_id in self.sessions and not self._cli_running.get(pty_id):
+            return None  # its CLI is not running: no row (cli_changed)
+        event: dict = {
+            "t": "pty",
+            "pty": pty_id,
+            "kind": pty.kind or "agent",
+            "cols": pty.cols,
+            "rows": pty.rows,
+            "table": True,
+        }
+        if pty.cwd:
+            event["cwd"] = pty.cwd
+        session = pty.session if pty.kind == "shell" else self.agent_pty_sessions().get(pty_id)
+        if session:
+            event["session"] = session
+        pid = pty.child_pid()
+        if pid:
+            event["pid"] = pid
+        return event
+
+    def cli_changed(self, record: hosting.SessionRecord, running: bool) -> None:
+        """The session's CLI came up or went (the facts' `running_command`,
+        re-read by the /proc poll and on a foreground flip): its pty joins
+        the table, or leaves it with the table's word (a `pty-exited` with
+        ``table: true``; the pty itself lives on, the shell alone), and the
+        item's `running` follows (PR-1.12c review)."""
+        pty_id = record.pty_id
+        if pty_id is None or pty_id not in self.ptys.ptys:
+            return
+        running = bool(running)
+        if self._cli_running.get(pty_id, False) == running:
+            return
+        if not running:
+            ran = self.agent_pty_sessions().get(pty_id)
+        self._cli_running[pty_id] = running
+        if running:
+            record.cli_ever_ran = True  # a shell alone from here on is the CLI's leaving, not a startup
+            self.publish_pty(pty_id)
+            return
+        self._broadcast({"t": "pty-exited", "pty": pty_id, "status": None, "table": True})
+        if self.feed is not None and ran:
+            self.feed.refresh_running({ran})
+        # The CLI left a pty no client shows (detached, then the agent
+        # quit by itself): the shell alone is closed, not kept for good.
+        record.close_if_orphan_shell("the CLI left with no client attached")
+
+    def publish_pty(self, pty_id: int) -> None:
+        """An agent pty spawned or resolved: every subscriber is sent its
+        row, and the item of the session it runs its `running`."""
+        event = self.table_row(pty_id)
+        if event is None:
+            return
+        self._broadcast(event)
+        if self.feed is not None and event.get("session"):
+            self.feed.refresh_running({event["session"]})
+
+    # -- restart when idle (§3.10 item 1, PR-1.12c)
+
+    # How often a restart that waits for every session to be idle looks.
+    RESTART_POLL_MS = 2000
+
+    def restart_when_idle(self, restart: Callable[[], None]) -> None:
+        """Call *restart* once no session is busy (the tracker's
+        `busy_count`): looked at now, then every `RESTART_POLL_MS`. A
+        second ask replaces the first; `cancel_restart` calls it off."""
+        from gi.repository import GLib
+
+        self.cancel_restart()
+        self._restart_waiting = restart
+        if self._restart_tick():
+            self._restart_source = GLib.timeout_add(self.RESTART_POLL_MS, self._restart_tick)
+
+    def _restart_tick(self) -> bool:
+        busy = self.activity.busy_count() if self.activity is not None else 0
+        if busy:
+            return True
+        restart, self._restart_waiting = self._restart_waiting, None
+        self._restart_source = 0
+        if restart is not None:
+            log.info("restart when idle: no session is busy; restarting")
+            try:
+                restart()
+            except Exception:
+                log.exception("restart when idle: the restart failed")
+        return False
+
+    def cancel_restart(self) -> bool:
+        """Call off a restart waiting for the sessions to be idle; True
+        when one was waiting."""
+        from gi.repository import GLib
+
+        waiting = self._restart_waiting is not None
+        self._restart_waiting = None
+        if self._restart_source:
+            GLib.source_remove(self._restart_source)
+            self._restart_source = 0
+        return waiting
+
+    @property
+    def restart_pending(self) -> bool:
+        """Whether a restart waits for the sessions to be idle."""
+        return self._restart_waiting is not None
+
     # -- stopping (§3.10 item 1)
 
     def stop_sessions(self, done: Callable[[], None] | None = None) -> list[str]:
@@ -1841,19 +2021,26 @@ class ServiceCore:
         GLib.timeout_add(100, settled)
         return ids
 
-    def _force_close_for(self, pty_id: int) -> Callable[[], None]:
-        def force() -> None:
-            record = self.sessions.get(pty_id)
-            if record is not None:
-                record.session.end_close()
-            try:
-                self.ptys.close(pty_id)
-            except KeyError:
-                pass
+    def force_close(self, pty_id: int) -> None:
+        """End agent pty *pty_id* now: its session's close poll stopped and
+        the pty closed (SIGHUP, the master closed, SIGKILL after the grace).
+        What a graceful close whose budget ran out comes to — `stop_sessions`'
+        force, and `SessionRecord.close_budget`'s when no client is attached
+        to answer the `close` event."""
+        record = self.sessions.get(pty_id)
+        if record is not None:
+            record.session.end_close()
+            record.budget_spent = False
+        try:
+            self.ptys.close(pty_id)
+        except KeyError:
+            pass
 
-        return force
+    def _force_close_for(self, pty_id: int) -> Callable[[], None]:
+        return lambda: self.force_close(pty_id)
 
     def shutdown(self) -> None:
+        self.cancel_restart()
         if self.activity is not None:
             self.activity.stop()
         self.ptys.shutdown()

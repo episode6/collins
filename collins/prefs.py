@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-05. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -106,11 +106,19 @@ _RUNNING_BEHAVIORS = [
     ("background", N_("Background Session")),
 ]
 
-# Closing a whole window has a fourth answer the tab close doesn't: keep
-# every session exactly as it is and just hide the window (the dialog's
-# "Keep Running (Hide Window)"). Shortened here because a ComboRow's value
+# Quitting has its own answers (split-service spec §3.21, D30): leave every
+# session running in the Collins service (detach, the default), ask, stop
+# them first (exit: the dialog's "Stop Sessions and Quit"), hand them to
+# /bg, or keep every session exactly as it is and just hide the window (the
+# dialog's "Keep Running (Hide Window)"). Short labels: a ComboRow's value
 # label ellipsizes past ~130px.
-_QUIT_BEHAVIORS = _RUNNING_BEHAVIORS + [("hide", N_("Hide Window"))]
+_QUIT_BEHAVIORS = [
+    ("detach", N_("Leave Running")),
+    ("ask", N_("Ask")),
+    ("exit", N_("Stop Sessions")),
+    ("background", N_("Background Session")),
+    ("hide", N_("Hide Window")),
+]
 
 # What archiving does with a session's git worktree once the session has
 # stopped (see MainWindow._settle_archived_worktree).
@@ -568,7 +576,10 @@ class PreferencesDialog(Adw.Dialog):
         self._quit_behavior_row = self._add_running_behavior_row(
             sessions_group,
             _("When quitting with running sessions"),
-            _("Closing a window while agent sessions are still running"),
+            _(
+                "Closing a window while agent sessions are still running. Leave "
+                "Running quits and the sessions keep working in the Collins service"
+            ),
             "quit_with_running_sessions",
             behaviors=_QUIT_BEHAVIORS,
         )
@@ -1486,7 +1497,10 @@ class PreferencesDialog(Adw.Dialog):
             self._sync_quit_behavior_subtitle(present)
 
     def _sync_quit_behavior_subtitle(self, host_present: bool) -> None:
-        subtitle = _("Closing a window while agent sessions are still running")
+        subtitle = _(
+            "Closing a window while agent sessions are still running. Leave "
+            "Running quits and the sessions keep working in the Collins service"
+        )
         if not host_present:
             subtitle += ". " + _(
                 "Without a status icon, a hidden window comes back by "

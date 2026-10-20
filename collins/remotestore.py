@@ -101,6 +101,7 @@ _PROPS = (
     "syncing",
     "backgrounding",
     "can_background",
+    "running",
 )
 _SIGNALLED = {"busy": "busy-changed", "unread": "unread-changed"}
 # The settings whose flip moves what a row's name is: whether the CLI's
@@ -125,6 +126,10 @@ class RemoteStore(GObject.Object):
         "busy-changed": (GObject.SignalFlags.RUN_FIRST, None, (str, bool)),
         # A session was put away (archived).
         "archived": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+        # The service's agent ptys moved: one spawned, resolved or exited,
+        # or a row's `running` flipped (PR-1.12c, §3.21). The session id
+        # whose row it moves, "" for a fresh spawn not yet resolved.
+        "running-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
     }
 
     def __init__(self, link, state, pr_store=None) -> None:
@@ -148,7 +153,18 @@ class RemoteStore(GObject.Object):
         self._summary = {"total": 0, "hidden": 0, "size": 0, "projects": (), "chats": 0}
         self._projects: frozenset[str] = frozenset()
         self._title_switches = {name: bool(state.get_setting(name)) for name in _TITLE_SWITCHES}
+        # The service's agent ptys, as the subscription's rows of the pty
+        # table tell them (PR-1.12c): pty id -> {"session": id or None,
+        # "cwd": str}. What a running row attaches to, and the unresolved
+        # spawns' "New session" rows.
+        self._agent_ptys: dict[int, dict] = {}
+        # The open_tabs entries of a window that closed while others stay
+        # (App.keep_open_tabs): kept while their sessions run here, dropped
+        # when a table exit names one, cleared with the rest on a reset.
+        self.kept_open_tabs: list[str] = []
         link.on("item", self._on_item)
+        link.on("pty", self._on_pty)
+        link.on("pty-exited", self._on_pty_exited)
         link.on("rows", self._on_rows)
         link.on("put-away", self._on_put_away)
         state.connect_changed(self._on_state_changed)
@@ -172,6 +188,12 @@ class RemoteStore(GObject.Object):
         self._fields.clear()
         self._paged = False
         self._missing.clear()
+        self.kept_open_tabs = []
+        # The new service's table comes whole with the snapshot.
+        gone = [row.get("session") or "" for row in self._agent_ptys.values()]
+        self._agent_ptys.clear()
+        for session_id in gone:
+            self._sync_running(session_id)
 
     # -- events ---------------------------------------------------------------------
 
@@ -248,6 +270,49 @@ class RemoteStore(GObject.Object):
             self.model.splice(0, self.model.get_n_items(), items)
         self.emit("refreshed", order_changed)
 
+    def _on_pty(self, event: dict) -> None:
+        """A row of the pty table (the subscription's, ``table: true``): an
+        agent pty spawned, or resolved to a session. A view's `pty` event
+        (a size, the active client) moves nothing here."""
+        if not event.get("table") or event.get("kind") != "agent":
+            return
+        pty = int(event["pty"])
+        session_id = event.get("session") or None
+        old = self._agent_ptys.get(pty)
+        self._agent_ptys[pty] = {"session": session_id, "cwd": event.get("cwd") or ""}
+        if old is not None and old.get("session") and old["session"] != session_id:
+            self._sync_running(old["session"])
+        self._sync_running(session_id or "")
+
+    def _on_pty_exited(self, event: dict) -> None:
+        """An agent pty's child exited: its row leaves the table (the
+        subscription's word and a view's alike; the second is a no-op)."""
+        row = self._agent_ptys.pop(event.get("pty"), None)
+        if event.get("table"):
+            # A session that ended (or whose CLI left) with no tab here: a
+            # closed window's kept entry no longer stands for anything.
+            self.forget_kept_tab((row or {}).get("session"), event.get("pty"))
+        if row is not None:
+            session_id = row.get("session") or ""
+            if session_id and not self._table_runs(session_id):
+                # The table's word is the newer: an `item` field saying
+                # running from before the exit must not hold the row up
+                # until the service's own `item` lands (PR-1.12c review).
+                fields = self._fields.get(session_id)
+                if fields is not None:
+                    fields["running"] = False
+            self._sync_running(session_id)
+
+    def _sync_running(self, session_id: str) -> None:
+        """Put a row's `running` in line with what the service said of it
+        (its `item` field, or an agent pty naming it) and tell the window."""
+        item = self._items.get(session_id) if session_id else None
+        if item is not None:
+            running = self.is_running(session_id)
+            if item.running != running:
+                item.running = running
+        self.emit("running-changed", session_id)
+
     def _on_put_away(self, event: dict) -> None:
         self.emit("archived", event["session"])
 
@@ -296,11 +361,16 @@ class RemoteStore(GObject.Object):
             if prop not in fields:
                 continue
             value = fields[prop]
+            if prop == "running":
+                # The field, or a row of the pty table naming the session.
+                value = bool(value) or self._table_runs(item.session_id)
             if item.get_property(prop) == value:
                 continue
             item.set_property(prop, value)
             if announce and prop in _SIGNALLED:
                 self.emit(_SIGNALLED[prop], item.session_id, bool(value))
+            if announce and prop == "running":
+                self.emit("running-changed", item.session_id)
 
     def _reproject(self, session_ids) -> None:
         """Put a row's name and star back in line with the mirror (after an
@@ -319,6 +389,62 @@ class RemoteStore(GObject.Object):
             favorite = self.state.is_favorite(session_id)
             if item.favorite != favorite:
                 item.favorite = favorite
+
+    # -- the service's agent ptys (PR-1.12c, §3.21) ----------------------------------
+
+    def keep_open_tabs(self, entries: list[str]) -> None:
+        """Keep a closed window's `open_tabs` entries (App.keep_open_tabs)."""
+        self.kept_open_tabs += [e for e in entries if e not in self.kept_open_tabs]
+
+    def forget_kept_tab(self, session_id: str | None, pty: int | None) -> bool:
+        """Drop the kept entries naming *session_id* or ``pty:<pty>``; True
+        when one went."""
+        gone = {session_id, f"pty:{pty}" if isinstance(pty, int) else None} - {None, ""}
+        kept = [e for e in self.kept_open_tabs if e not in gone]
+        if len(kept) == len(self.kept_open_tabs):
+            return False
+        self.kept_open_tabs = kept
+        return True
+
+    def _table_runs(self, session_id: str) -> bool:
+        return any(row.get("session") == session_id for row in self._agent_ptys.values())
+
+    def is_running(self, session_id: str) -> bool:
+        """Whether an agent pty on the service runs *session_id* (its item
+        field, or a row of the pty table)."""
+        if not session_id:
+            return False
+        return bool(self._fields.get(session_id, {}).get("running")) or self._table_runs(session_id)
+
+    def pty_for(self, session_id: str) -> int | None:
+        """The agent pty running *session_id*, or the session its forward
+        chain continued under (newest first); None when none runs it."""
+        if not session_id:
+            return None
+        chain = list(reversed(self.state.forward_chain(session_id))) or [session_id]
+        for sid in chain:
+            for pty, row in sorted(self._agent_ptys.items()):
+                if row.get("session") == sid:
+                    return pty
+        return None
+
+    def agent_ptys(self) -> dict[int, dict]:
+        """Every agent pty the service runs: pty id -> ``{"session": id or
+        None, "cwd": str}`` (a copy)."""
+        return {pty: dict(row) for pty, row in self._agent_ptys.items()}
+
+    def pty_running(self, pty: int) -> bool:
+        """Whether the service still runs agent pty *pty*."""
+        return pty in self._agent_ptys
+
+    def unresolved_ptys(self) -> dict[int, str]:
+        """The agent ptys whose session is not known yet (a fresh spawn
+        the resolver has not bound, an unsandboxed fork): pty id -> cwd."""
+        return {
+            pty: row.get("cwd") or ""
+            for pty, row in self._agent_ptys.items()
+            if not row.get("session")
+        }
 
     # -- lookups ----------------------------------------------------------------------
 

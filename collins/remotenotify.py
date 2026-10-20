@@ -57,6 +57,7 @@ class RemoteNotifications(NotificationCenter):
         self._link = link
         self._holding = 0  # writes in flight: their events change, one `changed` at the end
         self._moved = False
+        self._resyncing = False  # between a `reset` and the snapshot's `resynced`
         link.on("notify", self._on_notify)
         link.on("seen", self._on_seen)
         # Who hears a counted finish (the service's verdict, D29): the app,
@@ -65,12 +66,27 @@ class RemoteNotifications(NotificationCenter):
 
     def reset(self) -> None:
         """The link was lost and is back (spec §3.20): the history is the
-        service's; the next snapshot sends every row again."""
-        self._holding = 0
-        self._moved = False
-        if self._rows:
-            self._rows.clear()
-            self._changed()
+        service's; the next snapshot sends every row again. Nothing is
+        announced until it has (`resynced`): announcing the emptied rows
+        made the app withdraw every standing desktop notification (its
+        rule: a session with no unread row left has none), which the
+        snapshot's rows then never re-sent. Held, the one `changed` at the
+        end sees the whole history as the service has it, and only a row
+        read or removed elsewhere meanwhile comes down (PR 605's review,
+        nit 7)."""
+        if not self._resyncing:
+            self._resyncing = True
+            self._hold()
+        self._moved = self._moved or bool(self._rows)  # a prior reset's emptied rows count too
+        self._rows.clear()
+
+    def resynced(self) -> None:
+        """The subscribe snapshot after a `reset` has been applied (`App.
+        _on_connected`): one `changed` for whatever moved since."""
+        if not self._resyncing:
+            return
+        self._resyncing = False
+        self._release()
 
     # -- events ---------------------------------------------------------------------
 

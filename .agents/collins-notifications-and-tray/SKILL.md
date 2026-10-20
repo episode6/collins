@@ -28,7 +28,16 @@ coalesces a bell, replaces an update), `remove`, `clear`, `set_green`
 (`notify.green`; green is still decided by the client's edges in Phase 1,
 as the tracker runs there), `rekey_session`, and the reads (`seen`, told
 to every other client), applied here first. Listeners hear one `changed`
-per write. Each client applies the delivery table below with its own
+per write. On a reconnect `reset()` empties the rows but announces
+nothing until `App._on_connected` calls `resynced()` after the subscribe
+snapshot has landed: announcing the emptied rows made the app withdraw
+every standing desktop notification (its "no unread row left" rule),
+which the snapshot never re-sent; held, the one `changed` sees the whole
+history and only a row read elsewhere meanwhile comes down. A row the
+service posted with no client (a `notify_user` from a detached session)
+arrives in that snapshot unread and is never announced on the desktop:
+the snapshot never delivers (D29's command sink is PR-3.4's). Each client
+applies the delivery table below with its own
 focus; the card, sound, desktop notification, flash, tray, dock badge and
 Caffeine are pure client. **A row's text is a msgid and args** (§3.14):
 `Notification.msgid` / `args` cross the wire and are persisted beside an

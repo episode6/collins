@@ -1088,6 +1088,7 @@ def test_a_client_attaching_after_a_landing_is_told_landed(server, tmp_path):
     assert "landed" not in record.snapshot()
     client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
     assert "landed" not in ends.of("session")[0]
+    record.session.has_running_command = lambda: True  # a detach from a shell alone would close it
     client.request({"t": "detach", "pty": pty})
     record.transcript_landed([], True)
     snapshot = record.snapshot()
@@ -1213,6 +1214,76 @@ def test_a_second_spawn_of_a_running_session_is_refused_with_its_pty(tmp_path, m
     pump(0.3)
 
 
+def test_a_fork_of_a_running_session_is_spawned_not_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    server = loopback.LoopbackServer(core)
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    origin = spawn_agent(client, tmp_path, session=session_id, command_override="sleep 300")
+    assert pump(5, lambda: core.ptys.get(origin["pty"]).has_running_command())
+    fork = spawn_agent(client, tmp_path, session=session_id, fork=True, command_override="sleep 300")
+    assert fork["pty"] != origin["pty"]
+    assert pump(5, lambda: core.ptys.get(fork["pty"]).has_running_command())
+    assert origin["pty"] in core.ptys.ptys  # the origin's pty is not closed for it
+    # The fork's pty names no session in the table: no stand-in for its origin.
+    assert core.agent_pty_sessions()[fork["pty"]] is None
+    server.shutdown()
+    pump(0.3)
+
+
+def test_opening_the_origin_while_its_fork_runs_is_not_the_forks_pty(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    server = loopback.LoopbackServer(core)
+    ends = Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    session_id = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+    fork = spawn_agent(client, tmp_path, session=session_id, fork=True, command_override="sleep 300")
+    assert pump(5, lambda: core.ptys.get(fork["pty"]).has_running_command())
+    origin = spawn_agent(client, tmp_path, session=session_id)
+    assert origin["pty"] != fork["pty"]
+    assert fork["pty"] in core.ptys.ptys  # neither refused with nor closed for
+    server.shutdown()
+    pump(0.3)
+
+
+def test_a_session_whose_cli_exited_leaves_the_table(app_state, projects_dir, tmp_path, monkeypatch):
+    """The shell alone on an agent pty is no running session: its row
+    leaves the table (a table `pty-exited`, the pty itself alive) and the
+    item's `running` goes off; the CLI coming back puts it back."""
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    _root, ids = projects_dir
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        pty = spawn_agent(client, tmp_path, session=ids["alpha1"], command_override="sleep 2")["pty"]
+        record = core.sessions[pty]
+        assert pump(5, lambda: record.session.has_running_command())
+        record.refresh_process_facts()
+        assert core.running_sessions() == {ids["alpha1"]}
+        assert pump(6, lambda: not record.session.has_running_command())
+        record.refresh_process_facts()
+        assert pty in core.ptys.ptys  # the shell lives on
+        assert core.running_sessions() == set()
+        assert any(e.get("table") and e["pty"] == pty and e["status"] is None for e in ends.of("pty-exited"))
+        moved = [e for e in ends.of("item") if e["session"] == ids["alpha1"] and "running" in e]
+        assert moved[-1]["running"] is False
+        assert core.table_row(pty) is None
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
 def test_spawned_shells_never_see_the_probe_or_systemd_variables(server, tmp_path, monkeypatch):
     monkeypatch.setenv("COLLINS_DEBUG_API", "1")
     monkeypatch.setenv("NOTIFY_SOCKET", "/run/x")
@@ -1279,6 +1350,238 @@ def test_stop_sessions_runs_the_close_flow_and_kills_a_child_that_ignores_sighup
     pump(0.3)
 
 
+def _closing_server(tmp_path, monkeypatch):
+    """A core on /bin/sh with the force budgets cut to two ticks and a
+    short kill grace, and an attached agent whose typed command ignores
+    Ctrl+C in a group of its own: the graceful close can only run out."""
+    from collins.service import ptyserver
+    from collins.service import session as session_mod
+
+    monkeypatch.setenv("SHELL", "/bin/sh")
+    monkeypatch.setattr(session_mod, "EXIT_FORCE_TICKS", 2)
+    monkeypatch.setattr(session_mod, "BG_FORCE_TICKS", 2)
+    monkeypatch.setattr(session_mod, "EXIT_NUDGE_TICKS", ())
+    monkeypatch.setattr(session_mod, "BG_NUDGE_TICKS", ())
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    reply = client.request({
+        "t": "spawn", "kind": "agent", "cwd": str(tmp_path), "cols": 80, "rows": 24,
+        "command_override": "sh -c 'trap \"\" INT; exec sleep 300'",
+    })
+    pty = reply["pty"]
+    client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+    return srv, core, client, ends, pty
+
+
+@pytest.mark.parametrize("mode", ["exit", "background"])
+@pytest.mark.parametrize("leave", ["client_gone", "detach"])
+def test_a_close_budget_with_no_client_attached_ends_the_pty(tmp_path, monkeypatch, mode, leave):
+    """PR 605's review, must-fix 1 (the reviewer's probe): a graceful close
+    whose client went away mid-drain — the tab detached, the quit insisted
+    on, the client crashed. The budget used to be told to the attachments
+    alone, so with none the poll ended and the CLI the user asked to stop
+    ran on for good. The service now forces the close itself: the pty and
+    its child are gone after the budget, the record's `closing` is False.
+    For the exit flow and the /bg handoff's alike."""
+    srv, core, client, ends, pty = _closing_server(tmp_path, monkeypatch)
+    try:
+        child = core.ptys.get(pty).child_pid()
+        job = core.ptys.get(pty).foreground_pgrp()
+        record = core.sessions[pty]
+        client.request({"t": "close", "pty": pty, "mode": mode, "text": "\x03\x03"})
+        assert record.session.closing
+        if leave == "client_gone":
+            client.close()
+        else:
+            client.request({"t": "detach", "pty": pty})
+        assert not core.ptys.get(pty).attachments
+        assert pump(10, lambda: pty not in core.ptys.ptys), "the pty outlived the budget"
+        assert record.session.closing is False
+        assert pump(5, lambda: not _live_in_group(job)), _live_in_group(job)
+        assert not os.path.exists(f"/proc/{child}") or open(f"/proc/{child}/stat").read().split()[2] == "Z"
+        assert not any(e.get("state") == "budget" for e in ends.of("close"))
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_close_budget_told_to_a_client_that_then_leaves_is_forced(tmp_path, monkeypatch):
+    """The budget ran out with the client attached (the `close` event went
+    to it, the window would force the close) and the client detached
+    before answering: the last detach is what forces it."""
+    srv, core, client, ends, pty = _closing_server(tmp_path, monkeypatch)
+    try:
+        record = core.sessions[pty]
+        client.request({"t": "close", "pty": pty, "mode": "exit", "text": "\x03\x03"})
+        assert pump(5, lambda: any(e.get("state") == "budget" for e in ends.of("close")))
+        pump(0.5)
+        assert pty in core.ptys.ptys and record.session.closing and record.budget_spent
+        client.request({"t": "detach", "pty": pty})
+        assert pump(5, lambda: pty not in core.ptys.ptys)
+        assert record.session.closing is False and record.budget_spent is False
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_shells_exit_ends_a_close_in_flight(tmp_path, monkeypatch):
+    """Nit 11: `closing` stayed True on a record whose shell had exited
+    mid-close (harmless, misleading in a dump); `shell_exited` ends it."""
+    srv, core, client, ends, pty = _closing_server(tmp_path, monkeypatch)
+    try:
+        record = core.sessions[pty]
+        client.request({"t": "close", "pty": pty, "mode": "exit", "text": "\x03\x03"})
+        assert record.session.closing
+        core.ptys.close(pty)  # the pty ends under the close, as a kill would
+        assert pump(5, lambda: pty not in core.ptys.ptys)
+        assert record.session.closing is False
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def _orphan_rig(tmp_path, monkeypatch, hold_s=1.5, shell="/bin/sh"):
+    """A core on *shell* with the shell-alone startup hold cut to *hold_s*
+    and a short kill grace; the caller spawns."""
+    from collins.service import hosting, ptyserver
+
+    monkeypatch.setenv("SHELL", shell)
+    monkeypatch.setattr(ptyserver, "CLOSE_GRACE_MS", 500)
+    monkeypatch.setattr(hosting, "ORPHAN_HOLD_S", hold_s)
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    srv = loopback.LoopbackServer(core)
+    ends = Client()
+    client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+    return srv, core, client, ends
+
+
+@pytest.mark.parametrize("leave", ["detach", "client_gone"])
+def test_a_shell_alone_nobody_shows_is_closed_at_the_holds_end(tmp_path, monkeypatch, leave):
+    """PR 605's verification: a CLI that never came up (no `claude`, a bad
+    `claude_cli_path`, a failed sandbox launch) left a shell the client's
+    `cli_exited()` could not tell from a CLI still starting, so a plain
+    Quit detached it and recorded it; on the service it was a shell alone
+    with no attachment and no running row, closed only by a resume of that
+    session, so it was orphaned for the service's life. The last client's
+    detach (or its departure) from an agent pty whose CLI is not running
+    closes the pty — after the startup hold, since a CLI never seen running
+    may still be the shell's rc before it forks the typed command."""
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch)
+    try:
+        # The typed command is `true`: the "CLI" never comes up, the shell is alone.
+        pty = spawn_agent(client, tmp_path)["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        screen = core.ptys.get(pty).screen
+        assert pump(3, lambda: "true" in screen.capture_contents())
+        assert not core.ptys.get(pty).has_running_command()
+        record = core.sessions[pty]
+        if leave == "detach":
+            client.request({"t": "detach", "pty": pty})
+        else:
+            client.close()
+        assert record._orphan_recheck is not None  # held, one re-check scheduled
+        pump(0.8)
+        assert pty in core.ptys.ptys  # inside the hold: kept
+        assert pump(5, lambda: pty not in core.ptys.ptys), "the shell alone outlived the hold"
+        assert pump(3, lambda: pty not in core.sessions)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_launch_whose_cli_comes_up_inside_the_hold_is_kept(tmp_path, monkeypatch):
+    """The window the hold is for: a detach (or a client crash) right after
+    a new-chat Send, while the shell still runs its rc. `sleep 1; exec sleep
+    300` is that shell: no command of its own for a second, then the 'CLI'.
+    Detached at once, the launch is kept, and still there after the hold.
+    The slow rc is a wrapper shell that sleeps in the shell's own group (no
+    job of its own, so `has_running_command` is False, as under a real rc),
+    then execs /bin/sh, which runs the typed command."""
+    slow = tmp_path / "slowsh"
+    slow.write_text('#!/bin/sh\nsleep 1\nexec /bin/sh "$@"\n')
+    slow.chmod(0o755)
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch, shell=str(slow))
+    try:
+        pty = spawn_agent(client, tmp_path, command_override="sleep 300")["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        client.request({"t": "detach", "pty": pty})
+        record = core.sessions[pty]
+        assert pty in core.ptys.ptys and record._orphan_recheck is not None
+        assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+        pump(1.8)  # past the hold's end and its re-check
+        assert pty in core.ptys.ptys and record._orphan_recheck is None
+        assert record.cli_ever_ran
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_detached_sessions_cli_leaving_by_itself_closes_the_shell(tmp_path, monkeypatch):
+    """The other way round: the session is detached while its CLI runs,
+    then the CLI quits on its own. The table says so (`pty-exited`, status
+    null, `table: true`) and the shell alone goes with it at once — no hold,
+    the CLI was seen running; nobody was attached, so nothing else would
+    ever close it."""
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch, hold_s=600.0)
+    try:
+        pty = spawn_agent(client, tmp_path, command_override="sleep 2")["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        assert pump(5, lambda: core.ptys.get(pty).has_running_command())
+        assert core.sessions[pty].cli_ever_ran
+        client.request({"t": "detach", "pty": pty})
+        pump(0.3)
+        assert pty in core.ptys.ptys  # the CLI runs: a detached session, not an orphan
+        # (The table's `pty-exited` goes to subscribers; this client is none.)
+        assert pump(10, lambda: pty not in core.ptys.ptys), "the shell left by the CLI outlived it"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_an_attach_inside_the_hold_cancels_the_recheck(tmp_path, monkeypatch):
+    srv, core, client, ends = _orphan_rig(tmp_path, monkeypatch)
+    try:
+        pty = spawn_agent(client, tmp_path)["pty"]
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        client.request({"t": "detach", "pty": pty})
+        record = core.sessions[pty]
+        assert record._orphan_recheck is not None
+        client.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+        assert record._orphan_recheck is None
+        pump(2.0)  # past where the hold would have ended
+        assert pty in core.ptys.ptys  # shown: kept
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_shown_shell_and_a_closing_one_are_left_alone(server, tmp_path):
+    """The rule's edges: a shell alone a client still shows stays (a tab
+    at the shell prompt), and a pty mid-close is the close flow's."""
+    ends, other = Client(), Client()
+    client = server.connect(ends.on_output, ends.on_event, device="laptop")
+    second = server.connect(other.on_output, other.on_event, device="desk")
+    pty, _screen = _ready_agent(server, client, tmp_path)
+    second.request({"t": "attach", "pty": pty, "cols": 80, "rows": 24})
+    record = server.core.sessions[pty]
+    record.cli_ever_ran = True  # past the startup hold's question
+    client.request({"t": "detach", "pty": pty})
+    pump(0.3)
+    assert pty in server.core.ptys.ptys  # the second client shows it
+    record.session.closing = True
+    second.request({"t": "detach", "pty": pty})
+    pump(0.3)
+    assert pty in server.core.ptys.ptys  # a close flow owns it
+    record.session.closing = False
+    assert record.close_if_orphan_shell("the test asks") is True
+    assert record.close_if_orphan_shell("asked again") is False  # the master is gone: no second force
+    assert pump(3, lambda: pty not in server.core.ptys.ptys)
+
+
 def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):
     """The CLI exited and the shell sits on the pty (a quit before
     1.12c's attach): the resume is not refused; the old pty is closed and
@@ -1292,3 +1595,139 @@ def test_a_resume_of_a_shell_only_pty_closes_it_and_spawns(server, tmp_path):
     assert second["pty"] != first["pty"]
     assert pump(5, lambda: first["pty"] not in server.core.ptys.ptys)
     assert second["pty"] in server.core.ptys.ptys
+
+
+# -- the lifecycle (PR-1.12c, §3.21) ----------------------------------------------------
+
+
+class _Busy:
+    """A tracker stand-in: `busy_count` is whatever the test says."""
+
+    def __init__(self, count):
+        self.count = count
+
+    def busy_count(self):
+        return self.count
+
+    def stop(self):
+        pass
+
+
+def test_a_restart_when_idle_waits_for_no_session_busy(server, monkeypatch):
+    core = server.core
+    monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+    core.activity = _Busy(2)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    assert core.restart_pending
+    pump(0.2)
+    assert restarted == []  # still busy: it waits
+    core.activity.count = 0
+    assert pump(1, lambda: restarted == [True])
+    assert not core.restart_pending
+    pump(0.1)
+    assert restarted == [True]  # once
+
+
+def test_a_restart_when_idle_is_called_off_by_cancel(server, monkeypatch):
+    core = server.core
+    monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+    core.activity = _Busy(1)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    assert core.cancel_restart() is True
+    core.activity.count = 0
+    pump(0.2)
+    assert restarted == [] and not core.restart_pending
+    assert core.cancel_restart() is False  # nothing waits
+
+
+def test_a_restart_when_idle_with_nothing_busy_restarts_at_once(server):
+    core = server.core
+    core.activity = _Busy(0)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    assert restarted == [True] and not core.restart_pending
+
+
+def test_the_pty_table_names_the_sessions_and_goes_to_subscribers(
+    app_state, projects_dir, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("SHELL", "/bin/sh")  # a real shell: the typed CLI runs
+    _root, ids = projects_dir
+    service_state = app_state.AppState(migrate=True, device=False)
+    core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
+    store = SessionStore(service_state)
+    core.start_store(store)
+    store._last_sessions = discover_sessions()
+    store._apply()
+    srv = loopback.LoopbackServer(core)
+    try:
+        ends = Client()
+        client = srv.connect(ends.on_output, ends.on_event, device="laptop")
+        client.request({"t": "subscribe"})
+        assert all(e.get("running") is False for e in ends.of("item"))
+        resumed = spawn_agent(client, tmp_path, session=ids["alpha1"], command_override="sleep 300")["pty"]
+        fresh = spawn_agent(client, tmp_path, command_override="sleep 300")["pty"]
+        # No row until the CLI runs (the /proc poll's word, read by hand here).
+        for pty in (resumed, fresh):
+            record = core.sessions[pty]
+            assert pump(5, lambda record=record: record.session.has_running_command())
+            record.refresh_process_facts()
+        rows = {e["pty"]: e for e in ends.of("pty") if e.get("table")}
+        assert rows[resumed]["session"] == ids["alpha1"] and rows[resumed]["kind"] == "agent"
+        assert "session" not in rows[fresh]  # not resolved yet: no id
+        assert core.running_sessions() == {ids["alpha1"]}
+        running = [e for e in ends.of("item") if e["session"] == ids["alpha1"] and "running" in e]
+        assert running and running[-1]["running"] is True
+        # A second subscriber's snapshot carries both rows, table-flagged.
+        later = Client()
+        other = srv.connect(later.on_output, later.on_event, device="desktop")
+        other.request({"t": "subscribe"})
+        snapshot = {e["pty"]: e for e in later.of("pty")}
+        assert set(snapshot) >= {resumed, fresh} and all(e.get("table") for e in snapshot.values())
+        item = [e for e in later.of("item") if e["session"] == ids["alpha1"]][0]
+        assert item["running"] is True
+        # The exit: the table's word to every subscriber, and running off.
+        client.request({"t": "close", "pty": resumed, "mode": "kill"})
+        assert pump(8, lambda: any(
+            e.get("table") and e["pty"] == resumed for e in ends.of("pty-exited")
+        ))
+        assert core.running_sessions() == set()
+
+        def last_running():
+            moved = [e for e in ends.of("item") if e["session"] == ids["alpha1"] and "running" in e]
+            return moved[-1]["running"]
+
+        assert pump(2, lambda: last_running() is False)
+        for event in ends.of("pty") + ends.of("pty-exited"):
+            assert isinstance(protocol.validate(dict(event), protocol.SERVICE), protocol.Message)
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_a_restart_now_after_idle_does_not_fire_the_idle_one_too(server, monkeypatch):
+    core = server.core
+    monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+    core.activity = _Busy(1)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append("idle"))
+    # `now` cancels the waiting one first (api.server.ApiServer.restart).
+    assert core.cancel_restart() is True
+    restarted.append("now")
+    core.activity.count = 0
+    pump(0.2)
+    assert restarted == ["now"]
+
+
+def test_shutdown_cancels_a_waiting_restart(tmp_path, monkeypatch):
+    core = ServiceCore(state_dir=tmp_path / "pty", get_setting=lambda key: True)
+    monkeypatch.setattr(core, "RESTART_POLL_MS", 20)
+    core.activity = _Busy(1)
+    restarted = []
+    core.restart_when_idle(lambda: restarted.append(True))
+    core.shutdown()
+    core.activity = _Busy(0)
+    pump(0.2)
+    assert restarted == [] and not core.restart_pending

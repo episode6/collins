@@ -122,6 +122,11 @@ class ClientSession:
         self.cwd = cwd
         self.transcript_path: str | None = str(jsonl_path) if jsonl_path else None
         self.exited = False
+        # Whether a `session` event has ever said the CLI owns the terminal
+        # (`running_command` True): until then a fresh spawn or an attach is
+        # a tab whose CLI is still coming up, not a shell left after it
+        # (`cli_exited`; PR 605's review, should-fix 5).
+        self.cli_seen = False
         self.cut_refusal: str | None = None  # the last `cut` request's refusal msgid (D55)
         for name, value in _FIELD_DEFAULTS.items():
             if name == "transcript_path":
@@ -167,6 +172,8 @@ class ClientSession:
                 attr = name
             if attr not in _SETTABLE:
                 continue  # a newer service's field: no home for it here (rule 5)
+            if attr == "running_command" and value:
+                self.cli_seen = True
             if getattr(self, attr, _MISSING) != value:
                 setattr(self, attr, value)
                 changed.add(attr)
@@ -241,6 +248,17 @@ class ClientSession:
 
     def has_running_command(self) -> bool:
         return bool(self.running_command) and not self.exited
+
+    def cli_exited(self) -> bool:
+        """Whether the CLI has come and gone: the pty exited, or the shell
+        has the terminal back after the CLI was once seen owning it. False
+        for a spawn or an attach whose first facts have not landed yet
+        (`running_command` is False until the CLI's first output settles,
+        about a second after the spawn): such a tab is an open session, not
+        a shell alone, to the quit's rules (`quitrules`)."""
+        if self.exited:
+            return True
+        return self.cli_seen and not self.running_command
 
     def agent_is_running(self) -> bool:
         return bool(self.agent_running) and not self.exited
