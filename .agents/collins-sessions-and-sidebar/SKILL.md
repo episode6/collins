@@ -557,7 +557,13 @@ before the store's first scan, a planted link never followed; a scan that
 listed no session at all is not trusted and the thread checks the projects
 directory is readable before it scans the uploads — `providers.discover`
 answers `[]` when `~/.claude/projects` is not there, and an unmount must
-not read as every session gone). An empty
+not read as every session gone; and the sessions and the uploads must be
+of one world, `uploads.sweep_refusal`: with the projects directory
+anything but the CLI's own — `COLLINS_PROJECTS_DIR`, every check, capture
+and test — the sweep is refused, logged once, unless `COLLINS_UPLOADS_DIR`
+names the uploads, since staged sessions would make every real upload an
+orphan; `XDG_DATA_HOME` alone does not count, and `start-debug`, on the
+real projects directory, sweeps as the user's instance does). An empty
 upload is refused (400), and one past 64 MiB is 413 on
 its headers with the body drained, never held (`set_accumulate(False)` in
 the early handler).

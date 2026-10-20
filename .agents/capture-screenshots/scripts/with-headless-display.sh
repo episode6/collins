@@ -38,10 +38,25 @@ if [ "$#" -eq 0 ]; then
     exit 2
 fi
 
+# Everything run through this wrapper is a scratch instance on staged
+# sessions, and its service judges upload directories by the sessions it
+# knows: left on the default root it would read the user's real
+# ~/.local/share/collins/uploads. A caller that set COLLINS_UPLOADS_DIR keeps
+# it; otherwise the uploads go to a scratch directory removed on the way out.
+# (The service also refuses that sweep by itself, uploads.sweep_refusal.)
+uploads_scratch=
+if [ -z "${COLLINS_UPLOADS_DIR:-}" ]; then
+    uploads_scratch=$(mktemp -d -t collins-headless-uploads-XXXXXX)
+    export COLLINS_UPLOADS_DIR="$uploads_scratch"
+    # Until the compositor's own cleanup trap replaces it below.
+    trap 'rm -rf "$uploads_scratch"' EXIT
+fi
+
 if ! command -v gnome-shell >/dev/null 2>&1 || ! command -v dbus-run-session >/dev/null 2>&1; then
     echo "with-headless-display: gnome-shell/dbus-run-session not found;" \
          "running on the current display (a window will appear)" >&2
-    exec "$@"
+    "$@"
+    exit $?
 fi
 
 size=${HEADLESS_SIZE:-1920x1200}
@@ -65,6 +80,7 @@ cleanup() {
     kill -KILL -"$shell_pgid" 2>/dev/null
     # The shell doesn't remove its own socket on the way out.
     rm -f "$log" "$runtime/$wl_name" "$runtime/$wl_name.lock"
+    [ -n "$uploads_scratch" ] && rm -rf "$uploads_scratch"
 }
 trap cleanup EXIT INT TERM
 
@@ -76,7 +92,8 @@ if [ ! -S "$runtime/$wl_name" ]; then
     echo "with-headless-display: compositor never came up, see below;" \
          "running on the current display instead" >&2
     tail -5 "$log" >&2
-    exec "$@"
+    "$@"
+    exit $?
 fi
 
 WAYLAND_DISPLAY="$wl_name" GDK_BACKEND=wayland DISPLAY= "$@"

@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-13. Full change history: git log for this file.
+fork. Last modified: 2026-10-18. Full change history: git log for this file.
 -->
 
 # Features
@@ -501,8 +501,27 @@ A syntax-highlighted code editor lives beside the agent terminal — the
 - Real editing: line numbers, bracket matching, undo/redo, find in file
   (`Ctrl+F`), save (`Ctrl+S`), and **180 languages'** worth of syntax
   highlighting via GtkSourceView — the engine behind GNOME Text Editor. The
-  tree's right-click menu covers rename, copy, cut and paste, through the
-  system clipboard, so files round-trip with your file manager — and, on a
+  tree's right-click menu covers rename, copy, cut and paste, carried out
+  by the service (a rename stays in its folder and never lands on a taken
+  name; a paste never overwrites, landing as "name (copy)" instead — and
+  that holds against the agent writing in the same folder at the same
+  moment, not only against your own clicks; a cut moves, and an open file
+  follows its rename or move with its unsaved edits; a big folder copy
+  takes as long as it takes, with the rest of the window live, and
+  appears whole or not at all: it is built under a hidden
+  `.collins-…` name beside where it will land and renamed when it is
+  complete. A folder holding something that cannot be copied (a socket,
+  a pipe, a file you cannot read) still lands, without that entry, and
+  the message says which. A failed copy removes that folder itself; if
+  the service is stopped while a copy is still running, the hidden
+  folder stays, and it is an unfinished copy that is safe to delete,
+  which later copies of that folder leave out; it also stays, around
+  that folder, when another program moved a folder of its own into the
+  copy while it was being built). Copies
+  travel through the system clipboard as Collins' own
+  `collins://` references to the service's files — and, when the service is
+  this machine, as ordinary file URIs too, so files round-trip with your
+  file manager — and, on a
   file (an Agent files row too), the same **Open In…** submenu as the git
   page's files list: your *Footer apps* that take a file, then *Default
   app* (`xdg-open`).

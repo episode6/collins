@@ -443,3 +443,34 @@ def test_upload_png_names_the_texture_by_prefix_and_lands_the_path_or_the_error(
     monkeypatch.setattr(remoteuploads.apilink, "current", lambda: Link(status=500))
     remoteuploads.upload_png(b"\x89PNG", "drop", None, lambda path, error: done.append((path, error)))
     assert done[-1] == (None, "The service refused the upload (500).")
+
+
+# -- the orphan sweep's gate: the sessions and the uploads from one world --------------------
+
+
+def test_the_orphan_sweep_is_refused_on_staged_sessions_without_its_own_uploads(tmp_path, monkeypatch):
+    """The 612 follow-up of the PR 613 verification: a scratch service on a
+    staged projects directory knows none of the user's sessions, so on an
+    uploads root nothing named for it, it would read every real upload
+    directory as an orphan. Only `COLLINS_UPLOADS_DIR` names it:
+    `XDG_DATA_HOME` may be the user's own export."""
+    real = tmp_path / "home" / ".claude" / "projects"
+    staged = tmp_path / "staged" / "projects"
+    monkeypatch.delenv("COLLINS_UPLOADS_DIR", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    # The user's instance, and `start-debug`'s (the real projects directory): never refused.
+    assert uploads.sweep_refusal(real, real) is None
+    assert uploads.sweep_refusal(str(real) + "/", real) is None
+    # The real directory named another way is still the real one: through
+    # `..`, and through a symlinked home.
+    real.mkdir(parents=True)
+    assert uploads.sweep_refusal(real.parent / "x" / ".." / "projects", real) is None
+    (tmp_path / "link-home").symlink_to(tmp_path / "home")
+    assert uploads.sweep_refusal(tmp_path / "link-home" / ".claude" / "projects", real) is None
+    assert uploads.sweep_refusal(real, tmp_path / "link-home" / ".claude" / "projects") is None
+    refusal = uploads.sweep_refusal(staged, real)
+    assert refusal and "COLLINS_UPLOADS_DIR" in refusal and str(staged) in refusal
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    assert uploads.sweep_refusal(staged, real)  # not enough: a user may export it for real
+    monkeypatch.setenv("COLLINS_UPLOADS_DIR", str(tmp_path / "uploads"))
+    assert uploads.sweep_refusal(staged, real) is None
