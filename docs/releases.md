@@ -38,6 +38,14 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **The service finds the `claude` CLI.** Whether there is one, where it
+  is and what a typed path is worth are asked of the service, which runs
+  the CLI with your login shell's `PATH`: the **Before you start**
+  dialog's CLI group, its pre-fill and verdict, and the CLI row in
+  Preferences. A path you give is put on the service's `PATH` at once
+  (and taken off when you clear it), not at its next start. Fixes the
+  dialog opening on the "where is claude" ask at every launch of a window
+  started without `~/.local/bin` on its `PATH`. Browse is a local extra.
 - **The window opens no file of the service's; the local extras know when
   they apply.** The last chunk of the split's Phase 2. *Export as
   Markdown…* asks the service for the rendered transcript and writes the

@@ -168,7 +168,9 @@ only; `generate.py`'s long lines are expected.
 - `AppState.save()` persists every default; a test asserting on a "missing"
   key after a save is wrong.
 - Preferences' CLI row and the welcome dialog share `welcome.MARKS` /
-  `reason_for` so both judge paths identically.
+  `reason_for` so both judge paths identically, and both ask the service
+  for the verdict (`remotecli.check`, asynchronous: a verdict on text the
+  box no longer holds is dropped).
 - A `Gtk.Settings` change (`gtk-label-select-on-focus` off) lives in
   `app.apply_gtk_settings`; the effort/model pickers and every other
   `Gio.Menu` popover must be hosted by a `Gtk.MenuButton` (a hand-parented one

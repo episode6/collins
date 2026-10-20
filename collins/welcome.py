@@ -15,7 +15,9 @@ Toggling writes the setting at once, as Preferences does, so Escape after a
 toggle loses nothing; Continue (or a close) records the dialog as seen.
 The gate is welcomegate.should_show, GTK-free so the unit suite holds it.
 
-The dialog's first group is the CLI, in one of two states. Found on PATH:
+The dialog's first group is the CLI, in one of two states, both the
+service's word (remotecli: the CLI runs where the service runs, so this
+window's own PATH and disk are never asked). Found on the service's PATH:
 one row naming which `claude` Collins is using, so a wrong auto-detect is
 visible. Not found: the ask the CLI-only welcome used to be (see clisetup
 for why a desktop launch so often can't find it, and for what counts as a
@@ -27,13 +29,14 @@ or quit out of.
 
 The answer is a path, so the group is a path box: pre-filled from the
 places the CLI is known to land when one of them has it, a Browse button
-for when none does, and a live verdict beside it — a green check for a
-path that will work, a red cross for one that won't, with the reason
-underneath. The verdict is clisetup.validate()'s, which refuses
+for when none does (on a client that shares the service's disk), and a
+live verdict beside it — a green check for a path that will work, a red
+cross for one that won't, with the reason underneath. The verdict is
+clisetup.validate()'s, asked of the service (`cli.check`), which refuses
 version-numbered paths (they die on the CLI's next self-update) and never
 resolves symlinks (the stable launcher *is* a symlink; resolving it would
-store the very path just refused). Accepting stores the path, puts its
-directory on the app's PATH, and sets the world in motion exactly as a
+store the very path just refused). Accepting stores the path, which the
+service puts on its PATH as the write lands, and sets the world in motion exactly as a
 CLI-found launch would have: the session store rescans, the remembered
 session reopens, and the rest of the launch's welcome-work gets its turn.
 """
@@ -49,7 +52,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gtk  # noqa: E402
 
-from . import clisetup, tokensettings, welcomegate  # noqa: E402
+from . import apilink, clisetup, remotecli, tokensettings, welcomegate  # noqa: E402
 from .i18n import _  # noqa: E402
 from .state import AppState  # noqa: E402
 
@@ -99,12 +102,12 @@ def maybe_show(window, state: AppState, store, then: Callable[[], None]):
     launch check from being refused for nothing.) Returns the dialog, or
     None when nothing showed.
     """
-    cli_found = clisetup.on_path()
+    cli_found = not remotecli.missing()
     if not welcomegate.should_show(state, cli_found):
         then()
         return None
     if not cli_found:
-        log.info("clisetup: claude CLI not on PATH; asking where it is")
+        log.info("clisetup: the service has no claude CLI; asking where it is")
     log.info("welcome: showing the first-launch dialog")
     dialog = WelcomeDialog(window, state, store, then, cli_found)
     dialog.present(window)
@@ -120,10 +123,11 @@ def show(window, state: AppState, store) -> WelcomeDialog:
     and answering it records ``welcome_seen`` exactly as a launch's would
     (a no-op too: every launch that offers the item has it set, or is
     showing the dialog already). The CLI state is the real one: with no
-    `claude` on PATH this is the not-found dialog, Quit and all.
+    `claude` on the service's PATH this is the not-found dialog, Quit and
+    all.
     """
     log.info("welcome: showing the dialog on demand")
-    dialog = WelcomeDialog(window, state, store, lambda: None, clisetup.on_path())
+    dialog = WelcomeDialog(window, state, store, lambda: None, not remotecli.missing())
     dialog.present(window)
     return dialog
 
@@ -152,6 +156,10 @@ class WelcomeDialog(Adw.Dialog):
         self._cli_found = cli_found
         self._done = False  # answered (seen recorded, then() run)
         self._quit = False  # Quit pressed: closing must not count as an answer
+        # The service's last verdict and the text it was on: Continue takes
+        # only a path the service judged as it now reads.
+        self._status: str | None = None
+        self._judged: str | None = None
 
         # The button first: the CLI group's prefilled path judges itself as
         # it is set, and the verdict is what the button says.
@@ -184,6 +192,8 @@ class WelcomeDialog(Adw.Dialog):
             quit_button = Gtk.Button(label=_("Quit"))
             quit_button.connect("clicked", self._on_quit)
             bar.pack_start(quit_button)
+            # What the button says until the service's first verdict lands.
+            self._button.set_label(_("Use This CLI"))
             self._update_verdict()
         else:
             self._button.set_label(_("Continue"))
@@ -208,7 +218,7 @@ class WelcomeDialog(Adw.Dialog):
             # Preferences has the row that changes it.
             group = Adw.PreferencesGroup(title=_("Claude Code CLI"))
             row = Adw.ActionRow(
-                title=_("Using claude at {path}").format(path=clisetup.found_at()),
+                title=_("Using claude at {path}").format(path=remotecli.found_at() or "claude"),
                 subtitle=_("Change it later in Preferences"),
                 activatable=False,
                 selectable=False,
@@ -232,11 +242,14 @@ class WelcomeDialog(Adw.Dialog):
         )
         self._entry = Adw.EntryRow(title=_("Path to the claude executable"))
         self._verdict = Gtk.Image(valign=Gtk.Align.CENTER)
-        browse = Gtk.Button(label=_("Browse…"), valign=Gtk.Align.CENTER)
-        browse.add_css_class("flat")
-        browse.connect("clicked", self._on_browse)
         self._entry.add_suffix(self._verdict)
-        self._entry.add_suffix(browse)
+        # A chooser picks a path of this device: the service's only when
+        # the two share a disk (a local extra: hidden, not disabled).
+        if apilink.is_local():
+            browse = Gtk.Button(label=_("Browse…"), valign=Gtk.Align.CENTER)
+            browse.add_css_class("flat")
+            browse.connect("clicked", self._on_browse)
+            self._entry.add_suffix(browse)
         self._entry.connect("changed", lambda *_a: self._update_verdict())
         group.add(self._entry)
         # The verdict's reason, directly under the box: a title-less row in
@@ -245,7 +258,8 @@ class WelcomeDialog(Adw.Dialog):
         self._reason.add_css_class("dim-label")
         group.add(self._reason)
         group.add(_install_hint())
-        prefilled = clisetup.detect()
+        # The known locations on the service's machine, where the CLI runs.
+        prefilled = remotecli.detect()
         if prefilled:
             self._entry.set_text(prefilled)  # fires "changed" → first verdict
             self._entry.set_position(-1)
@@ -276,11 +290,20 @@ class WelcomeDialog(Adw.Dialog):
     # -- the CLI ask ---------------------------------------------------------
 
     def _update_verdict(self) -> None:
-        """Re-judge the path on every keystroke: the mark, the reason, and
-        what the accept button is — Use This CLI, disabled, for a path that
-        won't do; Continue for one that will. One button, two labels."""
+        """Re-judge the path on every keystroke, on the service (the path
+        is one of its machine): until it answers, the button waits."""
         text = self._entry.get_text()
-        status = clisetup.validate(text)
+        self._button.set_sensitive(False)
+        remotecli.check(text, lambda status: self._show_verdict(text, status))
+
+    def _show_verdict(self, text: str, status: str) -> None:
+        """The service's verdict: the mark, the reason, and what the accept
+        button is — Use This CLI, disabled, for a path that won't do;
+        Continue for one that will. One button, two labels. A verdict on
+        text the box no longer holds is dropped (a later one is coming)."""
+        if self._done or text != self._entry.get_text():
+            return
+        self._status, self._judged = status, text
         icon, style = MARKS.get(status, BAD_MARK)
         self._verdict.set_from_icon_name(icon)
         for name in ("success", "warning", "error"):
@@ -322,7 +345,7 @@ class WelcomeDialog(Adw.Dialog):
             self.close()  # → "closed" → _on_closed records the answer
             return
         text = self._entry.get_text().strip()
-        if clisetup.validate(text) not in MARKS:
+        if self._judged is None or self._judged.strip() != text or self._status not in MARKS:
             return  # the button is insensitive; a default-widget Enter isn't
         self._done = True
         # can_close=False would refuse this click's own close, so take the
@@ -331,12 +354,11 @@ class WelcomeDialog(Adw.Dialog):
         self.force_close()
         # Stored as given — unexpanded, unresolved — so the stable launcher
         # the user pointed at is the thing remembered, not tonight's version
-        # of it.
+        # of it. The service puts it on its PATH as the write lands; the
+        # refresh behind it hears where its lookup lands now.
         self._state.set_setting(clisetup.PATH_SETTING, text)
-        if clisetup.apply(text):
-            log.info("clisetup: claude CLI confirmed at %s", text)
-        else:  # validated a moment ago; only a same-instant uninstall gets here
-            log.warning("clisetup: %s accepted but claude still not findable", text)
+        log.info("clisetup: claude CLI confirmed at %s", text)
+        remotecli.refresh()
         self._state.set_setting(SEEN_SETTING, True)
         # Now the launch that would have happened, happens: rescan (which
         # also arms the file monitors), reopen the remembered session, and

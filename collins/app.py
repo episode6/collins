@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-12. Full change history: git log for this file.
+# fork. Last modified: 2026-10-20. Full change history: git log for this file.
 
 """Application entry point."""
 
@@ -37,6 +37,7 @@ from . import (
     notifysound,
     prmenu,
     ptyclient,
+    remotecli,
     remotediffs,
     remotefiles,
     remotegit,
@@ -2256,12 +2257,14 @@ class App(Adw.Application):
         """The sandbox probe's verdict so far (the service's; a client never
         probes): what the sidebar, the new-chat screen and Preferences
         read (sandboxstatus). Asked at connect and again after a reconnect;
-        the `sandbox what=probe` event keeps it between."""
+        the `sandbox what=probe` event keeps it between. And where the
+        service's claude CLI is, which the welcome gate reads (remotecli)."""
         try:
             status = self._service_link.call({"t": "service.status"})
         except RequestRefused:
             status = {}
         sandboxstatus.set_probe_reason(status.get("sandbox"))
+        remotecli.set_found(status.get("cli"))
 
     # -- the connection's life (§3.20) ------------------------------------------
 

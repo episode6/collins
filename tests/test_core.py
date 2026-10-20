@@ -2055,6 +2055,69 @@ def test_the_poll_setting_written_by_a_client_reaches_the_poller(app_state, proj
         pump(0.3)
 
 
+@pytest.fixture
+def cli_dir(tmp_path, monkeypatch):
+    """A `claude` in a folder of its own, off a PATH of /usr/bin alone, and
+    no PATH entry left over from an earlier apply."""
+    from collins import clisetup
+
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    cli = tools / "claude"
+    cli.write_text("#!/bin/sh\n")
+    cli.chmod(0o755)
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(clisetup, "_appended", None)
+    monkeypatch.setattr(clisetup, "known_locations", lambda: [tmp_path / "nowhere" / "claude", cli])
+    return cli
+
+
+def test_the_cli_is_the_services_to_find_and_judge(app_state, tmp_path, cli_dir):
+    """The welcome gate and Preferences ask the service where its claude
+    is (service.status's cli, cli.check) and what a typed path is worth."""
+    _core, _store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+    try:
+        assert client.request({"t": "service.status"})["cli"] == ""
+        asked = client.request({"t": "cli.check"})
+        assert asked["found"] == "" and asked["detected"] == str(cli_dir)
+        assert "status" not in asked
+        judged = client.request({"t": "cli.check", "path": str(cli_dir)})
+        assert judged["status"] == "ok" and "detected" not in judged
+        assert client.request({"t": "cli.check", "path": "/nowhere/claude"})["status"] == "missing"
+        versioned = tmp_path / "versions" / "2.1.226"
+        versioned.parent.mkdir()
+        versioned.write_text("#!/bin/sh\n")
+        versioned.chmod(0o755)
+        assert client.request({"t": "cli.check", "path": str(versioned)})["status"] == "versioned"
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
+def test_the_cli_path_written_by_a_client_goes_on_the_services_path(app_state, tmp_path, cli_dir):
+    """The welcome's and Preferences' answer reaches the service's PATH at
+    once, so the next cli.check finds it; cleared, the entry comes off."""
+    from collins import clisetup
+
+    _core, _store, _poller, srv, client, _ends = _store_core(app_state, tmp_path)
+
+    def setting(value):
+        return {"t": "state.set", "key": "settings", "entry": clisetup.PATH_SETTING, "value": value}
+
+    try:
+        client.request(setting(str(cli_dir)))
+        assert os.environ["PATH"].split(os.pathsep)[-1] == str(cli_dir.parent)
+        assert client.request({"t": "cli.check"})["found"] == str(cli_dir)
+        assert client.request({"t": "service.status"})["cli"] == str(cli_dir)
+        client.request(setting(""))
+        assert str(cli_dir.parent) not in os.environ["PATH"].split(os.pathsep)
+        assert client.request({"t": "cli.check"})["found"] == ""
+    finally:
+        srv.shutdown()
+        pump(0.3)
+
+
 def test_an_agent_spawn_in_a_chat_folder_makes_it_again(app_state, projects_dir, tmp_path, monkeypatch):
     from collins import chats
 

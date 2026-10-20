@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-20. Full change history: git log for this file.
 
 """Preferences dialog: terminal font, scrollback, color scheme."""
 
@@ -30,6 +30,7 @@ from . import (  # noqa: E402
     notifysound,
     prefslayout,
     prefssearch,
+    remotecli,
     sandboxgrants,
     sandboxplan,
     sandboxstatus,
@@ -1524,14 +1525,18 @@ class PreferencesDialog(Adw.Dialog):
         dialog asks a launch that can't find it (welcome), now answerable
         after the fact: point at a different install, or clear the box to
         fall back to whatever PATH offers. Tabs already open keep the CLI
-        they started with."""
+        they started with. Every verdict is the service's (remotecli): the
+        CLI runs where it runs."""
         self._cli_row = Adw.EntryRow(title=_("Path to the claude executable"))
         self._cli_verdict = Gtk.Image(valign=Gtk.Align.CENTER)
-        browse = Gtk.Button(label=_("Browse…"), valign=Gtk.Align.CENTER)
-        browse.add_css_class("flat")
-        browse.connect("clicked", self._on_cli_browse)
         self._cli_row.add_suffix(self._cli_verdict)
-        self._cli_row.add_suffix(browse)
+        # A chooser picks a path of this device: the service's only when
+        # the two share a disk (a local extra: hidden, not disabled).
+        if apilink.is_local():
+            browse = Gtk.Button(label=_("Browse…"), valign=Gtk.Align.CENTER)
+            browse.add_css_class("flat")
+            browse.connect("clicked", self._on_cli_browse)
+            self._cli_row.add_suffix(browse)
         self._cli_row.set_text(state.get_setting(clisetup.PATH_SETTING) or "")
         self._cli_row.connect("changed", self._on_cli_path_changed)
         group.add(_searchable(self._cli_row, "claude", "CLI", "PATH", _("Browse…")))
@@ -1555,24 +1560,40 @@ class PreferencesDialog(Adw.Dialog):
         "rely on PATH alone" (the setting's default). Anything else (a typo,
         a half-typed path) just wears its red x while the stored answer
         stays; closing preferences mid-typo loses nothing.
+
+        The verdict is asked of the service, where the path is a path; it
+        lands a moment later (`_settle_cli_row`), and only for the text the
+        box still holds.
         """
         text = self._cli_row.get_text().strip()
-        status = clisetup.validate(text)
+        if not text:
+            self._settle_cli_row(text, None, save)
+            return
+        remotecli.check(text, lambda status: self._settle_cli_row(text, status, save))
+
+    def _settle_cli_row(self, text: str, status: str | None, save: bool) -> None:
+        if text != self._cli_row.get_text().strip():
+            return  # a later keystroke's verdict is on its way
         acceptable = not text or status in welcome.MARKS
         stored = self._state.get_setting(clisetup.PATH_SETTING) or ""
         if save and acceptable and text != stored:
+            # The service swaps the old answer's PATH entry for the new
+            # one's as the write lands, so the next tab (and every headless
+            # claude run) picks up the change.
             self._state.set_setting(clisetup.PATH_SETTING, text)
-            # Swaps the old answer's PATH entry for the new one's, so the
-            # next tab (and every headless claude run) picks up the change.
-            clisetup.apply(text)
             self._on_change()
+            if not text:
+                # Cleared: what PATH alone offers is the service's to say,
+                # once the write has landed (the refresh rides behind it).
+                remotecli.refresh(lambda: self._settle_cli_row(text, None, False))
+                return
         if text:
             icon, style = welcome.MARKS.get(status, welcome.BAD_MARK)
             reason = welcome.reason_for(status, text)
-        elif clisetup.on_path():
+        elif remotecli.found_at():
             icon, style = welcome.MARKS[clisetup.OK]
             reason = _("Using the claude found on PATH at {path}.").format(
-                path=clisetup.found_at()
+                path=remotecli.found_at()
             )
         else:
             icon, style = welcome.BAD_MARK
