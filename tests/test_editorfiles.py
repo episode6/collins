@@ -7,22 +7,26 @@ import pytest
 from collins.editorfiles import (
     _MAX_HIGHLIGHT_BYTES,
     _MAX_IMAGE_BYTES,
-    _MAX_OPEN_BYTES,
     LIGHTBOX_BUTTON_STRIP,
     LIGHTBOX_MIN_H,
     LIGHTBOX_MIN_W,
     LIGHTBOX_SHADOW_PAD,
+    NEWLINES,
     FollowScope,
     LoadGuard,
     PaneLayout,
     PasteError,
     RenameError,
     RerootAction,
+    detect_newline,
     fence_language_id,
+    fill_text,
+    first_line,
     follow_scope,
     format_copied_files,
     gallery_step,
     guess_language_id,
+    holds_nul,
     image_guard,
     is_image_path,
     is_inside,
@@ -30,16 +34,16 @@ from collins.editorfiles import (
     lightbox_zoom_slot,
     lightbox_zoombar_inside,
     list_dir,
-    load_guard,
+    load_applies,
     pane_layout,
     parse_copied_files,
     paste_entries,
     paste_target,
     path_from_file_uri,
     plan_reroot,
-    read_first_line,
     rename_target,
     renamed_path,
+    save_text,
     should_highlight,
     unique_target,
     walk_files,
@@ -81,84 +85,28 @@ def test_guess_language_unknown_shebang_interpreter_is_none():
     assert guess_language_id("script", "not a shebang") is None
 
 
-# -- read_first_line ----------------------------------------------------------
+# -- first_line (of the text fs.read answered) ---------------------------------
 
 
-def test_read_first_line_strips_line_ending(tmp_path):
-    f = tmp_path / "script"
-    f.write_text("#!/bin/bash\necho hi\n")
-    assert read_first_line(f) == "#!/bin/bash"
+def test_first_line_strips_line_ending():
+    assert first_line("#!/bin/bash\necho hi\n") == "#!/bin/bash"
 
 
-def test_read_first_line_crlf(tmp_path):
-    f = tmp_path / "script"
-    f.write_bytes(b"#!/usr/bin/env python3\r\nprint(1)\r\n")
-    assert read_first_line(f) == "#!/usr/bin/env python3"
+def test_first_line_crlf():
+    assert first_line("#!/usr/bin/env python3\r\nprint(1)\r\n") == "#!/usr/bin/env python3"
 
 
-def test_read_first_line_missing_file_is_empty(tmp_path):
-    assert read_first_line(tmp_path / "missing") == ""
+def test_first_line_of_nothing_is_empty():
+    assert first_line("") == ""
 
 
-def test_read_first_line_caps_bytes(tmp_path):
-    f = tmp_path / "long"
-    f.write_text("x" * 4096)
-    assert read_first_line(f) == "x" * 512
+def test_first_line_caps_chars():
+    assert first_line("x" * 4096) == "x" * 512
 
 
-def test_read_first_line_feeds_shebang_guess(tmp_path):
-    f = tmp_path / "deploy"
-    f.write_text("#!/usr/bin/env bash\nset -euo pipefail\n")
-    assert guess_language_id(f, read_first_line(f)) == "sh"
-
-
-# -- load_guard -----------------------------------------------------------------
-
-
-def test_load_guard_ok_for_plain_text(tmp_path):
-    f = tmp_path / "a.txt"
-    f.write_text("hello")
-    assert load_guard(f) == LoadGuard.OK
-
-
-def test_load_guard_missing_path_is_not_a_file(tmp_path):
-    assert load_guard(tmp_path / "missing.txt") == LoadGuard.NOT_A_FILE
-
-
-def test_load_guard_directory_is_not_a_file(tmp_path):
-    assert load_guard(tmp_path) == LoadGuard.NOT_A_FILE
-
-
-def test_load_guard_binary_detected_by_nul_byte(tmp_path):
-    f = tmp_path / "a.bin"
-    f.write_bytes(b"hello\x00world")
-    assert load_guard(f) == LoadGuard.BINARY
-
-
-def test_load_guard_too_large(tmp_path):
-    f = tmp_path / "big.txt"
-    with f.open("wb") as fh:
-        fh.seek(_MAX_OPEN_BYTES)
-        fh.write(b"x")
-    assert load_guard(f) == LoadGuard.TOO_LARGE
-
-
-def test_load_guard_at_size_cap_is_ok(tmp_path):
-    f = tmp_path / "cap.txt"
-    f.write_bytes(b"x" * _MAX_OPEN_BYTES)
-    assert load_guard(f) == LoadGuard.OK
-
-
-def test_load_guard_unreadable(tmp_path):
-    f = tmp_path / "noperm.txt"
-    f.write_text("hi")
-    os.chmod(f, 0o000)
-    try:
-        if os.access(f, os.R_OK):  # root in the test environment: skip
-            return
-        assert load_guard(f) == LoadGuard.UNREADABLE
-    finally:
-        os.chmod(f, 0o644)
+def test_first_line_feeds_shebang_guess(tmp_path):
+    line = first_line("#!/usr/bin/env bash\nset -euo pipefail\n")
+    assert guess_language_id(tmp_path / "deploy", line) == "sh"
 
 
 # -- is_image_path ----------------------------------------------------------------
@@ -419,23 +367,103 @@ def test_lightbox_layout_zero_size_image_does_not_divide_by_zero():
     assert (w, h) == (LIGHTBOX_MIN_W, LIGHTBOX_MIN_H)
 
 
+# -- load_applies (the generation gate of _on_loaded) ------------------------------
+
+
+def test_a_superseded_loads_landing_is_dropped():
+    """The Fable review of PR 609, should-fix 3: a rename during a load
+    restarts it from the new path and bumps the generation; the old path's
+    read lands later and must touch nothing (its text is the old name's,
+    and acting on it would re-watch or re-fill behind the live load)."""
+    assert load_applies(load_id=1, live_id=1, shut=False, still_open=True) is True
+    assert load_applies(load_id=1, live_id=2, shut=False, still_open=True) is False
+    assert load_applies(load_id=2, live_id=2, shut=False, still_open=True) is True
+
+
+def test_a_landing_after_shutdown_or_on_a_closed_page_is_dropped():
+    assert load_applies(1, 1, shut=True, still_open=True) is False
+    assert load_applies(1, 1, shut=False, still_open=False) is False
+
+
+# -- holds_nul (the client's own refusal of a NUL in fs.read's text) -------------
+
+
+def test_holds_nul_refuses_a_nul_anywhere():
+    """The Fable review of PR 609, must-fix 1: `GtkSource.Buffer.set_text`
+    stops at a NUL, so a text with one would show cut short and a save
+    would write the cut. The service answers such a file `binary`; the
+    client refuses it too, wherever the NUL is."""
+    assert holds_nul("head\n" + "x" * 9000 + "\n\x00tail\n") is True
+    assert holds_nul("\x00") is True
+
+
+def test_holds_nul_passes_plain_text():
+    assert holds_nul("") is False
+    assert holds_nul("one\ntwo\r\n\t\x01\xff") is False
+
+
+# -- line endings (fill_text / save_text, the Fable review of PR 609, SF2) -------
+
+
+def test_detect_newline_majority_then_first():
+    assert detect_newline("a\r\nb\r\nc\n") == "\r\n"
+    assert detect_newline("a\nb\nc\r\n") == "\n"
+    assert detect_newline("a\rb\rc\r") == "\r"
+    assert detect_newline("a\r\nb\n") == "\r\n"  # a tie: the first seen
+    assert detect_newline("a\nb\r\n") == "\n"
+    assert detect_newline("no line ending") == "\n"
+    assert detect_newline("") == "\n"
+    assert set(NEWLINES) == {"\r\n", "\n", "\r"}
+
+
+def test_crlf_file_round_trips_with_every_line_ending_converted():
+    """The old `FileSaver` converted every line ending to the file's type:
+    `a\r\nb\r\n` loaded, `\nnew` typed, saved as `a\r\nb\r\nnew\r\n`. The
+    first version of the split wrote `a\r\nb\nnew\r\n`."""
+    text, newline = fill_text("a\r\nb\r\n", True)
+    assert (text, newline) == ("a\nb", "\r\n")
+    assert save_text(text + "\nnew", newline, True) == "a\r\nb\r\nnew\r\n"
+
+
+def test_mixed_input_is_normalised_to_the_detected_ending():
+    text, newline = fill_text("a\r\nb\nc\r\n", True)
+    assert (text, newline) == ("a\nb\nc", "\r\n")
+    # A CRLF pasted into the buffer and a CR are written as the file's ending.
+    assert save_text("a\nb\r\nc\rd", newline, True) == "a\r\nb\r\nc\r\nd\r\n"
+    assert save_text("a\nb\r\nc", "\n", True) == "a\nb\nc\n"
+
+
+def test_lf_file_is_untouched():
+    text, newline = fill_text("x\n\n", True)
+    assert (text, newline) == ("x\n", "\n")
+    assert save_text(text, newline, True) == "x\n\n"
+    assert fill_text("x", True) == ("x", "\n")
+    assert save_text("x\nnew", "\n", True) == "x\nnew\n"  # a missing final newline is added
+    assert save_text("", "\n", True) == ""  # an empty buffer stays an empty file
+    assert save_text("x", "\n", False) == "x"  # implicit newline off: nothing added
+
+
+def test_fill_text_keeps_a_bom_and_an_unknown_newline_is_lf():
+    text, newline = fill_text("\ufeffa\r\n", True)
+    assert (text, newline) == ("\ufeffa", "\r\n")
+    assert save_text(text, newline, True) == "\ufeffa\r\n"
+    assert save_text("a\nb", "??", True) == "a\nb\n"
+
+
 # -- should_highlight -----------------------------------------------------------
 
 
-def test_should_highlight_small_file(tmp_path):
-    f = tmp_path / "a.py"
-    f.write_text("x")
-    assert should_highlight(f) is True
+def test_should_highlight_small_file():
+    assert should_highlight(1) is True
+    assert should_highlight(_MAX_HIGHLIGHT_BYTES) is True
 
 
-def test_should_highlight_false_above_cap(tmp_path):
-    f = tmp_path / "big.py"
-    f.write_bytes(b"x" * (_MAX_HIGHLIGHT_BYTES + 1))
-    assert should_highlight(f) is False
+def test_should_highlight_false_above_cap():
+    assert should_highlight(_MAX_HIGHLIGHT_BYTES + 1) is False
 
 
-def test_should_highlight_true_for_missing_file():
-    assert should_highlight("/nonexistent/path") is True
+def test_should_highlight_true_for_an_unknown_size():
+    assert should_highlight(None) is True
 
 
 # -- is_inside --------------------------------------------------------------------
