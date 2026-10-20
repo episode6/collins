@@ -21,6 +21,21 @@ reaches them.
   sends `fs.unwatch`. A reconnect loses the service's watches, so
   `reset()` sends every live watch again.
 
+PR-2.4 adds the tree's, quick open's and the roots' reads, blocking on
+the sync channel like `read` (a worker thread's; `off_main` is the
+pattern: the work on a daemon thread, its answer landed at
+`GLib.PRIORITY_DEFAULT`):
+
+- `stat_path(path, root)` is `fs.stat`: the kind (a symlink followed), a
+  file's size, the mtime and `inside`, whether the path resolves inside
+  *root* (the asking editor's; every root the service knows when None).
+- `list_dir(path, root, hidden)` is `fs.list`: the directory's entries in
+  the tree's order with the ignored names marked, and `truncated`.
+- `walk_root(root, hidden)` is `fs.walk`: every file under the root, relative,
+  at most 20 000, and `truncated`.
+- `Watcher.watch(path, listener, kind=WATCH_DIR)` watches a directory's
+  entries; its listener hears `dir-changed {handle, path}`.
+
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
 `apilink.current()` as every other ask of the service. GTK-free; the
@@ -35,6 +50,8 @@ import threading
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
+
+from gi.repository import GLib
 
 from . import apilink
 from .api import protocol
@@ -67,6 +84,42 @@ class Written:
     mtime: int
     size: int
     encoding: str
+
+
+@dataclass(frozen=True)
+class Stat:
+    """What `fs.stat` answered."""
+
+    kind: str
+    size: int | None
+    mtime: int | None
+    inside: bool
+
+    @property
+    def is_file(self) -> bool:
+        return self.kind == "file"
+
+    @property
+    def is_dir(self) -> bool:
+        return self.kind == "dir"
+
+
+@dataclass(frozen=True)
+class Entry:
+    """One entry of an `fs.list`: a file, a directory, or a symlink to a
+    directory inside the root (a folder never expanded)."""
+
+    name: str
+    kind: str
+    ignored: bool
+
+    @property
+    def is_dir(self) -> bool:
+        return self.kind != "file"
+
+    @property
+    def expandable(self) -> bool:
+        return self.kind == "dir"
 
 
 def refusal_words(refusal: RequestRefused) -> str:
@@ -121,6 +174,68 @@ def write(
     )
 
 
+def stat_path(path: str, root: str | None = None) -> Stat:
+    """`fs.stat` of *path*: blocking, on the caller's thread (a worker's).
+    *root* is what `inside` is of (every root the service knows when
+    None). Raises `RequestRefused`."""
+    message: dict = {"t": "fs.stat", "path": str(path)}
+    if root is not None:
+        message["root"] = str(root)
+    fields = apilink.call(message, timeout=CALL_TIMEOUT_S)
+    size = fields.get("size")
+    mtime = fields.get("mtime")
+    return Stat(
+        kind=str(fields.get("kind") or "missing"),
+        size=int(size) if isinstance(size, int) else None,
+        mtime=int(mtime) if isinstance(mtime, int) else None,
+        inside=bool(fields.get("inside", False)),
+    )
+
+
+def list_dir(path: str, root: str, hidden: bool = False) -> tuple[list[Entry], bool]:
+    """`fs.list` of the directory *path* under the tree's *root*:
+    (entries, truncated). Blocking; raises `RequestRefused`."""
+    fields = apilink.call(
+        {"t": "fs.list", "path": str(path), "hidden": bool(hidden), "root": str(root)},
+        timeout=CALL_TIMEOUT_S,
+    )
+    entries = [
+        Entry(str(item.get("name")), str(item.get("kind")), bool(item.get("ignored")))
+        for item in fields.get("entries") or ()
+        if isinstance(item, dict)
+    ]
+    return entries, bool(fields.get("truncated", False))
+
+
+def walk_root(root: str, hidden: bool = False) -> tuple[list[str], bool]:
+    """`fs.walk` of *root*: (relative paths, truncated). Blocking; raises
+    `RequestRefused`."""
+    fields = apilink.call({"t": "fs.walk", "root": str(root), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
+    return [str(p) for p in fields.get("paths") or ()], bool(fields.get("truncated", False))
+
+
+def off_main(
+    work: Callable[[], object], land: Callable[[str, object], None], name: str = "remotefiles"
+) -> None:
+    """*work* (a blocking call of the service's) on a daemon thread;
+    `land(kind, value)` on the main loop at `GLib.PRIORITY_DEFAULT` with
+    ``("ok", result)`` or ``("refused", RequestRefused)`` — anything else
+    the work raised (the link gone mid-call, a bug) lands as a ``failed``
+    refusal, never a hang."""
+
+    def run() -> None:
+        try:
+            result: tuple[str, object] = ("ok", work())
+        except RequestRefused as refusal:
+            result = ("refused", refusal)
+        except Exception as exc:
+            log.exception("remotefiles: %s failed", name)
+            result = ("refused", RequestRefused(protocol.ERROR_FAILED, str(exc), {}))
+        GLib.idle_add(lambda: land(*result) and False, priority=GLib.PRIORITY_DEFAULT)
+
+    threading.Thread(target=run, name=name, daemon=True).start()
+
+
 class Watcher:
     """The editor's file watches on the service (see the module
     docstring). *link_of* is where the link comes from (`apilink.current`
@@ -136,6 +251,9 @@ class Watcher:
         # watch is dropped at the next event.
         self._watches: dict[str, _Watch] = {}
         self._installed_on: apilink.Link | None = None
+        # What hears a reconnect after the watches are re-sent (`on_reset`:
+        # a file tree lists its folders again), held weakly.
+        self._reset_listeners: list[Callable[[], Callable[[], None] | None]] = []
 
     def install(self, link: apilink.Link) -> None:
         """Hear the link's `file-changed` events (once per link: a
@@ -143,13 +261,16 @@ class Watcher:
         if self._installed_on is link:
             return
         if self._installed_on is not None:
-            self._installed_on.off("file-changed", self._on_changed)
-        link.on("file-changed", self._on_changed)
+            for name in _EVENTS:
+                self._installed_on.off(name, self._on_changed)
+        for name in _EVENTS:
+            link.on(name, self._on_changed)
         self._installed_on = link
 
     def uninstall(self) -> None:
         if self._installed_on is not None:
-            self._installed_on.off("file-changed", self._on_changed)
+            for name in _EVENTS:
+                self._installed_on.off(name, self._on_changed)
             self._installed_on = None
 
     @property
@@ -159,8 +280,12 @@ class Watcher:
         and writes come back refused."""
         return self._installed_on is not None
 
-    def watch(self, path: str, listener: Listener, mtime: int | None = None) -> str:
+    def watch(
+        self, path: str, listener: Listener, mtime: int | None = None, kind: str = protocol.WATCH_FILE
+    ) -> str:
         """Watch *path* for *listener*: the handle, which `unwatch` takes.
+        *kind* is WATCH_FILE (`file-changed`) or WATCH_DIR (a directory's
+        entries, `dir-changed`; no *mtime*).
         *mtime* is the file as the caller last read or wrote it: the
         service's first stat is compared against it, so a change in
         between is one `file-changed` at once (`update` keeps it current
@@ -171,7 +296,7 @@ class Watcher:
         with self._lock:
             handle = f"w{self._next}"
             self._next += 1
-            self._watches[handle] = _Watch(path, listener, mtime)
+            self._watches[handle] = _Watch(path, listener, mtime, kind)
         self._send_watch(handle)
         return handle
 
@@ -207,6 +332,24 @@ class Watcher:
             live = list(self._watches)
         for handle in live:
             self._send_watch(handle)
+        for ref in list(self._reset_listeners):
+            listener = ref()
+            if listener is None:
+                self._reset_listeners.remove(ref)
+                continue
+            try:
+                listener()
+            except Exception:
+                log.exception("remotefiles: a reset listener failed")
+
+    def on_reset(self, listener: Callable[[], None]) -> None:
+        """Call *listener* after every reconnect's `reset` (a bound method
+        is held weakly)."""
+        ref = weakref.WeakMethod(listener) if inspect.ismethod(listener) else (lambda: listener)
+        self._reset_listeners.append(ref)
+
+    def off_reset(self, listener: Callable[[], None]) -> None:
+        self._reset_listeners = [ref for ref in self._reset_listeners if ref() not in (None, listener)]
 
     def _send_watch(self, handle: str) -> None:
         link = self._link_of()
@@ -215,8 +358,8 @@ class Watcher:
         if link is None or not self.installed or watch is None:
             return
         path = watch.path
-        message = {"t": "fs.watch", "path": path, "kind": protocol.WATCH_FILE, "handle": handle}
-        if watch.mtime is not None:
+        message = {"t": "fs.watch", "path": path, "kind": watch.kind, "handle": handle}
+        if watch.mtime is not None and watch.kind == protocol.WATCH_FILE:
             message["mtime"] = watch.mtime
         link.send(
             message,
@@ -238,18 +381,21 @@ class Watcher:
         try:
             listener(dict(event))
         except Exception:
-            log.exception("remotefiles: a file-changed listener failed")
+            log.exception("remotefiles: a %s listener failed", event.get("t"))
 
 
 class _Watch:
     """One watch of the client's: the path, the listener (weakly, for a
     bound method) and the mtime the service's watch is seeded with."""
 
-    __slots__ = ("path", "_ref", "mtime")
+    __slots__ = ("path", "_ref", "mtime", "kind")
 
-    def __init__(self, path: str, listener: Listener, mtime: int | None) -> None:
+    def __init__(
+        self, path: str, listener: Listener, mtime: int | None, kind: str = protocol.WATCH_FILE
+    ) -> None:
         self.path = path
         self.mtime = mtime
+        self.kind = kind
         if inspect.ismethod(listener):
             self._ref: Callable[[], Listener | None] = weakref.WeakMethod(listener)
         else:
@@ -258,6 +404,9 @@ class _Watch:
     def listener(self) -> Listener | None:
         return self._ref()
 
+
+# The events a watch's listener hears: a file's, a directory's.
+_EVENTS = ("file-changed", "dir-changed")
 
 _WATCHER = Watcher()
 
