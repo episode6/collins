@@ -70,7 +70,6 @@ from . import (  # noqa: E402
     contextmenu,
     dialogs,
     filetypes,
-    gitinfo,
     gitloads,
     gitmodel,
     gitops,
@@ -940,12 +939,22 @@ class GitSidebar(Gtk.Box):
 
         self.run_mutation(work, done)
 
-    def run_mutation(self, work: Callable[[], object], done: Callable[[object], None]) -> bool:
+    def run_mutation(
+        self,
+        work: Callable[[], object],
+        done: Callable[[object], None],
+        failed: Callable[[BaseException], None] | None = None,
+    ) -> bool:
         """*work* on a daemon thread while the widget reads busy, *done*
         with its answer back on the main loop — unless the widget was
-        told to forget the ask meanwhile (a newer generation). Public:
-        the page runs the diff view's stage / discard / revert plans
-        behind the same busy. False (and a toast) when one is running."""
+        told to forget the ask meanwhile (a newer generation). A *work*
+        that raises lands *failed* with the error (or, without one, a
+        toast of its words): the caller's own busy state is its to clear
+        either way, and a raise never leaves it set (PR 608's review,
+        should-fix 3: the page's view stayed busy, every button
+        insensitive, after a plan the link refused). Public: the page
+        runs the diff view's stage / discard / revert plans behind the
+        same busy. False (and a toast) when one is running."""
         if self._busy:
             self._toast(_("Another git operation is still running"), refusal=True)
             return False
@@ -956,21 +965,36 @@ class GitSidebar(Gtk.Box):
 
         def run() -> None:
             try:
-                answer = work()
+                answer: object = work()
+                error: BaseException | None = None
             except Exception as err:  # a worker must never die silently
                 log.warning("git sidebar: mutation failed: %s", err)
-                answer = None
-            GLib.idle_add(self._mutation_done, gen, done, answer, priority=GLib.PRIORITY_DEFAULT)
+                answer, error = None, err
+            GLib.idle_add(
+                self._mutation_done, gen, done, failed, answer, error, priority=GLib.PRIORITY_DEFAULT
+            )
 
         threading.Thread(target=run, name="git-sidebar-mutation", daemon=True).start()
         return True
 
-    def _mutation_done(self, gen: int, done: Callable[[object], None], answer: object) -> bool:
+    def _mutation_done(
+        self,
+        gen: int,
+        done: Callable[[object], None],
+        failed: Callable[[BaseException], None] | None,
+        answer: object,
+        error: BaseException | None,
+    ) -> bool:
         if gen != self._mutation_gen:
             return GLib.SOURCE_REMOVE
         self._busy = False
         self._sync_buttons()
-        if answer is not None:
+        if error is not None:
+            if failed is not None:
+                failed(error)
+            else:
+                self._toast(_("git failed: {error}").format(error=str(error) or error.__class__.__name__))
+        elif answer is not None:
             done(answer)
         return GLib.SOURCE_REMOVE
 
@@ -1357,7 +1381,7 @@ class GitSidebar(Gtk.Box):
         cwd = self._cwd_provider()
 
         def work() -> None:
-            operation = gitops.in_progress_operation(gitinfo.git_dir(cwd))
+            operation = gitops.in_progress_operation_at(cwd)
             staged = gitops.staged_paths(cwd) if operation is None else []
             GLib.idle_add(self._commit_gated, operation, staged, then, priority=GLib.PRIORITY_DEFAULT)
 
@@ -1461,7 +1485,7 @@ class GitSidebar(Gtk.Box):
         cwd = self._cwd_provider()
 
         def work() -> None:
-            operation = gitops.in_progress_operation(gitinfo.git_dir(cwd))
+            operation = gitops.in_progress_operation_at(cwd)
             GLib.idle_add(self._revert_gated, sha, operation, priority=GLib.PRIORITY_DEFAULT)
 
         threading.Thread(target=work, name="git-sidebar-revert-gate", daemon=True).start()

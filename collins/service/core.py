@@ -160,8 +160,9 @@ from ..api import protocol
 from ..i18n import N_
 from ..shellinput import shell_command
 from ..state import MAP, SCALAR, SHARED_KEYS
-from . import bgagents, hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
+from . import bgagents, gitfeed, hosting, jobs, prfeed, ptyserver, storefeed, termstream, tokenuse, tracking
 from . import diffs as diffs_mod
+from . import files as files_mod
 from . import notifications as notifications_mod
 from . import sandbox as sandbox_mod
 from . import tools as tools_mod
@@ -283,6 +284,9 @@ class ServiceCore:
             on_output=self._on_pty_output,
         )
         self.jobs = jobs.JobRunner()
+        # Git over the API (PR-2.1): every git.* request, the blob GET and
+        # the watches, answered off the main loop.
+        self.git = gitfeed.GitFeed(self)
         self.tools: tools_mod.SessionTools | None = None
         self.sandbox = None  # service.sandbox.SandboxRequests, once start_sandbox ran
         # The sandbox host and the live grants (start_sandbox_host), the
@@ -364,6 +368,7 @@ class ServiceCore:
         service but "no client is attached" (§3.1 rule 5)."""
         self._clients.discard(id(client))
         self.jobs.forget(client.deliver)
+        self.git.client_gone(client)
         self._subscribers = [c for c in self._subscribers if c is not client]
         if self.tools is not None:
             self.tools.client_gone(client)
@@ -1246,6 +1251,21 @@ class ServiceCore:
     _req_pr_comment = _gh
     _req_pr_review = _gh
     _req_pr_thread = _gh
+
+    # -- git over the API (PR-2.1; service.gitfeed, service.files)
+
+    def _git(self, message: protocol.Message, client: Client) -> dict | protocol.Deferred:
+        return self.git.handle(message, client)
+
+    _req_git_run = _git
+    _req_git_info = _git
+    _req_git_sizes = _git
+    _req_git_watch = _git
+    _req_git_unwatch = _git
+    _req_git_plan = _git
+
+    def _req_fs_trash(self, message: protocol.Message, client: Client) -> dict | protocol.Deferred:
+        return files_mod.handle_trash(self, client, message, later=self.git._later)
 
     # -- the diffs' marks (PR-1.11; service.diffs)
 
@@ -2414,6 +2434,7 @@ class ServiceCore:
 
     def shutdown(self) -> None:
         self.cancel_restart()
+        self.git.shutdown()
         if self.background is not None:
             self.background.stop()
         if self._sweep_source:

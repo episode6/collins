@@ -39,7 +39,7 @@ def test_transport_numbers_are_the_specs():
 
 
 def test_capabilities_and_error_codes_are_closed():
-    assert p.CAPABILITIES == {"local", "debug"}
+    assert p.CAPABILITIES == {"local", "debug", "git"}
     assert p.ERRORS == {
         "unknown",
         "invalid",
@@ -49,6 +49,7 @@ def test_capabilities_and_error_codes_are_closed():
         "gone",
         "refused",
         "failed",
+        "stale",
     }
 
 
@@ -203,6 +204,15 @@ PHASE_ONE_TYPES = [
     "sandbox.drop",
     "sandbox.forget",
     "sandbox",
+    # PR-2.1: git over the API (behind the `git` cap).
+    "git.run",
+    "git.info",
+    "git.sizes",
+    "git.watch",
+    "git.unwatch",
+    "git-changed",
+    "git.plan",
+    "fs.trash",
     "service.restart",
     "service.status",
 ]
@@ -640,6 +650,39 @@ SAMPLES = {
         "delivery": DELIVERY,
         "revoked": False,
     },
+    ("git.run", p.REQUEST): {
+        "cwd": "/home/u/project",
+        "builder": "status_argv",
+        "args": {},
+        "stdin": "",
+        "timeout": 5.0,
+        "env": "default",
+    },
+    ("git.info", p.REQUEST): {
+        "cwd": "/home/u/project",
+        "changes": False,
+        "state": True,
+        "known_refs": "ab12",
+    },
+    ("git.sizes", p.REQUEST): {"cwd": "/home/u/project", "paths": ["a.txt"]},
+    ("git.watch", p.REQUEST): {
+        "cwd": "/home/u/project", "handle": "gitpage-7f", "files": ["a.txt", "src/b.py"], "state": "deadbeef",
+    },
+    ("git.unwatch", p.REQUEST): {"handle": "gitpage-7f"},
+    ("git-changed", p.EVENT): {"cwd": "/home/u/project", "tree": "t1", "refs": "r1", "state": None},
+    ("git.plan", p.REQUEST): {
+        "cwd": "/home/u/project",
+        "load": "unstaged",
+        "path": "a.txt",
+        "previous_path": None,
+        "parent_target": None,
+        "op": "apply-cached",
+        "paths": ["a.txt"],
+        "patch": "diff --git a/a.txt b/a.txt\n",
+        "three_way": False,
+        "keys": ["a.txt|deadbeef|0/1"],
+    },
+    ("fs.trash", p.REQUEST): {"paths": ["/home/u/project/untracked.txt"]},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
 }
@@ -772,6 +815,43 @@ REPLIES = {
     "sandbox.derive": {"plan": "/run/user/1000/plan-2.json", "box": BOX, "reason": ""},
     "sandbox.drop": {},
     "sandbox.forget": {},
+    "git.run": {
+        "status": 0,
+        "stdout": "## main\n",
+        "stderr": "",
+        "unreachable": False,
+        "stdout_chunked": False,
+        "stdout_bytes": 8,
+    },
+    "git.info": {
+        "root": "/home/u/project",
+        "git_dir": "/home/u/project/.git",
+        "branch": "feat",
+        "default_branch": "main",
+        "github_url": "https://github.com/o/r",
+        "index_mtime": 1700000000000,
+        "head": "a" * 40,
+        "markers": ["MERGE_HEAD"],
+        "operation": "merge",
+        "refs": "ab12",
+        "remotes": ["origin"],
+        "heads": {"main": "a" * 40, "feat": "b" * 40},
+        "remote_heads": {"origin/main": "a" * 40},
+        "changes": {"staged": True, "unstaged": False},
+        "state": "deadbeef",
+    },
+    "git.sizes": {"sizes": {"a.txt": 12, "gone.txt": None}},
+    "git.watch": {},
+    "git.unwatch": {},
+    "git.plan": {
+        "applied": True,
+        "stdout": "",
+        "stderr": "",
+        "unreachable": False,
+        "three_way": False,
+        "conflicts": False,
+    },
+    "fs.trash": {"trashed": ["/home/u/project/untracked.txt"], "removed": ["/home/u/project/gone.txt"]},
     "service.restart": {},
     "service.status": {
         "version": "0.2.0",
@@ -1681,3 +1761,28 @@ def test_a_cut_event_at_its_bound_frames():
     # A plain text that frames is kept whole: the bound bites only when it must.
     plain = "a" * (p.EVENT_TEXT_BYTES - 2)
     assert p.fit_text_bytes(plain, p.EVENT_TEXT_BYTES) == plain
+
+
+def test_split_reply_does_not_serialise_a_field_that_alone_passes_the_frame(monkeypatch):
+    """Nit 10 of PR 608's review: `split_reply` dumped the whole reply to
+    measure it before chunking, a second serialisation of a 64 MiB stdout
+    on the service's main loop. A field longer than the frame is chunked
+    without the measure; a reply that might fit is still measured once."""
+    import json
+
+    dumps: list[int] = []
+    real = json.dumps
+
+    def counting(value, **kwargs):
+        dumps.append(len(str(value.get(p.CHUNKED_FIELD, ""))) if isinstance(value, dict) else -1)
+        return real(value, **kwargs)
+
+    monkeypatch.setattr(json, "dumps", counting)
+    big = {"re": 3, "ok": True, p.CHUNKED_FIELD: "x" * (p.MAX_FRAME + 1)}
+    frames, slim = p.split_reply(big)
+    assert frames and slim["stdout_chunked"] and slim["stdout_bytes"] == p.MAX_FRAME + 1
+    assert all(size <= 64 for size in dumps), dumps  # only the slim reply's encode measured the field
+    del dumps[:]
+    small = {"re": 3, "ok": True, p.CHUNKED_FIELD: "y" * 100}
+    assert p.split_reply(small) == ([], small)
+    assert len(dumps) == 1
