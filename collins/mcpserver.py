@@ -32,7 +32,9 @@ Argument validation against the tool schemas is the dispatcher's job
 
 from __future__ import annotations
 
+import errno
 import os
+import socket
 from collections.abc import Callable
 
 from gi.repository import Gio, GLib
@@ -89,10 +91,11 @@ class SessionToolService:
     def start(self) -> None:
         """Bind the socket and start accepting. Raises on failure.
 
-        A leftover socket file is unlinked first: it can only be ours — the
-        path is keyed by application id and GApplication uniqueness keeps two
-        instances of one id from running — so it's the residue of a SIGKILL,
-        not another listener.
+        A leftover socket file is unlinked first when nobody answers on it
+        (the residue of a SIGKILL); one that answers is another service's
+        for this app id, and starting over it would take its sessions'
+        tool calls away, so that raises instead (the service is a plain
+        process since PR-1.12b: nothing keeps two of one id apart but this).
         """
         # sun_path is 108 bytes including the NUL. Gio doesn't check: it
         # silently truncates, "listening" on a path no shim will ever dial —
@@ -102,10 +105,22 @@ class SessionToolService:
         if len(os.fsencode(self._path)) > 107:
             raise OSError(f"socket path too long for AF_UNIX: {self._path}")
         os.makedirs(os.path.dirname(self._path), mode=0o700, exist_ok=True)
-        try:
-            os.unlink(self._path)
-        except OSError:
-            pass
+        if os.path.exists(self._path):
+            probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            probe.settimeout(1.0)
+            try:
+                probe.connect(self._path)
+            except OSError as exc:
+                if exc.errno not in (errno.ECONNREFUSED, errno.ENOENT):
+                    raise OSError(f"another listener may hold {self._path}: {exc}") from exc
+            else:
+                raise OSError(f"another Collins service is listening on {self._path}")
+            finally:
+                probe.close()
+            try:
+                os.unlink(self._path)
+            except OSError:
+                pass
         service = Gio.SocketService.new()
         service.add_address(
             Gio.UnixSocketAddress.new(self._path),

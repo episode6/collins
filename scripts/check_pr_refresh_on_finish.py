@@ -108,6 +108,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
 from collins import i18n, prdetail, prstatus, trust  # noqa: E402
@@ -166,22 +167,35 @@ prdetail.fetch = fake_detail_fetch
 
 
 def status_fetches() -> int:
-    with _lock:
-        return len([call for call in gh_calls if call[:2] == ["pr", "view"]])
+    # Counted on the service, where the fetches run (e2e_service.stub_calls).
+    return len(
+        [c for c in e2e_service.stub_calls() if c["stub"] == "gh_json" and c["args"][:2] == ["pr", "view"]]
+    )
 
 
 def page_loads() -> list[str]:
-    with _lock:
-        return list(detail_calls)
+    # Counted on the service, where the page's fetch runs; `forget_page_loads`
+    # moves the watermark the way clearing the list did.
+    loads = [c["args"][0] for c in e2e_service.stub_calls() if c["stub"] == "pr_detail"]
+    return loads[state.get("loads_seen", 0):]
 
 
 def forget_page_loads() -> None:
-    with _lock:
-        detail_calls.clear()
+    state["loads_seen"] = len(
+        [c for c in e2e_service.stub_calls() if c["stub"] == "pr_detail"]
+    )
 
 
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(CWD)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+# The service's gh and detail stubs (scripts/e2e_stubs.py): the same canned
+# `pr view` this process's fake answers, and a detail fetch that records
+# the page's load and answers nothing.
+e2e_service.start_service(
+    stubs={"gh_json": {"pr view": fake_gh_json(["pr", "view"])}, "pr_detail": None}
+)
 app = App()
 
 exit_code = 1
@@ -281,6 +295,15 @@ def step_status_refetched() -> bool:
         return later(step_status_refetched, 500)
     check("a finish edge refetches the PR's status", status_fetches() > state["before"],
           f"{state['before']} -> {status_fetches()}")
+    # The launch sweep (refresh_prs_on_launch) rode the first scan inside
+    # startup in one process; over the socket it follows the first `rows`
+    # and lands a few seconds in, so it has to have come and gone before
+    # fetches are counted against the edges below.
+    win = state["win"]
+    e2e_service.wait_until(
+        lambda: getattr(win, "_launch_sweep_done", True) and not getattr(win.sidebar, "_pr_sweep", False),
+        timeout_s=20,
+    )
     # No aging this time: a session that goes quiet between every permission
     # prompt must not turn into a `gh` call per pause.
     state["before"] = status_fetches()
@@ -289,6 +312,11 @@ def step_status_refetched() -> bool:
 
 
 def step_throttled() -> bool:
+    # The previous edge's held re-read lands on the service a beat later
+    # than it did in one process: let it settle before the next edge fires.
+    e2e_service.wait_until(
+        lambda: SESSION not in state["tab"].probe("activity.judge.held"), timeout_s=5
+    )
     check("a second finish seconds later is throttled", status_fetches() == state["before"],
           f"{state['before']} -> {status_fetches()}")
     # The gate itself. A finish edge with the transcript untouched since the
@@ -300,13 +328,16 @@ def step_throttled() -> bool:
     age_the_throttles()
     state["before"] = status_fetches()
     finish_edge(turn_ended=False)
-    check("an unmoved transcript holds the edge", SESSION in state["tab"].probe("activity.judge.held"))
+    check("an unmoved transcript holds the edge", SESSION in state["tab"].probe("activity.judge.held"),
+          (state["tab"].probe("finish_ledger._counted"), state["tab"].probe("transcript.stamp")))
     return later(step_repaint_dropped, int(FINISH_CONFIRM_S * 1000) + 1500)
 
 
 def step_repaint_dropped() -> bool:
     check("a finish with the transcript unchanged refetches nothing",
-          status_fetches() == state["before"], f"{state['before']} -> {status_fetches()}")
+          status_fetches() == state["before"],
+          f"{state['before']} -> {status_fetches()} "
+          f"counted {state['tab'].probe('finish_ledger._counted')} stamp {state['tab'].probe('transcript.stamp')}")
     check("and raises no flag and no green row",
           not row_unread() and not app.notification_center.is_green(SESSION))
     check("the held edge was dropped", SESSION not in state["tab"].probe("activity.judge.held"))

@@ -85,6 +85,7 @@ gi.require_version("Gdk", "4.0")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
 from collins import i18n, trust  # noqa: E402
@@ -160,6 +161,9 @@ i18n.init(seed.get_setting("language"))
 seed.set_group_expanded("proj:alpha", True)
 seed.toggle_favorite(SID)
 trust.trust_dir(PROJECT)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 
 tries = 0
@@ -172,7 +176,9 @@ def stage() -> bool:
     tries += 1
     win = app.get_active_window()
     header = project_header(win) if win is not None else None
-    if header is None:
+    # The row exists the moment the first `rows` lands; its label is
+    # allocated a frame later, and what is read below is its allocation.
+    if header is None or zone_edge(header) <= 0:
         if tries > 120:  # the scan lands off a worker thread; CI is slow
             print("timed out waiting for the window and the project header", file=sys.stderr)
             app.quit()

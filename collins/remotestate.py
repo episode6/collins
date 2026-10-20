@@ -77,7 +77,7 @@ from typing import Any
 from gi.repository import GLib
 
 from . import uistate
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import _
 from .state import (
     DEFAULT_SETTINGS,
@@ -184,6 +184,18 @@ class RemoteState(AppState):
                 return self.ui.get_scoped(self.service_id, key)
             return self.ui.settings.get(key, DEFAULT_SETTINGS.get(key))
         return self.settings.get(key, DEFAULT_SETTINGS.get(key))
+
+    def reset(self) -> None:
+        """The link was lost and is back (spec §3.20): every write that
+        waited on a reply is forgotten (the link failed it), and the next
+        snapshot's events are taken as the service's word on every key.
+        What is shown stays until an event moves it."""
+        self._pending.clear()
+        self._capture = None
+        self._confirmed.clear()
+        self._any_events.clear()
+        self._whole_events.clear()
+        self._entry_events.clear()
 
     def connect_changed(self, listener: Callable[[str, str | None, bool], None]) -> None:
         """Call *listener(key, entry, reverted)* whenever the mirror changes:

@@ -133,6 +133,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import GLib  # noqa: E402
 
 from collins import composerkeys, i18n, trust  # noqa: E402
@@ -163,6 +164,9 @@ threading.Thread(target=watchdog, daemon=True).start()
 
 i18n.init(AppState().get_setting("language"))
 trust.trust_dir(TRUSTED)
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 state: dict = {}
 
@@ -236,14 +240,26 @@ def steps():
     yield 600
 
     # 2. A paste-back the CLI folds anyway: force whole-draft pieces.
+    # The pieces are cut on the service (the session's paste-back, PR-1.12a),
+    # so its limits are the ones lowered, through the probe (D27).
     limits = composerkeys._PIECE_NEWLINES, composerkeys._PIECE_CHARS
     composerkeys._PIECE_NEWLINES = composerkeys._PIECE_CHARS = 10_000
+    for name in ("_PIECE_NEWLINES", "_PIECE_CHARS"):
+        tab._client.request(
+            {"t": "debug.sandbox", "target": "core", "name": "debug_patch",
+             "args": ["collins.composerkeys", name, 10_000]}
+        )
     tab.open_composer()
     yield 1200
     tab._composer.set_text(DRAFT)
     tab.close_composer()
     yield 1200
     composerkeys._PIECE_NEWLINES, composerkeys._PIECE_CHARS = limits
+    for name, value in zip(("_PIECE_NEWLINES", "_PIECE_CHARS"), limits, strict=True):
+        tab._client.request(
+            {"t": "debug.sandbox", "target": "core", "name": "debug_patch",
+             "args": ["collins.composerkeys", name, value]}
+        )
     check("a whole-draft paste folds into a stand-in", box() == "[Pasted text #1 +11 lines]", box())
     check(
         "…which the verify read records against the draft",

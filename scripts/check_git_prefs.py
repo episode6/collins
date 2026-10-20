@@ -82,6 +82,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Vte", "3.91")
+import e2e_service  # noqa: E402
 from gi.repository import Adw, GLib  # noqa: E402
 
 from collins import i18n, prefslayout  # noqa: E402
@@ -162,11 +163,9 @@ def setting(key: str):
 def settle() -> None:
     """Run what the main loop has ready (never the settle timer: that is
     waited for where the check is about it)."""
-    context = GLib.MainContext.default()
-    for _ in range(50):
-        if not context.pending():
-            break
-        context.iteration(False)
+    # A write's reply and the service's save land over the socket a
+    # moment later (PR-1.12b): pump until they have.
+    e2e_service.settle()
 
 
 def typed(row, text: str) -> None:
@@ -179,6 +178,9 @@ def typed(row, text: str) -> None:
 
 
 i18n.init(AppState().get_setting("language"))
+# The service is its own process (PR-1.12b): started here, with this
+# check's environment, before the app connects to it.
+e2e_service.start_service()
 app = App()
 
 exit_code = 1
@@ -303,10 +305,12 @@ def step_writes_settled() -> bool:
     check("and calls on_change", changes() == 3, changes())
 
     untracked.set_active(False)
+    settle()
     check("switching untracked files off writes the setting", setting("git_untracked") is False)
     check("and calls on_change", changes() == 4, changes())
 
     log_page.set_value(50)
+    settle()
     check("the page size writes an int", setting("git_log_page") == 50, repr(setting("git_log_page")))
     check("and calls on_change", changes() == 5, changes())
 

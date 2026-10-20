@@ -40,7 +40,7 @@ from pathlib import Path
 from gi.repository import GObject
 
 from . import apilink, prdetail, prstatus
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
 from .i18n import translate
 from .prstatus import PullRequest
 
@@ -87,6 +87,17 @@ class RemotePrStore(GObject.Object):
             self._records[session_id] = list(records)
         else:
             self._records.pop(session_id, None)
+
+    def reset(self) -> None:
+        """The link was lost and is back (spec §3.20): the records are the
+        service's, and the snapshot that follows names only the sessions
+        that still have some, so a session whose records went while the
+        link was down would keep them here behind the equality guard.
+        Cleared, each cleared session announced once."""
+        sessions = list(self._records)
+        self._records.clear()
+        for session_id in sessions:
+            self.emit("session-changed", session_id)
 
     # -- the hub's API --------------------------------------------------------------
 

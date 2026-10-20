@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import shutil
 import string
+from collections.abc import Iterable
 from pathlib import Path
 
 _STATE_BASE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
@@ -101,14 +102,16 @@ def save(session_id: str, text: str, ordinal: int = 0) -> None:
         pass  # history is best-effort; never break a tab close over it
 
 
-def save_all(session_id: str, texts: dict[int, str]) -> None:
+def save_all(session_id: str, texts: dict[int, str], keep: Iterable[int] = ()) -> None:
     """Persist every live shell's scrollback, one file per ordinal. The
-    mapping's keys are the explicit keep-set: files under ordinals it
-    doesn't mention belong to shells that no longer exist — closing a
-    shell deletes its history."""
+    mapping's keys, with *keep*, are the explicit keep-set: files under
+    ordinals neither mentions belong to shells that no longer exist —
+    closing a shell deletes its history. An ordinal in *keep* alone is
+    left as it is (its text follows by itself, `history_requests`)."""
     if _path(session_id) is None:
         return
-    stale = [path for ordinal, path in _ordinal_paths(session_id) if ordinal not in texts]
+    kept = set(texts) | set(keep)
+    stale = [path for ordinal, path in _ordinal_paths(session_id) if ordinal not in kept]
     for ordinal, text in texts.items():
         save(session_id, text, ordinal)
     for path in stale:
@@ -162,3 +165,58 @@ def delete(session_id: str) -> None:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+# The frame a `panel.history` request must stay under (api.protocol
+# MAX_FRAME is 1 MiB; the header and the pty entries take the rest).
+HISTORY_REQUEST_BUDGET = 900_000
+
+
+def _tail_fitting(text: str, budget: int) -> str:
+    """The longest suffix of *text* whose JSON encoding (`protocol.
+    json_bytes`, the quotes included) is at most *budget* bytes."""
+    from .api.protocol import json_bytes
+
+    if json_bytes(text) <= budget:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if json_bytes(text[len(text) - mid :]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[len(text) - lo :] if lo else ""
+
+
+def history_requests(key: str, shells: list[dict], budget: int = HISTORY_REQUEST_BUDGET) -> list[dict]:
+    """The `panel.history` requests that write *shells* (entries of
+    ``{"ordinal", "pty"}`` or ``{"ordinal", "text"}``) under *key*: one
+    request when it frames within *budget* whole, else a first request
+    naming every ordinal (the ptys as they are, every text entry marked
+    ``keep`` so its file survives the keep-set) followed by one
+    ``partial`` request per text, each alone, so no shell's history is
+    blanked by another's. A text whose request would pass the budget by
+    itself is cut to its tail. *budget* bounds the **frame**: each request
+    as `protocol.encode` writes it (`json_bytes`), not the texts' UTF-8 —
+    a scrollback dense with newlines, quotes, backslashes or control
+    characters encodes larger than it measures, and a request past
+    `MAX_FRAME` is one the link refuses to send (the review of PR 604,
+    should-fix 1). GTK-free; `tests/test_panelhistory_requests.py` pins it."""
+    from .api.protocol import json_bytes
+
+    whole = {"t": "panel.history", "key": key, "shells": shells}
+    if json_bytes(whole) <= budget:
+        return [whole]
+    first = [{"ordinal": e["ordinal"], "keep": True} if "text" in e else e for e in shells]
+    out = [{"t": "panel.history", "key": key, "shells": first}]
+    for entry in shells:
+        if "text" not in entry:
+            continue
+        request = {"t": "panel.history", "key": key, "partial": True,
+                   "shells": [{"ordinal": entry["ordinal"], "text": ""}]}
+        # What the frame has left for the text, its two quotes counted once.
+        room = budget - json_bytes(request) + 2
+        request["shells"][0]["text"] = _tail_fitting(entry["text"], room)
+        out.append(request)
+    return out

@@ -9,7 +9,7 @@ import pytest
 
 from collins import notifycenter
 from collins.api import protocol
-from collins.api.loopback import RequestRefused
+from collins.api.protocol import RequestRefused
 from collins.apilink import Link
 from collins.notifycenter import KIND_BELL, KIND_MESSAGE, KIND_UPDATE
 from collins.remotenotify import RemoteNotifications

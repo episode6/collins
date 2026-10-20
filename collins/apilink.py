@@ -7,18 +7,25 @@
 
 `remotestate.RemoteState` and `remotestore.RemoteStore` (split-service spec
 §3.8, §3.15) talk to the service through one `Link`: requests go out by
-`call` (wait for the reply; what the loopback does anyway) or `send` (the
-reply lands in a callback, the shape a socket will need), and events come
-in through `dispatch`, which hands each to the handlers registered for its
-type. `LoopbackLink` is the link over `api.loopback.LoopbackClient`, the
-app's one connection through Phase 1; the unit tests drive the mirrors
-through a fake link that holds replies back, which is how an event landing
-during an unanswered write is tested.
+`call` (block for the reply) or `send` (the reply lands in a callback on
+the main loop), and events come in through `dispatch`, which hands each to
+the handlers registered for its type. `api.client.SocketLink` is the link
+over the service's socket (PR-1.12b, D26: two WebSockets per client, `call`
+on the sync channel from any thread, `send` and every event on the
+primary); the unit tests drive the mirrors through a fake link that holds
+replies back, which is how an event landing during an unanswered write is
+tested.
 
-A refusal reaches the caller as `RequestRefused` (its `error`, `msgid` and
-`details`); a message the protocol does not accept is the sender's bug, and
-reaches it as a `RequestRefused` with the code ``invalid`` after being
-logged, so a mirror reverts rather than raising into a GTK callback.
+A refusal reaches the caller as `RequestRefused` (`api.protocol`'s: its
+`error`, `msgid` and `details`); a message the protocol does not accept is
+the sender's bug, and reaches it as a `RequestRefused` with the code
+``invalid`` after being logged, so a mirror reverts rather than raising
+into a GTK callback. A link that is not connected refuses every call with
+``gone``.
+
+One `Link` outlives its connections: the handlers registered on it stay
+across a reconnect, and the connection manager (`connection.py`) connects
+the same link again.
 
 GTK-free.
 """
@@ -29,7 +36,9 @@ import logging
 from collections.abc import Callable
 
 from .api import protocol
-from .api.loopback import RequestRefused
+from .api.protocol import RequestRefused
+
+__all__ = ["Link", "RequestRefused", "call", "current", "set_current"]
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +47,8 @@ Refused = Callable[[RequestRefused], None]
 
 
 class Link:
-    """What a mirror needs of its connection. Subclasses provide `_request`."""
+    """What a mirror needs of its connection. Subclasses provide `_request`
+    (blocking) and may override `send` with a non-blocking form."""
 
     def __init__(self) -> None:
         self._handlers: dict[str, list[Callable[[dict], None]]] = {}
@@ -80,38 +90,12 @@ class Link:
         if on_reply is not None:
             on_reply(fields)
 
-    def _request(self, message: dict) -> dict:
+    def send_event(self, message: dict) -> None:
+        """A client event (`tool-reply`, `ack`), validated by the transport."""
         raise NotImplementedError
 
-
-class LoopbackLink(Link):
-    """A `Link` over a `LoopbackClient`: build it first, then connect the
-    client with `dispatch` as its event callback (`bind`)."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.client = None
-
-    def bind(self, client) -> None:
-        self.client = client
-
     def _request(self, message: dict) -> dict:
-        if self.client is None:
-            raise RequestRefused(protocol.ERROR_GONE, "Not connected to the service", {})
-        try:
-            return self.client.request(message)
-        except ValueError as error:
-            log.error("link: %s is not a valid request: %s", message.get("t"), error)
-            raise RequestRefused(protocol.ERROR_INVALID, str(error), {}) from None
-
-    def send_event(self, message: dict) -> None:
-        """A client event (`tool-reply`), validated by the transport."""
-        if self.client is None:
-            return
-        try:
-            self.client.send_event(message)
-        except ValueError as error:
-            log.error("link: %s is not a valid event: %s", message.get("t"), error)
+        raise NotImplementedError
 
 
 # ---- the app's link ------------------------------------------------------------
@@ -119,21 +103,11 @@ class LoopbackLink(Link):
 # The client modules that ask the service for something outside the two
 # mirrors (a PR action, a job, the model catalog, a tool's reply: PR-1.11)
 # reach it through `current()`: the app's own link (`set_current`, at
-# startup). A widget built with no app behind it (an e2e check driving it
-# alone, a probe script) may get a link of its own on the loopback a tab
-# with no app gets (`set_fallback`: terminal.service_loopback, registered
-# when that module loads), connected on first use and never subscribed --
-# but only once the script has said so (`allow_harness`): that loopback's
-# core has no store and no state, so in the real app (Preferences opened
-# from the status icon before a window exists, say) it would serve PR
-# requests with nothing behind them and refuse the rest, silently. With no
-# app link and no opt-in, `current()` is None and `call` refuses with
-# ``gone``: the caller fails soft, visibly.
+# startup), or the one an e2e check driving bare widgets built for itself
+# (scripts/e2e_service.py's `harness_link`). With no link `current()` is
+# None and `call` refuses with ``gone``: the caller fails soft, visibly.
 
 _current: Link | None = None
-_fallback = None  # () -> api.loopback.LoopbackServer
-_fallback_link: LoopbackLink | None = None
-_harness = False
 
 
 def set_current(link: Link | None) -> None:
@@ -141,29 +115,8 @@ def set_current(link: Link | None) -> None:
     _current = link
 
 
-def set_fallback(loopback_factory) -> None:
-    global _fallback
-    _fallback = loopback_factory
-
-
-def allow_harness() -> None:
-    """A script driving widgets with no app behind them (an e2e check, a
-    probe) opts in to the fallback link (see above)."""
-    global _harness
-    _harness = True
-
-
 def current() -> Link | None:
-    global _fallback_link
-    if _current is not None:
-        return _current
-    if _fallback is None or not _harness:
-        return None
-    if _fallback_link is None or _fallback_link.client is None or _fallback_link.client.closed:
-        link = LoopbackLink()
-        link.bind(_fallback().connect(lambda *_frame: None, link.dispatch, "harness"))
-        _fallback_link = link
-    return _fallback_link
+    return _current
 
 
 def call(message: dict) -> dict:

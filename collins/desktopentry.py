@@ -75,6 +75,48 @@ def exec_command() -> str:
     return "collins"
 
 
+UNIT = "collins-service.service"
+
+
+def service_launcher_path() -> Path | None:
+    """The installed `collins-service` command: beside the `collins`
+    launcher when there is one (a pip or pipx install puts both in the
+    same bin directory), else whatever is on this shell's PATH."""
+    launcher = launcher_path()
+    if launcher is not None and (sibling := launcher.with_name("collins-service")).is_file():
+        return sibling
+    if found := shutil.which("collins-service"):
+        return Path(found).resolve()
+    return None
+
+
+def systemd_user_dir(root: Path | None = None) -> Path:
+    """Where a user's own units go: ``$XDG_DATA_HOME/systemd/user``."""
+    return (root or data_home()) / "systemd" / "user"
+
+
+def service_unit(template: str, command: str, app_id: str | None = None) -> str:
+    """The shipped unit with ``ExecStart=`` resolved to *command* (the same
+    resolution `exec_command` does for the launcher) and, for a
+    non-default app id, ``Environment=COLLINS_APP_ID=`` appended to the
+    service section (split-service spec §3.20)."""
+    lines = []
+    for line in template.splitlines():
+        if line.startswith("ExecStart="):
+            line = f"ExecStart={command}"
+        lines.append(line)
+        if line == "[Service]" and app_id and app_id != APP_ID:
+            lines.append(f"Environment=COLLINS_APP_ID={app_id}")
+    return "\n".join(lines) + "\n"
+
+
+def service_exec_command() -> str:
+    """The unit's ExecStart: an absolute path when there is one to give."""
+    if (launcher := service_launcher_path()) is not None:
+        return _quote_exec(str(launcher))
+    return "collins-service"
+
+
 def entry_locations() -> list[Path]:
     """Every applications directory a launcher for us could already sit in.
 
@@ -147,7 +189,8 @@ def install(root: Path | None = None) -> list[Path]:
     template = _PACKAGE / f"{APP_ID}.desktop"
     icon = _PACKAGE / "icons" / f"{APP_ID}.svg"
     appdata = _PACKAGE / f"{APP_ID}.metainfo.xml"
-    if missing := [p for p in (template, icon, appdata) if not p.is_file()]:
+    unit = _PACKAGE / UNIT
+    if missing := [p for p in (template, icon, appdata, unit) if not p.is_file()]:
         raise FileNotFoundError(
             "these files are missing from the installed package: "
             + ", ".join(str(p) for p in missing)
@@ -160,9 +203,33 @@ def install(root: Path | None = None) -> list[Path]:
     entry.write_text(desktop_entry(template.read_text(), exec_command()))
     shutil.copyfile(icon, icons / icon.name)
     shutil.copyfile(appdata, metainfo / appdata.name)
-
+    # The service's user unit (§3.10): installed, never enabled; the app
+    # starts it on demand and *Start at login* (a later PR) enables it.
+    units = systemd_user_dir(root)
+    units.mkdir(parents=True, exist_ok=True)
+    unit_path = units / UNIT
+    unit_path.write_text(service_unit(unit.read_text(), service_exec_command()))
     _refresh(applications, root / "icons" / "hicolor")
-    return [entry, icons / icon.name, metainfo / appdata.name]
+    _reload_units()
+    return [entry, icons / icon.name, metainfo / appdata.name, unit_path]
+
+
+def _reload_units() -> None:
+    """Let the user manager see the unit. Best effort: no systemd, no
+    session, or a failing daemon-reload leaves the files in place."""
+    if shutil.which("systemctl") is None:
+        return
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass  # the files are in place; the next login reads them
 
 
 def install_cli() -> int:

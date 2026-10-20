@@ -100,7 +100,7 @@ them (`ServiceCore.with_state()` builds the state with `migrate=True,
 device=False`; `start_store()` the store) and `service/storefeed.py`
 publishes them. Everything in the UI — `app.state`, `app.store`,
 `window.state`, `window.store`, the sidebar, Preferences, the tabs' settings
-dict — holds the client's **mirrors** on one `apilink.LoopbackLink`
+dict — holds the client's **mirrors** on one `api.client.SocketLink`
 (`App._start_service_client`):
 
 - `RemoteState` *is* an `AppState` (subclass): the same methods and
@@ -128,7 +128,7 @@ dict — holds the client's **mirrors** on one `apilink.LoopbackLink`
   `status`, `unread: false` (and a notification's flag by focus, the
   placeholder handoff), the /bg handoff's `backgrounding` and
   `can_background` — and `busy` from a client is refused. The property
-  moves when the `item` comes back (immediately on the loopback). The
+  moves when the `item` comes back (a moment later, over the socket). The
   sandbox host and the live grants are the core's too
   (`ServiceCore.start_sandbox_host`); the box a resumed or forked session
   runs in is minted on the service at its spawn, and settled against the
@@ -169,7 +169,11 @@ history through its notification center, the marks through
 (kind and arguments, answered with an id) and `job` events (`running`
 with progress or a partial result, then `done`, `failed`, `refused` or
 `cancelled`), run by `service/jobs.py`'s `JobRunner` on daemon threads and
-read through `jobclient.start(kind, args, on_event)`. Worktree recovery
+read through `jobclient.start(kind, args, on_event)`. A job in flight when
+the link is lost never reports again (the service forgets a gone client's
+jobs; the reconnect is a new client), so `App._on_connection_lost` calls
+`jobclient.reset(link)` and every watcher hears one final `failed`
+("The connection to the service was lost"). Worktree recovery
 (`worktree.trash`, `worktree.restore`: `sessions.trash_worktree` /
 `restore_worktree` on the service's machine), the chat folder made and
 trusted before its session starts (`chats.trust`: `chats.create_chat_dir`

@@ -67,6 +67,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # e2e: the full gir stack, a display (Xvfb) and a session bus (dbus)
     python3-gi-cairo gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-gtksource-5 \
     gir1.2-spelling-1 libspelling-1-2 gir1.2-gdkpixbuf-2.0 gir1.2-vte-3.91 \
+    # the API between the service and the client (collins.api) is libsoup 3
+    gir1.2-soup-3.0 \
     xvfb xauth dbus fonts-dejavu-core \
     # e2e: the real box check (check_sandbox_launch.py), which skips with a
     # printed reason where the container can't give bwrap a user namespace
@@ -95,7 +97,8 @@ RUN dnf install -y \
     git rpm-build rpmlint copr-cli glibc-langpack-en \
     python3-devel pyproject-rpm-macros python3-setuptools python3-wheel python3-pip \
     desktop-file-utils appstream \
-    python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling \
+    python3-gobject gtk4 libadwaita vte291-gtk4 gtksourceview5 libspelling libsoup3 \
+    systemd-rpm-macros \
     python3-markdown-it-py python3-linkify-it-py bubblewrap bindfs fuse3 \
   && dnf clean all
 # Root here, but the runner checks the workspace out as uid 1001, and git

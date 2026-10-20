@@ -34,7 +34,8 @@ def _modules(package) -> list[str]:
 
 def test_the_service_and_the_api_load_no_gtk():
     modules = _modules(collins.service) + _modules(collins.api)
-    assert "collins.service.core" in modules and "collins.api.loopback" in modules
+    assert "collins.service.core" in modules and "collins.api.server" in modules
+    assert "collins.api.client" in modules and "collins.service.main" in modules
     # PR-1.11's: the session tools, the notification history, the jobs and
     # token use are the service's, and as GTK-free as the rest.
     for name in (

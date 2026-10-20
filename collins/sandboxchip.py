@@ -49,7 +49,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import mcptools, sandboxgrants, sandboxplan, tokensettings  # noqa: E402
-from .api.loopback import RequestRefused  # noqa: E402
+from .api.protocol import RequestRefused  # noqa: E402
 from .formatting import display_path  # noqa: E402
 from .i18n import _, translate  # noqa: E402
 
