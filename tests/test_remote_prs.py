@@ -296,3 +296,52 @@ def test_a_pr_blob_over_the_cap_is_413_and_reads_as_too_large(wired, monkeypatch
     with pytest.raises(prblobs.BlobError, match="No such file"):
         remoteprs.fetch_blob("o/r", sha, "gone.png")
     assert blobcache._reason(413) != blobcache._reason(404)
+
+
+# -- the gh requests leave the service's main loop ------------------------------------------
+
+
+def _request(message):
+    checked = protocol.validate({**message, "id": 7}, protocol.CLIENT)
+    assert isinstance(checked, protocol.Message), checked
+    return checked
+
+
+def test_a_gh_request_runs_on_a_thread_and_settles_through_dispatch(monkeypatch):
+    """A tab switch froze the window: the page's `pr.detail` ran gh on the
+    service's loop, and the tab's `pr.fetch` (a call on the GTK thread)
+    queued behind it. The handler now runs where *spawn* puts it, and the
+    reply lands only through *dispatch*."""
+    import threading
+
+    ran_on = []
+    monkeypatch.setattr(prdetail, "fetch", lambda url: ran_on.append(threading.current_thread().name))
+    spawned, dispatched = [], []
+    deferred = prfeed.handle_gh_later(
+        _request({"t": "pr.detail", "url": URL1}),
+        dispatch=dispatched.append,
+        spawn=lambda fn, name: spawned.append((fn, name)),
+    )
+    assert not deferred.settled and ran_on == []  # nothing ran on the caller's loop
+    ((run, name),) = spawned
+    assert name == "pr.detail"
+    worker = threading.Thread(target=run, name="worker")
+    worker.start()
+    worker.join()
+    assert ran_on == ["worker"] and not deferred.settled
+    dispatched.pop()()
+    assert deferred.settled and deferred.reply == protocol.reply(7)
+
+
+def test_a_gh_request_that_raises_settles_failed(monkeypatch):
+    def boom(url):
+        raise RuntimeError("gh exploded")
+
+    monkeypatch.setattr(prdetail, "fetch", boom)
+    deferred = prfeed.handle_gh_later(
+        _request({"t": "pr.detail", "url": URL1}),
+        dispatch=lambda fn: fn(),
+        spawn=lambda fn, _name: fn(),
+    )
+    assert deferred.settled
+    assert deferred.reply["error"] == protocol.ERROR_FAILED

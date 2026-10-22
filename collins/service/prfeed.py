@@ -22,10 +22,14 @@ holds on this side too: an unchanged list writes nothing and tells nobody.
 
 The gh requests (`handle_gh`) need no store, so a core with none (a widget
 driven alone, a harness's own service) serves them all the same. They
-are made from a client's worker thread (they block on gh), as the page and
-the menus made the calls themselves; the handler runs on
-that thread and touches nothing but the gh modules, whose caches lock. A
-refusal or failure crosses as the reply's `error`, `practions`' own words.
+block on gh for seconds, so the core never runs them on its main loop:
+`handle_gh_later` runs each on a thread of its own and settles a
+`protocol.Deferred` (gitfeed's way). Run on the loop, a page's
+`pr.detail` froze every pty the service hosts, and any client call
+queued behind it — a tab switch's `pr.fetch`, made on the GTK thread,
+froze the window with it. The handler touches nothing but the gh
+modules, whose caches lock. A refusal or failure crosses as the reply's
+`error`, `practions`' own words.
 
 `pr.detail` and `pr.threads` are the large replies: a big PR's detail (its
 body, its timeline, every file's patch up to `prdetail.WIRE_PATCH_MAX`)
@@ -190,6 +194,30 @@ def handle_gh(message: protocol.Message) -> dict:
         resolved = bool(message.get("resolved"))
         return _error(message, practions.set_thread_resolved(pr, message.get("thread"), resolved))
     return protocol.refuse(message.id, protocol.ERROR_UNKNOWN, "{type}: not served here", {"type": kind})
+
+
+def handle_gh_later(
+    message: protocol.Message,
+    dispatch: Callable[[Callable[[], object]], None] | None = None,
+    spawn: Callable[[Callable[[], None], str], None] | None = None,
+) -> protocol.Deferred:
+    """`handle_gh` on a thread, its reply settled on the main loop by
+    *dispatch*; one that raises settles a ``failed`` refusal, so the peer
+    still gets exactly one response."""
+    deferred = protocol.Deferred()
+
+    def run() -> None:
+        try:
+            reply = handle_gh(message)
+        except Exception:
+            log.exception("prs: %s failed on its thread", message.type)
+            reply = protocol.refuse(
+                message.id, protocol.ERROR_FAILED, "{type}: failed on the service", {"type": message.type}
+            )
+        (dispatch or gitfeed.dispatch_default)(lambda: deferred.settle(reply))
+
+    (spawn or gitfeed.spawn_default)(run, message.type)
+    return deferred
 
 
 # ---- the blob GET (PR-2.2) ----------------------------------------------------------
