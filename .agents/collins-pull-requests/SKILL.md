@@ -61,7 +61,13 @@ reply whole, measures it and raises `prstatus.TooLarge`, which
 `fetch_bytes` turns into `BlobTooLarge` and the route into the status
 whose stand-in says "too large"),
 `invalidate` and `sweep` / `resync` (`pr.fetch`, `pr.sweep`) — called from
-worker threads as before; a refusal reads as the function's own failure.
+worker threads as before, except `invalidate`, which a tab's selection
+calls on the GTK thread; a refusal reads as the function's own failure.
+On the service every one of them runs on a thread of its own
+(`ServiceCore._gh` → `prfeed.handle_gh_later`, a `protocol.Deferred`),
+**never on the main loop**: there a `pr.detail`'s seconds of gh stalled
+every pty, and the tab switch's `invalidate` queued behind it froze the
+window.
 The Session's own transcript-driven fetches (`enrich`, `discover_pr`) are
 the Session's, which is service code. Avatars stay client fetches; a body's
 images are the service's since PR-2.7 (`GET /api/blob?kind=remote`, the
