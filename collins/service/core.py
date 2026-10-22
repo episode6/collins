@@ -1312,8 +1312,10 @@ class ServiceCore:
             )
         return self.prs.set_records(message)
 
-    def _gh(self, message: protocol.Message, client: Client) -> dict:
-        return prfeed.handle_gh(message)
+    def _gh(self, message: protocol.Message, client: Client) -> protocol.Deferred:
+        # Off the main loop: gh takes seconds, and every pty and every
+        # client's call would wait on it (prfeed's docstring).
+        return prfeed.handle_gh_later(message)
 
     _req_pr_fetch = _gh
     _req_pr_sweep = _gh

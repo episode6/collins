@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-18. Full change history: git log for this file.
+fork. Last modified: 2026-10-22. Full change history: git log for this file.
 -->
 
 # Releases & Roadmap
@@ -38,6 +38,12 @@ downloads of each version, see the
 
 ### v0.1.5 — UNRELEASED
 
+- **No freeze switching to a tab with a PR page open.** The service ran
+  every `gh` request (a PR page's read, the status sweep, every PR
+  action) on its main loop. While `gh` ran, every session's output
+  stalled and the window waited too: switching to such a tab asks the
+  service to re-check the tab's PRs while the page's own read is in
+  flight. Those requests now run on threads of their own.
 - **The service finds the `claude` CLI.** Whether there is one, where it
   is and what a typed path is worth are asked of the service, which runs
   the CLI with your login shell's `PATH`: the **Before you start**
