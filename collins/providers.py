@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-04. Full change history: git log for this file.
+# fork. Last modified: 2026-10-22. Full change history: git log for this file.
 
 """Agent providers: each adapts one AI coding-agent CLI to the app's Session model.
 
@@ -1072,6 +1072,17 @@ def get_provider(provider_id: str) -> Provider:
 def available_providers() -> list[Provider]:
     """Providers whose CLI is installed on PATH."""
     return [p for p in ALL_PROVIDERS if p.available()]
+
+
+def discoverable_providers() -> list[Provider]:
+    """Providers whose transcripts are listed and watched: every one, its CLI
+    on PATH or not. A transcript is on disk whether or not the binary can be
+    found this instant, and the CLI's self-update swaps the binary under
+    PATH: a scan gated on `available()` that landed in that gap listed no
+    session and dropped every file monitor, so the sidebar stayed empty
+    until a manual refresh. A provider that was never used has no
+    transcripts to list (`discover` finds no directory)."""
+    return list(ALL_PROVIDERS)
 
 
 def default_provider() -> Provider:

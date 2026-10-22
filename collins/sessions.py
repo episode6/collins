@@ -1,11 +1,11 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-13. Full change history: git log for this file.
+# fork. Last modified: 2026-10-22. Full change history: git log for this file.
 
 """Session model + Claude Code transcript parsing.
 
 Discovery is delegated to per-agent providers (see providers.py);
-discover_sessions() aggregates every installed agent's sessions.
+discover_sessions() aggregates every agent's sessions on disk.
 """
 
 from __future__ import annotations
@@ -781,13 +781,14 @@ def _scan_tail(path: Path) -> tuple[str, str]:
 
 
 def discover_sessions() -> list[Session]:
-    """All sessions from every installed agent, newest activity first."""
+    """All sessions from every agent with transcripts on disk, newest
+    activity first (`providers.discoverable_providers`)."""
     # Local import breaks the sessions<->providers cycle (providers imports the
     # parsing helpers above at module load; this runs only at call time).
-    from .providers import available_providers
+    from .providers import discoverable_providers
 
     sessions: list[Session] = []
-    for provider in available_providers():
+    for provider in discoverable_providers():
         sessions.extend(provider.discover())
     sessions.sort(key=lambda s: s.mtime, reverse=True)
     return sessions

@@ -74,7 +74,13 @@ threaded scan, `Gio.FileMonitor`s on each provider's projects dir (debounced),
 grouping and ordering, and **every** state mutation (rename, favorite,
 archive, trash, project order, forward chains). It reuses `SessionItem`s
 across refreshes so property bindings survive; `refreshed(order_changed)` says
-whether rows must be rebuilt. `SessionItem` properties the sidebar binds to:
+whether rows must be rebuilt. The scan and the monitors cover
+`providers.discoverable_providers()`, never `available_providers()`: the
+CLI's self-update swaps its binary under `PATH`, and a scan gated on finding
+it once listed no session and dropped every monitor, leaving the sidebar
+empty until a manual refresh. The client's sidebar builds from the mirror's
+first `rows` (`RemoteStore.applied`), not from a non-empty model, so a store
+with no row still draws the Chats header. `SessionItem` properties the sidebar binds to:
 `display_name`, `subtitle`, `preview`, `favorite`, `status` (`""` | `open` |
 `attention` | `background`), `state` (`""` | `interrupted`), `busy`, `unread`,
 `syncing`, `backgrounding`, `can_background`, `background` (`""` |

@@ -15,9 +15,8 @@ nowhere to start a session, must keep folding on activation.
         python3 scripts/check_project_row_click.py
 
 Nothing is spawned: the new-chat screen starts no CLI until its first
-prompt is sent, and this check never sends one. A `claude` stub still has
-to be on PATH — a provider whose CLI is missing has no sessions discovered
-at all, so without it the project never gets a header.
+prompt is sent, and this check never sends one. A `claude` stub is still on PATH, as an
+install would have it.
 """
 
 import json

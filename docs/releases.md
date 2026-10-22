@@ -44,6 +44,13 @@ downloads of each version, see the
   stalled and the window waited too: switching to such a tab asks the
   service to re-check the tab's PRs while the page's own read is in
   flight. Those requests now run on threads of their own.
+- **The sidebar no longer goes blank after the `claude` CLI updates
+  itself.** A scan that ran while the CLI's self-update was swapping its
+  binary found no `claude` on `PATH`, listed no session and dropped every
+  folder watch, so the sidebar stayed empty (not even the Chats header)
+  until a manual refresh. Sessions are now listed and watched from their
+  transcripts whether or not the CLI can be found that instant, and the
+  sidebar draws its headers even when it has no session to show.
 - **The service finds the `claude` CLI.** Whether there is one, where it
   is and what a typed path is worth are asked of the service, which runs
   the CLI with your login shell's `PATH`: the **Before you start**

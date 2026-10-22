@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-09-27. Full change history: git log for this file.
+# fork. Last modified: 2026-10-22. Full change history: git log for this file.
 
 import json
 import os
@@ -69,6 +69,16 @@ def test_discover_finds_only_real_sessions(projects_dir):
     sessions = discover_sessions()
     assert len(sessions) == 3  # noise files excluded
     assert {s.session_id for s in sessions} == set(ids.values())
+
+
+def test_discover_does_not_need_the_cli_on_path(projects_dir, monkeypatch):
+    """The CLI's self-update swaps its binary under PATH: a scan that runs
+    in that gap must still list every transcript on disk."""
+    import collins.providers as providers_mod
+
+    _root, ids = projects_dir
+    monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: False)
+    assert {s.session_id for s in discover_sessions()} == set(ids.values())
 
 
 def test_discover_skips_scratch_projects(projects_dir, app_state):
