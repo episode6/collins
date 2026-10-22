@@ -461,17 +461,19 @@ def test_a_scan_without_the_cli_keeps_the_rows_and_the_monitors(app_state, proje
     monkeypatch.setattr(chats_mod, "sweep_orphan_chat_dirs", lambda refs: None)
     monkeypatch.setattr(store_mod.SessionStore, "_request_titles", lambda self, sessions: None)
     store = store_mod.SessionStore(app_state.AppState())
-    store._on_scanned(discover_sessions())
-    rows = store.model.get_n_items()
-    watched = len(store._monitors)
-    assert rows and watched
+    try:
+        store._on_scanned(discover_sessions())
+        rows = store.model.get_n_items()
+        watched = len(store._monitors)
+        assert rows and watched
 
-    monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: False)
-    store._on_scanned(discover_sessions())
-    assert store.model.get_n_items() == rows
-    assert len(store._monitors) == watched
-    for monitor in store._monitors:
-        monitor.cancel()
+        monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: False)
+        store._on_scanned(discover_sessions())
+        assert store.model.get_n_items() == rows
+        assert len(store._monitors) == watched
+    finally:
+        for monitor in store._monitors:
+            monitor.cancel()
 
 
 def test_manual_refresh_forces_a_rebuild_report(app_state, projects_dir, monkeypatch):
