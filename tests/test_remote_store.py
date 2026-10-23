@@ -69,6 +69,28 @@ def test_the_snapshot_fills_the_rows(world):
     assert state.service_id == store.state.service_id
 
 
+def test_a_snapshot_with_no_row_still_applies(world):
+    """A service store with nothing to list still sends its `rows`: the
+    mirror says it applied, which is what the sidebar builds its headers
+    (Chats, the emptied projects) from."""
+    store, remote, _state, ids, _link = world
+    assert remote.applied
+    for session_id in ids.values():
+        store.state.set_archived(session_id, True)
+    store._apply()
+    fresh = LoopbackLink()
+    server = loopback.LoopbackServer(store._core)
+    client = server.connect(lambda *_frame: None, fresh.dispatch, device="desktop")
+    fresh.bind(client)
+    mirror = RemoteStore(fresh, RemoteState(fresh), pr_store=store.pr_store)
+    assert not mirror.applied
+    mirror.subscribe()
+    assert mirror.model.get_n_items() == 0
+    assert mirror.applied
+    assert mirror.empty_groups == store.empty_groups
+    server.shutdown()
+
+
 def test_the_snapshot_leaves_the_archive_out(world):
     _store, remote, _state, ids, _link = world
     assert ids["beta1"] not in remote.known_sessions

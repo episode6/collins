@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-18. Full change history: git log for this file.
+# fork. Last modified: 2026-10-22. Full change history: git log for this file.
 
 """Session sidebar: search, project accordion, favorites, selection mode.
 
@@ -1661,9 +1661,11 @@ class SessionSidebar(Gtk.Box):
         self.footer.set_ellipsize(_ELLIPSIZE_END)
         self._view.add_bottom_bar(self.footer)
 
-        # Populate from whatever the shared store already holds (a sibling
-        # window may have triggered the scan before this sidebar connected).
-        if store.model.get_n_items():
+        # Populate from whatever the shared store already holds: the
+        # subscribe snapshot lands before any window exists. Built from the
+        # first `rows` even when it names no session, or a store with none
+        # would leave the list blank, without even the Chats header.
+        if store.applied:
             self._on_store_refreshed(store, True)
 
     # -- store sync ------------------------------------------------------------

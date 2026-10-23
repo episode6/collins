@@ -181,6 +181,10 @@ class RemoteStore(GObject.Object):
         self.empty_groups: list[tuple[tuple, str, str | None]] = []
         self.resolved_project_order: list[str] = []
         self.show_archived = False
+        # Whether a `rows` has landed: the sidebar builds its headers from
+        # the first one even when it names no row (the Chats header and the
+        # empty projects stand without sessions).
+        self.applied = False
         self._fields: dict[str, dict] = {}  # session id -> its item fields, as last sent
         self._items: dict[str, SessionItem] = {}
         self._paged = False
@@ -304,6 +308,7 @@ class RemoteStore(GObject.Object):
         order_changed = bool(event.get("order_changed")) or current != [i.session_id for i in items]
         if order_changed:
             self.model.splice(0, self.model.get_n_items(), items)
+        self.applied = True
         self.emit("refreshed", order_changed)
 
     def _on_pty(self, event: dict) -> None:

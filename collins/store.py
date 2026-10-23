@@ -1,6 +1,6 @@
 # Modified from the original agent-session-manager
 # (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-# fork. Last modified: 2026-10-05. Full change history: git log for this file.
+# fork. Last modified: 2026-10-22. Full change history: git log for this file.
 
 """SessionStore: the single source of truth between disk and UI.
 
@@ -25,7 +25,7 @@ from . import chats, panelhistory, remotearchive, uploads
 from .i18n import _
 from .models import CHATS_GROUP, FAV_GROUP, SessionItem
 from .prattach import PromptAttacher
-from .providers import available_providers
+from .providers import discoverable_providers
 from .prstatus import newest_title
 from .prstore import PrStore
 from .sessions import (
@@ -187,7 +187,7 @@ class SessionStore(GObject.Object):
         self._setup_monitors()
 
     def refresh(self, force_rebuild: bool = False) -> None:
-        """Rescan every installed agent's sessions off the main thread.
+        """Rescan every agent's sessions off the main thread.
 
         *force_rebuild* makes the resulting `refreshed` signal report an
         order change even when nothing moved, so listeners rebuild rows
@@ -535,7 +535,7 @@ class SessionStore(GObject.Object):
             monitor.cancel()
         self._monitors = []
         paths: list = []
-        for provider in available_providers():
+        for provider in discoverable_providers():
             paths += provider.watch_dirs()
         for path in paths:
             try:

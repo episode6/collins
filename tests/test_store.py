@@ -451,6 +451,31 @@ def test_first_scan_sweeps_orphan_chat_dirs(app_state, projects_dir, chats_dir, 
     assert len(swept) == 1
 
 
+def test_a_scan_without_the_cli_keeps_the_rows_and_the_monitors(app_state, projects_dir, monkeypatch):
+    """A scan that lands while the CLI is off PATH (its self-update swapping
+    the binary) used to project no row and drop every file monitor, which
+    left the sidebar empty until a manual refresh: neither depends on the
+    binary now."""
+    import collins.providers as providers_mod
+
+    monkeypatch.setattr(chats_mod, "sweep_orphan_chat_dirs", lambda refs: None)
+    monkeypatch.setattr(store_mod.SessionStore, "_request_titles", lambda self, sessions: None)
+    store = store_mod.SessionStore(app_state.AppState())
+    try:
+        store._on_scanned(discover_sessions())
+        rows = store.model.get_n_items()
+        watched = len(store._monitors)
+        assert rows and watched
+
+        monkeypatch.setattr(providers_mod.ClaudeProvider, "available", lambda self: False)
+        store._on_scanned(discover_sessions())
+        assert store.model.get_n_items() == rows
+        assert len(store._monitors) == watched
+    finally:
+        for monitor in store._monitors:
+            monitor.cancel()
+
+
 def test_manual_refresh_forces_a_rebuild_report(app_state, projects_dir, monkeypatch):
     """refresh(force_rebuild=True) must report an order change even when
     nothing moved: sidebar rows bake in on-disk state at construction time
