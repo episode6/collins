@@ -12,10 +12,10 @@ the service, and the next window picks them up.
 Nothing about the window looks different because of the split, by design.
 What changed is what *quit* and *close* mean, below.
 
-::: tip Same machine, for now
-Both halves run on the same machine and the same user. A service on another
-machine, reached over ssh, is the next phase; the socket and the protocol
-are built for it.
+::: tip Same machine, or not
+Both halves run as the same user. They usually share a machine; a service
+on another machine is reached over ssh, with the socket forwarded — see
+[A service on another machine](./remote).
 :::
 
 ## What runs where

@@ -865,3 +865,45 @@ def test_stop_stops_the_transport():
     world.manager.start_remote(transport)
     world.manager.stop()
     assert transport.stopped == 1 and world.link.closed >= 1
+
+
+def test_the_forwards_word_replaces_the_sockets_when_it_lands_later():
+    """Over a forward the socket's close lands first ("the service closed
+    the connection") and the ssh child's exit, with the line the person
+    should read, a beat later: the later word is taken and the state said
+    again (the banner refreshes); no second retry is scheduled."""
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    world.link.on_lost("sync: the service closed the connection")
+    assert world.manager.last_error == "sync: the service closed the connection"
+    timers = len(world.timers)
+    lost_states = world.states.count("lost")
+    transport.die("ssh to box ended: client_loop: send disconnect: Broken pipe")
+    assert world.manager.last_error == "ssh to box ended: client_loop: send disconnect: Broken pipe"
+    assert world.states.count("lost") == lost_states + 1  # said again, for the banner
+    assert len(world.timers) == timers  # the retry already scheduled stands
+    assert world.lost == ["sync: the service closed the connection"]  # on_lost once per loss
+
+
+def test_a_local_loss_while_lost_changes_nothing():
+    world = World(live=True)
+    world.manager.start_local()
+    world.live = False
+    world.link.on_lost("closed")
+    states = list(world.states)
+    world.manager.lost("another word")
+    assert world.states == states and world.manager.last_error == "closed"
+
+
+def test_the_sockets_word_never_replaces_the_forwards():
+    """The other order: the forward's exit lands first, the socket's close
+    a beat later. The person reads ssh's line, not the socket's."""
+    world = World(live=False)
+    transport = FakeTransport(world)
+    world.manager.start_remote(transport)
+    transport.die("ssh to box ended: signal 9")
+    states = world.states.count("lost")
+    world.link.on_lost("sync: the service closed the connection")
+    assert world.manager.last_error == "ssh to box ended: signal 9"
+    assert world.states.count("lost") == states

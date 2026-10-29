@@ -2230,6 +2230,7 @@ class App(Adw.Application):
         self._ui = uistate.UiState(_ui_state_file(), device_defaults())
         self.connections = connections.Connections(self._ui)
         self.current_connection = connections.LOCAL
+        self._switched = False  # a switch_connection awaiting its connect
         self._start_connection(self._initial_connection())
 
     def _initial_connection(self) -> connections.Connection:
@@ -2309,11 +2310,13 @@ class App(Adw.Application):
         self._set_restart_pending(None)
         self.current_connection = connection
         self.connections.set_last(connection)
+        self._switched = True  # the next connect is another machine's: see _on_connected
         transport = None if connection.is_local else self._transport_for(connection)
-        self._connection.switch(
-            transport,
-            _("Switching to {name}").format(name=self.connection_label()),
+        reason = (
+            _("Switching to this computer") if connection.is_local
+            else _("Switching to {name}").format(name=connection.name)
         )
+        self._connection.switch(transport, reason)
 
     def connection_label(self) -> str:
         """The connection's name as the banner says it; "" for the local service."""
@@ -2485,6 +2488,13 @@ class App(Adw.Application):
         # notification comes down for a row the service still holds unread.
         self.notification_center.resynced()
         self._refresh_service_status()
+        if getattr(self, "_switched", False):
+            # Another machine's service (§3.24): the usage panel's numbers
+            # were the old login's; it asks the new service for its own.
+            self._switched = False
+            for window in self.get_windows():
+                if isinstance(window, MainWindow):
+                    window.sidebar.usage_panel.forget()
         for window in self.get_windows():
             if isinstance(window, MainWindow):
                 window.reattach_tabs()

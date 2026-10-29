@@ -698,7 +698,39 @@ made of it, never of a client's VTE:
 to the service and a `connection.ConnectionManager` that finds or starts
 `collins-service` (the unit via `systemctl --user start` for the default app
 id, else a detached spawn), connects both channels, subscribes, and on a
-loss backs off (1, 2, 5, 10, then every 30 s) and reconnects. A tab's (and a
+loss backs off (1, 2, 5, 10, then every 30 s) and reconnects. **A remote
+service** (spec §3.24, PR-3.1) puts a `sshforward.RemoteTransport` where
+find and start were (`ConnectionManager.start_remote` at launch,
+`switch` while running): *find* probes the forward's local socket
+(`<runtime dir>/collins/remote/<connection id>.sock`, `none` while no
+forward runs), *start* runs `ssh TARGET collins-service --print-socket`
+(10 s, bounded; exit 255 is ssh's "could not connect" with stderr's last
+line, any other exit `collins-service`'s own) and then the `-N -L` child of
+§3.2 (`BatchMode=yes`, `ServerAliveInterval=15`, `ControlMaster=no` so the
+forward is a connection of its own), unlinking the local socket first and
+only ever a socket. The child's exit is the manager's `lost` (reported from
+its stderr-reader thread, landed on the main loop), its last stderr line
+the banner's detail: `MainWindow.set_reconnecting(True, name, detail)`
+reads "Reconnecting to <name>: <detail>". A hello that fails over a live
+forward (ssh accepts, the remote service is dead) tells the transport
+(`connect_failed`), whose next find says `none` so the next start runs
+`--print-socket` again, which restarts it; the local service's loop never
+loops on a socket nobody answers. On a reconnect the remote start runs on
+the owner's thread (`_start_async`) so the banner paints; at launch it
+blocks like `start_local`. Footguns: the manager sets `link.path` itself
+before every connect (the forward's socket or the local one); a `switch`
+closes the link deliberately (no loss reported) and takes the lost road
+with no backoff; the `local` proof is read from *this* device's proof file
+and refused by the remote service (D11), so a remote window is never
+`local`. `connections.py` (GTK-free) is the list in `ui-state.json`
+(`Connections` over the device's one `UiState`, which the app shares with
+`RemoteState` so the file has one writer; rule 5 on every row; a target
+ssh could read as an option cannot be spelled), `connectdialog.py` the
+*Connect to…* dialog (Test runs `print_socket` on a thread), and
+`App.switch_connection` the switch: `open_tabs` flushed and frozen, every
+window's `detach_all_tabs()` (the quit's detach loop without the quit),
+`jobclient.reset`, then `ConnectionManager.switch`; `_on_connected(False)`
+resets the mirrors and reopens the new service's `open_tabs`. A tab's (and a
 panel shell's) client is an `api.client.PtyClient` from
 `terminal._pty_client`: `request`, `send_input`, `send_event`, `close`, fed the
 output frames and events of the ptys it spawned or attached. Tests and

@@ -204,7 +204,11 @@ def last_line(data: bytes | str | None) -> str:
 def exit_text(connection: Connection, code: int | None, detail: str) -> str:
     """The banner's text for a forward that ended with *code* and *detail*
     (its stderr's last line)."""
-    args = {"target": connection.target, "code": code, "detail": detail or f"exit {code}"}
+    if not detail:
+        # A child killed by a signal has no last line of its own (Popen
+        # reports -N): say which signal; else the bare exit status.
+        detail = f"signal {-code}" if isinstance(code, int) and code < 0 else f"exit {code}"
+    args = {"target": connection.target, "code": code, "detail": detail}
     if code == SSH_EXIT_FAILED:
         return translate(MSG_FORWARD_ENDED, args)
     if code == 0:

@@ -635,12 +635,25 @@ class ConnectionManager:
     # -- loss and reconnect, on the owner's loop ----------------------------------------
 
     def lost(self, reason: str) -> None:
-        """The owner found the link dead (a resubscribe refused ``gone``):
-        the same road as the link's own `on_lost`."""
-        self._on_link_lost(reason)
+        """The owner found the link dead (a resubscribe refused ``gone``),
+        or the transport's forward ended: the same road as the link's own
+        `on_lost`."""
+        self._on_link_lost(reason, from_link=False)
 
-    def _on_link_lost(self, reason: str) -> None:
-        if self.stopped or self.state == LOST:
+    def _on_link_lost(self, reason: str, from_link: bool = True) -> None:
+        if self.stopped:
+            return
+        if self.state == LOST:
+            # Already lost: a second word for the same loss. Over a forward
+            # the socket's close and the ssh child's exit (with its stderr's
+            # last line, the word the person should read) land a beat
+            # apart, in either order: the forward's word is taken whenever
+            # it comes, the socket's never replaces it, and the state is
+            # said again so the banner shows it. The retry already
+            # scheduled stands.
+            if not from_link and self._transport is not None and reason and reason != self.last_error:
+                self.last_error = reason
+                self._set_state(LOST)
             return
         self._generation += 1  # a handshake in flight is nobody's now
         self.last_error = reason
@@ -732,6 +745,7 @@ class ConnectionManager:
         `_timeout_verdict`."""
         if self.stopped:
             return False
+        self._pending = None  # the timer that ran this poll (if one did) is spent
         self.path, found = self._find(self.app_id)
         if found == "live":
             self._try_connect()

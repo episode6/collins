@@ -117,6 +117,8 @@ def test_exit_text_names_the_target_and_the_detail():
     assert "collins@localhost:2222" in text and "Connection closed by remote host" in text
     assert "closed" in sshforward.exit_text(CONNECTION, 0, "")
     assert "(exit 1)" in sshforward.exit_text(CONNECTION, 1, "")
+    # A killed child (Popen's -N) says the signal, not "exit -9".
+    assert "signal 9" in sshforward.exit_text(CONNECTION, -9, "")
 
 
 # ---- --print-socket -------------------------------------------------------------------

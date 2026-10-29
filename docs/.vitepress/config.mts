@@ -1,6 +1,6 @@
 // Modified from the original agent-session-manager
 // (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-// fork. Last modified: 2026-10-04. Full change history: git log for this file.
+// fork. Last modified: 2026-10-29. Full change history: git log for this file.
 import { defineConfig } from 'vitepress'
 
 // https://vitepress.dev/reference/site-config
@@ -48,6 +48,7 @@ export default defineConfig({
             { text: 'Keyboard Shortcuts', link: '/guide/keyboard-shortcuts' },
             { text: 'How It Works', link: '/guide/how-it-works' },
             { text: 'The Service', link: '/guide/service' },
+            { text: 'A Service on Another Machine', link: '/guide/remote' },
             { text: 'FAQ', link: '/guide/faq' },
           ],
         },
