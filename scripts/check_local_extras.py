@@ -25,9 +25,9 @@ copy otherwise, fetched whole from the service (`kind=file&as=file`), which
 serves it only when the session's agent named it. Those fetches are made
 over a second link that never proved `local`, since the service's own
 view of the app's link cannot be taken away from here: a file the session
-was sent opens from the cache, a `.desktop` among them is cached as
-`.bin` and goes to the app chooser, a project file nobody named is
-refused and said so.
+was sent opens from the cache, a `.desktop` among them is handed to no app
+and has no Open With… row (PR-3.0 item 6: only pictures and plain
+documents are), a project file nobody named is refused and said so.
 
 Then D39: a session whose project directory is gone is opened; the tab
 passes the cwd it has, the service's `spawn` falls back to its home and
@@ -466,17 +466,22 @@ def _not_local_attachments(view, document: Attachment, notes: list[str]) -> None
         made = LAUNCHER_CALLS[before:]
         check("[not local] Open With… asks which app, for the cached copy",
               made == [("ask", copy), ("launch", copy)], made)
-        # A file whose name would make a desktop run it: cached as `.bin`,
-        # and the chooser is shown instead of a default app.
+        # A file whose name would make a desktop run it, or that is no
+        # picture or plain document at all: no app is handed it (PR-3.0
+        # item 6, `blobcache.DOCUMENT_SUFFIXES`), there is no Open With…
+        # row for it, and opening the row says why.
         launcher = Attachment(key=state["launcher"], kind="file")
         view._records[launcher.key] = launcher
-        before = len(LAUNCHER_CALLS)
+        labels = attachment_menu(view, launcher)
+        check("[not local] a .desktop file has no Open With… row", "Open With…" not in labels, labels)
+        before, said = len(LAUNCHER_CALLS), len(notes)
         view.open(launcher)
-        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) >= before + 2, timeout_s=5.0)
+        view._on_open_with(None, GLib.Variant("s", launcher.key))
+        e2e_service.wait_until(lambda: len(notes) >= said + 2, timeout_s=5.0)
         made = LAUNCHER_CALLS[before:]
-        check("[not local] a .desktop file is never opened by its name",
-              len(made) == 2 and made[0][0] == "ask" and made[1][0] == "launch"
-              and made[1][1].startswith(cache) and made[1][1].endswith(".bin"), made)
+        check("[not local] a .desktop file is never handed to an app",
+              made == [] and len(notes) == said + 2 and "plain documents" in notes[-1],
+              (made, notes[said:]))
         # A file inside the project that the session's agent never named is
         # not the blob GET's to hand over: said out loud, nothing launched.
         unnamed = Attachment(key=f"{PROJECT}/notes.pdf", kind="file")

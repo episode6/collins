@@ -148,6 +148,31 @@ _RUNNABLE_SUFFIXES = frozenset(
 )
 
 
+# PR-3.0 item 6 (D54 (4)): what this device's cached copy may be handed to
+# a desktop app as (the lightbox's and the attachments panel's Open With…,
+# a file row's default app, for a client that is not `local`): a short
+# allow-list of document suffixes, the one rule that can be stated
+# truthfully (a deny-list of what a desktop might *run* is never complete).
+# The pictures the service already serves (`editorfiles.IMAGE_SUFFIXES`,
+# which the content types of `remoteimages` name too) and six plain
+# documents: what an agent hands a user to look at, and what a viewer
+# opens without running anything. Anything else has no Open With… row and
+# opens nowhere on this device; on the service's machine the file itself
+# is a local extra, which this list does not touch.
+DOCUMENT_SUFFIXES = frozenset(
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico", ".tiff", ".tif", ".avif",
+        ".pdf", ".txt", ".md", ".csv", ".json", ".log",
+    }
+)
+
+
+def hands_to_an_app(name: str | os.PathLike) -> bool:
+    """Whether a cached copy named *name* (or the file it is a copy of)
+    may go to a desktop app: its suffix is on `DOCUMENT_SUFFIXES`."""
+    return os.path.splitext(os.fspath(name))[1].lower() in DOCUMENT_SUFFIXES
+
+
 def whole_file_url(path: str, session: str = "") -> str:
     """`GET /api/blob?kind=file&as=file`: the file *path* as it is, which
     the service serves a client that is not `local` only when *session*'s
