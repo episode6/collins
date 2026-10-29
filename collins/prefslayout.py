@@ -48,10 +48,10 @@ GROUPS: tuple[str, ...] = (
 # service-and-client spec, §3.8; state.SERVICE_SETTINGS and DEVICE_SETTINGS
 # are the per-key lists): "service" for a group whose every row writes a
 # setting the Collins service reads, "device" for one whose rows are all
-# this device's, and "mixed" for the groups that hold both today. The
-# spec's dialog shows the two sides as two headings; that regrouping is
-# PR-3.3's, and until it lands the page keeps this order and the sides are
-# data only, pinned by tests/test_state_split.py.
+# this device's, and "mixed" for the groups that hold both. The dialog is two
+# pages, This device and Service (PR-3.3, D61): a group is on the page of
+# its side, and a mixed group is two groups of one title, one per page
+# (page_groups says which). Pinned by tests/test_state_split.py.
 GROUP_SIDES: dict[str, str] = {
     "cli": "service",
     "general": "mixed",
@@ -76,18 +76,21 @@ GROUP_SIDES: dict[str, str] = {
 # state.SERVICE_SETTINGS on the Service page, the rest on This device.
 # tests/test_state_split.py pins every group's side against
 # state.SERVICE_SETTINGS / DEVICE_SETTINGS, so a setting cannot sit in a
-# group on the wrong side of the split.
+# group on the wrong side of the split, and check_token_use_prefs.py holds
+# the dialog's rows to it (every row names its settings: prefs.py's
+# _SearchableGroup.add).
 GROUP_SETTINGS: dict[str, tuple[str, ...]] = {
     "cli": ("claude_cli_path",),
-    "general": ("language", "color_scheme", "status_icon", "show_tab_bar", "show_folder_path",
+    "general": ("language", "color_scheme", "status_icon", "show_folder_path",
                 "project_icon_size", "panel_tab_drag_handles", "clone_directory",
                 "check_for_updates", "show_usage_panel"),
     "token_use": ("title_model", "icon_model", "auto_renew_login"),
     "mcp_tools": tuple(mcptools.default_tool_settings()),
     "sessions": ("archive_running_session", "quit_with_running_sessions", "restore_last_session",
                  "archive_worktree", "archive_on_claude_ai", "auto_delete_archived_after",
-                 "auto_delete_archived_unit", "cli_title_sessions", "pr_title_sessions",
-                 "attach_prompt_prs", "background_status_poll", "progress_termprop"),
+                 "auto_delete_archived_unit", "cli_title_sessions",
+                 "background_status_poll", "progress_termprop", "worktree_new_sessions",
+                 "dock_attachments_when_room"),
     "sandbox": ("sandbox_new_sessions", "sandbox_bypass_permissions", "sandbox_share_gh",
                 "sandbox_share_ssh", "sandbox_settings_editable",
                 *mcptools.default_sandbox_tool_settings()),
@@ -98,7 +101,8 @@ GROUP_SETTINGS: dict[str, tuple[str, ...]] = {
     "terminal": ("font", "scrollback", "terminal_theme", "terminal_max_width", "easy_copy_paste"),
     "footer_apps": ("footer_apps",),
     "pull_requests": ("pr_font_scale", "pr_inline_images", "open_pr_panel_on_attach",
-                      "confirm_merges", "refresh_prs_on_launch"),
+                      "confirm_merges", "refresh_prs_on_launch", "attach_prompt_prs",
+                      "pr_title_sessions"),
     "git": ("git_layout", "git_line_numbers", "git_wrap_lines", "git_word_diff",
             "git_hide_whitespace", "git_untracked", "git_log_page", "git_parent_branch"),
     "caffeine": ("caffeine_on_launch", "caffeine_launch_timer", "caffeine_idle_grace_minutes",
@@ -106,6 +110,15 @@ GROUP_SETTINGS: dict[str, tuple[str, ...]] = {
     "editor": ("editor_style_scheme", "editor_font", "editor_show_line_numbers",
                "editor_show_hidden_files", "editor_narrow_width", "editor_pop_out_screen_width"),
 }
+
+def page_groups(side: str) -> tuple[str, ...]:
+    """The groups of one page of the dialog, in GROUPS order: "device" (This
+    device) or "service" (Service). A side's own groups and every mixed one,
+    which are on both pages."""
+    if side not in ("device", "service"):
+        raise ValueError(f"no such page: {side!r}")
+    return tuple(g for g in GROUPS if GROUP_SIDES[g] in (side, "mixed"))
+
 
 # The Token use group's rows, top to bottom, by the setting each one writes.
 # "model_list" is the exception: the status row under the two pickers writes

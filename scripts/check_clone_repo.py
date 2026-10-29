@@ -121,7 +121,7 @@ gi.require_version("Vte", "3.91")
 import e2e_service  # noqa: E402
 from gi.repository import GLib, Gtk  # noqa: E402
 
-from collins import clonedialog, i18n, prefslayout  # noqa: E402
+from collins import clonedialog, i18n  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.prefs import PreferencesDialog  # noqa: E402
 from collins.state import AppState  # noqa: E402
@@ -398,7 +398,7 @@ def step_preferences() -> None:
     dialog = PreferencesDialog(win.state, lambda: None)
     dialog.present(win)
     settle()
-    general = dialog._page.groups[prefslayout.GROUPS.index("general")]
+    general = dialog._group("general", "service")
     row = next((r for r in general.rows if r.get_title() == "Clone repositories into"), None)
     check("General holds the clone folder row", row is not None, [r.get_title() for r in general.rows])
     if row is None:
@@ -415,7 +415,12 @@ def step_preferences() -> None:
     dialog._search_entry.set_text("clone")
     dialog._apply_filter()
     visible = [
-        r.get_title() for g in dialog._page.groups if g.get_visible() for r in g.rows if r.get_visible()
+        r.get_title()
+        for p in dialog._pages
+        for g in p.groups
+        if g.get_visible()
+        for r in g.rows
+        if r.get_visible()
     ]
     check("search finds it by 'clone'", "Clone repositories into" in visible, visible)
     dialog.force_close()

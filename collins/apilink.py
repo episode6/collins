@@ -39,7 +39,9 @@ from collections.abc import Callable
 from .api import protocol
 from .api.protocol import RequestRefused
 
-__all__ = ["Link", "RequestRefused", "call", "current", "is_local", "service_home", "set_current"]
+__all__ = [
+    "Link", "RequestRefused", "call", "current", "is_local", "service_home", "service_host", "set_current",
+]
 
 log = logging.getLogger(__name__)
 
@@ -152,6 +154,18 @@ def service_home() -> str | None:
         return os.path.expanduser("~")
     home = getattr(_current, "service_home", None)
     return home if isinstance(home, str) and home.startswith("/") else None
+
+
+def service_host() -> str | None:
+    """The service's hostname, as its last hello said it (PR-3.3: what the
+    Preferences dialog's Service page is headed with). None with no link,
+    before a hello, or when the hello's `host` is not a non-empty string of
+    at most `protocol.HOST_MAX` characters (foreign content, rule 5)."""
+    hello = getattr(_current, "hello", None)
+    host = hello.get("host") if isinstance(hello, dict) else None
+    if isinstance(host, str) and 0 < len(host) <= protocol.HOST_MAX:
+        return host
+    return None
 
 
 def call(message: dict, timeout: float | None = None) -> dict:

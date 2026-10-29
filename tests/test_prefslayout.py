@@ -42,6 +42,47 @@ def test_a_mixed_group_has_rows_on_both_sides_and_the_others_on_one():
         assert halves == ({"service", "device"} if side == "mixed" else {side}), group
 
 
+def test_the_two_pages_cover_the_groups_and_share_the_mixed_ones():
+    device = set(prefslayout.page_groups("device"))
+    service = set(prefslayout.page_groups("service"))
+    assert device | service == set(prefslayout.GROUPS)
+    assert device & service == {
+        g for g, side in prefslayout.GROUP_SIDES.items() if side == "mixed"
+    }
+    assert prefslayout.page_groups("device") == (
+        "general", "sessions", "notifications", "composer", "terminal", "footer_apps",
+        "pull_requests", "git", "caffeine", "editor",
+    )
+    assert prefslayout.page_groups("service") == (
+        "cli", "general", "token_use", "mcp_tools", "sessions", "sandbox", "pull_requests", "git",
+    )
+
+
+def test_the_token_use_promise_holds_on_the_service_page():
+    assert prefslayout.page_groups("service")[:3] == ("cli", "general", "token_use")
+
+
+def test_git_directly_follows_pull_requests_on_both_pages():
+    for side in ("device", "service"):
+        groups = prefslayout.page_groups(side)
+        assert groups.index("git") == groups.index("pull_requests") + 1, side
+
+
+def test_no_such_page():
+    import pytest
+
+    with pytest.raises(ValueError):
+        prefslayout.page_groups("both")
+
+
+def test_pr_and_session_rows_are_where_the_dialog_has_them():
+    # Part 1 had these four wrong (D61): the dialog's rows decide.
+    assert "pr_title_sessions" in prefslayout.GROUP_SETTINGS["pull_requests"]
+    assert "attach_prompt_prs" in prefslayout.GROUP_SETTINGS["pull_requests"]
+    assert "worktree_new_sessions" in prefslayout.GROUP_SETTINGS["sessions"]
+    assert "dock_attachments_when_room" in prefslayout.GROUP_SETTINGS["sessions"]
+
+
 def test_group_names_are_unique():
     assert len(set(prefslayout.GROUPS)) == len(prefslayout.GROUPS)
 

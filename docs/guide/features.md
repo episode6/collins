@@ -1533,8 +1533,13 @@ along.
 Every preference is saved in one of two files under `~/.config/collins/`:
 the ones that describe what Collins does for your sessions in `state.json`,
 the ones that describe this computer's window in `ui-state.json` (see
-[App state](./how-it-works#app-state)). The dialog does not show the
-difference.
+[App state](./how-it-works#app-state)). The dialog shows the difference as
+two pages, **This device** and **Service** (headed with the service's host
+name); a group that has settings of both kinds, such as *General*, *Session
+behavior*, *Pull requests* and *Git*, appears on both under the same title.
+The search covers both pages: each page's tab says how many settings it
+matched, and the page showing is switched to the other one when it has no
+match and the other has.
 
 Terminal **font**, **scrollback** size, **easy copy & paste** (on by default),
 a **terminal color theme** (Dracula, Solarized, Gruvbox, Nord, Catppuccin,

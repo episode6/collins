@@ -1,7 +1,7 @@
 <!--
 Modified from the original agent-session-manager
 (https://github.com/r4nd3l/agent-session-manager, GPL-3.0) in the ghackett
-fork. Last modified: 2026-10-13. Full change history: git log for this file.
+fork. Last modified: 2026-10-29. Full change history: git log for this file.
 -->
 # How It Works
 
@@ -264,8 +264,8 @@ renaming it over `state.json`. The headless runs' scratch directory is
 `~/.config/collins/title-scratch/` beside them.
 The service keeps its socket, its lock and its local proof in
 `$XDG_RUNTIME_DIR/collins/<app id>/` (`api.sock`, `service.lock`,
-`local-proof`), and which tabs this window had open in `ui-state.json`
-(`open_tabs`). The terminal panel's per-session scrollback lives in
+`local-proof`), and which tabs this window had open and which sidebar
+groups it had expanded in `ui-state.json` (`open_tabs`, `expanded_groups`). The terminal panel's per-session scrollback lives in
 `~/.local/state/collins/panel_history/` (one file per panel tab), and the
 sidebar's Chats project in `~/.local/share/collins/chats/`. Each sandboxed
 session has a box of its own — its `$HOME` inside the sandbox — under

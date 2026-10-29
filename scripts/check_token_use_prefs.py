@@ -82,7 +82,7 @@ from gi.repository import Adw, GLib  # noqa: E402
 from collins import claudemodels, i18n, mcptools, prefslayout  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.prefs import PreferencesDialog  # noqa: E402
-from collins.state import AppState  # noqa: E402
+from collins.state import SERVICE_SETTINGS, AppState  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -120,9 +120,12 @@ def titles(group) -> list[str]:
     return [row.get_title() for row in group.rows]
 
 
-def visible_rows(page) -> list[str]:
+def visible_rows(dialog) -> list[str]:
+    # Both pages, This device first: the device rows come first within a
+    # mixed group too, so a list that was one page's order is still it.
     return [
         row.get_title()
+        for page in dialog._pages
         for group in page.groups
         if group.get_visible()
         for row in group.rows
@@ -183,16 +186,19 @@ def stage() -> bool:
 
 def step_layout() -> bool:
     dialog = state["dialog"]
-    page = dialog._page
-    headings = [g.get_title() or "" for g in page.groups]
-    check(
-        "the groups come in prefslayout's order",
-        headings == [HEADINGS[name] for name in prefslayout.GROUPS],
-        headings,
-    )
+    device, service = dialog._device_page, dialog._service_page
+    check("the dialog opens on This device", dialog._view_stack.get_visible_child() is device)
+    for side, page in (("device", device), ("service", service)):
+        headings = [g.get_title() or "" for g in page.groups]
+        check(
+            f"the {side} page's groups come in prefslayout's order",
+            headings == [HEADINGS[name] for name in prefslayout.page_groups(side)],
+            headings,
+        )
+    headings = [g.get_title() or "" for g in service.groups]
     check("Token use is directly under General", headings[1:3] == ["General", "Token use"], headings)
     check("Built-in MCP tools follows it", headings[3:4] == ["Built-in MCP tools"], headings)
-    token = page.groups[2]
+    token = service.groups[2]
     check(
         "the Token use group holds its four rows in order",
         titles(token)
@@ -204,9 +210,15 @@ def step_layout() -> bool:
         (token.get_description() or "").startswith("Each of these runs Claude on your behalf"),
         token.get_description(),
     )
-    check("the model rows left General", "Icon generation model" not in titles(page.groups[1]))
-    check("the title picker left Session behavior", "Session title model" not in titles(page.groups[4]))
-    mcp = page.groups[3]
+    check(
+        "the model rows left General",
+        "Icon generation model" not in titles(service.groups[1]) + titles(device.groups[0]),
+    )
+    check(
+        "the title picker left Session behavior",
+        "Session title model" not in titles(service.groups[4]) + titles(device.groups[1]),
+    )
+    mcp = service.groups[3]
     check(
         "the MCP group's description carries the disclosure",
         "read_terminal" in (mcp.get_description() or ""),
@@ -215,13 +227,49 @@ def step_layout() -> bool:
     check("the MCP group still lists every tool", len(mcp.rows) == len(mcptools.TOOLS), len(mcp.rows))
     renew = token.rows[2]
     status = token.rows[3]
-    state.update(page=page, renew=renew, status=status, pickers=token.rows[:2])
+    state.update(renew=renew, status=status, pickers=token.rows[:2])
     check("the renew switch opens on (the default)", isinstance(renew, Adw.SwitchRow) and renew.get_active())
     check(
         "the Model list row says it is free",
         (status.get_subtitle() or "").endswith("free, no tokens"),
         status.get_subtitle(),
     )
+    return later(step_pin, 200)
+
+
+def step_pin() -> bool:
+    """The dialog's rows against prefslayout's data, which no GTK-free test
+    can see: every row names the settings it writes, a group has a half on a
+    page exactly when prefslayout.page_groups puts it there, every row sits
+    on the page of its settings' side, and the keys over a group's halves are
+    GROUP_SETTINGS' for it (D61: the table had drifted from the dialog)."""
+    dialog = state["dialog"]
+    problems: list[str] = []
+    for name in prefslayout.GROUPS:
+        side = prefslayout.GROUP_SIDES[name]
+        keys: set[str] = set()
+        for half_side in ("device", "service"):
+            group = dialog._group(name, half_side)
+            wanted = name in prefslayout.page_groups(half_side)
+            if (group is not None) != wanted:
+                problems.append(f"{name}: a half on {half_side} is {group is not None}, wanted {wanted}")
+            if group is None:
+                continue
+            for row in group.rows:
+                settings = getattr(row, "settings", None)
+                if settings is None:
+                    problems.append(f"{name}/{half_side}: a row with no settings tag")
+                    continue
+                if side == "mixed" and not settings:
+                    problems.append(f"{name}/{half_side}: a mixed group's row names no setting")
+                for key in settings:
+                    if (key in SERVICE_SETTINGS) != (half_side == "service"):
+                        problems.append(f"{name}: {key} is on the {half_side} page")
+                keys.update(settings)
+        table = set(prefslayout.GROUP_SETTINGS[name])
+        if keys != table:
+            problems.append(f"{name}: rows only {sorted(keys - table)}, table only {sorted(table - keys)}")
+    check("every row is on its settings' page and the dialog agrees with GROUP_SETTINGS", not problems, problems)
     return later(step_catalog)
 
 
@@ -256,8 +304,32 @@ def step_catalog() -> bool:
 
 
 def step_search() -> bool:
-    dialog, page = state["dialog"], state["page"]
+    dialog = state["dialog"]
     entry = dialog._search_entry
+    stack = dialog._view_stack
+
+    def badges() -> tuple[int, int]:
+        return dialog._device_vsp.get_badge_number(), dialog._service_vsp.get_badge_number()
+
+    # A search over two pages is no worse than one over one: it shows the
+    # page that has the match, and each tab says how many rows it has.
+    stack.set_visible_child(dialog._service_page)
+    entry.set_text("dracula")
+    dialog._apply_filter()
+    check(
+        "a match on the other page switches to it",
+        stack.get_visible_child() is dialog._device_page and visible_rows(dialog) == ["Color theme"],
+        visible_rows(dialog),
+    )
+    check("the tabs count the matches (device 1, service 0)", badges() == (1, 0), badges())
+    entry.set_text("parent branch")
+    dialog._apply_filter()
+    check("a page that has matches stays shown", stack.get_visible_child() is dialog._device_page)
+    check("the tabs count both halves of the Git group (5 and 4)", badges() == (5, 4), badges())
+    entry.set_text("")
+    dialog._apply_filter()
+    check("clearing the search keeps the page", stack.get_visible_child() is dialog._device_page)
+    check("and hides the counts", badges() == (0, 0), badges())
     for query, expected in (
         ("oauth", ["Auto-renew the Claude login"]),
         ("auto-generate", ["Session title model"]),
@@ -277,11 +349,11 @@ def step_search() -> bool:
     ):
         entry.set_text(query)
         dialog._apply_filter()
-        rows = visible_rows(page)
+        rows = visible_rows(dialog)
         check(f"searching {query!r} finds {expected}", rows == expected, rows)
     entry.set_text("")
     dialog._apply_filter()
-    check("clearing the search shows everything again", len(visible_rows(page)) > 40, len(visible_rows(page)))
+    check("clearing the search shows everything again", len(visible_rows(dialog)) > 40, len(visible_rows(dialog)))
     return step_sandbox_tools()
 
 

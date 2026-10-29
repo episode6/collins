@@ -348,8 +348,9 @@ def surfaces(win, local: bool) -> None:
     prefs._search_entry.set_text("")
     prefs._apply_filter()
     check(f"[{say}] …and clearing the search keeps it that way", group.get_visible() is local)
-    others = [g for g in prefs._page.groups if g is not group and g.get_visible()]
-    check(f"[{say}] the other groups are all there", len(others) == len(prefs._page.groups) - 1, len(others))
+    others = [g for p in prefs._pages for g in p.groups if g is not group and g.get_visible()]
+    total = sum(len(p.groups) for p in prefs._pages)
+    check(f"[{say}] the other groups are all there", len(others) == total - 1, len(others))
 
     readme = f"{PROJECT}/README.md"
     entries = openwith.file_open_with_entries([APP_ID], readme)

@@ -77,7 +77,8 @@ SCENES = (
     "main-window", "hero", "quick-switcher", "session-details", "mcp-servers",
     "preferences", "terminal-panel", "new-chat", "composer", "pr-page",
     "editor-panel", "editor-picker", "attachments-panel", "notifications",
-    "notification-card", "preferences-notifications", "welcome", "welcome-cli",
+    "notification-card", "preferences-notifications", "preferences-service",
+    "preferences-search", "welcome", "welcome-cli",
     "git-page", "git-page-notes", "git-page-commit", "git-page-commit-folded",
     "git-page-gap-note",
 )
@@ -274,6 +275,21 @@ def stage(win) -> list[tuple[int, callable]]:
         dialogs.mcp_browser_dialog(win)
     elif scene == "preferences":
         win.activate_action("win.preferences")
+    elif scene in ("preferences-service", "preferences-search"):
+        # Preferences is two pages (This device, Service); the first is
+        # the "preferences" scene. These open the dialog and show the
+        # Service page, or type a search that has matches on both with the
+        # tabs' counts (not docs shots: a PR's).
+        win.activate_action("win.preferences")
+
+        def second_view() -> None:
+            dialog = win.get_visible_dialog()
+            if scene == "preferences-service":
+                dialog._view_stack.set_visible_child(dialog._service_page)
+            else:
+                dialog._search_entry.set_text("parent branch")
+
+        return [(1200, second_view)]
     elif scene == "preferences-notifications":
         # The dialog filtered to the Notifications group, the way the
         # sheet's Preferences… link opens it (not a docs shot: a PR's).
