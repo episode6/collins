@@ -157,6 +157,24 @@ DEVICE = frozenset(
         "openwith:_alternatives_terminal:shutil.which",
         "openwith:_configured_terminal_ids:Path.read_text",
         "openwith:_from_command:shutil.which",
+        # -- the launchers (PR-3.0 item 7) handing a program of this device's
+        # something of this device's own: a web or mail address, or a file
+        # this device has. `copylabel.open_uri` opens GitHub, the releases
+        # page and the `gh` install page; `terminal._launch_web` a clicked
+        # http(s) or mailto link (any other scheme is `_launch_local_uri`,
+        # below: PR-3.0 item 8). The attachments panel's `_launch` and
+        # `_launch_default` and the lightbox's Open With… hand an app the
+        # path their callers chose: this device's cached copy (D51, a
+        # picture or a document only: `blobcache.DOCUMENT_SUFFIXES`, PR-3.0
+        # item 6), or the service's own file, which only a `local` client
+        # is handed (the ask is the callers': `AttachmentsView._with_file`,
+        # `lightbox.show_image`) and which is then a file on this device.
+        "copylabel:open_uri:UriLauncher.new",
+        "terminal:_launch_web:UriLauncher.new",
+        "attachpanel:AttachmentsView._launch:FileLauncher.new",
+        "attachpanel:AttachmentsView._launch_default:FileLauncher.new",
+        "lightbox:ImageLightbox._on_open_with_clicked:FileLauncher.new",
+        "lightbox:ImageLightbox.present_over:FileLauncher.new",
     }
 )
 
@@ -171,19 +189,33 @@ LOCAL_EXTRAS = frozenset(
         # service's handed to a program of this device's ------------------------------
         "footerapps:launch_app:Path.is_dir",
         "footerapps:launch_app:subprocess.Popen",
+        "footerapps:launch_app:Launcher.launch",  # the app's info launched on the folder (PR-3.0 item 7)
         "footerapps:launch_app_file:Path.is_file",
+        "footerapps:launch_app_file:Launcher.launch",
         "openwith:launch_terminal:Path.is_dir",
         "openwith:launch_terminal:subprocess.Popen",
         "openwith:open_file_default:Path.is_file",
         "openwith:open_file_default:shutil.which",  # xdg-open
         "openwith:open_file_default:subprocess.Popen",
+        "openwith:open_file_default:AppInfo.launch_default_for_uri",  # with no xdg-open (PR-3.0 item 7)
         # -- the attachments panel's Open With… and Show in Folder ----------------------
         "attachpanel:AttachmentsView._on_show_folder:os.path.exists",
+        "attachpanel:AttachmentsView._on_show_folder:FileLauncher.new",
+        "attachpanel:AttachmentsView._on_show_folder:Launcher.open_containing_folder",
         "attachpanel:AttachmentsView._with_local_file:os.path.isfile",
         # -- Open in Ghostty ---------------------------------------------------------
         "window:MainWindow._on_open_ghostty:Path.is_dir",
         "window:MainWindow._on_open_ghostty:shutil.which",
         "window:MainWindow._on_open_ghostty:subprocess.Popen",
+        # -- the launchers (PR-3.0 item 7): the file manager on a folder, the
+        # transcript revealed, a clicked folder's default app, and a clicked
+        # link of any scheme but http(s) and mailto (PR-3.0 item 8) ----------------
+        "window:MainWindow._on_open_folder:FileLauncher.new",
+        "window:MainWindow._on_reveal_transcript:FileLauncher.new",
+        "window:MainWindow._on_reveal_transcript:Launcher.open_containing_folder",
+        "terminal:_launch_default:FileLauncher.new",
+        "terminal:_launch_local_uri:FileLauncher.new",
+        "terminal:_launch_local_uri:UriLauncher.new",
         # -- a native chooser's starting folder (§3.11: the native choosers are a
         # `local` client's; PR-3.2 gives the others the path picker) --------------------
         "clonedialog:CloneDialog._browse_target:os.path.isdir",
@@ -402,15 +434,12 @@ LOCAL_EXTRAS = frozenset(
 # - **A star import** (`from os.path import *`, then a bare `isdir(p)`),
 #   and a module or `os.path` itself bound to a name (`sp = subprocess;
 #   sp.run(a)`).
-# - **The launchers**: `Gtk.FileLauncher`, `Gtk.UriLauncher`,
-#   `Gio.AppInfo.launch` / `launch_uris` / `launch_default_for_uri`,
-#   `open_containing_folder`. They open nothing themselves; they hand a
-#   path to a program of this device's, which is what a local extra is.
-#   Every one today is gated by hand or works on this device's cached
-#   copy (D51): attachpanel.py:507-524, lightbox.py:339, 776,
-#   terminal.py:319-322, 813, window.py:6098, 6398, footerapps.py:92,
-#   120, openwith.py:163, copylabel.py:59 (GitHub, releases, the `gh`
-#   install page).
+# - **The launchers** are seen since PR-3.0 (item 7: `Gtk.FileLauncher.new`,
+#   `Gtk.UriLauncher.new`, `Gio.AppInfo.launch_default_for_uri`,
+#   `open_containing_folder` and `launch_uris*` on any receiver) and filed
+#   above; what stays unseen of them is `launch` on an app's info whose
+#   name does not say so (`app.launch(files, ctx)`: `launch` is a
+#   `Gtk.FileLauncher`'s word too, whose `new` is the site).
 # - **A property store**: `picture.props.file = g` / `.props.filename =`
 #   (an `ast.Attribute` store, not a call); the constructor and
 #   `set_property` forms are seen.

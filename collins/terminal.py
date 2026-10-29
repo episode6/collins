@@ -80,6 +80,7 @@ from .linkpatterns import (  # noqa: E402
     resolve_file_reference,
     resolve_wrapped_reference,
     resolve_wrapped_url,
+    scheme_is_remote_safe,
     token_at_column,
     uri_scheme,
 )
@@ -303,7 +304,9 @@ def _is_file_uri(uri: str) -> bool:
 
 def _launch_uri(terminal: Vte.Terminal, uri: str, click: int = 0) -> None:
     """Open a clicked link the way its scheme deserves (*click*: the
-    click's number, see `_present_image`)."""
+    click's number, see `_present_image`): a web or mail address on any
+    client (`_launch_web`), anything else only on the service's machine
+    (`_launch_local_uri`, PR-3.0 item 8)."""
     if uri.startswith("www."):
         uri = "http://" + uri  # the bare-host grammar's half of a URL
     if _is_file_uri(uri):
@@ -315,8 +318,29 @@ def _launch_uri(terminal: Vte.Terminal, uri: str, click: int = 0) -> None:
         if path is not None:
             _open_file_reference(terminal, path, None, None, click)
             return
-        if not apilink.is_local():
-            return  # a file handed to this device's apps: a local extra (§3.12)
+    if scheme_is_remote_safe(uri):
+        _launch_web(terminal, uri)
+    else:
+        _launch_local_uri(terminal, uri)
+
+
+def _launch_web(terminal: Vte.Terminal, uri: str) -> None:
+    """An http(s) or mailto address, on any client: it names nothing of
+    the service's machine, so this device's browser or mail app takes it."""
+    if not scheme_is_remote_safe(uri):
+        return
+    Gtk.UriLauncher.new(uri).launch(terminal.get_root(), None, _on_link_launched)
+
+
+def _launch_local_uri(terminal: Vte.Terminal, uri: str) -> None:
+    """Any other scheme (a `file:` URI with no path the click could open,
+    `ssh:`, an editor's or a desktop's own handler): a local extra
+    (§3.12, PR-3.0 item 8), since the program it starts on this device may
+    read it as a path of this machine's. Nothing for a client that is not
+    on the service's machine."""
+    if not apilink.is_local():
+        return
+    if _is_file_uri(uri):
         launcher = Gtk.FileLauncher.new(Gio.File.new_for_uri(uri))
     else:
         launcher = Gtk.UriLauncher.new(uri)

@@ -168,6 +168,11 @@ class _Launcher:
 
 Gtk.FileLauncher.new = staticmethod(lambda gfile: _Launcher(gfile.get_path() or gfile.get_uri()))
 Gtk.UriLauncher.new = staticmethod(lambda uri: _Launcher(uri))
+# GIO's default handler for a URI (`openwith.open_file_default` without an
+# xdg-open; a launcher the walker reads since PR-3.0 item 7): recorded too.
+Gio.AppInfo.launch_default_for_uri = staticmethod(
+    lambda uri, _context=None: LAUNCHER_CALLS.append(("default", uri)) or True
+)
 
 import collins.attachpanel as attachpanel_mod  # noqa: E402
 import collins.terminal as terminal_mod  # noqa: E402
@@ -348,6 +353,19 @@ def surfaces(win, local: bool) -> None:
     readme = f"{PROJECT}/README.md"
     entries = openwith.file_open_with_entries([APP_ID], readme)
     check(f"[{say}] a file's Open In… rows", bool(entries) is local, entries)
+    # The default app for a file of the service's, through GIO's own handler
+    # (PR-3.0 item 7: a launcher site, behind the ask): this device's
+    # xdg-open is hidden for the call so the recorded handler is the road.
+    before = len(LAUNCHER_CALLS)
+    real_which = openwith.shutil.which
+    openwith.shutil.which = lambda name, *a, **k: None if name == "xdg-open" else real_which(name, *a, **k)
+    try:
+        opened = openwith.open_file_default(readme)
+    finally:
+        openwith.shutil.which = real_which
+    made = LAUNCHER_CALLS[before:]
+    expected = [("default", Gio.File.new_for_path(readme).get_uri())] if local else []
+    check(f"[{say}] a file's default app (GIO's handler)", made == expected and opened is local, made)
 
     # The attachments panel: a bare view on the session, its menu read off
     # the popover. The file is one the session was sent (its uploads): a
@@ -512,6 +530,19 @@ def footer(tab, local: bool) -> None:
     terminal_mod._launch_uri(tab.terminal, "https://example.test/")
     check(f"[{say}] a clicked web link opens either way",
           LAUNCHER_CALLS[before:] == [("launch", "https://example.test/")], LAUNCHER_CALLS[before:])
+    # The schemes (PR-3.0 item 8): a mail address opens either way; any
+    # other scheme only on the service's machine.
+    for uri in ("mailto:someone@example.test", "HTTP://example.test/upper"):
+        before = len(LAUNCHER_CALLS)
+        terminal_mod._launch_uri(tab.terminal, uri)
+        check(f"[{say}] a clicked {uri.split(':')[0]} link opens either way",
+              LAUNCHER_CALLS[before:] == [("launch", uri)], LAUNCHER_CALLS[before:])
+    for uri in ("ssh://host.example.test/home/u", "vscode://file/etc/hosts", "smb://host/share"):
+        before = len(LAUNCHER_CALLS)
+        terminal_mod._launch_uri(tab.terminal, uri)
+        made = LAUNCHER_CALLS[before:]
+        wanted = [("launch", uri)] if local else []
+        check(f"[{say}] a clicked {uri.split(':')[0]}: link", made == wanted, made)
 
 
 seed = AppState()

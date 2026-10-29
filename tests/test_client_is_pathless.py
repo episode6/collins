@@ -180,7 +180,7 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
     them. So each group's size is pinned, and `DEVICE`'s per module: a
     new site means editing these numbers in the same diff, where the
     question "is this really the device's own file" gets asked."""
-    assert len(LOCAL_EXTRAS) == 16
+    assert len(LOCAL_EXTRAS) == 27  # 16, and eleven launchers since PR-3.0 (items 7, 8)
     assert len(UNRULED) <= 3
     per_module: dict[str, int] = {}
     for site in DEVICE:
@@ -200,8 +200,13 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
         "prefs": 1,
         "sidebar": 1,
         "openwith": 5,
+        # The launchers handing a URL or a file this device has (PR-3.0 item 7).
+        "copylabel": 1,
+        "terminal": 1,
+        "attachpanel": 2,
+        "lightbox": 2,
     }
-    assert len(DEVICE) == 67
+    assert len(DEVICE) == 73
     # `openwith`'s five device sites are lookups of this device's terminal
     # preference; its launchers are local extras and nowhere else.
     assert {s for s in DEVICE if s.startswith("openwith:")} == {
@@ -271,6 +276,19 @@ def test_the_device_group_names_no_module_that_takes_a_path_of_the_services():
     assert modules == {
         "app", "blobcache", "remoteimages", "remoteuploads", "uistate", "window", "desktopentry",
         "updatecheck", "buildinfo", "connection", "prefs", "sidebar", "openwith",
+        "copylabel", "terminal", "attachpanel", "lightbox",
+    }
+    # The four modules the launchers brought (PR-3.0 item 7) are there for
+    # a launcher each and nothing else: a web or mail address, or a file
+    # this device has (a cached copy, or the service's own file handed
+    # only to a `local` client by the callers' ask).
+    assert {s for s in DEVICE if s.startswith(("copylabel:", "terminal:", "attachpanel:", "lightbox:"))} == {
+        "copylabel:open_uri:UriLauncher.new",
+        "terminal:_launch_web:UriLauncher.new",
+        "attachpanel:AttachmentsView._launch:FileLauncher.new",
+        "attachpanel:AttachmentsView._launch_default:FileLauncher.new",
+        "lightbox:ImageLightbox._on_open_with_clicked:FileLauncher.new",
+        "lightbox:ImageLightbox.present_over:FileLauncher.new",
     }
     # `remoteuploads` is there for the dropped file it reads to upload, and nothing else.
     assert {s for s in DEVICE if s.startswith("remoteuploads:")} == {
@@ -302,9 +320,28 @@ def test_the_unruled_group_only_shrinks():
 def test_the_cwd_checks_and_the_terminals_sites_are_gone():
     """D39 (PR-2.8): the tab and its panel shells do not ask this device's
     disk whether a cwd is a directory; the service's `spawn` falls back and
-    says where the pty started. `terminal` has no site left at all."""
+    says where the pty started. `terminal` and `lightbox` have no site left
+    but their launchers (PR-3.0 item 7), the ones a click opens with."""
     found = pathless.walk()
-    assert not sorted(s for s in found if s.startswith(("terminal:", "lightbox:")))
+    assert sorted(s for s in found if s.startswith(("terminal:", "lightbox:"))) == [
+        "lightbox:ImageLightbox._on_open_with_clicked:FileLauncher.new",
+        "lightbox:ImageLightbox.present_over:FileLauncher.new",
+        "terminal:_launch_default:FileLauncher.new",
+        "terminal:_launch_local_uri:FileLauncher.new",
+        "terminal:_launch_local_uri:UriLauncher.new",
+        "terminal:_launch_web:UriLauncher.new",
+    ]
+
+
+def test_a_clicked_link_of_any_scheme_but_the_webs_is_a_local_extra():
+    """PR-3.0 item 8: `_launch_web` is the one launch a client that is not
+    local makes for a clicked link (a web or mail address); every other
+    scheme goes through `_launch_local_uri`, which asks first."""
+    assert "terminal:_launch_web:UriLauncher.new" in DEVICE
+    assert {s for s in LOCAL_EXTRAS if s.startswith("terminal:_launch_local_uri:")} == {
+        "terminal:_launch_local_uri:FileLauncher.new",
+        "terminal:_launch_local_uri:UriLauncher.new",
+    }
 
 
 # -- the walker's reach (the Fable review of PR 615, should-fix 1 and 2) -----------------------
@@ -327,6 +364,37 @@ _HEADER = (
 )
 
 CAUGHT = {
+    # -- the launchers (PR-3.0 item 7; on the "unseen" record until then) -------------------
+    "Gtk.FileLauncher": (
+        "def f(p):\n"
+        "    Gtk.FileLauncher.new(Gio.File.new_for_path(p)).launch(None, None, None)\n",
+        "FileLauncher.new",
+    ),
+    "Gtk.UriLauncher": (
+        "def f(u):\n    Gtk.UriLauncher.new(u).launch(None, None, None)\n",
+        "UriLauncher.new",
+    ),
+    "Gio.AppInfo.launch_default_for_uri": (
+        "def f(u):\n    return Gio.AppInfo.launch_default_for_uri(u, None)\n",
+        "AppInfo.launch_default_for_uri",
+    ),
+    "Gio.AppInfo.launch_default_for_uri_async": (
+        "def f(u):\n    Gio.AppInfo.launch_default_for_uri_async(u, None, None, None)\n",
+        "AppInfo.launch_default_for_uri_async",
+    ),
+    "an app's launch": (
+        "def f(info, p):\n    info.launch([Gio.File.new_for_path(p)], None)\n",
+        "Launcher.launch",
+    ),
+    "an app's launch on an attribute": (
+        "def f(self, p):\n    self.app_info.launch([Gio.File.new_for_path(p)], None)\n",
+        "Launcher.launch",
+    ),
+    "an app's launch_uris": ("def f(app, u):\n    app.launch_uris([u], None)\n", "Launcher.launch_uris"),
+    "a launcher's open_containing_folder": (
+        "def f(launcher):\n    launcher.open_containing_folder(None, None, None)\n",
+        "Launcher.open_containing_folder",
+    ),
     # -- import aliases ---------------------------------------------------------------------
     "from os.path import isdir as there": ("def f(p):\n    return there(p)\n", "os.path.isdir"),
     "import os.path as osp": ("def f(p):\n    return osp.isdir(p)\n", "os.path.isdir"),
@@ -607,16 +675,9 @@ MISSED = {
     "a helper's read": "def f(p):\n    return helper(p)\n\ndef helper(p):\n    pass\n",
     "expanduser (this device's home, no read)": "def f(p):\n    return os.path.expanduser(p)\n",
     "abspath (this device's cwd, no read)": "def f(p):\n    return os.path.abspath(p)\n",
-    "Gtk.FileLauncher": (
-        "def f(p):\n"
-        "    Gtk.FileLauncher.new(Gio.File.new_for_path(p)).launch(None, None, None)\n"
+    "an app's launch on a receiver with no hint": (
+        "def f(app, p):\n    app.launch([Gio.File.new_for_path(p)], None)\n"
     ),
-    "Gtk.UriLauncher": "def f(u):\n    Gtk.UriLauncher.new(u).launch(None, None, None)\n",
-    "Gio.AppInfo.launch_default_for_uri": (
-        "def f(u):\n"
-        "    return Gio.AppInfo.launch_default_for_uri(u, None)\n"
-    ),
-    "an app's launch": "def f(info, p):\n    info.launch([Gio.File.new_for_path(p)], None)\n",
     "os.kill": "def f(pid):\n    os.kill(pid, 15)\n",
     "a function out of a dict": "def f(p, table):\n    return table['isdir'](p)\n",
     "a bare open handed on": "def f(ps):\n    return list(map(open, ps))\n",

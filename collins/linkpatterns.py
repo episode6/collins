@@ -80,6 +80,21 @@ def uri_scheme(uri: str) -> str:
         return ""
 
 
+# The schemes a clicked link opens with on any client (PR-3.0 item 8): a
+# web address and a mail address name nothing of the service's machine.
+# Every other scheme (`file:`, `ssh:`, an editor's `vscode:`, a desktop's
+# own handlers) is a local extra: it hands something to a program of this
+# device's that may read it as a path of this machine's.
+REMOTE_SAFE_SCHEMES = frozenset({"http", "https", "mailto"})
+
+
+def scheme_is_remote_safe(uri: str) -> bool:
+    """Whether a clicked *uri* opens on a client that is not on the
+    service's machine: its scheme is http, https or mailto, however cased.
+    No scheme at all is not safe (a bare word is no address)."""
+    return uri_scheme(uri) in REMOTE_SAFE_SCHEMES
+
+
 def bare_names_pattern(names: Iterable[str]) -> str | None:
     """A FILE_PATTERN companion matching any of *names* as a bare token.
 
