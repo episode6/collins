@@ -17,9 +17,8 @@ device's own files and programs), `LOCAL_EXTRAS` (each behind
 `apilink.is_local()` in its own function; kept on the list by ruling
 D49), `UNRULED` (pinned, so it only shrinks; recorded and not moved by
 ruling D50, with the reads the walker cannot see listed beside the group
-in `tests/pathless_allowlist.py`) and `RECORDED` (four `gitloads` sites
-the walker has seen only since it reads a function handed on without
-being called; pinned the same way).
+in `tests/pathless_allowlist.py`). `RECORDED` (four `gitloads` default
+arguments) is gone since PR-3.0 (D54 (6)).
 
 The walker's own reach is pinned at the end of this file: a table of
 spellings of a read it must catch, and a table of the ones it is known
@@ -32,7 +31,7 @@ import ast
 
 import pathless
 import pytest
-from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE, RECORDED, UNRULED
+from pathless_allowlist import ALLOWLIST, DEVICE, LOCAL_EXTRAS, NOT_A_SITE, UNRULED
 
 WHAT_TO_DO = """
 Each is a call the walker reads as the client opening a file or starting a
@@ -55,8 +54,7 @@ so one of these is the answer, in this order:
 
 The lists are in tests/pathless_allowlist.py. Each is pinned in this file
 (`test_each_group_is_pinned…`, `test_what_is_no_site_is_pinned…`), so filing
-means editing the pin in the same diff. `UNRULED` and `RECORDED` take nothing
-new."""
+means editing the pin in the same diff. `UNRULED` takes nothing new."""
 
 
 def test_no_site_outside_the_allowlist():
@@ -91,10 +89,10 @@ def test_the_git_pages_sites_are_gone():
     for prefix in ("gitpage:", "gitinfo:", "remotegit:", "gitpatch:"):
         left = sorted(s for s in found if s.startswith(prefix))
         assert not left, left
-    # `gitloads` calls nothing itself; what the walker finds there are its
-    # default arguments (the local runner behind `gitops`' transport, and
-    # show_diff's `exists`), which D50 records: `RECORDED`, and no other.
-    assert {s for s in found if s.startswith("gitloads:")} == RECORDED
+    # `gitloads` calls nothing itself, and since PR-3.0 (D54 (6)) names
+    # no site's function as a default argument either: no local runner,
+    # no `exists` of this device's.
+    assert {s for s in found if s.startswith("gitloads:")} == set()
     # The sidebar's last one, the file row's "is there a file to open"
     # check, is `fs.stat`'s since PR-2.4.
     assert sorted(s for s in found if s.startswith("gitsidebar:")) == []
@@ -170,9 +168,9 @@ def test_the_walker_covers_the_gtk_modules_and_the_helpers():
 # -- the final list (PR-2.8) ------------------------------------------------------------------
 
 
-def test_the_list_is_four_groups_that_do_not_overlap():
-    groups = (DEVICE, LOCAL_EXTRAS, UNRULED, RECORDED)
-    assert ALLOWLIST == DEVICE | LOCAL_EXTRAS | UNRULED | RECORDED
+def test_the_list_is_groups_that_do_not_overlap():
+    groups = (DEVICE, LOCAL_EXTRAS, UNRULED)
+    assert ALLOWLIST == DEVICE | LOCAL_EXTRAS | UNRULED
     assert len(ALLOWLIST) == sum(len(group) for group in groups)
 
 
@@ -184,7 +182,6 @@ def test_each_group_is_pinned_so_a_site_is_never_filed_silently():
     question "is this really the device's own file" gets asked."""
     assert len(LOCAL_EXTRAS) == 16
     assert len(UNRULED) <= 3
-    assert len(RECORDED) <= 4
     per_module: dict[str, int] = {}
     for site in DEVICE:
         module = site.split(":", 1)[0]
@@ -299,18 +296,6 @@ def test_the_unruled_group_only_shrinks():
         "clonedialog:CloneDialog._clone_done:os.path.isdir",
         "clonedialog:CloneDialog._refresh_destination:shutil.which",
         "window:MainWindow._visible_project_dir:Path.is_dir",
-    }
-
-
-def test_the_recorded_group_only_shrinks():
-    """Four `gitloads` sites the walker has seen since 2026-10-13 (a
-    site's function as a default argument). Neither device files nor local
-    extras; D50's rule is to record them. Pinned like `UNRULED`."""
-    assert RECORDED <= {
-        "gitloads:commit_message:subprocess.run",
-        "gitloads:commit_subject:subprocess.run",
-        "gitloads:resolve_commit:subprocess.run",
-        "gitloads:diff_file_path:os.path.exists",
     }
 
 

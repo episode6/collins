@@ -8,8 +8,9 @@ every site the client had then; each chunk of Phase 2 took off the sites
 it moved to the service (git in PR-2.1 and PR-2.2, the editor's files in
 PR-2.3, the tree, quick open and roots in PR-2.4, the file operations in
 PR-2.5, the links and the worktree checks in PR-2.6, the pictures in
-PR-2.7, the tab's and the shells' cwd checks in PR-2.8, D39). What is
-left is in four groups, and `tests/test_client_is_pathless.py` holds
+PR-2.7, the tab's and the shells' cwd checks in PR-2.8, D39; PR-3.0
+took the four `gitloads` sites of `RECORDED` off, D54 (6)). What is
+left is in three groups, and `tests/test_client_is_pathless.py` holds
 each to its rule:
 
 - `DEVICE`: this device's own files and programs. Nothing here names a
@@ -28,10 +29,10 @@ each to its rule:
   recorded, not moved; Phase 2 closes with them. **D54** (2026-10-12)
   rules what Phase 3 does with the list. The test pins the group so it
   can only shrink.
-- `RECORDED`: four more that are neither, in `gitloads`, which the walker
-  could not see until it learned to read a function handed on without
-  being called (the 2026-10-13 round, below). Under D50 they are
-  recorded, not moved, and no ruling names them yet. Pinned the same way.
+- (`RECORDED`, four `gitloads` sites the walker saw from 2026-10-13 on —
+  the local runner's `run=subprocess.run` defaults and show_diff's
+  `exists` — went in PR-3.0 by D54 (6): the service resolves the
+  tool's `file`, and a client has no local git runner to fall back on.)
 
 **What the tests enforce** (`tests/test_client_is_pathless.py`). A new
 site in a GTK module or a client helper fails the suite until it is
@@ -39,7 +40,7 @@ filed here, and so does an entry nothing matches any more (a site that
 moved comes off the list in the same PR). Filing is a deliberate,
 reviewed edit, not a way round the rule: each group is pinned by its
 exact size (`DEVICE` 67 and per module, `LOCAL_EXTRAS` 16, `UNRULED` at
-most its three, `RECORDED` at most its four), so a site cannot be added
+most its three), so a site cannot be added
 to any of them without that test changing in the same diff, where a
 reviewer sees it. And a match that is **no read at all** — the walker's
 any-receiver words landing on an object that is no path and no file (a
@@ -318,13 +319,11 @@ LOCAL_EXTRAS = frozenset(
 #   `gitinfo` and `window` (some fifty: `read_diff`, `side_bytes` and
 #   `tree_state_signature` at gitpage.py:1315, 1316, 1389, `read_status`,
 #   `run_plan`, `commit`, …; each takes the transport when one is
-#   installed) run on this
-#   device when the service's hello lacks the `git` capability
-#   (`App` logs "git runs locally" and installs no transport). Every
-#   service since PR-2.1 has the capability, so this is a fallback for an
-#   older service, which the protocol window does not admit today. The
-#   three `subprocess.run` sites of `RECORDED` below are the same
-#   fallback, seen by the walker.
+#   installed) ran on this device when the service's hello lacked the
+#   `git` capability. Gone in PR-3.0 (D54 (6)): the app installs the
+#   transport on every hello, so a client has no local git runner left
+#   (a service without the capability refuses each ask), and the three
+#   `gitloads` `run=subprocess.run` defaults the walker saw went with it.
 # - Seen and judged the device's own (not service facts): the update
 #   check's `prstatus.gh_succeeds` / `gh_json` (updatecheck.py:169, 191:
 #   this device's `gh` asking GitHub about Collins' releases),
@@ -471,41 +470,7 @@ UNRULED = frozenset(
     }
 )
 
-# Neither this device's files nor local extras, and seen by the walker
-# only since 2026-10-13: each is a site's function named as a default
-# argument, not called where it is written (`run=subprocess.run`,
-# `exists=os.path.exists`), which the walker did not read before. D50's
-# rule for what is neither: recorded, not moved. No ruling names these
-# four (D54 was made on the three above); they go with the next one.
-RECORDED = frozenset(
-    {
-        # The local runner `gitops.run_git` falls back to when no transport
-        # is installed (a service whose hello lacks the `git` capability:
-        # the fallback recorded above for `gitinfo` and `gitpage`). With the
-        # transport, which every service since PR-2.1 has, `run` is unused
-        # and git runs on the service. Callers: gitpage.py:1210, 1322
-        # (the breadcrumb's subject, the commit card), toolclient.py:160.
-        "gitloads:commit_message:subprocess.run",
-        "gitloads:commit_subject:subprocess.run",
-        "gitloads:resolve_commit:subprocess.run",
-        # show_diff's `file` argument: a relative path is taken against the
-        # agent's cwd when it is only there, and "there" is asked of this
-        # device's disk when the client's half runs it (toolclient.py:566,
-        # :620); the service's half asks its own (service/diffs.py:200).
-        # **What goes wrong for a client on another machine**: an agent that
-        # `cd`ed into `sub/` and names `foo.py` (meaning `sub/foo.py`) gets
-        # `foo.py`, which is not in the diff, so show_diff reveals nothing
-        # or refuses and annotate_diff / highlight_diff add nothing, where
-        # the same call with no client attached resolves right. If this
-        # device has a checkout at the same path, its disk decides instead.
-        # And `gitloads.py:457`'s `expanduser` puts this device's home into
-        # a `~/…` argument on the same path. It fails soft (a refusal, a
-        # mark not placed); read, not driven.
-        "gitloads:diff_file_path:os.path.exists",
-    }
-)
-
-ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED | RECORDED
+ALLOWLIST = DEVICE | LOCAL_EXTRAS | UNRULED
 
 # What the walker names a site and is none: no file of anyone's is opened
 # and no program started, because the receiver is not a path, not a

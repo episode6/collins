@@ -96,6 +96,7 @@ from .. import attachrecords, editorfiles, mcptools, notifycenter, proctree, rem
 from ..api import protocol
 from ..prstatus import parse_pr_url
 from ..shellinput import shell_command
+from . import diffs as diffs_mod
 
 log = logging.getLogger(__name__)
 
@@ -281,6 +282,10 @@ class SessionTools:
             return self._ui_show_image
 
         def ui(session, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
+            # A diff tool's files are resolved here, on the service's disk
+            # and with its home, before any client sees the call (PR-3.0
+            # item 5); the headless half gets them resolved too.
+            args = diffs_mod.resolve_tool_files(name, args, session.current_agent_cwd())
             forwarded = self._forward(session, name, args, sandboxed)
             if forwarded is not None:
                 return forwarded

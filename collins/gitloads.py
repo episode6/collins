@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -237,8 +236,20 @@ def short_ref(ref: str) -> str:
     return ref[:_SHORT_SHA_LEN] if _FULL_SHA.match(ref or "") else ref
 
 
+def _run_git(cwd: str, argv: list[str], run, timeout: float):
+    """`gitops.run_git` with the caller's *run* (a test's fake), else
+    gitops' own runner: the service's transport in a client (PR-3.0 item 5:
+    a client has no local runner to fall back on, the app installs the
+    transport on every hello) and this machine's git on the service."""
+    from . import gitops  # at call time: gitops imports this module
+
+    if run is None:
+        return gitops.run_git(cwd, argv, timeout=timeout)
+    return gitops.run_git(cwd, argv, run=run, timeout=timeout)
+
+
 def commit_subject(
-    cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+    cwd: str | None, ref: object, run=None, timeout: float = GIT_TIMEOUT_S
 ) -> str | None:
     """The subject line of the commit *ref* names in the repository at *cwd*
     — `git log -1 --format=%s <ref>^{commit} --`, one gitops.run_git call,
@@ -255,9 +266,8 @@ def commit_subject(
     without a call."""
     if not cwd or not safe_ref(ref):
         return None
-    from . import gitops  # at call time: gitops imports this module
 
-    result = gitops.run_git(cwd, commit_subject_argv(ref), run=run, timeout=timeout)
+    result = _run_git(cwd, commit_subject_argv(ref), run, timeout)
     if result.unreachable:
         return ""
     if not result.ok:
@@ -316,7 +326,7 @@ class CommitMessage:
 
 
 def commit_message(
-    cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+    cwd: str | None, ref: object, run=None, timeout: float = GIT_TIMEOUT_S
 ) -> CommitMessage | None:
     """The commit *ref* names, whole — one `git log -1
     --format=%H%x00%an%x00%aI%x00%s%x00%b <ref>^{commit} --` on a worker
@@ -328,9 +338,8 @@ def commit_message(
     body last so a huge one can't hide the others."""
     if not cwd or not safe_ref(ref):
         return None
-    from . import gitops  # at call time: gitops imports this module
 
-    result = gitops.run_git(cwd, commit_message_argv(ref), run=run, timeout=timeout)
+    result = _run_git(cwd, commit_message_argv(ref), run, timeout)
     if not result.ok:
         return None
     parts = result.stdout.split("\0", 4)
@@ -398,7 +407,7 @@ def reflow_body(body: str) -> str:
 
 
 def resolve_commit(
-    cwd: str | None, ref: object, run=subprocess.run, timeout: float = GIT_TIMEOUT_S
+    cwd: str | None, ref: object, run=None, timeout: float = GIT_TIMEOUT_S
 ) -> str | None:
     """The full sha of the commit *ref* names in the repository at *cwd* —
     `git rev-parse --verify --quiet <ref>^{commit}`, one gitops.run_git
@@ -413,9 +422,8 @@ def resolve_commit(
     GitResult.unreachable)."""
     if not cwd or not safe_ref(ref):
         return None
-    from . import gitops  # at call time: gitops imports this module
 
-    result = gitops.run_git(cwd, resolve_commit_argv(ref), run=run, timeout=timeout)
+    result = _run_git(cwd, resolve_commit_argv(ref), run, timeout)
     if result.unreachable:
         return ""
     if not result.ok:
@@ -439,30 +447,25 @@ def show_diff_load(what: object) -> Loaded | None:
     return {SHOW_KEY: what} if safe_ref(what) else None
 
 
-def diff_file_path(
-    raw: object, repo_root: str | None, cwd: str | None = None, exists=os.path.exists
-) -> str | None:
+def diff_file_path(raw: object, repo_root: str | None) -> str | None:
     """The path the diff view reveals — repo-relative, "/"-separated, as
     the files panel shows it — out of what the agent handed the tool: an
-    absolute path inside *repo_root*, or a relative one. A relative path
-    is taken against the repository root (that is how a diff names files)
-    unless it is only there against the agent's *cwd* (an agent that cd'd
-    into a subdirectory and named a file the way its shell sees it) —
-    *exists* decides, injectable for the tests. None for anything that
-    can't be a file in the diff: empty, escaping the root, a leading "-"
-    (git would read it as a flag)."""
+    absolute path inside *repo_root*, or a relative one, taken against
+    the repository root (that is how a diff names files). The service has
+    already made absolute a relative path that is only there against the
+    agent's cwd, and expanded a `~` with its home
+    (`service.diffs.resolve_file_arg`, PR-3.0 item 5): nothing here asks
+    a disk or a home. None for anything that can't be a file in the diff:
+    empty, escaping the root, a leading "-" (git would read it as a
+    flag)."""
     if not isinstance(raw, str) or not raw.strip() or not repo_root:
         return None
     root = os.path.normpath(repo_root)
-    text = os.path.expanduser(raw.strip())
+    text = raw.strip()
     if os.path.isabs(text):
         full = os.path.normpath(text)
     else:
         full = os.path.normpath(os.path.join(root, text))
-        if cwd and os.path.normpath(cwd) != root:
-            from_cwd = os.path.normpath(os.path.join(cwd, text))
-            if not exists(full) and exists(from_cwd):
-                full = from_cwd
     try:
         relative = os.path.relpath(full, root)
     except ValueError:

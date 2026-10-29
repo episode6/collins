@@ -191,3 +191,56 @@ def test_a_read_that_raises_answers_at_once(tmp_path, linked, monkeypatch):
     assert got == (False, "git vanished")
     got = diffs.annotate(FakeSession(str(tmp_path)), {"notes": [{"file": "a.py", "line": 1, "summary": "s"}]})
     assert got == (False, "git vanished")
+
+
+# -- the tools' files, resolved on the service (PR-3.0 item 5, D54 (6)) ------------------
+
+
+def test_a_file_only_there_against_the_agents_cwd_is_made_absolute(monkeypatch):
+    """An agent that cd'd into a subdirectory names files the way its shell
+    sees them; a path that is only there against its cwd is taken from
+    there — and one that exists against the root wins outright. Resolved
+    on the service, whose disk it is, before any client sees the call."""
+    from collins.service.diffs import resolve_file_arg
+
+    root, cwd = "/repo", "/repo/pkg"
+    only_in_pkg = {"/repo/pkg/a.py"}
+    assert resolve_file_arg("a.py", root, cwd, exists=only_in_pkg.__contains__) == "/repo/pkg/a.py"
+    both = {"/repo/a.py", "/repo/pkg/a.py"}
+    assert resolve_file_arg("a.py", root, cwd, exists=both.__contains__) == "a.py"
+    assert resolve_file_arg("a.py", root, cwd, exists=set().__contains__) == "a.py"
+    assert resolve_file_arg("a.py", root, root, exists=only_in_pkg.__contains__) == "a.py"  # no subdirectory
+    assert resolve_file_arg("a.py", None, cwd, exists=only_in_pkg.__contains__) == "a.py"  # no repository
+    # A `~` is this machine's home; anything that is no path is left alone.
+    monkeypatch.setenv("HOME", "/srv/u")
+    assert resolve_file_arg("~/repo/a.py", root, cwd) == "/srv/u/repo/a.py"
+    assert resolve_file_arg("", root, cwd) == "" and resolve_file_arg(None, root, cwd) is None
+    # The client's half then reads it against the root: the cwd never lifts
+    # a path out of the repository.
+    from collins import gitloads
+
+    lifted = resolve_file_arg("../../x.py", root, cwd, exists=lambda p: p == "/x.py")
+    assert gitloads.diff_file_path(lifted, root) is None
+
+
+def test_every_diff_tools_file_is_resolved_and_the_rest_left_alone(tmp_path):
+    from collins.service.diffs import resolve_tool_files
+
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "pkg" / "a.py").write_text("x")
+    cwd = str(repo / "pkg")
+    args = {"what": "staged", "file": "a.py", "line": 3}
+    got = resolve_tool_files("show_diff", args, cwd)
+    assert got == {"what": "staged", "file": str(repo / "pkg" / "a.py"), "line": 3}
+    assert args["file"] == "a.py"  # the caller's dict untouched
+    notes = {"notes": [
+        {"file": "a.py", "line": 1, "summary": "s"}, {"file": "pkg/a.py", "line": 2, "summary": "t"},
+    ]}
+    got = resolve_tool_files("annotate_diff", notes, cwd)
+    assert [n["file"] for n in got["notes"]] == [str(repo / "pkg" / "a.py"), "pkg/a.py"]
+    marks = {"marks": [{"file": "a.py", "line": 1, "start": 0, "end": 1}]}
+    assert resolve_tool_files("highlight_diff", marks, cwd)["marks"][0]["file"] == str(repo / "pkg" / "a.py")
+    other = {"file": "a.py"}
+    assert resolve_tool_files("open_in_editor", other, cwd) is other

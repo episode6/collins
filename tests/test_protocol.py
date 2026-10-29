@@ -947,7 +947,9 @@ REPLIES = {
     "fs.write": {"mtime": 1700000000000000, "size": 4, "encoding": "latin-1"},
     "fs.watch": {},
     "fs.unwatch": {},
-    "fs.stat": {"kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True, "path": "/home/u/a.txt"},
+    "fs.stat": {
+        "kind": "file", "size": 4, "mtime": 1700000000000000, "inside": True, "path": "/home/u/a.txt",
+    },
     "fs.list": {
         "entries": [{"name": "a.txt", "kind": "file", "ignored": False}],
         "truncated": False,

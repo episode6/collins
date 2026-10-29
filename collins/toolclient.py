@@ -578,7 +578,9 @@ class ToolClient:
             )
         path = None
         if "file" in args:
-            path = gitloads.diff_file_path(args["file"], str(root), cwd)
+            # The service resolved `file` before it sent the call (the
+            # agent's cwd, a `~`: PR-3.0 item 5).
+            path = gitloads.diff_file_path(args["file"], str(root))
             if path is None:
                 return False, f"'file' must be a path inside the repository: {args['file']!r}"
         else:
@@ -627,12 +629,13 @@ class ToolClient:
         """The tool's file → repo-relative path (gitloads.diff_file_path)
         against the repository *page* shows — not the tab's live cwd,
         which an agent may have `cd`ed out of since show_diff — or None
-        while the page is on its card. The cwd only breaks a tie for a
-        relative path that exists there and not under the root."""
+        while the page is on its card. A relative path only there against
+        the agent's cwd was made absolute by the service before the call
+        came (`service.diffs.resolve_file_arg`, PR-3.0 item 5)."""
         root = page.repo_root
         if root is None:
             return None
-        return lambda raw: gitloads.diff_file_path(raw, str(root), tab.current_agent_cwd())
+        return lambda raw: gitloads.diff_file_path(raw, str(root))
 
     def diff_context(self, found, args: dict, sandboxed: bool = False) -> mcptools.ToolResult:
         _window, tab = found

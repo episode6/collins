@@ -409,7 +409,8 @@ def test_stat_answers_kind_size_mtime_and_inside(served, tmp_path):
     reply = client.request({"t": "fs.stat", "path": str(project), "root": str(project)})
     assert reply["kind"] == "dir" and reply["size"] is None and reply["inside"] is True
     reply = client.request({"t": "fs.stat", "path": str(project / "nope"), "root": str(project)})
-    assert reply == {"kind": "missing", "size": None, "mtime": None, "inside": False, "path": str(project / "nope")}
+    missing = {"kind": "missing", "size": None, "mtime": None, "inside": False}
+    assert reply == {**missing, "path": str(project / "nope")}
     (project / "dangling").symlink_to(project / "nowhere")
     assert client.request({"t": "fs.stat", "path": str(project / "dangling")})["kind"] == "symlink"
     # A link to a file is the file; one out of the root is not inside it.

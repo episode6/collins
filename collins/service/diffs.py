@@ -32,11 +32,13 @@ GLib only; nothing here imports GTK.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from collections.abc import Callable
 
 from .. import diffnotes, gitinfo, gitloads, gitops, mcptools
 from ..api import protocol
+from .files import expand_home
 
 log = logging.getLogger(__name__)
 
@@ -197,7 +199,9 @@ class DiffNotes:
         return self._read(session, answer)
 
     def _resolver(self, session, root: str):
-        return lambda raw: gitloads.diff_file_path(raw, root, session.current_agent_cwd())
+        # The call's files were resolved before it reached here
+        # (`resolve_tool_files`, in the tools' dispatch).
+        return lambda raw: gitloads.diff_file_path(raw, root)
 
     def annotate(self, session, args: dict) -> mcptools.ToolResult:
         def answer(got) -> tuple[bool, str]:
@@ -252,3 +256,58 @@ class DiffNotes:
 
         return self._read(session, answer)
 
+
+
+# -- the tools' file arguments, resolved here (PR-3.0 item 5, D54 (6)) ------------------
+
+# The diff tools whose arguments name a file: show_diff's `file`, and the
+# `file` of each entry of annotate_diff's `notes` and highlight_diff's `marks`.
+FILE_TOOLS = {"show_diff": None, "annotate_diff": "notes", "highlight_diff": "marks"}
+
+
+def resolve_file_arg(raw: object, root: str | None, cwd: str | None, exists=os.path.exists) -> object:
+    """A diff tool's `file` as the service hands it on: a `~` expanded
+    with this machine's home, and a relative path the agent named from a
+    subdirectory — there against its *cwd* and not against the
+    repository *root* — made absolute; anything else as it was, which
+    `gitloads.diff_file_path` takes against the root. Resolved here, on
+    the machine whose disk it is, before any client sees the call: a
+    client on another machine has neither the disk nor the home. *exists*
+    is injectable for the tests."""
+    if not isinstance(raw, str) or not raw.strip():
+        return raw
+    text = expand_home(raw.strip())
+    if os.path.isabs(text):
+        return text
+    if root and cwd and os.path.normpath(cwd) != os.path.normpath(root):
+        full = os.path.normpath(os.path.join(root, text))
+        from_cwd = os.path.normpath(os.path.join(cwd, text))
+        if not exists(full) and exists(from_cwd):
+            return from_cwd
+    return raw
+
+
+def resolve_tool_files(name: str, args: dict, cwd: str | None, exists=os.path.exists) -> dict:
+    """*args* of the tool *name* with every file it names resolved
+    (`resolve_file_arg`) against the repository at the agent's *cwd*: a
+    copy, the caller's dict untouched; the arguments of any other tool as
+    they are."""
+    if name not in FILE_TOOLS or not isinstance(args, dict):
+        return args
+    root = gitinfo.repo_root(cwd) if cwd else None
+    root_text = str(root) if root is not None else None
+    resolved = dict(args)
+    key = FILE_TOOLS[name]
+    if key is None:
+        if "file" in resolved:
+            resolved["file"] = resolve_file_arg(resolved["file"], root_text, cwd, exists)
+        return resolved
+    entries = resolved.get(key)
+    if isinstance(entries, list):
+        resolved[key] = [
+            {**entry, "file": resolve_file_arg(entry["file"], root_text, cwd, exists)}
+            if isinstance(entry, dict) and "file" in entry
+            else entry
+            for entry in entries
+        ]
+    return resolved
