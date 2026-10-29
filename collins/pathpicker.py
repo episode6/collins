@@ -1,24 +1,32 @@
 # New in the ghackett fork of agent-session-manager (GPL-3.0).
 """The path picker: a folder chooser over the service's files (split-service
-spec §3.11, §3.24; PR-3.2).
+spec §3.11, §3.24; PR-3.2, D60).
 
 A client that is not on the service's machine cannot hand the desktop's
 own chooser a folder of the service's, so the seven sites that pick one
 (`choosers.choose_folder`: a new session's project folder, *Add project*,
-continue, new chat, the clone destination in the dialog and in
+continue, new chat, the clone destination in its dialog and in
 Preferences, a sandbox grant) open this instead. Folders only (D56):
 *Attach file* picks a file of this device's and uploads it.
 
 An `Adw.Dialog`: *Cancel* and *Open* in the header; the path entry (a
-path of the service's, `~` its home) with *Up* and *New folder* beside
-it; the shortcuts (the service's home, the project roots the store
-lists) on the left; the folder's subfolders on the right, filtered by
-the name being typed, a click moving into one. Tab completes the name.
-*Open* (or Enter) asks the service's `fs.stat` whether the typed path is
-a folder and hands it to *on_done*; the dialog closes then, and only
-then. The model (what to list, filter, complete, the ask numbering) is
-`pathpickermodel`'s and GTK-free; every request runs off the main loop
-(`remotefiles.off_main`) and lands at `GLib.PRIORITY_DEFAULT`.
+path of the service's, `~` its home, expanded by the service) with *Up*,
+*Show hidden* and *New folder* beside it; the shortcuts (the service's
+home, the project roots the store lists) on the left; the folder's
+subfolders on the right, filtered by the name being typed, a click moving
+into one (a link to a folder too, marked). Tab completes the name. A
+listing the service cut says so in a last, inert row; one it refused
+shows its words in place of the list. *Open* (or Enter) asks the
+service's `fs.stat` whether the typed or navigated path is a folder and
+hands it to *on_done* as the service echoed it, never resolved; the
+dialog closes then, and only then.
+
+It browses the whole filesystem, as the native dialog does, over the two
+requests that are the picker's own and unconfined (D60: `fs.dirs`,
+`fs.newdir`); it never sends the editor's confined `fs.list` or
+`fs.mkdir`. The model is `pathpickermodel`'s and GTK-free; every request
+runs off the main loop (`remotefiles.off_main`) and lands at
+`GLib.PRIORITY_DEFAULT`.
 """
 
 from __future__ import annotations
@@ -56,6 +64,17 @@ def project_roots() -> list[str]:
         if cwd:
             roots.append(worktree_project_root(cwd) or cwd)
     return roots
+
+
+def _row(icon: str, text: str, mark: str | None = None) -> Gtk.Box:
+    box = Gtk.Box(spacing=8, margin_top=4, margin_bottom=4, margin_start=6, margin_end=6)
+    box.append(Gtk.Image.new_from_icon_name(icon))
+    label = Gtk.Label(label=text, xalign=0.0, hexpand=True)
+    label.set_ellipsize(Pango.EllipsizeMode.END)
+    box.append(label)
+    if mark:
+        box.append(Gtk.Image.new_from_icon_name(mark))
+    return box
 
 
 class PathPicker(Adw.Dialog):
@@ -100,12 +119,18 @@ class PathPicker(Adw.Dialog):
 
         self.up_btn = Gtk.Button(icon_name="go-up-symbolic", tooltip_text=_("Enclosing folder"))
         self.up_btn.connect("clicked", lambda *_a: self._go_up())
+        # Off at every open and never saved (§3.24): the request's `hidden`.
+        self.hidden_btn = Gtk.ToggleButton(
+            icon_name="view-reveal-symbolic", tooltip_text=_("Show hidden folders")
+        )
+        self.hidden_btn.connect("toggled", lambda *_a: self._relist())
         self.new_btn = Gtk.MenuButton(icon_name="folder-new-symbolic", tooltip_text=_("New folder"))
         self.new_btn.set_popover(self._new_folder_popover())
 
         bar = Gtk.Box(spacing=6, margin_top=6, margin_bottom=6, margin_start=12, margin_end=12)
         bar.append(self.up_btn)
         bar.append(self.entry)
+        bar.append(self.hidden_btn)
         bar.append(self.new_btn)
 
         self.places = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
@@ -119,12 +144,11 @@ class PathPicker(Adw.Dialog):
         self.rows.connect("row-activated", self._on_row)
         self.status = Adw.StatusPage(icon_name="folder-symbolic")
         self.status.add_css_class("compact")
-        self.stack = Gtk.Stack()
+        self.stack = Gtk.Stack(hexpand=True)
         self.stack.add_named(
             Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, child=self.rows, vexpand=True), "rows"
         )
         self.stack.add_named(self.status, "status")
-        self.stack.set_hexpand(True)
 
         panes = Gtk.Box(vexpand=True)
         panes.append(places_scroll)
@@ -148,8 +172,7 @@ class PathPicker(Adw.Dialog):
         self.connect("closed", self._on_closed)
 
         self._fill_places()
-        start = model.expand(initial, self._home) if initial else None
-        self.go(start or model.expand("~", self._home) or "/")
+        self.go(initial if initial and model.well_formed(initial) else (self._home or "~"))
         self.set_focus(self.entry)
 
     # -- moving about --------------------------------------------------------------------
@@ -158,15 +181,17 @@ class PathPicker(Adw.Dialog):
         """Show *folder*: the entry says it, and its subfolders are asked
         for at once (no debounce: a click, a shortcut, *Up*)."""
         self._cancel_debounce()
-        self._set_text(model.entry_text(folder, self._home))
-        self._list(folder, "")
+        self._set_text(model.entry_text(folder))
+        self._list(model.split(model.entry_text(folder))[0], "")
 
     def _go_up(self) -> None:
-        where = model.split(self.entry.get_text(), self._home)
-        folder = where[0] if where is not None else None
-        above = model.parent(folder) if folder else None
+        above = model.parent(self._listing.path or "")
         if above is not None:
             self.go(above)
+
+    def _relist(self) -> None:
+        self._cancel_debounce()
+        self._list_for_text()
 
     def _on_place(self, _box: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
         path = getattr(row, "path", None)
@@ -174,7 +199,7 @@ class PathPicker(Adw.Dialog):
             self.go(path)
 
     def _on_row(self, _box: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
-        folder = self._listing.folder
+        folder = self._listing.path
         name = getattr(row, "name", None)
         if folder and name:
             self.go(model.child(folder, name))
@@ -207,72 +232,78 @@ class PathPicker(Adw.Dialog):
             self._debounce = None
 
     def _list_for_text(self) -> None:
-        where = model.split(self.entry.get_text(), self._home)
+        where = model.split(self.entry.get_text())
         if where is None:
             self._show_status(_("Type a full path"), _("A path on the service's machine starts with / or ~"))
             return
-        folder, prefix = where
-        self._list(folder, prefix)
+        self._list(*where)
 
     def _list(self, folder: str, prefix: str) -> None:
-        hidden = model.wants_hidden(prefix)
+        hidden = self.hidden_btn.get_active()
         if not self._listing.needs(folder, hidden):
             self._show_rows(prefix)
             return
         token = self._listing.ask(folder, hidden)
-        self._show_status(_("Listing…"), "", spinner=True)
+        self._show_status(_("Listing…"), "", icon="content-loading-symbolic")
         remotefiles.off_main(
             lambda: model.list_folders(folder, hidden),
-            lambda status, value: self._listed(token, status, value),
+            lambda status, value: self._listed(token, folder, status, value),
             name="path-picker-list",
         )
 
-    def _listed(self, token: int, status: str, value: object) -> None:
+    def _listed(self, token: int, asked: str, status: str, value: object) -> None:
         if self._closed:
             return
         if status == "ok":
-            rows, truncated = value
-            landed = self._listing.land(token, rows, truncated)
+            path, rows, truncated = value
+            landed = self._listing.land(token, rows, path=path, truncated=truncated)
         else:
             landed = self._listing.land(token, None, error=remotefiles.refusal_words(value))
         if not landed:
             return
-        where = model.split(self.entry.get_text(), self._home)
+        text = self.entry.get_text()
+        if status == "ok" and text.strip() == model.entry_text(asked) and path != asked:
+            # Untouched since the move: the entry shows the folder as the
+            # service listed it (a `~` expanded there, §3.24).
+            self._set_text(model.entry_text(path))
+            self._listing.folder = model.split(model.entry_text(path))[0]
+            text = self.entry.get_text()
+        where = model.split(text)
         self._show_rows(where[1] if where is not None and where[0] == self._listing.folder else "")
 
     def _show_rows(self, prefix: str) -> None:
         listing = self._listing
         if listing.error:
-            self._show_status(_("Can't list this folder"), listing.error)
+            # The service's words in place of the list, as the native
+            # dialog shows a folder it cannot read.
+            self._show_status(_("Can't list this folder"), listing.error, icon="folder-symbolic")
             return
         self.rows.remove_all()
         shown = model.matching(listing.rows, prefix)
         for folder in shown:
             row = Gtk.ListBoxRow()
             row.name = folder.name
-            box = Gtk.Box(spacing=8, margin_top=4, margin_bottom=4, margin_start=6, margin_end=6)
-            box.append(Gtk.Image.new_from_icon_name("folder-symbolic"))
-            label = Gtk.Label(label=folder.name, xalign=0.0, hexpand=True)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            box.append(label)
-            if folder.link:
-                box.append(Gtk.Image.new_from_icon_name("emblem-symbolic-link-symbolic"))
-            row.set_child(box)
-            self.rows.append(row)
-        if not shown:
-            self._show_status(
-                _("No folders here") if not prefix else _("No folder starts with that"),
-                "",
+            row.set_child(
+                _row("folder-symbolic", folder.name, "emblem-symbolic-link-symbolic" if folder.link else None)
             )
+            if folder.link:
+                row.set_tooltip_text(_("A link to a folder"))
+            self.rows.append(row)
+        if listing.truncated:
+            last = Gtk.ListBoxRow(activatable=False, selectable=False)
+            note = Gtk.Label(label=_("Only the first folders are listed"), xalign=0.0, margin_start=6)
+            note.add_css_class("dim-label")
+            last.set_child(note)
+            self.rows.append(last)
+        if not shown and not listing.truncated:
+            self._show_status(_("No folders here") if not prefix else _("No folder starts with that"), "")
             return
         self.stack.set_visible_child_name("rows")
-        if listing.truncated:
-            self._say(_("Only the first folders are shown"))
 
-    def _show_status(self, title: str, description: str, spinner: bool = False) -> None:
+    def _show_status(self, title: str, description: str, icon: str = "folder-symbolic") -> None:
         self.status.set_title(title)
         self.status.set_description(GLib.markup_escape_text(description) if description else None)
-        self.status.set_icon_name("content-loading-symbolic" if spinner else "folder-symbolic")
+        self.status.set_icon_name(icon)
         self.stack.set_visible_child_name("status")
 
     def _say(self, text: str) -> None:
@@ -283,14 +314,14 @@ class PathPicker(Adw.Dialog):
         if keyval not in (Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab) or state & Gdk.ModifierType.SHIFT_MASK:
             return False
         text = self.entry.get_text()
-        where = model.split(text, self._home)
+        where = model.split(text)
         if where is None or where[0] != self._listing.folder or self._listing.error:
-            # The listing is not of the folder typed yet: ask now, and let
-            # the next Tab complete against it.
+            # The rows are not of the folder typed yet: ask now, and let the
+            # next Tab complete against them.
             self._cancel_debounce()
             self._list_for_text()
             return True
-        completed = model.complete(text, self._home, self._listing.rows)
+        completed = model.complete(text, self._listing.rows)
         if completed is not None:
             self._set_text(completed)
             self._list_for_text()
@@ -303,13 +334,9 @@ class PathPicker(Adw.Dialog):
         for label, path in model.shortcuts(self._home, project_roots()):
             row = Gtk.ListBoxRow()
             row.path = path
-            box = Gtk.Box(spacing=8, margin_top=4, margin_bottom=4, margin_start=6, margin_end=6)
             home = not label
-            box.append(Gtk.Image.new_from_icon_name("user-home-symbolic" if home else "folder-symbolic"))
-            text = Gtk.Label(label=_("Home") if home else label, xalign=0.0, hexpand=True)
-            text.set_ellipsize(Pango.EllipsizeMode.END)
-            box.append(text)
-            row.set_child(box)
+            icon = "user-home-symbolic" if home else "folder-symbolic"
+            row.set_child(_row(icon, _("Home") if home else label))
             row.set_tooltip_text(path)
             self.places.append(row)
 
@@ -346,9 +373,9 @@ class PathPicker(Adw.Dialog):
     def _make_folder(self) -> None:
         name = self.new_entry.get_text()
         error = model.new_folder_error(name)
-        folder = self._listing.folder or (model.split(self.entry.get_text(), self._home) or (None,))[0]
+        folder = self._listing.path
         if error is None and not folder:
-            error = "Type a full path"
+            error = "List a folder first"
         if error is not None:
             self.new_note.set_text(_(error))
             self.new_note.set_visible(True)
@@ -357,7 +384,7 @@ class PathPicker(Adw.Dialog):
         remotefiles.off_main(
             lambda: model.make_folder(folder, name),
             lambda status, value: self._made(status, value),
-            name="path-picker-mkdir",
+            name="path-picker-newdir",
         )
 
     def _made(self, status: str, value: object) -> None:
@@ -370,19 +397,20 @@ class PathPicker(Adw.Dialog):
             return
         self.new_btn.popdown()
         self._listing.folder = None  # the folder it went in has a new row
-        self.go(value)
+        self.go(value)  # the picker enters the folder it made (§3.24)
 
     # -- open ----------------------------------------------------------------------------
 
     def _open(self) -> None:
         if self._opening:
             return
-        path = model.expand(self.entry.get_text(), self._home)
-        if path is None:
+        text = self.entry.get_text().strip()
+        if not model.well_formed(text):
             self._say(_("Type a full path: one that starts with / or ~"))
             return
         self._opening = True
         self.open_btn.set_sensitive(False)
+        path = text.rstrip("/") or "/"
         remotefiles.off_main(
             lambda: model.stat_folder(path),
             lambda status, value: self._opened(path, status, value),
@@ -398,7 +426,7 @@ class PathPicker(Adw.Dialog):
             self._say(remotefiles.refusal_words(value))
             return
         if value is None:
-            self._say(_("There is no folder at {path}").format(path=model.display(path, self._home)))
+            self._say(_("There is no folder at {path}").format(path=path))
             return
         done = self._on_done
         self.close()

@@ -14,20 +14,23 @@ actions behind them do nothing.
 
 The check runs one `App()` against a service of its own, reads every one
 of those surfaces while the link is `local`, then takes the proof away
-(`link.local = False`: what a client over ssh is, which no transport can
-produce before Phase 3) and reads them again. What is not a local extra
+(`e2e_service.drop_local`: what a client over ssh is, to the client and
+to the service alike, D60) and reads them again. What is not a local extra
 is asserted to survive: New session here, Details, the Markdown export
 (asked of the service both times: `store.transcript-export`), Copy Path.
 
 The attachments panel's Open With… and a file row's default app are for
 every client (D51): the file itself for a local one, this device's cached
 copy otherwise, fetched whole from the service (`kind=file&as=file`), which
-serves it only when the session's agent named it. Those fetches are made
-over a second link that never proved `local`, since the service's own
-view of the app's link cannot be taken away from here: a file the session
-was sent opens from the cache, a `.desktop` among them is handed to no app
-and has no Open With… row (PR-3.0 item 6: only pictures and plain
-documents are), a project file nobody named is refused and said so.
+serves it only when the session's agent named it, and only to a client it
+knows as not local: a file the session was sent opens from the cache, a
+`.desktop` among them is handed to no app and has no Open With… row
+(PR-3.0 item 6: only pictures and plain documents are), a project file
+nobody named is refused and said so.
+
+*Attach file* (PR-3.2, D56) is this device's chooser both ways: a local
+tab's composer mentions the picked file itself, a tab that is not local
+uploads it as a drop does and mentions the copy the service wrote.
 
 Then D39: a session whose project directory is gone is opened; the tab
 passes the cwd it has, the service's `spawn` falls back to its home and
@@ -187,8 +190,6 @@ from collins import (  # noqa: E402
     trust,
     uploads,
 )
-from collins.api import server as api_server  # noqa: E402
-from collins.api.client import SocketLink  # noqa: E402
 from collins.app import App  # noqa: E402
 from collins.attachrecords import Attachment  # noqa: E402
 from collins.prefs import PreferencesDialog  # noqa: E402
@@ -394,26 +395,16 @@ def surfaces(win, local: bool) -> None:
             made,
         )
     else:
-        # Not local: this device's cached copy, fetched from the service.
-        # (The row activated above asked while the app's own link was
-        # current: the service knows that link as local whatever this side
-        # says, and serves a local client no file whole. So the fetches
-        # are made over a link that never proved it, as a client over ssh
-        # is to both ends; the app's link is put back after.)
-        e2e_service.wait_until(lambda: bool(notes), timeout_s=5.0)
-        check("[not local] a client the service knows as local is served no file whole",
-              LAUNCHER_CALLS[before:] == [] and len(notes) == 1, (LAUNCHER_CALLS[before:], notes))
-        del notes[:]
-        own = apilink.current()
-        if "remote" not in state:
-            app_id = os.environ["COLLINS_APP_ID"]
-            state["remote"] = SocketLink(api_server.socket_path(app_id), app_id="", device="remote")
-            state["remote"].connect()  # never proves `local`
-        apilink.set_current(state["remote"])
-        try:
-            _not_local_attachments(view, document, notes)
-        finally:
-            apilink.set_current(own)
+        # Not local: this device's cached copy, fetched from the service
+        # over the app's own link, which the service agrees is not local
+        # (`e2e_service.drop_local`, D60), as a client over ssh is to both
+        # ends.
+        e2e_service.wait_until(lambda: len(LAUNCHER_CALLS) > before, timeout_s=5.0)
+        made = LAUNCHER_CALLS[before:]
+        check("[not local] the row opens over the app's own link, from the cache",
+              len(made) == 1 and made[0][0] == "launch" and made[0][1].startswith(str(blobcache.cache_root()))
+              and notes == [], (made, notes))
+        _not_local_attachments(view, document, notes)
 
     # (The lightbox's Open With… is check_drop_upload.py's: the service's
     # own file for a local client, this device's cached copy otherwise.)
@@ -510,6 +501,56 @@ def _not_local_attachments(view, document: Attachment, notes: list[str]) -> None
         check("[not local] a file the agent never named is not fetched",
               LAUNCHER_CALLS[before:] == [] and len(notes) == said + 1 and "couldn't fetch" in notes[-1],
               (LAUNCHER_CALLS[before:], notes[said:]))
+
+
+class _Picked:
+    """A `Gtk.FileDialog` stand-in for the composer's *Attach file*: its
+    `open_finish` hands over a file of this device's."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def open_finish(self, _result):
+        return Gio.File.new_for_path(self.path)
+
+
+def attach(tab, local: bool) -> None:
+    """*Attach file* (PR-3.2, D56): the chooser is this device's always; a
+    local client mentions the picked file itself, any other uploads it as a
+    drop does (`PUT /api/upload`) and mentions the copy the service wrote."""
+    say = "local" if local else "not local"
+    picked = f"{E2E}/device/{'here' if local else 'there'}-attached.txt"
+    os.makedirs(os.path.dirname(picked), exist_ok=True)
+    body = f"attached from {say}\n".encode()
+    with open(picked, "wb") as fh:
+        fh.write(body)
+    composer = tab._attach_composer()
+    check(f"[{say}] the attach has a composer to land in", composer is not None)
+    if composer is None:
+        return
+    buffer = composer._buffer
+
+    def text() -> str:
+        return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), True)
+
+    before = text()
+    tab._on_composer_file_chosen(_Picked(picked), None)
+    e2e_service.wait_until(lambda: text() != before, timeout_s=5.0)
+    added = text()[len(before):]
+    if local:
+        check("[local] the attach mentions the picked file itself", picked in added, added)
+        return
+    check("[not local] the attach never mentions this device's path", picked not in added, added)
+    root = str(uploads.root())
+    copy = next((word.strip("'\"") for word in added.split() if root in word), "")
+    copy = copy[copy.index(root):] if copy else ""
+    check("[not local] …it mentions the copy uploaded to the service", copy.startswith(root), (added, root))
+    try:
+        with open(copy, "rb") as fh:
+            same = fh.read() == body
+    except OSError:
+        same = False
+    check("[not local] …which holds the picked file's bytes", same, copy)
 
 
 def footer(tab, local: bool) -> None:
@@ -610,9 +651,10 @@ def with_a_local_tab() -> bool:
         return GLib.SOURCE_REMOVE
     state["local_tab"] = tabs[0]
     footer(tabs[0], True)
+    attach(tabs[0], True)
 
-    # -- the proof taken away: what a client over ssh is ---------------------------------
-    apilink.current().local = False
+    # -- the proof taken away: what a client over ssh is, at both ends (D60) --------------
+    e2e_service.drop_local(apilink.current())
     surfaces(win, False)
     check("[not local] the export is still the service's, unchanged",
           remotestore.transcript_export(SID) == state["export"])
@@ -639,9 +681,12 @@ def with_a_remote_tab() -> bool:
         footer(fresh, False)
         tip = fresh._files_btn.get_parent()
         check("[not local] the footer is still there", tip is not None)
+        attach(fresh, False)
 
     # -- D39: a session whose project directory is gone ------------------------------------
-    apilink.current().local = True  # back on the service's machine
+    # Back on the service's machine, at both ends.
+    apilink.current().call({"t": "debug.local", "local": True})
+    apilink.current().local = True
     win = state["win"]
     session = win.store.get_session(GONE_SID)
     check("the session whose folder went is in the store", session is not None and session.cwd == GONE)

@@ -478,3 +478,26 @@ def test_covers_counts_a_worktrees_project_and_skips_what_is_not_text():
     assert remotefiles.covers("/srv/p", ["/srv/p/.claude/worktrees/w1"])
     assert remotefiles.covers("/srv/p/docs", [None, 7, "", "/srv/p/.claude/worktrees/w1"])
     assert not remotefiles.covers("/srv/q", [None, "/srv/p/.claude/worktrees/w1"])
+
+
+# -- the path picker's two (PR-3.2, D60) ---------------------------------------------------
+
+
+def test_list_dirs_is_an_fs_dirs_call(link):
+    link.answers["fs.dirs"] = {
+        "path": "/home/svc",
+        "entries": [{"name": "src", "symlink": False}, {"name": "shared", "symlink": True}, {"bad": 1}],
+        "truncated": True,
+    }
+    dirs = remotefiles.list_dirs("~", hidden=True)
+    assert dirs == remotefiles.Dirs("/home/svc", [("src", False), ("shared", True)], True)
+    assert link.calls[-1][0] == {"t": "fs.dirs", "path": "~", "hidden": True}
+    link.answers["fs.dirs"] = RequestRefused(protocol.ERROR_GONE, protocol.FOLDER_GONE_MSGID, {})
+    with pytest.raises(RequestRefused):
+        remotefiles.list_dirs("/gone")
+
+
+def test_new_dir_is_an_fs_newdir_call(link):
+    link.answers["fs.newdir"] = {"path": "/home/svc/new"}
+    assert remotefiles.new_dir("~/new") == "/home/svc/new"
+    assert link.calls[-1][0] == {"t": "fs.newdir", "path": "~/new"}

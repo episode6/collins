@@ -57,6 +57,12 @@ links), blocking the same way:
   `covers(root, cwds)` is when a root the service refused is worth
   asking about again (PR-3.2): a session listed at it or above it.
 
+PR-3.2 adds the path picker's two (D60), unconfined on the service:
+`list_dirs(path, hidden)` is `fs.dirs` (the folder listed, its
+subfolders as `(name, symlink)`, `truncated`) and `new_dir(path)` is
+`fs.newdir` (the folder made). The picker never sends `fs.list` or
+`fs.mkdir`, which stay the editor's, confined to its tree root.
+
 `install(link)` wires the module's watcher (the app, once the link is
 connected; a harness, its own link); the reads and writes go through
 `apilink.current()` as every other ask of the service. GTK-free; the
@@ -425,6 +431,43 @@ def _paste_outcomes(fields: dict) -> list[PasteOutcome]:
             )
         )
     return outcomes
+
+
+@dataclass(frozen=True)
+class Dirs:
+    """What `fs.dirs` answered: the folder listed (`~` expanded and
+    normalised by the service), its subfolders as `(name, symlink)` in
+    the service's order, and whether the list was cut."""
+
+    path: str
+    folders: list[tuple[str, bool]]
+    truncated: bool
+
+
+def list_dirs(path: str, hidden: bool = False) -> Dirs:
+    """`fs.dirs` of *path* (absolute, or led by `~`, the service's home):
+    blocking, on the caller's thread. Raises `RequestRefused` (``gone``
+    when no folder is there; ``unknown`` from a service without it)."""
+    fields = apilink.call({"t": "fs.dirs", "path": str(path), "hidden": bool(hidden)}, timeout=CALL_TIMEOUT_S)
+    where = fields.get("path")
+    return Dirs(
+        path=where if isinstance(where, str) else str(path),
+        folders=[
+            (str(item.get("name")), bool(item.get("symlink")))
+            for item in fields.get("entries") or ()
+            if isinstance(item, dict) and item.get("name")
+        ],
+        truncated=bool(fields.get("truncated", False)),
+    )
+
+
+def new_dir(path: str) -> str:
+    """`fs.newdir` of *path*: one folder made under a folder that is
+    there; the path made. Blocking. Raises `RequestRefused` (its `reason`
+    one of `protocol.FS_MKDIR_REASONS`)."""
+    fields = apilink.call({"t": "fs.newdir", "path": str(path)}, timeout=CALL_TIMEOUT_S)
+    made = fields.get("path")
+    return made if isinstance(made, str) else str(path)
 
 
 def make_dir(path: str, root: str) -> None:

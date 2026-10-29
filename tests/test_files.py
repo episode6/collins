@@ -1631,3 +1631,145 @@ def test_source_confinement_answers_the_roots_and_what_is_under_them(tmp_path):
     assert not confine(str(tmp_path.resolve())) and not confine(real + "-evil") and not confine("/")
     assert files.source_confinement(files.Confinement(True, ()))("/anything/at/all")  # a `local` client
     assert not files.source_confinement(files.Confinement(False, []))("/anything/at/all")
+
+
+# -- the path picker's two (PR-3.2, D60): unconfined ------------------------------------
+
+
+@pytest.fixture
+def remote(served, tmp_path, monkeypatch):
+    """`served` with the client no longer `local` (a client over ssh), the
+    service's home at the scratch tree, and one folder outside every root
+    the service knows."""
+    core, client, project, events = served
+    client.local = False
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    return core, client, home, outside
+
+
+def test_dirs_answers_a_non_local_client_outside_every_root(remote):
+    """The home and a folder no session or project names are listed (the
+    picker's whole point, D60), while `fs.list` of the same folder stays
+    refused `outside`: the editor's confinement is untouched."""
+    core, client, home, outside = remote
+    (outside / "b").mkdir()
+    (outside / "A").mkdir()
+    (outside / "file.txt").write_text("x")
+    reply = client.request({"t": "fs.dirs", "path": str(outside), "hidden": False})
+    assert reply["path"] == str(outside)
+    assert reply["entries"] == [{"name": "A", "symlink": False}, {"name": "b", "symlink": False}]
+    assert reply["truncated"] is False
+    (home / "src").mkdir()
+    reply = client.request({"t": "fs.dirs", "path": "~", "hidden": False})
+    assert reply["path"] == str(home) and [e["name"] for e in reply["entries"]] == ["src"]
+    reply = client.request({"t": "fs.dirs", "path": "~/src/../", "hidden": False})
+    assert reply["path"] == str(home)  # `~` expanded and normalised, echoed
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.list", "path": str(outside), "hidden": False, "root": str(outside)})
+    assert refused.value.error == protocol.ERROR_REFUSED and refused.value.msgid == files.OUTSIDE_MSGID
+
+
+def test_dirs_sorts_case_folded_flags_links_and_hides_dotted_names(remote):
+    core, client, home, outside = remote
+    for name in ("zeta", "Beta", "alpha", ".hidden", "node_modules"):
+        (outside / name).mkdir()
+    target = home / "elsewhere"
+    target.mkdir()
+    (outside / "linked").symlink_to(target)
+    (outside / "dangling").symlink_to(outside / "nothing")
+    (outside / "file-link").symlink_to(outside / "zeta" / "nope.txt")
+    reply = client.request({"t": "fs.dirs", "path": str(outside), "hidden": False})
+    assert reply["entries"] == [
+        {"name": "alpha", "symlink": False},
+        {"name": "Beta", "symlink": False},
+        {"name": "linked", "symlink": True},  # a link to a folder: listed, flagged
+        {"name": "node_modules", "symlink": False},  # SKIP_DIR_NAMES not applied
+        {"name": "zeta", "symlink": False},
+    ]
+    reply = client.request({"t": "fs.dirs", "path": str(outside), "hidden": True})
+    assert reply["entries"][0] == {"name": ".hidden", "symlink": False}
+    # The listed path is never resolved through its links.
+    reply = client.request({"t": "fs.dirs", "path": str(outside / "linked"), "hidden": False})
+    assert reply["path"] == str(outside / "linked")
+
+
+def test_dirs_leaves_out_what_no_request_could_name(remote, monkeypatch):
+    core, client, home, outside = remote
+    (outside / "ok").mkdir()
+    (outside / "abcdefgh").mkdir()
+    os.mkdir(os.path.join(os.fsencode(str(outside)), b"caf\xe9"))
+    # A name over FS_NAME_MAX (lowered here: most filesystems stop at 255).
+    monkeypatch.setattr(protocol, "FS_NAME_MAX", 4)
+    reply = client.request({"t": "fs.dirs", "path": str(outside), "hidden": False})
+    assert [e["name"] for e in reply["entries"]] == ["ok"]
+
+
+def test_dirs_is_cut_at_the_list_bound(remote, monkeypatch):
+    core, client, home, outside = remote
+    monkeypatch.setattr(protocol, "FS_LIST_MAX", 3)
+    for n in range(5):
+        (outside / f"d{n}").mkdir()
+    reply = files.dirs_reply(str(outside), False)
+    assert [e["name"] for e in reply["entries"]] == ["d0", "d1", "d2"] and reply["truncated"] is True
+
+
+def test_dirs_refuses_gone_and_an_unreadable_folder_failed(remote):
+    core, client, home, outside = remote
+    (outside / "f.txt").write_text("x")
+    for path in (outside / "missing", outside / "f.txt"):
+        with pytest.raises(inproc.RequestRefused) as refused:
+            client.request({"t": "fs.dirs", "path": str(path), "hidden": False})
+        assert refused.value.error == protocol.ERROR_GONE
+        assert refused.value.msgid == protocol.FOLDER_GONE_MSGID
+    shut = outside / "shut"
+    shut.mkdir()
+    shut.chmod(0)
+    try:
+        if os.access(shut, os.R_OK):
+            pytest.skip("running as a user every mode lets in")
+        with pytest.raises(inproc.RequestRefused) as refused:
+            client.request({"t": "fs.dirs", "path": str(shut), "hidden": False})
+        assert refused.value.error == protocol.ERROR_FAILED
+    finally:
+        shut.chmod(0o700)
+
+
+def test_newdir_makes_one_folder_anywhere_a_parent_is(remote):
+    """Under any folder that is there, for a client that is not local (the
+    picker's New folder, D60), while `fs.mkdir` there stays refused."""
+    core, client, home, outside = remote
+    reply = client.request({"t": "fs.newdir", "path": str(outside / "made")})
+    assert reply == {"path": str(outside / "made")} and (outside / "made").is_dir()
+    reply = client.request({"t": "fs.newdir", "path": "~/new"})
+    assert reply == {"path": str(home / "new")} and (home / "new").is_dir()
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.newdir", "path": str(outside / "made")})
+    assert refused.value.details["reason"] == "exists"  # exclusive
+    (outside / "f.txt").write_text("x")
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.newdir", "path": str(outside / "f.txt")})
+    assert refused.value.details["reason"] == "exists"  # never over a file
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.newdir", "path": str(outside / "no" / "parent")})
+    assert refused.value.details["reason"] == "no_parent"  # one level, no -p
+    assert not (outside / "no").exists()
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.newdir", "path": "/"})
+    assert refused.value.details["reason"] == "not_a_name"
+    with pytest.raises(inproc.RequestRefused) as refused:
+        client.request({"t": "fs.mkdir", "path": str(outside / "other"), "root": str(outside)})
+    assert refused.value.msgid == files.OUTSIDE_MSGID and not (outside / "other").exists()
+
+
+def test_roots_count_the_stores_virtual_projects(tmp_path):
+    """A project added from the picker is a root from its row on (D60)."""
+    added = tmp_path / "added"
+    added.mkdir()
+    state = type("State", (), {"get_virtual_projects": lambda self: {"added": str(added)}})()
+    core = type("Core", (), {"sessions": {}, "store": None, "state": state})()
+    assert files.roots(core) == [str(added)]
+    assert files.allowed(core, type("C", (), {"local": False})(), str(added / "sub"))

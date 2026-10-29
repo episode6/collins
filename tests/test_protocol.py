@@ -128,6 +128,7 @@ PHASE_ONE_TYPES = [
     "debug.session.call",
     "debug.screen",
     "debug.pty",
+    "debug.local",
     "debug.sandbox",
     "state.set",
     "state.get",
@@ -234,6 +235,9 @@ PHASE_ONE_TYPES = [
     "fs.mkdir",
     # PR-2.6: the bare root-name links' read (the same `files` cap).
     "fs.names",
+    # PR-3.2: the path picker's two, unconfined (the same `files` cap, D60).
+    "fs.dirs",
+    "fs.newdir",
     "service.restart",
     "service.status",
     # The claude CLI is the service's to find and judge (the welcome gate,
@@ -477,6 +481,7 @@ SAMPLES = {
     },
     ("debug.screen", p.REQUEST): {"pty": 7},
     ("debug.pty", p.REQUEST): {"pty": 7},
+    ("debug.local", p.REQUEST): {"local": False},
     ("debug.sandbox", p.REQUEST): {
         "target": "host",
         "name": "grants",
@@ -758,6 +763,8 @@ SAMPLES = {
     },
     ("fs.mkdir", p.REQUEST): {"path": "/home/u/project/new", "root": "/home/u/project"},
     ("fs.names", p.REQUEST): {"root": "/home/u/project"},
+    ("fs.dirs", p.REQUEST): {"path": "~/src", "hidden": True},
+    ("fs.newdir", p.REQUEST): {"path": "/home/u/new"},
     ("service.restart", p.REQUEST): {"when": "idle"},
     ("service.status", p.REQUEST): {},
     ("cli.check", p.REQUEST): {"path": "~/.local/bin/claude"},
@@ -817,6 +824,7 @@ REPLIES = {
     "debug.session.call": {"value": "ok"},
     "debug.screen": {"rows": ["❯ "], "cursor": [2, 0], "columns": 80, "row_count": 24, "capture": "❯ "},
     "debug.pty": {"child_pid": 4242, "foreground_pgrp": 5151, "shell_pid": 4242, "process_cwd": "/home/u"},
+    "debug.local": {},
     "debug.sandbox": {"value": ["/home/u/data"]},
     "clear": {},
     "paint": {},
@@ -979,6 +987,14 @@ REPLIES = {
         "results_bytes": 2,
     },
     "fs.mkdir": {},
+    "fs.dirs": {
+        "path": "/home/u/src",
+        "entries": [{"name": "collins", "symlink": False}, {"name": "shared", "symlink": True}],
+        "truncated": False,
+        "entries_chunked": False,
+        "entries_bytes": 2,
+    },
+    "fs.newdir": {"path": "/home/u/new"},
     "fs.names": {
         "names": ["README.md", "pyproject.toml"],
         "truncated": False,
@@ -2001,3 +2017,43 @@ def test_fs_names_chunks_as_json_like_a_walks_paths():
     data = b"".join(p.unpack_frame(frame)[1] for frame in frames)
     assert p.join_reply(slim, data)["names"] == names
     assert "names" in p.CHUNKED_JSON_FIELDS and "names" in p.CHUNKED_FIELDS
+
+
+# -- the path picker's two (PR-3.2, D60) -----------------------------------------------------
+
+
+def test_the_pickers_two_ride_the_files_cap_and_take_the_services_home():
+    """`fs.dirs` and `fs.newdir` (D60): behind CAP_FILES with no PROTOCOL
+    bump (PR-2.5's precedent), a `~`-led path taken as `fs.stat`'s, and
+    no `root` field: a request is confined or it is not."""
+    assert p.CAP_FILES in p.CAPABILITIES
+
+    def refused(name: str, path: str, **fields) -> bool:
+        message = {"t": name, "id": 1, "path": path, "hidden": False, **fields}
+        return isinstance(p.validate(message, p.CLIENT), p.Refusal)
+
+    for name in ("fs.dirs", "fs.newdir"):
+        kind = p.TYPES[name]
+        assert "root" not in kind.request.fields
+        assert kind.request.fields["path"].kind == p.K_HOME_PATH
+        assert not refused(name, "~")
+        assert not refused(name, "/srv/p")
+        assert refused(name, "~other/x")
+        assert refused(name, "relative")
+    # `hidden` is required.
+    assert isinstance(p.validate({"t": "fs.dirs", "id": 1, "path": "/srv"}, p.CLIENT), p.Refusal)
+
+
+def test_fs_dirs_rows_are_bounded_names_and_a_symlink_flag():
+    row = p.TYPES["fs.dirs"].request.reply["entries"].item
+    assert set(row.fields) == {"name", "symlink"}
+    assert p.TYPES["fs.dirs"].request.reply["entries"].high == p.FS_LIST_MAX
+    long = {**REPLIES["fs.dirs"], "entries": [{"name": "x" * (p.FS_NAME_MAX + 1), "symlink": False}]}
+    assert isinstance(p.validate_response(p.reply(1, **long), "fs.dirs"), p.Refusal)
+    no_flag = {**REPLIES["fs.dirs"], "entries": [{"name": "x"}]}
+    assert isinstance(p.validate_response(p.reply(1, **no_flag), "fs.dirs"), p.Refusal)
+    assert "entries" in p.CHUNKED_JSON_FIELDS  # chunked past a frame, as fs.list's
+
+
+def test_debug_local_is_a_debug_request():
+    assert p.TYPES["debug.local"].request.fields["local"].kind == p.K_BOOL
