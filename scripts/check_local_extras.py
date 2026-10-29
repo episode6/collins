@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check for the local extras' gate (split-service spec §3.12,
-PR-2.8), the Markdown export over the API and where a spawn lands (D39).
+PR-2.8; PR-3.0), the Markdown export over the API and where a spawn lands
+(D39).
 
 A window on the service's machine has proved it (`local`, D11) and keeps
 the things that hand a path of the service's to something on this device:
@@ -316,6 +317,9 @@ def surfaces(win, local: bool) -> None:
     row_labels, row_icons, group_labels, group_icons = sidebar_menus(win)
     for label in ("Open in Ghostty", "Open In…", "Reveal transcript"):
         check(f"[{say}] the session menu's {label}", (label in row_labels) is local, row_labels)
+    # Native chat runs the agent in this process (D54 (3), PR-3.0 item 2).
+    native = "Continue in native chat (experimental)"
+    check(f"[{say}] the session menu's {native}", (native in row_labels) is local, row_labels)
     check(f"[{say}] the project menu's Open In…", ("Open In…" in group_labels) is local, group_labels)
     # The submenu's rows are widgets (an icon each): the footer app, the
     # file manager, and a terminal where the desktop names one.

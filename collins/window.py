@@ -523,7 +523,12 @@ class MainWindow(Adw.ApplicationWindow):
                 _("Continue last {name} session…").format(name=provider.name),
                 f"win.continue-session::{provider.id}",
             )
-        for provider in available_providers():
+        # Native streaming chat runs the agent in this process, on this
+        # device: a local extra (D54 (3), PR-3.0 item 2), hidden for a
+        # client that is not on the service's machine, and slated for
+        # removal. Its variants are this device's CLI's.
+        chat_providers = available_providers() if apilink.is_local() else []
+        for provider in chat_providers:
             for variant in provider.chat_variants():  # native streaming chat
                 if variant.label:
                     text = _("New {name} native chat ({mode}) (experimental)").format(
@@ -3614,6 +3619,10 @@ class MainWindow(Adw.ApplicationWindow):
         )
 
     def _launch_new_chat_session(self, cwd: str, provider, variant_key: str = "") -> None:
+        if not apilink.is_local():
+            # A local extra (D54 (3)): the chat runs on this device, in a
+            # folder of the service's. The menus hide the entries too.
+            return
         variants = provider.chat_variants()
         variant = provider.chat_variant(variant_key) or (variants[0] if variants else None)
         if variant is None:
@@ -3629,6 +3638,9 @@ class MainWindow(Adw.ApplicationWindow):
         variant_key, _, session_id = param.get_string().partition(":")
         session = self.store.get_session(session_id)
         if session is None:
+            return
+        if not apilink.is_local():
+            # A local extra (D54 (3)), as in _launch_new_chat_session.
             return
         provider = get_provider(session.provider)
         variants = provider.chat_variants()

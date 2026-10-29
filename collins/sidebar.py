@@ -2680,7 +2680,10 @@ class SessionSidebar(Gtk.Box):
             open_section.append_item(item(_("Open in Ghostty"), "open-ghostty"))
         if provider.supports_fork:
             open_section.append_item(item(_("Fork session"), "fork-session"))
-        for cv in provider.chat_variants():
+        # Native chat runs on this device (D54 (3)): a local extra like the
+        # two above, hidden for a client that is not local; slated for
+        # removal.
+        for cv in provider.chat_variants() if local else ():
             if cv.label:
                 label = _("Continue in native chat ({mode}) (experimental)").format(mode=_(cv.label))
             else:
