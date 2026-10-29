@@ -331,16 +331,17 @@ def test_the_timeout_kills_the_command(tmp_path):
     slow.chmod(0o755)
     started = time.monotonic()
     status, error = noti.run_command(str(slow), {}, timeout=0.3)
-    assert status is None and "didn't finish in 0.3 s" in error
+    assert status is None and error == "Timed out after 0.3 s"
     assert time.monotonic() - started < 5
     assert noti.COMMAND_TIMEOUT_S == 10.0
 
 
 def test_a_bad_template_or_missing_program_fails_soft(tmp_path):
-    status, error = noti.run_command("echo 'unterminated", {})
-    assert status is None and "doesn't parse" in error
+    with pytest.raises(ValueError):
+        noti.split_command("echo 'unterminated")
+    assert noti.run_command("echo 'unterminated", {})[0] is None
     status, error = noti.run_command(str(tmp_path / "nowhere"), {})
-    assert status is None and "Couldn't run" in error
+    assert status is None and error == "No such file or directory"
     # Through the sink: skipped and logged, nothing raised.
     svc = sink_service(str(tmp_path / "nowhere"))
     assert svc.sink("message", "s1", "t", "p", "b") is True
@@ -362,24 +363,70 @@ def test_the_sink_runs_off_the_loop():
     assert svc.sink("message", "s1", "t", "p", "b") is True and len(started) == 1
 
 
-def ask_test(svc):
-    message = protocol.validate({"t": "notify.test", "id": 7}, protocol.CLIENT)
+def ask_test(svc, command):
+    message = protocol.validate({"t": "notify.test", "id": 7, "command": command}, protocol.CLIENT)
     assert isinstance(message, protocol.Message), message
-    deferred = svc.handle(message, None)
-    assert isinstance(deferred, protocol.Deferred) and deferred.settled
-    return protocol.validate_response(deferred.reply, "notify.test")
+    answer = svc.handle(message, None)
+    if isinstance(answer, protocol.Deferred):
+        assert answer.settled
+        answer = answer.reply
+    return protocol.validate_response(answer, "notify.test")
 
 
-def test_notify_test_runs_regardless_of_clients_and_replies_with_the_status(script, monkeypatch):
+def test_notify_test_runs_the_box_text_with_a_subscriber_attached(script, monkeypatch):
     path, recorded = script
     monkeypatch.setenv("EXIT", "3")
-    svc = sink_service(str(path), clients=True)
-    answer = ask_test(svc)
-    assert answer.ok and answer.fields["status"] == 3 and answer.fields["error"] == ""
-    assert "COLLINS_NOTIFY_KIND=test" in recorded()
+    # The saved setting says something else; the box's text is what runs.
+    svc = ServiceNotifications(
+        State(),
+        get_setting={"notify_command": "false"}.get,
+        run_async=lambda fn: fn(),
+        dispatch=lambda fn: fn(),
+    )
+    connect(svc)  # a client is subscribed: the test runs regardless
+    answer = ask_test(svc, f"{path} one")
+    assert answer.ok and answer.fields == {"status": 3}  # exactly one of status / error
+    assert recorded() == [
+        "arg=one",
+        "COLLINS_NOTIFY_KIND=test",
+        "COLLINS_NOTIFY_TITLE=Collins test notification",
+        "COLLINS_NOTIFY_BODY=Sent from Preferences",
+        "COLLINS_NOTIFY_SESSION=",
+        "COLLINS_NOTIFY_PROJECT=",
+        "stdin=",
+    ]
 
 
-def test_notify_test_replies_with_the_error(tmp_path):
-    for template, wanted in (("", "No notify command"), (str(tmp_path / "nowhere"), "Couldn't run")):
-        answer = ask_test(sink_service(template))
-        assert answer.ok and "status" not in answer.fields and wanted in answer.fields["error"]
+def test_notify_test_replies_with_the_error_for_a_command_that_wont_start(tmp_path):
+    answer = ask_test(sink_service(""), str(tmp_path / "nowhere"))
+    assert answer.ok and answer.fields == {"error": "No such file or directory"}
+    assert len(answer.fields["error"]) <= protocol.SHORT_MAX
+
+
+def test_notify_test_replies_with_the_error_on_the_timeout(tmp_path, monkeypatch):
+    slow = tmp_path / "slow.sh"
+    slow.write_text("#!/bin/sh\nsleep 30\n")
+    slow.chmod(0o755)
+    real = noti.run_command
+    monkeypatch.setattr(noti, "run_command", lambda template, env: real(template, env, timeout=0.3))
+    svc = ServiceNotifications(State(), run_async=lambda fn: fn(), dispatch=lambda fn: fn())
+    answer = ask_test(svc, str(slow))
+    assert answer.ok and answer.fields == {"error": "Timed out after 0.3 s"}
+
+
+def test_notify_test_runs_off_the_loop_and_settles_later():
+    started = []
+    svc = ServiceNotifications(
+        State(), run_async=started.append, run=lambda *_a: (0, ""), dispatch=lambda fn: fn()
+    )
+    message = protocol.validate({"t": "notify.test", "id": 7, "command": "true"}, protocol.CLIENT)
+    deferred = svc.handle(message, None)
+    assert isinstance(deferred, protocol.Deferred) and not deferred.settled and len(started) == 1
+    started[0]()
+    assert deferred.settled and deferred.reply["status"] == 0
+
+
+def test_notify_test_refuses_an_empty_or_unsplittable_command():
+    for command in ("", "   ", "echo 'unterminated"):
+        answer = ask_test(sink_service("true"), command)
+        assert not answer.ok and answer.error == protocol.ERROR_INVALID

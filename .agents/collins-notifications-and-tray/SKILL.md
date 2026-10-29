@@ -65,10 +65,13 @@ NUL-free by `command_env`), `stdin=DEVNULL`, its own session so a
 timeout (10 s, `COMMAND_TIMEOUT_S`) kills the group. It runs on a
 daemon thread (`run_async`), never the loop, and fails soft: an empty
 or unsplittable template, a missing program, a timeout, a non-zero
-exit are logged and skipped. `notify.test` (the Preferences *Send test*
-button) runs it regardless of clients, returns a `Deferred`, and
-replies `{status}` or `{error}`; it takes no argument, so it runs the
-setting as saved. A test injects `get_setting`, `has_clients`,
+exit are logged and skipped. `notify.test {command}` (the Preferences *Send test* button, D62) runs the
+**text it carries** (the box's, not the saved setting, so a refused save
+cannot test the old command) regardless of clients, on a worker thread: an
+empty or unsplittable command is `invalid`, a run replies `{status}`, one
+that won't start or times out replies `{error}` (short: SHORT_MAX), never
+both. Its variables are the test values (`KIND=test`, TITLE "Collins test
+notification", BODY "Sent from Preferences", SESSION and PROJECT empty). A test injects `get_setting`, `has_clients`,
 `run_async`, `run` and `dispatch` into the constructor.
 
 ## The center (`notifycenter.py`, GTK-free)

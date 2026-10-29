@@ -68,6 +68,10 @@ from ..notifycenter import Notification, NotificationCenter
 log = logging.getLogger(__name__)
 
 SETTING = "notify_command"
+# What `notify.test` tells the command it is.
+TEST_KIND = "test"
+TEST_TITLE = "Collins test notification"
+TEST_BODY = "Sent from Preferences"
 COMMAND_TIMEOUT_S = 10.0
 # What goes into the command's environment is bounded (rule 5: an agent's
 # message is foreign text): the kind and the session id are short, the
@@ -86,6 +90,12 @@ def command_env(kind: str, title: str, body: str, session: str, project: str) ->
     }
 
 
+def split_command(template: str) -> list[str]:
+    """*template* as an argv: `shlex.split`, never a shell. ``[]`` for an
+    empty template; raises ValueError for one that does not split."""
+    return shlex.split((template or "").strip())
+
+
 def run_command(
     template: str, env: dict[str, str], timeout: float = COMMAND_TIMEOUT_S
 ) -> tuple[int | None, str]:
@@ -93,16 +103,15 @@ def run_command(
     *env* added to the service's own, `stdin=DEVNULL`, for at most *timeout*
     seconds. Returns ``(exit status, "")`` once it ended (negative: the
     signal that ended it) or ``(None, why)`` when it did not run or did not
-    finish, in English. Blocking: call it off the main loop. Never raises."""
-    template = (template or "").strip()
-    if not template:
-        return None, "No notify command is set"
+    finish, in English and short (it crosses the wire as `notify.test`'s
+    `error`, at most SHORT_MAX characters). Blocking: call it off the main
+    loop. Never raises."""
     try:
-        argv = shlex.split(template)
-    except ValueError as error:
-        return None, f"The notify command doesn't parse: {error}"
+        argv = split_command(template)
+    except ValueError:
+        argv = []
     if not argv:
-        return None, "No notify command is set"
+        return None, "Not a command"
     try:
         proc = subprocess.Popen(
             argv,
@@ -113,7 +122,8 @@ def run_command(
             start_new_session=True,
         )
     except (OSError, ValueError) as error:
-        return None, f"Couldn't run {argv[0]}: {getattr(error, 'strerror', None) or error}"
+        log.warning("notify_command: couldn't run %s: %s", argv[0], error)
+        return None, str(getattr(error, "strerror", None) or error)
     try:
         _out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -123,10 +133,11 @@ def run_command(
         except OSError:
             proc.kill()
         proc.communicate()
-        return None, f"{argv[0]} didn't finish in {timeout:g} s"
+        log.warning("notify_command: %s didn't finish in %g s", argv[0], timeout)
+        return None, f"Timed out after {timeout:g} s"
     except Exception as error:  # fail soft: never into the service's loop
         log.exception("notify_command: waiting on %s failed", argv[0])
-        return None, f"Couldn't run {argv[0]}: {error}"
+        return None, str(error)
     if proc.returncode:
         tail = (err or b"").decode("utf-8", "replace").strip()[-_STDERR_KEEP:]
         log.warning("notify_command: %s exited %s%s", argv[0], proc.returncode, f": {tail}" if tail else "")
@@ -301,13 +312,23 @@ class ServiceNotifications:
             log.exception("notify_command: couldn't start")
             return False
 
-    def test(self, message: protocol.Message) -> protocol.Deferred:
-        """`notify.test`: the command once, with or without a client, on a
-        thread; the reply is settled on the main loop with the exit status
-        or the error."""
+    def test(self, message: protocol.Message) -> dict | protocol.Deferred:
+        """`notify.test {command}`: the command *as given* (the box's text,
+        not the saved setting) once, with or without a client, on a thread,
+        with the test values in its variables; the reply is settled on the
+        main loop with exactly one of the exit `status` or the `error`. A
+        command that is empty or does not split is `invalid`."""
+        template = message.get("command") or ""
+        try:
+            argv = split_command(template)
+        except ValueError:
+            argv = []
+        if not argv:
+            return protocol.refuse(
+                message.id, protocol.ERROR_INVALID, "That is not a command Collins can run", {}
+            )
         deferred = protocol.Deferred()
-        template = self.command()
-        env = command_env("test", "Collins", "Test notification", "", "")
+        env = command_env(TEST_KIND, TEST_TITLE, TEST_BODY, "", "")
         run = self._run
 
         def work() -> None:
@@ -315,10 +336,11 @@ class ServiceNotifications:
                 status, error = run(template, env)
             except Exception as exc:
                 log.exception("notify_command: the test failed")
-                status, error = None, f"Couldn't run the command: {exc}"
-            fields: dict = {"error": error[: protocol.NAME_MAX]}
+                status, error = None, str(exc)
             if status is not None:
-                fields["status"] = max(-255, min(255, int(status)))
+                fields: dict = {"status": max(-255, min(255, int(status)))}
+            else:
+                fields = {"error": (error or "Didn't run")[: protocol.SHORT_MAX]}
             self._dispatch(lambda: deferred.settle(protocol.reply(message.id, **fields)))
 
         self._run_async(work)

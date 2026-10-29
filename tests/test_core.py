@@ -2678,8 +2678,9 @@ def test_a_counted_finish_runs_the_notify_command_only_with_no_client(app_state,
 
 
 def test_notify_test_is_served_with_a_client_attached(app_state, tmp_path):
-    """`notify.test` runs the command whether or not anyone is subscribed,
-    and the reply carries the exit status or the error."""
+    """`notify.test` runs the command it carries whether or not anyone is
+    subscribed (the saved setting is empty here), and the reply carries the
+    exit status or the error."""
     service_state = app_state.AppState(migrate=True, device=False)
     core = ServiceCore(state=service_state, state_dir=tmp_path / "pty")
     core.start_store(SessionStore(service_state))
@@ -2688,13 +2689,12 @@ def test_notify_test_is_served_with_a_client_attached(app_state, tmp_path):
         ends = Client()
         client = srv.connect(ends.on_output, ends.on_event, device="laptop")
         client.request({"t": "subscribe"})
-        reply = client.request({"t": "notify.test"})
-        assert reply["error"] == "No notify command is set" and "status" not in reply
-        service_state.set_setting("notify_command", "true")
-        reply = client.request({"t": "notify.test"})
-        assert reply["status"] == 0 and reply["error"] == ""
-        service_state.set_setting("notify_command", "false")
-        assert client.request({"t": "notify.test"})["status"] == 1
+        reply = client.request({"t": "notify.test", "command": "true"})
+        assert reply["status"] == 0 and "error" not in reply
+        assert client.request({"t": "notify.test", "command": "false"})["status"] == 1
+        with pytest.raises(loopback.RequestRefused) as refused:
+            client.request({"t": "notify.test", "command": "  "})
+        assert refused.value.error == protocol.ERROR_INVALID
     finally:
         srv.shutdown()
         pump(0.3)

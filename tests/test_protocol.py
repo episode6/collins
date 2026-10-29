@@ -633,7 +633,7 @@ SAMPLES = {
     ("notify.clear", p.REQUEST): {},
     ("notify.green", p.REQUEST): {"session": ID, "on": True, "title": "Fix", "project": "project"},
     ("notify.rekey", p.REQUEST): {"session": "placeholder-3", "to": ID},
-    ("notify.test", p.REQUEST): {},
+    ("notify.test", p.REQUEST): {"command": "tpush --title Hi"},
     ("seen", p.REQUEST): {"ids": [ID, "green:" + ID], "session": ID, "all": False},
     ("seen", p.EVENT): {"ids": ["update:0.1.5"], "session": ID, "all": True},
     ("job.start", p.REQUEST): {"kind": "clone", "args": {"source": "o/r", "dest": "/home/u/r"}},

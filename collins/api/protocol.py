@@ -182,10 +182,12 @@ each taken from the code the message replaces:
   coalesces a bell, and answers with the id), and for the rest with
   `notify.remove`, `notify.clear`, `notify.green` (the synthetic row of a
   finished run, on or off) and `notify.rekey` (a placeholder's rows moving
-  to the session that resolved). `notify.test` runs the service's
-  `notify_command` once (§3.13), with or without a client attached, and
-  answers with its exit `status` or the `error` that kept it from
-  running. `seen` carries notification ids and/or a
+  to the session that resolved). `notify.test` runs the `command`
+  it carries (the text in Preferences' box, §3.13) once, with or without a
+  client attached and with test values in its environment, and answers
+  with exactly one of its exit `status` or the `error` that kept it from
+  running or finishing; an empty command, or one `shlex` cannot split, is
+  `invalid`. `seen` carries notification ids and/or a
   session, or `all`, from a client as a request and from the service to
   every other client as an event, so unread is one number everywhere.
 - `job.start` starts a long-running operation on the service (a clone, the
@@ -1995,16 +1997,18 @@ _TABLE: tuple[MessageType, ...] = (
     ),
     MessageType(
         "notify.test",
-        "Run the service's notify_command now, whether or not a client is attached.",
+        "Run a notify command as given, whether or not a client is attached.",
         request=_request(
+            # The text in Preferences' box, not the saved setting: judged
+            # `invalid` when empty or when shlex cannot split it.
+            {"command": _req(_s(ARG_TEXT_MAX))},
             reply={
                 # The command's exit status (negative: the signal that
-                # ended it), absent when it never ran to an end.
+                # ended it); exactly one of the two comes back.
                 "status": _i(-255, 255),
                 # Why it did not run or did not finish, in the service's
-                # English: an empty setting, a template that does not
-                # split, a program that is not there, the 10 s timeout.
-                "error": _s(NAME_MAX),
+                # English: the OS's words, or the 10 s timeout.
+                "error": _s(SHORT_MAX),
             },
         ),
     ),
